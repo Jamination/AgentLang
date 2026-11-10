@@ -49,7 +49,49 @@ A complete small game in the recommended structure: `examples/starter/game.al`.
 
 ## Verification
 
-RESULTS_PLACEHOLDER
+`./verify.sh` exits 0 (`VERIFY: PASS`). It was run twice in total: the first run failed on a
+bug in the new part of the script itself (it reported "no test for module" for modules that
+have tests), the second passed. Two runs against a cap of 40 failures.
+
+| Check | Result |
+|-------|--------|
+| build | `cargo build --release`, Rust std only, no crates |
+| no external tools in the compile path | pass |
+| conformance | 190 passed, 0 failed, 1 skipped: language (default, `-O0`, `--unchecked`), standard library, system-dependent tests, bindings, diagnostics, unit tests |
+| `f32` against C | `tests/c/f32.al` prints the same 187 lines as `tests/c/f32.c` built with `clang -O2`, in all three build modes |
+| vectors / matrices / quaternions | `tests/run/vectors.al`, `vectors2.al`, `overload.al`, `overload2.al`, `tests/std/math_linalg.al` |
+| standard library | every module has tests and a documentation page; the 23 library test programs that need no system library are static executables |
+| Vulkan | an offscreen 256 x 256 triangle rendered by the NVIDIA driver; pixels match `tests/sys/data/vk_triangle.ref` |
+| DX12, Metal | bindings and one triangle sample each pass `alc check` |
+| benchmarks | byte-identical output on all 10; geometric mean AL / clang -O2 = 1.072 (limit 1.5); worst ratio 1.248 (limit 2.5) |
+
+| benchmark | clang -O2 | AL | ratio |
+|---|---|---|---|
+| nbody | 0.334s | 0.417s | 1.248 |
+| spectralnorm | 0.209s | 0.219s | 1.046 |
+| fannkuch | 0.192s | 0.223s | 1.158 |
+| mandelbrot | 0.560s | 0.567s | 1.012 |
+| binarytrees | 1.247s | 1.136s | 0.911 |
+| sha256 | 0.768s | 0.849s | 1.105 |
+| matmul | 0.399s | 0.424s | 1.061 |
+| quicksort | 0.420s | 0.433s | 1.032 |
+| sieve | 0.500s | 0.514s | 1.028 |
+| hashmap | 0.736s | 0.851s | 1.157 |
+
+**Skipped (1):** `window_x11`: opening a real window needs a private X display
+(`AL_TEST_DISPLAY`), which this machine does not provide to tests. The window module is
+covered headlessly by `tests/std/window_logic.al` (key mapping, scaling, event translation)
+and `tests/sys/window_nodisplay.al` (clean failure without a display).
+
+Other measurements taken during development (not part of `verify.sh`):
+
+- Scalar math against the C library, 160 inputs per function and precision: every
+  transcendental function within 1 ulp in `f32` and `f64`, `fmod` exact.
+- Differential fuzzing (unoptimised vs optimised vs unchecked, IR verifier on): 750 general
+  programs and 1,160 `f32` / vector programs since the vector work, no differences.
+- `mat4 * mat4` + `mat4 * vec4` loop: 0.102 s against 0.144 s for scalar C at `clang -O2`;
+  an `f32` Mandelbrot loop: 0.117 s against 0.202 s. Single runs, one machine.
+- Compiling hello world takes 17 ms with the whole core library loaded; the starter game 84 ms.
 
 ## Things you should know
 
