@@ -1,0 +1,100 @@
+// vector, quaternion and matrix functions of the math library
+var fails i64
+
+fn ok(name str, c bool) {
+    if !c {
+        fails += 1
+        print("FAILED:", name)
+    }
+}
+
+fn main() {
+    x := vec3(1.0, 0.0, 0.0)
+    y := vec3(0.0, 1.0, 0.0)
+    z := vec3(0.0, 0.0, 1.0)
+    a := vec3(1.0, 2.0, 3.0)
+    b := vec3(-4.0, 5.0, 0.5)
+    // ---- vectors ----
+    ok("dot", dot(a, b) == 7.5 && dot(vec2(1.0, 2.0), vec2(3.0, 4.0)) == 11.0 && dot(vec4(1.0, 2.0, 3.0, 4.0), vec4(1.0)) == 10.0)
+    ok("cross", cross(x, y) == z && cross(y, z) == x && cross(z, x) == y && cross(a, b) == vec3(-14.0, -12.5, 13.0) && cross(a, a) == vec3(0.0))
+    ok("cross2", cross(vec2(1.0, 0.0), vec2(0.0, 1.0)) == 1.0 && cross(vec2(0.0, 1.0), vec2(1.0, 0.0)) == -1.0)
+    ok("length", length(vec2(3.0, 4.0)) == 5.0 && length(vec3(2.0, 3.0, 6.0)) == 7.0 && length(vec4(1.0, 1.0, 1.0, 1.0)) == 2.0 && length_sq(a) == 14.0 && length_sq(vec2(3.0, 4.0)) == 25.0)
+    ok("distance", distance(vec2(1.0, 1.0), vec2(4.0, 5.0)) == 5.0 && distance(a, a) == 0.0 && distance(vec3(0.0), vec3(2.0, 3.0, 6.0)) == 7.0)
+    ok("normalize", approx_eq(length(normalize(a)), 1.0) && normalize(vec3(0.0)) == vec3(0.0) && normalize(vec2(0.0, -3.0)) == vec2(0.0, -1.0) && approx_eq(normalize(vec4(2.0)), vec4(0.5)))
+    ok("lerp", lerp(a, b, 0.0) == a && lerp(a, b, 1.0) == b && lerp(a, b, 0.5) == vec3(-1.5, 3.5, 1.75) && lerp(vec2(0.0), vec2(4.0), 0.25) == vec2(1.0))
+    ok("min max", min(a, b) == vec3(-4.0, 2.0, 0.5) && max(a, b) == vec3(1.0, 5.0, 3.0) && min(vec2(1.0, 9.0), vec2(2.0, 3.0)) == vec2(1.0, 3.0) && max(vec4(1.0), vec4(0.0, 2.0, 0.0, 2.0)) == vec4(1.0, 2.0, 1.0, 2.0))
+    ok("generic min still works", min(3, 4) == 3 && max(2.5, 1.5) == 2.5 && abs(-7) == 7)
+    ok("clamp", clamp(b, vec3(-1.0), vec3(1.0)) == vec3(-1.0, 1.0, 0.5) && clamp(vec2(5.0, -5.0), vec2(0.0), vec2(1.0)) == vec2(1.0, 0.0))
+    ok("abs", abs(b) == vec3(4.0, 5.0, 0.5) && abs(vec2(-1.0, 1.0)) == vec2(1.0) && abs(vec4(-2.0)) == vec4(2.0))
+    f := vec3(1.5, -1.5, 2.0)
+    ok("floor ceil fract", floor(f) == vec3(1.0, -2.0, 2.0) && ceil(f) == vec3(2.0, -1.0, 2.0) && fract(f) == vec3(0.5, 0.5, 0.0) && floor(vec2(-0.25, 0.25)) == vec2(-1.0, 0.0) && ceil(vec4(0.5)) == vec4(1.0))
+    ok("components", min_component(b) == -4.0 && max_component(b) == 5.0 && min_component(vec2(2.0, 1.0)) == 1.0 && max_component(vec4(1.0, 2.0, 9.0, 4.0)) == 9.0)
+    ok("reflect", reflect(vec2(1.0, -1.0), vec2(0.0, 1.0)) == vec2(1.0, 1.0) && reflect(vec3(0.0, -1.0, 0.0), y) == y && reflect(x, y) == x)
+    d := normalize(vec3(1.0, -1.0, 0.0))
+    ok("refract", approx_eq(refract(d, y, 1.0), d) && approx_eq(refract(vec3(0.0, -1.0, 0.0), y, 1.5), vec3(0.0, -1.0, 0.0)) && refract(d, y, 2.0) == vec3(0.0))
+    r := refract(d, y, 0.75)
+    ok("refract snell", approx_eq(length(r), 1.0) && approx_eq(r.x, 0.75 * d.x) && r.y < 0.0)
+    ok("project", project(vec2(3.0, 4.0), vec2(2.0, 0.0)) == vec2(3.0, 0.0) && project(a, y) == vec3(0.0, 2.0, 0.0) && project(a, vec3(0.0)) == vec3(0.0))
+    ok("angle_between", approx_eq(angle_between(x, y), HALF_PI) && approx_eq(angle_between(x, x * -2.0), PI) && angle_between(a, a) < 0.001 && approx_eq(angle_between(vec2(1.0, 0.0), vec2(1.0, 1.0)), PI / 4.0))
+    ok("perp rotate", perp(vec2(1.0, 0.0)) == vec2(0.0, 1.0) && perp(vec2(0.0, 1.0)) == vec2(-1.0, 0.0) && approx_eq(rotate(vec2(1.0, 0.0), HALF_PI), vec2(0.0, 1.0)) && approx_eq(rotate(vec2(1.0, 1.0), PI), vec2(-1.0, -1.0)))
+    ok("approx_eq vec", approx_eq(a, a + 0.0000001) && !approx_eq(a, a + 0.01) && approx_eq(a, a + 0.01, 0.1) && !approx_eq(vec2(1.0, 2.0), vec2(1.0, 2.1)))
+
+    // ---- quaternions ----
+    id := quat_identity()
+    qz := quat_axis_angle(z, HALF_PI)
+    ok("axis_angle", id == quat(0.0, 0.0, 0.0, 1.0) && approx_eq(qz * x, y) && approx_eq(qz * y, x * -1.0) && approx_eq(qz * z, z))
+    ok("compose", approx_eq((qz * qz) * x, x * -1.0) && approx_eq(quat_axis_angle(x, HALF_PI) * y, z) && approx_eq(quat_axis_angle(y, HALF_PI) * z, x))
+    ok("unit", approx_eq(dot(qz, qz), 1.0) && approx_eq(normalize(qz * 3.0), qz) && normalize(quat(0.0, 0.0, 0.0, 0.0)) == id)
+    ok("inverse", approx_eq(inverse(qz) * (qz * a), a) && conjugate(qz) == quat(-qz.x, -qz.y, -qz.z, qz.w) && approx_eq(inverse(qz * 2.0) * (qz * 2.0), id))
+    ok("slerp ends", approx_eq(slerp(id, qz, 0.0), id) && approx_eq(slerp(id, qz, 1.0), qz) && approx_eq(nlerp(id, qz, 0.0), id) && approx_eq(nlerp(id, qz, 1.0), qz))
+    half := quat_axis_angle(z, HALF_PI / 2.0)
+    ok("slerp mid", approx_eq(slerp(id, qz, 0.5), half) && approx_eq(nlerp(id, qz, 0.5), half) && approx_eq(slerp(id, qz, 0.25), quat_axis_angle(z, HALF_PI / 4.0)))
+    ok("slerp short arc", approx_eq(slerp(id, qz * -1.0, 0.5) * x, half * x) && approx_eq(slerp(qz, qz, 0.3), qz))
+    ax, ang := axis_angle(quat_axis_angle(normalize(a), 1.25))
+    ok("axis_angle back", approx_eq(ax, normalize(a)) && approx_eq(ang, 1.25))
+    ax0, ang0 := axis_angle(id)
+    ok("axis_angle identity", ax0 == x && ang0 == 0.0)
+    e := to_euler(quat_euler(0.3, -1.1, 0.7))
+    ok("euler round trip", approx_eq(e, vec3(0.3, -1.1, 0.7), 0.00001))
+    // roll around Z first, then pitch around X, then yaw around Y
+    ok("euler order", approx_eq(quat_euler(0.0, HALF_PI, 0.0) * z, x) && approx_eq(quat_euler(HALF_PI, 0.0, 0.0) * y, z) && approx_eq(quat_euler(0.0, 0.0, HALF_PI) * x, y))
+    qe := quat_euler(0.4, 0.9, -0.2)
+    ok("euler compose", approx_eq(qe, quat_axis_angle(y, 0.9) * (quat_axis_angle(x, 0.4) * quat_axis_angle(z, -0.2))))
+    fw := normalize(vec3(1.0, 0.5, -2.0))
+    ql := quat_look_rotation(fw, y)
+    ok("look_rotation", approx_eq(ql * vec3(0.0, 0.0, -1.0), fw) && (ql * y).y > 0.0 && fabs((ql * x).y) < 0.00001 && approx_eq(quat_look_rotation(vec3(0.0, 0.0, -1.0), y), id))
+
+    // ---- matrices ----
+    i4 := mat4_identity()
+    ok("identity", i4 == mat4(1.0) && i4 * i4 == i4 && i4 * vec4(a, 1.0) == vec4(a, 1.0))
+    t := translate(vec3(10.0, 20.0, 30.0))
+    s := scale(vec3(2.0, 3.0, 4.0))
+    ok("translate scale", transform_point(t, a) == vec3(11.0, 22.0, 33.0) && transform_dir(t, a) == a && transform_point(s, a) == vec3(2.0, 6.0, 12.0) && transform_point(t * s, a) == vec3(12.0, 26.0, 42.0))
+    ok("rotations", approx_eq(transform_point(rotate_z(HALF_PI), x), y) && approx_eq(transform_point(rotate_x(HALF_PI), y), z) && approx_eq(transform_point(rotate_y(HALF_PI), z), x))
+    ok("from_quat", approx_eq(mat4_from_quat(qz), rotate_z(HALF_PI)) && approx_eq(rotate_axis(z, HALF_PI), rotate_z(HALF_PI)) && approx_eq(rotate_axis(normalize(a), 0.8), mat4_from_quat(quat_axis_angle(normalize(a), 0.8))))
+    trs := mat4_trs(vec3(1.0, -2.0, 3.0), qe, vec3(2.0, 0.5, 1.5))
+    ok("trs", approx_eq(trs, translate(vec3(1.0, -2.0, 3.0)) * (mat4_from_quat(qe) * scale(vec3(2.0, 0.5, 1.5)))))
+    ok("transpose", transpose(transpose(trs)) == trs && transpose(t)[0] == vec4(1.0, 0.0, 0.0, 10.0) && approx_eq(transpose(rotate_z(0.7)), rotate_z(-0.7)))
+    ok("determinant", determinant(i4) == 1.0 && determinant(s) == 24.0 && approx_eq(determinant(trs), 1.5) && approx_eq(determinant(rotate_axis(normalize(b), 2.0)), 1.0) && determinant(scale(vec3(1.0, 0.0, 1.0))) == 0.0)
+    ok("inverse", approx_eq(inverse(trs) * trs, i4, 0.00001) && approx_eq(trs * inverse(trs), i4, 0.00001) && approx_eq(inverse(s), scale(vec3(0.5, 0.33333334, 0.25))))
+    ok("inverse_affine", approx_eq(inverse_affine(trs), inverse(trs), 0.00001) && approx_eq(inverse_affine(t), translate(vec3(-10.0, -20.0, -30.0))))
+    p := perspective(HALF_PI, 2.0, 1.0, 10.0)
+    gen := p * trs
+    ok("inverse general", approx_eq(inverse(gen) * gen, i4, 0.0001))
+    v := look_at(vec3(0.0, 0.0, 5.0), vec3(0.0), y)
+    ok("look_at", approx_eq(transform_point(v, vec3(0.0)), vec3(0.0, 0.0, -5.0)) && approx_eq(transform_point(v, vec3(1.0, 2.0, 5.0)), vec3(1.0, 2.0, 0.0)))
+    v2 := look_at(vec3(3.0, 0.0, 0.0), vec3(0.0), y)
+    ok("look_at side", approx_eq(transform_point(v2, vec3(0.0)), vec3(0.0, 0.0, -3.0)) && approx_eq(transform_point(v2, vec3(0.0, 1.0, 0.0)), vec3(0.0, 1.0, -3.0)) && approx_eq(transform_point(v2, vec3(0.0, 0.0, -1.0)), vec3(1.0, 0.0, -3.0)))
+    // clip space: x right, y up, depth 0 at near and 1 at far
+    n := p * vec4(0.0, 0.0, -1.0, 1.0)
+    fa := p * vec4(0.0, 0.0, -10.0, 1.0)
+    c := p * vec4(2.0, 1.0, -1.0, 1.0)
+    ok("perspective", approx_eq(n.z / n.w, 0.0) && approx_eq(fa.z / fa.w, 1.0) && approx_eq(c.x / c.w, 1.0) && approx_eq(c.y / c.w, 1.0) && n.w == 1.0 && fa.w == 10.0)
+    cv := perspective_vk(HALF_PI, 2.0, 1.0, 10.0) * vec4(2.0, 1.0, -1.0, 1.0)
+    ok("perspective_vk", approx_eq(cv.x / cv.w, 1.0) && approx_eq(cv.y / cv.w, -1.0) && approx_eq(cv.z / cv.w, 0.0))
+    o := ortho(-2.0, 2.0, -1.0, 1.0, 0.0, 10.0)
+    ok("ortho", approx_eq(transform_point(o, vec3(2.0, 1.0, -10.0)), vec3(1.0, 1.0, 1.0)) && approx_eq(transform_point(o, vec3(-2.0, -1.0, 0.0)), vec3(-1.0, -1.0, 0.0)) && approx_eq(transform_point(o, vec3(0.0, 0.0, -5.0)), vec3(0.0, 0.0, 0.5)))
+    ok("project_point", approx_eq(project_point(p, vec3(2.0, 1.0, -1.0)), vec3(1.0, 1.0, 0.0)) && approx_eq(project_point(p, vec3(0.0, 0.0, -10.0)), vec3(0.0, 0.0, 1.0)) && transform_point(p, vec3(0.0, 0.0, -10.0)).z == 10.0)
+    ok("approx_eq mat", approx_eq(trs, trs) && !approx_eq(trs, t) && approx_eq(i4, mat4(1.001), 0.01))
+    print("math_linalg failures:", fails)
+}

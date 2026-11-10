@@ -1334,12 +1334,14 @@ struct __Png {
     pal [1024]u8     // palette as RGBA
 }
 
-// the Paeth predictor: whichever of left, up, up-left is closest to left + up - up-left
+// The Paeth predictor: whichever of left, up, up-left is closest to left + up - up-left (ties
+// in that order). Written as two selects so that it compiles without branches.
 inline fn __paeth(a i64, b i64, c i64) i64 {
     pa := abs(b - c)
     pb := abs(a - c)
     pc := abs(a + b - 2 * c)
-    if pa <= pb && pa <= pc { a } else if pb <= pc { b } else { c }
+    r := if pb <= pc { b } else { c }
+    if pa <= min(pb, pc) { a } else { r }
 }
 
 // Reverses the scanline filter `ft`: reads the filtered bytes src, writes the row to cur (which

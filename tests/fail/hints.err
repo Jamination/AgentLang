@@ -2,5 +2,5 @@ unknown type `int` (integer types are
 unknown type `string` (text is `str`
 unknown identifier `null` (the null pointer is `nil`)
 unknown function `println` (use `print(a, b, ...)`)
-unknown function `length` (use `len(x)`)
+unknown function `count` (use `len(x)`)
 unknown type `double` (the floating-point type is f64)

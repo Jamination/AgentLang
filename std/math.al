@@ -1190,3 +1190,858 @@ fn pow(x f32, y f32) f32 {
 fn fmod(x f32, y f32) f32 {
     f32(fmod(f64(x), f64(y)))
 }
+
+// ---------- vectors ----------
+
+// dot product
+fn dot(a vec2, b vec2) f32 {
+    m := a * b
+    m.x + m.y
+}
+
+// dot product
+fn dot(a vec3, b vec3) f32 {
+    m := a * b
+    m.x + m.y + m.z
+}
+
+// dot product
+fn dot(a vec4, b vec4) f32 {
+    m := a * b
+    (m.x + m.y) + (m.z + m.w)
+}
+
+// cross product (right-handed)
+fn cross(a vec3, b vec3) vec3 {
+    a.yzx * b.zxy - a.zxy * b.yzx
+}
+
+// z of the 3D cross product: > 0 when b is counter-clockwise from a
+fn cross(a vec2, b vec2) f32 {
+    a.x * b.y - a.y * b.x
+}
+
+// squared length
+fn length_sq(v vec2) f32 {
+    dot(v, v)
+}
+
+// squared length
+fn length_sq(v vec3) f32 {
+    dot(v, v)
+}
+
+// squared length
+fn length_sq(v vec4) f32 {
+    dot(v, v)
+}
+
+// Euclidean length
+fn length(v vec2) f32 {
+    sqrt(dot(v, v))
+}
+
+// Euclidean length
+fn length(v vec3) f32 {
+    sqrt(dot(v, v))
+}
+
+// Euclidean length
+fn length(v vec4) f32 {
+    sqrt(dot(v, v))
+}
+
+// distance between two points
+fn distance(a vec2, b vec2) f32 {
+    length(a - b)
+}
+
+// distance between two points
+fn distance(a vec3, b vec3) f32 {
+    length(a - b)
+}
+
+// distance between two points
+fn distance(a vec4, b vec4) f32 {
+    length(a - b)
+}
+
+// v scaled to length 1; the zero vector stays zero
+fn normalize(v vec2) vec2 {
+    l := dot(v, v)
+    if l > 0.0 { v / sqrt(l) } else { vec2(0.0) }
+}
+
+// v scaled to length 1; the zero vector stays zero
+fn normalize(v vec3) vec3 {
+    l := dot(v, v)
+    if l > 0.0 { v / sqrt(l) } else { vec3(0.0) }
+}
+
+// v scaled to length 1; the zero vector stays zero
+fn normalize(v vec4) vec4 {
+    l := dot(v, v)
+    if l > 0.0 { v / sqrt(l) } else { vec4(0.0) }
+}
+
+// a at t = 0, b at t = 1
+fn lerp(a vec2, b vec2, t f32) vec2 {
+    a + (b - a) * t
+}
+
+// a at t = 0, b at t = 1
+fn lerp(a vec3, b vec3, t f32) vec3 {
+    a + (b - a) * t
+}
+
+// a at t = 0, b at t = 1
+fn lerp(a vec4, b vec4, t f32) vec4 {
+    a + (b - a) * t
+}
+
+// lane-wise minimum
+fn min(a vec2, b vec2) vec2 {
+    fmin(a, b)
+}
+
+// lane-wise minimum
+fn min(a vec3, b vec3) vec3 {
+    fmin(a, b)
+}
+
+// lane-wise minimum
+fn min(a vec4, b vec4) vec4 {
+    fmin(a, b)
+}
+
+// lane-wise maximum
+fn max(a vec2, b vec2) vec2 {
+    fmax(a, b)
+}
+
+// lane-wise maximum
+fn max(a vec3, b vec3) vec3 {
+    fmax(a, b)
+}
+
+// lane-wise maximum
+fn max(a vec4, b vec4) vec4 {
+    fmax(a, b)
+}
+
+// every lane limited to [lo, hi]
+fn clamp(v vec2, lo vec2, hi vec2) vec2 {
+    fmin(fmax(v, lo), hi)
+}
+
+// every lane limited to [lo, hi]
+fn clamp(v vec3, lo vec3, hi vec3) vec3 {
+    fmin(fmax(v, lo), hi)
+}
+
+// every lane limited to [lo, hi]
+fn clamp(v vec4, lo vec4, hi vec4) vec4 {
+    fmin(fmax(v, lo), hi)
+}
+
+// lane-wise absolute value
+fn abs(v vec2) vec2 {
+    fabs(v)
+}
+
+// lane-wise absolute value
+fn abs(v vec3) vec3 {
+    fabs(v)
+}
+
+// lane-wise absolute value
+fn abs(v vec4) vec4 {
+    fabs(v)
+}
+
+// lane-wise floor
+fn floor(v vec2) vec2 {
+    vec2(floor(v.x), floor(v.y))
+}
+
+// lane-wise floor
+fn floor(v vec3) vec3 {
+    vec3(floor(v.x), floor(v.y), floor(v.z))
+}
+
+// lane-wise floor
+fn floor(v vec4) vec4 {
+    vec4(floor(v.x), floor(v.y), floor(v.z), floor(v.w))
+}
+
+// lane-wise ceil
+fn ceil(v vec2) vec2 {
+    vec2(ceil(v.x), ceil(v.y))
+}
+
+// lane-wise ceil
+fn ceil(v vec3) vec3 {
+    vec3(ceil(v.x), ceil(v.y), ceil(v.z))
+}
+
+// lane-wise ceil
+fn ceil(v vec4) vec4 {
+    vec4(ceil(v.x), ceil(v.y), ceil(v.z), ceil(v.w))
+}
+
+// lane-wise v - floor(v)
+fn fract(v vec2) vec2 {
+    v - floor(v)
+}
+
+// lane-wise v - floor(v)
+fn fract(v vec3) vec3 {
+    v - floor(v)
+}
+
+// lane-wise v - floor(v)
+fn fract(v vec4) vec4 {
+    v - floor(v)
+}
+
+// smallest lane
+fn min_component(v vec2) f32 {
+    fmin(v.x, v.y)
+}
+
+// smallest lane
+fn min_component(v vec3) f32 {
+    fmin(fmin(v.x, v.y), v.z)
+}
+
+// smallest lane
+fn min_component(v vec4) f32 {
+    m := fmin(v.xy, v.zw)
+    fmin(m.x, m.y)
+}
+
+// largest lane
+fn max_component(v vec2) f32 {
+    fmax(v.x, v.y)
+}
+
+// largest lane
+fn max_component(v vec3) f32 {
+    fmax(fmax(v.x, v.y), v.z)
+}
+
+// largest lane
+fn max_component(v vec4) f32 {
+    m := fmax(v.xy, v.zw)
+    fmax(m.x, m.y)
+}
+
+// v mirrored at the plane with unit normal n
+fn reflect(v vec2, n vec2) vec2 {
+    v - n * (2.0 * dot(v, n))
+}
+
+// v mirrored at the plane with unit normal n
+fn reflect(v vec3, n vec3) vec3 {
+    v - n * (2.0 * dot(v, n))
+}
+
+// unit v refracted at the surface with unit normal n, eta = ratio of refraction indices; zero on total internal reflection
+fn refract(v vec2, n vec2, eta f32) vec2 {
+    d := dot(n, v)
+    k := 1.0 - eta * eta * (1.0 - d * d)
+    if k < 0.0 { vec2(0.0) } else { v * eta - n * (eta * d + sqrt(k)) }
+}
+
+// unit v refracted at the surface with unit normal n, eta = ratio of refraction indices; zero on total internal reflection
+fn refract(v vec3, n vec3, eta f32) vec3 {
+    d := dot(n, v)
+    k := 1.0 - eta * eta * (1.0 - d * d)
+    if k < 0.0 { vec3(0.0) } else { v * eta - n * (eta * d + sqrt(k)) }
+}
+
+// the part of a that points along b (zero if b is zero)
+fn project(a vec2, b vec2) vec2 {
+    l := dot(b, b)
+    if l > 0.0 { b * (dot(a, b) / l) } else { vec2(0.0) }
+}
+
+// the part of a that points along b (zero if b is zero)
+fn project(a vec3, b vec3) vec3 {
+    l := dot(b, b)
+    if l > 0.0 { b * (dot(a, b) / l) } else { vec3(0.0) }
+}
+
+// unsigned angle between a and b in [0, PI]
+fn angle_between(a vec2, b vec2) f32 {
+    atan2(fabs(cross(a, b)), dot(a, b))
+}
+
+// unsigned angle between a and b in [0, PI]
+fn angle_between(a vec3, b vec3) f32 {
+    atan2(length(cross(a, b)), dot(a, b))
+}
+
+// v turned 90 degrees counter-clockwise
+fn perp(v vec2) vec2 {
+    vec2(-v.y, v.x)
+}
+
+// v turned counter-clockwise by angle
+fn rotate(v vec2, angle f32) vec2 {
+    s, c := sin_cos(angle)
+    v * c + perp(v) * s
+}
+
+// every lane within EPSILON * max(1, largest magnitude)
+fn approx_eq(a vec2, b vec2) bool {
+    max_component(fabs(a - b)) <= EPSILON * fmax(1.0, max_component(fmax(fabs(a), fabs(b))))
+}
+
+// every lane within EPSILON * max(1, largest magnitude)
+fn approx_eq(a vec3, b vec3) bool {
+    max_component(fabs(a - b)) <= EPSILON * fmax(1.0, max_component(fmax(fabs(a), fabs(b))))
+}
+
+// every lane within EPSILON * max(1, largest magnitude)
+fn approx_eq(a vec4, b vec4) bool {
+    max_component(fabs(a - b)) <= EPSILON * fmax(1.0, max_component(fmax(fabs(a), fabs(b))))
+}
+
+// every lane within eps
+fn approx_eq(a vec2, b vec2, eps f32) bool {
+    max_component(fabs(a - b)) <= eps
+}
+
+// every lane within eps
+fn approx_eq(a vec3, b vec3, eps f32) bool {
+    max_component(fabs(a - b)) <= eps
+}
+
+// every lane within eps
+fn approx_eq(a vec4, b vec4, eps f32) bool {
+    max_component(fabs(a - b)) <= eps
+}
+
+// ---------- quaternions (rotate a vector with q * v, compose with a * b: b first) ----------
+
+// the rotation that does nothing
+fn quat_identity() quat {
+    quat(0.0, 0.0, 0.0, 1.0)
+}
+
+// rotation by angle around axis (right-hand rule; axis need not be normalised)
+fn quat_axis_angle(axis vec3, angle f32) quat {
+    s, c := sin_cos(angle * 0.5)
+    quat(normalize(axis) * s, c)
+}
+
+// rotation from Euler angles: roll around Z first, then pitch around X, then yaw around Y
+fn quat_euler(pitch f32, yaw f32, roll f32) quat {
+    sx, cx := sin_cos(pitch * 0.5)
+    sy, cy := sin_cos(yaw * 0.5)
+    sz, cz := sin_cos(roll * 0.5)
+    quat(cy * sx * cz + sy * cx * sz, sy * cx * cz - cy * sx * sz, cy * cx * sz - sy * sx * cz, cy * cx * cz + sy * sx * sz)
+}
+
+// four-component dot product
+fn dot(a quat, b quat) f32 {
+    dot(vec4(a), vec4(b))
+}
+
+// q scaled to unit length; the zero quaternion becomes the identity
+fn normalize(q quat) quat {
+    l := dot(q, q)
+    if l > 0.0 { quat(vec4(q) / sqrt(l)) } else { quat_identity() }
+}
+
+// the opposite rotation of a unit quaternion
+fn conjugate(q quat) quat {
+    quat(-q.xyz, q.w)
+}
+
+// the opposite rotation (q need not be normalised)
+fn inverse(q quat) quat {
+    quat(vec4(-q.xyz, q.w) / dot(q, q))
+}
+
+// normalised linear interpolation along the shorter arc: cheap, not constant speed
+fn nlerp(a quat, b quat, t f32) quat {
+    va := vec4(a)
+    vb := vec4(b)
+    if dot(va, vb) < 0.0 {
+        vb = -vb
+    }
+    normalize(quat(va + (vb - va) * t))
+}
+
+// spherical interpolation along the shorter arc at constant angular speed
+fn slerp(a quat, b quat, t f32) quat {
+    va := vec4(a)
+    vb := vec4(b)
+    d := dot(va, vb)
+    if d < 0.0 {
+        vb = -vb
+        d = -d
+    }
+    if d > 0.9995 {
+        return normalize(quat(va + (vb - va) * t))
+    }
+    th := acos(d)
+    quat((va * sin((1.0 - t) * th) + vb * sin(t * th)) / sin(th))
+}
+
+// the rotation whose matrix has the orthonormal columns x, y, z
+fn __quat_from_axes(x vec3, y vec3, z vec3) quat {
+    tr := x.x + y.y + z.z
+    if tr > 0.0 {
+        s := sqrt(tr + 1.0) * 2.0
+        return quat((y.z - z.y) / s, (z.x - x.z) / s, (x.y - y.x) / s, 0.25 * s)
+    }
+    if x.x > y.y && x.x > z.z {
+        s := sqrt(1.0 + x.x - y.y - z.z) * 2.0
+        return quat(0.25 * s, (y.x + x.y) / s, (z.x + x.z) / s, (y.z - z.y) / s)
+    }
+    if y.y > z.z {
+        s := sqrt(1.0 + y.y - x.x - z.z) * 2.0
+        return quat((y.x + x.y) / s, 0.25 * s, (z.y + y.z) / s, (z.x - x.z) / s)
+    }
+    s := sqrt(1.0 + z.z - x.x - y.y) * 2.0
+    quat((z.x + x.z) / s, (z.y + y.z) / s, 0.25 * s, (x.y - y.x) / s)
+}
+
+// the rotation that turns -Z into forward and keeps +Y as close to up as possible
+fn quat_look_rotation(forward vec3, up vec3) quat {
+    f := normalize(forward)
+    r := cross(f, up)
+    if length_sq(r) < 1e-12 {
+        // forward is parallel to up: any roll will do
+        r = cross(f, if fabs(f.y) < 0.9 { vec3(0.0, 1.0, 0.0) } else { vec3(1.0, 0.0, 0.0) })
+    }
+    r = normalize(r)
+    __quat_from_axes(r, cross(r, f), -f)
+}
+
+// (pitch, yaw, roll) of a unit quaternion, the inverse of quat_euler; pitch is in [-PI/2, PI/2]
+fn to_euler(q quat) vec3 {
+    sp := 2.0 * (q.w * q.x - q.y * q.z)
+    if fabs(sp) > 0.99999 {
+        // looking straight up or down: yaw and roll turn around the same axis, report it as yaw
+        return vec3(if sp > 0.0 { HALF_PI } else { -HALF_PI }, atan2(2.0 * (q.w * q.y - q.x * q.z), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)), 0.0)
+    }
+    vec3(asin(sp), atan2(2.0 * (q.x * q.z + q.w * q.y), 1.0 - 2.0 * (q.x * q.x + q.y * q.y)), atan2(2.0 * (q.x * q.y + q.w * q.z), 1.0 - 2.0 * (q.x * q.x + q.z * q.z)))
+}
+
+// (axis, angle) of a unit quaternion, angle in [0, TAU]; the identity gives the X axis and 0
+fn axis_angle(q quat) (vec3, f32) {
+    l := length(q.xyz)
+    if l == 0.0 {
+        return (vec3(1.0, 0.0, 0.0), 0.0)
+    }
+    (q.xyz / l, 2.0 * atan2(l, q.w))
+}
+
+// every component within EPSILON (q and -q, the same rotation, are not considered equal)
+fn approx_eq(a quat, b quat) bool {
+    approx_eq(vec4(a), vec4(b))
+}
+
+// every component within eps
+fn approx_eq(a quat, b quat, eps f32) bool {
+    approx_eq(vec4(a), vec4(b), eps)
+}
+
+// ---------- matrices ----------
+
+// the matrix that changes nothing
+fn mat4_identity() mat4 {
+    mat4(1.0)
+}
+
+// translation by v
+fn translate(v vec3) mat4 {
+    m := mat4(1.0)
+    m[3] = vec4(v, 1.0)
+    m
+}
+
+// scaling by v.x, v.y, v.z along the axes
+fn scale(v vec3) mat4 {
+    mat4(vec4(v.x, 0.0, 0.0, 0.0), vec4(0.0, v.y, 0.0, 0.0), vec4(0.0, 0.0, v.z, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
+}
+
+// rotation around the X axis
+fn rotate_x(angle f32) mat4 {
+    s, c := sin_cos(angle)
+    mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, c, s, 0.0), vec4(0.0, -s, c, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
+}
+
+// rotation around the Y axis
+fn rotate_y(angle f32) mat4 {
+    s, c := sin_cos(angle)
+    mat4(vec4(c, 0.0, -s, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(s, 0.0, c, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
+}
+
+// rotation around the Z axis
+fn rotate_z(angle f32) mat4 {
+    s, c := sin_cos(angle)
+    mat4(vec4(c, s, 0.0, 0.0), vec4(-s, c, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
+}
+
+// rotation matrix of a unit quaternion
+fn mat4_from_quat(q quat) mat4 {
+    d := q.xyz * 2.0
+    a := d * q.x
+    b := d * q.y
+    c := d * q.z
+    w := d * q.w
+    mat4(vec4(1.0 - (b.y + c.z), a.y + w.z, a.z - w.y, 0.0), vec4(a.y - w.z, 1.0 - (a.x + c.z), b.z + w.x, 0.0), vec4(a.z + w.y, b.z - w.x, 1.0 - (a.x + b.y), 0.0), vec4(0.0, 0.0, 0.0, 1.0))
+}
+
+// rotation by angle around axis
+fn rotate_axis(axis vec3, angle f32) mat4 {
+    mat4_from_quat(quat_axis_angle(axis, angle))
+}
+
+// translation * rotation * scale: the usual object-to-world matrix
+fn mat4_trs(t vec3, r quat, s vec3) mat4 {
+    m := mat4_from_quat(r)
+    mat4(m[0] * s.x, m[1] * s.y, m[2] * s.z, vec4(t, 1.0))
+}
+
+// rows and columns exchanged
+fn transpose(m mat4) mat4 {
+    a := m[0]
+    b := m[1]
+    c := m[2]
+    d := m[3]
+    mat4(vec4(a.x, b.x, c.x, d.x), vec4(a.y, b.y, c.y, d.y), vec4(a.z, b.z, c.z, d.z), vec4(a.w, b.w, c.w, d.w))
+}
+
+// 2x2 minors of the rows (x, y) of the columns a, b, c, d: ab ac ad in the first vector, bc bd cd in the second
+fn __minors(a vec2, b vec2, c vec2, d vec2) (vec3, vec3) {
+    (vec3(cross(a, b), cross(a, c), cross(a, d)), vec3(cross(b, c), cross(b, d), cross(c, d)))
+}
+
+// determinant
+fn determinant(m mat4) f32 {
+    s, t := __minors(m[0].xy, m[1].xy, m[2].xy, m[3].xy)
+    c, e := __minors(m[0].zw, m[1].zw, m[2].zw, m[3].zw)
+    dot(s, e.zyx) - 2.0 * s.y * e.y + dot(t, c.zyx) - 2.0 * t.y * c.y
+}
+
+// one column of the adjugate from a row of the matrix and the minors of the two rows that are neither it nor its partner
+fn __adj_col(r vec4, k0 vec4, k1 vec4, k2 vec4) vec4 {
+    r.yxxx * k0 + r.zzyy * k1 + r.wwwz * k2
+}
+
+// inverse of any invertible matrix; a singular matrix (determinant 0) gives the zero matrix
+fn inverse(m mat4) mat4 {
+    s, t := __minors(m[0].xy, m[1].xy, m[2].xy, m[3].xy)
+    c, e := __minors(m[0].zw, m[1].zw, m[2].zw, m[3].zw)
+    det := dot(s, e.zyx) - 2.0 * s.y * e.y + dot(t, c.zyx) - 2.0 * t.y * c.y
+    if det == 0.0 {
+        return mat4(0.0)
+    }
+    r := transpose(m)
+    k0 := vec4(e.z, -e.z, e.y, -e.x)
+    k1 := vec4(-e.y, c.z, -c.z, c.y)
+    k2 := vec4(e.x, -c.y, c.x, -c.x)
+    j0 := vec4(t.z, -t.z, t.y, -t.x)
+    j1 := vec4(-t.y, s.z, -s.z, s.y)
+    j2 := vec4(t.x, -s.y, s.x, -s.x)
+    i := 1.0 / det
+    mat4(__adj_col(r[1], k0, k1, k2) * i, __adj_col(r[0], k0, k1, k2) * -i, __adj_col(r[3], j0, j1, j2) * i, __adj_col(r[2], j0, j1, j2) * -i)
+}
+
+// inverse of an affine matrix (last row 0 0 0 1: any mix of rotation, scale, shear and translation); cheaper than inverse
+fn inverse_affine(m mat4) mat4 {
+    a := m[0].xyz
+    b := m[1].xyz
+    c := m[2].xyz
+    t := m[3].xyz
+    i := 1.0 / dot(a, cross(b, c))
+    r0 := cross(b, c) * i
+    r1 := cross(c, a) * i
+    r2 := cross(a, b) * i
+    mat4(vec4(r0.x, r1.x, r2.x, 0.0), vec4(r0.y, r1.y, r2.y, 0.0), vec4(r0.z, r1.z, r2.z, 0.0), vec4(-dot(r0, t), -dot(r1, t), -dot(r2, t), 1.0))
+}
+
+// view matrix of a camera at eye looking at target (view space: +X right, +Y up, -Z forward)
+fn look_at(eye vec3, target vec3, up vec3) mat4 {
+    f := normalize(target - eye)
+    s := normalize(cross(f, up))
+    u := cross(s, f)
+    mat4(vec4(s.x, u.x, -f.x, 0.0), vec4(s.y, u.y, -f.y, 0.0), vec4(s.z, u.z, -f.z, 0.0), vec4(-dot(s, eye), -dot(u, eye), dot(f, eye), 1.0))
+}
+
+// perspective projection: vertical field of view fovy (radians), aspect = width / height, clip depth 0 at near and 1 at far, +Y up (D3D, Metal)
+fn perspective(fovy f32, aspect f32, near f32, far f32) mat4 {
+    f := 1.0 / tan(fovy * 0.5)
+    mat4(vec4(f / aspect, 0.0, 0.0, 0.0), vec4(0.0, f, 0.0, 0.0), vec4(0.0, 0.0, far / (near - far), -1.0), vec4(0.0, 0.0, near * far / (near - far), 0.0))
+}
+
+// perspective with Y flipped, for Vulkan (whose clip space has +Y pointing down)
+fn perspective_vk(fovy f32, aspect f32, near f32, far f32) mat4 {
+    m := perspective(fovy, aspect, near, far)
+    m[1] = -m[1]
+    m
+}
+
+// orthographic projection of the box left..right, bottom..top, near..far (distances along -Z), clip depth 0..1
+fn ortho(left f32, right f32, bottom f32, top f32, near f32, far f32) mat4 {
+    mat4(vec4(2.0 / (right - left), 0.0, 0.0, 0.0), vec4(0.0, 2.0 / (top - bottom), 0.0, 0.0), vec4(0.0, 0.0, 1.0 / (near - far), 0.0), vec4((left + right) / (left - right), (bottom + top) / (bottom - top), near / (near - far), 1.0))
+}
+
+// m applied to the point p (w = 1, no perspective divide)
+fn transform_point(m mat4, p vec3) vec3 {
+    (m * vec4(p, 1.0)).xyz
+}
+
+// m applied to the point p followed by the perspective divide (world to clip-space coordinates)
+fn project_point(m mat4, p vec3) vec3 {
+    c := m * vec4(p, 1.0)
+    c.xyz / c.w
+}
+
+// m applied to the direction d (w = 0: translation is ignored)
+fn transform_dir(m mat4, d vec3) vec3 {
+    (m * vec4(d, 0.0)).xyz
+}
+
+// every element within EPSILON * max(1, largest magnitude of its column)
+fn approx_eq(a mat4, b mat4) bool {
+    approx_eq(a[0], b[0]) && approx_eq(a[1], b[1]) && approx_eq(a[2], b[2]) && approx_eq(a[3], b[3])
+}
+
+// every element within eps
+fn approx_eq(a mat4, b mat4, eps f32) bool {
+    approx_eq(a[0], b[0], eps) && approx_eq(a[1], b[1], eps) && approx_eq(a[2], b[2], eps) && approx_eq(a[3], b[3], eps)
+}
+
+// ---------- geometry ----------
+
+// axis-aligned box
+struct Aabb { min vec3, max vec3 }
+
+// half-line: the points origin + dir * t for t >= 0
+struct Ray { origin vec3, dir vec3 }
+
+// the points p with dot(normal, p) == d; normal has unit length
+struct Plane { normal vec3, d f32 }
+
+struct Sphere { center vec3, radius f32 }
+
+// smallest box around both
+fn aabb_union(a Aabb, b Aabb) Aabb {
+    Aabb{fmin(a.min, b.min), fmax(a.max, b.max)}
+}
+
+// is p inside or on the box?
+fn contains(b Aabb, p vec3) bool {
+    min_component(fmin(p - b.min, b.max - p)) >= 0.0
+}
+
+// is p inside or on the sphere?
+fn contains(s Sphere, p vec3) bool {
+    length_sq(p - s.center) <= s.radius * s.radius
+}
+
+// do the boxes overlap or touch?
+fn intersects(a Aabb, b Aabb) bool {
+    min_component(fmin(a.max - b.min, b.max - a.min)) >= 0.0
+}
+
+// do the spheres overlap or touch?
+fn intersects(a Sphere, b Sphere) bool {
+    r := a.radius + b.radius
+    length_sq(a.center - b.center) <= r * r
+}
+
+// the point of the box nearest to p (p itself when inside)
+fn closest_point(b Aabb, p vec3) vec3 {
+    fmin(fmax(p, b.min), b.max)
+}
+
+// the point of the sphere's surface nearest to p (the center when p is the center)
+fn closest_point(s Sphere, p vec3) vec3 {
+    s.center + normalize(p - s.center) * s.radius
+}
+
+// the point of the plane nearest to p
+fn closest_point(pl Plane, p vec3) vec3 {
+    p - pl.normal * (dot(pl.normal, p) - pl.d)
+}
+
+// the point of the ray nearest to p
+fn closest_point(r Ray, p vec3) vec3 {
+    r.origin + r.dir * fmax(dot(p - r.origin, r.dir) / dot(r.dir, r.dir), 0.0)
+}
+
+// where the ray enters the box: (t, true) with the hit at origin + dir * t, t = 0 if it starts inside; (_, false) on a miss
+fn ray_hit(r Ray, b Aabb) (f32, bool) {
+    inv := vec3(1.0) / r.dir
+    t0 := (b.min - r.origin) * inv
+    t1 := (b.max - r.origin) * inv
+    near := fmax(max_component(fmin(t0, t1)), 0.0)
+    (near, min_component(fmax(t0, t1)) >= near)
+}
+
+// first point where the ray meets the sphere's surface: (t, true) with the hit at origin + dir * t; (_, false) on a miss
+fn ray_hit(r Ray, s Sphere) (f32, bool) {
+    oc := r.origin - s.center
+    a := dot(r.dir, r.dir)
+    b := dot(oc, r.dir)
+    disc := b * b - a * (dot(oc, oc) - s.radius * s.radius)
+    if disc < 0.0 {
+        return (0.0, false)
+    }
+    q := sqrt(disc)
+    t := (-b - q) / a
+    if t < 0.0 {
+        // the origin is inside: the exit point
+        t = (q - b) / a
+    }
+    (t, t >= 0.0)
+}
+
+// where the ray crosses the plane: (t, true) with the hit at origin + dir * t; (_, false) if it is parallel or points away
+fn ray_hit(r Ray, pl Plane) (f32, bool) {
+    dn := dot(pl.normal, r.dir)
+    if dn == 0.0 {
+        return (0.0, false)
+    }
+    t := (pl.d - dot(pl.normal, r.origin)) / dn
+    (t, t >= 0.0)
+}
+
+// ---------- easing: t in [0, 1] -> [0, 1], f(0) = 0, f(1) = 1 ----------
+
+// slow start
+fn ease_in_quad(t f32) f32 {
+    t * t
+}
+
+// slow end
+fn ease_out_quad(t f32) f32 {
+    t * (2.0 - t)
+}
+
+// slow start and end
+fn ease_in_out_quad(t f32) f32 {
+    if t < 0.5 {
+        return 2.0 * t * t
+    }
+    u := 1.0 - t
+    1.0 - 2.0 * u * u
+}
+
+// slower start
+fn ease_in_cubic(t f32) f32 {
+    t * t * t
+}
+
+// slower end
+fn ease_out_cubic(t f32) f32 {
+    u := 1.0 - t
+    1.0 - u * u * u
+}
+
+// slower start and end
+fn ease_in_out_cubic(t f32) f32 {
+    if t < 0.5 {
+        return 4.0 * t * t * t
+    }
+    u := 1.0 - t
+    1.0 - 4.0 * u * u * u
+}
+
+// overshoots and oscillates around 1 before settling
+fn ease_out_elastic(t f32) f32 {
+    if t <= 0.0 || t >= 1.0 {
+        return saturate(t)
+    }
+    exp(t * -6.931472) * sin((t * 10.0 - 0.75) * 2.0943952) + 1.0
+}
+
+// bounces off 1 three times, like a dropped ball
+fn ease_out_bounce(t f32) f32 {
+    if t < 0.36363637 {
+        return 7.5625 * t * t
+    }
+    if t < 0.72727275 {
+        u := t - 0.54545456
+        return 7.5625 * u * u + 0.75
+    }
+    if t < 0.90909094 {
+        u := t - 0.8181818
+        return 7.5625 * u * u + 0.9375
+    }
+    u := t - 0.95454544
+    7.5625 * u * u + 0.984375
+}
+
+// overshoots 1 by about 10% and comes back
+fn ease_out_back(t f32) f32 {
+    u := t - 1.0
+    1.0 + u * u * (2.70158 * u + 1.70158)
+}
+
+// ---------- colour (rgb / rgba lanes in 0..1) ----------
+
+// rgb to (hue, saturation, value), all in 0..1 (hue 0 = red, 1/3 = green, 2/3 = blue)
+fn rgb_to_hsv(c vec3) vec3 {
+    v := max_component(c)
+    d := v - min_component(c)
+    if d <= 0.0 {
+        return vec3(0.0, 0.0, v)
+    }
+    h := (c.x - c.y) / d + 4.0
+    if v == c.x {
+        h = (c.y - c.z) / d
+        if h < 0.0 {
+            h += 6.0
+        }
+    } else if v == c.y {
+        h = (c.z - c.x) / d + 2.0
+    }
+    vec3(h / 6.0, d / v, v)
+}
+
+// (hue, saturation, value) to rgb; hue wraps around
+fn hsv_to_rgb(c vec3) vec3 {
+    p := fabs(fract(vec3(c.x) + vec3(1.0, 0.6666667, 0.33333334)) * 6.0 - 3.0)
+    k := fmin(fmax(p - 1.0, vec3(0.0)), vec3(1.0))
+    (vec3(1.0) + (k - 1.0) * c.y) * c.z
+}
+
+// one sRGB-encoded channel to linear light
+fn srgb_to_linear(x f32) f32 {
+    if x <= 0.04045 { x / 12.92 } else { pow((x + 0.055) / 1.055, 2.4) }
+}
+
+// one linear-light channel to sRGB encoding
+fn linear_to_srgb(x f32) f32 {
+    if x <= 0.0031308 { x * 12.92 } else { 1.055 * pow(x, 0.41666666) - 0.055 }
+}
+
+// sRGB-encoded colour to linear light (do lighting and blending in linear)
+fn srgb_to_linear(c vec3) vec3 {
+    vec3(srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z))
+}
+
+// linear-light colour to sRGB encoding (for display or 8-bit storage)
+fn linear_to_srgb(c vec3) vec3 {
+    vec3(linear_to_srgb(c.x), linear_to_srgb(c.y), linear_to_srgb(c.z))
+}
+
+// rgba packed as RGBA8 with red in the lowest byte (R8G8B8A8 in memory); lanes are clamped to 0..1 and rounded
+fn color_u32(c vec4) u32 {
+    b := fmin(fmax(c, vec4(0.0)), vec4(1.0)) * 255.0 + 0.5
+    u32(b.x) | u32(b.y) << 8 | u32(b.z) << 16 | u32(b.w) << 24
+}
+
+// the inverse of color_u32
+fn color_vec4(c u32) vec4 {
+    vec4(f32(c & 0xFF), f32((c >> 8) & 0xFF), f32((c >> 16) & 0xFF), f32(c >> 24)) * 0.003921569
+}

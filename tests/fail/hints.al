@@ -2,7 +2,7 @@
 fn f(x int) string {
     y := null
     println(x)
-    return fmt(length(y))
+    return fmt(count(y))
 }
 fn main() {
     var d double
