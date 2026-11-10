@@ -212,7 +212,7 @@ fn rand_range(lo f32, hi f32) f32 {
 // ---------- noise ----------
 // well-mixed 32-bit hash of an integer lattice point and a seed
 fn noise_hash(x i64, y i64, z i64, seed u32) u32 {
-    h := u32(x) * 0x8da6b343 ^ u32(y) * 0xd8163841 ^ u32(z) * 0xcb1ab31f ^ seed * 0x9e3779b9
+    h := (u32(x) * 0x8da6b343 ^ u32(y) * 0xd8163841 ^ u32(z) * 0xcb1ab31f ^ seed * 0x9e3779b9) + 0x2545f491
     h = (h ^ (h >> 16)) * 0x7feb352d
     h = (h ^ (h >> 15)) * 0x846ca68b
     return h ^ (h >> 16)

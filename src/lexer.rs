@@ -165,6 +165,24 @@ pub fn lex(src: &str, file: u16, errs: &mut Vec<Diag>) -> Vec<Token> {
             }
             continue;
         }
+        if c == b'`' {
+            // raw string: no escapes, may span lines; ends at the next backquote
+            i += 1;
+            let st = i;
+            while i < s.len() && s[i] != b'`' {
+                if s[i] == b'\n' {
+                    line += 1;
+                    line_start = i + 1;
+                }
+                i += 1;
+            }
+            if i >= s.len() {
+                errs.push(Diag { pos: p, msg: "unterminated raw string (missing closing `)".into() });
+            }
+            out.push(Token { t: Tk::Str(s[st..i.min(s.len())].to_vec()), pos: p });
+            i += 1;
+            continue;
+        }
         if c == b'"' || c == b'\'' {
             let q = c;
             i += 1;

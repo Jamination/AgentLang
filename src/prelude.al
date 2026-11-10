@@ -156,6 +156,10 @@ fn mark() i64 {
 }
 
 fn release(m i64) {
+    // a mark taken before the first allocation (the heap is mapped lazily) means "everything"
+    if m == 0 {
+        m = __heap_base
+    }
     if m >= __heap_base && m < __heap_cur {
         if __heap_cur > __heap_hwm {
             __heap_hwm = __heap_cur
@@ -751,14 +755,17 @@ fn __tests_done() i64 {
 }
 
 // ---------- capture output into a string: fmt(...) ----------
+// The capture buffer lives outside the arena (release() must not take it away): a static block
+// first, then mappings of its own.
 var __cap_on i64
+var __cap_static [1024]u8
 var __cap_buf []u8
 var __cap_len i64
 
 // captures nest: each fmt() takes the text appended after its starting position
 fn __cap_begin() i64 {
     if len(__cap_buf) == 0 {
-        __cap_buf = alloc[u8](256)
+        __cap_buf = __cap_static[..]
     }
     __cap_on += 1
     return __cap_len
@@ -771,9 +778,16 @@ fn __cap_put(s str) {
         while cap < __cap_len + n {
             cap = cap * 2
         }
-        nb := alloc[u8](cap)
-        memcopy(ptr(nb), ptr(__cap_buf), __cap_len)
-        __cap_buf = nb
+        // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS
+        p := syscall(9, 0, cap, 3, 0x22, -1, 0)
+        if p < 0 && p > -4096 {
+            __die("panic: out of memory", "", "")
+        }
+        memcopy(p, ptr(__cap_buf), __cap_len)
+        if len(__cap_buf) > 1024 {
+            syscall(11, ptr(__cap_buf), len(__cap_buf))
+        }
+        __cap_buf = mkslice[u8](p, cap)
     }
     memcopy(cast[i64](ptr(__cap_buf)) + __cap_len, ptr(s), n)
     __cap_len += n

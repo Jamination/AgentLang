@@ -1,0 +1,20 @@
+Handle{idx: 0, gen: 1} Handle{idx: 1, gen: 1} Handle{idx: 2, gen: 1} Handle{idx: 0, gen: 0} 3 3
+true false false false false
+Mob{name: elf, hp: 15} true
+true false true 2
+Handle{idx: 1, gen: 3} true true bat 3
+1 Handle{idx: 1, gen: 3} bat true
+2 Handle{idx: 2, gen: 1} imp true
+0 0 false false Handle{idx: 0, gen: 3} true
+1000 true true
+1000 1000 true 500
+true true true true false 4 true
+(1, true) (2, true) 2 false
+true true 3 4 6 7
+16 19 4
+16 17 18 19 (0, false)
+0 (0, false)
+b c
+[5, 2, 7, 40] 4 true false false 2 -1
+1 -1 [5, 40, 7] 60.0 7.5 10.5
+0 false 0 [9]

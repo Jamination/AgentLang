@@ -1,0 +1,35 @@
+A Z 0 9
+Space Escape Enter Tab Backspace Left Up Right Down LShift RShift LCtrl RCtrl LAlt RAlt RAlt LSuper F1 F12 Kp0 Kp9 Kp0 Kp7 KpEnter Delete Minus Grave PrintScreen 
+true true 0 0 0
+unmapped key codes: 0
+0 3 12 15
+0 EventNone 0 0 0 0 EventNone
+1 EventMouseDown 0 7 9 1 EventMouseUp
+2 EventMouseDown 2 7 9 1 EventMouseUp
+3 EventMouseDown 1 7 9 1 EventMouseUp
+4 EventWheel 0 0 1 1 EventNone
+5 EventWheel 0 0 -1 1 EventNone
+6 EventWheel 0 -1 0 1 EventNone
+7 EventWheel 0 1 0 1 EventNone
+8 EventMouseDown 3 7 9 1 EventMouseUp
+9 EventMouseDown 4 7 9 1 EventMouseUp
+10 EventNone 0 0 0 0 EventNone
+192 80 16
+true 4660 77 5 9
+33 52 18 77 32 5 9
+300 -2 5 38
+640 480
+(0, 0, 640, 480) (80, 0, 640, 480) (0, 60, 640, 480)
+(0, 22, 100, 56) (0, 0, 1920, 1080) (0, 499, 3, 1) (0, 0, 0, 0) (0, 0, 0, 0)
+ff0000 00ff00 
+0000ff ffffff 
+0000ff 00ff00 
+ff0000 ffffff 
+000000 ff0000 ff0000 00ff00 00ff00 000000 
+000000 ff0000 ff0000 00ff00 00ff00 000000 
+000000 0000ff 0000ff ffffff ffffff 000000 
+000000 0000ff 0000ff ffffff ffffff 000000 
+000000 000000 
+010203 070809 
+000000 000000 
+(27, 0, 156, 97) 5412 4675185212023360515

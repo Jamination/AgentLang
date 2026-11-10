@@ -1,0 +1,8 @@
+2409258929 519115313 2285811994 1711388655 108901715 1633879843
+lattice zero true bounded true deterministic true
+spread true true mean near 0 true
+smooth true
+seeded true true true
+noise3 true true true fbm2 true true true
+true 0.0 true true
+0.1532 -0.0638 -0.0584 -0.0280

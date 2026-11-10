@@ -1,0 +1,35 @@
+# AL standard library
+
+Everything here ships inside the compiler: there is nothing to install and no search path.
+`alc sigs file.al -- std` lists every declaration that a program can see.
+
+## Always available (no `use`)
+
+| Part | What it gives | Reference |
+|------|---------------|-----------|
+| core | printing, `Vec`, `Map`, strings, sorting, parsing, file I/O, arena memory, `args` | [LANGUAGE.md](LANGUAGE.md#standard-library) |
+| built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [LANGUAGE.md](LANGUAGE.md#f32-vectors-matrices) |
+| math | scalar functions for `f32`/`f64`, vector / quaternion / matrix functions, geometry tests, easing, colour | [std/math.md](std/math.md) |
+| rand | seedable generators, ranges, shuffles, noise | [std/rand.md](std/rand.md) |
+| time | clocks, sleeping, frame clock, fixed timestep, timers | [std/time.md](std/time.md) |
+| mem | sub-arenas, frame allocation, object pools with generational handles, ring buffers | [std/mem.md](std/mem.md) |
+
+## Modules (`use std.<name>`)
+
+| Module | What it gives | Links against | Reference |
+|--------|---------------|---------------|-----------|
+| `std.asset` | files, directories, paths, cached asset loading, hot-reload polling, config and JSON readers | nothing | [std/asset.md](std/asset.md) |
+| `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
+| `std.input` | per-frame key / mouse state, action maps | nothing | [std/input.md](std/input.md) |
+| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` | [std/window.md](std/window.md) |
+| `std.audio` | WAV, software mixer, sound device output | `libasound.so.2` (device only) | [std/audio.md](std/audio.md) |
+| `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
+| `std.dx12` | Direct3D 12 / DXGI bindings (type-check only: no Windows backend yet) | Windows DLLs | [std/dx12.md](std/dx12.md) |
+| `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
+| `std.libc`, `std.x11`, `std.alsa` | raw C declarations used by the modules above | the named library | source in `std/` |
+
+A program is a static, libc-free executable unless it reaches an `extern` function; then it is a
+dynamically linked executable that needs only the libraries of the functions it can reach.
+For example a game that uses `std.audio` only to mix into a buffer stays static.
+
+How to structure a game on top of these: [GAMES.md](GAMES.md).

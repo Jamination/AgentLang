@@ -1,0 +1,17 @@
+0 1 2 3 4 5 3
+jump 0 0
+10 7
+jump false false false
+jump true true false
+jump true false false
+jump true true false
+jump false false true
+jump false false false
+fire true true false
+pause true true false
+0.0 vec2(0.0, 0.0)
+1.0 vec2(1.0, 0.0)
+0.0
+-0.7071 0.7071 1.0000
+8 false true
+9 true false

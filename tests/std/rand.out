@@ -1,0 +1,16 @@
+11091344671253066420 13793997310169335082 1900383378846508768
+13720838825685603483 558541318 963 0
+reproducible true seed matters true
+floats in [0,1) true means true true
+range histogram flat true
+wide range true true true 7 0
+f32 range true
+chance true false true
+[0, 1, 5, 8, 4, 7, 3, 2, 6, 9]
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+shuffle fair true pick orc imp elf imp
+unit true centered true true
+inside true uniform true true
+normal mean true stddev true 68% true
+true true true
+true 12 true

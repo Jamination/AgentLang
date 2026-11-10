@@ -83,6 +83,8 @@ alc test tour.al       # run the test blocks
 - Float literals: `1.5`, `1e9`, `2.5e-3` (a digit is required on both sides of the point).
 - String literals: `"text"` with escapes `\n \t \r \0 \\ \" \' \xHH`. A string is a `str`
   (`[]u8`); literals are read-only.
+- Raw string literals: text between backquotes, taken as is (no escapes) and allowed to span
+  lines; meant for embedded shader source and other multi-line text.
 
 ## Types
 

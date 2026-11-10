@@ -170,12 +170,16 @@ impl<'a> Cx<'a> {
                         continue;
                     }
                 } else if prev.file < np && pos.file >= np {
-                    // a user declaration shadows a prelude declaration of the same name
-                    cx.fn_names.remove(name);
-                    cx.struct_names.remove(name);
-                    cx.enum_names.remove(name);
-                    cx.const_decls.remove(name);
-                    cx.global_decls.remove(name);
+                    // a user declaration shadows a prelude declaration of the same name; types
+                    // and values are looked up separately, so a function does not hide a type
+                    if matches!(d, Decl::Struct(_) | Decl::Enum(_)) {
+                        cx.struct_names.remove(name);
+                        cx.enum_names.remove(name);
+                    } else {
+                        cx.fn_names.remove(name);
+                        cx.const_decls.remove(name);
+                        cx.global_decls.remove(name);
+                    }
                 } else {
                     let at = cx.pos_str(*prev);
                     cx.err(pos, format!("`{}` is already declared at {}", name, at));

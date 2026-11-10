@@ -123,6 +123,7 @@ fn key_from_keysym(ks u64) i64 {
         0xFFE8, 0xFFEA, 0xFE03 => KEY_RALT
         0xFFEB => KEY_LSUPER
         0xFFEC => KEY_RSUPER
+        0xFFFF => KEY_DELETE
         _ => KEY_UNKNOWN
     }
 }

@@ -1,0 +1,1 @@
+test -n "$AL_TEST_DISPLAY"
