@@ -13,8 +13,13 @@ struct Plan {
     latch: B,
     pre: B,
     exit: B,
+    // number of copies of the body
     trip: usize,
+    // true: the loop disappears; false: the copies form a loop again (trip count is a multiple)
+    full: bool,
 }
+
+pub const MAX_PARTIAL_SIZE: usize = 400;
 
 fn analyze(f: &Func, cfg: &Cfg, loops: &Loops, li: usize) -> Option<Plan> {
     let l = &loops.loops[li];
@@ -75,7 +80,7 @@ fn analyze(f: &Func, cfg: &Cfg, loops: &Loops, li: usize) -> Option<Plan> {
     let mut i = start;
     loop {
         trip += 1;
-        if trip > MAX_TRIP {
+        if trip > 1 << 16 {
             return None;
         }
         let nx = canon(ty, i.wrapping_add(step));
@@ -84,6 +89,26 @@ fn analyze(f: &Func, cfg: &Cfg, loops: &Loops, li: usize) -> Option<Plan> {
             break;
         }
         i = nx;
+    }
+    // longest chain of header phis that only shift values along (h = g; g = f; ...)
+    let hphis: Vec<V> = f.blocks[h as usize].insts.iter().copied().take_while(|v| f.insts[*v as usize].op == Op::Phi).collect();
+    let back_of = |ph: V| -> V {
+        let i = &f.insts[ph as usize];
+        i.pb.iter().zip(i.args.iter()).find(|(pb, _)| **pb == latch).map(|(_, a)| *a).unwrap_or(NOV)
+    };
+    let mut chain = 1usize;
+    for &ph in &hphis {
+        let mut len = 1usize;
+        let mut cur = ph;
+        loop {
+            let b = back_of(cur);
+            if b == NOV || b == ph || !hphis.contains(&b) || len > 16 {
+                break;
+            }
+            len += 1;
+            cur = b;
+        }
+        chain = chain.max(len);
     }
     // size and exits
     let def_block = f.block_of();
@@ -114,10 +139,15 @@ fn analyze(f: &Func, cfg: &Cfg, loops: &Loops, li: usize) -> Option<Plan> {
             }
         }
     }
-    if size * trip > MAX_UNROLLED_SIZE {
-        return None;
+    if trip <= MAX_TRIP && size * trip <= MAX_UNROLLED_SIZE {
+        return Some(Plan { blocks: l.blocks.clone(), header: h, latch, pre, exit, trip, full: true });
     }
-    Some(Plan { blocks: l.blocks.clone(), header: h, latch, pre, exit, trip })
+    // partial: unrolling by the shift-chain length turns the per-iteration register shuffle into
+    // plain renaming
+    if super::enabled("partial") && chain >= 2 && chain <= 8 && trip % chain == 0 && trip > chain && size * chain <= MAX_PARTIAL_SIZE {
+        return Some(Plan { blocks: l.blocks.clone(), header: h, latch, pre, exit, trip: chain, full: false });
+    }
+    None
 }
 
 fn apply(f: &mut Func, p: &Plan) {
@@ -148,6 +178,7 @@ fn apply(f: &mut Func, p: &Plan) {
     // copy 0 is the original body; prev maps original values to their copy in the previous iteration
     let mut prev: Vec<V> = (0..n0 as V).collect();
     let mut prev_latch = p.latch;
+    let orig_latch_term = f.blocks[p.latch as usize].term.clone();
     let mut prev_header_of_last = p.header;
     let exit_is_true_target = matches!(f.blocks[p.latch as usize].term, Term::Br(_, t, _) if t == p.exit);
     let _ = exit_is_true_target;
@@ -204,7 +235,8 @@ fn apply(f: &mut Func, p: &Plan) {
                 f.im(nv).pb = pb;
                 f.blocks[nb as usize].insts.push(nv);
             }
-            let term = match f.blocks[b as usize].term.clone() {
+            let src_term = if b == p.latch { orig_latch_term.clone() } else { f.blocks[b as usize].term.clone() };
+            let term = match src_term {
                 Term::Jmp(t) => Term::Jmp(bmap.get(&t).copied().unwrap_or(t)),
                 Term::Br(c, t, e) => Term::Br(look(&cur, c), bmap.get(&t).copied().unwrap_or(t), bmap.get(&e).copied().unwrap_or(e)),
                 other => other,
@@ -218,8 +250,20 @@ fn apply(f: &mut Func, p: &Plan) {
         prev = cur;
     }
     let _ = prev_header_of_last;
-    // the last copy leaves the loop
-    f.blocks[prev_latch as usize].term = Term::Jmp(p.exit);
+    if p.full {
+        // the last copy leaves the loop
+        f.blocks[prev_latch as usize].term = Term::Jmp(p.exit);
+    } else if p.trip > 1 {
+        // the last copy branches back to the first one
+        if let Term::Br(_, t, e) = &mut f.blocks[prev_latch as usize].term {
+            if *t != p.exit {
+                *t = p.header;
+            }
+            if *e != p.exit {
+                *e = p.header;
+            }
+        }
+    }
     // exit phis and uses after the loop see the last copy
     if p.trip > 1 {
         let last = &prev;
@@ -259,6 +303,23 @@ fn apply(f: &mut Func, p: &Plan) {
                 _ => {}
             }
         }
+    }
+    if !p.full {
+        // header phis stay: their back-edge inputs now come from the last copy
+        if p.trip > 1 {
+            for &ph in &hphis {
+                let (_, bk) = phi_in[&ph];
+                let nv = if loop_def(bk) { prev[bk as usize] } else { bk };
+                let i = f.im(ph);
+                for k in 0..i.pb.len() {
+                    if i.pb[k] == p.latch {
+                        i.pb[k] = prev_latch;
+                        i.args[k] = nv;
+                    }
+                }
+            }
+        }
+        return;
     }
     // copy 0: header phis take their initial values
     let mut repl: Vec<V> = vec![NOV; f.insts.len()];

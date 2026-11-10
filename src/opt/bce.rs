@@ -15,6 +15,8 @@ struct Iv {
     end: V,
     cmp: Op,
     ty: T,
+    // last value of the induction variable when it is known at compile time
+    last_const: Option<i64>,
 }
 
 // index expression: ext(inner(iv)) where inner is iv +/- invariants
@@ -70,6 +72,31 @@ fn find_iv(f: &Func, header: B, latch: B, pre: B, in_loop: &[bool], def_block: &
         return None;
     }
     let ty = pi.ty;
+    if step != 1 && step != -1 {
+        // other strides: only with constant bounds, where the last value can be computed
+        let (s0, e0) = (f.is_const(start)?, f.is_const(end)?);
+        if step == 0 {
+            return None;
+        }
+        let mut i = s0;
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            if n > 1 << 20 {
+                return None;
+            }
+            let nx = canon(ty, i.wrapping_add(step));
+            // the counter must move monotonically (no wrap) while the loop continues
+            if (step > 0) != (nx > i) {
+                return None;
+            }
+            if !super::simplify::fold_icmp(ci.op, ty, nx, e0)? {
+                break;
+            }
+            i = nx;
+        }
+        return Some(Iv { phi, start, step, end, cmp: ci.op, ty, last_const: Some(i) });
+    }
     let ok = match (step, ci.op) {
         (1, Op::Slt) | (1, Op::Ult) | (-1, Op::Sgt) | (-1, Op::Ugt) => true,
         (1, Op::Sle) | (1, Op::Ule) | (-1, Op::Sge) | (-1, Op::Uge) => {
@@ -93,7 +120,7 @@ fn find_iv(f: &Func, header: B, latch: B, pre: B, in_loop: &[bool], def_block: &
     if !ok {
         return None;
     }
-    Some(Iv { phi, start, step, end, cmp: ci.op, ty })
+    Some(Iv { phi, start, step, end, cmp: ci.op, ty, last_const: None })
 }
 
 // match idx as ext(inner) with inner = iv, inner + inv, inner - inv or inv - inner
@@ -261,7 +288,9 @@ fn hoist_in_loop(f: &mut Func, cfg: &Cfg, loops: &Loops, li: usize) -> bool {
     // the last value taken by the induction variable (guarded against zero-trip shapes)
     let mut last_eff = NOV;
     if let Some(iv) = &iv {
-        if cands.iter().any(|c| matches!(c.6, Kind::Affine(_))) {
+        if let Some(k) = iv.last_const {
+            last_eff = f.push(pre, Op::Const, iv.ty, vec![], k);
+        } else if cands.iter().any(|c| matches!(c.6, Kind::Affine(_))) {
             let enters = f.push(pre, iv.cmp, T::I8, vec![iv.start, iv.end], 0);
             let last = match iv.cmp {
                 Op::Slt | Op::Ult => {
@@ -304,7 +333,7 @@ fn hoist_in_loop(f: &mut Func, cfg: &Cfg, loops: &Loops, li: usize) -> bool {
                 let e_last = build(f, last_eff);
                 let c1 = f.push(pre, Op::Ult, T::I8, vec![e_first, len], 0);
                 let c2 = f.push(pre, Op::Ult, T::I8, vec![e_last, len], 0);
-                let dir = a.coef.signum() * iv.step;
+                let dir = a.coef.signum() * iv.step.signum();
                 let c3 = if dir > 0 { f.push(pre, Op::Ule, T::I8, vec![e_first, e_last], 0) } else { f.push(pre, Op::Ule, T::I8, vec![e_last, e_first], 0) };
                 add_check(f, &mut cur, c1, trap);
                 add_check(f, &mut cur, c2, trap);

@@ -1,5 +1,6 @@
 pub mod alias;
 pub mod bce;
+pub mod checkmerge;
 pub mod cleanup;
 pub mod gvn;
 pub mod inline;
@@ -11,6 +12,14 @@ pub mod unroll;
 
 use crate::ir::*;
 
+// debugging aid: ALC_DISABLE=pass1,pass2 switches optimization passes off
+pub fn enabled(name: &str) -> bool {
+    match std::env::var("ALC_DISABLE") {
+        Ok(v) => !v.split(',').any(|x| x == name),
+        Err(_) => true,
+    }
+}
+
 fn local_opt(f: &mut Func, level: u32) {
     cleanup::prune_unreachable(f);
     mem2reg::run(f);
@@ -21,10 +30,11 @@ fn local_opt(f: &mut Func, level: u32) {
     for _ in 0..4 {
         let mut ch = false;
         ch |= simplify::run(f);
-        ch |= gvn::run(f);
-        ch |= loadelim::run(f);
+        ch |= enabled("gvn") && gvn::run(f);
+        ch |= enabled("checkmerge") && checkmerge::run(f);
+        ch |= enabled("loadelim") && loadelim::run(f);
         ch |= mem2reg::run(f);
-        ch |= licm::run(f);
+        ch |= enabled("licm") && licm::run(f);
         ch |= simplify::run(f);
         if !ch {
             break;
@@ -32,16 +42,20 @@ fn local_opt(f: &mut Func, level: u32) {
     }
     // fully unroll small constant-trip loops (inner loops become constant as outer ones go)
     for _ in 0..6 {
-        if !unroll::run(f) {
+        if !enabled("unroll") || !unroll::run(f) {
             break;
+        }
+        if std::env::var("ALC_DEBUG").map(|v| v == "unroll").unwrap_or(false) {
+            eprintln!("after unroll:\n{}", print_func(f, None));
         }
         for _ in 0..3 {
             let mut ch = false;
             ch |= simplify::run(f);
-            ch |= gvn::run(f);
-            ch |= loadelim::run(f);
+            ch |= enabled("gvn") && gvn::run(f);
+            ch |= enabled("checkmerge") && checkmerge::run(f);
+            ch |= enabled("loadelim") && loadelim::run(f);
             ch |= mem2reg::run(f);
-            ch |= licm::run(f);
+            ch |= enabled("licm") && licm::run(f);
             ch |= simplify::run(f);
             if !ch {
                 break;
@@ -50,10 +64,13 @@ fn local_opt(f: &mut Func, level: u32) {
     }
     // hoist bounds checks out of counted loops, then clean up what that exposes
     for _ in 0..3 {
-        if !bce::run(f) {
+        if !enabled("bce") || !bce::run(f) {
             break;
         }
         gvn::run(f);
+        if enabled("checkmerge") {
+            checkmerge::run(f);
+        }
         simplify::run(f);
         licm::run(f);
         simplify::run(f);

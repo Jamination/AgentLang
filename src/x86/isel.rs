@@ -41,9 +41,24 @@ pub fn split_critical_edges(f: &mut Func) -> Vec<ExitAlias> {
         if is_hphi(c) || (ci.op.is_cmp() && ci.args.iter().any(|a| is_hphi(*a))) {
             return None;
         }
+        // operands folded into the compare are evaluated after the copies: they must not
+        // depend on a header phi through anything that gets folded (addresses, test operands)
+        fn tree_has(f: &Func, v: V, depth: u32, is_hphi: &dyn Fn(V) -> bool) -> bool {
+            if is_hphi(v) {
+                return true;
+            }
+            let i = &f.insts[v as usize];
+            if !matches!(i.op, Op::Add | Op::Sub | Op::Shl | Op::Mul | Op::Load | Op::And) {
+                return false;
+            }
+            if depth == 0 {
+                return true;
+            }
+            i.args.iter().any(|a| tree_has(f, *a, depth - 1, is_hphi))
+        }
         if ci.args.iter().any(|a| {
             let ai = &f.insts[*a as usize];
-            matches!(ai.op, Op::And | Op::Load | Op::Add) && ai.args.iter().any(|x| is_hphi(*x))
+            matches!(ai.op, Op::And | Op::Load) && tree_has(f, *a, 12, &is_hphi)
         }) {
             return None;
         }
