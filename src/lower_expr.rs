@@ -153,7 +153,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let n = items.len() as i64;
                     let bytes = self.iconst(T::I64, n * es as i64);
                     let bv = self.sval(T_I64, bytes);
-                    let p = self.call_rt("__alloc", vec![], vec![bv], e.pos);
+                    let p = self.call_rt("__alloc_raw", vec![], vec![bv], e.pos);
                     let pv = self.scalar(p);
                     for (i, (name, item)) in items.iter().enumerate() {
                         if name.is_some() {
@@ -590,7 +590,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let sz = self.cx.types.size_of(ty);
                     let bytes = self.iconst(T::I64, sz as i64);
                     let bv = self.sval(T_I64, bytes);
-                    let p = self.call_rt("__alloc", vec![], vec![bv], pos);
+                    let p = self.call_rt("__alloc_raw", vec![], vec![bv], pos);
                     let pv = self.scalar(p);
                     let dst = self.mval(ty, pv);
                     self.init_lit(dst, items, pos);

@@ -3,6 +3,7 @@
 var __heap_cur i64
 var __heap_end i64
 var __heap_base i64
+var __heap_hwm i64
 var __argc i64
 var __argv i64
 var __obuf [65536]u8
@@ -94,8 +95,8 @@ noinline fn __heap_grow(n i64) i64 {
     __die("panic: out of memory", "", "")
 }
 
-// zeroed memory, 16-byte aligned; never freed individually (see mark/release)
-inline fn __alloc(n i64) i64 {
+// uninitialized memory, 16-byte aligned; never freed individually (see mark/release)
+inline fn __alloc_raw(n i64) i64 {
     n = (n + 15) & ~15
     p := __heap_cur
     e := p + n
@@ -103,6 +104,16 @@ inline fn __alloc(n i64) i64 {
         return __heap_grow(n)
     }
     __heap_cur = e
+    return p
+}
+
+// zeroed memory: only memory that was handed out before (below the high-water mark) is dirty
+inline fn __alloc(n i64) i64 {
+    p := __alloc_raw(n)
+    if p < __heap_hwm {
+        d := __heap_hwm - p
+        memfill(p, 0, if d < n { d } else { n })
+    }
     return p
 }
 
@@ -117,14 +128,16 @@ fn new[T]() *T {
     return cast[*T](__alloc(sizeof[T]()))
 }
 
-// arena control: everything allocated after mark() is released (and zeroed) by release()
+// arena control: everything allocated after mark() is released by release()
 fn mark() i64 {
     return __heap_cur
 }
 
 fn release(m i64) {
     if m >= __heap_base && m < __heap_cur {
-        memfill(m, 0, __heap_cur - m)
+        if __heap_cur > __heap_hwm {
+            __heap_hwm = __heap_cur
+        }
         __heap_cur = m
     }
 }

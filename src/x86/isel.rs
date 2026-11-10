@@ -296,6 +296,12 @@ pub fn select(f: &Func, m: &Module, depths: &[u32], aliases: &[ExitAlias]) -> MF
         rev.extend(s.out.drain(..).rev());
         for &v in f.blocks[b as usize].insts.iter().rev() {
             let op = f.insts[v as usize].op;
+            if op == Op::Const && s.needed[v as usize] {
+                // a wide constant kept in a register (so that loops do not rebuild it)
+                let d = s.vr(v);
+                rev.push(MInst::new(MOp::Mov, 8, Opnd::R(d), Opnd::I(f.insts[v as usize].k)));
+                continue;
+            }
             if matches!(op, Op::Phi | Op::Param | Op::Alloca | Op::Const | Op::FConst | Op::GAddr | Op::FAddr | Op::Proj | Op::Nop) {
                 continue;
             }
@@ -352,7 +358,7 @@ impl<'a> Sel<'a> {
     fn reg(&mut self, v: V) -> Reg {
         let i = &self.f.insts[v as usize];
         match i.op {
-            Op::Const => {
+            Op::Const if fits32(i.k) || self.blk_of[v as usize] == self.cur_block => {
                 let r = self.mf.new_vreg(0);
                 self.e(MOp::Mov, 8, Opnd::R(r), Opnd::I(i.k));
                 r
@@ -680,10 +686,10 @@ impl<'a> Sel<'a> {
                 Op::Ugt => cc::A,
                 _ => cc::AE,
             };
-            if self.f.is_const(y) == Some(0) && matches!(op, Op::Eq | Op::Ne) && !self.can_fold_load(x) {
+            if self.f.is_const(y) == Some(0) && matches!(op, Op::Eq | Op::Ne | Op::Slt | Op::Sle | Op::Sgt | Op::Sge) && !self.can_fold_load(x) {
                 // test x, x  (or test a, b for (a & b) ==/!= 0)
                 let xi = &self.f.insts[x as usize];
-                if xi.op == Op::And && self.uses[x as usize] == 1 && self.blk_of[x as usize] == self.cur_block {
+                if matches!(op, Op::Eq | Op::Ne) && xi.op == Op::And && self.uses[x as usize] == 1 && self.blk_of[x as usize] == self.cur_block {
                     let (p, q) = (xi.args[0], xi.args[1]);
                     let pr = self.reg(p);
                     let qo = self.rmi(q);
@@ -920,10 +926,10 @@ impl<'a> Sel<'a> {
                         let (a, b) = (i.args[0], i.args[1]);
                         let (ra, rb) = (m.base, m.idx);
                         let direct = self.vreg[a as usize] == ra && self.vreg[b as usize] == rb;
-                        if direct && self.uses[a as usize] == 1 {
+                        if direct && self.dies_here(a) {
                             self.e(MOp::Mov, 8, Opnd::R(d), Opnd::R(ra));
                             self.e(MOp::Add, 8, Opnd::R(d), Opnd::R(rb));
-                        } else if direct && self.uses[b as usize] == 1 {
+                        } else if direct && self.dies_here(b) {
                             self.e(MOp::Mov, 8, Opnd::R(d), Opnd::R(rb));
                             self.e(MOp::Add, 8, Opnd::R(d), Opnd::R(ra));
                         } else {
@@ -1280,11 +1286,17 @@ impl<'a> Sel<'a> {
         }
     }
 
+    // a value with a single use that is defined in the block being selected ends its life at
+    // that use, so a two-address instruction can reuse its register
+    fn dies_here(&self, v: V) -> bool {
+        self.uses[v as usize] == 1 && self.blk_of[v as usize] == self.cur_block && self.f.insts[v as usize].op != Op::Phi
+    }
+
     fn uses_of_reg_single(&self, i: &Inst, base: Reg) -> bool {
-        // x + const where x has a single use: two-address add coalesces
+        // x + const where x dies here: two-address add coalesces
         for &a in &i.args {
             if self.vreg[a as usize] == base {
-                return self.uses[a as usize] == 1;
+                return self.dies_here(a);
             }
         }
         false

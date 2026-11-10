@@ -300,7 +300,9 @@ impl<'a> Ctx<'a> {
                 if let Some(k2) = cb {
                     let ai = self.f.insts[a as usize].clone();
                     if matches!(op, Shl | Mul) && ai.op == Add {
-                        if let Some(k1) = self.c(ai.args[1]) {
+                        let small = |k: i64| k >= i32::MIN as i64 && k <= i32::MAX as i64;
+                        let prod = self.c(ai.args[1]).and_then(|k1| fold_bin(op, ty, k1, k2));
+                        if let (Some(k1), true) = (self.c(ai.args[1]), prod.map(small).unwrap_or(false)) {
                             let x = ai.args[0];
                             let inner = self.mk(op, ty, vec![x, b]);
                             let kc = self.konst(ty, fold_bin(op, ty, k1, k2).unwrap());
@@ -410,6 +412,15 @@ impl<'a> Ctx<'a> {
                     let r = matches!(op, Eq | Sle | Sge | Ule | Uge);
                     self.set_const(v, r as i64);
                     return None;
+                }
+                // (x & (len - 1)) <u len  is true exactly when len != 0
+                if op == Ult || op == Ugt {
+                    let (idx, len) = if op == Ult { (a, b) } else { (b, a) };
+                    if self.masked_by(idx, len, 4, idx) {
+                        let z = self.konst(at, 0);
+                        self.set(v, Ne, vec![len, z], 0);
+                        return None;
+                    }
                 }
                 // comparisons of booleans with constants
                 if let Some(k) = self.c(b) {
@@ -548,6 +559,51 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    // is v always of the form (x & (len - 1)), directly or through phis?
+    fn masked_by(&self, v: V, len: V, depth: u32, root: V) -> bool {
+        let i = &self.f.insts[v as usize];
+        match i.op {
+            Op::And => {
+                let is_len_m1 = |m: V| -> bool {
+                    let mi = &self.f.insts[m as usize];
+                    mi.op == Op::Add && mi.args[0] == len && self.c(mi.args[1]) == Some(-1)
+                };
+                is_len_m1(i.args[0]) || is_len_m1(i.args[1])
+            }
+            Op::Phi if depth > 0 && !i.args.is_empty() => i.args.iter().all(|a| *a == root || *a == v || self.masked_by(*a, len, depth - 1, root)),
+            _ => false,
+        }
+    }
+
+    // upper bound on the number of significant bits of an unsigned value
+    fn ubits(&self, v: V, depth: u32) -> u32 {
+        let i = &self.f.insts[v as usize];
+        let tb = i.ty.bits().max(1);
+        if depth == 0 {
+            return tb;
+        }
+        let r = match i.op {
+            Op::Const => 64 - (i.k as u64 & mask(tb)).leading_zeros(),
+            Op::LShr => match self.c(i.args[1]) {
+                Some(k) => self.ubits(i.args[0], depth - 1).saturating_sub((k & (tb as i64 - 1)) as u32),
+                None => tb,
+            },
+            Op::And => self.ubits(i.args[0], depth - 1).min(self.ubits(i.args[1], depth - 1)),
+            Op::ZExt => self.ubits(i.args[0], depth - 1).min(self.f.insts[i.args[0] as usize].ty.bits()),
+            Op::URem => match self.c(i.args[1]) {
+                Some(k) => 64 - (k as u64 & mask(tb)).leading_zeros(),
+                None => tb,
+            },
+            Op::UDiv => match self.c(i.args[1]) {
+                Some(k) if k > 0 => self.ubits(i.args[0], depth - 1).saturating_sub(63 - (k as u64).leading_zeros()),
+                _ => tb,
+            },
+            op if op.is_cmp() => 1,
+            _ => tb,
+        };
+        r.min(tb)
+    }
+
     fn match_rotate(&mut self, a: V, b: V, ty: T) -> Option<(Op, V, V)> {
         let bits = ty.bits() as i64;
         let (ai, bi) = (self.f.insts[a as usize].clone(), self.f.insts[b as usize].clone());
@@ -585,6 +641,24 @@ impl<'a> Ctx<'a> {
     // unsigned division by a constant (Hacker's Delight, magicu)
     fn udiv_magic(&mut self, n: V, ty: T, d: u64) -> V {
         let w = ty.bits();
+        // a dividend known to be narrow needs only one multiplication and one shift
+        let nb = self.ubits(n, 6);
+        if ty == T::I64 && nb < 64 && nb > 0 {
+            if nb < 64 && (d as u128) >= (1u128 << nb) {
+                return self.konst(ty, 0);
+            }
+            for sh in nb..64 {
+                let two_s: u128 = 1u128 << sh;
+                let m = (two_s + d as u128 - 1) / d as u128;
+                let e = m * d as u128 - two_s;
+                if (e << nb) <= two_s && m < (1u128 << (64 - nb)) {
+                    let mc = self.konst(ty, m as u64 as i64);
+                    let t = self.mk(Op::Mul, ty, vec![n, mc]);
+                    let sc = self.konst(ty, sh as i64);
+                    return self.mk(Op::LShr, ty, vec![t, sc]);
+                }
+            }
+        }
         let two_w1: u128 = 1u128 << (w - 1);
         let wmask: u128 = (1u128 << w) - 1;
         let d128 = d as u128;
@@ -885,6 +959,257 @@ pub fn simplify_cfg(f: &mut Func) -> bool {
             if did {
                 break;
             }
+        }
+        if !did {
+            break;
+        }
+        cleanup::prune_unreachable(f);
+        changed = true;
+    }
+    // 4. thread jumps through blocks that only branch on a phi of constants
+    loop {
+        let preds = f.preds();
+        let uses = f.use_counts();
+        let mut did = false;
+        'blocks: for b in f.rpo() {
+            let (c, t, e) = match f.blocks[b as usize].term {
+                Term::Br(c, t, e) if t != e && t != b && e != b => (c, t, e),
+                _ => continue,
+            };
+            let binsts = f.blocks[b as usize].insts.clone();
+            if binsts.is_empty() || !binsts.iter().all(|v| f.insts[*v as usize].op == Op::Phi) || !binsts.contains(&c) {
+                continue;
+            }
+            // the phis of b may only be used by its terminator and by phis of its successors
+            let mut phi_uses = vec![0u32; binsts.len()];
+            for s in [t, e] {
+                for &v in &f.blocks[s as usize].insts {
+                    let i = &f.insts[v as usize];
+                    if i.op != Op::Phi {
+                        break;
+                    }
+                    for (k, a) in i.args.iter().enumerate() {
+                        if i.pb[k] == b {
+                            if let Some(pi) = binsts.iter().position(|x| x == a) {
+                                phi_uses[pi] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            for (pi, &ph) in binsts.iter().enumerate() {
+                let extra = if ph == c { 1 } else { 0 };
+                if uses[ph as usize] != phi_uses[pi] + extra {
+                    continue 'blocks;
+                }
+            }
+            let cphi = f.insts[c as usize].clone();
+            for (k, &p) in cphi.pb.iter().enumerate() {
+                let kc = match f.is_const(cphi.args[k]) {
+                    Some(kc) => kc,
+                    None => continue,
+                };
+                if p == b || !preds[b as usize].contains(&p) {
+                    continue;
+                }
+                let target = if kc != 0 { t } else { e };
+                // p must not already reach the target directly (its phis would need two inputs)
+                if preds[target as usize].contains(&p) {
+                    continue;
+                }
+                // a conditional branch in p with both arms into b cannot be threaded simply
+                if let Term::Br(_, x, y) = f.blocks[p as usize].term {
+                    if x == b && y == b {
+                        continue;
+                    }
+                }
+                // new phi inputs in the target for the edge p -> target
+                for ii in 0..f.blocks[target as usize].insts.len() {
+                    let v = f.blocks[target as usize].insts[ii];
+                    if f.insts[v as usize].op != Op::Phi {
+                        break;
+                    }
+                    let inst = f.insts[v as usize].clone();
+                    if let Some(bk) = inst.pb.iter().position(|x| *x == b) {
+                        let val = inst.args[bk];
+                        // a phi of b seen through p is its input from p
+                        let nv = if binsts.contains(&val) {
+                            let vi = &f.insts[val as usize];
+                            let pk = vi.pb.iter().position(|x| *x == p).unwrap();
+                            vi.args[pk]
+                        } else {
+                            val
+                        };
+                        let im = f.im(v);
+                        im.args.push(nv);
+                        im.pb.push(p);
+                    }
+                }
+                match &mut f.blocks[p as usize].term {
+                    Term::Jmp(x) => {
+                        if *x == b {
+                            *x = target;
+                        }
+                    }
+                    Term::Br(_, x, y) => {
+                        if *x == b {
+                            *x = target;
+                        }
+                        if *y == b {
+                            *y = target;
+                        }
+                    }
+                    _ => {}
+                }
+                did = true;
+                break 'blocks;
+            }
+        }
+        if !did {
+            break;
+        }
+        cleanup::prune_unreachable(f);
+        changed = true;
+    }
+    // 5. a merge block that only re-tests a flag every predecessor sets to a constant:
+    //    send each predecessor straight to its destination
+    loop {
+        let cfg = Cfg::new(f);
+        let def_block = f.block_of();
+        let mut did = false;
+        'blocks2: for &b in &cfg.rpo {
+            let (c, t, e) = match f.blocks[b as usize].term {
+                Term::Br(c, t, e) if t != e && t != b && e != b => (c, t, e),
+                _ => continue,
+            };
+            let binsts = f.blocks[b as usize].insts.clone();
+            if b == 0 || binsts.is_empty() || !binsts.iter().all(|v| f.insts[*v as usize].op == Op::Phi) || !binsts.contains(&c) {
+                continue;
+            }
+            if cfg.preds[t as usize].len() != 1 || cfg.preds[e as usize].len() != 1 || cfg.preds[b as usize].len() < 2 {
+                continue;
+            }
+            let cphi = f.insts[c as usize].clone();
+            let mut dest: Vec<(B, B)> = Vec::new();
+            for (k, &p) in cphi.pb.iter().enumerate() {
+                let kc = match f.is_const(cphi.args[k]) {
+                    Some(kc) => kc,
+                    None => continue 'blocks2,
+                };
+                if p == b {
+                    continue 'blocks2;
+                }
+                if let Term::Br(_, x, y) = f.blocks[p as usize].term {
+                    if x == b && y == b {
+                        continue 'blocks2;
+                    }
+                }
+                dest.push((p, if kc != 0 { t } else { e }));
+            }
+            if dest.len() != cfg.preds[b as usize].len() {
+                continue;
+            }
+            // every use of b's phis must be dominated by t or by e
+            for bb in 0..f.blocks.len() {
+                if !cfg.reachable(bb as B) || bb as B == b {
+                    continue;
+                }
+                for &v in &f.blocks[bb].insts {
+                    let i = &f.insts[v as usize];
+                    for (k, a) in i.args.iter().enumerate() {
+                        if def_block[*a as usize] == b {
+                            let at = if i.op == Op::Phi { i.pb[k] } else { bb as B };
+                            if !(cfg.dom(t, at) || cfg.dom(e, at)) {
+                                continue 'blocks2;
+                            }
+                        }
+                    }
+                }
+                for a in f.term_uses(bb as B) {
+                    if def_block[a as usize] == b && !(cfg.dom(t, bb as B) || cfg.dom(e, bb as B)) {
+                        continue 'blocks2;
+                    }
+                }
+            }
+            // build the replacement values of b's phis on each side
+            let mut repl_t: Vec<V> = Vec::new();
+            let mut repl_e: Vec<V> = Vec::new();
+            for (side, s) in [(0, t), (1, e)] {
+                let ps: Vec<B> = dest.iter().filter(|d| d.1 == s).map(|d| d.0).collect();
+                for &ph in &binsts {
+                    let pi = f.insts[ph as usize].clone();
+                    let vals: Vec<V> = ps.iter().map(|p| pi.args[pi.pb.iter().position(|x| x == p).unwrap()]).collect();
+                    let nv = if ps.is_empty() {
+                        ph
+                    } else if vals.iter().all(|x| *x == vals[0]) {
+                        vals[0]
+                    } else {
+                        let np = f.mk(Op::Phi, pi.ty, vals, 0);
+                        f.im(np).pb = ps.clone();
+                        f.blocks[s as usize].insts.insert(0, np);
+                        np
+                    };
+                    if side == 0 {
+                        repl_t.push(nv);
+                    } else {
+                        repl_e.push(nv);
+                    }
+                }
+            }
+            // rewrite uses
+            for bb in 0..f.blocks.len() {
+                if !cfg.reachable(bb as B) || bb as B == b {
+                    continue;
+                }
+                let in_t = |x: B| cfg.dom(t, x);
+                for ii in 0..f.blocks[bb].insts.len() {
+                    let v = f.blocks[bb].insts[ii];
+                    if (v as usize) >= def_block.len() {
+                        continue;
+                    }
+                    for ai in 0..f.insts[v as usize].args.len() {
+                        let a = f.insts[v as usize].args[ai];
+                        if (a as usize) < def_block.len() && def_block[a as usize] == b {
+                            let at = if f.insts[v as usize].op == Op::Phi { f.insts[v as usize].pb[ai] } else { bb as B };
+                            let k = binsts.iter().position(|x| *x == a).unwrap();
+                            f.insts[v as usize].args[ai] = if in_t(at) { repl_t[k] } else { repl_e[k] };
+                        }
+                    }
+                }
+                let side_t = in_t(bb as B);
+                let fix = |a: &mut V| {
+                    if (*a as usize) < def_block.len() && def_block[*a as usize] == b {
+                        let k = binsts.iter().position(|x| x == a).unwrap();
+                        *a = if side_t { repl_t[k] } else { repl_e[k] };
+                    }
+                };
+                match &mut f.blocks[bb].term {
+                    Term::Br(cc, _, _) => fix(cc),
+                    Term::Ret(vs) => vs.iter_mut().for_each(fix),
+                    _ => {}
+                }
+            }
+            // retarget the predecessors
+            for (p, s) in dest {
+                match &mut f.blocks[p as usize].term {
+                    Term::Jmp(x) => {
+                        if *x == b {
+                            *x = s;
+                        }
+                    }
+                    Term::Br(_, x, y) => {
+                        if *x == b {
+                            *x = s;
+                        }
+                        if *y == b {
+                            *y = s;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            did = true;
+            break;
         }
         if !did {
             break;
