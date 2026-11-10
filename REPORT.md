@@ -58,7 +58,7 @@ have tests), the second passed. Two runs against a cap of 40 failures.
 | build | `cargo build --release`, Rust std only, no crates |
 | no external tools in the compile path | pass |
 | conformance | 190 passed, 0 failed, 1 skipped: language (default, `-O0`, `--unchecked`), standard library, system-dependent tests, bindings, diagnostics, unit tests |
-| `f32` against C | `tests/c/f32.al` prints the same 187 lines as `tests/c/f32.c` built with `clang -O2`, in all three build modes |
+| `f32` against C | `tests/c/f32.al` prints the same 182 lines as `tests/c/f32.c` built with `clang -O2`, in all three build modes |
 | vectors / matrices / quaternions | `tests/run/vectors.al`, `vectors2.al`, `overload.al`, `overload2.al`, `tests/std/math_linalg.al` |
 | standard library | every module has tests and a documentation page; the 23 library test programs that need no system library are static executables |
 | Vulkan | an offscreen 256 x 256 triangle rendered by the NVIDIA driver; pixels match `tests/sys/data/vk_triangle.ref` |
