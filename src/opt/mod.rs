@@ -1,4 +1,5 @@
 pub mod alias;
+pub mod bce;
 pub mod cleanup;
 pub mod gvn;
 pub mod inline;
@@ -27,6 +28,16 @@ fn local_opt(f: &mut Func, level: u32) {
         if !ch {
             break;
         }
+    }
+    // hoist bounds checks out of counted loops, then clean up what that exposes
+    for _ in 0..3 {
+        if !bce::run(f) {
+            break;
+        }
+        gvn::run(f);
+        simplify::run(f);
+        licm::run(f);
+        simplify::run(f);
     }
     cleanup::dce(f);
 }

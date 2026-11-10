@@ -3,9 +3,32 @@ use super::mir::*;
 use crate::ir::*;
 use std::collections::HashMap;
 
+// Split critical edges so that phi copies have a place to live. A loop back edge whose phis are
+// only used inside the loop is left alone: its copies are emitted in the latch before the branch.
 pub fn split_critical_edges(f: &mut Func) {
+    let cfg = Cfg::new(f);
+    let loops = Loops::new(f, &cfg);
     let preds = f.preds();
     let nb = f.blocks.len();
+    let def_block = f.block_of();
+    // for every header phi: is it used outside its loop?
+    let phi_escapes = |f: &Func, header: B, li: usize| -> bool {
+        let phis: Vec<V> = f.blocks[header as usize].insts.iter().copied().take_while(|v| f.insts[*v as usize].op == Op::Phi).collect();
+        for b in 0..nb {
+            if !cfg.reachable(b as B) || loops.contains(li, b as B) {
+                continue;
+            }
+            for &v in &f.blocks[b].insts {
+                if f.insts[v as usize].args.iter().any(|a| phis.contains(a)) {
+                    return true;
+                }
+            }
+            if f.term_uses(b as B).iter().any(|a| phis.contains(a)) {
+                return true;
+            }
+        }
+        false
+    };
     for b in 0..nb {
         if let Term::Br(c, t, e) = f.blocks[b].term.clone() {
             if t == e {
@@ -16,6 +39,31 @@ pub fn split_critical_edges(f: &mut Func) {
             let mut ne = e;
             for (which, s) in [(0, t), (1, e)] {
                 if preds[s as usize].len() > 1 {
+                    let other = if which == 0 { e } else { t };
+                    // back edge b -> s of a loop that the other successor leaves
+                    let mut keep = false;
+                    if cfg.reachable(b as B) && cfg.dom(s, b as B) {
+                        if let Some(li) = (0..loops.loops.len()).find(|&li| loops.loops[li].header == s) {
+                            let has_phi = f.blocks[s as usize].insts.first().map(|v| f.insts[*v as usize].op == Op::Phi).unwrap_or(false);
+                            if has_phi && !loops.contains(li, other) && preds[other as usize].len() == 1 {
+                                // the branch condition must not read the header phis
+                                let is_hphi = |v: V| f.insts[v as usize].op == Op::Phi && def_block[v as usize] == s;
+                                let ci = &f.insts[c as usize];
+                                let cond_ok = !is_hphi(c) && !(ci.op.is_cmp() && ci.args.iter().any(|a| is_hphi(*a)));
+                                // values folded into the compare (and operand) must not be phis either
+                                let deep_ok = !ci.args.iter().any(|a| {
+                                    let ai = &f.insts[*a as usize];
+                                    matches!(ai.op, Op::And | Op::Load | Op::Add) && ai.args.iter().any(|x| is_hphi(*x))
+                                });
+                                if cond_ok && deep_ok && !phi_escapes(f, s, li) {
+                                    keep = true;
+                                }
+                            }
+                        }
+                    }
+                    if keep {
+                        continue;
+                    }
                     let nbk = f.new_block();
                     f.blocks[nbk as usize].term = Term::Jmp(s);
                     for ii in 0..f.blocks[s as usize].insts.len() {
@@ -75,6 +123,8 @@ struct Sel<'a> {
     fconst_ix: HashMap<u64, u32>,
     // memory-clobber counter position of each instruction within its block (for load folding)
     pos_in_block: Vec<u32>,
+    clob: Vec<u32>,
+    cur_clob: u32,
     cur_block: B,
 }
 
@@ -94,6 +144,8 @@ pub fn select(f: &Func, m: &Module, depths: &[u32]) -> MFunc {
         out: Vec::new(),
         fconst_ix: HashMap::new(),
         pos_in_block: vec![0; n],
+        clob: vec![0; n],
+        cur_clob: 0,
         cur_block: 0,
     };
     for b in 0..f.blocks.len() {
@@ -101,8 +153,13 @@ pub fn select(f: &Func, m: &Module, depths: &[u32]) -> MFunc {
     }
     // per-value facts
     for b in &f.blocks {
+        let mut nclob = 0u32;
         for (pi, &v) in b.insts.iter().enumerate() {
             s.pos_in_block[v as usize] = pi as u32;
+            s.clob[v as usize] = nclob;
+            if crate::opt::cleanup::is_root(f.insts[v as usize].op) {
+                nclob += 1;
+            }
             let i = &f.insts[v as usize];
             match i.op {
                 Op::Load => {}
@@ -139,6 +196,7 @@ pub fn select(f: &Func, m: &Module, depths: &[u32]) -> MFunc {
     let rpo = f.rpo();
     for &b in rpo.iter().rev() {
         s.cur_block = b;
+        s.cur_clob = f.blocks[b as usize].insts.iter().filter(|v| crate::opt::cleanup::is_root(f.insts[**v as usize].op)).count() as u32;
         let mut rev: Vec<MInst> = Vec::new();
         // terminator (with phi copies for the unique successor)
         s.out.clear();
@@ -151,6 +209,7 @@ pub fn select(f: &Func, m: &Module, depths: &[u32]) -> MFunc {
             }
             if crate::opt::cleanup::is_root(op) || s.needed[v as usize] {
                 s.out.clear();
+                s.cur_clob = s.clob[v as usize];
                 s.inst(v);
                 rev.extend(s.out.drain(..).rev());
             }
@@ -247,11 +306,40 @@ impl<'a> Sel<'a> {
         }
         Opnd::R(self.reg(v))
     }
-    // xmm register or memory (float constant)
+    // can the load `v` be folded into the instruction currently being selected?
+    fn can_fold_load(&self, v: V) -> bool {
+        let i = &self.f.insts[v as usize];
+        i.op == Op::Load
+            && self.uses[v as usize] == 1
+            && self.blk_of[v as usize] == self.cur_block
+            && self.clob[v as usize] == self.cur_clob
+            && self.vreg[v as usize] == NOREG
+            && !self.needed[v as usize]
+    }
+    fn load_mem(&mut self, v: V) -> Option<Mem> {
+        if !self.can_fold_load(v) {
+            return None;
+        }
+        let a = self.f.insts[v as usize].args[0];
+        Some(self.addr(a))
+    }
+    // register, 32-bit immediate, or a folded load of the full operation width
+    fn rmi_mem(&mut self, v: V, ty: T) -> Opnd {
+        if (ty == T::I32 || ty == T::I64) && self.f.insts[v as usize].ty == ty {
+            if let Some(m) = self.load_mem(v) {
+                return Opnd::M(m);
+            }
+        }
+        self.rmi(v)
+    }
+    // xmm register or memory (float constant or folded load)
     fn xm(&mut self, v: V) -> Opnd {
         let i = &self.f.insts[v as usize];
         if i.op == Op::FConst && i.k != 0 {
             let m = self.fconst(i.k as u64);
+            return Opnd::M(m);
+        }
+        if let Some(m) = self.load_mem(v) {
             return Opnd::M(m);
         }
         Opnd::R(self.reg(v))
@@ -493,7 +581,7 @@ impl<'a> Sel<'a> {
                 Op::Ugt => cc::A,
                 _ => cc::AE,
             };
-            if self.f.is_const(y) == Some(0) && matches!(op, Op::Eq | Op::Ne) {
+            if self.f.is_const(y) == Some(0) && matches!(op, Op::Eq | Op::Ne) && !self.can_fold_load(x) {
                 // test x, x  (or test a, b for (a & b) ==/!= 0)
                 let xi = &self.f.insts[x as usize];
                 if xi.op == Op::And && self.uses[x as usize] == 1 && self.blk_of[x as usize] == self.cur_block {
@@ -507,8 +595,20 @@ impl<'a> Sel<'a> {
                 self.e(MOp::Test, sz, Opnd::R(xr), Opnd::R(xr));
                 return (cc, 0);
             }
+            // memory operands: cmp [mem], imm  /  cmp reg, [mem]
+            if let Some(k) = self.f.is_const(y) {
+                if fits32(k) {
+                    if let Some(m) = self.load_mem(x) {
+                        self.e(MOp::Cmp, sz, Opnd::M(m), Opnd::I(k));
+                        return (cc, 0);
+                    }
+                }
+            }
             let xr = self.reg(x);
-            let yo = self.rmi(y);
+            let yo = match self.load_mem(y) {
+                Some(m) => Opnd::M(m),
+                None => self.rmi(y),
+            };
             self.e(MOp::Cmp, sz, Opnd::R(xr), yo);
             return (cc, 0);
         }
@@ -560,6 +660,13 @@ impl<'a> Sel<'a> {
                 self.jmp(t);
             }
             Term::Br(c, t, e) => {
+                // an unsplit loop back edge: its phi copies go before the compare
+                for s in [t, e] {
+                    let has_phi = self.f.blocks[s as usize].insts.first().map(|v| self.f.insts[*v as usize].op == Op::Phi).unwrap_or(false);
+                    if has_phi {
+                        self.phi_copies(b, s);
+                    }
+                }
                 let ci = &self.f.insts[c as usize];
                 if ci.op.is_cmp() {
                     let (cc, extra) = self.cmp_flags(c);
@@ -640,13 +747,17 @@ impl<'a> Sel<'a> {
     fn binop(&mut self, v: V, mop: MOp, commutative: bool) {
         let i = &self.f.insts[v as usize];
         let (mut a, mut b) = (i.args[0], i.args[1]);
-        let sz = osz(i.ty);
-        if commutative && self.f.is_const(a).is_none() && self.uses[a as usize] > 1 && self.uses[b as usize] == 1 && self.f.is_const(b).is_none() {
+        let ty = i.ty;
+        let sz = osz(ty);
+        let wide = ty == T::I32 || ty == T::I64;
+        if commutative && wide && !self.can_fold_load(b) && self.can_fold_load(a) {
+            std::mem::swap(&mut a, &mut b);
+        } else if commutative && !self.can_fold_load(b) && self.f.is_const(a).is_none() && self.uses[a as usize] > 1 && self.uses[b as usize] == 1 && self.f.is_const(b).is_none() {
             std::mem::swap(&mut a, &mut b);
         }
         let d = self.vr(v);
         let ar = self.reg(a);
-        let bo = self.rmi(b);
+        let bo = self.rmi_mem(b, ty);
         self.e(MOp::Mov, 8, Opnd::R(d), Opnd::R(ar));
         self.e(mop, sz, Opnd::R(d), bo);
     }
@@ -655,7 +766,7 @@ impl<'a> Sel<'a> {
         let i = &self.f.insts[v as usize];
         let (mut a, mut b) = (i.args[0], i.args[1]);
         let is_c = |s: &Self, x: V| s.f.insts[x as usize].op == Op::FConst;
-        if commutative && (is_c(self, a) || (self.uses[a as usize] > 1 && self.uses[b as usize] == 1 && !is_c(self, b))) {
+        if commutative && !self.can_fold_load(b) && (is_c(self, a) || self.can_fold_load(a) || (self.uses[a as usize] > 1 && self.uses[b as usize] == 1 && !is_c(self, b))) {
             std::mem::swap(&mut a, &mut b);
         }
         let d = self.vr(v);
@@ -874,9 +985,12 @@ impl<'a> Sel<'a> {
             }
             Op::SExt => {
                 let d = self.vr(v);
-                let s = self.reg(i.args[0]);
                 let st = self.f.insts[i.args[0] as usize].ty;
-                let mut mi = MInst::new(MOp::Movsx, sz_of(st), Opnd::R(d), Opnd::R(s));
+                let s = match self.load_mem(i.args[0]) {
+                    Some(m) => Opnd::M(m),
+                    None => Opnd::R(self.reg(i.args[0])),
+                };
+                let mut mi = MInst::new(MOp::Movsx, sz_of(st), Opnd::R(d), s);
                 mi.sz2 = if ty == T::I64 { 8 } else { 4 };
                 self.out.push(mi);
             }
@@ -884,6 +998,16 @@ impl<'a> Sel<'a> {
                 let d = self.vr(v);
                 let src = i.args[0];
                 let st = self.f.insts[src as usize].ty;
+                if let Some(m) = self.load_mem(src) {
+                    if st == T::I32 {
+                        self.e(MOp::Mov, 4, Opnd::R(d), Opnd::M(m));
+                    } else {
+                        let mut mi = MInst::new(MOp::Movzx, sz_of(st), Opnd::R(d), Opnd::M(m));
+                        mi.sz2 = 4;
+                        self.out.push(mi);
+                    }
+                    return;
+                }
                 let s = self.reg(src);
                 if st == T::I32 {
                     if self.zext_free(src) {
@@ -891,6 +1015,9 @@ impl<'a> Sel<'a> {
                     } else {
                         self.e(MOp::Mov, 4, Opnd::R(d), Opnd::R(s));
                     }
+                } else if self.f.insts[src as usize].op == Op::Load {
+                    // byte loads are already zero-extended
+                    self.e(MOp::Mov, 8, Opnd::R(d), Opnd::R(s));
                 } else {
                     let mut mi = MInst::new(MOp::Movzx, sz_of(st), Opnd::R(d), Opnd::R(s));
                     mi.sz2 = 4;
@@ -905,9 +1032,16 @@ impl<'a> Sel<'a> {
             Op::SIToF => {
                 let d = self.vr(v);
                 let st = self.f.insts[i.args[0] as usize].ty;
-                let s = self.ext32(i.args[0], true);
+                let s = if st == T::I32 || st == T::I64 {
+                    match self.load_mem(i.args[0]) {
+                        Some(m) => Opnd::M(m),
+                        None => Opnd::R(self.reg(i.args[0])),
+                    }
+                } else {
+                    Opnd::R(self.ext32(i.args[0], true))
+                };
                 self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
-                self.e(MOp::Cvtsi2sd, if st == T::I64 { 8 } else { 4 }, Opnd::R(d), Opnd::R(s));
+                self.e(MOp::Cvtsi2sd, if st == T::I64 { 8 } else { 4 }, Opnd::R(d), s);
             }
             Op::UIToF => {
                 // lowered in the frontend; treat as signed

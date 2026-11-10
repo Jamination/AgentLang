@@ -63,7 +63,17 @@ pub fn run(f: &mut Func) -> bool {
                 for v in old {
                     for ai in 0..f.insts[v as usize].args.len() {
                         let a = f.insts[v as usize].args[ai];
-                        let r = find(&repl, a);
+                        let mut r = find(&repl, a);
+                        // a condition decided by a dominating branch is a constant here
+                        if let Some(&val) = known.get(&r) {
+                            if f.insts[r as usize].op != Op::Const {
+                                let c = f.mk(Op::Const, T::I8, vec![], val as i64);
+                                repl.push(NOV);
+                                new.push(c);
+                                r = c;
+                                changed = true;
+                            }
+                        }
                         if r != a {
                             f.insts[v as usize].args[ai] = r;
                         }
