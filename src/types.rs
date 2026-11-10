@@ -11,6 +11,10 @@ pub enum TyK {
     Bool,
     Int(u8, bool), // bits, signed
     F64,
+    F32,
+    Vec(u8), // vec2 / vec3 / vec4: f32 lanes
+    Quat,
+    Mat4, // four vec4 columns
     Ptr(Ty),
     Slice(Ty),
     Array(Ty, u64),
@@ -33,8 +37,14 @@ pub const T_U16: Ty = 8;
 pub const T_U32: Ty = 9;
 pub const T_U64: Ty = 10;
 pub const T_F64: Ty = 11;
-pub const T_STR: Ty = 12;
-pub const T_NEVER: Ty = 13;
+pub const T_F32: Ty = 12;
+pub const T_STR: Ty = 13;
+pub const T_NEVER: Ty = 14;
+pub const T_VEC2: Ty = 15;
+pub const T_VEC3: Ty = 16;
+pub const T_VEC4: Ty = 17;
+pub const T_QUAT: Ty = 18;
+pub const T_MAT4: Ty = 19;
 
 #[derive(Clone, Debug)]
 pub struct StructInfo {
@@ -82,6 +92,8 @@ pub const AK_I32: u32 = 2;
 pub const AK_I64: u32 = 3;
 pub const AK_F64: u32 = 4;
 pub const AK_PTR: u32 = 5;
+pub const AK_F32: u32 = 6;
+pub const AK_VEC: u32 = 7;
 
 pub fn may_alias_class(a: u32, b: u32) -> bool {
     let (ka, kb) = (a & 15, b & 15);
@@ -119,6 +131,7 @@ impl Types {
             TyK::Int(32, false),
             TyK::Int(64, false),
             TyK::F64,
+            TyK::F32,
         ] {
             t.intern(k);
         }
@@ -126,6 +139,10 @@ impl Types {
         assert_eq!(s, T_STR);
         let n = t.intern(TyK::Never);
         assert_eq!(n, T_NEVER);
+        for k in [TyK::Vec(2), TyK::Vec(3), TyK::Vec(4), TyK::Quat, TyK::Mat4] {
+            t.intern(k);
+        }
+        assert_eq!(t.intern(TyK::Mat4), T_MAT4);
         t
     }
 
@@ -141,6 +158,17 @@ impl Types {
     pub fn k(&self, t: Ty) -> &TyK {
         &self.kinds[t as usize]
     }
+    pub fn is_float(&self, t: Ty) -> bool {
+        t == T_F64 || t == T_F32
+    }
+    // vec2 / vec3 / vec4 / quat: the number of f32 lanes
+    pub fn vec_lanes(&self, t: Ty) -> Option<u32> {
+        match self.k(t) {
+            TyK::Vec(n) => Some(*n as u32),
+            TyK::Quat => Some(4),
+            _ => None,
+        }
+    }
     pub fn ptr(&mut self, t: Ty) -> Ty {
         self.intern(TyK::Ptr(t))
     }
@@ -155,7 +183,7 @@ impl Types {
     }
     pub fn is_scalar(&self, t: Ty) -> bool {
         match self.k(t) {
-            TyK::Bool | TyK::Int(..) | TyK::F64 | TyK::Ptr(_) | TyK::Fn(..) => true,
+            TyK::Bool | TyK::Int(..) | TyK::F64 | TyK::F32 | TyK::Vec(_) | TyK::Quat | TyK::Ptr(_) | TyK::Fn(..) => true,
             TyK::Enum(e) => self.enums[*e as usize].simple,
             _ => false,
         }
@@ -169,6 +197,10 @@ impl Types {
             TyK::Bool => "bool".into(),
             TyK::Int(b, s) => format!("{}{}", if *s { "i" } else { "u" }, b),
             TyK::F64 => "f64".into(),
+            TyK::F32 => "f32".into(),
+            TyK::Vec(n) => format!("vec{}", n),
+            TyK::Quat => "quat".into(),
+            TyK::Mat4 => "mat4".into(),
             TyK::Ptr(e) => format!("*{}", self.name(*e)),
             TyK::Slice(e) => {
                 if *e == T_U8 {
@@ -281,6 +313,10 @@ impl Types {
             TyK::Bool => 1,
             TyK::Int(b, _) => (b / 8) as u32,
             TyK::F64 | TyK::Ptr(_) | TyK::Fn(..) => 8,
+            TyK::F32 => 4,
+            TyK::Vec(n) => 4 * n as u32,
+            TyK::Quat => 16,
+            TyK::Mat4 => 64,
             TyK::Slice(_) => 16,
             TyK::Array(e, n) => (self.size_of(e) as u64 * n).min(u32::MAX as u64) as u32,
             TyK::Struct(s) => {
@@ -301,6 +337,7 @@ impl Types {
             TyK::Bool => 1,
             TyK::Int(b, _) => (b / 8) as u32,
             TyK::F64 | TyK::Ptr(_) | TyK::Fn(..) | TyK::Slice(_) | TyK::Enum(_) => 8,
+            TyK::F32 | TyK::Vec(_) | TyK::Quat | TyK::Mat4 => 4,
             TyK::Array(e, _) => self.align_of(e),
             TyK::Struct(s) => {
                 self.layout_struct(s);
@@ -329,6 +366,10 @@ impl Types {
             TyK::Int(32, _) => (T::I32, AK_I32),
             TyK::Int(_, _) => (T::I64, AK_I64),
             TyK::F64 => (T::F64, AK_F64),
+            TyK::F32 => (T::F32, AK_F32),
+            TyK::Vec(2) => (T::V2, AK_VEC),
+            TyK::Vec(3) => (T::V3, AK_VEC),
+            TyK::Vec(_) | TyK::Quat => (T::V4, AK_VEC),
             TyK::Ptr(_) | TyK::Fn(..) => (T::I64, AK_PTR),
             TyK::Enum(_) => (T::I64, AK_I64),
             _ => (T::I64, AK_ANY),
@@ -347,7 +388,12 @@ impl Types {
     pub fn leaves(&mut self, t: Ty, base: u32, out: &mut Vec<Leaf>) {
         match self.k(t).clone() {
             TyK::Err | TyK::Unit | TyK::Never => {}
-            TyK::Bool | TyK::Int(..) | TyK::F64 | TyK::Ptr(_) | TyK::Fn(..) => {
+            TyK::Mat4 => {
+                for c in 0..4 {
+                    out.push(Leaf { off: base + 16 * c, t: T::V4, alias: AK_VEC });
+                }
+            }
+            TyK::Bool | TyK::Int(..) | TyK::F64 | TyK::F32 | TyK::Vec(_) | TyK::Quat | TyK::Ptr(_) | TyK::Fn(..) => {
                 let (it, k) = self.scalar_ir(t);
                 out.push(Leaf { off: base, t: it, alias: k });
             }
@@ -417,6 +463,7 @@ impl Types {
             }
             TyK::Tuple(v) => v.iter().map(|f| self.leaf_count(*f)).fold(0u64, |a, b| a.saturating_add(b)),
             TyK::Slice(_) => 2,
+            TyK::Mat4 => 4,
             TyK::Enum(_) => (self.size_of(t) / 8) as u64,
             TyK::Err | TyK::Unit | TyK::Never => 0,
             _ => 1,

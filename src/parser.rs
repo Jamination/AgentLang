@@ -186,7 +186,7 @@ impl<'a> Parser<'a> {
             self.expect_p(")")?;
             let ret = if self.is_p("{") { None } else { Some(self.ty()?) };
             let body = self.block()?;
-            return Ok(Decl::Fn(FnDecl { name, tparams, params, ret, body, pos, inline }));
+            return Ok(Decl::Fn(FnDecl { name, tparams, params, ret, body, pos, inline, ext: None }));
         }
         if inline != 0 {
             return self.err("expected `fn` after inline/noinline");

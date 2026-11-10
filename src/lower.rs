@@ -66,6 +66,9 @@ pub struct Cx<'a> {
     pub inst_depth: u32,
     // names declared by the prelude: prelude code always sees these, user code may shadow them
     pub p_fn_names: HashMap<&'a str, usize>,
+    // every definition of a function name (overloads), per layer, in declaration order
+    pub fn_over: HashMap<&'a str, Vec<usize>>,
+    pub p_fn_over: HashMap<&'a str, Vec<usize>>,
     pub p_struct_names: HashMap<&'a str, usize>,
     pub p_enum_names: HashMap<&'a str, usize>,
     // true while resolving names on behalf of prelude code
@@ -84,6 +87,12 @@ pub fn builtin_type(name: &str) -> Option<Ty> {
         "u32" => T_U32,
         "u64" => T_U64,
         "f64" => T_F64,
+        "f32" => T_F32,
+        "vec2" => T_VEC2,
+        "vec3" => T_VEC3,
+        "vec4" => T_VEC4,
+        "quat" => T_QUAT,
+        "mat4" => T_MAT4,
         "bool" => T_BOOL,
         "str" => T_STR,
         "never" => T_NEVER,
@@ -119,12 +128,16 @@ impl<'a> Cx<'a> {
             exposed: HashSet::new(),
             inst_depth: 0,
             p_fn_names: HashMap::new(),
+            fn_over: HashMap::new(),
+            p_fn_over: HashMap::new(),
             p_struct_names: HashMap::new(),
             p_enum_names: HashMap::new(),
             scope_prelude: false,
             entry_file: u16::MAX,
         };
         let mut names: HashMap<&'a str, Pos> = HashMap::new();
+        // is the visible declaration of a name a function?
+        let mut names_fn: HashMap<&'a str, bool> = HashMap::new();
         for d in decls {
             let (name, pos): (&'a str, Pos) = match d {
                 Decl::Fn(f) => (&f.name, f.pos),
@@ -139,7 +152,17 @@ impl<'a> Cx<'a> {
                 continue;
             }
             if let Some(prev) = names.get(name) {
-                if prev.file == 0 && pos.file != 0 {
+                let layer = if pos.file == 0 { &cx.p_fn_over } else { &cx.fn_over };
+                if let (Decl::Fn(f), Some(true)) = (d, names_fn.get(name)) {
+                    // another definition of a function name: an overload, chosen by argument type
+                    let sig = |g: &FnDecl| g.params.iter().map(|p| type_str(&p.1)).collect::<Vec<_>>().join(",");
+                    let dup = layer.get(name).and_then(|l| l.iter().find(|di| sig(cx.fn_decls[**di]) == sig(f)).copied());
+                    if let Some(di) = dup {
+                        let at = cx.pos_str(cx.fn_decls[di].pos);
+                        cx.err(pos, format!("`{}` is already declared with these parameter types at {}", name, at));
+                        continue;
+                    }
+                } else if prev.file == 0 && pos.file != 0 {
                     // a user declaration shadows a prelude declaration of the same name
                     cx.fn_names.remove(name);
                     cx.struct_names.remove(name);
@@ -153,12 +176,21 @@ impl<'a> Cx<'a> {
                 }
             }
             names.insert(name, pos);
+            names_fn.insert(name, matches!(d, Decl::Fn(_)));
             match d {
                 Decl::Fn(f) => {
+                    let di = cx.fn_decls.len();
                     if pos.file == 0 {
-                        cx.p_fn_names.insert(&f.name, cx.fn_decls.len());
+                        cx.p_fn_names.entry(&f.name).or_insert(di);
+                        cx.p_fn_over.entry(&f.name).or_default().push(di);
+                        cx.fn_names.entry(&f.name).or_insert(di);
+                    } else {
+                        // the first user definition is what the plain name refers to
+                        if !cx.fn_over.contains_key(name) {
+                            cx.fn_names.insert(&f.name, di);
+                        }
+                        cx.fn_over.entry(&f.name).or_default().push(di);
                     }
-                    cx.fn_names.insert(&f.name, cx.fn_decls.len());
                     cx.fn_decls.push(f);
                 }
                 Decl::Struct(s) => {
@@ -204,6 +236,27 @@ impl<'a> Cx<'a> {
             }
         }
         self.fn_names.get(n).copied()
+    }
+    // all definitions a call to `n` may resolve to: user definitions first, then the prelude's
+    pub fn fn_candidates(&self, n: &str) -> Vec<usize> {
+        let mut v: Vec<usize> = Vec::new();
+        if self.scope_prelude {
+            // prelude code sees its own definitions; the synthesized entry also reaches user code
+            if let Some(l) = self.p_fn_over.get(n) {
+                return l.clone();
+            }
+            return self.fn_over.get(n).cloned().unwrap_or_default();
+        }
+        if !self.fn_names.contains_key(n) {
+            return v;
+        }
+        if let Some(l) = self.fn_over.get(n) {
+            v.extend(l.iter().copied());
+        }
+        if let Some(l) = self.p_fn_over.get(n) {
+            v.extend(l.iter().copied());
+        }
+        v
     }
     pub fn find_struct(&self, n: &str) -> Option<usize> {
         if self.scope_prelude {
@@ -657,7 +710,8 @@ impl<'a> Cx<'a> {
                         (TyK::Int(bits, signed), CV::Int(i)) => {
                             v = CV::Int(wrap_int(*i, bits, signed));
                         }
-                        (TyK::F64, CV::Int(i)) => v = CV::Float(*i as f64),
+                        (TyK::F64 | TyK::F32, CV::Int(i)) => v = CV::Float(*i as f64),
+                        (TyK::F32, CV::Float(f)) => v = CV::Float(*f as f32 as f64),
                         (TyK::F64, CV::Float(_)) | (TyK::Bool, CV::Bool(_)) => {}
                         (TyK::Slice(e), CV::Str(_)) if e == T_U8 => {}
                         _ => {
@@ -777,6 +831,8 @@ impl<'a> Cx<'a> {
                     (TyK::Int(bits, signed), CV::Float(f)) => Some(CV::Int(wrap_int(f as i64, bits, signed))),
                     (TyK::F64, CV::Int(i)) => Some(CV::Float(i as f64)),
                     (TyK::F64, CV::Float(f)) => Some(CV::Float(f)),
+                    (TyK::F32, CV::Int(i)) => Some(CV::Float(i as f32 as f64)),
+                    (TyK::F32, CV::Float(f)) => Some(CV::Float(f as f32 as f64)),
                     _ => None,
                 }
             }
@@ -857,6 +913,27 @@ impl<'a> Cx<'a> {
                 true
             }
             (EK::Nil, TyK::Ptr(_)) | (EK::Nil, TyK::Fn(..)) => true,
+            (EK::Call(c, args), TyK::Vec(_) | TyK::Quat | TyK::Mat4) => {
+                // vec3(1.0, 2.0, 3.0) with constant components; mat4 from four constant columns
+                match self.expr_type(c, &HashMap::new()) {
+                    Some(t) if t == ty => {}
+                    _ => return false,
+                }
+                let (n, et, es) = match k {
+                    TyK::Mat4 => (4, T_VEC4, 16),
+                    TyK::Vec(n) => (n as usize, T_F32, 4),
+                    _ => (4, T_F32, 4),
+                };
+                if args.len() != n {
+                    return false;
+                }
+                for (i, a) in args.iter().enumerate() {
+                    if !self.const_init(a, et, off + i * es, data, relocs) {
+                        return false;
+                    }
+                }
+                true
+            }
             _ => {
                 let v = match self.const_eval(e) {
                     Some(v) => v,
@@ -866,6 +943,14 @@ impl<'a> Cx<'a> {
                     (TyK::Int(bits, _), CV::Int(i)) => {
                         let n = (bits / 8) as usize;
                         data[off..off + n].copy_from_slice(&i.to_le_bytes()[..n]);
+                        true
+                    }
+                    (TyK::F32, CV::Float(f)) => {
+                        data[off..off + 4].copy_from_slice(&(f as f32).to_bits().to_le_bytes());
+                        true
+                    }
+                    (TyK::F32, CV::Int(i)) => {
+                        data[off..off + 4].copy_from_slice(&(i as f32).to_bits().to_le_bytes());
                         true
                     }
                     (TyK::F64, CV::Float(f)) => {

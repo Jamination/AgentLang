@@ -11,17 +11,19 @@ pub struct Val {
     pub v: V,
     pub mem: bool,
     pub alias: u32,
+    // for a place that is one f32 lane of a vector in memory: (lane, vector IR type)
+    pub lane: Option<(u8, T)>,
 }
 
 impl Val {
     pub fn unit() -> Val {
-        Val { ty: T_UNIT, v: NOV, mem: false, alias: 0 }
+        Val { ty: T_UNIT, v: NOV, mem: false, alias: 0, lane: None }
     }
     pub fn err() -> Val {
-        Val { ty: T_ERR, v: NOV, mem: false, alias: 0 }
+        Val { ty: T_ERR, v: NOV, mem: false, alias: 0, lane: None }
     }
     pub fn never() -> Val {
-        Val { ty: T_NEVER, v: NOV, mem: false, alias: 0 }
+        Val { ty: T_NEVER, v: NOV, mem: false, alias: 0, lane: None }
     }
 }
 
@@ -74,7 +76,7 @@ pub fn lower_all(cx: &mut Cx, entry: &str, check_from_file: u16) {
         // type-check every non-generic user function, even if unreachable
         for di in 0..cx.fn_decls.len() {
             let d = cx.fn_decls[di];
-            if d.tparams.is_empty() && d.pos.file >= check_from_file && cx.fn_names.get(d.name.as_str()) == Some(&di) {
+            if d.tparams.is_empty() && d.pos.file >= check_from_file && cx.fn_over.get(d.name.as_str()).map(|l| l.contains(&di)).unwrap_or(false) && cx.fn_names.contains_key(d.name.as_str()) {
                 cx.inst_fn(di, vec![]);
             }
         }
@@ -252,12 +254,12 @@ impl<'c, 'a> Fx<'c, 'a> {
         self.f.im(v).aux = alias;
     }
     pub fn sval(&self, ty: Ty, v: V) -> Val {
-        Val { ty, v, mem: false, alias: 0 }
+        Val { ty, v, mem: false, alias: 0, lane: None }
     }
     // a memory value; alias class is the generic class of scalar types
     pub fn mval(&self, ty: Ty, addr: V) -> Val {
         let alias = if self.cx.types.is_scalar(ty) { self.cx.types.scalar_ir(ty).1 } else { 0 };
-        Val { ty, v: addr, mem: true, alias }
+        Val { ty, v: addr, mem: true, alias, lane: None }
     }
     pub fn irt(&self, ty: Ty) -> T {
         self.cx.types.scalar_ir(ty).0
@@ -268,6 +270,11 @@ impl<'c, 'a> Fx<'c, 'a> {
             return self.iconst(T::I64, 0);
         }
         if v.mem {
+            if let Some((k, vt)) = v.lane {
+                // one f32 lane of a vector in memory
+                let x = self.load_raw(v.v, vt, v.alias);
+                return self.ins(Op::VExt, T::F32, vec![x], k as i64);
+            }
             let t = self.irt(v.ty);
             self.load_raw(v.v, t, v.alias)
         } else {
@@ -281,6 +288,12 @@ impl<'c, 'a> Fx<'c, 'a> {
         }
         if self.cx.types.is_scalar(dst.ty) {
             let v = self.scalar(src);
+            if let Some((k, vt)) = dst.lane {
+                let old = self.load_raw(dst.v, vt, dst.alias);
+                let new = self.ins(Op::VIns, vt, vec![old, v], k as i64);
+                self.store_raw(dst.v, new, vt, dst.alias);
+                return;
+            }
             let t = self.irt(dst.ty);
             self.store_raw(dst.v, v, t, dst.alias);
             return;
@@ -320,7 +333,7 @@ impl<'c, 'a> Fx<'c, 'a> {
             self.cx.types.leaves(dst.ty, 0, &mut leaves);
             for l in &leaves {
                 let a = self.add_off(dst.v, l.off as i64);
-                let z = if l.t == T::F64 { self.ins(Op::FConst, T::F64, vec![], 0) } else { self.iconst(l.t, 0) };
+                let z = if l.t.is_fp() { self.ins(Op::FConst, l.t, vec![], 0) } else { self.iconst(l.t, 0) };
                 self.store_raw(a, z, l.t, l.alias);
             }
         } else {

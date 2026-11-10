@@ -110,6 +110,13 @@ pub enum MOp {
     Ucomisd,
     Xorpd,
     Andpd,
+    // SSE operations above take sz 8 (scalar double), 4 (scalar single) or 16 (packed single)
+    Minsd,
+    Maxsd,
+    Cvtf,     // sz 8: single -> double, sz 4: double -> single
+    Shufps,   // a = dst, b = src, c = immediate
+    Unpcklps,
+    Movlo, // movss xmm, xmm: replaces lane 0, keeps the rest
     Cvtsi2sd,
     Cvttsd2si,
     MovqToX, // xmm <- gpr
@@ -181,8 +188,9 @@ pub struct MFunc {
     pub vclass: Vec<u8>,     // class of each vreg (index = reg - VREG0): 0 = gpr, 1 = xmm
     pub slots: Vec<(u32, u32)>, // frame slots: (size, align)
     pub out_args: u32,       // number of outgoing stack argument words
-    pub fconsts: Vec<u64>,
+    pub fconsts: Vec<u128>,
     pub has_calls: bool,
+    pub wide_xmm: bool, // some xmm value is a vector: spill slots hold 16 bytes
 }
 
 impl MFunc {
@@ -228,7 +236,7 @@ pub fn defs_uses(i: &MInst, defs: &mut Vec<Reg>, uses: &mut Vec<Reg>) {
     uses.clear();
     use MOp::*;
     match i.op {
-        Mov | Movzx | Movsx | Lea | MovSd | Cvtsi2sd | Cvttsd2si | MovqToX | MovqToR | Setcc | Sqrtsd | Popcnt | Tzcnt | Lzcnt | Imul3 => {
+        Mov | Movzx | Movsx | Lea | MovSd | Cvtsi2sd | Cvttsd2si | MovqToX | MovqToR | Setcc | Sqrtsd | Cvtf | Popcnt | Tzcnt | Lzcnt | Imul3 => {
             match &i.a {
                 Opnd::R(r) => defs.push(*r),
                 Opnd::M(m) => mem_regs(m, uses),
@@ -241,7 +249,7 @@ pub fn defs_uses(i: &MInst, defs: &mut Vec<Reg>, uses: &mut Vec<Reg>) {
                 defs.push(r);
             }
         }
-        Add | Sub | And | Or | Xor | Imul | Addsd | Subsd | Mulsd | Divsd | Xorpd | Andpd | Cmov | Shl | Shr | Sar | Rol | Ror => {
+        Add | Sub | And | Or | Xor | Imul | Addsd | Subsd | Mulsd | Divsd | Minsd | Maxsd | Shufps | Unpcklps | Movlo | Xorpd | Andpd | Cmov | Shl | Shr | Sar | Rol | Ror => {
             match &i.a {
                 Opnd::R(r) => {
                     defs.push(*r);

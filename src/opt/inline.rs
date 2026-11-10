@@ -118,7 +118,7 @@ pub fn inline_call(f: &mut Func, cb: B, call: V, g: &Func) {
     for k in 0..nrets {
         if rets.is_empty() {
             // callee never returns: any value will do
-            let z = if g.rets[k] == T::F64 { f.mk(Op::FConst, T::F64, vec![], 0) } else { f.mk(Op::Const, g.rets[k], vec![], 0) };
+            let z = if g.rets[k].is_fp() { f.mk(Op::FConst, g.rets[k], vec![], 0) } else { f.mk(Op::Const, g.rets[k], vec![], 0) };
             f.blocks[0].insts.insert(0, z);
             results.push(z);
         } else if rets.len() == 1 {

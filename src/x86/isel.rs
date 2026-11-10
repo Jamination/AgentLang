@@ -214,6 +214,22 @@ fn osz(t: T) -> u8 {
 fn fits32(k: i64) -> bool {
     k >= i32::MIN as i64 && k <= i32::MAX as i64
 }
+// operation size of an xmm type: scalar single, scalar double, packed
+fn fsz(t: T) -> u8 {
+    match t {
+        T::F32 => 4,
+        T::F64 => 8,
+        _ => 16,
+    }
+}
+// size of a plain memory move of an xmm type (vec3 takes two moves)
+fn fsz_mem(t: T) -> u8 {
+    match t {
+        T::F32 => 4,
+        T::F64 | T::V2 => 8,
+        _ => 16,
+    }
+}
 
 struct Sel<'a> {
     f: &'a Func,
@@ -227,7 +243,7 @@ struct Sel<'a> {
     slot_of: HashMap<V, u32>,
     projs: HashMap<V, Vec<(i64, V)>>,
     out: Vec<MInst>,
-    fconst_ix: HashMap<u64, u32>,
+    fconst_ix: HashMap<u128, u32>,
     // memory-clobber counter position of each instruction within its block (for load folding)
     pos_in_block: Vec<u32>,
     clob: Vec<u32>,
@@ -250,7 +266,16 @@ pub fn select(f: &Func, m: &Module, depths: &[u32], aliases: &[ExitAlias]) -> MF
     let mut s = Sel {
         f,
         m,
-        mf: MFunc { name: f.name.clone(), blocks: Vec::new(), vclass: Vec::new(), slots: Vec::new(), out_args: 0, fconsts: Vec::new(), has_calls: false },
+        mf: MFunc {
+            name: f.name.clone(),
+            blocks: Vec::new(),
+            vclass: Vec::new(),
+            slots: Vec::new(),
+            out_args: 0,
+            fconsts: Vec::new(),
+            has_calls: false,
+            wide_xmm: f.insts.iter().any(|i| i.ty.is_vec()),
+        },
         vreg: vec![NOREG; n],
         uses: f.use_counts(),
         needed: vec![false; n],
@@ -354,8 +379,13 @@ impl<'a> Sel<'a> {
     fn e(&mut self, op: MOp, sz: u8, a: Opnd, b: Opnd) {
         self.out.push(MInst::new(op, sz, a, b));
     }
+    fn shufps(&mut self, d: Reg, s: Reg, imm: i64) {
+        let mut mi = MInst::new(MOp::Shufps, 16, Opnd::R(d), Opnd::R(s));
+        mi.c = Opnd::I(imm);
+        self.out.push(mi);
+    }
     fn class_of(&self, v: V) -> u8 {
-        if self.f.insts[v as usize].ty == T::F64 {
+        if self.f.insts[v as usize].ty.is_fp() {
             1
         } else {
             0
@@ -369,7 +399,7 @@ impl<'a> Sel<'a> {
         }
         self.vreg[v as usize]
     }
-    fn fconst(&mut self, bits: u64) -> Mem {
+    fn fconst(&mut self, bits: u128) -> Mem {
         let ix = match self.fconst_ix.get(&bits) {
             Some(&i) => i,
             None => {
@@ -395,7 +425,7 @@ impl<'a> Sel<'a> {
                 if i.k == 0 {
                     self.e(MOp::Zero, 8, Opnd::R(r), Opnd::None);
                 } else {
-                    let m = self.fconst(i.k as u64);
+                    let m = self.fconst(i.k as u64 as u128);
                     self.e(MOp::MovSd, 8, Opnd::R(r), Opnd::M(m));
                 }
                 r
@@ -468,8 +498,12 @@ impl<'a> Sel<'a> {
     fn xm(&mut self, v: V) -> Opnd {
         let i = &self.f.insts[v as usize];
         if i.op == Op::FConst && i.k != 0 {
-            let m = self.fconst(i.k as u64);
+            let m = self.fconst(i.k as u64 as u128);
             return Opnd::M(m);
+        }
+        if i.ty.is_vec() {
+            // packed operations need aligned memory operands: vector loads are never folded
+            return Opnd::R(self.reg(v));
         }
         if let Some(m) = self.load_mem(v) {
             return Opnd::M(m);
@@ -579,7 +613,7 @@ impl<'a> Sel<'a> {
         for (pi, &t) in params.iter().enumerate() {
             let pv = by_index.get(&(pi as i64)).copied();
             let want = pv.map(|v| self.needed[v as usize]).unwrap_or(false);
-            if t == T::F64 {
+            if t.is_fp() {
                 if nf < NUM_FLOAT_ARGS {
                     if want {
                         let d = self.vr(pv.unwrap());
@@ -590,9 +624,9 @@ impl<'a> Sel<'a> {
                     if want {
                         let d = self.vr(pv.unwrap());
                         let m = Mem { base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MemKind::InArg, id: nstack };
-                        self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::M(m));
+                        self.e(MOp::MovSd, fsz(t), Opnd::R(d), Opnd::M(m));
                     }
-                    nstack += 1;
+                    nstack += if t.is_vec() { 2 } else { 1 };
                 }
             } else if ni < INT_ARGS.len() {
                 if want {
@@ -632,7 +666,7 @@ impl<'a> Sel<'a> {
                 Op::GAddr => Opnd::GAddr(si.k as u32, 0),
                 Op::FAddr => Opnd::FAddr(si.k as u32),
                 Op::FConst if si.k == 0 => Opnd::None,
-                Op::FConst => Opnd::M(self.fconst(si.k as u64)),
+                Op::FConst => Opnd::M(self.fconst(si.k as u64 as u128)),
                 Op::Alloca => Opnd::M(Mem::slot(self.slot_of[&src], 0)),
                 _ => {
                     let r = self.reg(src);
@@ -749,25 +783,25 @@ impl<'a> Sel<'a> {
             Op::FLt | Op::FLe => {
                 let br = self.reg(b);
                 let ao = self.xm(a);
-                self.e(MOp::Ucomisd, 8, Opnd::R(br), ao);
+                self.e(MOp::Ucomisd, fsz(at), Opnd::R(br), ao);
                 (if i.op == Op::FLt { cc::A } else { cc::AE }, 0)
             }
             Op::FGt | Op::FGe => {
                 let ar = self.reg(a);
                 let bo = self.xm(b);
-                self.e(MOp::Ucomisd, 8, Opnd::R(ar), bo);
+                self.e(MOp::Ucomisd, fsz(at), Opnd::R(ar), bo);
                 (if i.op == Op::FGt { cc::A } else { cc::AE }, 0)
             }
             Op::FEq => {
                 let ar = self.reg(a);
                 let bo = self.xm(b);
-                self.e(MOp::Ucomisd, 8, Opnd::R(ar), bo);
+                self.e(MOp::Ucomisd, fsz(at), Opnd::R(ar), bo);
                 (cc::E, 1)
             }
             _ => {
                 let ar = self.reg(a);
                 let bo = self.xm(b);
-                self.e(MOp::Ucomisd, 8, Opnd::R(ar), bo);
+                self.e(MOp::Ucomisd, fsz(at), Opnd::R(ar), bo);
                 (cc::NE, 2)
             }
         }
@@ -833,7 +867,7 @@ impl<'a> Sel<'a> {
                 let mut used = Vec::new();
                 let mut moves: Vec<(Reg, V)> = Vec::new();
                 for &v in &vals {
-                    if self.f.insts[v as usize].ty == T::F64 {
+                    if self.f.insts[v as usize].ty.is_fp() {
                         moves.push((XMM0 + nf as Reg, v));
                         nf += 1;
                     } else {
@@ -845,7 +879,7 @@ impl<'a> Sel<'a> {
                 let srcs: Vec<(Reg, Opnd, bool)> = moves
                     .iter()
                     .map(|&(d, v)| {
-                        let isf = self.f.insts[v as usize].ty == T::F64;
+                        let isf = self.f.insts[v as usize].ty.is_fp();
                         let o = if !isf { self.mov_src(v) } else { Opnd::R(self.reg(v)) };
                         (d, o, isf)
                     })
@@ -904,8 +938,9 @@ impl<'a> Sel<'a> {
         let d = self.vr(v);
         let ar = self.reg(a);
         let bo = self.xm(b);
+        let sz = fsz(self.f.insts[v as usize].ty);
         self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(ar));
-        self.e(mop, 8, Opnd::R(d), bo);
+        self.e(mop, sz, Opnd::R(d), bo);
     }
 
     fn zext_free(&self, v: V) -> bool {
@@ -1094,19 +1129,31 @@ impl<'a> Sel<'a> {
             Op::FMul => self.fbinop(v, MOp::Mulsd, true),
             Op::FSub => self.fbinop(v, MOp::Subsd, false),
             Op::FDiv => self.fbinop(v, MOp::Divsd, false),
+            Op::FMin => self.fbinop(v, MOp::Minsd, false),
+            Op::FMax => self.fbinop(v, MOp::Maxsd, false),
             Op::FSqrt => {
                 let d = self.vr(v);
                 let s = self.xm(i.args[0]);
                 self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
-                self.e(MOp::Sqrtsd, 8, Opnd::R(d), s);
+                self.e(MOp::Sqrtsd, fsz(ty), Opnd::R(d), s);
             }
             Op::FNeg | Op::FAbs => {
                 let d = self.vr(v);
                 let s = self.reg(i.args[0]);
-                let mask = if i.op == Op::FNeg { 0x8000_0000_0000_0000u64 } else { 0x7FFF_FFFF_FFFF_FFFFu64 };
+                let neg = i.op == Op::FNeg;
+                let mask: u128 = if ty == T::F64 {
+                    if neg {
+                        0x8000_0000_0000_0000
+                    } else {
+                        0x7FFF_FFFF_FFFF_FFFF
+                    }
+                } else {
+                    let lane: u128 = if neg { 0x8000_0000 } else { 0x7FFF_FFFF };
+                    lane | lane << 32 | lane << 64 | lane << 96
+                };
                 let m = self.fconst(mask);
                 self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(s));
-                self.e(if i.op == Op::FNeg { MOp::Xorpd } else { MOp::Andpd }, 8, Opnd::R(d), Opnd::M(m));
+                self.e(if neg { MOp::Xorpd } else { MOp::Andpd }, if ty == T::F64 { 8 } else { 16 }, Opnd::R(d), Opnd::M(m));
             }
             op if op.is_cmp() => {
                 let d = self.vr(v);
@@ -1180,22 +1227,26 @@ impl<'a> Sel<'a> {
                     Opnd::R(self.ext32(i.args[0], true))
                 };
                 self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
-                self.e(MOp::Cvtsi2sd, if st == T::I64 { 8 } else { 4 }, Opnd::R(d), s);
+                let mut mi = MInst::new(MOp::Cvtsi2sd, if st == T::I64 { 8 } else { 4 }, Opnd::R(d), s);
+                mi.sz2 = fsz(ty);
+                self.out.push(mi);
             }
             Op::FToSI => {
                 let d = self.vr(v);
                 let s = self.xm(i.args[0]);
-                self.e(MOp::Cvttsd2si, if ty == T::I64 { 8 } else { 4 }, Opnd::R(d), s);
+                let mut mi = MInst::new(MOp::Cvttsd2si, if ty == T::I64 { 8 } else { 4 }, Opnd::R(d), s);
+                mi.sz2 = fsz(self.f.insts[i.args[0] as usize].ty);
+                self.out.push(mi);
             }
             Op::BitsToF => {
                 let d = self.vr(v);
                 let s = self.reg(i.args[0]);
-                self.e(MOp::MovqToX, 8, Opnd::R(d), Opnd::R(s));
+                self.e(MOp::MovqToX, fsz(ty), Opnd::R(d), Opnd::R(s));
             }
             Op::FToBits => {
                 let d = self.vr(v);
                 let s = self.reg(i.args[0]);
-                self.e(MOp::MovqToR, 8, Opnd::R(d), Opnd::R(s));
+                self.e(MOp::MovqToR, fsz(self.f.insts[i.args[0] as usize].ty), Opnd::R(d), Opnd::R(s));
             }
             Op::Select => {
                 let d = self.vr(v);
@@ -1219,7 +1270,16 @@ impl<'a> Sel<'a> {
                 let d = self.vr(v);
                 let m = self.addr(i.args[0]);
                 match ty {
-                    T::F64 => self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::M(m)),
+                    T::F64 | T::F32 | T::V2 | T::V4 => self.e(MOp::MovSd, fsz_mem(ty), Opnd::R(d), Opnd::M(m)),
+                    T::V3 => {
+                        // x, y as one 8-byte load; z joins as the upper half
+                        let t = self.mf.new_vreg(1);
+                        let mut hi = m;
+                        hi.disp += 8;
+                        self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::M(m));
+                        self.e(MOp::MovSd, 4, Opnd::R(t), Opnd::M(hi));
+                        self.shufps(d, t, 0x44);
+                    }
                     T::I8 | T::I16 => {
                         let mut mi = MInst::new(MOp::Movzx, sz_of(ty), Opnd::R(d), Opnd::M(m));
                         mi.sz2 = 4;
@@ -1231,14 +1291,31 @@ impl<'a> Sel<'a> {
             Op::Store => {
                 let val = i.args[1];
                 let vi = &self.f.insts[val as usize];
-                if ty == T::F64 {
-                    if vi.op == Op::FConst && vi.k == 0 {
+                if ty.is_fp() {
+                    if vi.op == Op::FConst && (vi.k == 0 || ty == T::F32) {
                         let m = self.addr(i.args[0]);
-                        self.e(MOp::Mov, 8, Opnd::M(m), Opnd::I(0));
+                        if ty == T::V3 || ty == T::V4 {
+                            let mut hi = m;
+                            hi.disp += 8;
+                            self.e(MOp::Mov, 8, Opnd::M(m), Opnd::I(0));
+                            self.e(MOp::Mov, if ty == T::V3 { 4 } else { 8 }, Opnd::M(hi), Opnd::I(0));
+                        } else {
+                            self.e(MOp::Mov, if ty == T::F32 { 4 } else { 8 }, Opnd::M(m), Opnd::I(vi.k as i32 as i64));
+                        }
+                    } else if ty == T::V3 {
+                        let r = self.reg(val);
+                        let m = self.addr(i.args[0]);
+                        let t = self.mf.new_vreg(1);
+                        let mut hi = m;
+                        hi.disp += 8;
+                        self.e(MOp::MovSd, 8, Opnd::M(m), Opnd::R(r));
+                        self.e(MOp::MovSd, 8, Opnd::R(t), Opnd::R(r));
+                        self.shufps(t, t, 2);
+                        self.e(MOp::MovSd, 4, Opnd::M(hi), Opnd::R(t));
                     } else {
                         let r = self.reg(val);
                         let m = self.addr(i.args[0]);
-                        self.e(MOp::MovSd, 8, Opnd::M(m), Opnd::R(r));
+                        self.e(MOp::MovSd, fsz_mem(ty), Opnd::M(m), Opnd::R(r));
                     }
                 } else {
                     let src = match vi.op {
@@ -1274,6 +1351,90 @@ impl<'a> Sel<'a> {
                 self.e(MOp::Mov, 8, Opnd::R(if i.op == Op::MemCpy { RSI } else { RAX }), s);
                 self.e(MOp::Mov, 8, Opnd::R(RCX), n);
                 self.e(if i.op == Op::MemCpy { MOp::RepMovsb } else { MOp::RepStosb }, 0, Opnd::None, Opnd::None);
+            }
+            Op::FExt | Op::FTrunc => {
+                let d = self.vr(v);
+                let s = self.xm(i.args[0]);
+                self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
+                self.e(MOp::Cvtf, fsz(ty), Opnd::R(d), s);
+            }
+            Op::VSplat => {
+                let d = self.vr(v);
+                let s = self.reg(i.args[0]);
+                self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(s));
+                self.shufps(d, d, 0);
+            }
+            Op::VBuild => {
+                let d = self.vr(v);
+                let consts: Vec<Option<u32>> = i.args.iter().map(|a| if self.f.insts[*a as usize].op == Op::FConst { Some(self.f.insts[*a as usize].k as u32) } else { None }).collect();
+                if consts.iter().all(|c| c.is_some()) {
+                    let mut bits = 0u128;
+                    for (k, c) in consts.iter().enumerate() {
+                        bits |= (c.unwrap() as u128) << (32 * k);
+                    }
+                    if bits == 0 {
+                        self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
+                    } else {
+                        let m = self.fconst(bits);
+                        self.e(MOp::MovSd, 16, Opnd::R(d), Opnd::M(m));
+                    }
+                    return;
+                }
+                let rs: Vec<Reg> = i.args.iter().map(|a| self.reg(*a)).collect();
+                self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(rs[0]));
+                self.e(MOp::Unpcklps, 16, Opnd::R(d), Opnd::R(rs[1]));
+                if rs.len() == 3 {
+                    self.shufps(d, rs[2], 0x44);
+                } else if rs.len() == 4 {
+                    let t = self.mf.new_vreg(1);
+                    self.e(MOp::MovSd, 8, Opnd::R(t), Opnd::R(rs[2]));
+                    self.e(MOp::Unpcklps, 16, Opnd::R(t), Opnd::R(rs[3]));
+                    self.shufps(d, t, 0x44);
+                }
+            }
+            Op::VExt => {
+                let d = self.vr(v);
+                let s = self.reg(i.args[0]);
+                self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(s));
+                if i.k != 0 {
+                    self.shufps(d, d, i.k);
+                }
+            }
+            Op::VIns => {
+                let d = self.vr(v);
+                let x = self.reg(i.args[0]);
+                let s = self.reg(i.args[1]);
+                match i.k {
+                    0 => {
+                        self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(x));
+                        self.e(MOp::Movlo, 4, Opnd::R(d), Opnd::R(s));
+                    }
+                    1 => {
+                        // [x0, s, x1, s1] then lanes 2, 3 from x
+                        self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(x));
+                        self.e(MOp::Unpcklps, 16, Opnd::R(d), Opnd::R(s));
+                        self.shufps(d, x, 0xE4);
+                    }
+                    k => {
+                        // t = [s, s, x3, x3] (lane 2) or [s, s, x2, x2] (lane 3)
+                        let t = self.mf.new_vreg(1);
+                        self.e(MOp::MovSd, 8, Opnd::R(t), Opnd::R(s));
+                        self.shufps(t, x, if k == 2 { 0xF0 } else { 0xA0 });
+                        self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(x));
+                        self.shufps(d, t, if k == 2 { 0x84 } else { 0x24 });
+                    }
+                }
+            }
+            Op::VShuf => {
+                let d = self.vr(v);
+                let a = self.reg(i.args[0]);
+                self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(a));
+                if i.args[0] == i.args[1] {
+                    self.shufps(d, d, i.k);
+                } else {
+                    let b = self.reg(i.args[1]);
+                    self.shufps(d, b, i.k);
+                }
             }
             Op::Bswap | Op::Popcnt | Op::Ctz | Op::Clz => {
                 let d = self.vr(v);
@@ -1337,17 +1498,17 @@ impl<'a> Sel<'a> {
         let mut nf = 0usize;
         let mut nstack = 0u32;
         let mut reg_moves: Vec<(Reg, Opnd, bool)> = Vec::new();
-        let mut stack_moves: Vec<(u32, Opnd, bool)> = Vec::new();
+        let mut stack_moves: Vec<(u32, Opnd, u8)> = Vec::new();
         for &a in args {
-            let isf = self.f.insts[a as usize].ty == T::F64;
-            if isf {
+            let at = self.f.insts[a as usize].ty;
+            if at.is_fp() {
                 let r = Opnd::R(self.reg(a));
                 if nf < NUM_FLOAT_ARGS {
                     reg_moves.push((XMM0 + nf as Reg, r, true));
                     nf += 1;
                 } else {
-                    stack_moves.push((nstack, r, true));
-                    nstack += 1;
+                    stack_moves.push((nstack, r, fsz(at)));
+                    nstack += if at.is_vec() { 2 } else { 1 };
                 }
             } else if ni < INT_ARGS.len() {
                 let s = self.mov_src(a);
@@ -1359,15 +1520,19 @@ impl<'a> Sel<'a> {
                     Opnd::R(r) => Opnd::R(r),
                     _ => Opnd::R(self.reg(a)),
                 };
-                stack_moves.push((nstack, s, false));
+                stack_moves.push((nstack, s, 0));
                 nstack += 1;
             }
         }
         let tr = target.map(|t| self.reg(t));
         self.mf.out_args = self.mf.out_args.max(nstack);
-        for (slot, s, isf) in stack_moves {
+        for (slot, s, fs) in stack_moves {
             let m = Mem { base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MemKind::OutArg, id: slot };
-            self.e(if isf { MOp::MovSd } else { MOp::Mov }, 8, Opnd::M(m), s);
+            if fs != 0 {
+                self.e(MOp::MovSd, fs, Opnd::M(m), s);
+            } else {
+                self.e(MOp::Mov, 8, Opnd::M(m), s);
+            }
         }
         let mut used = Vec::new();
         for (d, s, isf) in reg_moves {
@@ -1389,7 +1554,7 @@ impl<'a> Sel<'a> {
         if i.ty != T::Void {
             if self.needed[v as usize] {
                 let d = self.vr(v);
-                if i.ty == T::F64 {
+                if i.ty.is_fp() {
                     self.e(MOp::MovSd, 8, Opnd::R(d), Opnd::R(XMM0));
                 } else {
                     self.e(MOp::Mov, 8, Opnd::R(d), Opnd::R(RAX));
@@ -1415,7 +1580,7 @@ impl<'a> Sel<'a> {
             let mut nf = 0;
             let mut locs: Vec<Reg> = Vec::new();
             for t in &types {
-                if *t == T::F64 {
+                if t.is_fp() {
                     locs.push(XMM0 + nf as Reg);
                     nf += 1;
                 } else {
@@ -1428,7 +1593,7 @@ impl<'a> Sel<'a> {
                     continue;
                 }
                 let d = self.vr(p);
-                let isf = self.f.insts[p as usize].ty == T::F64;
+                let isf = self.f.insts[p as usize].ty.is_fp();
                 self.e(if isf { MOp::MovSd } else { MOp::Mov }, 8, Opnd::R(d), Opnd::R(locs[k as usize]));
             }
         }

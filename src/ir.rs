@@ -13,6 +13,11 @@ pub enum T {
     I32,
     I64,
     F64,
+    F32,
+    // 128-bit vectors of f32 lanes held in an xmm register; they differ in memory size only
+    V2,
+    V3,
+    V4,
 }
 
 impl T {
@@ -21,8 +26,10 @@ impl T {
             T::Void => 0,
             T::I8 => 1,
             T::I16 => 2,
-            T::I32 => 4,
-            T::I64 | T::F64 => 8,
+            T::I32 | T::F32 => 4,
+            T::I64 | T::F64 | T::V2 => 8,
+            T::V3 => 12,
+            T::V4 => 16,
         }
     }
     pub fn bits(self) -> u32 {
@@ -30,6 +37,21 @@ impl T {
     }
     pub fn is_int(self) -> bool {
         matches!(self, T::I8 | T::I16 | T::I32 | T::I64)
+    }
+    // lives in an xmm register
+    pub fn is_fp(self) -> bool {
+        matches!(self, T::F32 | T::F64 | T::V2 | T::V3 | T::V4)
+    }
+    pub fn is_vec(self) -> bool {
+        matches!(self, T::V2 | T::V3 | T::V4)
+    }
+    pub fn lanes(self) -> u32 {
+        match self {
+            T::V2 => 2,
+            T::V3 => 3,
+            T::V4 => 4,
+            _ => 1,
+        }
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -39,6 +61,10 @@ impl T {
             T::I32 => "i32",
             T::I64 => "i64",
             T::F64 => "f64",
+            T::F32 => "f32",
+            T::V2 => "v2",
+            T::V3 => "v3",
+            T::V4 => "v4",
         }
     }
 }
@@ -46,7 +72,7 @@ impl T {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Op {
     Const,  // k = value (sign-extended to i64, canonical for type)
-    FConst, // k = f64 bits
+    FConst, // k = f64 bits (f32 bits for F32; vectors: only 0)
     Param,  // k = index
     GAddr,  // k = global id
     FAddr,  // k = function id
@@ -75,6 +101,15 @@ pub enum Op {
     FSqrt,
     FNeg,
     FAbs,
+    FMin,   // x86 semantics: a < b ? a : b
+    FMax,   // a > b ? a : b
+    FExt,   // f32 -> f64
+    FTrunc, // f64 -> f32
+    VSplat, // f32 -> vector with every lane equal
+    VBuild, // f32 lanes -> vector
+    VExt,   // vector -> f32, k = lane
+    VIns,   // args = [vector, f32], k = lane
+    VShuf,  // args = [a, b], k = shufps immediate: lanes 0,1 from a and 2,3 from b
     Eq,
     Ne,
     Slt,
@@ -613,9 +648,13 @@ pub fn print_func(f: &Func, m: Option<&Module>) -> String {
                     let _ = write!(line, " {}", i.k);
                 }
                 Op::FConst => {
-                    let _ = write!(line, " {:?}", f64::from_bits(i.k as u64));
+                    if i.ty == T::F32 {
+                        let _ = write!(line, " {:?}", f32::from_bits(i.k as u32));
+                    } else {
+                        let _ = write!(line, " {:?}", f64::from_bits(i.k as u64));
+                    }
                 }
-                Op::Param | Op::Proj => {
+                Op::Param | Op::Proj | Op::VExt | Op::VIns | Op::VShuf => {
                     let _ = write!(line, " #{}", i.k);
                 }
                 Op::GAddr => {

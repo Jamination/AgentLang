@@ -44,8 +44,8 @@ pub fn link(m: &Module, out: &Output) -> Vec<u8> {
     let mut rodata: Vec<u8> = Vec::new();
     let fpool_addr = BASE + ro_off;
     for &bits in &out.fpool {
-        put64(&mut rodata, bits);
-        put64(&mut rodata, 0);
+        put64(&mut rodata, bits as u64);
+        put64(&mut rodata, (bits >> 64) as u64);
     }
     let mut gaddr: Vec<u64> = vec![0; m.globals.len()];
     for (gi, g) in m.globals.iter().enumerate() {

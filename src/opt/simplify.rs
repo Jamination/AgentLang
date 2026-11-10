@@ -99,12 +99,24 @@ impl<'a> Ctx<'a> {
     fn c(&self, v: V) -> Option<i64> {
         self.f.is_const(v)
     }
+    // scalar float constants only (vector constants are never folded)
     fn fc(&self, v: V) -> Option<f64> {
         let i = &self.f.insts[v as usize];
-        if i.op == Op::FConst {
+        if i.op == Op::FConst && i.ty == T::F64 {
             Some(f64::from_bits(i.k as u64))
+        } else if i.op == Op::FConst && i.ty == T::F32 {
+            Some(f32::from_bits(i.k as u32) as f64)
         } else {
             None
+        }
+    }
+    // bits of the constant r in type ty; f32 results are computed in f64 and rounded once,
+    // which is exact for + - * / sqrt
+    fn fbits(ty: T, r: f64) -> i64 {
+        if ty == T::F32 {
+            (r as f32).to_bits() as i64
+        } else {
+            r.to_bits() as i64
         }
     }
     fn konst(&mut self, ty: T, k: i64) -> V {
@@ -373,7 +385,7 @@ impl<'a> Ctx<'a> {
                         FMul => x * y,
                         _ => x / y,
                     };
-                    self.set(v, FConst, vec![], r.to_bits() as i64);
+                    self.set(v, FConst, vec![], Self::fbits(ty, r));
                 }
                 None
             }
@@ -384,7 +396,7 @@ impl<'a> Ctx<'a> {
                         FAbs => x.abs(),
                         _ => x.sqrt(),
                     };
-                    self.set(v, FConst, vec![], r.to_bits() as i64);
+                    self.set(v, FConst, vec![], Self::fbits(ty, r));
                 }
                 None
             }
@@ -515,7 +527,8 @@ impl<'a> Ctx<'a> {
             }
             SIToF => {
                 if let Some(x) = self.c(inst.args[0]) {
-                    self.set(v, FConst, vec![], (x as f64).to_bits() as i64);
+                    let bits = if ty == T::F32 { (x as f32).to_bits() as i64 } else { (x as f64).to_bits() as i64 };
+                    self.set(v, FConst, vec![], bits);
                 }
                 None
             }
@@ -529,7 +542,7 @@ impl<'a> Ctx<'a> {
             }
             BitsToF => {
                 if let Some(x) = self.c(inst.args[0]) {
-                    self.set(v, FConst, vec![], x);
+                    self.set(v, FConst, vec![], if ty == T::F32 { x & 0xFFFF_FFFF } else { x });
                 }
                 None
             }
@@ -538,6 +551,12 @@ impl<'a> Ctx<'a> {
                 if i.op == FConst {
                     let k = i.k;
                     self.set_const(v, k);
+                }
+                None
+            }
+            FExt | FTrunc => {
+                if let Some(x) = self.fc(inst.args[0]) {
+                    self.set(v, FConst, vec![], Self::fbits(ty, x));
                 }
                 None
             }

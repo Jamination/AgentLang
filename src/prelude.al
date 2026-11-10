@@ -487,6 +487,25 @@ fn __dec_cmp(a []u8, an i64, ap i64, b []u8, bn i64, bp i64) i64 {
 fn __fmt_shortest(x f64, out []u8) i64 {
     m, e, cls := __f64_parts(x)
     neg := (cast[u64](x) >> 63) != 0
+    return __fmt_short_parts(neg, m, e, cls, m == (u64(1) << 52) && e > -1074, out)
+}
+
+fn __fmt_shortest32(x f32, out []u8) i64 {
+    bits := cast[u32](x)
+    ex := i64((bits >> 23) & 255)
+    man := u64(bits & 0x7FFFFF)
+    neg := (bits >> 31) != 0
+    if ex == 255 {
+        return __fmt_short_parts(neg, man, 0, if man == 0 { 1 } else { 2 }, false, out)
+    }
+    if ex == 0 {
+        return __fmt_short_parts(neg, man, -149, 0, false, out)
+    }
+    return __fmt_short_parts(neg, man | (u64(1) << 23), ex - 150, 0, man == 0 && ex > 1, out)
+}
+
+// value = m * 2^e; `closer`: the gap to the next smaller float is half the usual one
+fn __fmt_short_parts(neg bool, m u64, e i64, cls i64, closer bool, out []u8) i64 {
     o := 0
     if cls == 2 {
         return __copy_str(out, o, "nan")
@@ -508,7 +527,7 @@ fn __fmt_shortest(x f64, out []u8) i64 {
     nh, ph := __dec_expand(2 * m + 1, e - 1, dh[..])
     nl := 0
     pl := 0
-    if m == (u64(1) << 52) && e > -1074 {
+    if closer {
         nl, pl = __dec_expand(4 * m - 1, e - 2, dl[..])
     } else {
         nl, pl = __dec_expand(2 * m - 1, e - 1, dl[..])
@@ -620,6 +639,41 @@ fn __fmt_shortest(x f64, out []u8) i64 {
         o += 1
     }
     return o
+}
+
+fn __put_f32(x f32) {
+    var b [40]u8
+    n := __fmt_shortest32(x, b[..])
+    __put_str(b[..n])
+}
+
+// ---------- matrix / quaternion operators ----------
+fn __mat4_mulv(m mat4, v vec4) vec4 {
+    return m[0] * v.x + m[1] * v.y + m[2] * v.z + m[3] * v.w
+}
+
+fn __mat4_mul(a mat4, b mat4) mat4 {
+    return mat4(__mat4_mulv(a, b[0]), __mat4_mulv(a, b[1]), __mat4_mulv(a, b[2]), __mat4_mulv(a, b[3]))
+}
+
+fn __mat4_diag(s f32) mat4 {
+    return mat4(vec4(s, 0.0, 0.0, 0.0), vec4(0.0, s, 0.0, 0.0), vec4(0.0, 0.0, s, 0.0), vec4(0.0, 0.0, 0.0, s))
+}
+
+// Hamilton product; components are (x, y, z, w) with w the scalar part
+fn __quat_mul(a quat, b quat) quat {
+    return quat(
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z)
+}
+
+// rotate v by the unit quaternion q: v + 2w(u x v) + 2 u x (u x v)
+fn __quat_rotate(q quat, v vec3) vec3 {
+    u := q.xyz
+    t := (u.yzx * v.zxy - u.zxy * v.yzx) * 2.0
+    return v + t * q.w + (u.yzx * t.zxy - u.zxy * t.yzx)
 }
 
 fn __put_f64(x f64) {

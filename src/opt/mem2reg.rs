@@ -18,7 +18,7 @@ impl<'a> Ctx<'a> {
         if let Some(&z) = self.zero.get(&t) {
             return z;
         }
-        let z = if t == T::F64 { self.f.mk(Op::FConst, t, vec![], 0) } else { self.f.mk(Op::Const, t, vec![], 0) };
+        let z = if t.is_fp() { self.f.mk(Op::FConst, t, vec![], 0) } else { self.f.mk(Op::Const, t, vec![], 0) };
         self.entry_consts.push(z);
         self.zero.insert(t, z);
         z

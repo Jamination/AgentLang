@@ -161,6 +161,15 @@ impl<'a> Enc<'a> {
     }
 }
 
+// mandatory prefix of an SSE operation by operand size: scalar double, scalar single, packed single
+fn fp_pfx(sz: u8) -> u8 {
+    match sz {
+        4 => 0xF3,
+        16 => 0,
+        _ => 0xF2,
+    }
+}
+
 fn byte_reg_needs_rex(o: &Opnd) -> bool {
     matches!(o, Opnd::R(r) if (4..8).contains(r))
 }
@@ -405,29 +414,59 @@ fn enc_inst(e: &mut Enc, i: &MInst) {
         Ret => e.out.push(0xC3),
         Syscall => e.out.extend_from_slice(&[0x0F, 0x05]),
         Ud2 => e.out.extend_from_slice(&[0x0F, 0x0B]),
-        MovSd => match (&i.a, &i.b) {
-            (Opnd::R(d), Opnd::R(s)) => e.op(false, 0, false, &[0x0F, 0x28], (*d & 15) as u8, &rm_reg(*s), false),
-            (Opnd::R(d), Opnd::M(_)) => {
-                let rm = e.rm(&i.b);
-                e.op(false, 0xF2, false, &[0x0F, 0x10], (*d & 15) as u8, &rm, false);
+        MovSd => {
+            // movaps between registers; movsd / movss / movups to and from memory
+            let pfx = fp_pfx(sz);
+            match (&i.a, &i.b) {
+                (Opnd::R(d), Opnd::R(s)) => e.op(false, 0, false, &[0x0F, 0x28], (*d & 15) as u8, &rm_reg(*s), false),
+                (Opnd::R(d), Opnd::M(_)) => {
+                    let rm = e.rm(&i.b);
+                    e.op(false, pfx, false, &[0x0F, 0x10], (*d & 15) as u8, &rm, false);
+                }
+                (Opnd::M(_), Opnd::R(s)) => {
+                    let rm = e.rm(&i.a);
+                    e.op(false, pfx, false, &[0x0F, 0x11], (*s & 15) as u8, &rm, false);
+                }
+                _ => panic!("encoder: bad movsd {:?}", i),
             }
-            (Opnd::M(_), Opnd::R(s)) => {
-                let rm = e.rm(&i.a);
-                e.op(false, 0xF2, false, &[0x0F, 0x11], (*s & 15) as u8, &rm, false);
-            }
-            _ => panic!("encoder: bad movsd {:?}", i),
-        },
-        Addsd | Subsd | Mulsd | Divsd | Sqrtsd => {
+        }
+        Addsd | Subsd | Mulsd | Divsd | Sqrtsd | Minsd | Maxsd => {
             let o = match i.op {
                 Addsd => 0x58,
                 Mulsd => 0x59,
                 Subsd => 0x5C,
                 Divsd => 0x5E,
+                Minsd => 0x5D,
+                Maxsd => 0x5F,
                 _ => 0x51,
             };
             let d = reg_of(&i.a);
             let rm = e.rm(&i.b);
-            e.op(false, 0xF2, false, &[0x0F, o], (d & 15) as u8, &rm, false);
+            e.op(false, fp_pfx(sz), false, &[0x0F, o], (d & 15) as u8, &rm, false);
+        }
+        Cvtf => {
+            // cvtss2sd (sz 8) / cvtsd2ss (sz 4)
+            let d = reg_of(&i.a);
+            let rm = e.rm(&i.b);
+            e.op(false, if sz == 8 { 0xF3 } else { 0xF2 }, false, &[0x0F, 0x5A], (d & 15) as u8, &rm, false);
+        }
+        Shufps => {
+            let d = reg_of(&i.a);
+            let rm = e.rm(&i.b);
+            e.op(false, 0, false, &[0x0F, 0xC6], (d & 15) as u8, &rm, false);
+            match i.c {
+                Opnd::I(k) => e.imm(k, 1),
+                _ => panic!("encoder: shufps without immediate"),
+            }
+        }
+        Movlo => {
+            let d = reg_of(&i.a);
+            e.op(false, 0xF3, false, &[0x0F, 0x10], (d & 15) as u8, &rm_reg(reg_of(&i.b)), false);
+        }
+        Unpcklps => {
+            let d = reg_of(&i.a);
+            let rm = e.rm(&i.b);
+            e.op(false, 0, false, &[0x0F, 0x14], (d & 15) as u8, &rm, false);
         }
         Ucomisd | Xorpd | Andpd => {
             let o = match i.op {
@@ -437,27 +476,28 @@ fn enc_inst(e: &mut Enc, i: &MInst) {
             };
             let d = reg_of(&i.a);
             let rm = e.rm(&i.b);
-            e.op(true, 0, false, &[0x0F, o], (d & 15) as u8, &rm, false);
+            e.op(sz == 8, 0, false, &[0x0F, o], (d & 15) as u8, &rm, false);
         }
         Cvtsi2sd => {
+            // sz = integer size, sz2 = float size (4: single)
             let d = reg_of(&i.a);
             let rm = e.rm(&i.b);
-            e.op(false, 0xF2, w, &[0x0F, 0x2A], (d & 15) as u8, &rm, false);
+            e.op(false, if i.sz2 == 4 { 0xF3 } else { 0xF2 }, w, &[0x0F, 0x2A], (d & 15) as u8, &rm, false);
         }
         Cvttsd2si => {
             let d = reg_of(&i.a);
             let rm = e.rm(&i.b);
-            e.op(false, 0xF2, w, &[0x0F, 0x2C], (d & 15) as u8, &rm, false);
+            e.op(false, if i.sz2 == 4 { 0xF3 } else { 0xF2 }, w, &[0x0F, 0x2C], (d & 15) as u8, &rm, false);
         }
         MovqToX => {
             let d = reg_of(&i.a);
             let rm = e.rm(&i.b);
-            e.op(true, 0, true, &[0x0F, 0x6E], (d & 15) as u8, &rm, false);
+            e.op(true, 0, w, &[0x0F, 0x6E], (d & 15) as u8, &rm, false);
         }
         MovqToR => {
             let s = reg_of(&i.b);
             let rm = e.rm(&i.a);
-            e.op(true, 0, true, &[0x0F, 0x7E], (s & 15) as u8, &rm, false);
+            e.op(true, 0, w, &[0x0F, 0x7E], (s & 15) as u8, &rm, false);
         }
         RepMovsb => e.out.extend_from_slice(&[0xF3, 0xA4]),
         RepStosb => e.out.extend_from_slice(&[0xF3, 0xAA]),

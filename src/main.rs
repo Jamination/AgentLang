@@ -6,6 +6,7 @@ mod lower;
 mod lower_call;
 mod lower_expr;
 mod lower_fn;
+mod lower_vec;
 mod parser;
 mod elf;
 mod opt;
@@ -186,35 +187,6 @@ fn report(names: &[String], errs: &mut Vec<Diag>) -> bool {
     true
 }
 
-fn type_str(t: &TypeAst) -> String {
-    match t {
-        TypeAst::Name(n, args, _) => {
-            if args.is_empty() {
-                n.clone()
-            } else {
-                format!("{}[{}]", n, args.iter().map(type_str).collect::<Vec<_>>().join(", "))
-            }
-        }
-        TypeAst::Ptr(e) => format!("*{}", type_str(e)),
-        TypeAst::Slice(e) => format!("[]{}", type_str(e)),
-        TypeAst::Array(n, e) => {
-            let len = match &n.k {
-                EK::Int(k) => k.to_string(),
-                EK::Ident(name) => name.clone(),
-                _ => "_".into(),
-            };
-            format!("[{}]{}", len, type_str(e))
-        }
-        TypeAst::Fn(ps, r) => {
-            let p = ps.iter().map(type_str).collect::<Vec<_>>().join(", ");
-            match r {
-                Some(r) => format!("fn({}) {}", p, type_str(r)),
-                None => format!("fn({})", p),
-            }
-        }
-        TypeAst::Tuple(ts) => format!("({})", ts.iter().map(type_str).collect::<Vec<_>>().join(", ")),
-    }
-}
 
 // `alc sigs`: one line per declaration, for a quick overview of a file
 fn print_sigs(names: &[String], decls: &[Decl], from_file: u16) {
@@ -288,7 +260,7 @@ fn real_main() -> i32 {
             Decl::Test(t) => {
                 let fname = format!("__test_{}", tests.len());
                 tests.push(t.name.clone());
-                decls.push(Decl::Fn(FnDecl { name: fname, tparams: vec![], params: vec![], ret: None, body: t.body, pos: t.pos, inline: -1 }));
+                decls.push(Decl::Fn(FnDecl { name: fname, tparams: vec![], params: vec![], ret: None, body: t.body, pos: t.pos, inline: -1, ext: None }));
             }
             Decl::Fn(f) => {
                 if f.name == "main" {

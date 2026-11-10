@@ -44,9 +44,9 @@ impl<'c, 'a> Fx<'c, 'a> {
                 let v = self.iconst(it, n);
                 self.sval(ty, v)
             }
-            Some(TyK::F64) => {
-                let v = self.ins(Op::FConst, T::F64, vec![], (n as f64).to_bits() as i64);
-                self.sval(T_F64, v)
+            Some(TyK::F64) | Some(TyK::F32) | Some(TyK::Vec(_)) | Some(TyK::Quat) | Some(TyK::Mat4) => {
+                let ft = self.float_expect(expect);
+                self.fconst_ty(ft, n as f64)
             }
             _ => {
                 let v = self.iconst(T::I64, n);
@@ -59,8 +59,8 @@ impl<'c, 'a> Fx<'c, 'a> {
         match cv {
             CV::Int(i) => self.int_lit(i, i < 0, ty.or(expect), pos),
             CV::Float(f) => {
-                let v = self.ins(Op::FConst, T::F64, vec![], f.to_bits() as i64);
-                self.sval(T_F64, v)
+                let ft = self.float_expect(ty.or(expect));
+                self.fconst_ty(ft, f)
             }
             CV::Bool(b) => {
                 let v = self.iconst(T::I8, b as i64);
@@ -80,8 +80,8 @@ impl<'c, 'a> Fx<'c, 'a> {
                         self.err(e.pos, format!("float literal used where {} is expected", tn));
                     }
                 }
-                let v = self.ins(Op::FConst, T::F64, vec![], f.to_bits() as i64);
-                self.sval(T_F64, v)
+                let ft = self.float_expect(expect);
+                self.fconst_ty(ft, *f)
             }
             EK::Bool(b) => {
                 let v = self.iconst(T::I8, *b as i64);
@@ -296,10 +296,22 @@ impl<'c, 'a> Fx<'c, 'a> {
                 None
             }
             EK::Field(b, name) => {
-                let bv = self.expr(b, None);
-                self.field_of(bv, name, e.pos)
+                let bv = self.lvalue_base(b);
+                let p = self.field_of(bv, name, e.pos)?;
+                if !p.mem {
+                    self.err(e.pos, "expression is not assignable".into());
+                    return None;
+                }
+                Some(p)
             }
-            EK::Index(b, idx) if idx.len() == 1 => self.index_place(b, &idx[0], e.pos),
+            EK::Index(b, idx) if idx.len() == 1 => {
+                let p = self.index_place(b, &idx[0], e.pos)?;
+                if !p.mem {
+                    self.err(e.pos, "expression is not assignable".into());
+                    return None;
+                }
+                Some(p)
+            }
             EK::Un(UnOp::Deref, p) => {
                 let pv = self.expr(p, None);
                 match self.cx.types.k(pv.ty).clone() {
@@ -337,6 +349,9 @@ impl<'c, 'a> Fx<'c, 'a> {
 
     pub fn field_of(&mut self, base: Val, name: &str, pos: Pos) -> Option<Val> {
         let bv = self.auto_deref(base);
+        if let Some(r) = self.vec_field(bv, name, pos) {
+            return r;
+        }
         match self.cx.types.k(bv.ty).clone() {
             TyK::Struct(sid) => {
                 self.cx.types.layout_struct(sid);
@@ -418,6 +433,10 @@ impl<'c, 'a> Fx<'c, 'a> {
                 let (p, l) = self.slice_parts(bv);
                 Some((p, l, et))
             }
+            TyK::Mat4 => {
+                let l = self.iconst(T::I64, 4);
+                Some((bv.v, l, T_VEC4))
+            }
             TyK::Array(et, n) => {
                 let l = self.iconst(T::I64, n as i64);
                 Some((bv.v, l, et))
@@ -436,7 +455,10 @@ impl<'c, 'a> Fx<'c, 'a> {
     }
 
     pub fn index_place(&mut self, b: &'a Expr, idx: &'a Expr, pos: Pos) -> Option<Val> {
-        let bv = self.expr(b, None);
+        let bv = self.lvalue_base(b);
+        if self.cx.types.vec_lanes(bv.ty).is_some() {
+            return self.vec_index(bv, idx, pos);
+        }
         let (ptr, len, et) = self.indexable(bv, pos)?;
         let iv = self.expr(idx, Some(T_I64));
         if iv.ty == T_ERR {
@@ -544,10 +566,11 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let s = self.scalar(v);
                     let r = self.ins(Op::Sub, it, vec![z, s], 0);
                     self.sval(v.ty, r)
-                } else if v.ty == T_F64 {
+                } else if self.cx.types.is_float(v.ty) || self.cx.types.vec_lanes(v.ty).is_some() {
+                    let it = self.irt(v.ty);
                     let s = self.scalar(v);
-                    let r = self.ins(Op::FNeg, T::F64, vec![s], 0);
-                    self.sval(T_F64, r)
+                    let r = self.ins(Op::FNeg, it, vec![s], 0);
+                    self.sval(v.ty, r)
                 } else {
                     let tn = self.tyname(v.ty);
                     self.err(pos, format!("cannot negate {}", tn));
@@ -605,7 +628,12 @@ impl<'c, 'a> Fx<'c, 'a> {
                     self.err(pos, "cannot take the address of this expression (only variables, fields, elements and `&T{...}` literals)".into());
                     return Val::err();
                 }
-                match self.place(x) {
+                match self.place(x).filter(|p| {
+                    if p.lane.is_some() {
+                        self.err(pos, "cannot take the address of a vector component (copy it to a variable first)".into());
+                    }
+                    p.lane.is_none()
+                }) {
                     Some(p) => {
                         if p.alias >> 4 != 0 {
                             self.cx.exposed.insert(p.alias >> 4);
@@ -672,13 +700,13 @@ impl<'c, 'a> Fx<'c, 'a> {
                     None
                 } else {
                     match expect {
-                        Some(t) if self.cx.types.is_int(t) || t == T_F64 => Some(t),
+                        Some(t) if self.cx.types.is_int(t) || self.cx.types.is_float(t) || self.is_vecish(t) => Some(t),
                         _ => None,
                     }
                 };
                 let both_untyped = self.is_untyped(a) && self.is_untyped(b);
                 let exp = if both_untyped && (matches!(self.cx.const_eval(a), Some(CV::Float(_))) || matches!(self.cx.const_eval(b), Some(CV::Float(_)))) {
-                    Some(T_F64)
+                    Some(self.float_expect(exp))
                 } else {
                     exp
                 };
@@ -728,6 +756,9 @@ impl<'c, 'a> Fx<'c, 'a> {
             let v = self.ins(o, it, vec![lv, rv], 0);
             return self.sval(l.ty, v);
         }
+        if let Some(v) = self.vec_binary(op, l, r, pos) {
+            return v;
+        }
         if l.ty != r.ty {
             let (a, b) = (self.tyname(l.ty), self.tyname(r.ty));
             if self.cx.types.is_scalar(l.ty) && self.cx.types.is_scalar(r.ty) && !matches!(self.cx.types.k(l.ty), TyK::Ptr(_) | TyK::Fn(..)) {
@@ -757,7 +788,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let v = self.ins(o, T::I8, vec![a, b], 0);
                     return self.sval(T_BOOL, v);
                 }
-                TyK::F64 => {
+                TyK::F64 | TyK::F32 => {
                     let o = match op {
                         BinOp::Eq => Op::FEq,
                         BinOp::Ne => Op::FNe,
@@ -823,7 +854,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                 let v = self.ins(o, it, vec![a, b], 0);
                 self.sval(l.ty, v)
             }
-            TyK::F64 => {
+            TyK::F64 | TyK::F32 => {
                 let o = match op {
                     BinOp::Add => Op::FAdd,
                     BinOp::Sub => Op::FSub,
@@ -835,8 +866,9 @@ impl<'c, 'a> Fx<'c, 'a> {
                     }
                 };
                 let (a, b) = (self.scalar(l), self.scalar(r));
-                let v = self.ins(o, T::F64, vec![a, b], 0);
-                self.sval(T_F64, v)
+                let it = self.irt(l.ty);
+                let v = self.ins(o, it, vec![a, b], 0);
+                self.sval(l.ty, v)
             }
             _ => {
                 let tn = self.tyname(l.ty);
@@ -1020,7 +1052,29 @@ impl<'c, 'a> Fx<'c, 'a> {
                 let r = self.load_raw(slot, T::F64, 0);
                 self.sval(to, r)
             }
-            (TyK::F64, TyK::Int(tb, _)) => {
+            (TyK::Int(fb, fs), TyK::F32) => {
+                if fb == 64 && !fs {
+                    let d = self.convert(v, T_F64, pos);
+                    return self.convert(d, T_F32, pos);
+                }
+                let mut s = self.scalar(v);
+                if fb < 64 {
+                    s = self.ins(if fs { Op::SExt } else { Op::ZExt }, T::I64, vec![s], 0);
+                }
+                let r = self.ins(Op::SIToF, T::F32, vec![s], 0);
+                self.sval(to, r)
+            }
+            (TyK::F32, TyK::F64) => {
+                let s = self.scalar(v);
+                let r = self.ins(Op::FExt, T::F64, vec![s], 0);
+                self.sval(to, r)
+            }
+            (TyK::F64, TyK::F32) => {
+                let s = self.scalar(v);
+                let r = self.ins(Op::FTrunc, T::F32, vec![s], 0);
+                self.sval(to, r)
+            }
+            (TyK::F64 | TyK::F32, TyK::Int(tb, _)) => {
                 let s = self.scalar(v);
                 let mut r = self.ins(Op::FToSI, T::I64, vec![s], 0);
                 if tb < 64 {

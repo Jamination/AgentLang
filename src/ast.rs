@@ -145,6 +145,8 @@ pub struct FnDecl {
     pub body: Block,
     pub pos: Pos,
     pub inline: i8, // 1 = always inline, -1 = never, 0 = auto
+    // `extern "lib" fn`: a C function in the named shared library (no body)
+    pub ext: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -195,4 +197,35 @@ pub enum Decl {
     Global(GlobalDecl),
     Test(TestDecl),
     Use(String, Pos),
+}
+
+// source form of a type (for signatures in diagnostics and `alc sigs`)
+pub fn type_str(t: &TypeAst) -> String {
+    match t {
+        TypeAst::Name(n, args, _) => {
+            if args.is_empty() {
+                n.clone()
+            } else {
+                format!("{}[{}]", n, args.iter().map(type_str).collect::<Vec<_>>().join(", "))
+            }
+        }
+        TypeAst::Ptr(e) => format!("*{}", type_str(e)),
+        TypeAst::Slice(e) => format!("[]{}", type_str(e)),
+        TypeAst::Array(n, e) => {
+            let len = match &n.k {
+                EK::Int(k) => k.to_string(),
+                EK::Ident(name) => name.clone(),
+                _ => "_".into(),
+            };
+            format!("[{}]{}", len, type_str(e))
+        }
+        TypeAst::Fn(ps, r) => {
+            let p = ps.iter().map(type_str).collect::<Vec<_>>().join(", ");
+            match r {
+                Some(r) => format!("fn({}) {}", p, type_str(r)),
+                None => format!("fn({})", p),
+            }
+        }
+        TypeAst::Tuple(ts) => format!("({})", ts.iter().map(type_str).collect::<Vec<_>>().join(", ")),
+    }
 }

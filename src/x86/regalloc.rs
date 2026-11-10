@@ -667,7 +667,7 @@ fn b_can_be_mem(i: &MInst) -> bool {
         return false;
     }
     match i.op {
-        Add | Sub | And | Or | Xor | Cmp | Imul | Addsd | Subsd | Mulsd | Divsd | Sqrtsd | Ucomisd | Cvtsi2sd | Cvttsd2si | Cmov | Imul3 => true,
+        Add | Sub | And | Or | Xor | Cmp | Imul | Addsd | Subsd | Mulsd | Divsd | Minsd | Maxsd | Sqrtsd | Cvtf | Ucomisd | Cvtsi2sd | Cvttsd2si | Cmov | Imul3 => true,
         Mov => i.sz == 8 || i.sz == 4,
         MovSd => true,
         Movzx | Movsx => true,
@@ -678,7 +678,7 @@ fn b_can_be_mem(i: &MInst) -> bool {
 fn spill(mf: &mut MFunc, order: &[u32], spilled: &[u32], unspillable: &mut Vec<bool>) {
     let mut slot_of: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
     for &v in spilled {
-        let s = mf.new_slot(8, 8);
+        let s = if mf.wide_xmm && mf.class(v) == 1 { mf.new_slot(16, 16) } else { mf.new_slot(8, 8) };
         slot_of.insert(v, s);
     }
     let mut defs = Vec::new();
@@ -703,17 +703,20 @@ fn spill(mf: &mut MFunc, order: &[u32], spilled: &[u32], unspillable: &mut Vec<b
                 let slot = slot_of[&v];
                 let cls = mf.class(v);
                 let mem = Opnd::M(Mem::slot(slot, 0));
-                let mv = if cls == 1 { MOp::MovSd } else { MOp::Mov };
+        let mv = if cls == 1 { MOp::MovSd } else { MOp::Mov };
+        let msz: u8 = if cls == 1 && mf.wide_xmm { 16 } else { 8 };
                 let is_def = defs.contains(&v);
                 let is_use = uses.contains(&v);
                 // direct forms that avoid a temporary
                 if let Some((d, s)) = i.is_copy() {
                     if s == v && d != v && !slot_of.contains_key(&d) {
                         i.b = mem;
+                        i.sz = msz;
                         continue;
                     }
                     if d == v && s != v && !slot_of.contains_key(&s) {
                         i.a = mem;
+                        i.sz = msz;
                         continue;
                     }
                 }
@@ -729,6 +732,9 @@ fn spill(mf: &mut MFunc, order: &[u32], spilled: &[u32], unspillable: &mut Vec<b
                     });
                     if cnt == 1 && !i.uses.contains(&v) {
                         i.b = mem;
+                        if i.op == MOp::MovSd {
+                            i.sz = msz;
+                        }
                         continue;
                     }
                 }
@@ -750,10 +756,10 @@ fn spill(mf: &mut MFunc, order: &[u32], spilled: &[u32], unspillable: &mut Vec<b
                     }
                 }
                 if is_use {
-                    out.push(MInst::new(mv, 8, Opnd::R(t), mem));
+                    out.push(MInst::new(mv, msz, Opnd::R(t), mem));
                 }
                 if is_def {
-                    after.push(MInst::new(mv, 8, mem, Opnd::R(t)));
+                    after.push(MInst::new(mv, msz, mem, Opnd::R(t)));
                 }
             }
             out.push(i);

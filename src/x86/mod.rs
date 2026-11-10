@@ -13,7 +13,7 @@ pub struct Compiled {
 
 pub struct Output {
     pub funcs: Vec<Compiled>,
-    pub fpool: Vec<u64>,
+    pub fpool: Vec<u128>,
 }
 
 fn reachable_funcs(m: &Module) -> Vec<u32> {
@@ -51,8 +51,8 @@ fn reachable_funcs(m: &Module) -> Vec<u32> {
 
 pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
     let fids = reachable_funcs(m);
-    let mut fpool: Vec<u64> = Vec::new();
-    let mut fpool_ix: HashMap<u64, u32> = HashMap::new();
+    let mut fpool: Vec<u128> = Vec::new();
+    let mut fpool_ix: HashMap<u128, u32> = HashMap::new();
     let mut funcs = Vec::new();
     for fid in fids {
         let aliases = {
