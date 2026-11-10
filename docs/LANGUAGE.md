@@ -123,6 +123,7 @@ const LIMIT = 1000                         // compile-time constant (untyped unl
 const MASK u32 = 0xFF00
 var counter i64                            // global variable, zero-initialized
 var table = [4]i64{1, 2, 4, 8}             // global with a constant initializer
+var ops = [2]fn(i64) i64{double, negate}   //   (function names are constants too)
 test "name" { ... }                        // unit test, run by `alc test`
 use "other.al"                             // include another file (path relative to this file)
 ```
@@ -341,6 +342,9 @@ sort_by(a []T, less fn(T, T) bool)                            // stable
 // strings (str = []u8; slicing gives views without copying)
 concat(a, b) str        find(s, sub) i64        starts_with(s, p)        ends_with(s, p)
 trim(s) str             split(s, sep u8) []str  lines(s) []str           cmp(a, b) i64
+join(parts []str, sep) str                      to_upper(s) str          to_lower(s) str
+pad_left(s, width, fill u8) str                 pad_right(s, width, fill u8) str
+hex(x u64) str
 parse_i64(s) (i64, bool)                        parse_f64(s) (f64, bool)
 
 // files and process
