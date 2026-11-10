@@ -713,7 +713,7 @@ pub fn emit(mf: &mut MFunc, alloc: &Alloc, layout: &[u32], fpool: &[u32]) -> Cod
                     (false, true) => 5,
                     (true, true) => 6,
                 },
-                Item::Align(a) => (a - o % a) % a,
+                Item::Align(a) => align_pad(o, *a),
             };
         }
         offs[items.len()] = o;
@@ -771,12 +771,22 @@ pub fn emit(mf: &mut MFunc, alloc: &Alloc, layout: &[u32], fpool: &[u32]) -> Cod
                 }
             }
             Item::Align(a) => {
-                let pad = (a - bytes.len() as u32 % a) % a;
+                let pad = align_pad(bytes.len() as u32, *a);
                 nops(&mut bytes, pad);
             }
         }
     }
     Code { bytes, relocs }
+}
+
+// padding in front of an aligned block; long paddings are not worth executing
+fn align_pad(o: u32, a: u32) -> u32 {
+    let p = (a - o % a) % a;
+    if p > 10 {
+        0
+    } else {
+        p
+    }
 }
 
 pub fn nops(out: &mut Vec<u8>, mut n: u32) {

@@ -69,6 +69,16 @@ pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
         crate::opt::trace("isel", f);
         let mut mf = isel::select(f, m, &depths, &aliases);
         let layout: Vec<u32> = block_layout(f);
+        // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
+        // benchmark suite the padding executed on every loop entry cost more than it gained.
+        if std::env::var("ALC_ALIGN").is_ok() {
+            for (li, l) in loops.loops.iter().enumerate() {
+                let innermost = !loops.loops.iter().enumerate().any(|(oi, o)| oi != li && o.parent == Some(li));
+                if innermost && l.header != 0 {
+                    mf.blocks[l.header as usize].align = true;
+                }
+            }
+        }
         crate::opt::trace("regalloc", f);
         let alloc = regalloc::allocate(&mut mf, &layout);
         crate::opt::trace("emit", f);
