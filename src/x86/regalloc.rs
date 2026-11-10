@@ -337,12 +337,113 @@ pub struct Alloc {
     pub used_callee_saved: Vec<Reg>,
 }
 
+fn spill_slot(o: &Opnd, first_spill: u32) -> Option<u32> {
+    match o {
+        Opnd::M(m) if m.kind == MemKind::Slot && m.id >= first_spill && m.base == NOREG && m.idx == NOREG && m.disp == 0 => Some(m.id),
+        _ => None,
+    }
+}
+
+// After allocation: reuse registers that still hold the value of a spill slot instead of
+// reloading it, and drop stores to slots that are never read.
+fn spill_forward(mf: &mut MFunc, order: &[u32], first_spill: u32) {
+    let nb = mf.blocks.len();
+    let mut npreds = vec![0u32; nb];
+    let mut the_pred = vec![u32::MAX; nb];
+    for &b in order {
+        for &s in &mf.blocks[b as usize].succs {
+            npreds[s as usize] += 1;
+            the_pred[s as usize] = b;
+        }
+    }
+    let mut out_state: Vec<Option<Vec<(u32, Reg)>>> = vec![None; nb];
+    let mut defs = Vec::new();
+    let mut uses = Vec::new();
+    for (oi, &b) in order.iter().enumerate() {
+        let mut st: Vec<(u32, Reg)> = Vec::new();
+        if oi != 0 && npreds[b as usize] == 1 {
+            if let Some(s) = &out_state[the_pred[b as usize] as usize] {
+                st = s.clone();
+            }
+        }
+        let insts = std::mem::take(&mut mf.blocks[b as usize].insts);
+        let mut out: Vec<MInst> = Vec::with_capacity(insts.len());
+        for mut i in insts {
+            let is_store = matches!(i.op, MOp::Mov | MOp::MovSd) && spill_slot(&i.a, first_spill).is_some();
+            // uses of a slot whose value is still in a register
+            if let Some(s) = spill_slot(&i.b, first_spill) {
+                if let Some(&(_, r)) = st.iter().find(|e| e.0 == s) {
+                    let full_reload = ((i.op == MOp::Mov && i.sz == 8) || i.op == MOp::MovSd) && matches!(i.a, Opnd::R(_));
+                    if full_reload && i.a == Opnd::R(r) {
+                        continue;
+                    }
+                    i.b = Opnd::R(r);
+                }
+            }
+            if matches!(i.op, MOp::Cmp | MOp::Test) {
+                if let Some(s) = spill_slot(&i.a, first_spill) {
+                    if let Some(&(_, r)) = st.iter().find(|e| e.0 == s) {
+                        i.a = Opnd::R(r);
+                    }
+                }
+            }
+            defs_uses(&i, &mut defs, &mut uses);
+            for &d in &defs {
+                st.retain(|e| e.1 != d);
+            }
+            if is_store {
+                let s = spill_slot(&i.a, first_spill).unwrap();
+                st.retain(|e| e.0 != s);
+                if let Opnd::R(r) = i.b {
+                    st.push((s, r));
+                }
+            } else if let (Some(s), Opnd::R(d)) = (spill_slot(&i.b, first_spill), i.a) {
+                if ((i.op == MOp::Mov && i.sz == 8) || i.op == MOp::MovSd) && !st.iter().any(|e| e.0 == s) {
+                    st.push((s, d));
+                }
+            } else if let Some((d, src)) = i.is_copy() {
+                // a register copy of a slot value is another home for it
+                if let Some(&(s, _)) = st.iter().find(|e| e.1 == src) {
+                    st.push((s, d));
+                }
+            }
+            out.push(i);
+        }
+        mf.blocks[b as usize].insts = out;
+        out_state[b as usize] = Some(st);
+    }
+    // remove stores to slots that are never read
+    let mut reads = vec![0u32; mf.slots.len()];
+    for &b in order {
+        for i in &mf.blocks[b as usize].insts {
+            let is_store = matches!(i.op, MOp::Mov | MOp::MovSd) && spill_slot(&i.a, first_spill).is_some();
+            for (k, o) in [&i.a, &i.b, &i.c].iter().enumerate() {
+                if let Opnd::M(m) = o {
+                    if m.kind == MemKind::Slot && m.id >= first_spill && !(k == 0 && is_store) {
+                        reads[m.id as usize] += 1;
+                    }
+                }
+            }
+        }
+    }
+    for &b in order {
+        mf.blocks[b as usize].insts.retain(|i| {
+            let is_store = matches!(i.op, MOp::Mov | MOp::MovSd);
+            match (is_store, spill_slot(&i.a, first_spill)) {
+                (true, Some(s)) => reads[s as usize] > 0,
+                _ => true,
+            }
+        });
+    }
+}
+
 // spill weight helper
 fn depth_weight(d: u32) -> f64 {
     10f64.powi(d.min(6) as i32)
 }
 
 pub fn allocate(mf: &mut MFunc, order: &[u32]) -> Alloc {
+    let first_spill = mf.slots.len() as u32;
     let mut unspillable: Vec<bool> = vec![false; mf.vclass.len()];
     let mut round = 0;
     loop {
@@ -550,6 +651,9 @@ pub fn allocate(mf: &mut MFunc, order: &[u32]) -> Alloc {
                 mf.blocks[b as usize].insts = out;
             }
             let used_callee_saved: Vec<Reg> = (0..16).filter(|&r| used[r as usize] && callee_saved(r)).collect();
+            if mf.slots.len() as u32 > first_spill {
+                spill_forward(mf, order, first_spill);
+            }
             return Alloc { used_callee_saved };
         }
         if round > 40 {

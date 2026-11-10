@@ -7,6 +7,7 @@ pub mod licm;
 pub mod loadelim;
 pub mod mem2reg;
 pub mod simplify;
+pub mod unroll;
 
 use crate::ir::*;
 
@@ -27,6 +28,24 @@ fn local_opt(f: &mut Func, level: u32) {
         ch |= simplify::run(f);
         if !ch {
             break;
+        }
+    }
+    // fully unroll small constant-trip loops (inner loops become constant as outer ones go)
+    for _ in 0..6 {
+        if !unroll::run(f) {
+            break;
+        }
+        for _ in 0..3 {
+            let mut ch = false;
+            ch |= simplify::run(f);
+            ch |= gvn::run(f);
+            ch |= loadelim::run(f);
+            ch |= mem2reg::run(f);
+            ch |= licm::run(f);
+            ch |= simplify::run(f);
+            if !ch {
+                break;
+            }
         }
     }
     // hoist bounds checks out of counted loops, then clean up what that exposes
