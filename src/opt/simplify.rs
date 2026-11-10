@@ -296,6 +296,58 @@ impl<'a> Ctx<'a> {
                         }
                     }
                 }
+                // (x + c1) << c2  =>  (x << c2) + (c1 << c2) ; (x + c1) * c2  =>  x * c2 + c1 * c2
+                if let Some(k2) = cb {
+                    let ai = self.f.insts[a as usize].clone();
+                    if matches!(op, Shl | Mul) && ai.op == Add {
+                        if let Some(k1) = self.c(ai.args[1]) {
+                            let x = ai.args[0];
+                            let inner = self.mk(op, ty, vec![x, b]);
+                            let kc = self.konst(ty, fold_bin(op, ty, k1, k2).unwrap());
+                            self.set(v, Add, vec![inner, kc], 0);
+                            return None;
+                        }
+                    }
+                }
+                if op == Xor || op == Or {
+                    let (ai, bi) = (self.f.insts[a as usize].clone(), self.f.insts[b as usize].clone());
+                    if ai.op == And && bi.op == And && self.uses.get(a as usize).copied().unwrap_or(2) == 1 && self.uses.get(b as usize).copied().unwrap_or(2) == 1 {
+                        // bit select: (x & y) ^ (~x & z)  =>  z ^ (x & (y ^ z))
+                        let is_not = |s: &Self, n: V, x: V| -> bool {
+                            let ni = &s.f.insts[n as usize];
+                            ni.op == Xor && s.c(ni.args[1]) == Some(-1) && ni.args[0] == x
+                        };
+                        let mut sel: Option<(V, V, V)> = None;
+                        for (p, q) in [(&ai, &bi), (&bi, &ai)] {
+                            for pi in 0..2 {
+                                for qi in 0..2 {
+                                    if sel.is_none() && is_not(self, q.args[qi], p.args[pi]) {
+                                        sel = Some((p.args[pi], p.args[1 - pi], q.args[1 - qi]));
+                                    }
+                                }
+                            }
+                        }
+                        if let Some((x, y, z)) = sel {
+                            let yz = self.mk(Xor, ty, vec![y, z]);
+                            let m = self.mk(And, ty, vec![x, yz]);
+                            self.set(v, Xor, vec![z, m], 0);
+                            return None;
+                        }
+                        // (x & y) ^ (x & z)  =>  x & (y ^ z)
+                        if op == Xor {
+                            for pi in 0..2 {
+                                for qi in 0..2 {
+                                    if ai.args[pi] == bi.args[qi] {
+                                        let x = ai.args[pi];
+                                        let yz = self.mk(Xor, ty, vec![ai.args[1 - pi], bi.args[1 - qi]]);
+                                        self.set(v, And, vec![x, yz], 0);
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // rotate idioms: (x >>> n) | (x << (bits - n))
                 if op == Or || op == Xor || op == Add {
                     if let Some(r) = self.match_rotate(a, b, ty) {

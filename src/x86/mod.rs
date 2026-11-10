@@ -55,18 +55,18 @@ pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
     let mut fpool_ix: HashMap<u64, u32> = HashMap::new();
     let mut funcs = Vec::new();
     for fid in fids {
-        {
+        let aliases = {
             let f = &mut m.funcs[fid as usize];
             crate::opt::cleanup::prune_unreachable(f);
-            isel::split_critical_edges(f);
             crate::opt::cleanup::trivial_phis(f);
             crate::opt::cleanup::dce(f);
-        }
+            isel::split_critical_edges(f)
+        };
         let f = &m.funcs[fid as usize];
         let cfg = Cfg::new(f);
         let loops = Loops::new(f, &cfg);
         let depths: Vec<u32> = (0..f.blocks.len()).map(|b| loops.depth(b as B)).collect();
-        let mut mf = isel::select(f, m, &depths);
+        let mut mf = isel::select(f, m, &depths, &aliases);
         let layout: Vec<u32> = block_layout(f);
         let alloc = regalloc::allocate(&mut mf, &layout);
         let local: Vec<u32> = mf

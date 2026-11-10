@@ -22,8 +22,8 @@ struct Affine {
     ext: Option<Op>,
     // root of the inner expression (the value below the extension)
     inner: V,
-    // +1 when the index grows with the induction variable, -1 when it shrinks
-    dir: i64,
+    // index = coef * iv + invariant
+    coef: i64,
 }
 
 fn is_trap_block(f: &Func, b: B) -> bool {
@@ -108,7 +108,7 @@ fn match_affine(f: &Func, idx: V, iv: &Iv, in_loop: &[bool], def_block: &[B]) ->
         }
     };
     // walk down the inner chain
-    let mut dir = 1i64;
+    let mut coef = 1i64;
     let mut v = inner;
     let mut depth = 0;
     loop {
@@ -139,11 +139,27 @@ fn match_affine(f: &Func, idx: V, iv: &Iv, in_loop: &[bool], def_block: &[B]) ->
                 if invariant(b) && !invariant(a) {
                     v = a;
                 } else if invariant(a) && !invariant(b) {
-                    dir = -dir;
+                    coef = -coef;
                     v = b;
                 } else {
                     return None;
                 }
+            }
+            Op::Mul | Op::Shl if ext.is_none() && iv.ty == T::I64 => {
+                let k = f.is_const(i.args[1])?;
+                let m = if i.op == Op::Shl {
+                    if !(0..31).contains(&k) {
+                        return None;
+                    }
+                    1i64 << k
+                } else {
+                    k
+                };
+                if m <= 0 || m > (1 << 31) || coef.abs() > (1 << 31) {
+                    return None;
+                }
+                coef *= m;
+                v = i.args[0];
             }
             _ => return None,
         }
@@ -151,7 +167,7 @@ fn match_affine(f: &Func, idx: V, iv: &Iv, in_loop: &[bool], def_block: &[B]) ->
     if f.insts[inner as usize].ty != iv.ty {
         return None;
     }
-    Some(Affine { ext, inner, dir: dir * iv.step })
+    Some(Affine { ext, inner, coef })
 }
 
 // rebuild the index expression in block `pre` with the induction variable replaced by `at`
@@ -288,10 +304,19 @@ fn hoist_in_loop(f: &mut Func, cfg: &Cfg, loops: &Loops, li: usize) -> bool {
                 let e_last = build(f, last_eff);
                 let c1 = f.push(pre, Op::Ult, T::I8, vec![e_first, len], 0);
                 let c2 = f.push(pre, Op::Ult, T::I8, vec![e_last, len], 0);
-                let c3 = if a.dir > 0 { f.push(pre, Op::Ule, T::I8, vec![e_first, e_last], 0) } else { f.push(pre, Op::Ule, T::I8, vec![e_last, e_first], 0) };
+                let dir = a.coef.signum() * iv.step;
+                let c3 = if dir > 0 { f.push(pre, Op::Ule, T::I8, vec![e_first, e_last], 0) } else { f.push(pre, Op::Ule, T::I8, vec![e_last, e_first], 0) };
                 add_check(f, &mut cur, c1, trap);
                 add_check(f, &mut cur, c2, trap);
                 add_check(f, &mut cur, c3, trap);
+                if a.coef.abs() > 1 {
+                    // the trip count must be small enough that coef * iv cannot wrap; when it is
+                    // not, some access is out of bounds anyway
+                    let d = if iv.step > 0 { f.push(pre, Op::Sub, T::I64, vec![last_eff, iv.start], 0) } else { f.push(pre, Op::Sub, T::I64, vec![iv.start, last_eff], 0) };
+                    let lim = f.push(pre, Op::Const, T::I64, vec![], i64::MAX / a.coef.abs());
+                    let c4 = f.push(pre, Op::Ule, T::I8, vec![d, lim], 0);
+                    add_check(f, &mut cur, c4, trap);
+                }
                 let _ = idx;
             }
         }

@@ -3,32 +3,118 @@ use super::mir::*;
 use crate::ir::*;
 use std::collections::HashMap;
 
-// Split critical edges so that phi copies have a place to live. A loop back edge whose phis are
-// only used inside the loop is left alone: its copies are emitted in the latch before the branch.
-pub fn split_critical_edges(f: &mut Func) {
+// A header phi `p` whose old value is needed after the loop is found in the register of the
+// header phi `q` that receives it on the back edge.
+pub struct ExitAlias {
+    pub p: V,
+    pub q: V,
+    pub header: B,
+}
+
+// Split critical edges so that phi copies have a place to live. A loop back edge is left alone
+// when the loop is only left through its latch (or through traps): its copies are emitted in
+// the latch before the branch, and uses of header phis after the loop are redirected.
+pub fn split_critical_edges(f: &mut Func) -> Vec<ExitAlias> {
     let cfg = Cfg::new(f);
     let loops = Loops::new(f, &cfg);
     let preds = f.preds();
     let nb = f.blocks.len();
     let def_block = f.block_of();
-    // for every header phi: is it used outside its loop?
-    let phi_escapes = |f: &Func, header: B, li: usize| -> bool {
+    let mut aliases: Vec<ExitAlias> = Vec::new();
+    // can the back edge latch -> header stay unsplit? returns the aliases needed after the loop
+    let analyze = |f: &Func, latch: B, header: B, other: B, c: V| -> Option<Vec<ExitAlias>> {
+        if !cfg.reachable(latch) || !cfg.dom(header, latch) {
+            return None;
+        }
+        let li = (0..loops.loops.len()).find(|&li| loops.loops[li].header == header)?;
+        let l = &loops.loops[li];
+        if l.latches.len() != 1 || loops.contains(li, other) {
+            return None;
+        }
         let phis: Vec<V> = f.blocks[header as usize].insts.iter().copied().take_while(|v| f.insts[*v as usize].op == Op::Phi).collect();
+        if phis.is_empty() {
+            return None;
+        }
+        // the branch condition (and what gets folded into it) must not read the header phis
+        let is_hphi = |v: V| f.insts[v as usize].op == Op::Phi && def_block[v as usize] == header;
+        let ci = &f.insts[c as usize];
+        if is_hphi(c) || (ci.op.is_cmp() && ci.args.iter().any(|a| is_hphi(*a))) {
+            return None;
+        }
+        if ci.args.iter().any(|a| {
+            let ai = &f.insts[*a as usize];
+            matches!(ai.op, Op::And | Op::Load | Op::Add) && ai.args.iter().any(|x| is_hphi(*x))
+        }) {
+            return None;
+        }
+        // every other way out of the loop must be a trap
+        let mut trap_exits: Vec<B> = Vec::new();
+        for &b in &l.blocks {
+            for s in f.succs(b) {
+                if loops.contains(li, s) || (b == latch && s == other) {
+                    continue;
+                }
+                if f.blocks[s as usize].term != Term::Trap {
+                    return None;
+                }
+                trap_exits.push(s);
+            }
+            if matches!(f.blocks[b as usize].term, Term::Ret(_)) {
+                return None;
+            }
+        }
+        // phis used after the loop need a partner that receives them on the back edge
+        let mut out = Vec::new();
         for b in 0..nb {
             if !cfg.reachable(b as B) || loops.contains(li, b as B) {
                 continue;
             }
+            let mut used: Vec<V> = Vec::new();
             for &v in &f.blocks[b].insts {
-                if f.insts[v as usize].args.iter().any(|a| phis.contains(a)) {
-                    return true;
+                for a in &f.insts[v as usize].args {
+                    if phis.contains(a) {
+                        used.push(*a);
+                    }
                 }
             }
-            if f.term_uses(b as B).iter().any(|a| phis.contains(a)) {
-                return true;
+            for a in f.term_uses(b as B) {
+                if phis.contains(&a) {
+                    used.push(a);
+                }
+            }
+            if used.is_empty() {
+                continue;
+            }
+            if trap_exits.contains(&(b as B)) {
+                return None;
+            }
+            for p in used {
+                let partner = phis.iter().copied().find(|&q| {
+                    let qi = &f.insts[q as usize];
+                    q != p && qi.pb.iter().zip(qi.args.iter()).any(|(pb, a)| *pb == latch && *a == p)
+                })?;
+                out.push(ExitAlias { p, q: partner, header });
             }
         }
-        false
+        Some(out)
     };
+    // decide first (on the unmodified CFG), then split
+    let mut keep: Vec<(B, B)> = Vec::new();
+    for b in 0..nb {
+        if let Term::Br(c, t, e) = f.blocks[b].term.clone() {
+            if t == e {
+                continue;
+            }
+            for (s, other) in [(t, e), (e, t)] {
+                if preds[s as usize].len() > 1 {
+                    if let Some(al) = analyze(f, b as B, s, other, c) {
+                        aliases.extend(al);
+                        keep.push((b as B, s));
+                    }
+                }
+            }
+        }
+    }
     for b in 0..nb {
         if let Term::Br(c, t, e) = f.blocks[b].term.clone() {
             if t == e {
@@ -39,29 +125,7 @@ pub fn split_critical_edges(f: &mut Func) {
             let mut ne = e;
             for (which, s) in [(0, t), (1, e)] {
                 if preds[s as usize].len() > 1 {
-                    let other = if which == 0 { e } else { t };
-                    // back edge b -> s of a loop that the other successor leaves
-                    let mut keep = false;
-                    if cfg.reachable(b as B) && cfg.dom(s, b as B) {
-                        if let Some(li) = (0..loops.loops.len()).find(|&li| loops.loops[li].header == s) {
-                            let has_phi = f.blocks[s as usize].insts.first().map(|v| f.insts[*v as usize].op == Op::Phi).unwrap_or(false);
-                            if has_phi && !loops.contains(li, other) && preds[other as usize].len() == 1 {
-                                // the branch condition must not read the header phis
-                                let is_hphi = |v: V| f.insts[v as usize].op == Op::Phi && def_block[v as usize] == s;
-                                let ci = &f.insts[c as usize];
-                                let cond_ok = !is_hphi(c) && !(ci.op.is_cmp() && ci.args.iter().any(|a| is_hphi(*a)));
-                                // values folded into the compare (and operand) must not be phis either
-                                let deep_ok = !ci.args.iter().any(|a| {
-                                    let ai = &f.insts[*a as usize];
-                                    matches!(ai.op, Op::And | Op::Load | Op::Add) && ai.args.iter().any(|x| is_hphi(*x))
-                                });
-                                if cond_ok && deep_ok && !phi_escapes(f, s, li) {
-                                    keep = true;
-                                }
-                            }
-                        }
-                    }
-                    if keep {
+                    if keep.contains(&(b as B, s)) {
                         continue;
                     }
                     let nbk = f.new_block();
@@ -87,6 +151,7 @@ pub fn split_critical_edges(f: &mut Func) {
             f.blocks[b].term = Term::Br(c, nt, ne);
         }
     }
+    aliases
 }
 
 fn sz_of(t: T) -> u8 {
@@ -126,10 +191,20 @@ struct Sel<'a> {
     clob: Vec<u32>,
     cur_clob: u32,
     cur_block: B,
+    exit_alias: HashMap<V, (V, usize)>,
+    loops: Loops,
 }
 
-pub fn select(f: &Func, m: &Module, depths: &[u32]) -> MFunc {
+pub fn select(f: &Func, m: &Module, depths: &[u32], aliases: &[ExitAlias]) -> MFunc {
     let n = f.insts.len();
+    let cfg = Cfg::new(f);
+    let loops = Loops::new(f, &cfg);
+    let mut exit_alias: HashMap<V, (V, usize)> = HashMap::new();
+    for a in aliases {
+        if let Some(li) = (0..loops.loops.len()).find(|&li| loops.loops[li].header == a.header) {
+            exit_alias.insert(a.p, (a.q, li));
+        }
+    }
     let mut s = Sel {
         f,
         m,
@@ -147,6 +222,8 @@ pub fn select(f: &Func, m: &Module, depths: &[u32]) -> MFunc {
         clob: vec![0; n],
         cur_clob: 0,
         cur_block: 0,
+        exit_alias,
+        loops,
     };
     for b in 0..f.blocks.len() {
         s.mf.blocks.push(MBlock { insts: Vec::new(), succs: f.succs(b as B), depth: depths.get(b).copied().unwrap_or(0), align: false });
@@ -292,6 +369,13 @@ impl<'a> Sel<'a> {
                 r
             }
             _ => {
+                if let Some(&(q, li)) = self.exit_alias.get(&v) {
+                    if !self.loops.contains(li, self.cur_block) {
+                        // after the loop the old value of this phi lives in its partner
+                        self.needed[q as usize] = true;
+                        return self.vr(q);
+                    }
+                }
                 self.needed[v as usize] = true;
                 self.vr(v)
             }

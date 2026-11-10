@@ -135,11 +135,12 @@ pub struct MemRef {
     pub addr: Addr,
     pub size: i64,
     pub class: u32,
+    pub ptr: V, // the address value itself
 }
 
 pub fn memref(f: &Func, v: V) -> MemRef {
     let i = &f.insts[v as usize];
-    MemRef { addr: decompose(f, i.args[0]), size: i.ty.size() as i64, class: i.aux }
+    MemRef { addr: decompose(f, i.args[0]), size: i.ty.size() as i64, class: i.aux, ptr: i.args[0] }
 }
 
 pub fn may_alias(a: &MemRef, b: &MemRef, esc: &[bool]) -> bool {
@@ -154,6 +155,9 @@ pub fn may_alias(a: &MemRef, b: &MemRef, esc: &[bool]) -> bool {
         }
         _ => {}
     }
+    if a.ptr == b.ptr && a.ptr != NOV {
+        return true;
+    }
     if a.addr.base == b.addr.base {
         if let (Some(oa), Some(ob)) = (a.addr.off, b.addr.off) {
             return oa < ob + b.size && ob < oa + a.size;
@@ -163,5 +167,8 @@ pub fn may_alias(a: &MemRef, b: &MemRef, esc: &[bool]) -> bool {
 }
 
 pub fn must_alias(a: &MemRef, b: &MemRef) -> bool {
-    a.addr.base == b.addr.base && a.addr.off.is_some() && a.addr.off == b.addr.off && a.size == b.size
+    if a.size != b.size {
+        return false;
+    }
+    (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && a.addr.off.is_some() && a.addr.off == b.addr.off)
 }

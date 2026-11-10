@@ -4,6 +4,7 @@ use crate::ir::*;
 
 #[derive(Clone)]
 struct Avail {
+    ptr: V,
     mref_addr: Addr,
     size: i64,
     class: u32,
@@ -13,7 +14,7 @@ struct Avail {
 }
 
 fn mr(a: &Avail) -> MemRef {
-    MemRef { addr: a.mref_addr, size: a.size, class: a.class }
+    MemRef { addr: a.mref_addr, size: a.size, class: a.class, ptr: a.ptr }
 }
 
 pub fn run(f: &mut Func) -> bool {
@@ -75,7 +76,7 @@ pub fn run(f: &mut Func) -> bool {
                                     a.pending_store = None;
                                 }
                             }
-                            st.push(Avail { mref_addr: m.addr, size: m.size, class: m.class, ty, val: v, pending_store: None });
+                            st.push(Avail { ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty, val: v, pending_store: None });
                         }
                     }
                 }
@@ -93,7 +94,7 @@ pub fn run(f: &mut Func) -> bool {
                         }
                     }
                     st.retain(|a| !may_alias(&mr(a), &m, &esc));
-                    st.push(Avail { mref_addr: m.addr, size: m.size, class: m.class, ty, val, pending_store: Some(v) });
+                    st.push(Avail { ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty, val, pending_store: Some(v) });
                 }
                 Op::Call | Op::CallInd | Op::Syscall | Op::MemCpy | Op::MemSet => {
                     // may read or write anything reachable: only non-escaped stack slots survive
