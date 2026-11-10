@@ -52,7 +52,8 @@ done
 echo "== standard library: tests, documentation, static linking =="
 # every module has at least one test and a documentation page
 for m in math rand time mem input window audio image asset; do
-  ls tests/std/${m}*.al tests/sys/${m}*.al >/dev/null 2>&1 || { echo "FAIL: no test for module $m"; fail=1; }
+  n=$(ls tests/std/${m}*.al tests/sys/${m}*.al 2>/dev/null | wc -l)
+  [[ $n -gt 0 ]] || { echo "FAIL: no test for module $m"; fail=1; }
   [[ -s docs/std/$m.md ]] || { echo "FAIL: docs/std/$m.md is missing"; fail=1; }
 done
 ls tests/run/vectors.al tests/run/overload.al tests/c/f32.al >/dev/null 2>&1 || { echo "FAIL: f32 / vector language tests are missing"; fail=1; }
