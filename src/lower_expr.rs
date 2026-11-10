@@ -267,7 +267,12 @@ impl<'c, 'a> Fx<'c, 'a> {
             self.err(pos, format!("type `{}` cannot be used as a value here", n));
             return Val::err();
         }
-        self.err(pos, format!("unknown identifier `{}`", n));
+        let hint = match n {
+            "null" | "NULL" | "None" | "nullptr" => " (the null pointer is `nil`)",
+            "self" | "this" => " (methods are plain functions: name the receiver parameter explicitly)",
+            _ => "",
+        };
+        self.err(pos, format!("unknown identifier `{}`{}", n, hint));
         Val::err()
     }
 

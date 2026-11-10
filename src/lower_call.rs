@@ -260,7 +260,16 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let fv = self.expr(c, None);
                     return self.call_indirect(fv, args, pos);
                 }
-                self.err(pos, format!("unknown function `{}`", n));
+                let hint = match n.as_str() {
+                    "println" | "printf" | "echo" | "puts" | "console" => " (use `print(a, b, ...)`)",
+                    "length" | "size" | "count" => " (use `len(x)`)",
+                    "malloc" | "calloc" => " (use `alloc[T](n)` or `new[T]()`)",
+                    "str" | "string" | "to_string" | "format" | "sprintf" => " (use `fmt(a, b, ...)`)",
+                    "append" => " (use a `Vec`: `v.push(x)`)",
+                    "int" | "float" => " (convert with a type name: `i64(x)`, `f64(x)`)",
+                    _ => "",
+                };
+                self.err(pos, format!("unknown function `{}`{}", n, hint));
                 for a in args {
                     self.expr(a, None);
                 }

@@ -67,7 +67,24 @@ impl<'a> Parser<'a> {
     }
     fn err<T>(&mut self, msg: &str) -> R<T> {
         let d = self.tok_desc();
-        self.errs.push(Diag { pos: self.pos(), msg: format!("{}, found {}", msg, d) });
+        // habits from other languages get a direct pointer to the AL spelling
+        let hint = match self.peek() {
+            Tk::Id(s) => match s.as_str() {
+                "let" | "mut" | "auto" | "val" => " (declare variables with `name := value` or `var name T`)",
+                "func" | "def" | "function" | "pub" => " (functions are declared with `fn name(args) Result { }`)",
+                "and" => " (use `&&`)",
+                "or" => " (use `||`)",
+                "not" => " (use `!`)",
+                "import" => " (use `use \"file.al\"`)",
+                "switch" => " (use `match`)",
+                "elif" | "elsif" => " (use `else if`)",
+                _ => "",
+            },
+            Tk::P(p) if *p == "+" || *p == "-" => " (there is no `++`/`--`/`->`: use `x += 1`, and write result types without an arrow)",
+            Tk::P(p) if *p == ":" => " (types follow names without a colon: `x i64`)",
+            _ => "",
+        };
+        self.errs.push(Diag { pos: self.pos(), msg: format!("{}, found {}{}", msg, d, hint) });
         Err(())
     }
     fn expect_p(&mut self, p: &str) -> R<()> {

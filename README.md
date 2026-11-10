@@ -22,7 +22,7 @@ cargo build --release
 | `src/lexer.rs`, `parser.rs`, `ast.rs` | front end |
 | `src/types.rs`, `lower*.rs` | type checking fused with lowering to SSA IR |
 | `src/ir.rs` | SSA IR, dominators, loop analysis |
-| `src/opt/` | mem2reg/SROA, simplifier (const folding, strength reduction, magic-number division, CFG cleanup, jump threading), GVN with condition propagation, load/store elimination, LICM, inlining, full and partial loop unrolling, bounds-check hoisting and merging |
+| `src/opt/` | mem2reg/SROA, simplifier (const folding, strength reduction, magic-number division, CFG cleanup, jump threading, if-conversion), GVN with condition propagation, load/store elimination, LICM, inlining, tail-recursion elimination, full and partial loop unrolling, bounds-check hoisting and merging |
 | `src/x86/` | instruction selection (addressing modes, load folding, compare/branch fusion), graph-colouring register allocation with coalescing, peepholes, encoder with branch relaxation |
 | `src/elf.rs` | static ELF writer / linker |
 | `src/prelude.al` | runtime and standard library, written in AL |

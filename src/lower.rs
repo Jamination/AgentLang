@@ -255,7 +255,15 @@ impl<'a> Cx<'a> {
                 if let Some(ei) = self.find_enum(n.as_str()) {
                     return self.inst_enum(ei, targs, *pos);
                 }
-                self.err(*pos, format!("unknown type `{}`", n));
+                let hint = match n.as_str() {
+                    "int" | "long" | "isize" | "usize" | "uint" | "size_t" => " (integer types are i8 i16 i32 i64 u8 u16 u32 u64; the default is i64)",
+                    "float" | "double" | "f32" => " (the floating-point type is f64)",
+                    "string" | "String" | "char" | "byte" => " (text is `str`, a byte is `u8`)",
+                    "boolean" => " (use `bool`)",
+                    "void" => " (omit the result type instead)",
+                    _ => "",
+                };
+                self.err(*pos, format!("unknown type `{}`{}", n, hint));
                 T_ERR
             }
             TypeAst::Ptr(e) => {
