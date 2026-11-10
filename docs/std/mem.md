@@ -43,7 +43,7 @@ zeroed when it is handed out again.
 | `kb(n i64) i64`, `mb(n i64) i64` | `n` kibibytes / mebibytes in bytes: `arena_new(mb(4))`. |
 | `mem_used() i64` | Bytes of the program arena currently in use. Print the difference across a frame or a level to find leaks: it must return to the same value. |
 | `as_bytes[T](s []T) []u8` | The memory of a slice as bytes (a view, nothing is copied): for writing typed data to files, hashing, uploading to a GPU. |
-| `from_bytes[T](b []u8) []T` | The reverse view: `from_bytes[Vertex](data)`. Trailing bytes that do not fill a `T` are dropped. `b` must be suitably aligned for `T` (memory from `alloc`, `read_bytes` and `embed` data is). |
+| `from_bytes[T](b []u8) []T` | The reverse view: `from_bytes[Vertex](data)`. Trailing bytes that do not fill a `T` are dropped. `b` must be suitably aligned for `T` (memory from `alloc` and `read_bytes` is). |
 | `zero[T](p *T)` | Sets the value `p` points to to all zero bytes. |
 | `zero[T](s []T)` | Sets every element of `s` to all zero bytes. |
 

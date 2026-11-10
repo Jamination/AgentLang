@@ -1,0 +1,8 @@
+extern function `takes_struct`: P cannot cross the C boundary (pass integers, floats and pointers)
+extern function `returns_vec`: vec3 cannot cross the C boundary (pass integers, floats and pointers)
+`area` is already declared with these parameter types at tests/fail/extern.al:5:1
+vec3(...) needs 3 components (or a single f32 for all of them), got 2
+vec3 has no component `q` (components: xyz; swizzles like `.xy` or `.zyx` are allowed)
+operands have different types: vec3 and f64 (vectors combine with the same vector type or with f32)
+cannot take the address of a vector component (copy it to a variable first)
+argument `a` of `area`: expected vec2, found str

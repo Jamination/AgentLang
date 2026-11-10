@@ -1330,7 +1330,7 @@ struct __Png {
     channels i64     // bytes per pixel of the decoded image
     npal i64
     trns bool        // grey or RGB with a transparent colour, or a palette with alpha
-    key [3]i64       // the transparent colour
+    key [4]i64       // the transparent colour (grey or RGB samples)
     pal [1024]u8     // palette as RGBA
 }
 
@@ -1363,7 +1363,7 @@ fn __png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
         }
     } else if ft == 3 {
         for i in 0..bpp {
-            cur[i] = src[i] + prev[i] >> 1
+            cur[i] = src[i] + (prev[i] >> 1)
         }
         for i in bpp..n {
             cur[i] = src[i] + u8((i64(cur[i - bpp]) + i64(prev[i])) >> 1)

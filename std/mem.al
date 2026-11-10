@@ -4,8 +4,8 @@
 // AL has one arena: alloc/new bump a pointer, mark()/release(m) give back everything allocated
 // since the mark. The pieces here structure that for a game:
 //   - frame_begin()/frame_end(): scratch memory that lives for one frame (or one nested scope)
-//   - Arena: a fixed block with its own cursor, for data with its own lifetime (a level, a
-//     menu, an audio thread) that must survive releases of the main arena
+//   - Arena: a fixed block with its own cursor, for data whose lifetime does not nest with
+//     the frame and level marks (it stays valid across releases of marks taken after it)
 //   - Pool[T]: objects created and destroyed individually, addressed by generational handles
 //   - Ring[T], SparseSet: fixed queues and integer sets without per-operation allocation
 // Typical layout: allocate long-lived state first, take `level := mark()` and load the level,
@@ -161,6 +161,7 @@ fn pool_growable[T](cap i64) Pool[T] {
     return p
 }
 
+// doubles the storage; only called when the free list is empty, so `free` starts afresh
 fn __pool_grow[T](p *Pool[T]) {
     cap := max(len(p.items) * 2, 8)
     items := alloc[T](cap)

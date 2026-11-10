@@ -347,6 +347,7 @@ fn get_bool(c *Config, key str, default bool) bool {
 }
 
 // ---------- JSON ----------
+// the kind of a JSON value
 enum JsonKind { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }
 
 // One value of a parsed JSON document.
@@ -371,6 +372,7 @@ fn __json_peek(p *__JsonReader) u8 {
     return 0
 }
 
+// the value of 4 hex digits at s[i..], or -1
 fn __json_hex4(s str, i i64) i64 {
     if i + 4 > len(s) {
         return -1
@@ -378,11 +380,13 @@ fn __json_hex4(s str, i i64) i64 {
     v := 0
     for k in i..i + 4 {
         c := s[k]
-        d := if c >= '0' && c <= '9' { i64(c - '0') } else if c >= 'a' && c <= 'f' { i64(c - 'a') + 10 } else if c >= 'A' && c <= 'F' { i64(c - 'A') + 10 } else { -1 }
-        if d < 0 {
+        if c >= '0' && c <= '9' {
+            v = v * 16 + i64(c - '0')
+        } else if (c | 0x20) >= 'a' && (c | 0x20) <= 'f' {
+            v = v * 16 + i64(c | 0x20) - 'a' + 10
+        } else {
             return -1
         }
-        v = v * 16 + d
     }
     return v
 }
@@ -534,6 +538,10 @@ fn __json_items(p *__JsonReader, close u8) []Json {
     return items.items()
 }
 
+fn __json_in_number(c u8) bool {
+    return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
+}
+
 fn __json_value(p *__JsonReader, out *Json) {
     c := __json_peek(p)
     if c == '{' {
@@ -556,7 +564,7 @@ fn __json_value(p *__JsonReader, out *Json) {
         __json_word(p, "null")
     } else {
         start := p.i
-        while p.i < len(p.s) && ((p.s[p.i] >= '0' && p.s[p.i] <= '9') || p.s[p.i] == '-' || p.s[p.i] == '+' || p.s[p.i] == '.' || p.s[p.i] == 'e' || p.s[p.i] == 'E') {
+        while p.i < len(p.s) && __json_in_number(p.s[p.i]) {
             p.i += 1
         }
         out.kind = JsonNumber

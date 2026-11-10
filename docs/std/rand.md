@@ -10,7 +10,8 @@ Always available (no `use`). Source: `std/rand.al`.
 - A process-wide default generator for code that does not care (`rand_u64`, `rand_range`, ...).
 - Hash-based gradient noise (`noise2`, `noise3`, `fbm2`): pure functions of their arguments.
 
-Nothing in this module allocates, reads the clock or touches the operating system. There is
+Nothing in this module allocates, reads the clock or touches the operating system (its only
+dependency is `log` from [math](math.md), for `normal`). There is
 deliberately no "seed from time" function: pass `u64(time_ns())` to `rng` if you want a
 different game every run, and log the seed so that the run can be reproduced.
 

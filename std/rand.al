@@ -149,24 +149,6 @@ fn unit_vec3(r *Rng) vec3 {
     return vec3(p.x * k, p.y * k, 1.0 - 2.0 * d)
 }
 
-// natural logarithm for x > 0 (private: keeps this module independent of std.math)
-fn __rand_ln(x f64) f64 {
-    bits := cast[u64](x)
-    e := i64((bits >> 52) & 0x7FF) - 1023
-    m := cast[f64]((bits & 0x000FFFFFFFFFFFFF) | 0x3FF0000000000000)
-    if m > 1.4142135623730951 {
-        m = m * 0.5
-        e += 1
-    }
-    t := (m - 1.0) / (m + 1.0)
-    t2 := t * t
-    p := 1.0 / 19.0
-    for k in 17..=1 by -2 {
-        p = p * t2 + 1.0 / f64(k)
-    }
-    return 2.0 * t * p + f64(e) * 0.6931471805599453
-}
-
 // normally distributed value with the given mean and standard deviation (Marsaglia polar method)
 fn normal(r *Rng, mean f32, stddev f32) f32 {
     loop {
@@ -174,7 +156,7 @@ fn normal(r *Rng, mean f32, stddev f32) f32 {
         v := next_f64(r) * 2.0 - 1.0
         s := u * u + v * v
         if s < 1.0 && s > 0.0 {
-            return mean + stddev * f32(u * sqrt(-2.0 * __rand_ln(s) / s))
+            return mean + stddev * f32(u * sqrt(-2.0 * log(s) / s))
         }
     }
 }
