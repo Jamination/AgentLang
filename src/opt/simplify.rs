@@ -1244,6 +1244,113 @@ pub fn simplify_cfg(f: &mut Func) -> bool {
         cleanup::prune_unreachable(f);
         changed = true;
     }
+    // 6. if-conversion: tiny side-effect-free arms become selects (conditional moves)
+    loop {
+        if !super::enabled("ifconv") {
+            break;
+        }
+        let preds = f.preds();
+        let mut did = false;
+        for b in f.rpo() {
+            let (c, t, e) = match f.blocks[b as usize].term {
+                Term::Br(c, t, e) if t != e => (c, t, e),
+                _ => continue,
+            };
+            let side = |f: &Func, x: B| -> Option<B> {
+                if x == 0 || preds[x as usize].len() != 1 {
+                    return None;
+                }
+                let j = match f.blocks[x as usize].term {
+                    Term::Jmp(j) => j,
+                    _ => return None,
+                };
+                let insts = &f.blocks[x as usize].insts;
+                let mut real = 0;
+                for &v in insts {
+                    let op = f.insts[v as usize].op;
+                    let cheap = matches!(
+                        op,
+                        Op::Const | Op::FConst | Op::GAddr | Op::FAddr | Op::Add | Op::Sub | Op::And | Op::Or | Op::Xor | Op::Shl | Op::LShr | Op::AShr | Op::SExt | Op::ZExt | Op::Trunc
+                    );
+                    if !cheap {
+                        return None;
+                    }
+                    if !matches!(op, Op::Const | Op::FConst | Op::GAddr | Op::FAddr) {
+                        real += 1;
+                    }
+                }
+                if real > 2 {
+                    return None;
+                }
+                Some(j)
+            };
+            let (tb, eb, j) = match (side(f, t), side(f, e)) {
+                (Some(j1), Some(j2)) if j1 == j2 && j1 != t && j1 != e => (Some(t), Some(e), j1),
+                (Some(j1), _) if j1 == e => (Some(t), None, e),
+                (_, Some(j2)) if j2 == t => (None, Some(e), t),
+                _ => continue,
+            };
+            if j == b || j == 0 {
+                continue;
+            }
+            let from_t = tb.unwrap_or(b);
+            let from_e = eb.unwrap_or(b);
+            // the join's phis decide whether this is worth it
+            let phis: Vec<V> = f.blocks[j as usize].insts.iter().copied().take_while(|v| f.insts[*v as usize].op == Op::Phi).collect();
+            let mut pairs: Vec<(V, V, V)> = Vec::new();
+            let mut ok = true;
+            let mut selects = 0;
+            for &ph in &phis {
+                let i = &f.insts[ph as usize];
+                let vt = i.pb.iter().position(|x| *x == from_t).map(|k| i.args[k]);
+                let ve = i.pb.iter().position(|x| *x == from_e).map(|k| i.args[k]);
+                match (vt, ve) {
+                    (Some(vt), Some(ve)) => {
+                        if vt != ve {
+                            if !i.ty.is_int() {
+                                ok = false;
+                            }
+                            selects += 1;
+                        }
+                        pairs.push((ph, vt, ve));
+                    }
+                    _ => ok = false,
+                }
+            }
+            if !ok || selects == 0 || selects > 2 {
+                continue;
+            }
+            // hoist both arms into b and merge the values with selects
+            for x in [tb, eb].into_iter().flatten() {
+                let moved = std::mem::take(&mut f.blocks[x as usize].insts);
+                f.blocks[b as usize].insts.extend(moved);
+            }
+            for (ph, vt, ve) in pairs {
+                let ty = f.insts[ph as usize].ty;
+                let nv = if vt == ve { vt } else { f.push(b, Op::Select, ty, vec![c, vt, ve], 0) };
+                let i = f.im(ph);
+                let mut k = 0;
+                while k < i.pb.len() {
+                    if i.pb[k] == from_t || i.pb[k] == from_e {
+                        i.pb.remove(k);
+                        i.args.remove(k);
+                    } else {
+                        k += 1;
+                    }
+                }
+                i.pb.push(b);
+                i.args.push(nv);
+            }
+            f.blocks[b as usize].term = Term::Jmp(j);
+            did = true;
+            break;
+        }
+        if !did {
+            break;
+        }
+        cleanup::prune_unreachable(f);
+        changed = true;
+    }
     // normalize `br c, t, t`
     for b in 0..f.blocks.len() {
         if let Term::Br(_, t, e) = f.blocks[b].term {
