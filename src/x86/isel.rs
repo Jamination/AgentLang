@@ -78,6 +78,33 @@ pub fn split_critical_edges(f: &mut Func) -> Vec<ExitAlias> {
                 return None;
             }
         }
+        // Instruction selection may evaluate address arithmetic and compares lazily at their
+        // use. Anything computed from a header phi inside the loop that could be re-evaluated
+        // after the loop would then read the already-updated phi register: keep the edge split.
+        let mut derived: Vec<V> = phis.clone();
+        let mut qi = 0;
+        while qi < derived.len() {
+            let x = derived[qi];
+            qi += 1;
+            for &b in &l.blocks {
+                for &u in &f.blocks[b as usize].insts {
+                    let ui = &f.insts[u as usize];
+                    let lazy = matches!(ui.op, Op::Add | Op::Sub | Op::Shl | Op::Mul | Op::And) || ui.op.is_cmp();
+                    if lazy && ui.args.contains(&x) && !derived.contains(&u) {
+                        derived.push(u);
+                    }
+                }
+            }
+        }
+        for b in 0..nb {
+            if !cfg.reachable(b as B) || loops.contains(li, b as B) {
+                continue;
+            }
+            let lazy_use = |a: &V| derived.contains(a) && !phis.contains(a);
+            if f.blocks[b].insts.iter().any(|v| f.insts[*v as usize].args.iter().any(lazy_use)) || f.term_uses(b as B).iter().any(lazy_use) {
+                return None;
+            }
+        }
         // phis used after the loop need a partner that receives them on the back edge
         let mut out = Vec::new();
         for b in 0..nb {

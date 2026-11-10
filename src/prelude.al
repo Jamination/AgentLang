@@ -1356,3 +1356,87 @@ fn args() []str {
     }
     return out
 }
+
+// ---------- text helpers ----------
+// s right-aligned in a field of `width` characters (padded on the left with `fill`)
+fn pad_left(s str, width i64, fill u8) str {
+    if len(s) >= width {
+        return s
+    }
+    out := alloc[u8](width)
+    k := width - len(s)
+    for i in 0..k {
+        out[i] = fill
+    }
+    memcopy(cast[i64](ptr(out)) + k, ptr(s), len(s))
+    return out
+}
+
+// s left-aligned in a field of `width` characters
+fn pad_right(s str, width i64, fill u8) str {
+    if len(s) >= width {
+        return s
+    }
+    out := alloc[u8](width)
+    memcopy(ptr(out), ptr(s), len(s))
+    for i in len(s)..width {
+        out[i] = fill
+    }
+    return out
+}
+
+// lower-case hexadecimal digits of x (no prefix)
+fn hex(x u64) str {
+    var b [16]u8
+    i := 16
+    loop {
+        i -= 1
+        d := u8(x & 15)
+        b[i] = if d < 10 { d + '0' } else { d - 10 + 'a' }
+        x = x >> 4
+        if x == 0 {
+            break
+        }
+    }
+    out := alloc[u8](16 - i)
+    memcopy(ptr(out), cast[i64](ptr(b)) + i, 16 - i)
+    return out
+}
+
+fn to_upper(s str) str {
+    out := alloc[u8](len(s))
+    for i, c in s {
+        out[i] = if c >= 'a' && c <= 'z' { c - 32 } else { c }
+    }
+    return out
+}
+
+fn to_lower(s str) str {
+    out := alloc[u8](len(s))
+    for i, c in s {
+        out[i] = if c >= 'A' && c <= 'Z' { c + 32 } else { c }
+    }
+    return out
+}
+
+// concatenation of all parts with sep between them
+fn join(parts []str, sep str) str {
+    n := 0
+    for p in parts {
+        n += len(p)
+    }
+    if len(parts) > 1 {
+        n += len(sep) * (len(parts) - 1)
+    }
+    out := alloc[u8](n)
+    k := 0
+    for i, p in parts {
+        if i > 0 {
+            memcopy(cast[i64](ptr(out)) + k, ptr(sep), len(sep))
+            k += len(sep)
+        }
+        memcopy(cast[i64](ptr(out)) + k, ptr(p), len(p))
+        k += len(p)
+    }
+    return out
+}

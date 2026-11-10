@@ -125,6 +125,19 @@ class Gen:
             name, ptys, rty = r.choice(self.funcs)
             args = ", ".join(self.expr(env, p, depth - 2) for p in ptys)
             return self.conv(f"{name}({args})", rty, ty)
+        if k < 0.955 and getattr(self, "helpers", False):
+            c = r.random()
+            if c < 0.3:
+                e = f"ssum(smix(sv, {self.expr(env, 'i64', depth - 2)}))"
+            elif c < 0.5:
+                e = f"wsum(ga[..], {self.expr(env, 'i64', depth - 2)}, {self.expr(env, 'i64', depth - 2)})"
+            elif c < 0.65:
+                e = f"wsum(ga[4..12], {self.expr(env, 'i64', depth - 2)}, {r.randint(0, 9)})"
+            elif c < 0.8:
+                e = f"fibr({self.expr(env, 'i64', depth - 2)} & 7)"
+            else:
+                e = f"(sv.a + i64(sv.b) + i64(sv.d))"
+            return self.conv(e, "i64", ty)
         if k < 0.97:
             f = r.choice(["popcnt", "ctz", "clz", "bswap"])
             return f"{f}({self.expr(env, ty, depth - 1)})"
@@ -199,6 +212,21 @@ class Gen:
             self.w(f"if {self.expr(env, 'bool', 2)} {{")
             self.w("    " + r.choice(["break", "continue"]))
             self.w("}")
+        elif k < 0.93 and getattr(self, "helpers", False):
+            c = r.random()
+            if c < 0.3:
+                self.w(f"sv = smix(sv, {self.expr(env, 'i64', 2)})")
+            elif c < 0.5:
+                self.w(f"sv.{r.choice(['a', 'a', 'b', 'd'])} += {r.randint(1, 9)}")
+            elif c < 0.7:
+                self.w(f"rot(ga[{r.choice(['..', '2..9', '8..', '..5'])}], {self.expr(env, 'i64', 2)})")
+            elif c < 0.85:
+                self.tmp += 1
+                self.w(f"pa_{self.tmp}, pb_{self.tmp} := pairup({self.expr(env, 'i64', 2)}, {self.expr(env, 'u32', 2)})")
+                self.w(f"sv.b = sv.b + pa_{self.tmp}")
+                self.w(f"sv.a = sv.a ^ pb_{self.tmp}")
+            else:
+                self.w(f"sv.c = sv.c * 0.5 + f64(i8({self.expr(env, 'i64', 2)}))")
         elif k < 0.95:
             self.tmp += 1
             n = f"v_{self.tmp}"
@@ -222,6 +250,48 @@ class Gen:
         self.arrays = [("ga", "i64", 16), ("gb", "u32", 8), ("gc", "u8", 32), ("gd", "f64", 4), ("ge", "i16", 16)]
         for a, t, n in self.arrays:
             self.w(f"var {a} [{n}]{t}")
+        self.w("")
+        # fixed helpers that exercise structs, tuples, slices and run-time loop bounds
+        self.w("struct S { a i64, b u32, c f64, d i16 }")
+        self.w("fn smix(s S, k i64) S {")
+        self.w("    S{a: s.a * 3 + k, b: s.b ^ u32(k), c: s.c * 0.5 + f64(s.d), d: s.d + i16(k)}")
+        self.w("}")
+        self.w("fn ssum(s S) i64 {")
+        self.w("    s.a + i64(s.b) + i64(s.c) + i64(s.d)")
+        self.w("}")
+        self.w("fn pairup(x i64, y u32) (u32, i64) {")
+        self.w("    (y + u32(x), x - i64(y))")
+        self.w("}")
+        self.w("fn wsum(a []i64, lo i64, n i64) i64 {")
+        self.w("    s := 0")
+        self.w("    lo = lo & 7")
+        self.w("    n = min(n & 7, len(a) - lo)")
+        self.w("    for i in lo..lo + n {")
+        self.w("        s += a[i] * (i + 1)")
+        self.w("    }")
+        self.w("    i := len(a) - 1")
+        self.w("    while i >= 0 && a[i] != s {")
+        self.w("        s = s ^ a[i]")
+        self.w("        i -= 2")
+        self.w("    }")
+        self.w("    s")
+        self.w("}")
+        self.w("fn rot(a []i64, k i64) {")
+        self.w("    n := len(a)")
+        self.w("    for r in 0..(k & 3) {")
+        self.w("        t := a[0]")
+        self.w("        for i in 0..n - 1 {")
+        self.w("            a[i] = a[i + 1]")
+        self.w("        }")
+        self.w("        a[n - 1] = t + r")
+        self.w("    }")
+        self.w("}")
+        self.w("fn fibr(n i64) i64 {")
+        self.w("    if n < 2 {")
+        self.w("        return n")
+        self.w("    }")
+        self.w("    fibr(n - 1) + fibr(n - 2)")
+        self.w("}")
         self.w("")
         for fi in range(r.randint(1, 4)):
             ptys = [r.choice(INT_TYPES + ["f64"]) for _ in range(r.randint(1, 4))]
@@ -255,9 +325,14 @@ class Gen:
             n = f"x{i}"
             self.w(f"var {n} {t} = {self.lit(t)}")
             env[n] = t
+        self.w("sv := S{a: 7, b: 9, c: 1.5, d: -3}")
+        self.helpers = True
         for _ in range(r.randint(4, 14)):
             self.stmt(env, 3, False)
         self.ind = 1
+        self.w("print(sv.a, sv.b, sv.d)")
+        self.w("putf(sv.c, 4)")
+        self.w("putc('\\n')")
         names = [n for n in env if n.startswith("x")]
         for n in names:
             if env[n] == "f64":

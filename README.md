@@ -43,3 +43,22 @@ flowchart LR
   H --> I[peephole + encode]
   I --> J[ELF link]
 ```
+
+## Testing
+
+- `tests/run.sh` — conformance suite: programs in `tests/run` are built three ways (default,
+  `-O0`, `--unchecked`) and must print the expected output; `tests/fail` holds programs that
+  must be rejected with given diagnostics; `tests/unit` exercises `alc test`.
+- `tests/gen/fuzz.py [count] [seed]` — differential fuzzer: random programs must behave the same
+  unoptimized, optimized and unchecked, and the optimizer's IR must pass the verifier after every
+  pass (`ALC_DEBUG=verify`).
+- `tests/gen/divconst.py` regenerates the division-by-constant stress test.
+- `ALC_DISABLE=pass,...` switches optimization passes off (`unroll`, `bce`, `licm`, `gvn`,
+  `loadelim`, `checkmerge`, `tre`, `partial`, `thread4`, `thread5`) for bisecting.
+
+## Benchmarks
+
+`./verify.sh` builds each benchmark with `clang -O2` and with `alc` (default mode: bounds and
+division checks **enabled**), requires byte-identical output, and compares the best of 7 runs.
+Both sides use the same algorithms and problem sizes; `binarytrees` uses a bump arena on both
+sides so that the comparison measures generated code rather than `malloc`.
