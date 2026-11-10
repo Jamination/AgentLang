@@ -1,16 +1,103 @@
+pub mod alias;
 pub mod cleanup;
+pub mod gvn;
+pub mod inline;
+pub mod licm;
+pub mod loadelim;
 pub mod mem2reg;
+pub mod simplify;
 
 use crate::ir::*;
 
+fn local_opt(f: &mut Func, level: u32) {
+    cleanup::prune_unreachable(f);
+    mem2reg::run(f);
+    cleanup::dce(f);
+    if level == 0 {
+        return;
+    }
+    for _ in 0..4 {
+        let mut ch = false;
+        ch |= simplify::run(f);
+        ch |= gvn::run(f);
+        ch |= loadelim::run(f);
+        ch |= mem2reg::run(f);
+        ch |= licm::run(f);
+        ch |= simplify::run(f);
+        if !ch {
+            break;
+        }
+    }
+    cleanup::dce(f);
+}
+
 pub fn optimize(m: &mut Module, level: u32) {
+    let n = m.funcs.len();
     for f in m.funcs.iter_mut() {
-        if !f.lowered {
+        if f.lowered {
+            cleanup::prune_unreachable(f);
+            mem2reg::run(f);
+            cleanup::dce(f);
+            if level > 0 {
+                simplify::run(f);
+            }
+        }
+    }
+    if level == 0 {
+        return;
+    }
+    // call graph facts
+    let mut call_counts = vec![0u32; n];
+    let mut addr_taken = vec![false; n];
+    let mut callees: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for (fi, f) in m.funcs.iter().enumerate() {
+        for b in &f.blocks {
+            for &v in &b.insts {
+                let i = &f.insts[v as usize];
+                match i.op {
+                    Op::Call => {
+                        call_counts[i.k as usize] += 1;
+                        callees[fi].push(i.k as u32);
+                    }
+                    Op::FAddr => addr_taken[i.k as usize] = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+    addr_taken[m.entry as usize] = true;
+    // bottom-up order (post-order DFS from every function)
+    let mut order: Vec<u32> = Vec::new();
+    let mut state = vec![0u8; n];
+    for root in 0..n as u32 {
+        if state[root as usize] != 0 {
             continue;
         }
-        cleanup::prune_unreachable(f);
-        mem2reg::run(f);
-        cleanup::dce(f);
+        let mut stack: Vec<(u32, usize)> = vec![(root, 0)];
+        state[root as usize] = 1;
+        while let Some(&mut (fx, ref mut ci)) = stack.last_mut() {
+            if *ci < callees[fx as usize].len() {
+                let c = callees[fx as usize][*ci];
+                *ci += 1;
+                if state[c as usize] == 0 {
+                    state[c as usize] = 1;
+                    stack.push((c, 0));
+                }
+            } else {
+                order.push(fx);
+                stack.pop();
+            }
+        }
     }
-    let _ = level;
+    let pol = inline::Policy { small: 40, hinted: 400, single_site: 150, max_caller: 4000 };
+    let mut done = vec![false; n];
+    for fid in order {
+        if m.funcs[fid as usize].lowered {
+            local_opt(&mut m.funcs[fid as usize], level);
+            if inline::run(m, fid, &done, &call_counts, &addr_taken, &pol) {
+                local_opt(&mut m.funcs[fid as usize], level);
+            }
+        }
+        done[fid as usize] = true;
+    }
 }
