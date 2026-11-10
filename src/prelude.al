@@ -10,9 +10,31 @@ var __obuf [65536]u8
 var __olen i64
 var __tests_failed i64
 
+var __sigstack [32768]u8
+
+noinline fn __on_fault(sig i64) never {
+    if sig == 8 {
+        __die("panic: arithmetic fault (division by zero or overflow)", "", "")
+    }
+    __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
+}
+
 fn __rt_init(sp i64) {
     __argc = cast[*i64](sp)[0]
     __argv = sp + 8
+    // report crashes as panics: handlers run on their own stack so that stack overflow works too
+    var ss [3]i64
+    ss[0] = cast[i64](ptr(__sigstack))
+    ss[2] = 32768
+    syscall(131, ptr(ss), 0)
+    var sa [4]i64
+    sa[0] = cast[i64](__on_fault)
+    // SA_ONSTACK | SA_RESTORER | SA_NODEFER
+    sa[1] = 0x08000000 | 0x04000000 | 0x40000000
+    sa[2] = cast[i64](__on_fault)
+    syscall(13, 11, ptr(sa), 0, 8)
+    syscall(13, 7, ptr(sa), 0, 8)
+    syscall(13, 8, ptr(sa), 0, 8)
 }
 
 // ---------- process ----------

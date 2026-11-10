@@ -8,6 +8,7 @@ pub mod licm;
 pub mod loadelim;
 pub mod mem2reg;
 pub mod simplify;
+pub mod tre;
 pub mod unroll;
 
 use crate::ir::*;
@@ -80,13 +81,16 @@ fn local_opt(f: &mut Func, level: u32) {
 
 pub fn optimize(m: &mut Module, level: u32) {
     let n = m.funcs.len();
-    for f in m.funcs.iter_mut() {
+    for (fid, f) in m.funcs.iter_mut().enumerate() {
         if f.lowered {
             cleanup::prune_unreachable(f);
             mem2reg::run(f);
             cleanup::dce(f);
             if level > 0 {
                 simplify::run(f);
+                if enabled("tre") && tre::run(f, fid as u32) {
+                    simplify::run(f);
+                }
             }
         }
     }
