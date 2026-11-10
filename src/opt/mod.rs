@@ -21,7 +21,22 @@ pub fn enabled(name: &str) -> bool {
     }
 }
 
+pub fn trace(what: &str, f: &Func) {
+    match std::env::var("ALC_DEBUG").as_deref() {
+        Ok("trace") => eprintln!("[trace] {} {} (size {})", what, f.name, f.size()),
+        Ok("verify") => {
+            // `what` names the pass about to run, so a failure belongs to the previous one
+            if let Err(e) = verify(f) {
+                eprintln!("IR verification failed before `{}` in {}: {}\n{}", what, f.name, e, print_func(f, None));
+                std::process::exit(3);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn local_opt(f: &mut Func, level: u32) {
+    trace("local_opt", f);
     cleanup::prune_unreachable(f);
     mem2reg::run(f);
     cleanup::dce(f);
@@ -30,22 +45,30 @@ fn local_opt(f: &mut Func, level: u32) {
     }
     for _ in 0..4 {
         let mut ch = false;
+        trace("simplify", f);
         ch |= simplify::run(f);
+        trace("gvn", f);
         ch |= enabled("gvn") && gvn::run(f);
         ch |= enabled("checkmerge") && checkmerge::run(f);
+        trace("loadelim", f);
         ch |= enabled("loadelim") && loadelim::run(f);
+        trace("mem2reg", f);
         ch |= mem2reg::run(f);
+        trace("licm", f);
         ch |= enabled("licm") && licm::run(f);
+        trace("simplify2", f);
         ch |= simplify::run(f);
         if !ch {
             break;
         }
     }
+    trace("unroll-phase", f);
     // fully unroll small constant-trip loops (inner loops become constant as outer ones go)
     for _ in 0..6 {
         if !enabled("unroll") || !unroll::run(f) {
             break;
         }
+        trace("after-unroll", f);
         if std::env::var("ALC_DEBUG").map(|v| v == "unroll").unwrap_or(false) {
             eprintln!("after unroll:\n{}", print_func(f, None));
         }
@@ -68,15 +91,18 @@ fn local_opt(f: &mut Func, level: u32) {
         if !enabled("bce") || !bce::run(f) {
             break;
         }
+        trace("after-bce", f);
         gvn::run(f);
         if enabled("checkmerge") {
             checkmerge::run(f);
         }
+        trace("after-bce-gvn", f);
         simplify::run(f);
         licm::run(f);
         simplify::run(f);
     }
     cleanup::dce(f);
+    trace("end-local-opt", f);
 }
 
 pub fn optimize(m: &mut Module, level: u32) {
@@ -89,6 +115,7 @@ pub fn optimize(m: &mut Module, level: u32) {
             if level > 0 {
                 simplify::run(f);
                 if enabled("tre") && tre::run(f, fid as u32) {
+                    trace("after-tre", f);
                     simplify::run(f);
                 }
             }
@@ -146,6 +173,7 @@ pub fn optimize(m: &mut Module, level: u32) {
         if m.funcs[fid as usize].lowered {
             local_opt(&mut m.funcs[fid as usize], level);
             if inline::run(m, fid, &done, &call_counts, &addr_taken, &pol) {
+                trace("after-inline", &m.funcs[fid as usize]);
                 local_opt(&mut m.funcs[fid as usize], level);
             }
         }

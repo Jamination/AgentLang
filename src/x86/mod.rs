@@ -66,9 +66,12 @@ pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
         let cfg = Cfg::new(f);
         let loops = Loops::new(f, &cfg);
         let depths: Vec<u32> = (0..f.blocks.len()).map(|b| loops.depth(b as B)).collect();
+        crate::opt::trace("isel", f);
         let mut mf = isel::select(f, m, &depths, &aliases);
         let layout: Vec<u32> = block_layout(f);
+        crate::opt::trace("regalloc", f);
         let alloc = regalloc::allocate(&mut mf, &layout);
+        crate::opt::trace("emit", f);
         let local: Vec<u32> = mf
             .fconsts
             .iter()
@@ -79,6 +82,9 @@ pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
                 })
             })
             .collect();
+        if std::env::var("ALC_DEBUG").map(|v| v == "mir").unwrap_or(false) {
+            eprint!("{}", mir::print_mfunc(&mf));
+        }
         let code = emit::emit(&mut mf, &alloc, &layout, &local);
         if dump_asm {
             print!("{}", mir::print_mfunc(&mf));

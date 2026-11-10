@@ -115,7 +115,6 @@ impl<'c, 'a> Fx<'c, 'a> {
             EK::Field(b, name) => {
                 if name == "len" {
                     // .len on slices and arrays
-                    let save = self.cx.errs.len();
                     let bv = self.expr(b, None);
                     if let Some(v) = self.len_of(bv) {
                         return v;

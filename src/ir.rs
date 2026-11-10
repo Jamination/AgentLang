@@ -45,7 +45,6 @@ impl T {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Op {
-    Nop,
     Const,  // k = value (sign-extended to i64, canonical for type)
     FConst, // k = f64 bits
     Param,  // k = index
@@ -96,7 +95,6 @@ pub enum Op {
     ZExt,
     Trunc,
     SIToF,
-    UIToF,
     FToSI,
     BitsToF,
     FToBits,
@@ -134,12 +132,8 @@ impl Op {
         use Op::*;
         !matches!(
             self,
-            Nop | Param | Alloca | SDiv | UDiv | SRem | URem | Load | Store | Call | CallInd | Syscall | Proj | Phi | MemCpy | MemSet
+            Param | Alloca | SDiv | UDiv | SRem | URem | Load | Store | Call | CallInd | Syscall | Proj | Phi | MemCpy | MemSet
         )
-    }
-    pub fn has_side_effect(self) -> bool {
-        use Op::*;
-        matches!(self, Store | Call | CallInd | Syscall | MemCpy | MemSet | SDiv | UDiv | SRem | URem)
     }
     pub fn swap_cmp(self) -> Op {
         use Op::*;
@@ -271,9 +265,6 @@ impl Func {
         let v = self.mk(op, ty, args, k);
         self.blocks[b as usize].insts.push(v);
         v
-    }
-    pub fn i(&self, v: V) -> &Inst {
-        &self.insts[v as usize]
     }
     pub fn im(&mut self, v: V) -> &mut Inst {
         &mut self.insts[v as usize]
@@ -423,6 +414,7 @@ pub struct Cfg {
     pub rpo: Vec<B>,
     pub rpo_idx: Vec<u32>,
     pub preds: Vec<Vec<B>>,
+    #[allow(dead_code)]
     pub idom: Vec<B>,
     pub children: Vec<Vec<B>>,
     pre: Vec<u32>,
@@ -672,4 +664,75 @@ pub fn print_func(f: &Func, m: Option<&Module>) -> String {
     }
     let _ = writeln!(s, "}}");
     s
+}
+
+// ---------- verifier (debugging aid: ALC_DEBUG=verify) ----------
+pub fn verify(f: &Func) -> Result<(), String> {
+    let cfg = Cfg::new(f);
+    let n = f.insts.len();
+    let mut def_block = vec![u32::MAX; n];
+    let mut def_pos = vec![0usize; n];
+    for &b in &cfg.rpo {
+        for (pi, &v) in f.blocks[b as usize].insts.iter().enumerate() {
+            if def_block[v as usize] != u32::MAX {
+                return Err(format!("%{} appears twice (b{} and b{})", v, def_block[v as usize], b));
+            }
+            def_block[v as usize] = b;
+            def_pos[v as usize] = pi;
+        }
+    }
+    for &b in &cfg.rpo {
+        let blk = &f.blocks[b as usize];
+        let mut seen_non_phi = false;
+        for (pi, &v) in blk.insts.iter().enumerate() {
+            let i = &f.insts[v as usize];
+            if i.op == Op::Phi {
+                if seen_non_phi {
+                    return Err(format!("phi %{} after non-phi in b{}", v, b));
+                }
+                let mut pbs = i.pb.clone();
+                pbs.sort();
+                let mut ps = cfg.preds[b as usize].clone();
+                ps.sort();
+                ps.dedup();
+                if pbs != ps {
+                    return Err(format!("phi %{} in b{} has inputs from {:?} but predecessors are {:?}", v, b, i.pb, cfg.preds[b as usize]));
+                }
+                for (k, &a) in i.args.iter().enumerate() {
+                    let db = def_block[a as usize];
+                    if db == u32::MAX {
+                        return Err(format!("phi %{} in b{} uses %{} which is not defined in reachable code", v, b, a));
+                    }
+                    if !cfg.dom(db, i.pb[k]) {
+                        return Err(format!("phi %{} in b{}: input %{} (b{}) does not dominate predecessor b{}", v, b, a, db, i.pb[k]));
+                    }
+                }
+            } else {
+                seen_non_phi = true;
+                for &a in &i.args {
+                    let db = def_block[a as usize];
+                    if db == u32::MAX {
+                        return Err(format!("%{} in b{} uses %{} which is not defined in reachable code", v, b, a));
+                    }
+                    if db == b {
+                        if def_pos[a as usize] >= pi {
+                            return Err(format!("%{} in b{} uses %{} before its definition", v, b, a));
+                        }
+                    } else if !cfg.dom(db, b) {
+                        return Err(format!("%{} in b{} uses %{} (b{}) which does not dominate it", v, b, a, db));
+                    }
+                }
+            }
+        }
+        for a in f.term_uses(b) {
+            let db = def_block[a as usize];
+            if db == u32::MAX || !cfg.dom(db, b) {
+                return Err(format!("terminator of b{} uses %{} which does not dominate it", b, a));
+            }
+        }
+        if blk.term == Term::None {
+            return Err(format!("b{} has no terminator", b));
+        }
+    }
+    Ok(())
 }

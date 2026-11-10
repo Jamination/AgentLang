@@ -15,6 +15,7 @@ pub fn run(f: &mut Func) -> bool {
     let mut table: HashMap<Key, V> = HashMap::new();
     let mut known: HashMap<V, bool> = HashMap::new();
     let mut changed = false;
+    let mut bool_consts: [V; 2] = [NOV, NOV];
     fn find(repl: &[V], mut v: V) -> V {
         while repl[v as usize] != NOV {
             v = repl[v as usize];
@@ -67,10 +68,13 @@ pub fn run(f: &mut Func) -> bool {
                         // a condition decided by a dominating branch is a constant here
                         if let Some(&val) = known.get(&r) {
                             if f.insts[r as usize].op != Op::Const {
-                                let c = f.mk(Op::Const, T::I8, vec![], val as i64);
-                                repl.push(NOV);
-                                new.push(c);
-                                r = c;
+                                // the constants live at the top of the entry block
+                                let slot = val as usize;
+                                if bool_consts[slot] == NOV {
+                                    bool_consts[slot] = f.mk(Op::Const, T::I8, vec![], val as i64);
+                                    repl.push(NOV);
+                                }
+                                r = bool_consts[slot];
                                 changed = true;
                             }
                         }
@@ -114,6 +118,13 @@ pub fn run(f: &mut Func) -> bool {
                 }
             }
         }
+    }
+    let extra: Vec<V> = bool_consts.iter().copied().filter(|c| *c != NOV).collect();
+    if !extra.is_empty() {
+        // after the entry block's phis there are none: block 0 has no predecessors
+        let mut e = extra;
+        e.extend(f.blocks[0].insts.iter().copied());
+        f.blocks[0].insts = e;
     }
     if changed {
         f.apply_repl(&mut repl);

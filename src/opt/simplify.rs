@@ -133,9 +133,6 @@ impl<'a> Ctx<'a> {
     fn op(&self, v: V) -> Op {
         self.f.insts[v as usize].op
     }
-    fn arg(&self, v: V, i: usize) -> V {
-        self.f.insts[v as usize].args[i]
-    }
 
     // returns Some(w) when v should be replaced by the existing value w
     fn simplify(&mut self, v: V) -> Option<V> {
@@ -842,7 +839,13 @@ pub fn simplify_cfg(f: &mut Func) -> bool {
     }
     changed |= cleanup::prune_unreachable(f);
     // 2. merge straight-line blocks
+    let mut guard_merge = 0u32;
     loop {
+        guard_merge += 1;
+        if guard_merge > 20000 {
+            eprintln!("simplify_cfg: step merge does not converge in {}", f.name);
+            break;
+        }
         let preds = f.preds();
         let mut merged = false;
         let mut repl: Vec<V> = vec![NOV; f.insts.len()];
@@ -894,7 +897,13 @@ pub fn simplify_cfg(f: &mut Func) -> bool {
         changed = true;
     }
     // 3. skip empty forwarding blocks
+    let mut guard_forward = 0u32;
     loop {
+        guard_forward += 1;
+        if guard_forward > 20000 {
+            eprintln!("simplify_cfg: step forward does not converge in {}", f.name);
+            break;
+        }
         let preds = f.preds();
         let mut did = false;
         for e in f.rpo() {
@@ -967,7 +976,16 @@ pub fn simplify_cfg(f: &mut Func) -> bool {
         changed = true;
     }
     // 4. thread jumps through blocks that only branch on a phi of constants
+    let mut guard_thread4 = 0u32;
     loop {
+        guard_thread4 += 1;
+        if !super::enabled("thread4") {
+            break;
+        }
+        if guard_thread4 > 20000 {
+            eprintln!("simplify_cfg: step thread4 does not converge in {}", f.name);
+            break;
+        }
         let preds = f.preds();
         let uses = f.use_counts();
         let mut did = false;
@@ -1073,7 +1091,16 @@ pub fn simplify_cfg(f: &mut Func) -> bool {
     }
     // 5. a merge block that only re-tests a flag every predecessor sets to a constant:
     //    send each predecessor straight to its destination
+    let mut guard_thread5 = 0u32;
     loop {
+        guard_thread5 += 1;
+        if !super::enabled("thread5") {
+            break;
+        }
+        if guard_thread5 > 20000 {
+            eprintln!("simplify_cfg: step thread5 does not converge in {}", f.name);
+            break;
+        }
         let cfg = Cfg::new(f);
         let def_block = f.block_of();
         let mut did = false;
@@ -1233,9 +1260,13 @@ pub fn run(f: &mut Func) -> bool {
     let mut any = false;
     for _ in 0..50 {
         let mut ch = false;
+        super::trace("  fold", f);
         ch |= fold_insts(f);
+        super::trace("  cfg", f);
         ch |= simplify_cfg(f);
+        super::trace("  phis", f);
         ch |= cleanup::trivial_phis(f);
+        super::trace("  dce", f);
         ch |= cleanup::dce(f);
         if !ch {
             break;

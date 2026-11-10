@@ -834,6 +834,21 @@ impl<'a> Cx<'a> {
                 }
                 true
             }
+            (EK::Ident(n), TyK::Fn(ptys, rty)) => {
+                // address of a (non-generic) function
+                let di = match self.find_fn(n) {
+                    Some(di) if self.fn_decls[di].tparams.is_empty() => di,
+                    _ => return false,
+                };
+                let fid = self.inst_fn(di, vec![]);
+                if self.fn_sigs[fid as usize] != (ptys.clone(), *rty) {
+                    self.err(e.pos, format!("function `{}` does not have the type {}", n, self.types.name(ty)));
+                    return false;
+                }
+                relocs.push((off as u32, RelocTarget::Func(fid)));
+                true
+            }
+            (EK::Nil, TyK::Ptr(_)) | (EK::Nil, TyK::Fn(..)) => true,
             _ => {
                 let v = match self.const_eval(e) {
                     Some(v) => v,

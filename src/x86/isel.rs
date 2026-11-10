@@ -302,7 +302,7 @@ pub fn select(f: &Func, m: &Module, depths: &[u32], aliases: &[ExitAlias]) -> MF
                 rev.push(MInst::new(MOp::Mov, 8, Opnd::R(d), Opnd::I(f.insts[v as usize].k)));
                 continue;
             }
-            if matches!(op, Op::Phi | Op::Param | Op::Alloca | Op::Const | Op::FConst | Op::GAddr | Op::FAddr | Op::Proj | Op::Nop) {
+            if matches!(op, Op::Phi | Op::Param | Op::Alloca | Op::Const | Op::FConst | Op::GAddr | Op::FAddr | Op::Proj) {
                 continue;
             }
             if crate::opt::cleanup::is_root(op) || s.needed[v as usize] {
@@ -968,7 +968,14 @@ impl<'a> Sel<'a> {
                         mi.c = Opnd::I(k);
                         self.out.push(mi);
                     }
-                    _ => self.binop(v, MOp::Imul, true),
+                    Some(_) => {
+                        // a constant too wide for an immediate: multiply two registers
+                        let ar = self.reg(a);
+                        let br = self.reg(b);
+                        self.e(MOp::Mov, 8, Opnd::R(d), Opnd::R(ar));
+                        self.e(MOp::Imul, osz(ty), Opnd::R(d), Opnd::R(br));
+                    }
+                    None => self.binop(v, MOp::Imul, true),
                 }
             }
             Op::And => {
@@ -1147,13 +1154,6 @@ impl<'a> Sel<'a> {
                 };
                 self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
                 self.e(MOp::Cvtsi2sd, if st == T::I64 { 8 } else { 4 }, Opnd::R(d), s);
-            }
-            Op::UIToF => {
-                // lowered in the frontend; treat as signed
-                let d = self.vr(v);
-                let s = self.reg(i.args[0]);
-                self.e(MOp::Zero, 8, Opnd::R(d), Opnd::None);
-                self.e(MOp::Cvtsi2sd, 8, Opnd::R(d), Opnd::R(s));
             }
             Op::FToSI => {
                 let d = self.vr(v);

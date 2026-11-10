@@ -308,7 +308,7 @@ fn hoist_in_loop(f: &mut Func, cfg: &Cfg, loops: &Loops, li: usize) -> bool {
     }
     // build the chain of hoisted checks: pre -> n1 -> ... -> header
     let mut cur = pre;
-    let mut add_check = |f: &mut Func, cur: &mut B, cond: V, trap: B| {
+    let add_check = |f: &mut Func, cur: &mut B, cond: V, trap: B| {
         let nb = f.new_block();
         f.blocks[nb as usize].term = Term::Jmp(h);
         f.blocks[*cur as usize].term = Term::Br(cond, nb, trap);

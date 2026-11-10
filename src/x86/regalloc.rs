@@ -17,9 +17,6 @@ impl BitSet {
     fn clear(&mut self, i: u32) {
         self.w[(i / 64) as usize] &= !(1u64 << (i % 64));
     }
-    fn get(&self, i: u32) -> bool {
-        self.w[(i / 64) as usize] >> (i % 64) & 1 != 0
-    }
     fn union_with(&mut self, o: &BitSet) -> bool {
         let mut ch = false;
         for (a, b) in self.w.iter_mut().zip(o.w.iter()) {

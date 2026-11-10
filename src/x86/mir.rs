@@ -6,9 +6,7 @@ pub const NOREG: Reg = u32::MAX;
 pub const RAX: Reg = 0;
 pub const RCX: Reg = 1;
 pub const RDX: Reg = 2;
-pub const RBX: Reg = 3;
 pub const RSP: Reg = 4;
-pub const RBP: Reg = 5;
 pub const RSI: Reg = 6;
 pub const RDI: Reg = 7;
 pub const R8: Reg = 8;
@@ -21,7 +19,6 @@ pub const VREG0: Reg = 32;
 pub const INT_ARGS: [Reg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
 pub const INT_RETS: [Reg; 4] = [RAX, RDX, RCX, RSI];
 pub const NUM_FLOAT_ARGS: usize = 8;
-pub const NUM_FLOAT_RETS: usize = 4;
 // rbx, rbp, r12-r15
 pub fn callee_saved(r: Reg) -> bool {
     matches!(r, 3 | 5 | 12 | 13 | 14 | 15)
@@ -51,9 +48,6 @@ pub struct Mem {
 impl Mem {
     pub fn new() -> Mem {
         Mem { base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MemKind::Normal, id: 0 }
-    }
-    pub fn base(r: Reg, disp: i32) -> Mem {
-        Mem { base: r, idx: NOREG, scale: 1, disp, kind: MemKind::Normal, id: 0 }
     }
     pub fn slot(id: u32, disp: i32) -> Mem {
         Mem { base: NOREG, idx: NOREG, scale: 1, disp, kind: MemKind::Slot, id }
@@ -132,7 +126,6 @@ pub enum MOp {
 }
 
 pub mod cc {
-    pub const O: u8 = 0;
     pub const B: u8 = 2;
     pub const AE: u8 = 3;
     pub const E: u8 = 4;
