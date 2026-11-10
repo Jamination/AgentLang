@@ -38,8 +38,6 @@ ENUMS_WITHOUT_CONSTANTS = {'D3D12_MESSAGE_ID'}
 RENAMED_INTERFACES = {'ID3D10Blob': 'ID3DBlob'}
 # constants built with function-like macros in the headers (checked by --verify like all others)
 EXTRA_CONSTANTS = [('D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING', 0x1688)]
-# wrapper names that would hide a type of the AL core library get a trailing underscore
-RESERVED_NAMES = {'Map', 'Vec'}
 AL_KEYWORDS = set('fn struct enum const var test use if else while loop for in by return break continue assert match '
                   'defer inline noinline true false nil extern self'.split())
 
@@ -584,10 +582,6 @@ def emit_guids(db, out):
     out.append('')
 
 
-def wrapper_name(name):
-    return name + '_' if name in RESERVED_NAMES else name
-
-
 def emit_interfaces(db, out):
     out.append('// ---- COM interfaces: object = { vt }, vtable = function pointers in header order ' + '-' * 14)
     for name, methods in db.ifaces.items():
@@ -603,10 +597,10 @@ def emit_interfaces(db, out):
             generic = '[%s]' % ', '.join(tparams) if tparams else ''
             if sret:
                 out.append('inline fn %s%s(%s) %s { var r %s; %s; r }' % (
-                    wrapper_name(m.name), generic, ', '.join(params[:]), sret, sret, call))
+                    m.name, generic, ', '.join(params), sret, sret, call))
             else:
                 out.append('inline fn %s%s(%s)%s { %s }' % (
-                    wrapper_name(m.name), generic, ', '.join(params), ' ' + ret if ret else '', call))
+                    m.name, generic, ', '.join(params), ' ' + ret if ret else '', call))
         out.append('')
 
 
@@ -917,7 +911,7 @@ def emit_test(db):
                     args.append('0')
                 else:
                     args.append('%s{}' % pty)
-            out.append('        x.%s(%s)' % (wrapper_name(m.name), ', '.join(args)))
+            out.append('        x.%s(%s)' % (m.name, ', '.join(args)))
         out.append('    }')
     out.append('}')
     out.append('')

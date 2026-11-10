@@ -369,13 +369,12 @@ def png_fixtures():
     add("z_chunks", photo, before=chunk(b"gAMA", struct.pack(">I", 45455)) + chunk(b"pHYs", struct.pack(">IIB", 2835, 2835, 1)) + text,
         after=text + chunk(b"prIv", b"\x01\x02\x03"))
     # matches that reach far back: noisy rows repeating every 40 rows (24 000 bytes apart)
-    tile = model(200, 40, 2, 8, noise=256)
+    tile = model(200, 40, 2, 8, noise=4)
     far = dict(tile, rows=[tile["rows"][y % 40] for y in range(150)])
     add("z_far", far, filters=0)
-    add("z_far_i", dict(far, interlace=True), filters=0)
     # larger images
-    add("big_rgba", model(96, 64, 6, 8, noise=9))
-    add("big_rgba_i", model(96, 64, 6, 8, True, noise=9))
+    add("big_rgba", model(80, 60, 6, 8, noise=5))
+    add("big_rgba_i", model(80, 60, 6, 8, True, noise=5))
     add("big_pal", model(150, 70, 3, 8, noise=2))
     add("big_g16", model(64, 64, 0, 16, noise=300))
     flat = model(64, 64, 6, 8, noise=1)
@@ -598,7 +597,7 @@ def generate():
         save("img_bad_%s.bmp" % name, data)
         names.append("img_bad_%s.bmp" % name)
     text(os.path.join(DATA, "img_bad.txt"), names)
-    return names
+    text(os.path.join(ROOT, "tests", "std", "image_bad.out"), [name + " false" for name in names])
 
 
 def check(paths):

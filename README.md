@@ -2,11 +2,18 @@
 
 AL is a small statically typed language designed to be written by AI agents, and `alc` is its
 compiler: Rust, standard library only, no LLVM. It does its own optimization, instruction
-selection, register allocation, x86-64 encoding and ELF linking, and emits static Linux
-executables that use raw system calls (no libc, no dynamic loader).
+selection, register allocation, x86-64 encoding and ELF linking. Programs are static Linux
+executables that use raw system calls (no libc, no dynamic loader); a program that calls C
+functions (`extern`) is linked dynamically against exactly the libraries it reaches.
+
+It is meant for high-performance software such as games: `f32`, vectors, quaternions and
+matrices are built-in types compiled to SSE code, functions overload on argument types, and a
+game-oriented standard library ships inside the compiler.
 
 - Language reference: [docs/LANGUAGE.md](docs/LANGUAGE.md)
-- Verification (build + conformance tests + benchmarks against `clang -O2`): `./verify.sh`
+- Standard library: [docs/STDLIB.md](docs/STDLIB.md); structuring a game: [docs/GAMES.md](docs/GAMES.md)
+- Verification (build, conformance and library tests, `f32` semantics against clang, the
+  Vulkan triangle, benchmarks against `clang -O2`): `./verify.sh`
 
 ```
 cargo build --release
@@ -24,9 +31,12 @@ cargo build --release
 | `src/ir.rs` | SSA IR, dominators, loop analysis |
 | `src/opt/` | mem2reg/SROA, simplifier (const folding, strength reduction, magic-number division, CFG cleanup, jump threading, if-conversion), GVN with condition propagation, load/store elimination, LICM, inlining, tail-recursion elimination, full and partial loop unrolling, bounds-check hoisting and merging |
 | `src/x86/` | instruction selection (addressing modes, load folding, compare/branch fusion), graph-colouring register allocation with coalescing, peepholes, encoder with branch relaxation |
-| `src/elf.rs` | static ELF writer / linker |
-| `src/prelude.al` | runtime and standard library, written in AL |
-| `tests/` | conformance suite (`tests/run.sh`) |
+| `src/lower_vec.rs` | lowering of the built-in vector / matrix types |
+| `src/elf.rs` | ELF writer / linker (static, or dynamic when C libraries are used) |
+| `src/prelude.al` | runtime and core library, written in AL |
+| `std/` | bundled modules (`use std.<name>`) and the always-loaded math / rand / time / mem |
+| `tools/` | binding generators (`gen_vk.py` from `vk.xml`, `gen_dx12.py` from the D3D12 headers) |
+| `tests/` | conformance suite (`tests/run.sh`): `run`, `std`, `sys`, `check`, `fail`, `unit`, `c` |
 | `bench/` | the ten benchmarks in AL and C (`bench/run.sh` for quick timing) |
 
 ## Compiler pipeline
@@ -52,6 +62,7 @@ flowchart LR
 - `tests/gen/fuzz.py [count] [seed]` — differential fuzzer: random programs must behave the same
   unoptimized, optimized and unchecked, and the optimizer's IR must pass the verifier after every
   pass (`ALC_DEBUG=verify`).
+- `tests/gen/fuzz_vec.py [count] [seed]` — the same for `f32` / vector / matrix code.
 - `tests/gen/divconst.py` regenerates the division-by-constant stress test.
 - `ALC_DISABLE=pass,...` switches optimization passes off (`unroll`, `bce`, `licm`, `gvn`,
   `loadelim`, `checkmerge`, `tre`, `partial`, `thread4`, `thread5`) for bisecting.

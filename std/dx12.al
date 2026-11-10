@@ -4880,7 +4880,7 @@ inline fn GetDevice[T](self *IDXGISurface, riid *GUID, device **T) i32 { self.vt
 // [8] HRESULT IDXGISurface::GetDesc(DXGI_SURFACE_DESC *desc)
 inline fn GetDesc(self *IDXGISurface, desc *DXGI_SURFACE_DESC) i32 { self.vt.GetDesc(self, desc) }
 // [9] HRESULT IDXGISurface::Map(DXGI_MAPPED_RECT *mapped_rect, UINT flags)
-inline fn Map_(self *IDXGISurface, mapped_rect *DXGI_MAPPED_RECT, flags u32) i32 { self.vt.Map(self, mapped_rect, flags) }
+inline fn Map(self *IDXGISurface, mapped_rect *DXGI_MAPPED_RECT, flags u32) i32 { self.vt.Map(self, mapped_rect, flags) }
 // [10] HRESULT IDXGISurface::Unmap()
 inline fn Unmap(self *IDXGISurface) i32 { self.vt.Unmap(self) }
 
@@ -4919,7 +4919,7 @@ inline fn GetDevice[T](self *IDXGISurface1, riid *GUID, device **T) i32 { self.v
 // [8] HRESULT IDXGISurface1::GetDesc(DXGI_SURFACE_DESC *desc)
 inline fn GetDesc(self *IDXGISurface1, desc *DXGI_SURFACE_DESC) i32 { self.vt.GetDesc(self, desc) }
 // [9] HRESULT IDXGISurface1::Map(DXGI_MAPPED_RECT *mapped_rect, UINT flags)
-inline fn Map_(self *IDXGISurface1, mapped_rect *DXGI_MAPPED_RECT, flags u32) i32 { self.vt.Map(self, mapped_rect, flags) }
+inline fn Map(self *IDXGISurface1, mapped_rect *DXGI_MAPPED_RECT, flags u32) i32 { self.vt.Map(self, mapped_rect, flags) }
 // [10] HRESULT IDXGISurface1::Unmap()
 inline fn Unmap(self *IDXGISurface1) i32 { self.vt.Unmap(self) }
 // [11] HRESULT IDXGISurface1::GetDC(WINBOOL discard, HDC *hdc)
@@ -5374,7 +5374,7 @@ inline fn GetDevice[T](self *IDXGISurface2, riid *GUID, device **T) i32 { self.v
 // [8] HRESULT IDXGISurface2::GetDesc(DXGI_SURFACE_DESC *desc)
 inline fn GetDesc(self *IDXGISurface2, desc *DXGI_SURFACE_DESC) i32 { self.vt.GetDesc(self, desc) }
 // [9] HRESULT IDXGISurface2::Map(DXGI_MAPPED_RECT *mapped_rect, UINT flags)
-inline fn Map_(self *IDXGISurface2, mapped_rect *DXGI_MAPPED_RECT, flags u32) i32 { self.vt.Map(self, mapped_rect, flags) }
+inline fn Map(self *IDXGISurface2, mapped_rect *DXGI_MAPPED_RECT, flags u32) i32 { self.vt.Map(self, mapped_rect, flags) }
 // [10] HRESULT IDXGISurface2::Unmap()
 inline fn Unmap(self *IDXGISurface2) i32 { self.vt.Unmap(self) }
 // [11] HRESULT IDXGISurface2::GetDC(WINBOOL discard, HDC *hdc)
@@ -7652,7 +7652,7 @@ inline fn SetName(self *ID3D12Resource, name *u16) i32 { self.vt.SetName(self, n
 // [7] HRESULT ID3D12Resource::GetDevice(REFIID riid, void **device)
 inline fn GetDevice[T](self *ID3D12Resource, riid *GUID, device **T) i32 { self.vt.GetDevice(self, riid, cast[**u8](device)) }
 // [8] HRESULT ID3D12Resource::Map(UINT sub_resource, const D3D12_RANGE *read_range, void **data)
-inline fn Map_(self *ID3D12Resource, sub_resource u32, read_range *D3D12_RANGE, data **u8) i32 { self.vt.Map(self, sub_resource, read_range, data) }
+inline fn Map(self *ID3D12Resource, sub_resource u32, read_range *D3D12_RANGE, data **u8) i32 { self.vt.Map(self, sub_resource, read_range, data) }
 // [9] void ID3D12Resource::Unmap(UINT sub_resource, const D3D12_RANGE *written_range)
 inline fn Unmap(self *ID3D12Resource, sub_resource u32, written_range *D3D12_RANGE) { self.vt.Unmap(self, sub_resource, written_range) }
 // [10] D3D12_RESOURCE_DESC * ID3D12Resource::GetDesc(D3D12_RESOURCE_DESC *__ret)
@@ -10928,7 +10928,7 @@ inline fn SetName(self *ID3D12Resource1, name *u16) i32 { self.vt.SetName(self, 
 // [7] HRESULT ID3D12Resource1::GetDevice(REFIID riid, void **device)
 inline fn GetDevice[T](self *ID3D12Resource1, riid *GUID, device **T) i32 { self.vt.GetDevice(self, riid, cast[**u8](device)) }
 // [8] HRESULT ID3D12Resource1::Map(UINT sub_resource, const D3D12_RANGE *read_range, void **data)
-inline fn Map_(self *ID3D12Resource1, sub_resource u32, read_range *D3D12_RANGE, data **u8) i32 { self.vt.Map(self, sub_resource, read_range, data) }
+inline fn Map(self *ID3D12Resource1, sub_resource u32, read_range *D3D12_RANGE, data **u8) i32 { self.vt.Map(self, sub_resource, read_range, data) }
 // [9] void ID3D12Resource1::Unmap(UINT sub_resource, const D3D12_RANGE *written_range)
 inline fn Unmap(self *ID3D12Resource1, sub_resource u32, written_range *D3D12_RANGE) { self.vt.Unmap(self, sub_resource, written_range) }
 // [10] D3D12_RESOURCE_DESC * ID3D12Resource1::GetDesc(D3D12_RESOURCE_DESC *__ret)
@@ -10981,7 +10981,7 @@ inline fn SetName(self *ID3D12Resource2, name *u16) i32 { self.vt.SetName(self, 
 // [7] HRESULT ID3D12Resource2::GetDevice(REFIID riid, void **device)
 inline fn GetDevice[T](self *ID3D12Resource2, riid *GUID, device **T) i32 { self.vt.GetDevice(self, riid, cast[**u8](device)) }
 // [8] HRESULT ID3D12Resource2::Map(UINT sub_resource, const D3D12_RANGE *read_range, void **data)
-inline fn Map_(self *ID3D12Resource2, sub_resource u32, read_range *D3D12_RANGE, data **u8) i32 { self.vt.Map(self, sub_resource, read_range, data) }
+inline fn Map(self *ID3D12Resource2, sub_resource u32, read_range *D3D12_RANGE, data **u8) i32 { self.vt.Map(self, sub_resource, read_range, data) }
 // [9] void ID3D12Resource2::Unmap(UINT sub_resource, const D3D12_RANGE *written_range)
 inline fn Unmap(self *ID3D12Resource2, sub_resource u32, written_range *D3D12_RANGE) { self.vt.Unmap(self, sub_resource, written_range) }
 // [10] D3D12_RESOURCE_DESC * ID3D12Resource2::GetDesc(D3D12_RESOURCE_DESC *__ret)

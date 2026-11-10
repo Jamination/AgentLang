@@ -1,9 +1,10 @@
-[name, fullscreen, volume, video.width, video.height, video.title, input.sensitivity, input.invert, input.empty, input.url]
-Space Game |   padded   | fallback | 0 | http://x/?a=b
+[name, fullscreen, volume, video.width, video.height, video.title, input.sensitivity, input.invert, input.empty, input.url, input.color, input.quoted]
+Space Game |   padded   | fallback | 0 | http://x/?a=b#frag
 1920 720 -1 -1 42
 0.75 0.25 1920.0 1.5
 true false true false
-true false true 10 10
+#ff8800 | a # b ; c | http://x/?a=b#frag
+true false true 12 12
 0 7
 false true 1920
 true true

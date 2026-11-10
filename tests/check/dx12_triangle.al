@@ -39,20 +39,20 @@ struct App {
 }
 
 // HLSL for both stages; the angle and the aspect ratio arrive as root constants.
-fn shader_source() str {
-    join([]str{
-        "cbuffer Params : register(b0) { float angle; float aspect; };",
-        "struct PSInput { float4 position : SV_POSITION; float4 color : COLOR; };",
-        "PSInput VSMain(float3 position : POSITION, float4 color : COLOR) {",
-        "    PSInput o;",
-        "    float s = sin(angle), c = cos(angle);",
-        "    o.position = float4((position.x * c - position.y * s) / aspect, position.x * s + position.y * c, position.z, 1.0);",
-        "    o.color = color;",
-        "    return o;",
-        "}",
-        "float4 PSMain(PSInput input) : SV_TARGET { return input.color; }",
-    }, "\n")
+const SHADER = `
+cbuffer Params : register(b0) { float angle; float aspect; };
+struct PSInput { float4 position : SV_POSITION; float4 color : COLOR; };
+
+PSInput VSMain(float3 position : POSITION, float4 color : COLOR) {
+    PSInput o;
+    float s = sin(angle), c = cos(angle);
+    o.position = float4((position.x * c - position.y * s) / aspect, position.x * s + position.y * c, position.z, 1.0);
+    o.color = color;
+    return o;
 }
+
+float4 PSMain(PSInput input) : SV_TARGET { return input.color; }
+`
 
 fn window_proc(hwnd *u8, msg u32, wparam u64, lparam i64) i64 {
     if msg == WM_DESTROY {
@@ -193,9 +193,8 @@ fn create_pipeline(app *App) {
     com_release(&signature)
     com_release(&errors)
 
-    source := shader_source()
-    vs := compile_shader(source, "VSMain", "vs_5_0")
-    ps := compile_shader(source, "PSMain", "ps_5_0")
+    vs := compile_shader(SHADER, "VSMain", "vs_5_0")
+    ps := compile_shader(SHADER, "PSMain", "ps_5_0")
 
     layout := [2]D3D12_INPUT_ELEMENT_DESC{
         D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: 0,
@@ -248,7 +247,7 @@ fn create_vertex_buffer(app *App) {
         &IID_ID3D12Resource, &app.vertex_buffer), "CreateCommittedResource")
     var mapped *u8
     no_read := D3D12_RANGE{0, 0}
-    dx_check(app.vertex_buffer.Map_(0, &no_read, &mapped), "Map")
+    dx_check(app.vertex_buffer.Map(0, &no_read, &mapped), "Map")
     memcopy(mapped, ptr(vertices), i64(size))
     app.vertex_buffer.Unmap(0, nil)
     app.vertex_view = D3D12_VERTEX_BUFFER_VIEW{app.vertex_buffer.GetGPUVirtualAddress(), u32(size), u32(sizeof[Vertex]())}
