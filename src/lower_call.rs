@@ -750,12 +750,25 @@ impl<'c, 'a> Fx<'c, 'a> {
                 self.call_rt("__panic", vec![], vec![loc, m], pos)
             }
             "fmt" => {
-                self.call_rt("__cap_begin", vec![], vec![], pos);
+                // evaluate everything first: output produced by the arguments themselves is not captured
+                let mut vals = Vec::new();
                 for a in args {
                     let v = self.expr(a, None);
-                    self.put_val(v, a.pos, 0);
+                    let v = if v.mem && v.ty != T_ERR {
+                        let t = self.temp(v.ty);
+                        let tv = self.mval(v.ty, t);
+                        self.store(tv, v);
+                        tv
+                    } else {
+                        v
+                    };
+                    vals.push((v, a.pos));
                 }
-                self.call_rt("__cap_end", vec![], vec![], pos)
+                let start = self.call_rt("__cap_begin", vec![], vec![], pos);
+                for (v, p) in vals {
+                    self.put_val(v, p, 0);
+                }
+                self.call_rt("__cap_end", vec![], vec![start], pos)
             }
             "hash" => {
                 arity!(1);

@@ -701,15 +701,13 @@ var __cap_on i64
 var __cap_buf []u8
 var __cap_len i64
 
-fn __cap_begin() {
-    if __cap_on != 0 {
-        __die("panic: nested fmt() is not supported", "", "")
-    }
-    __cap_on = 1
-    __cap_len = 0
+// captures nest: each fmt() takes the text appended after its starting position
+fn __cap_begin() i64 {
     if len(__cap_buf) == 0 {
         __cap_buf = alloc[u8](256)
     }
+    __cap_on += 1
+    return __cap_len
 }
 
 fn __cap_put(s str) {
@@ -727,10 +725,12 @@ fn __cap_put(s str) {
     __cap_len += n
 }
 
-fn __cap_end() str {
-    __cap_on = 0
-    out := alloc[u8](__cap_len)
-    memcopy(ptr(out), ptr(__cap_buf), __cap_len)
+fn __cap_end(start i64) str {
+    n := __cap_len - start
+    out := alloc[u8](n)
+    memcopy(ptr(out), cast[i64](ptr(__cap_buf)) + start, n)
+    __cap_len = start
+    __cap_on -= 1
     return out
 }
 
