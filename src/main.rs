@@ -32,7 +32,7 @@ struct Args {
 fn usage() -> ! {
     eprintln!(
         "usage: alc <command> <file.al> [options]\n\
-         commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n\
+         commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n\
          options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout"
     );
     std::process::exit(2);
@@ -186,15 +186,98 @@ fn report(names: &[String], errs: &mut Vec<Diag>) -> bool {
     true
 }
 
+fn type_str(t: &TypeAst) -> String {
+    match t {
+        TypeAst::Name(n, args, _) => {
+            if args.is_empty() {
+                n.clone()
+            } else {
+                format!("{}[{}]", n, args.iter().map(type_str).collect::<Vec<_>>().join(", "))
+            }
+        }
+        TypeAst::Ptr(e) => format!("*{}", type_str(e)),
+        TypeAst::Slice(e) => format!("[]{}", type_str(e)),
+        TypeAst::Array(n, e) => {
+            let len = match &n.k {
+                EK::Int(k) => k.to_string(),
+                EK::Ident(name) => name.clone(),
+                _ => "_".into(),
+            };
+            format!("[{}]{}", len, type_str(e))
+        }
+        TypeAst::Fn(ps, r) => {
+            let p = ps.iter().map(type_str).collect::<Vec<_>>().join(", ");
+            match r {
+                Some(r) => format!("fn({}) {}", p, type_str(r)),
+                None => format!("fn({})", p),
+            }
+        }
+        TypeAst::Tuple(ts) => format!("({})", ts.iter().map(type_str).collect::<Vec<_>>().join(", ")),
+    }
+}
+
+// `alc sigs`: one line per declaration, for a quick overview of a file
+fn print_sigs(names: &[String], decls: &[Decl], from_file: u16) {
+    let tp = |t: &Vec<String>| if t.is_empty() { String::new() } else { format!("[{}]", t.join(", ")) };
+    for d in decls {
+        let (pos, text) = match d {
+            Decl::Fn(f) => {
+                let ps = f.params.iter().map(|p| format!("{} {}", p.0, type_str(&p.1))).collect::<Vec<_>>().join(", ");
+                let r = f.ret.as_ref().map(|r| format!(" {}", type_str(r))).unwrap_or_default();
+                (f.pos, format!("fn {}{}({}){}", f.name, tp(&f.tparams), ps, r))
+            }
+            Decl::Struct(s) => {
+                let fs = s.fields.iter().map(|f| format!("{} {}", f.0, type_str(&f.1))).collect::<Vec<_>>().join(", ");
+                (s.pos, format!("struct {}{} {{ {} }}", s.name, tp(&s.tparams), fs))
+            }
+            Decl::Enum(e) => {
+                let vs = e
+                    .variants
+                    .iter()
+                    .map(|v| if v.1.is_empty() { v.0.clone() } else { format!("{}({})", v.0, v.1.iter().map(type_str).collect::<Vec<_>>().join(", ")) })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (e.pos, format!("enum {}{} {{ {} }}", e.name, tp(&e.tparams), vs))
+            }
+            Decl::Const(c) => (c.pos, format!("const {}{}", c.name, c.ty.as_ref().map(|t| format!(" {}", type_str(t))).unwrap_or_default())),
+            Decl::Global(g) => (g.pos, format!("var {}{}", g.name, g.ty.as_ref().map(|t| format!(" {}", type_str(t))).unwrap_or_default())),
+            Decl::Test(t) => (t.pos, format!("test \"{}\"", t.name)),
+            Decl::Use(..) => continue,
+        };
+        if pos.file < from_file {
+            continue;
+        }
+        println!("{}:{}: {}", names.get(pos.file as usize).map(|s| s.as_str()).unwrap_or("?"), pos.line, text);
+    }
+}
+
 fn real_main() -> i32 {
     let args = parse_args();
     let test_mode = args.cmd == "test";
-    if !matches!(args.cmd.as_str(), "build" | "run" | "test" | "check") {
+    if !matches!(args.cmd.as_str(), "build" | "run" | "test" | "check" | "sigs") {
         usage();
     }
     let mut src = Sources { names: Vec::new(), decls: Vec::new(), errs: Vec::new(), seen: HashSet::new() };
     src.add_text("<prelude>", PRELUDE, None);
     src.add_file(Path::new(&args.input), None);
+    if args.cmd == "sigs" {
+        // `alc sigs <file> --` with "std" as input lists the standard library
+        if report(&src.names, &mut src.errs) {
+            return 1;
+        }
+        let from = if args.rest.iter().any(|a| a == "std") { 0 } else { 1 };
+        let decls: Vec<Decl> = if from == 0 {
+            src.decls.iter().filter(|d| match d {
+                Decl::Fn(f) => !f.name.starts_with("__"),
+                Decl::Global(g) => !g.name.starts_with("__"),
+                _ => true,
+            }).cloned().collect()
+        } else {
+            src.decls.clone()
+        };
+        print_sigs(&src.names, &decls, from);
+        return 0;
+    }
     // tests become functions; the entry point is synthesized
     let mut tests: Vec<String> = Vec::new();
     let mut main_ret = false;
