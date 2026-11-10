@@ -89,7 +89,10 @@ alc test tour.al       # run the test blocks
 | Type | Meaning |
 |------|---------|
 | `i8 i16 i32 i64`, `u8 u16 u32 u64` | integers; arithmetic wraps around |
-| `f64` | IEEE-754 double |
+| `f64`, `f32` | IEEE-754 double / single |
+| `vec2 vec3 vec4` | vectors of 2 / 3 / 4 `f32` (8 / 12 / 16 bytes, C-compatible); held in one SSE register |
+| `quat` | quaternion `(x, y, z, w)` of `f32`, `w` is the scalar part |
+| `mat4` | 4x4 `f32` matrix: four `vec4` columns (column-major, 64 bytes) |
 | `bool` | `true` / `false` |
 | `*T` | pointer to `T` (may be `nil`) |
 | `[]T` | slice: pointer + length, a view of elements stored elsewhere |
@@ -101,7 +104,8 @@ alc test tour.al       # run the test blocks
 
 There are no implicit conversions between types. Untyped numeric literals take the type the
 context asks for (`var x u8 = 200`, `x * 2`, `f(3)`); without context an integer literal is
-`i64` and a float literal is `f64`. An integer literal is accepted where an `f64` is expected.
+`i64` and a float literal is `f64`. An integer literal is accepted where a float is expected,
+and a literal next to an `f32` or a vector is an `f32` (`v * 2.0`, `x + 1`).
 
 Structs, tuples, arrays and enums are values: assignment, argument passing and returning copy
 them. Slices and pointers are references to shared storage.
@@ -126,6 +130,8 @@ var table = [4]i64{1, 2, 4, 8}             // global with a constant initializer
 var ops = [2]fn(i64) i64{double, negate}   //   (function names are constants too)
 test "name" { ... }                        // unit test, run by `alc test`
 use "other.al"                             // include another file (path relative to this file)
+use std.window                             // a module bundled with the compiler (see docs/STDLIB.md)
+extern "libc.so.6" fn getpid() i32         // a C function from a shared library (no body)
 ```
 
 - The program starts at `fn main()`; `fn main() i64` returns the exit status.
@@ -133,6 +139,11 @@ use "other.al"                             // include another file (path relativ
 - Enum variant names live in the global namespace (`Red`, `Some(1)`), so they must be unique.
 - A user declaration may reuse a standard-library name (for example your own `push` or `Vec`);
   the library keeps using its own definitions internally.
+- **Overloading**: a function name may be defined several times with different parameter types.
+  A call picks the definition whose parameter matches the type of the receiver (`x.f()`) or of
+  the first argument that is not an untyped literal; with only literals, the definition that
+  accepts the literal kind (and, if several do, returns the expected type) is chosen.
+  `fn area(c Circle) f32`, `fn area(r Rect) f32`, `fn length(v vec3) f32`, `fn length(v vec2) f32`.
 
 ## Statements
 
@@ -388,6 +399,55 @@ Everything above is checked. These features are not, and exist for low-level cod
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
   different scalar type (except through `u8`), as in C.
 - `--unchecked` builds.
+- `extern` functions: the declared signature is trusted.
+
+## f32, vectors, matrices
+
+```
+var x f32 = 1.5                  // literals adapt; f32 and f64 never mix implicitly
+y := f32(n) * x + f32(d)         // conversions: f32(i), f32(f64), f64(f32), i64(f32) (truncates)
+a := vec3(1.0, 2.0, 3.0)         // constructors: components, one value for all lanes,
+b := vec3(0.5)                   //   or smaller vectors plus components: vec4(a, 1.0)
+c := a + b * 2.0 - a / b         // + - * / work lane-wise; a vector combines with an f32
+a.y = 4.0                        // components x y z w (or r g b a); a[i] also works
+d := a.zyx                       // swizzles (read-only), any 2-4 components: v.xy, v.xyzx
+e := vec3(v4)                    // drop trailing lanes
+a == b, a != b, -a               // comparisons are all-lanes; < > are not defined
+m := mat4(1.0)                   // diagonal matrix; mat4(c0, c1, c2, c3) from columns
+m[3] = vec4(1.0, 2.0, 3.0, 1.0)  // m[c] is a column, m[c][r] / m[c].x an element
+p := m * vec4(a, 1.0)            // mat4 * vec4, mat4 * mat4
+q := quat(0.0, 0.0, 0.0, 1.0)    // quat * quat composes, quat * vec3 rotates
+```
+
+- `sqrt`, `fabs`, `fmin`, `fmax` work on `f32`, `f64` and vectors (lane-wise).
+- `cast[u32](x)` / `cast[f32](bits)` reinterpret an `f32`; `cast[u64]` / `cast[f64]` an `f64`.
+- `print` shows the shortest decimal that reads back to the same value: `0.1`, `vec3(1.0, 2.0, 3.0)`.
+  `putf(f64(x), n)` prints with `n` decimals like C's `%.nf`.
+- Vectors are single values in SSE registers (`addps`, `mulps`, `shufps`); `vec3` in memory is
+  exactly 12 bytes, so `[]vec3` or a struct of vectors can be handed to a GPU API as is.
+- The address of a component (`&v.x`) cannot be taken; copy it to a variable.
+- The math library (always available, see docs/STDLIB.md): `dot cross length normalize lerp ...`.
+
+## C interop
+
+```
+extern "libc.so.6" fn getenv(name *u8) *u8
+extern "libm.so.6" fn cosf(x f32) f32
+
+home := from_cstr(getenv(ptr("HOME")))     // string literals are NUL-terminated in memory
+p := cstr(path)                            // NUL-terminated copy of any str
+```
+
+- Parameters and results must be integers, `bool`, `f32`/`f64`, pointers or function values;
+  C structs are passed by pointer (AL structs have C layout). C `int` is `i32`, `long`/`size_t`
+  are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.
+- A plain AL function can be passed where C expects a callback (`fn(*u8, *u8) i32`), as long as
+  its parameters are scalars. Code running on a foreign thread must not allocate.
+- A program that calls at least one `extern` function becomes a dynamically linked executable
+  (the system loader maps the libraries at start-up); every other program stays a static,
+  libc-free executable. Only the libraries of functions that are actually reachable are needed.
+- `embed("file.bin")` is the content of a file as a `str`, read at compile time (path relative
+  to the source file).
 
 ## Grammar summary
 

@@ -76,6 +76,7 @@ pub struct Cx<'a> {
     pub entry_file: u16,
     // files whose declarations are only checked when something uses them
     pub lazy_files: HashSet<u16>,
+    pub n_prelude: u16,
 }
 
 pub fn builtin_type(name: &str) -> Option<Ty> {
@@ -103,8 +104,11 @@ pub fn builtin_type(name: &str) -> Option<Ty> {
 }
 
 impl<'a> Cx<'a> {
-    pub fn new(decls: &'a [Decl], file_names: Vec<String>, opts: Opts) -> Cx<'a> {
+    // files with an index below `n_prelude` form the always-present core library
+    pub fn new(decls: &'a [Decl], file_names: Vec<String>, opts: Opts, n_prelude: u16) -> Cx<'a> {
+        let np = n_prelude;
         let mut cx = Cx {
+            n_prelude,
             types: Types::new(),
             module: Module { funcs: Vec::new(), globals: Vec::new(), entry: 0, externs: Vec::new() },
             errs: Vec::new(),
@@ -155,7 +159,7 @@ impl<'a> Cx<'a> {
                 continue;
             }
             if let Some(prev) = names.get(name) {
-                let layer = if pos.file == 0 { &cx.p_fn_over } else { &cx.fn_over };
+                let layer = if pos.file < np { &cx.p_fn_over } else { &cx.fn_over };
                 if let (Decl::Fn(f), Some(true)) = (d, names_fn.get(name)) {
                     // another definition of a function name: an overload, chosen by argument type
                     let sig = |g: &FnDecl| g.params.iter().map(|p| type_str(&p.1)).collect::<Vec<_>>().join(",");
@@ -165,7 +169,7 @@ impl<'a> Cx<'a> {
                         cx.err(pos, format!("`{}` is already declared with these parameter types at {}", name, at));
                         continue;
                     }
-                } else if prev.file == 0 && pos.file != 0 {
+                } else if prev.file < np && pos.file >= np {
                     // a user declaration shadows a prelude declaration of the same name
                     cx.fn_names.remove(name);
                     cx.struct_names.remove(name);
@@ -183,7 +187,7 @@ impl<'a> Cx<'a> {
             match d {
                 Decl::Fn(f) => {
                     let di = cx.fn_decls.len();
-                    if pos.file == 0 {
+                    if pos.file < np {
                         cx.p_fn_names.entry(&f.name).or_insert(di);
                         cx.p_fn_over.entry(&f.name).or_default().push(di);
                         cx.fn_names.entry(&f.name).or_insert(di);
@@ -197,14 +201,14 @@ impl<'a> Cx<'a> {
                     cx.fn_decls.push(f);
                 }
                 Decl::Struct(s) => {
-                    if pos.file == 0 {
+                    if pos.file < np {
                         cx.p_struct_names.insert(&s.name, cx.struct_decls.len());
                     }
                     cx.struct_names.insert(&s.name, cx.struct_decls.len());
                     cx.struct_decls.push(s);
                 }
                 Decl::Enum(e) => {
-                    if pos.file == 0 {
+                    if pos.file < np {
                         cx.p_enum_names.insert(&e.name, cx.enum_decls.len());
                     }
                     cx.enum_names.insert(&e.name, cx.enum_decls.len());
@@ -278,7 +282,7 @@ impl<'a> Cx<'a> {
         self.enum_names.get(n).copied()
     }
     pub fn internal_file(&self, file: u16) -> bool {
-        file == 0 || file == self.entry_file
+        file < self.n_prelude || file == self.entry_file
     }
 
     pub fn pos_str(&self, p: Pos) -> String {

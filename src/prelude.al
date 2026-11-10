@@ -1494,3 +1494,21 @@ fn join(parts []str, sep str) str {
     }
     return out
 }
+
+// a NUL-terminated copy of s, for C functions (string literals are NUL-terminated already:
+// `ptr("literal")` can be passed directly)
+fn cstr(s str) *u8 {
+    return cast[*u8](__cstr(s))
+}
+
+// the text of a NUL-terminated C string (not copied)
+fn from_cstr(p *u8) str {
+    if p == nil {
+        return ""
+    }
+    n := 0
+    while p[n] != 0 {
+        n += 1
+    }
+    return mkslice[u8](p, n)
+}

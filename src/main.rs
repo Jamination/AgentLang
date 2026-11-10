@@ -20,7 +20,37 @@ use std::path::{Path, PathBuf};
 const PRELUDE: &str = include_str!("prelude.al");
 
 // modules bundled with the compiler: `use std.<name>`
-const STD_MODULES: &[(&str, &str)] = &[("libc", include_str!("../std/libc.al"))];
+// (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
+const STD_MODULES: &[(&str, &str)] = &[
+    ("math", include_str!("../std/math.al")),
+    ("rand", include_str!("../std/rand.al")),
+    ("time", include_str!("../std/time.al")),
+    ("mem", include_str!("../std/mem.al")),
+    ("libc", include_str!("../std/libc.al")),
+    ("ecs", include_str!("../std/ecs.al")),
+    ("asset", include_str!("../std/asset.al")),
+    ("image", include_str!("../std/image.al")),
+    ("x11", include_str!("../std/x11.al")),
+    ("alsa", include_str!("../std/alsa.al")),
+    ("window", include_str!("../std/window.al")),
+    ("input", include_str!("../std/input.al")),
+    ("audio", include_str!("../std/audio.al")),
+    ("vk", include_str!("../std/vk.al")),
+    ("dx12", include_str!("../std/dx12.al")),
+    ("metal", include_str!("../std/metal.al")),
+];
+// modules that are loaded into every program
+const CORE_MODULES: &[&str] = &["math", "rand", "time", "mem"];
+
+fn std_text(name: &str) -> Option<String> {
+    let m = STD_MODULES.iter().find(|m| m.0 == name)?;
+    if let Ok(dir) = std::env::var("ALC_STD_DIR") {
+        if let Ok(t) = std::fs::read_to_string(Path::new(&dir).join(format!("{}.al", name))) {
+            return Some(t);
+        }
+    }
+    Some(m.1.to_string())
+}
 
 struct Args {
     cmd: String,
@@ -107,11 +137,11 @@ impl Sources {
         for d in decls {
             if let Decl::Use(path, pos) = &d {
                 if let Some(name) = path.strip_prefix("std:") {
-                    match STD_MODULES.iter().find(|m| m.0 == name) {
-                        Some(m) => {
+                    match std_text(name) {
+                        Some(text) => {
                             if self.seen.insert(PathBuf::from(format!("<std/{}.al>", name))) {
                                 self.std_files.push(self.names.len() as u16);
-                                self.add_text(&format!("<std/{}.al>", name), m.1, None);
+                                self.add_text(&format!("<std/{}.al>", name), &text, None);
                             }
                         }
                         None => {
@@ -250,13 +280,20 @@ fn real_main() -> i32 {
     }
     let mut src = Sources { names: Vec::new(), decls: Vec::new(), errs: Vec::new(), seen: HashSet::new(), std_files: Vec::new() };
     src.add_text("<prelude>", PRELUDE, None);
+    // the core library is part of the language: always present, no `use` needed
+    for name in CORE_MODULES {
+        let text = std_text(name).unwrap_or_default();
+        src.seen.insert(PathBuf::from(format!("<std/{}.al>", name)));
+        src.add_text(&format!("<std/{}.al>", name), &text, None);
+    }
+    let n_prelude = src.names.len() as u16;
     src.add_file(Path::new(&args.input), None);
     if args.cmd == "sigs" {
         // `alc sigs <file> --` with "std" as input lists the standard library
         if report(&src.names, &mut src.errs) {
             return 1;
         }
-        let from = if args.rest.iter().any(|a| a == "std") { 0 } else { 1 };
+        let from = if args.rest.iter().any(|a| a == "std") { 0 } else { n_prelude };
         let decls: Vec<Decl> = if from == 0 {
             src.decls.iter().filter(|d| match d {
                 Decl::Fn(f) => !f.name.starts_with("__"),
@@ -299,7 +336,7 @@ fn real_main() -> i32 {
         }
         entry.push_str(" exit(__tests_done())\n}\n");
     } else if !has_main {
-        src.errs.push(Diag { pos: Pos { file: 1, line: 1, col: 1 }, msg: "missing `fn main()`".into() });
+        src.errs.push(Diag { pos: Pos { file: n_prelude, line: 1, col: 1 }, msg: "missing `fn main()`".into() });
         entry.push_str(" exit(0)\n}\n");
     } else if main_ret {
         entry.push_str(" exit(main())\n}\n");
@@ -315,12 +352,12 @@ fn real_main() -> i32 {
     if report(&src.names, &mut src.errs) {
         return 1;
     }
-    let mut cx = lower::Cx::new(&decls, src.names.clone(), lower::Opts { checks: !args.unchecked });
+    let mut cx = lower::Cx::new(&decls, src.names.clone(), lower::Opts { checks: !args.unchecked }, n_prelude);
     if args.cmd != "check" {
         // bundled modules are only compiled as far as the program reaches into them
         cx.lazy_files = src.std_files.iter().copied().collect();
     }
-    lower_fn::lower_all(&mut cx, "__entry", 1);
+    lower_fn::lower_all(&mut cx, "__entry", n_prelude);
     if report(&src.names, &mut cx.errs) {
         return 1;
     }

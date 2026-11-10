@@ -989,6 +989,26 @@ impl<'c, 'a> Fx<'c, 'a> {
                 self.ins(if name == "memcopy" { Op::MemCpy } else { Op::MemSet }, T::Void, vec![dv, sv, nv], 0);
                 Val::unit()
             }
+            "embed" => {
+                // the bytes of a file, read at compile time (path relative to the source file)
+                arity!(1);
+                let rel = match &args[0].k {
+                    EK::Str(s) => String::from_utf8_lossy(s).to_string(),
+                    _ => {
+                        self.err(args[0].pos, "`embed` takes a string literal path".into());
+                        return Some(Val::err());
+                    }
+                };
+                let src = self.cx.file_names.get(pos.file as usize).cloned().unwrap_or_default();
+                let dir = if src.starts_with('<') { std::env::var("ALC_STD_DIR").map(std::path::PathBuf::from).unwrap_or_default() } else { std::path::Path::new(&src).parent().map(|p| p.to_path_buf()).unwrap_or_default() };
+                match std::fs::read(dir.join(&rel)) {
+                    Ok(bytes) => self.str_val(&bytes),
+                    Err(e) => {
+                        self.err(args[0].pos, format!("cannot embed `{}`: {}", dir.join(&rel).display(), e));
+                        Val::err()
+                    }
+                }
+            }
             "panic" => {
                 arity!(1);
                 let m = self.expr(&args[0], Some(T_STR));
