@@ -84,6 +84,11 @@ impl<'a> Parser<'a> {
             Tk::P(p) if *p == ":" => " (types follow names without a colon: `x i64`)",
             _ => "",
         };
+        let hint = match (hint, self.i.checked_sub(1).map(|j| &self.toks[j].t)) {
+            ("", Some(Tk::Id(prev))) if matches!(prev.as_str(), "let" | "mut" | "auto" | "val") => " (declare variables with `name := value` or `var name T`)",
+            ("", Some(Tk::Id(prev))) if matches!(prev.as_str(), "func" | "def" | "function" | "pub") => " (functions are declared with `fn name(args) Result { }`)",
+            (h, _) => h,
+        };
         self.errs.push(Diag { pos: self.pos(), msg: format!("{}, found {}{}", msg, d, hint) });
         Err(())
     }
