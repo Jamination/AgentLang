@@ -17,7 +17,7 @@ fn gcd(a i64, b i64) i64 {
 }
 fn countdown(n i64) {
     if n == 0 { return }
-    if n % 1000000 == 0 { put(n, " ") }
+    if n % 10000 == 0 { put(n, " ") }
     countdown(n - 1)
 }
 fn build(d i64, v i64) *Node {
@@ -31,7 +31,7 @@ fn sum_to(n i64) i64 {
 fn main() {
     t := build(10, 1)
     print(count(t), sumv(t), fact(20), gcd(1071, 462))
-    countdown(3000000)
+    countdown(30000)
     print()
-    print(sum_to(10000000))
+    print(sum_to(50000))
 }
