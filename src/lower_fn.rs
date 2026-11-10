@@ -809,11 +809,25 @@ impl<'c, 'a> Fx<'c, 'a> {
                 }
                 let hv = self.coerce(hv, ty, hi.pos);
                 let it = self.irt(ty);
+                let mut step_dyn: Option<V> = None;
                 let stepk = match step {
                     Some(se) => match self.cx.const_eval(se) {
                         Some(CV::Int(k)) if k != 0 => k,
-                        _ => {
-                            self.err(se.pos, "`by` step must be a non-zero integer constant".into());
+                        Some(_) => {
+                            self.err(se.pos, "`by` step must be a non-zero integer".into());
+                            1
+                        }
+                        None => {
+                            // runtime step: must be positive
+                            let sv = self.expr(se, Some(ty));
+                            let sv = self.coerce(sv, ty, se.pos);
+                            let s = self.scalar(sv);
+                            if self.cx.opts.checks {
+                                let z = self.iconst(it, 0);
+                                let ok = self.ins(if self.cx.types.is_signed(ty) { Op::Sgt } else { Op::Ne }, T::I8, vec![s, z], 0);
+                                self.check(ok, 2, se.pos);
+                            }
+                            step_dyn = Some(s);
                             1
                         }
                     },
@@ -844,7 +858,10 @@ impl<'c, 'a> Fx<'c, 'a> {
                 self.jmp(bc);
                 self.switch_to(bc);
                 let cur = self.load_raw(addr, it, iv.alias);
-                let st = self.iconst(it, stepk);
+                let st = match step_dyn {
+                    Some(s) => s,
+                    None => self.iconst(it, stepk),
+                };
                 let next = self.ins(Op::Add, it, vec![cur, st], 0);
                 self.store_raw(addr, next, it, iv.alias);
                 let c = self.ins(cmp, T::I8, vec![next, end], 0);
@@ -984,7 +1001,11 @@ impl<'c, 'a> Fx<'c, 'a> {
         let b = self.new_block();
         self.switch_to(b);
         let loc = self.loc_str(pos);
-        let name = if kind == 0 { "__bounds_fail" } else { "__div_fail" };
+        let name = match kind {
+            0 => "__bounds_fail",
+            1 => "__div_fail",
+            _ => "__step_fail",
+        };
         self.call_rt(name, vec![], vec![loc], pos);
         if !self.dead {
             self.terminate(Term::Trap);

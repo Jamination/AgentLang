@@ -58,6 +58,10 @@ noinline fn __div_fail(loc str) never {
     __die("panic: division by zero at ", loc, "")
 }
 
+noinline fn __step_fail(loc str) never {
+    __die("panic: loop step must be positive at ", loc, "")
+}
+
 noinline fn __assert_fail(loc str, msg str) never {
     __die("assertion failed at ", loc, if msg == "assertion failed" { "" } else { msg })
 }
