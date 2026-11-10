@@ -1547,6 +1547,11 @@ impl<'a> Sel<'a> {
                 c
             }
         };
+        if i.op == Op::CallInd && i.aux == 1 {
+            // C calling convention: al = number of vector registers used (for variadic callees)
+            self.e(MOp::Mov, 4, Opnd::R(RAX), Opnd::I(nf as i64));
+            used.push(RAX);
+        }
         c.uses = used;
         self.out.push(c);
         // results

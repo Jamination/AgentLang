@@ -76,16 +76,18 @@ pub fn lower_all(cx: &mut Cx, entry: &str, check_from_file: u16) {
         // type-check every non-generic user function, even if unreachable
         for di in 0..cx.fn_decls.len() {
             let d = cx.fn_decls[di];
-            if d.tparams.is_empty() && d.pos.file >= check_from_file && cx.fn_over.get(d.name.as_str()).map(|l| l.contains(&di)).unwrap_or(false) && cx.fn_names.contains_key(d.name.as_str()) {
+            let eager = d.pos.file >= check_from_file && !cx.lazy_files.contains(&d.pos.file);
+            if d.tparams.is_empty() && eager && cx.fn_over.get(d.name.as_str()).map(|l| l.contains(&di)).unwrap_or(false) && cx.fn_names.contains_key(d.name.as_str()) {
                 cx.inst_fn(di, vec![]);
             }
         }
         // and force evaluation of user constants / globals
-        let cnames: Vec<&str> = cx.const_decls.iter().filter(|(_, d)| d.pos.file >= check_from_file).map(|(n, _)| *n).collect();
+        let lazy = cx.lazy_files.clone();
+        let cnames: Vec<&str> = cx.const_decls.iter().filter(|(_, d)| d.pos.file >= check_from_file && !lazy.contains(&d.pos.file)).map(|(n, _)| *n).collect();
         for n in cnames {
             cx.const_named(n);
         }
-        let gnames: Vec<&str> = cx.global_decls.iter().filter(|(_, d)| d.pos.file >= check_from_file).map(|(n, _)| *n).collect();
+        let gnames: Vec<&str> = cx.global_decls.iter().filter(|(_, d)| d.pos.file >= check_from_file && !lazy.contains(&d.pos.file)).map(|(n, _)| *n).collect();
         for n in gnames {
             cx.global(n);
         }

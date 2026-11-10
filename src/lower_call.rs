@@ -124,9 +124,46 @@ impl<'c, 'a> Fx<'c, 'a> {
         self.emit_call(Callee::Direct(fid), &ptys, rty, args)
     }
 
+    // call of a C function through its import slot, with the C calling convention
+    fn emit_extern_call(&mut self, x: u32, ptys: &[Ty], rty: Ty, args: Vec<Val>) -> Val {
+        let got = self.cx.module.externs[x as usize].got;
+        let a = self.ins(Op::GAddr, T::I64, vec![], got as i64);
+        let target = self.load_raw(a, T::I64, AK_PTR);
+        let mut ir_args = vec![target];
+        for (v, &pt) in args.iter().zip(ptys.iter()) {
+            let mut s = self.scalar(*v);
+            // C callees expect narrow integers extended to 32 bits
+            let it = self.irt(pt);
+            if it == T::I8 || it == T::I16 {
+                s = self.ins(if self.cx.types.is_signed(pt) { Op::SExt } else { Op::ZExt }, T::I32, vec![s], 0);
+            }
+            ir_args.push(s);
+        }
+        let rt = match self.cx.abi_ret(rty) {
+            RetAbi::Scalar(t) => t,
+            _ => T::Void,
+        };
+        let c = self.ins(Op::CallInd, rt, ir_args, 0);
+        self.f.im(c).aux = 1;
+        if rty == T_NEVER {
+            self.terminate(Term::Trap);
+            return Val::never();
+        }
+        if rt == T::Void {
+            Val::unit()
+        } else {
+            self.sval(rty, c)
+        }
+    }
+
     pub fn emit_call(&mut self, callee: Callee, ptys: &[Ty], rty: Ty, args: Vec<Val>) -> Val {
         if args.iter().any(|a| a.ty == T_ERR) || rty == T_ERR {
             return Val::err();
+        }
+        if let Callee::Direct(fid) = callee {
+            if let Some(x) = self.cx.module.funcs[fid as usize].ext {
+                return self.emit_extern_call(x, ptys, rty, args);
+            }
         }
         let mut ir_args: Vec<V> = Vec::new();
         if let Callee::Ind(f) = callee {

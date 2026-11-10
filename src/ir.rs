@@ -242,6 +242,8 @@ pub struct Func {
     pub inline: i8,
     pub noreturn: bool,
     pub lowered: bool,
+    // a C function in a shared library: index into Module::externs
+    pub ext: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -264,6 +266,16 @@ pub struct Module {
     pub funcs: Vec<Func>,
     pub globals: Vec<Global>,
     pub entry: u32,
+    pub externs: Vec<ExternFn>,
+}
+
+// An imported C function: calls load its address from the 8-byte global `got`, which the
+// dynamic loader fills in.
+#[derive(Clone, Debug)]
+pub struct ExternFn {
+    pub name: String,
+    pub lib: String,
+    pub got: u32,
 }
 
 pub fn canon(ty: T, k: i64) -> i64 {
@@ -286,6 +298,7 @@ impl Func {
             inline: 0,
             noreturn: false,
             lowered: false,
+            ext: None,
         }
     }
     pub fn new_block(&mut self) -> B {

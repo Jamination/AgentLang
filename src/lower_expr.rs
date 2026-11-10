@@ -257,6 +257,13 @@ impl<'c, 'a> Fx<'c, 'a> {
             let fid = self.cx.inst_fn(di, vec![]);
             let (ptys, rty) = self.cx.fn_sigs[fid as usize].clone();
             let ty = self.cx.types.intern(TyK::Fn(ptys, rty));
+            if let Some(x) = self.cx.module.funcs[fid as usize].ext {
+                // the address of a C function comes from its import slot
+                let got = self.cx.module.externs[x as usize].got;
+                let a = self.ins(Op::GAddr, T::I64, vec![], got as i64);
+                let v = self.load_raw(a, T::I64, AK_PTR);
+                return self.sval(ty, v);
+            }
             let v = self.ins(Op::FAddr, T::I64, vec![], fid as i64);
             return self.sval(ty, v);
         }

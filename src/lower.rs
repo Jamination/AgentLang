@@ -74,6 +74,8 @@ pub struct Cx<'a> {
     // true while resolving names on behalf of prelude code
     pub scope_prelude: bool,
     pub entry_file: u16,
+    // files whose declarations are only checked when something uses them
+    pub lazy_files: HashSet<u16>,
 }
 
 pub fn builtin_type(name: &str) -> Option<Ty> {
@@ -104,7 +106,7 @@ impl<'a> Cx<'a> {
     pub fn new(decls: &'a [Decl], file_names: Vec<String>, opts: Opts) -> Cx<'a> {
         let mut cx = Cx {
             types: Types::new(),
-            module: Module { funcs: Vec::new(), globals: Vec::new(), entry: 0 },
+            module: Module { funcs: Vec::new(), globals: Vec::new(), entry: 0, externs: Vec::new() },
             errs: Vec::new(),
             opts,
             file_names,
@@ -134,6 +136,7 @@ impl<'a> Cx<'a> {
             p_enum_names: HashMap::new(),
             scope_prelude: false,
             entry_file: u16::MAX,
+            lazy_files: HashSet::new(),
         };
         let mut names: HashMap<&'a str, Pos> = HashMap::new();
         // is the visible declaration of a name a function?
@@ -540,10 +543,25 @@ impl<'a> Cx<'a> {
                 ParamAbi::ByRef => f.params.push(T::I64),
             }
         }
+        if let Some(lib) = &d.ext {
+            // a C function: scalar arguments and result only
+            let bad = ptys.iter().chain(std::iter::once(&rty)).copied().find(|t| *t != T_UNIT && *t != T_NEVER && *t != T_ERR && (!self.types.is_scalar(*t) || self.types.vec_lanes(*t).is_some()));
+            if let Some(t) = bad {
+                let tn = self.types.name(t);
+                self.err(d.pos, format!("extern function `{}`: {} cannot cross the C boundary (pass integers, floats and pointers)", d.name, tn));
+            }
+            let got = self.module.globals.len() as u32;
+            self.module.globals.push(Global { name: format!("got.{}", d.name), size: 8, align: 8, data: Some(vec![0; 8]), relocs: Vec::new(), readonly: false });
+            f.ext = Some(self.module.externs.len() as u32);
+            self.module.externs.push(crate::ir::ExternFn { name: d.name.clone(), lib: lib.clone(), got });
+        }
+        let is_ext = f.ext.is_some();
         self.module.funcs.push(f);
         self.fn_sigs.push((ptys, rty));
         self.fn_insts.insert((di, targs.clone()), fid);
-        self.work.push((fid, di, targs));
+        if !is_ext {
+            self.work.push((fid, di, targs));
+        }
         fid
     }
 

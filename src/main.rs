@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 
 const PRELUDE: &str = include_str!("prelude.al");
 
+// modules bundled with the compiler: `use std.<name>`
+const STD_MODULES: &[(&str, &str)] = &[("libc", include_str!("../std/libc.al"))];
+
 struct Args {
     cmd: String,
     input: String,
@@ -92,6 +95,7 @@ struct Sources {
     decls: Vec<Decl>,
     errs: Vec<Diag>,
     seen: HashSet<PathBuf>,
+    std_files: Vec<u16>,
 }
 
 impl Sources {
@@ -102,6 +106,21 @@ impl Sources {
         let decls = parser::Parser::new(toks, &mut self.errs).file();
         for d in decls {
             if let Decl::Use(path, pos) = &d {
+                if let Some(name) = path.strip_prefix("std:") {
+                    match STD_MODULES.iter().find(|m| m.0 == name) {
+                        Some(m) => {
+                            if self.seen.insert(PathBuf::from(format!("<std/{}.al>", name))) {
+                                self.std_files.push(self.names.len() as u16);
+                                self.add_text(&format!("<std/{}.al>", name), m.1, None);
+                            }
+                        }
+                        None => {
+                            let all: Vec<&str> = STD_MODULES.iter().map(|m| m.0).collect();
+                            self.errs.push(Diag { pos: *pos, msg: format!("unknown module `std.{}` (available: {})", name, all.join(", ")) });
+                        }
+                    }
+                    continue;
+                }
                 let p = match dir {
                     Some(dir) => dir.join(path),
                     None => PathBuf::from(path),
@@ -229,7 +248,7 @@ fn real_main() -> i32 {
     if !matches!(args.cmd.as_str(), "build" | "run" | "test" | "check" | "sigs") {
         usage();
     }
-    let mut src = Sources { names: Vec::new(), decls: Vec::new(), errs: Vec::new(), seen: HashSet::new() };
+    let mut src = Sources { names: Vec::new(), decls: Vec::new(), errs: Vec::new(), seen: HashSet::new(), std_files: Vec::new() };
     src.add_text("<prelude>", PRELUDE, None);
     src.add_file(Path::new(&args.input), None);
     if args.cmd == "sigs" {
@@ -297,6 +316,10 @@ fn real_main() -> i32 {
         return 1;
     }
     let mut cx = lower::Cx::new(&decls, src.names.clone(), lower::Opts { checks: !args.unchecked });
+    if args.cmd != "check" {
+        // bundled modules are only compiled as far as the program reaches into them
+        cx.lazy_files = src.std_files.iter().copied().collect();
+    }
     lower_fn::lower_all(&mut cx, "__entry", 1);
     if report(&src.names, &mut cx.errs) {
         return 1;
@@ -315,7 +338,13 @@ fn real_main() -> i32 {
         }
     }
     let out = x86::compile(&mut module, args.emit_asm);
-    let bytes = elf::link(&module, &out);
+    let bytes = match elf::link(&module, &out) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return 1;
+        }
+    };
     let out_path = match &args.output {
         Some(p) => p.clone(),
         None => {

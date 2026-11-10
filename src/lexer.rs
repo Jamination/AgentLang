@@ -21,7 +21,7 @@ pub struct Token {
 const KEYWORDS: &[&str] = &[
     "fn", "struct", "enum", "const", "var", "test", "use", "if", "else", "while", "loop", "for",
     "in", "return", "break", "continue", "assert", "true", "false", "nil", "match", "by", "defer",
-    "inline", "noinline",
+    "inline", "noinline", "extern",
 ];
 
 const PUNCTS: &[&str] = &[

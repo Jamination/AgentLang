@@ -137,7 +137,7 @@ impl<'a> Parser<'a> {
                 Tk::Eof => return,
                 Tk::P("{") => depth += 1,
                 Tk::P("}") => depth -= 1,
-                Tk::Kw(k) if depth <= 0 && matches!(*k, "fn" | "struct" | "enum" | "const" | "var" | "test" | "use" | "inline" | "noinline") => {
+                Tk::Kw(k) if depth <= 0 && matches!(*k, "fn" | "struct" | "enum" | "const" | "var" | "test" | "use" | "inline" | "noinline" | "extern") => {
                     if self.i > 0 && matches!(self.toks[self.i - 1].t, Tk::Nl) {
                         return;
                     }
@@ -169,6 +169,34 @@ impl<'a> Parser<'a> {
             inline = 1;
         } else if self.eat_kw("noinline") {
             inline = -1;
+        }
+        if self.eat_kw("extern") {
+            // extern "libfoo.so.1" fn name(args) Result     (a C function; no body)
+            let lib = match self.bump() {
+                Tk::Str(s) => String::from_utf8_lossy(&s).to_string(),
+                _ => {
+                    self.i -= 1;
+                    return self.err("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() i32`");
+                }
+            };
+            if !self.eat_kw("fn") {
+                return self.err("expected `fn` after the library name");
+            }
+            let name = self.ident()?;
+            self.expect_p("(")?;
+            let mut params = Vec::new();
+            while !self.is_p(")") {
+                let pn = self.ident()?;
+                let pt = self.ty()?;
+                params.push((pn, pt));
+                if !self.eat_p(",") {
+                    break;
+                }
+            }
+            self.expect_p(")")?;
+            let ret = if matches!(self.peek(), Tk::Nl | Tk::Eof) { None } else { Some(self.ty()?) };
+            let body = Block { stmts: Vec::new(), end: pos };
+            return Ok(Decl::Fn(FnDecl { name, tparams: Vec::new(), params, ret, body, pos, inline: -1, ext: Some(lib) }));
         }
         if self.eat_kw("fn") {
             let name = self.ident()?;
@@ -259,15 +287,22 @@ impl<'a> Parser<'a> {
             return Ok(Decl::Test(TestDecl { name, body, pos }));
         }
         if self.eat_kw("use") {
+            // use "file.al"   or   use std.name (a module bundled with the compiler)
+            if let (Tk::Id(a), Tk::P("."), Tk::Id(b)) = (self.peek().clone(), self.peek_at(1).clone(), self.peek_at(2).clone()) {
+                if a == "std" {
+                    self.i += 3;
+                    return Ok(Decl::Use(format!("std:{}", b), pos));
+                }
+            }
             return match self.bump() {
                 Tk::Str(s) => Ok(Decl::Use(String::from_utf8_lossy(&s).to_string(), pos)),
                 _ => {
                     self.i -= 1;
-                    self.err("expected file path string after `use`")
+                    self.err("expected a file path string or `std.<module>` after `use`")
                 }
             };
         }
-        self.err("expected declaration (fn, struct, enum, const, var, test, use)")
+        self.err("expected declaration (fn, struct, enum, const, var, test, use, extern)")
     }
 
     // ---------- types ----------
