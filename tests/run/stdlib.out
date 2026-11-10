@@ -1,0 +1,20 @@
+20 4 2 18 [0, 1, 4, 2, 2]
+[0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4]
+fig pear kiwi banana
+3 THREE true 0 false true true false 2 none
+9 3 1 0
+407 819.0 true false
+4999 4999 12494956
+true false false true false true false
+true false false true true
+foobar 2 -1 true true false
+padded 0 true true 0
+4 a b 0 c 2 1
+-12345 true 0 false 9223372036854775807 true
+3.25 -1500.0 0.1 0.0 false 0.001
+point Pt{x: 1, y: 2} has 2 fields; pi~3.14159 45
+3 2.5 7 2.5 2.0 -3.0 3.0 -2.0
+20 10
+3 [9, 8, 7, 0, 0]
+[4, 4, 4, 4, 4]
+3 a1 b2

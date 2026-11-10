@@ -112,7 +112,7 @@ impl<'c, 'a> Fx<'c, 'a> {
     }
 
     pub fn call_rt(&mut self, name: &str, targs: Vec<Ty>, args: Vec<Val>, pos: Pos) -> Val {
-        let di = match self.cx.fn_names.get(name) {
+        let di = match self.cx.p_fn_names.get(name).or_else(|| self.cx.fn_names.get(name)) {
             Some(&di) => di,
             None => {
                 self.err(pos, format!("internal: runtime function `{}` is missing", name));
@@ -243,7 +243,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let fv = self.expr(c, None);
                     return self.call_indirect(fv, args, pos);
                 }
-                if let Some(&di) = self.cx.fn_names.get(n.as_str()) {
+                if let Some(di) = self.cx.find_fn(n.as_str()) {
                     return self.call_decl(di, None, None, args, expect, pos);
                 }
                 if let Some(v) = self.builtin(n, None, args, expect, pos) {
@@ -268,10 +268,10 @@ impl<'c, 'a> Fx<'c, 'a> {
             }
             EK::Index(b, targs) => {
                 if let EK::Ident(n) = &b.k {
-                    let is_var = self.lookup(n).is_some() || (self.cx.global_decls.contains_key(n.as_str()) && !self.cx.fn_names.contains_key(n.as_str()));
+                    let is_var = self.lookup(n).is_some() || (self.cx.global_decls.contains_key(n.as_str()) && self.cx.find_fn(n.as_str()).is_none());
                     if !is_var {
                         let env = self.tenv.clone();
-                        let is_fn = self.cx.fn_names.get(n.as_str()).copied();
+                        let is_fn = self.cx.find_fn(n.as_str());
                         let is_builtin = matches!(n.as_str(), "sizeof" | "cast" | "mkslice");
                         if is_fn.is_some() || is_builtin {
                             let mut tys = Vec::new();
@@ -306,7 +306,8 @@ impl<'c, 'a> Fx<'c, 'a> {
                 // a struct field holding a function value?
                 let dv = self.auto_deref(rv);
                 if let TyK::Struct(sid) = self.cx.types.k(dv.ty).clone() {
-                    if self.cx.types.structs[sid as usize].fields.iter().any(|f| &f.0 == name) {
+                    let is_fn_field = self.cx.types.structs[sid as usize].fields.iter().any(|f| &f.0 == name && matches!(self.cx.types.k(f.1), TyK::Fn(..)));
+                    if is_fn_field {
                         let fp = match self.field_of(dv, name, pos) {
                             Some(p) => self.rvalue(p),
                             None => return Val::err(),
@@ -314,7 +315,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                         return self.call_indirect(fp, args, pos);
                     }
                 }
-                if let Some(&di) = self.cx.fn_names.get(name.as_str()) {
+                if let Some(di) = self.cx.find_fn(name.as_str()) {
                     return self.call_decl(di, None, Some(rv), args, expect, pos);
                 }
                 if name == "len" && args.is_empty() {
@@ -748,6 +749,25 @@ impl<'c, 'a> Fx<'c, 'a> {
                 let loc = self.loc_str(pos);
                 self.call_rt("__panic", vec![], vec![loc, m], pos)
             }
+            "fmt" => {
+                self.call_rt("__cap_begin", vec![], vec![], pos);
+                for a in args {
+                    let v = self.expr(a, None);
+                    self.put_val(v, a.pos, 0);
+                }
+                self.call_rt("__cap_end", vec![], vec![], pos)
+            }
+            "hash" => {
+                arity!(1);
+                let v = self.expr(&args[0], None);
+                if v.ty == T_ERR {
+                    return Some(Val::err());
+                }
+                match self.hash_val(v, pos) {
+                    Some(h) => self.sval(T_U64, h),
+                    None => Val::err(),
+                }
+            }
             "put" | "print" => {
                 for (i, a) in args.iter().enumerate() {
                     if i > 0 && name == "print" {
@@ -765,6 +785,75 @@ impl<'c, 'a> Fx<'c, 'a> {
             }
             _ => return None,
         })
+    }
+
+    // hash of any value that supports `==`
+    pub fn hash_val(&mut self, v: Val, pos: Pos) -> Option<V> {
+        match self.cx.types.k(v.ty).clone() {
+            TyK::Int(..) | TyK::Bool => {
+                let x = self.to_i64(v);
+                let a = self.sval(T_U64, x);
+                let r = self.call_rt("__hash_u64", vec![], vec![a], pos);
+                Some(self.scalar(r))
+            }
+            TyK::Ptr(_) | TyK::Fn(..) => {
+                let x = self.scalar(v);
+                let a = self.sval(T_U64, x);
+                let r = self.call_rt("__hash_u64", vec![], vec![a], pos);
+                Some(self.scalar(r))
+            }
+            TyK::Enum(_) if self.cx.types.is_scalar(v.ty) => {
+                let x = self.scalar(v);
+                let a = self.sval(T_U64, x);
+                let r = self.call_rt("__hash_u64", vec![], vec![a], pos);
+                Some(self.scalar(r))
+            }
+            TyK::F64 => {
+                // -0.0 == 0.0, so both must hash alike
+                let x = self.scalar(v);
+                let z = self.ins(Op::FConst, T::F64, vec![], 0);
+                let n = self.ins(Op::FAdd, T::F64, vec![x, z], 0);
+                let bits = self.ins(Op::FToBits, T::I64, vec![n], 0);
+                let a = self.sval(T_U64, bits);
+                let r = self.call_rt("__hash_u64", vec![], vec![a], pos);
+                Some(self.scalar(r))
+            }
+            TyK::Slice(et) => {
+                let r = if et == T_U8 { self.call_rt("__hash_str", vec![], vec![v], pos) } else { self.call_rt("__hash_slice", vec![et], vec![v], pos) };
+                Some(self.scalar(r))
+            }
+            TyK::Array(et, n) => {
+                let sty = self.cx.types.slice(et);
+                let t = self.temp(sty);
+                let sv = self.mval(sty, t);
+                let nv = self.iconst(T::I64, n as i64);
+                self.store_slice(sv, v.v, nv);
+                let r = if et == T_U8 { self.call_rt("__hash_str", vec![], vec![sv], pos) } else { self.call_rt("__hash_slice", vec![et], vec![sv], pos) };
+                Some(self.scalar(r))
+            }
+            TyK::Struct(_) | TyK::Tuple(_) => {
+                let names: Vec<String> = match self.cx.types.k(v.ty).clone() {
+                    TyK::Struct(sid) => self.cx.types.structs[sid as usize].fields.iter().map(|f| f.0.clone()).collect(),
+                    TyK::Tuple(ts) => (0..ts.len()).map(|i| i.to_string()).collect(),
+                    _ => vec![],
+                };
+                let mut h = self.iconst(T::I64, 0x51ed270b);
+                for n in names {
+                    let p = self.field_of(v, &n, pos)?;
+                    let fv = self.rvalue(p);
+                    let fh = self.hash_val(fv, pos)?;
+                    let (a, b) = (self.sval(T_U64, h), self.sval(T_U64, fh));
+                    let r = self.call_rt("__hash_mix", vec![], vec![a, b], pos);
+                    h = self.scalar(r);
+                }
+                Some(h)
+            }
+            _ => {
+                let tn = self.tyname(v.ty);
+                self.err(pos, format!("values of type {} cannot be hashed", tn));
+                None
+            }
+        }
     }
 
     fn put_lit(&mut self, s: &str, pos: Pos) {

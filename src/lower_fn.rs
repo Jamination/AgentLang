@@ -53,6 +53,7 @@ pub struct Fx<'c, 'a> {
 pub fn lower_all(cx: &mut Cx, entry: &str, check_from_file: u16) {
     match cx.fn_names.get(entry) {
         Some(&di) => {
+            cx.entry_file = cx.fn_decls[di].pos.file;
             let fid = cx.inst_fn(di, vec![]);
             cx.module.entry = fid;
         }
@@ -73,7 +74,7 @@ pub fn lower_all(cx: &mut Cx, entry: &str, check_from_file: u16) {
         // type-check every non-generic user function, even if unreachable
         for di in 0..cx.fn_decls.len() {
             let d = cx.fn_decls[di];
-            if d.tparams.is_empty() && d.pos.file >= check_from_file {
+            if d.tparams.is_empty() && d.pos.file >= check_from_file && cx.fn_names.get(d.name.as_str()) == Some(&di) {
                 cx.inst_fn(di, vec![]);
             }
         }
@@ -102,6 +103,7 @@ pub fn lower_all(cx: &mut Cx, entry: &str, check_from_file: u16) {
 
 fn lower_fn(cx: &mut Cx, fid: u32, di: usize, targs: Vec<Ty>) {
     let d = cx.fn_decls[di];
+    cx.scope_prelude = cx.internal_file(d.pos.file);
     let (ptys, rty) = cx.fn_sigs[fid as usize].clone();
     let f = std::mem::replace(&mut cx.module.funcs[fid as usize], Func::new(""));
     let mut tenv = HashMap::new();

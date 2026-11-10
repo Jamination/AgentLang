@@ -151,6 +151,10 @@ fn flush() {
 }
 
 fn __put_str(s str) {
+    if __cap_on != 0 {
+        __cap_put(s)
+        return
+    }
     n := len(s)
     if n > 65536 - __olen {
         flush()
@@ -164,6 +168,12 @@ fn __put_str(s str) {
 }
 
 fn putc(c u8) {
+    if __cap_on != 0 {
+        var one [1]u8
+        one[0] = c
+        __cap_put(one[..])
+        return
+    }
     if __olen == 65536 {
         flush()
     }
@@ -662,4 +672,665 @@ fn __tests_done() i64 {
         return 1
     }
     return 0
+}
+
+// ---------- capture output into a string: fmt(...) ----------
+var __cap_on i64
+var __cap_buf []u8
+var __cap_len i64
+
+fn __cap_begin() {
+    if __cap_on != 0 {
+        __die("panic: nested fmt() is not supported", "", "")
+    }
+    __cap_on = 1
+    __cap_len = 0
+    if len(__cap_buf) == 0 {
+        __cap_buf = alloc[u8](256)
+    }
+}
+
+fn __cap_put(s str) {
+    n := len(s)
+    if __cap_len + n > len(__cap_buf) {
+        cap := len(__cap_buf) * 2
+        while cap < __cap_len + n {
+            cap = cap * 2
+        }
+        nb := alloc[u8](cap)
+        memcopy(ptr(nb), ptr(__cap_buf), __cap_len)
+        __cap_buf = nb
+    }
+    memcopy(cast[i64](ptr(__cap_buf)) + __cap_len, ptr(s), n)
+    __cap_len += n
+}
+
+fn __cap_end() str {
+    __cap_on = 0
+    out := alloc[u8](__cap_len)
+    memcopy(ptr(out), ptr(__cap_buf), __cap_len)
+    return out
+}
+
+// ---------- hashing and equality helpers ----------
+fn __hash_u64(x u64) u64 {
+    x = (x ^ (x >> 33)) * 0xff51afd7ed558ccd
+    x = (x ^ (x >> 33)) * 0xc4ceb9fe1a85ec53
+    return x ^ (x >> 33)
+}
+
+fn __hash_str(s str) u64 {
+    var h u64 = 0xcbf29ce484222325
+    for c in s {
+        h = (h ^ u64(c)) * 0x100000001b3
+    }
+    return __hash_u64(h)
+}
+
+fn __hash_mix(a u64, b u64) u64 {
+    return __hash_u64(a ^ (b + 0x9e3779b97f4a7c15 + (a << 6) + (a >> 2)))
+}
+
+fn __hash_slice[T](s []T) u64 {
+    var h u64 = u64(len(s))
+    for x in s {
+        h = __hash_mix(h, hash(x))
+    }
+    return h
+}
+
+fn __slice_eq[T](a []T, b []T) bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for i in 0..len(a) {
+        if a[i] != b[i] {
+            return false
+        }
+    }
+    return true
+}
+
+// ---------- small generic helpers ----------
+fn min[T](a T, b T) T {
+    if b < a { b } else { a }
+}
+
+fn max[T](a T, b T) T {
+    if b > a { b } else { a }
+}
+
+fn abs[T](x T) T {
+    if x < 0 { -x } else { x }
+}
+
+fn swap[T](a *T, b *T) {
+    t := *a
+    *a = *b
+    *b = t
+}
+
+fn copy[T](dst []T, src []T) i64 {
+    n := min(len(dst), len(src))
+    memcopy(ptr(dst), ptr(src), n * sizeof[T]())
+    return n
+}
+
+fn fill[T](a []T, x T) {
+    for i in 0..len(a) {
+        a[i] = x
+    }
+}
+
+fn floor(x f64) f64 {
+    if x != x || fabs(x) >= 4503599627370496.0 {
+        return x
+    }
+    t := f64(i64(x))
+    if t > x { t - 1.0 } else { t }
+}
+
+fn ceil(x f64) f64 {
+    if x != x || fabs(x) >= 4503599627370496.0 {
+        return x
+    }
+    t := f64(i64(x))
+    if t < x { t + 1.0 } else { t }
+}
+
+fn clock_ns() i64 {
+    var ts [2]i64
+    syscall(228, 1, ptr(ts))
+    return ts[0] * 1000000000 + ts[1]
+}
+
+// ---------- growable vector ----------
+struct Vec[T] { buf []T, len i64 }
+
+fn vec[T]() Vec[T] {
+    return Vec[T]{buf: alloc[T](0), len: 0}
+}
+
+fn reserve[T](v *Vec[T], n i64) {
+    if n > len(v.buf) {
+        cap := max(len(v.buf) * 2, max(n, 8))
+        nb := alloc[T](cap)
+        memcopy(ptr(nb), ptr(v.buf), v.len * sizeof[T]())
+        v.buf = nb
+    }
+}
+
+fn push[T](v *Vec[T], x T) {
+    if v.len == len(v.buf) {
+        reserve(v, v.len + 1)
+    }
+    v.buf[v.len] = x
+    v.len += 1
+}
+
+fn pop[T](v *Vec[T]) T {
+    if v.len == 0 {
+        __die("panic: pop from an empty Vec", "", "")
+    }
+    v.len -= 1
+    return v.buf[v.len]
+}
+
+// the live elements of a Vec as a slice (valid until the next push that grows it)
+fn items[T](v *Vec[T]) []T {
+    return v.buf[..v.len]
+}
+
+// ---------- hash map (open addressing, linear probing) ----------
+struct Map[K, V] { keys []K, vals []V, state []u8, len i64, used i64 }
+
+fn map[K, V]() Map[K, V] {
+    return Map[K, V]{keys: alloc[K](0), vals: alloc[V](0), state: alloc[u8](0), len: 0, used: 0}
+}
+
+fn __map_find[K, V](m *Map[K, V], k K) i64 {
+    n := len(m.state)
+    if n == 0 {
+        return -1
+    }
+    mask := n - 1
+    i := i64(hash(k) >> 1) & mask
+    loop {
+        s := m.state[i]
+        if s == 0 {
+            return -1
+        }
+        if s == 1 && m.keys[i] == k {
+            return i
+        }
+        i = (i + 1) & mask
+    }
+}
+
+fn __map_grow[K, V](m *Map[K, V]) {
+    old_keys := m.keys
+    old_vals := m.vals
+    old_state := m.state
+    n := max(16, m.len * 4)
+    cap := 16
+    while cap < n {
+        cap = cap * 2
+    }
+    m.keys = alloc[K](cap)
+    m.vals = alloc[V](cap)
+    m.state = alloc[u8](cap)
+    m.len = 0
+    m.used = 0
+    for i in 0..len(old_state) {
+        if old_state[i] == 1 {
+            set(m, old_keys[i], old_vals[i])
+        }
+    }
+}
+
+fn set[K, V](m *Map[K, V], k K, v V) {
+    if (m.used + 1) * 4 > len(m.state) * 3 {
+        __map_grow(m)
+    }
+    mask := len(m.state) - 1
+    i := i64(hash(k) >> 1) & mask
+    first_free := -1
+    loop {
+        s := m.state[i]
+        if s == 0 {
+            break
+        }
+        if s == 1 && m.keys[i] == k {
+            m.vals[i] = v
+            return
+        }
+        if s == 2 && first_free < 0 {
+            first_free = i
+        }
+        i = (i + 1) & mask
+    }
+    if first_free >= 0 {
+        i = first_free
+    } else {
+        m.used += 1
+    }
+    m.state[i] = 1
+    m.keys[i] = k
+    m.vals[i] = v
+    m.len += 1
+}
+
+fn get[K, V](m *Map[K, V], k K) (V, bool) {
+    i := __map_find(m, k)
+    if i < 0 {
+        var zero V
+        return (zero, false)
+    }
+    return (m.vals[i], true)
+}
+
+// the value stored for k, or `default` when k is missing
+fn get_or[K, V](m *Map[K, V], k K, default V) V {
+    i := __map_find(m, k)
+    if i < 0 {
+        return default
+    }
+    return m.vals[i]
+}
+
+fn has[K, V](m *Map[K, V], k K) bool {
+    return __map_find(m, k) >= 0
+}
+
+fn del[K, V](m *Map[K, V], k K) bool {
+    i := __map_find(m, k)
+    if i < 0 {
+        return false
+    }
+    m.state[i] = 2
+    m.len -= 1
+    return true
+}
+
+// all keys, in unspecified order
+fn keys[K, V](m *Map[K, V]) []K {
+    out := alloc[K](m.len)
+    n := 0
+    for i in 0..len(m.state) {
+        if m.state[i] == 1 {
+            out[n] = m.keys[i]
+            n += 1
+        }
+    }
+    return out
+}
+
+// ---------- sorting ----------
+fn __sort_range[T](a []T, lo i64, hi i64) {
+    while hi - lo > 16 {
+        p := a[lo + (hi - lo) / 2]
+        i := lo
+        j := hi
+        while i <= j {
+            while a[i] < p {
+                i += 1
+            }
+            while p < a[j] {
+                j -= 1
+            }
+            if i <= j {
+                t := a[i]
+                a[i] = a[j]
+                a[j] = t
+                i += 1
+                j -= 1
+            }
+        }
+        // recurse into the smaller half, loop on the larger one
+        if j - lo < hi - i {
+            __sort_range(a, lo, j)
+            lo = i
+        } else {
+            __sort_range(a, i, hi)
+            hi = j
+        }
+    }
+    for i in lo + 1..=hi {
+        x := a[i]
+        j := i - 1
+        while j >= lo && x < a[j] {
+            a[j + 1] = a[j]
+            j -= 1
+        }
+        a[j + 1] = x
+    }
+}
+
+// ascending sort of numbers (anything comparable with `<`)
+fn sort[T](a []T) {
+    __sort_range(a, 0, len(a) - 1)
+}
+
+// stable merge sort with a user-supplied "less than"
+fn sort_by[T](a []T, less fn(T, T) bool) {
+    n := len(a)
+    if n < 2 {
+        return
+    }
+    tmp := alloc[T](n)
+    src := a
+    dst := tmp
+    width := 1
+    while width < n {
+        lo := 0
+        while lo < n {
+            mid := min(lo + width, n)
+            hi := min(lo + 2 * width, n)
+            i := lo
+            j := mid
+            k := lo
+            while i < mid && j < hi {
+                if less(src[j], src[i]) {
+                    dst[k] = src[j]
+                    j += 1
+                } else {
+                    dst[k] = src[i]
+                    i += 1
+                }
+                k += 1
+            }
+            while i < mid {
+                dst[k] = src[i]
+                i += 1
+                k += 1
+            }
+            while j < hi {
+                dst[k] = src[j]
+                j += 1
+                k += 1
+            }
+            lo = hi
+        }
+        t := src
+        src = dst
+        dst = t
+        width = width * 2
+    }
+    if ptr(src) != ptr(a) {
+        for i in 0..n {
+            a[i] = src[i]
+        }
+    }
+}
+
+// ---------- strings ----------
+fn concat(a str, b str) str {
+    out := alloc[u8](len(a) + len(b))
+    memcopy(ptr(out), ptr(a), len(a))
+    memcopy(cast[i64](ptr(out)) + len(a), ptr(b), len(b))
+    return out
+}
+
+// index of the first occurrence of sub in s, or -1
+fn find(s str, sub str) i64 {
+    n := len(s)
+    m := len(sub)
+    if m == 0 {
+        return 0
+    }
+    i := 0
+    while i + m <= n {
+        if s[i] == sub[0] && s[i..i + m] == sub {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+fn starts_with(s str, p str) bool {
+    return len(s) >= len(p) && s[..len(p)] == p
+}
+
+fn ends_with(s str, p str) bool {
+    return len(s) >= len(p) && s[len(s) - len(p)..] == p
+}
+
+fn __is_space(c u8) bool {
+    return c == ' ' || c == '\n' || c == '\t' || c == '\r'
+}
+
+fn trim(s str) str {
+    lo := 0
+    hi := len(s)
+    while lo < hi && __is_space(s[lo]) {
+        lo += 1
+    }
+    while hi > lo && __is_space(s[hi - 1]) {
+        hi -= 1
+    }
+    return s[lo..hi]
+}
+
+// pieces of s between occurrences of sep (views into s, no copying)
+fn split(s str, sep u8) []str {
+    n := 1
+    for c in s {
+        if c == sep {
+            n += 1
+        }
+    }
+    out := alloc[str](n)
+    k := 0
+    start := 0
+    for i in 0..len(s) {
+        if s[i] == sep {
+            out[k] = s[start..i]
+            k += 1
+            start = i + 1
+        }
+    }
+    out[k] = s[start..]
+    return out
+}
+
+fn lines(s str) []str {
+    if len(s) > 0 && s[len(s) - 1] == '\n' {
+        return split(s[..len(s) - 1], '\n')
+    }
+    return split(s, '\n')
+}
+
+// lexicographic comparison: negative, zero or positive
+fn cmp(a str, b str) i64 {
+    n := min(len(a), len(b))
+    for i in 0..n {
+        if a[i] != b[i] {
+            return i64(a[i]) - i64(b[i])
+        }
+    }
+    return len(a) - len(b)
+}
+
+fn parse_i64(s str) (i64, bool) {
+    n := len(s)
+    i := 0
+    neg := false
+    if n > 0 && (s[0] == '-' || s[0] == '+') {
+        neg = s[0] == '-'
+        i = 1
+    }
+    if i == n {
+        return (0, false)
+    }
+    var v u64 = 0
+    while i < n {
+        c := s[i]
+        if c < '0' || c > '9' {
+            return (0, false)
+        }
+        v = v * 10 + u64(c - '0')
+        i += 1
+    }
+    if neg {
+        return (i64(0 - v), true)
+    }
+    return (i64(v), true)
+}
+
+// decimal floating point: digits, optional fraction and exponent (nearest for up to 19 digits)
+fn parse_f64(s str) (f64, bool) {
+    n := len(s)
+    i := 0
+    neg := false
+    if n > 0 && (s[0] == '-' || s[0] == '+') {
+        neg = s[0] == '-'
+        i = 1
+    }
+    var mant u64 = 0
+    digits := 0
+    exp10 := 0
+    seen := false
+    while i < n && s[i] >= '0' && s[i] <= '9' {
+        if digits < 19 {
+            mant = mant * 10 + u64(s[i] - '0')
+            if mant != 0 {
+                digits += 1
+            }
+        } else {
+            exp10 += 1
+        }
+        seen = true
+        i += 1
+    }
+    if i < n && s[i] == '.' {
+        i += 1
+        while i < n && s[i] >= '0' && s[i] <= '9' {
+            if digits < 19 {
+                mant = mant * 10 + u64(s[i] - '0')
+                if mant != 0 {
+                    digits += 1
+                }
+                exp10 -= 1
+            }
+            seen = true
+            i += 1
+        }
+    }
+    if !seen {
+        return (0.0, false)
+    }
+    if i < n && (s[i] == 'e' || s[i] == 'E') {
+        i += 1
+        eneg := false
+        if i < n && (s[i] == '-' || s[i] == '+') {
+            eneg = s[i] == '-'
+            i += 1
+        }
+        if i == n {
+            return (0.0, false)
+        }
+        e := 0
+        while i < n && s[i] >= '0' && s[i] <= '9' {
+            if e < 10000 {
+                e = e * 10 + i64(s[i] - '0')
+            }
+            i += 1
+        }
+        exp10 += if eneg { -e } else { e }
+    }
+    if i != n {
+        return (0.0, false)
+    }
+    x := f64(mant)
+    p := 10.0
+    e := if exp10 < 0 { -exp10 } else { exp10 }
+    scale := 1.0
+    while e > 0 {
+        if e & 1 == 1 {
+            scale = scale * p
+        }
+        p = p * p
+        e = e >> 1
+    }
+    x = if exp10 < 0 { x / scale } else { x * scale }
+    return (if neg { -x } else { x }, true)
+}
+
+// ---------- files and arguments ----------
+fn __cstr(s str) i64 {
+    p := __alloc(len(s) + 1)
+    memcopy(p, ptr(s), len(s))
+    return p
+}
+
+// everything readable from a file descriptor (0 = standard input)
+fn read_all(fd i64) str {
+    buf := alloc[u8](65536)
+    n := 0
+    loop {
+        if n == len(buf) {
+            nb := alloc[u8](len(buf) * 2)
+            memcopy(ptr(nb), ptr(buf), n)
+            buf = nb
+        }
+        r := syscall(0, fd, cast[i64](ptr(buf)) + n, len(buf) - n)
+        if r == -4 {
+            continue
+        }
+        if r <= 0 {
+            break
+        }
+        n += r
+    }
+    return buf[..n]
+}
+
+fn read_file(path str) (str, bool) {
+    fd := syscall(2, __cstr(path), 0, 0)
+    if fd < 0 {
+        return ("", false)
+    }
+    data := read_all(fd)
+    syscall(3, fd)
+    return (data, true)
+}
+
+fn write_file(path str, data str) bool {
+    // O_WRONLY|O_CREAT|O_TRUNC, mode 0644
+    fd := syscall(2, __cstr(path), 577, 420)
+    if fd < 0 {
+        return false
+    }
+    p := cast[i64](ptr(data))
+    n := len(data)
+    ok := true
+    while n > 0 {
+        r := syscall(1, fd, p, n)
+        if r == -4 {
+            continue
+        }
+        if r <= 0 {
+            ok = false
+            break
+        }
+        p += r
+        n -= r
+    }
+    syscall(3, fd)
+    return ok
+}
+
+// command line arguments (args()[0] is the program name)
+fn args() []str {
+    out := alloc[str](__argc)
+    for i in 0..__argc {
+        p := cast[*i64](__argv)[i]
+        n := 0
+        while cast[*u8](p)[n] != 0 {
+            n += 1
+        }
+        out[i] = mkslice[u8](p, n)
+    }
+    return out
 }

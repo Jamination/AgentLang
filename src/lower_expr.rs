@@ -250,7 +250,7 @@ impl<'c, 'a> Fx<'c, 'a> {
             let m = self.mval(ty, a);
             return self.rvalue(m);
         }
-        if let Some(&di) = self.cx.fn_names.get(n) {
+        if let Some(di) = self.cx.find_fn(n) {
             if !self.cx.fn_decls[di].tparams.is_empty() {
                 self.err(pos, format!("generic function `{}` cannot be used as a value without type arguments", n));
                 return Val::err();
@@ -264,7 +264,7 @@ impl<'c, 'a> Fx<'c, 'a> {
         if let Some(&(ei, vi)) = self.cx.variants.get(n) {
             return self.construct_variant(ei, vi, &[], expect, pos);
         }
-        if builtin_type(n).is_some() || self.tenv.contains_key(n) || self.cx.struct_names.contains_key(n) {
+        if builtin_type(n).is_some() || self.tenv.contains_key(n) || self.cx.find_struct(n).is_some() {
             self.err(pos, format!("type `{}` cannot be used as a value here", n));
             return Val::err();
         }
@@ -284,7 +284,7 @@ impl<'c, 'a> Fx<'c, 'a> {
                         return Some(self.mval(ty, a));
                     }
                 }
-                if self.cx.const_decls.contains_key(n.as_str()) || self.cx.fn_names.contains_key(n.as_str()) {
+                if self.cx.const_decls.contains_key(n.as_str()) || self.cx.find_fn(n.as_str()).is_some() {
                     self.err(e.pos, format!("`{}` is not assignable", n));
                 } else {
                     self.err(e.pos, format!("unknown variable `{}` (declare it with `:=`)", n));
@@ -773,6 +773,18 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let x = self.ins(Op::Xor, T::I8, vec![s, one], 0);
                     return self.sval(T_BOOL, x);
                 }
+                TyK::Slice(_) | TyK::Array(..) | TyK::Struct(_) | TyK::Tuple(_) if eq_only => {
+                    let e = match self.eq_vals(l, r, pos) {
+                        Some(e) => e,
+                        None => return Val::err(),
+                    };
+                    if op == BinOp::Eq {
+                        return self.sval(T_BOOL, e);
+                    }
+                    let one = self.iconst(T::I8, 1);
+                    let x = self.ins(Op::Xor, T::I8, vec![e, one], 0);
+                    return self.sval(T_BOOL, x);
+                }
                 _ => {
                     let tn = self.tyname(l.ty);
                     self.err(pos, format!("cannot compare values of type {} with this operator", tn));
@@ -818,6 +830,56 @@ impl<'c, 'a> Fx<'c, 'a> {
                 let tn = self.tyname(l.ty);
                 self.err(pos, format!("arithmetic is not defined for {}", tn));
                 Val::err()
+            }
+        }
+    }
+
+    // structural equality of two values of the same type (as an i8 0/1)
+    pub fn eq_vals(&mut self, l: Val, r: Val, pos: Pos) -> Option<V> {
+        match self.cx.types.k(l.ty).clone() {
+            TyK::Slice(et) if et != T_U8 => {
+                let v = self.call_rt("__slice_eq", vec![et], vec![l, r], pos);
+                Some(self.scalar(v))
+            }
+            TyK::Array(et, n) => {
+                let sty = self.cx.types.slice(et);
+                let mut sl = Vec::new();
+                for x in [l, r] {
+                    let t = self.temp(sty);
+                    let sv = self.mval(sty, t);
+                    let nv = self.iconst(T::I64, n as i64);
+                    self.store_slice(sv, x.v, nv);
+                    sl.push(sv);
+                }
+                let v = if et == T_U8 { self.call_rt("__str_eq", vec![], sl, pos) } else { self.call_rt("__slice_eq", vec![et], sl, pos) };
+                Some(self.scalar(v))
+            }
+            TyK::Struct(_) | TyK::Tuple(_) => {
+                let names: Vec<String> = match self.cx.types.k(l.ty).clone() {
+                    TyK::Struct(sid) => self.cx.types.structs[sid as usize].fields.iter().map(|f| f.0.clone()).collect(),
+                    TyK::Tuple(ts) => (0..ts.len()).map(|i| i.to_string()).collect(),
+                    _ => vec![],
+                };
+                let mut acc = self.iconst(T::I8, 1);
+                for n in names {
+                    let pl = self.field_of(l, &n, pos)?;
+                    let pr = self.field_of(r, &n, pos)?;
+                    let (fl, fr) = (self.rvalue(pl), self.rvalue(pr));
+                    let e = self.binary_vals(BinOp::Eq, fl, fr, pos);
+                    if e.ty == T_ERR {
+                        return None;
+                    }
+                    let ev = self.scalar(e);
+                    acc = self.ins(Op::And, T::I8, vec![acc, ev], 0);
+                }
+                Some(acc)
+            }
+            _ => {
+                let v = self.binary_vals(BinOp::Eq, l, r, pos);
+                if v.ty == T_ERR {
+                    return None;
+                }
+                Some(self.scalar(v))
             }
         }
     }
@@ -973,7 +1035,7 @@ impl<'c, 'a> Fx<'c, 'a> {
         }
         // generic struct named without type arguments: take them from the expected type
         if let EK::Ident(n) = &te.k {
-            if let Some(&si) = self.cx.struct_names.get(n.as_str()) {
+            if let Some(si) = self.cx.find_struct(n.as_str()) {
                 if let Some(TyK::Struct(sid)) = expect.map(|t| self.cx.types.k(t).clone()) {
                     if self.cx.types.structs[sid as usize].decl == si {
                         return expect;

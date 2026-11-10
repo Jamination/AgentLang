@@ -64,6 +64,13 @@ pub struct Cx<'a> {
     pub strings: HashMap<Vec<u8>, u32>,
     pub exposed: HashSet<u32>,
     pub inst_depth: u32,
+    // names declared by the prelude: prelude code always sees these, user code may shadow them
+    pub p_fn_names: HashMap<&'a str, usize>,
+    pub p_struct_names: HashMap<&'a str, usize>,
+    pub p_enum_names: HashMap<&'a str, usize>,
+    // true while resolving names on behalf of prelude code
+    pub scope_prelude: bool,
+    pub entry_file: u16,
 }
 
 pub fn builtin_type(name: &str) -> Option<Ty> {
@@ -111,6 +118,11 @@ impl<'a> Cx<'a> {
             strings: HashMap::new(),
             exposed: HashSet::new(),
             inst_depth: 0,
+            p_fn_names: HashMap::new(),
+            p_struct_names: HashMap::new(),
+            p_enum_names: HashMap::new(),
+            scope_prelude: false,
+            entry_file: u16::MAX,
         };
         let mut names: HashMap<&'a str, Pos> = HashMap::new();
         for d in decls {
@@ -127,21 +139,39 @@ impl<'a> Cx<'a> {
                 continue;
             }
             if let Some(prev) = names.get(name) {
-                let at = cx.pos_str(*prev);
-                cx.err(pos, format!("`{}` is already declared at {}", name, at));
-                continue;
+                if prev.file == 0 && pos.file != 0 {
+                    // a user declaration shadows a prelude declaration of the same name
+                    cx.fn_names.remove(name);
+                    cx.struct_names.remove(name);
+                    cx.enum_names.remove(name);
+                    cx.const_decls.remove(name);
+                    cx.global_decls.remove(name);
+                } else {
+                    let at = cx.pos_str(*prev);
+                    cx.err(pos, format!("`{}` is already declared at {}", name, at));
+                    continue;
+                }
             }
             names.insert(name, pos);
             match d {
                 Decl::Fn(f) => {
+                    if pos.file == 0 {
+                        cx.p_fn_names.insert(&f.name, cx.fn_decls.len());
+                    }
                     cx.fn_names.insert(&f.name, cx.fn_decls.len());
                     cx.fn_decls.push(f);
                 }
                 Decl::Struct(s) => {
+                    if pos.file == 0 {
+                        cx.p_struct_names.insert(&s.name, cx.struct_decls.len());
+                    }
                     cx.struct_names.insert(&s.name, cx.struct_decls.len());
                     cx.struct_decls.push(s);
                 }
                 Decl::Enum(e) => {
+                    if pos.file == 0 {
+                        cx.p_enum_names.insert(&e.name, cx.enum_decls.len());
+                    }
                     cx.enum_names.insert(&e.name, cx.enum_decls.len());
                     cx.enum_decls.push(e);
                 }
@@ -165,6 +195,34 @@ impl<'a> Cx<'a> {
             }
         }
         cx
+    }
+
+    pub fn find_fn(&self, n: &str) -> Option<usize> {
+        if self.scope_prelude {
+            if let Some(&i) = self.p_fn_names.get(n) {
+                return Some(i);
+            }
+        }
+        self.fn_names.get(n).copied()
+    }
+    pub fn find_struct(&self, n: &str) -> Option<usize> {
+        if self.scope_prelude {
+            if let Some(&i) = self.p_struct_names.get(n) {
+                return Some(i);
+            }
+        }
+        self.struct_names.get(n).copied()
+    }
+    pub fn find_enum(&self, n: &str) -> Option<usize> {
+        if self.scope_prelude {
+            if let Some(&i) = self.p_enum_names.get(n) {
+                return Some(i);
+            }
+        }
+        self.enum_names.get(n).copied()
+    }
+    pub fn internal_file(&self, file: u16) -> bool {
+        file == 0 || file == self.entry_file
     }
 
     pub fn pos_str(&self, p: Pos) -> String {
@@ -191,10 +249,10 @@ impl<'a> Cx<'a> {
                 if targs.contains(&T_ERR) {
                     return T_ERR;
                 }
-                if let Some(&si) = self.struct_names.get(n.as_str()) {
+                if let Some(si) = self.find_struct(n.as_str()) {
                     return self.inst_struct(si, targs, *pos);
                 }
-                if let Some(&ei) = self.enum_names.get(n.as_str()) {
+                if let Some(ei) = self.find_enum(n.as_str()) {
                     return self.inst_enum(ei, targs, *pos);
                 }
                 self.err(*pos, format!("unknown type `{}`", n));
@@ -294,6 +352,8 @@ impl<'a> Cx<'a> {
         }
         let mut fields = Vec::new();
         let mut seen: HashSet<&str> = HashSet::new();
+        let save_scope = self.scope_prelude;
+        self.scope_prelude = self.internal_file(d.pos.file);
         for (fname, fty) in &d.fields {
             if !seen.insert(fname) {
                 self.err(d.pos, format!("duplicate field `{}` in struct `{}`", fname, d.name));
@@ -301,6 +361,7 @@ impl<'a> Cx<'a> {
             let t = self.resolve(fty, &env);
             fields.push((fname.clone(), t));
         }
+        self.scope_prelude = save_scope;
         self.types.structs[sid as usize].fields = fields;
         ty
     }
@@ -333,10 +394,13 @@ impl<'a> Cx<'a> {
             env.insert(n.clone(), *t);
         }
         let mut vars = Vec::new();
+        let save_scope = self.scope_prelude;
+        self.scope_prelude = self.internal_file(d.pos.file);
         for (vn, vts) in &d.variants {
             let ts: Vec<Ty> = vts.iter().map(|t| self.resolve(t, &env)).collect();
             vars.push((vn.clone(), ts));
         }
+        self.scope_prelude = save_scope;
         self.types.enums[eid as usize].variants = vars;
         ty
     }
@@ -389,11 +453,14 @@ impl<'a> Cx<'a> {
         for (n, t) in d.tparams.iter().zip(targs.iter()) {
             env.insert(n.clone(), *t);
         }
+        let save_scope = self.scope_prelude;
+        self.scope_prelude = self.internal_file(d.pos.file);
         let ptys: Vec<Ty> = d.params.iter().map(|p| self.resolve(&p.1, &env)).collect();
         let rty = match &d.ret {
             Some(r) => self.resolve(r, &env),
             None => T_UNIT,
         };
+        self.scope_prelude = save_scope;
         self.flush_layout_errors(d.pos);
         let fid = self.module.funcs.len() as u32;
         let mut f = Func::new(&self.inst_name(&d.name, &targs));
@@ -509,13 +576,13 @@ impl<'a> Cx<'a> {
                 if let Some(t) = builtin_type(n) {
                     return Some(t);
                 }
-                if let Some(&si) = self.struct_names.get(n.as_str()) {
+                if let Some(si) = self.find_struct(n.as_str()) {
                     if self.struct_decls[si].tparams.is_empty() {
                         return Some(self.inst_struct(si, vec![], e.pos));
                     }
                     return None;
                 }
-                if let Some(&ei) = self.enum_names.get(n.as_str()) {
+                if let Some(ei) = self.find_enum(n.as_str()) {
                     if self.enum_decls[ei].tparams.is_empty() {
                         return Some(self.inst_enum(ei, vec![], e.pos));
                     }
@@ -528,8 +595,8 @@ impl<'a> Cx<'a> {
                     EK::Ident(n) => n,
                     _ => return None,
                 };
-                let is_s = self.struct_names.get(n.as_str()).copied();
-                let is_e = self.enum_names.get(n.as_str()).copied();
+                let is_s = self.find_struct(n.as_str());
+                let is_e = self.find_enum(n.as_str());
                 if is_s.is_none() && is_e.is_none() {
                     return None;
                 }
