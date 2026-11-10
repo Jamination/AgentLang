@@ -73,6 +73,21 @@ for src in tests/std/*.al; do
   nstatic=$((nstatic+1))
 done
 echo "$nstatic standard-library test programs are static executables"
+# the graphics checks, spelled out
+if grep -q '^SKIP vk_triangle' <<<"$skips"; then
+  echo "Vulkan offscreen triangle: SKIPPED (see below)"
+elif $ALC build tests/sys/vk_triangle.al -o $BIN/vk_triangle 2>/dev/null && $BIN/vk_triangle >$BIN/vk_triangle.out 2>&1 && cmp -s $BIN/vk_triangle.out tests/sys/vk_triangle.out; then
+  echo "Vulkan offscreen triangle: rendered by the driver, pixels match tests/sys/data/vk_triangle.ref"
+else
+  echo "FAIL: Vulkan offscreen triangle"; head -5 $BIN/vk_triangle.out; fail=1
+fi
+for m in dx12 metal; do
+  if $ALC check tests/check/${m}_triangle.al 2>$BIN/check_$m.err; then
+    echo "$m bindings and sample: pass alc check"
+  else
+    echo "FAIL: $m sample does not type-check"; head -5 $BIN/check_$m.err; fail=1
+  fi
+done
 if [[ -n "$skips" ]]; then
   echo "skipped (prerequisite missing on this machine):"
   echo "$skips" | sed 's/^/  /'

@@ -379,6 +379,12 @@ m.has(k)               m.del(k)         m.len          m.keys()   // []K
 
 `alc sigs file.al -- std` prints every library signature.
 
+This section is the core. The game-oriented library (math, random numbers, time and fixed
+timestep, pools and frame memory, assets, images, input, window, audio, Vulkan / DX12 / Metal
+bindings) is described in [STDLIB.md](STDLIB.md); how to structure a game on it in
+[GAMES.md](GAMES.md). `floor`, `ceil`, `min`, `max`, `abs` above are joined there by the full
+set of math functions for `f32`, `f64` and vectors.
+
 ## Tooling
 
 ```
