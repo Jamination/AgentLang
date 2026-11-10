@@ -33,7 +33,7 @@ fn usage() -> ! {
     eprintln!(
         "usage: alc <command> <file.al> [options]\n\
          commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n\
-         options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --emit-ir     print optimized IR to stdout"
+         options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout"
     );
     std::process::exit(2);
 }
@@ -54,6 +54,7 @@ fn parse_args() -> Args {
                 }
                 a.output = Some(av[i].clone());
             }
+            "--json" => JSON.store(true, std::sync::atomic::Ordering::Relaxed),
             "--emit-ir" => a.emit_ir = true,
             "--emit-asm" => a.emit_asm = true,
             "--unchecked" => a.unchecked = true,
@@ -134,11 +135,43 @@ impl Sources {
     }
 }
 
+static JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn json_str(s: &str) -> String {
+    let mut o = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
 fn report(names: &[String], errs: &mut Vec<Diag>) -> bool {
     if errs.is_empty() {
         return false;
     }
     errs.sort_by_key(|d| (d.pos.file, d.pos.line, d.pos.col));
+    if JSON.load(std::sync::atomic::Ordering::Relaxed) {
+        // machine-readable diagnostics: one JSON array on stdout
+        let mut items: Vec<String> = Vec::new();
+        let mut last = String::new();
+        for d in errs.iter() {
+            let file = names.get(d.pos.file as usize).map(|s| s.as_str()).unwrap_or("?");
+            let item = format!("{{\"file\":{},\"line\":{},\"col\":{},\"message\":{}}}", json_str(file), d.pos.line, d.pos.col, json_str(&d.msg));
+            if item != last {
+                items.push(item.clone());
+                last = item;
+            }
+        }
+        println!("[{}]", items.join(","));
+        return true;
+    }
     let mut last = String::new();
     let mut n = 0;
     for d in errs.iter() {

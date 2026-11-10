@@ -1,0 +1,1 @@
+panic: index out of bounds at tests/run/bounds_loop.al:4

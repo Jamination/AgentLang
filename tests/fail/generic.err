@@ -1,0 +1,17 @@
+match used as a value must be exhaustive; missing: Square
+cannot infer type parameter `T` of `make`; write `make[T](...)`
+argument `a` of `pick`: expected str, found i64
+enum `Opt` expects 1 type argument(s), got 0
+cannot infer type arguments of enum `Opt` for `None`; annotate the destination type
+cannot infer type arguments of enum `Opt` for `None`; annotate the destination type
+generic struct `Box` needs type arguments here, e.g. `Box[i64]{...}`
+function `ident` expects 1 type argument(s), got 2
+unknown function `undefined_fn`
+Box[i64] has no field `w`
+i64 is not callable
+i64 has no field `x`
+index 5 is out of bounds for length 3
+operands have different types: [3]i64 and i64
+`break`/`continue` outside of a loop
+expression statement has no effect (did you mean `=` or `:=`?)
+cannot take the address of this expression (only variables, fields, elements and `&T{...}` literals)

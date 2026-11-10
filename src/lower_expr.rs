@@ -597,6 +597,10 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let pt = self.cx.types.ptr(ty);
                     return self.sval(pt, pv);
                 }
+                if !matches!(x.k, EK::Ident(_) | EK::Field(..) | EK::Index(..) | EK::Un(UnOp::Deref, _)) {
+                    self.err(pos, "cannot take the address of this expression (only variables, fields, elements and `&T{...}` literals)".into());
+                    return Val::err();
+                }
                 match self.place(x) {
                     Some(p) => {
                         if p.alias >> 4 != 0 {
@@ -722,7 +726,11 @@ impl<'c, 'a> Fx<'c, 'a> {
         }
         if l.ty != r.ty {
             let (a, b) = (self.tyname(l.ty), self.tyname(r.ty));
-            self.err(pos, format!("operands have different types: {} and {} (convert explicitly, e.g. `{}(x)`)", a, b, a));
+            if self.cx.types.is_scalar(l.ty) && self.cx.types.is_scalar(r.ty) && !matches!(self.cx.types.k(l.ty), TyK::Ptr(_) | TyK::Fn(..)) {
+                self.err(pos, format!("operands have different types: {} and {} (convert explicitly, e.g. `{}(x)`)", a, b, a));
+            } else {
+                self.err(pos, format!("operands have different types: {} and {}", a, b));
+            }
             return Val::err();
         }
         if is_cmp(op) {

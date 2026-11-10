@@ -1,0 +1,5 @@
+ok   addition
+FAIL clamp fails on purpose
+FAIL out of bounds is caught
+ok   strings
+2 test(s) failed

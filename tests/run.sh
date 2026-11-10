@@ -3,6 +3,7 @@
 # tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
 #                     every line of NAME.err must appear in stderr)
 # tests/fail/NAME.al  must fail to compile; every line of NAME.err must appear in the diagnostics
+# tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
 cd "$(dirname "$0")/.." || exit 2
 ALC=${1:-./target/release/alc}
 FILTER=${2:-}
@@ -55,6 +56,18 @@ for src in tests/fail/*.al; do
     [[ -z "$line" ]] && continue
     if ! grep -qF -- "$line" "$TMP/cerr"; then echo "FAIL $name: diagnostics lack: $line"; sed 's/^/    /' "$TMP/cerr" | head -5; ok=0; fi
   done <"tests/fail/$name.err"
+  if [[ $ok == 1 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi
+done
+for src in tests/unit/*.al; do
+  [[ -e "$src" ]] || continue
+  name=$(basename "$src" .al)
+  [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
+  exp_code=0
+  [[ -f "tests/unit/$name.code" ]] && exp_code=$(cat "tests/unit/$name.code")
+  $ALC test "$src" -o "$TMP/bin" >"$TMP/out" 2>"$TMP/err"; code=$?
+  ok=1
+  if ! cmp -s "$TMP/out" "tests/unit/$name.out"; then echo "FAIL unit/$name: stdout differs"; diff "tests/unit/$name.out" "$TMP/out" | head -10; ok=0; fi
+  if [[ "$code" != "$exp_code" ]]; then echo "FAIL unit/$name: exit code $code, expected $exp_code"; ok=0; fi
   if [[ $ok == 1 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done
 echo "conformance: $pass passed, $fail failed"
