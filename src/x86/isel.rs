@@ -294,7 +294,7 @@ impl<'a> Sel<'a> {
                 self.addr_term(b, m, depth + 1);
                 return;
             }
-            Op::Shl | Op::Mul if m.idx == NOREG && i.ty == T::I64 && self.uses[v as usize] <= 1 => {
+            Op::Shl | Op::Mul if m.idx == NOREG && i.ty == T::I64 => {
                 if let Some(k) = self.f.is_const(i.args[1]) {
                     let scale = if i.op == Op::Shl {
                         if (1..=3).contains(&k) {

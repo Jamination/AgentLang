@@ -511,7 +511,7 @@ fn reads_flags(op: MOp) -> bool {
 }
 
 // post-allocation cleanups that depend on the final layout
-fn peephole(mf: &mut MFunc, layout: &[u32]) {
+fn peephole(mf: &mut MFunc, layout: &mut Vec<u32>) {
     let nb = mf.blocks.len();
     // 1. thread jumps through blocks that only contain `jmp X`
     let mut fwd: Vec<u32> = (0..nb as u32).collect();
@@ -536,6 +536,21 @@ fn peephole(mf: &mut MFunc, layout: &[u32]) {
             }
         }
     }
+    // drop blocks that are no longer reachable
+    {
+        let mut reach = vec![false; nb];
+        let mut work = vec![layout[0]];
+        reach[layout[0] as usize] = true;
+        while let Some(b) = work.pop() {
+            for i in &mf.blocks[b as usize].insts {
+                if matches!(i.op, MOp::Jmp | MOp::Jcc) && !reach[i.tgt as usize] {
+                    reach[i.tgt as usize] = true;
+                    work.push(i.tgt);
+                }
+            }
+        }
+        layout.retain(|b| reach[*b as usize]);
+    }
     // 2. fallthrough and branch inversion
     for (li, &b) in layout.iter().enumerate() {
         let next = layout.get(li + 1).copied().unwrap_or(u32::MAX);
@@ -557,27 +572,50 @@ fn peephole(mf: &mut MFunc, layout: &[u32]) {
             insts.pop();
         }
     }
-    // 3. mov r, 0 -> xor r, r when flags are dead
+    // 3. flag-clobbering shorter forms when flags are dead:
+    //    mov r, 0 -> xor r, r ; lea r, [r + x] -> add r, x
     for b in 0..nb {
         let n = mf.blocks[b].insts.len();
         for k in 0..n {
             let i = &mf.blocks[b].insts[k];
-            if i.op == MOp::Mov && matches!(i.a, Opnd::R(r) if r < 16) && i.b == Opnd::I(0) {
-                let mut dead = true;
-                for j in k + 1..n {
-                    let o = mf.blocks[b].insts[j].op;
-                    if reads_flags(o) {
-                        dead = false;
-                        break;
-                    }
-                    if sets_flags(o) {
-                        break;
+            let zero = i.op == MOp::Mov && matches!(i.a, Opnd::R(r) if r < 16) && i.b == Opnd::I(0);
+            let mut add: Option<Opnd> = None;
+            if i.op == MOp::Lea {
+                if let (Opnd::R(d), Opnd::M(m)) = (i.a, i.b) {
+                    if m.kind == MemKind::Normal {
+                        if m.base == d && m.idx == NOREG && m.disp != 0 {
+                            add = Some(Opnd::I(m.disp as i64));
+                        } else if m.base == d && m.idx != NOREG && m.scale == 1 && m.disp == 0 && m.idx != d {
+                            add = Some(Opnd::R(m.idx));
+                        } else if m.idx == d && m.scale == 1 && m.disp == 0 && m.base != NOREG && m.base != d {
+                            add = Some(Opnd::R(m.base));
+                        }
                     }
                 }
-                if dead {
-                    let a = i.a;
-                    mf.blocks[b].insts[k] = MInst::new(MOp::Zero, 4, a, Opnd::None);
+            }
+            if !zero && add.is_none() {
+                continue;
+            }
+            let mut dead = true;
+            for j in k + 1..n {
+                let o = mf.blocks[b].insts[j].op;
+                if reads_flags(o) {
+                    dead = false;
+                    break;
                 }
+                if sets_flags(o) {
+                    break;
+                }
+            }
+            if !dead {
+                continue;
+            }
+            let a = i.a;
+            let sz = i.sz;
+            if zero {
+                mf.blocks[b].insts[k] = MInst::new(MOp::Zero, 4, a, Opnd::None);
+            } else if let Some(src) = add {
+                mf.blocks[b].insts[k] = MInst::new(MOp::Add, sz, a, src);
             }
         }
     }
@@ -616,11 +654,12 @@ pub fn emit(mf: &mut MFunc, alloc: &Alloc, layout: &[u32], fpool: &[u32]) -> Cod
     if size > 0 {
         pro.push(MInst::new(MOp::Sub, 8, Opnd::R(RSP), Opnd::I(size as i64)));
     }
+    let mut layout: Vec<u32> = layout.to_vec();
     let entry = layout[0] as usize;
     let mut body = std::mem::take(&mut mf.blocks[entry].insts);
     pro.append(&mut body);
     mf.blocks[entry].insts = pro;
-    for &b in layout {
+    for &b in layout.iter() {
         let insts = std::mem::take(&mut mf.blocks[b as usize].insts);
         let mut out = Vec::with_capacity(insts.len() + 4);
         for i in insts {
@@ -636,11 +675,11 @@ pub fn emit(mf: &mut MFunc, alloc: &Alloc, layout: &[u32], fpool: &[u32]) -> Cod
         }
         mf.blocks[b as usize].insts = out;
     }
-    peephole(mf, layout);
+    peephole(mf, &mut layout);
     // encode
     let mut items: Vec<Item> = Vec::new();
     let mut block_item: Vec<usize> = vec![usize::MAX; mf.blocks.len()];
-    for &b in layout {
+    for &b in layout.iter() {
         if mf.blocks[b as usize].align {
             items.push(Item::Align(16));
         }

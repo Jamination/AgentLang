@@ -1,4 +1,5 @@
-// Dominator-scoped global value numbering for pure instructions.
+// Dominator-scoped global value numbering for pure instructions, plus propagation of
+// branch conditions into dominated blocks (removes repeated checks).
 use crate::ir::*;
 use std::collections::HashMap;
 
@@ -12,6 +13,7 @@ pub fn run(f: &mut Func) -> bool {
     let cfg = Cfg::new(f);
     let mut repl: Vec<V> = vec![NOV; f.insts.len()];
     let mut table: HashMap<Key, V> = HashMap::new();
+    let mut known: HashMap<V, bool> = HashMap::new();
     let mut changed = false;
     fn find(repl: &[V], mut v: V) -> V {
         while repl[v as usize] != NOV {
@@ -19,21 +21,43 @@ pub fn run(f: &mut Func) -> bool {
         }
         v
     }
-    // explicit DFS over the dominator tree
     enum Step {
         Enter(B),
-        Exit(Vec<Key>),
+        Exit(Vec<Key>, Vec<(V, Option<bool>)>),
     }
     let mut stack = vec![Step::Enter(0)];
     while let Some(step) = stack.pop() {
         match step {
-            Step::Exit(keys) => {
+            Step::Exit(keys, facts) => {
                 for k in keys {
                     table.remove(&k);
+                }
+                for (c, old) in facts.into_iter().rev() {
+                    match old {
+                        Some(o) => {
+                            known.insert(c, o);
+                        }
+                        None => {
+                            known.remove(&c);
+                        }
+                    }
                 }
             }
             Step::Enter(b) => {
                 let mut added: Vec<Key> = Vec::new();
+                let mut facts: Vec<(V, Option<bool>)> = Vec::new();
+                // a block reached only through one arm of a conditional branch knows the condition
+                if cfg.preds[b as usize].len() == 1 {
+                    let p = cfg.preds[b as usize][0];
+                    if let Term::Br(c, t, e) = f.blocks[p as usize].term {
+                        if t != e {
+                            let c = find(&repl, c);
+                            let val = t == b;
+                            facts.push((c, known.insert(c, val)));
+                            // an equivalent negated compare is also decided
+                        }
+                    }
+                }
                 let old = std::mem::take(&mut f.blocks[b as usize].insts);
                 let mut new = Vec::with_capacity(old.len());
                 for v in old {
@@ -67,7 +91,14 @@ pub fn run(f: &mut Func) -> bool {
                     }
                 }
                 f.blocks[b as usize].insts = new;
-                stack.push(Step::Exit(added));
+                if let Term::Br(c, t, e) = f.blocks[b as usize].term {
+                    let c = find(&repl, c);
+                    if let Some(&val) = known.get(&c) {
+                        f.blocks[b as usize].term = Term::Jmp(if val { t } else { e });
+                        changed = true;
+                    }
+                }
+                stack.push(Step::Exit(added, facts));
                 for &c in cfg.children[b as usize].iter().rev() {
                     stack.push(Step::Enter(c));
                 }
@@ -76,6 +107,7 @@ pub fn run(f: &mut Func) -> bool {
     }
     if changed {
         f.apply_repl(&mut repl);
+        crate::opt::cleanup::prune_unreachable(f);
     }
     changed
 }

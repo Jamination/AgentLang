@@ -67,7 +67,7 @@ pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
         let loops = Loops::new(f, &cfg);
         let depths: Vec<u32> = (0..f.blocks.len()).map(|b| loops.depth(b as B)).collect();
         let mut mf = isel::select(f, m, &depths);
-        let layout: Vec<u32> = cfg.rpo.clone();
+        let layout: Vec<u32> = block_layout(f);
         let alloc = regalloc::allocate(&mut mf, &layout);
         let local: Vec<u32> = mf
             .fconsts
@@ -86,4 +86,54 @@ pub fn compile(m: &mut Module, dump_asm: bool) -> Output {
         funcs.push(Compiled { fid, code });
     }
     Output { funcs, fpool }
+}
+
+// Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,
+// with blocks that inevitably trap moved to the end.
+fn block_layout(f: &Func) -> Vec<u32> {
+    let n = f.blocks.len();
+    let mut seen = vec![false; n];
+    let mut post = Vec::with_capacity(n);
+    let mut stack: Vec<(B, usize)> = vec![(0, 0)];
+    seen[0] = true;
+    while let Some(&mut (b, ref mut i)) = stack.last_mut() {
+        let mut ss = f.succs(b);
+        ss.reverse();
+        if *i < ss.len() {
+            let s = ss[*i];
+            *i += 1;
+            if !seen[s as usize] {
+                seen[s as usize] = true;
+                stack.push((s, 0));
+            }
+        } else {
+            post.push(b);
+            stack.pop();
+        }
+    }
+    post.reverse();
+    // cold: every path from the block ends in a trap
+    let mut cold = vec![false; n];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &b in post.iter().rev() {
+            if cold[b as usize] {
+                continue;
+            }
+            let c = match &f.blocks[b as usize].term {
+                Term::Trap | Term::None => true,
+                Term::Jmp(t) => cold[*t as usize],
+                Term::Br(_, t, e) => cold[*t as usize] && cold[*e as usize],
+                Term::Ret(_) => false,
+            };
+            if c {
+                cold[b as usize] = true;
+                changed = true;
+            }
+        }
+    }
+    let mut out: Vec<u32> = post.iter().copied().filter(|b| !cold[*b as usize] || *b == 0).collect();
+    out.extend(post.iter().copied().filter(|b| cold[*b as usize] && *b != 0));
+    out
 }
