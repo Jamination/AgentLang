@@ -1,0 +1,1 @@
+the Vulkan loader (libvulkan.so.1) or a Vulkan driver (an ICD in /usr/share/vulkan/icd.d or /etc/vulkan/icd.d whose library exists) is not installed

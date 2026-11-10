@@ -282,10 +282,10 @@ impl<'c, 'a> Fx<'c, 'a> {
                 }
                 let cands = self.cx.fn_candidates(n.as_str());
                 if cands.len() == 1 {
-                    return self.call_decl(cands[0], None, None, args, expect, pos, None);
+                    return self.call_decl(cands[0], None, None, args, expect, pos, &[]);
                 }
                 if cands.len() > 1 {
-                    return self.call_overloaded(&cands, None, args, expect, pos);
+                    return self.call_overloaded(&cands, None, None, args, expect, pos);
                 }
                 if let Some(v) = self.builtin(n, None, args, expect, pos) {
                     return v;
@@ -321,9 +321,9 @@ impl<'c, 'a> Fx<'c, 'a> {
                     let is_var = self.lookup(n).is_some() || (self.cx.global_decls.contains_key(n.as_str()) && self.cx.find_fn(n.as_str()).is_none());
                     if !is_var {
                         let env = self.tenv.clone();
-                        let is_fn = self.cx.find_fn(n.as_str());
+                        let cands = self.cx.fn_candidates(n.as_str());
                         let is_builtin = matches!(n.as_str(), "sizeof" | "cast" | "mkslice");
-                        if is_fn.is_some() || is_builtin {
+                        if !cands.is_empty() || is_builtin {
                             let mut tys = Vec::new();
                             for t in targs {
                                 match self.cx.expr_type(t, &env) {
@@ -335,13 +335,36 @@ impl<'c, 'a> Fx<'c, 'a> {
                                     }
                                 }
                             }
-                            if let Some(di) = is_fn {
-                                return self.call_decl(di, Some(tys), None, args, expect, pos, None);
+                            if cands.len() == 1 {
+                                return self.call_decl(cands[0], Some(tys), None, args, expect, pos, &[]);
+                            }
+                            if cands.len() > 1 {
+                                return self.call_overloaded(&cands, Some(tys), None, args, expect, pos);
                             }
                             return self.builtin(n, Some(&tys), args, expect, pos).unwrap_or_else(Val::err);
                         }
                         if let Some(t) = self.cx.expr_type(c, &env) {
                             return self.conversion(t, args, pos);
+                        }
+                    }
+                }
+                // x.f[T](a): a method call with explicit type arguments
+                if let EK::Field(recv, name) = &b.k {
+                    let cands = self.cx.fn_candidates(name.as_str());
+                    if !cands.is_empty() {
+                        let env = self.tenv.clone();
+                        let saved = self.cx.errs.len();
+                        let tys: Option<Vec<Ty>> = targs.iter().map(|t| self.cx.expr_type(t, &env).filter(|x| *x != T_ERR)).collect();
+                        self.cx.errs.truncate(saved);
+                        if let Some(tys) = tys {
+                            let rv = self.expr(recv, None);
+                            if rv.ty == T_ERR {
+                                return Val::err();
+                            }
+                            if cands.len() == 1 {
+                                return self.call_decl(cands[0], Some(tys), Some(rv), args, expect, pos, &[]);
+                            }
+                            return self.call_overloaded(&cands, Some(tys), Some(rv), args, expect, pos);
                         }
                     }
                 }
@@ -367,10 +390,10 @@ impl<'c, 'a> Fx<'c, 'a> {
                 }
                 let cands = self.cx.fn_candidates(name.as_str());
                 if cands.len() == 1 {
-                    return self.call_decl(cands[0], None, Some(rv), args, expect, pos, None);
+                    return self.call_decl(cands[0], None, Some(rv), args, expect, pos, &[]);
                 }
                 if cands.len() > 1 {
-                    return self.call_overloaded(&cands, Some(rv), args, expect, pos);
+                    return self.call_overloaded(&cands, None, Some(rv), args, expect, pos);
                 }
                 if name == "len" && args.is_empty() {
                     if let Some(v) = self.len_of(rv) {
@@ -419,8 +442,64 @@ impl<'c, 'a> Fx<'c, 'a> {
         self.convert(v, to, pos)
     }
 
+    // The value of function `n`: with explicit type arguments, or with the types taken from
+    // the expected function type; of several definitions the one that fits is used.
+    pub fn fn_value(&mut self, n: &str, explicit: Option<Vec<Ty>>, expect: Option<Ty>) -> Option<Val> {
+        let cands = self.cx.fn_candidates(n);
+        let want = match expect.map(|t| self.cx.types.k(t).clone()) {
+            Some(TyK::Fn(p, r)) => Some((p, r)),
+            _ => None,
+        };
+        for &di in &cands {
+            let d = self.cx.fn_decls[di];
+            let targs: Vec<Ty> = match (&explicit, d.tparams.is_empty()) {
+                (Some(t), _) if t.len() == d.tparams.len() => t.clone(),
+                (Some(_), _) => continue,
+                (None, true) => Vec::new(),
+                (None, false) => {
+                    // infer the type arguments from the expected function type
+                    let (ps, r) = match &want {
+                        Some((ps, r)) if ps.len() == d.params.len() => (ps.clone(), *r),
+                        _ => continue,
+                    };
+                    let mut env = HashMap::new();
+                    let mut ok = true;
+                    for (p, t) in d.params.iter().zip(ps.iter()) {
+                        ok &= self.unify(&p.1, *t, &d.tparams, &mut env);
+                    }
+                    if let Some(rt) = &d.ret {
+                        ok &= self.unify(rt, r, &d.tparams, &mut env);
+                    }
+                    if !ok || d.tparams.iter().any(|p| !env.contains_key(p)) {
+                        continue;
+                    }
+                    d.tparams.iter().map(|p| env[p]).collect()
+                }
+            };
+            let fid = self.cx.inst_fn(di, targs);
+            let (ptys, rty) = self.cx.fn_sigs[fid as usize].clone();
+            if let Some((wp, wr)) = &want {
+                if cands.len() > 1 && (*wp != ptys || *wr != rty) {
+                    continue;
+                }
+            }
+            let ty = self.cx.types.intern(TyK::Fn(ptys, rty));
+            if let Some(x) = self.cx.module.funcs[fid as usize].ext {
+                // the address of a C function comes from its import slot
+                let got = self.cx.module.externs[x as usize].got;
+                let a = self.ins(Op::GAddr, T::I64, vec![], got as i64);
+                let v = self.load_raw(a, T::I64, AK_PTR);
+                return Some(self.sval(ty, v));
+            }
+            let v = self.ins(Op::FAddr, T::I64, vec![], fid as i64);
+            return Some(self.sval(ty, v));
+        }
+        None
+    }
+
     // does parameter type `pt` of declaration `d` accept a value of type `ty`?
-    fn param_accepts(&mut self, d: &'a FnDecl, pt: &TypeAst, ty: Ty, is_recv: bool) -> bool {
+    // (`explicit`: type arguments written at the call)
+    fn param_accepts(&mut self, d: &'a FnDecl, pt: &TypeAst, ty: Ty, is_recv: bool, explicit: Option<&[Ty]>) -> bool {
         let adjust = |s: &mut Self, t: Ty| -> bool { is_recv && (matches!(s.cx.types.k(t).clone(), TyK::Ptr(i) if i == ty) || matches!(s.cx.types.k(ty).clone(), TyK::Ptr(i) if i == t)) };
         if d.tparams.is_empty() {
             let saved = self.cx.errs.len();
@@ -428,142 +507,204 @@ impl<'c, 'a> Fx<'c, 'a> {
             self.cx.errs.truncate(saved);
             return t == ty || adjust(self, t);
         }
-        let mut env = HashMap::new();
-        if self.unify(pt, ty, &d.tparams, &mut env) {
+        let mut base = HashMap::new();
+        if let Some(tys) = explicit {
+            for (n, t) in d.tparams.iter().zip(tys.iter()) {
+                base.insert(n.clone(), *t);
+            }
+        }
+        // unification binds the type parameters; the concrete parts are compared after resolution
+        let fits = |s: &mut Self, pt: &TypeAst, ty: Ty| -> bool {
+            let mut env = base.clone();
+            if !s.unify(pt, ty, &d.tparams, &mut env) {
+                return false;
+            }
+            if mentions_unbound(pt, &d.tparams, &env) {
+                return true;
+            }
+            let saved = s.cx.errs.len();
+            let t = s.cx.resolve(pt, &env);
+            s.cx.errs.truncate(saved);
+            t == ty
+        };
+        if fits(self, pt, ty) {
             return true;
         }
         if !is_recv {
             return false;
         }
         match (pt, self.cx.types.k(ty).clone()) {
-            (TypeAst::Ptr(inner), _) => self.unify(inner, ty, &d.tparams, &mut HashMap::new()),
-            (_, TyK::Ptr(t)) => self.unify(pt, t, &d.tparams, &mut HashMap::new()),
+            (TypeAst::Ptr(inner), _) => fits(self, inner, ty),
+            (_, TyK::Ptr(t)) => fits(self, pt, t),
             _ => false,
         }
     }
 
-    // A name with several definitions: the definition is chosen by the type of the receiver,
-    // or of the first argument that is not an untyped literal.
-    fn call_overloaded(&mut self, cands: &[usize], recv: Option<Val>, args: &'a [Expr], expect: Option<Ty>, pos: Pos) -> Val {
+    // how well parameter `pi` of `d` fits an untyped literal argument: 0 = its default type,
+    // 1 = same kind, 2 = generic, 3 = integer literal for a float; None = does not fit
+    fn literal_fit(&mut self, d: &'a FnDecl, pi: usize, a: &Expr) -> Option<u8> {
+        let pt = &d.params[pi].1;
+        if mentions_unbound(pt, &d.tparams, &HashMap::new()) {
+            return Some(2);
+        }
+        let saved = self.cx.errs.len();
+        let t = self.cx.resolve(pt, &HashMap::new());
+        self.cx.errs.truncate(saved);
+        let k = self.cx.types.k(t).clone();
+        let (is_i, is_f) = (self.cx.types.is_int(t), self.cx.types.is_float(t));
+        if matches!(a.k, EK::Nil) {
+            return if matches!(k, TyK::Ptr(_) | TyK::Fn(..) | TyK::Slice(_)) { Some(0) } else { None };
+        }
+        if matches!(&a.k, EK::Ident(n) if self.cx.variants.contains_key(n.as_str())) {
+            return if matches!(k, TyK::Enum(_)) { Some(0) } else { None };
+        }
+        if matches!(self.cx.const_eval(a), Some(CV::Float(_))) {
+            return if t == T_F64 {
+                Some(0)
+            } else if is_f {
+                Some(1)
+            } else {
+                None
+            };
+        }
+        if t == T_I64 {
+            Some(0)
+        } else if is_i {
+            Some(1)
+        } else if is_f {
+            Some(3)
+        } else {
+            None
+        }
+    }
+
+    // A name with several definitions. The receiver and the arguments are looked at from left
+    // to right until one definition is left: typed arguments must match the parameter type,
+    // untyped literals must be acceptable to it. Remaining ties go to the definition whose
+    // parameters are the literals' default types, then to one returning the expected type.
+    fn call_overloaded(&mut self, cands: &[usize], explicit: Option<Vec<Ty>>, recv: Option<Val>, args: &'a [Expr], expect: Option<Ty>, pos: Pos) -> Val {
         let total = args.len() + recv.is_some() as usize;
+        let off = recv.is_some() as usize;
         let name = self.cx.fn_decls[cands[0]].name.clone();
-        let (k, val) = match recv {
-            Some(rv) => (0, rv),
-            None => match args.iter().position(|a| !self.is_untyped(a)) {
-                Some(i) => (i, self.expr(&args[i], None)),
-                None => {
-                    // only literals: rank the definitions by how well their first parameter
-                    // fits the literal, then prefer one returning the expected type
-                    let floaty = args.first().map(|a| matches!(self.cx.const_eval(a), Some(CV::Float(_)))).unwrap_or(false);
-                    let nil = matches!(args.first().map(|a| &a.k), Some(EK::Nil));
-                    let variant = matches!(args.first().map(|a| &a.k), Some(EK::Ident(n)) if self.cx.variants.contains_key(n.as_str()));
-                    let mut ranked: Vec<(u8, usize)> = Vec::new();
-                    for &di in cands {
-                        let d = self.cx.fn_decls[di];
-                        if d.params.len() != total {
-                            continue;
-                        }
-                        let rank = if total == 0 {
-                            0
-                        } else if !d.tparams.is_empty() {
-                            2
-                        } else {
-                            let saved = self.cx.errs.len();
-                            let t = self.cx.resolve(&d.params[0].1, &HashMap::new());
-                            self.cx.errs.truncate(saved);
-                            let k = self.cx.types.k(t).clone();
-                            let (is_i, is_f) = (self.cx.types.is_int(t), self.cx.types.is_float(t));
-                            if nil {
-                                if matches!(k, TyK::Ptr(_) | TyK::Fn(..) | TyK::Slice(_)) {
-                                    0
-                                } else {
-                                    continue;
-                                }
-                            } else if variant {
-                                if matches!(k, TyK::Enum(_)) {
-                                    0
-                                } else {
-                                    continue;
-                                }
-                            } else if floaty {
-                                if t == T_F64 {
-                                    0
-                                } else if is_f {
-                                    1
-                                } else {
-                                    continue;
-                                }
-                            } else if t == T_I64 {
-                                0
-                            } else if is_i {
-                                1
-                            } else if is_f {
-                                3
-                            } else {
-                                continue;
-                            }
-                        };
-                        ranked.push((rank, di));
-                    }
-                    ranked.sort_by_key(|r| r.0);
-                    let mut pick = ranked.first().map(|r| r.1).unwrap_or(cands[0]);
-                    if let Some(et) = expect {
-                        for &(_, di) in &ranked {
-                            let d = self.cx.fn_decls[di];
-                            if let (true, Some(rt)) = (d.tparams.is_empty(), &d.ret) {
-                                let saved = self.cx.errs.len();
-                                let t = self.cx.resolve(rt, &HashMap::new());
-                                self.cx.errs.truncate(saved);
-                                if t == et {
-                                    pick = di;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    return self.call_decl(pick, None, None, args, expect, pos, None);
-                }
-            },
+        let sigs = |s: &Self| -> String {
+            cands
+                .iter()
+                .map(|di| {
+                    let d = s.cx.fn_decls[*di];
+                    format!("{}({})", d.name, d.params.iter().map(|p| type_str(&p.1)).collect::<Vec<_>>().join(", "))
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
         };
-        if val.ty == T_ERR {
-            for (i, a) in args.iter().enumerate() {
-                if recv.is_some() || i != k {
-                    self.expr(a, None);
-                }
+        let mut alive: Vec<usize> = cands
+            .iter()
+            .copied()
+            .filter(|di| {
+                let d = self.cx.fn_decls[*di];
+                d.params.len() == total && explicit.as_ref().map(|t| t.len() == d.tparams.len()).unwrap_or(true)
+            })
+            .collect();
+        if alive.is_empty() {
+            let s = sigs(self);
+            self.err(pos, format!("no definition of `{}` takes {} argument(s); candidates: {}", name, total, s));
+            for a in args {
+                self.expr(a, None);
             }
             return Val::err();
         }
-        for &di in cands {
-            let d = self.cx.fn_decls[di];
-            if d.params.len() != total {
+        if let Some(rv) = recv {
+            let mut keep: Vec<usize> = Vec::new();
+            for &di in &alive {
+                let d = self.cx.fn_decls[di];
+                if self.param_accepts(d, &d.params[0].1, rv.ty, true, explicit.as_deref()) {
+                    keep.push(di);
+                }
+            }
+            if keep.is_empty() {
+                let (tn, s) = (self.tyname(rv.ty), sigs(self));
+                self.err(pos, format!("no definition of `{}` can be called on {}; candidates: {}", name, tn, s));
+                for a in args {
+                    self.expr(a, None);
+                }
+                return Val::err();
+            }
+            alive = keep;
+        }
+        let mut pre: Vec<(usize, Val)> = Vec::new();
+        for (i, a) in args.iter().enumerate() {
+            if alive.len() <= 1 {
+                break;
+            }
+            let mut keep: Vec<usize> = Vec::new();
+            if self.is_untyped(a) {
+                for &di in &alive {
+                    if self.literal_fit(self.cx.fn_decls[di], off + i, a).is_some() {
+                        keep.push(di);
+                    }
+                }
+                if !keep.is_empty() {
+                    alive = keep;
+                }
                 continue;
             }
-            if self.param_accepts(d, &d.params[k].1, val.ty, recv.is_some()) {
-                return match recv {
-                    Some(_) => self.call_decl(di, None, recv, args, expect, pos, None),
-                    None => self.call_decl(di, None, None, args, expect, pos, Some((k, val))),
-                };
+            let v = self.expr(a, None);
+            if v.ty != T_ERR {
+                pre.push((i, v));
+                for &di in &alive {
+                    let d = self.cx.fn_decls[di];
+                    if self.param_accepts(d, &d.params[off + i].1, v.ty, false, explicit.as_deref()) {
+                        keep.push(di);
+                    }
+                }
+                if keep.is_empty() {
+                    let (tn, s) = (self.tyname(v.ty), sigs(self));
+                    self.err(a.pos, format!("no definition of `{}` takes {} as argument {} here; candidates: {}", name, tn, off + i + 1, s));
+                }
+            }
+            if keep.is_empty() {
+                for b in &args[i + 1..] {
+                    self.expr(b, None);
+                }
+                return Val::err();
+            }
+            alive = keep;
+        }
+        let mut pick = alive[0];
+        if alive.len() > 1 {
+            // rank by how naturally the literal arguments fit, then by the expected result type
+            let mut ranked: Vec<(u32, usize)> = Vec::new();
+            for &di in &alive {
+                let d = self.cx.fn_decls[di];
+                let mut rank = 0u32;
+                for (i, a) in args.iter().enumerate() {
+                    if self.is_untyped(a) {
+                        rank += self.literal_fit(d, off + i, a).unwrap_or(4) as u32;
+                    }
+                }
+                ranked.push((rank, di));
+            }
+            ranked.sort_by_key(|r| r.0);
+            pick = ranked[0].1;
+            if let Some(et) = expect {
+                for &(_, di) in &ranked {
+                    let d = self.cx.fn_decls[di];
+                    if let (true, Some(rt)) = (d.tparams.is_empty(), &d.ret) {
+                        let saved = self.cx.errs.len();
+                        let t = self.cx.resolve(rt, &HashMap::new());
+                        self.cx.errs.truncate(saved);
+                        if t == et {
+                            pick = di;
+                            break;
+                        }
+                    }
+                }
             }
         }
-        let tn = self.tyname(val.ty);
-        let sigs: Vec<String> = cands
-            .iter()
-            .map(|di| {
-                let d = self.cx.fn_decls[*di];
-                format!("{}({})", d.name, d.params.iter().map(|p| type_str(&p.1)).collect::<Vec<_>>().join(", "))
-            })
-            .collect();
-        self.err(pos, format!("no definition of `{}` takes {} as argument {} here; candidates: {}", name, tn, k + 1, sigs.join("; ")));
-        for (i, a) in args.iter().enumerate() {
-            if recv.is_some() || i != k {
-                self.expr(a, None);
-            }
-        }
-        Val::err()
+        self.call_decl(pick, explicit, recv, args, expect, pos, &pre)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn call_decl(&mut self, di: usize, explicit: Option<Vec<Ty>>, recv: Option<Val>, args: &'a [Expr], expect: Option<Ty>, pos: Pos, pre: Option<(usize, Val)>) -> Val {
+    fn call_decl(&mut self, di: usize, explicit: Option<Vec<Ty>>, recv: Option<Val>, args: &'a [Expr], expect: Option<Ty>, pos: Pos, pre: &[(usize, Val)]) -> Val {
         let d = self.cx.fn_decls[di];
         let nrecv = if recv.is_some() { 1 } else { 0 };
         if d.params.len() != args.len() + nrecv {
@@ -617,20 +758,18 @@ impl<'c, 'a> Fx<'c, 'a> {
         for pass in 0..2 {
             for (i, a) in args.iter().enumerate() {
                 let pi = i + nrecv;
-                if let Some((pk, pv)) = pre {
+                if let Some(&(_, pv)) = pre.iter().find(|p| p.0 == i) {
                     // an argument that overload resolution already evaluated
-                    if pk == i {
-                        if pass == 0 {
-                            if generic && !self.unify(&d.params[pi].1, pv.ty, &d.tparams, &mut env) {
-                                let tn = self.tyname(pv.ty);
-                                self.err(a.pos, format!("argument {} of `{}` has type {}, which does not match the parameter type", i + 1, d.name, tn));
-                                failed = true;
-                            }
-                            let pv = self.stabilize(pv, &args[i + 1..]);
-                            vals[pi] = Some(pv);
+                    if pass == 0 {
+                        if generic && !self.unify(&d.params[pi].1, pv.ty, &d.tparams, &mut env) {
+                            let tn = self.tyname(pv.ty);
+                            self.err(a.pos, format!("argument {} of `{}` has type {}, which does not match the parameter type", i + 1, d.name, tn));
+                            failed = true;
                         }
-                        continue;
+                        let pv = self.stabilize(pv, &args[i + 1..]);
+                        vals[pi] = Some(pv);
                     }
+                    continue;
                 }
                 let untyped = self.is_untyped(a);
                 if (pass == 0) == untyped && generic {

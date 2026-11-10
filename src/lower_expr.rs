@@ -131,6 +131,24 @@ impl<'c, 'a> Fx<'c, 'a> {
                 }
             }
             EK::Index(b, idx) => {
+                // f[T]: an instantiation of a generic function as a value
+                if let EK::Ident(n) = &b.k {
+                    if self.lookup(n).is_none() && !self.cx.fn_candidates(n.as_str()).is_empty() && !self.cx.global_decls.contains_key(n.as_str()) {
+                        let env = self.tenv.clone();
+                        let saved = self.cx.errs.len();
+                        let tys: Option<Vec<Ty>> = idx.iter().map(|t| self.cx.expr_type(t, &env).filter(|x| *x != T_ERR)).collect();
+                        self.cx.errs.truncate(saved);
+                        if let Some(tys) = tys {
+                            return match self.fn_value(n, Some(tys), expect) {
+                                Some(v) => v,
+                                None => {
+                                    self.err(e.pos, format!("no definition of `{}` takes these type arguments", n));
+                                    Val::err()
+                                }
+                            };
+                        }
+                    }
+                }
                 if idx.len() != 1 {
                     self.err(e.pos, "expected a single index".into());
                     return Val::err();
@@ -249,23 +267,14 @@ impl<'c, 'a> Fx<'c, 'a> {
             let m = self.mval(ty, a);
             return self.rvalue(m);
         }
-        if let Some(di) = self.cx.find_fn(n) {
-            if !self.cx.fn_decls[di].tparams.is_empty() {
-                self.err(pos, format!("generic function `{}` cannot be used as a value without type arguments", n));
-                return Val::err();
-            }
-            let fid = self.cx.inst_fn(di, vec![]);
-            let (ptys, rty) = self.cx.fn_sigs[fid as usize].clone();
-            let ty = self.cx.types.intern(TyK::Fn(ptys, rty));
-            if let Some(x) = self.cx.module.funcs[fid as usize].ext {
-                // the address of a C function comes from its import slot
-                let got = self.cx.module.externs[x as usize].got;
-                let a = self.ins(Op::GAddr, T::I64, vec![], got as i64);
-                let v = self.load_raw(a, T::I64, AK_PTR);
-                return self.sval(ty, v);
-            }
-            let v = self.ins(Op::FAddr, T::I64, vec![], fid as i64);
-            return self.sval(ty, v);
+        if !self.cx.fn_candidates(n).is_empty() {
+            return match self.fn_value(n, None, expect) {
+                Some(v) => v,
+                None => {
+                    self.err(pos, format!("function `{}` cannot be used as a value here: it is generic or overloaded; write `{}[T]` or give the destination a function type", n, n));
+                    Val::err()
+                }
+            };
         }
         if let Some(&(ei, vi)) = self.cx.variants.get(n) {
             return self.construct_variant(ei, vi, &[], expect, pos);

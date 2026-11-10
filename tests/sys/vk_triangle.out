@@ -1,0 +1,5 @@
+triangle ok
+covered pixels: 18000 to 19000
+pixels differing from the reference: under 0.5%
+centre pixel: inside the triangle colour range
+corner pixel: clear colour

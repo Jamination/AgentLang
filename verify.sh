@@ -1,7 +1,11 @@
 #!/bin/bash
-# Full verification: build, conformance tests, benchmark correctness and performance vs clang -O2.
+# Full verification: build, conformance tests (language, standard library, system-dependent
+# tests, platform bindings), f32 semantics against clang, documentation presence, benchmark
+# correctness and performance vs clang -O2.
 # Exit code 0 only if everything passes and the performance bar is met:
 #   geometric mean of (AL time / clang -O2 time) <= 1.5 and every ratio <= 2.5
+# A test whose prerequisite is missing on this machine (GPU driver, sound library, display) is
+# reported as SKIP with its reason and does not count as a failure.
 cd "$(dirname "$0")" || exit 2
 RUNS=${RUNS:-7}
 BENCHES="nbody spectralnorm fannkuch mandelbrot binarytrees sha256 matmul quicksort sieve hashmap"
@@ -22,8 +26,59 @@ if grep -q '^\[dependencies\]' Cargo.toml && [[ -n "$(sed -n '/^\[dependencies\]
   echo "FAIL: Cargo.toml declares external crates"; fail=1
 fi
 
-echo "== conformance tests =="
-tests/run.sh $ALC || fail=1
+echo "== conformance tests (language, standard library, system, bindings) =="
+tests/run.sh $ALC | tee tmp_verify_conf.txt
+[[ ${PIPESTATUS[0]} == 0 ]] || fail=1
+skips=$(grep '^SKIP ' tmp_verify_conf.txt)
+rm -f tmp_verify_conf.txt
+
+echo "== f32 semantics against clang -O2 =="
+mkdir -p $BIN
+for c in tests/c/*.c; do
+  name=$(basename "$c" .c)
+  if ! clang -O2 -o $BIN/ref_$name "$c" -lm 2>$BIN/ref_$name.err; then echo "FAIL $name: clang failed"; cat $BIN/ref_$name.err; fail=1; continue; fi
+  $BIN/ref_$name >$BIN/ref_$name.out
+  for mode in "" "-O0" "--unchecked"; do
+    if ! $ALC build tests/c/$name.al $mode -o $BIN/al_$name 2>$BIN/al_$name.err; then echo "FAIL $name [$mode]: alc failed"; cat $BIN/al_$name.err; fail=1; continue; fi
+    $BIN/al_$name >$BIN/al_$name.out
+    if cmp -s $BIN/ref_$name.out $BIN/al_$name.out; then
+      echo "ok   $name [${mode:-default}]: $(wc -l <$BIN/ref_$name.out) lines identical to C"
+    else
+      echo "FAIL $name [${mode:-default}]: output differs from the C reference"; diff $BIN/ref_$name.out $BIN/al_$name.out | head -5; fail=1
+    fi
+  done
+done
+
+echo "== standard library: tests, documentation, static linking =="
+# every module has at least one test and a documentation page
+for m in math rand time mem ecs input window audio image asset; do
+  ls tests/std/${m}*.al tests/sys/${m}*.al >/dev/null 2>&1 || { echo "FAIL: no test for module $m"; fail=1; }
+  [[ -s docs/std/$m.md ]] || { echo "FAIL: docs/std/$m.md is missing"; fail=1; }
+done
+ls tests/run/vectors.al tests/run/overload.al tests/c/f32.al >/dev/null 2>&1 || { echo "FAIL: f32 / vector language tests are missing"; fail=1; }
+[[ -f tests/sys/vk_triangle.al && -f tests/sys/data/vk_triangle.ref && -s docs/std/vk.md ]] || { echo "FAIL: Vulkan triangle test, reference image or docs missing"; fail=1; }
+for m in dx12 metal; do
+  ls tests/check/${m}*.al >/dev/null 2>&1 || { echo "FAIL: no check-only sample for $m"; fail=1; }
+  [[ -s std/$m.al && -s docs/std/$m.md ]] || { echo "FAIL: bindings or docs for $m missing"; fail=1; }
+done
+for d in docs/LANGUAGE.md docs/STDLIB.md; do
+  [[ -s $d ]] || { echo "FAIL: $d is missing"; fail=1; }
+done
+grep -q "## f32, vectors, matrices" docs/LANGUAGE.md || { echo "FAIL: the language reference does not cover f32 / vectors"; fail=1; }
+# programs that use no system library stay static, libc-free executables
+nstatic=0
+for src in tests/std/*.al; do
+  $ALC build "$src" -o $BIN/static_check 2>/dev/null || { echo "FAIL: $src does not build"; fail=1; continue; }
+  if readelf -l $BIN/static_check 2>&1 | grep -qE "INTERP|DYNAMIC"; then echo "FAIL: $src is not a static executable"; fail=1; fi
+  nstatic=$((nstatic+1))
+done
+echo "$nstatic standard-library test programs are static executables"
+if [[ -n "$skips" ]]; then
+  echo "skipped (prerequisite missing on this machine):"
+  echo "$skips" | sed 's/^/  /'
+else
+  echo "no test was skipped"
+fi
 
 echo "== benchmarks =="
 mkdir -p $BIN
