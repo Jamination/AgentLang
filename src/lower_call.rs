@@ -675,10 +675,11 @@ impl<'c, 'a> Fx<'c, 'a> {
             let mut ranked: Vec<(u32, usize)> = Vec::new();
             for &di in &alive {
                 let d = self.cx.fn_decls[di];
-                let mut rank = 0u32;
+                // a definition with exactly these types beats a generic one
+                let mut rank = if d.tparams.is_empty() { 0u32 } else { 1 };
                 for (i, a) in args.iter().enumerate() {
                     if self.is_untyped(a) {
-                        rank += self.literal_fit(d, off + i, a).unwrap_or(4) as u32;
+                        rank += 10 * self.literal_fit(d, off + i, a).unwrap_or(4) as u32;
                     }
                 }
                 ranked.push((rank, di));

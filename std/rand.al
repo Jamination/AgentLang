@@ -82,7 +82,7 @@ fn range(r *Rng, lo i64, hi i64) i64 {
 }
 
 // uniform f32 in [lo, hi)
-fn range_f32(r *Rng, lo f32, hi f32) f32 {
+fn range(r *Rng, lo f32, hi f32) f32 {
     return lo + (hi - lo) * next_f32(r)
 }
 
@@ -201,6 +201,11 @@ fn rand_f32() f32 {
 
 // unbiased uniform integer in [lo, hi) from the default generator
 fn rand_range(lo i64, hi i64) i64 {
+    return range(&__rand_global, lo, hi)
+}
+
+// uniform f32 in [lo, hi) from the default generator
+fn rand_range(lo f32, hi f32) f32 {
     return range(&__rand_global, lo, hi)
 }
 

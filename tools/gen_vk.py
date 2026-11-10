@@ -425,22 +425,25 @@ def generate(reg):
     exported = reg.exported()
     missing = []
     for name in reg.req_commands:
-        if exported is not None and name not in exported:
-            missing.append(name)
-            continue
         cmd = reg.resolve_command(name)
         proto = Decl(cmd.find("proto"))
         params = [Decl(p) for p in cmd.findall("param") if api_ok(p)]
         ret = ""
         if proto.base != "void" or proto.nptr:
             ret = " " + reg.al_type(proto)[0]
+        sig = "(%s)%s" % (
+            ", ".join("%s %s" % (al_name(p.name), reg.al_type(p, True)[0]) for p in params), ret)
+        if exported is not None and name not in exported:
+            missing.append("%s: fn(%s)%s" % (
+                name, ", ".join(reg.al_type(p, True)[0] for p in params), ret))
+            continue
         w("// %s %s(%s)" % (proto.base + "*" * proto.nptr, name, ", ".join(p.ctext for p in params)))
-        w('extern "%s" fn %s(%s)%s' % (
-            LIB, name, ", ".join("%s %s" % (al_name(p.name), reg.al_type(p, True)[0]) for p in params), ret))
+        w('extern "%s" fn %s%s' % (LIB, name, sig))
     if missing:
-        w("// Not exported by the loader (reach them through vkGetInstanceProcAddr):")
-        for name in missing:
-            w("//   " + name)
+        w("// Not exported by the loader; get the address with vkGetInstanceProcAddr and cast it to")
+        w("// the function type shown: cast[fn(...) i32](vkGetInstanceProcAddr(instance, ptr(\"vkName\")))")
+        for line in missing:
+            w("//   " + line)
 
     w("")
     w("// ---- constructors: a zeroed struct with sType filled in ----")

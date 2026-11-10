@@ -139,18 +139,18 @@ fn fixed_step(hz f64) FixedStep {
     return FixedStep{step: 1.0 / hz, acc: 0.0, max_steps: 8, steps: 0}
 }
 
-// adds the frame time `dt` and returns how many fixed updates to run now (0..max_steps)
+// adds the frame time `dt` (ignored if negative) and returns how many fixed updates to run
+// now (0..max_steps)
 fn advance(f *FixedStep, dt f64) i64 {
-    f.acc += dt
+    if dt > 0.0 {
+        f.acc += dt
+    }
     n := i64(f.acc / f.step)
     if n > f.max_steps {
         n = f.max_steps
         f.acc = 0.0
     } else {
-        f.acc -= f64(n) * f.step
-        if f.acc < 0.0 {
-            f.acc = 0.0
-        }
+        f.acc = max(f.acc - f64(n) * f.step, 0.0)
     }
     f.steps += n
     return n

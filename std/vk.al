@@ -4316,18 +4316,19 @@ extern "libvulkan.so.1" fn vkGetPhysicalDeviceXcbPresentationSupportKHR(physical
 extern "libvulkan.so.1" fn vkCreateWaylandSurfaceKHR(instance *u8, pCreateInfo *VkWaylandSurfaceCreateInfoKHR, pAllocator *VkAllocationCallbacks, pSurface *u64) i32
 // VkBool32 vkGetPhysicalDeviceWaylandPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, struct wl_display* display)
 extern "libvulkan.so.1" fn vkGetPhysicalDeviceWaylandPresentationSupportKHR(physicalDevice *u8, queueFamilyIndex u32, display *u8) u32
-// Not exported by the loader (reach them through vkGetInstanceProcAddr):
-//   vkSetDebugUtilsObjectNameEXT
-//   vkSetDebugUtilsObjectTagEXT
-//   vkQueueBeginDebugUtilsLabelEXT
-//   vkQueueEndDebugUtilsLabelEXT
-//   vkQueueInsertDebugUtilsLabelEXT
-//   vkCmdBeginDebugUtilsLabelEXT
-//   vkCmdEndDebugUtilsLabelEXT
-//   vkCmdInsertDebugUtilsLabelEXT
-//   vkCreateDebugUtilsMessengerEXT
-//   vkDestroyDebugUtilsMessengerEXT
-//   vkSubmitDebugUtilsMessageEXT
+// Not exported by the loader; get the address with vkGetInstanceProcAddr and cast it to
+// the function type shown: cast[fn(...) i32](vkGetInstanceProcAddr(instance, ptr("vkName")))
+//   vkSetDebugUtilsObjectNameEXT: fn(*u8, *VkDebugUtilsObjectNameInfoEXT) i32
+//   vkSetDebugUtilsObjectTagEXT: fn(*u8, *VkDebugUtilsObjectTagInfoEXT) i32
+//   vkQueueBeginDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
+//   vkQueueEndDebugUtilsLabelEXT: fn(*u8)
+//   vkQueueInsertDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
+//   vkCmdBeginDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
+//   vkCmdEndDebugUtilsLabelEXT: fn(*u8)
+//   vkCmdInsertDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
+//   vkCreateDebugUtilsMessengerEXT: fn(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) i32
+//   vkDestroyDebugUtilsMessengerEXT: fn(*u8, u64, *VkAllocationCallbacks)
+//   vkSubmitDebugUtilsMessageEXT: fn(*u8, u32, u32, *VkDebugUtilsMessengerCallbackDataEXT)
 
 // ---- constructors: a zeroed struct with sType filled in ----
 // VkApplicationInfo with sType set.

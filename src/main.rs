@@ -27,7 +27,6 @@ const STD_MODULES: &[(&str, &str)] = &[
     ("time", include_str!("../std/time.al")),
     ("mem", include_str!("../std/mem.al")),
     ("libc", include_str!("../std/libc.al")),
-    ("ecs", include_str!("../std/ecs.al")),
     ("asset", include_str!("../std/asset.al")),
     ("image", include_str!("../std/image.al")),
     ("x11", include_str!("../std/x11.al")),

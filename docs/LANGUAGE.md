@@ -139,11 +139,15 @@ extern "libc.so.6" fn getpid() i32         // a C function from a shared library
 - Enum variant names live in the global namespace (`Red`, `Some(1)`), so they must be unique.
 - A user declaration may reuse a standard-library name (for example your own `push` or `Vec`);
   the library keeps using its own definitions internally.
-- **Overloading**: a function name may be defined several times with different parameter types.
-  A call picks the definition whose parameter matches the type of the receiver (`x.f()`) or of
-  the first argument that is not an untyped literal; with only literals, the definition that
-  accepts the literal kind (and, if several do, returns the expected type) is chosen.
-  `fn area(c Circle) f32`, `fn area(r Rect) f32`, `fn length(v vec3) f32`, `fn length(v vec2) f32`.
+- **Overloading**: a function name may be defined several times with different parameter types
+  (`fn area(c Circle) f32`, `fn area(r Rect) f32`, `fn length(v vec3) f32`, `fn length(v vec2) f32`).
+  A call looks at the receiver (`x.f()`) and then at the arguments from left to right until one
+  definition is left: a typed argument must have the parameter's type, an untyped literal must
+  be acceptable to it. If literals leave a tie, the definition whose parameters are the
+  literals' default types (`i64`, `f64`) wins, unless another one returns the expected type.
+  User definitions are considered before library definitions of the same name.
+- `f[T](args)` and `x.f[T](args)` pass type arguments explicitly. `f[T]` alone, or `f` where a
+  function type is expected, is the function value of that instantiation.
 
 ## Statements
 

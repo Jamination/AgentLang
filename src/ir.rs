@@ -45,14 +45,6 @@ impl T {
     pub fn is_vec(self) -> bool {
         matches!(self, T::V2 | T::V3 | T::V4)
     }
-    pub fn lanes(self) -> u32 {
-        match self {
-            T::V2 => 2,
-            T::V3 => 3,
-            T::V4 => 4,
-            _ => 1,
-        }
-    }
     pub fn name(self) -> &'static str {
         match self {
             T::Void => "void",
