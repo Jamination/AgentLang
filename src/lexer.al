@@ -16,10 +16,10 @@ struct Token {
     pos Pos
 }
 
-var LEXER_KEYWORDS = [26]str{
+var LEXER_KEYWORDS = [27]str{
     "fn", "struct", "enum", "const", "var", "test", "use", "if", "else", "while", "loop", "for",
     "in", "return", "break", "continue", "assert", "true", "false", "nil", "match", "by", "defer",
-    "inline", "noinline", "extern",
+    "inline", "noinline", "extern", "priv",
 }
 
 var LEXER_PUNCTS = [46]str{

@@ -333,7 +333,7 @@ fn sync_decl(p *Parser) {
                 }
             }
             TkKw(k) => {
-                if depth <= 0 && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "var" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern") {
+                if depth <= 0 && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "var" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern" || k == "priv") {
                     if p.i > 0 && parser_tk_nl(p.toks.buf[p.i - 1].t) {
                         return
                     }
@@ -365,7 +365,65 @@ fn tparams(p *Parser) (Vec[str], bool) {
     return (v, true)
 }
 
+// `priv` in front of a declaration: the declaration is visible only in its own file
+fn priv_decl(p *Parser) (Decl, bool) {
+    ppos := p.pos()
+    p.bump()
+    if p.is_kw("priv") {
+        return p.err[Decl]("`priv` is written once in front of a declaration")
+    }
+    if p.is_kw("test") {
+        p.errs.push(Diag{pos: ppos, msg: "a `test` block cannot be `priv` (nothing refers to a test by name): remove `priv`"})
+        return p.decl()
+    }
+    if p.is_kw("use") {
+        p.errs.push(Diag{pos: ppos, msg: "`use` cannot be `priv` (a file is included into the whole program): remove `priv`"})
+        return p.decl()
+    }
+    d, ok := p.decl()
+    if !ok {
+        return parser_fail[Decl]()
+    }
+    return (parser_set_priv(d, ppos, p.errs), true)
+}
+
+// the declaration marked as private. Every kind of declaration is listed: a new kind must
+// decide here whether it can be private.
+fn parser_set_priv(d Decl, ppos Pos, errs *Vec[Diag]) Decl {
+    return match d {
+        DeclFn(f) => {
+            if f.name == "main" {
+                errs.push(Diag{pos: ppos, msg: "`fn main` cannot be `priv`: it is where the program starts, which is outside this file; remove `priv`"})
+            } else {
+                f.is_priv = true
+            }
+            DeclFn(f)
+        }
+        DeclStruct(s) => {
+            s.is_priv = true
+            DeclStruct(s)
+        }
+        DeclEnum(e) => {
+            e.is_priv = true
+            DeclEnum(e)
+        }
+        DeclConst(c) => {
+            c.is_priv = true
+            DeclConst(c)
+        }
+        DeclGlobal(g) => {
+            g.is_priv = true
+            DeclGlobal(g)
+        }
+        DeclTest(t) => d
+        DeclUse(path, upos) => d
+    }
+}
+
 fn decl(p *Parser) (Decl, bool) {
+    if p.is_kw("priv") {
+        return p.priv_decl()
+    }
     pos := p.pos()
     inl := 0
     if p.eat_kw("inline") {
@@ -635,7 +693,7 @@ fn decl(p *Parser) (Decl, bool) {
             }
         }
     }
-    return p.err[Decl]("expected declaration (fn, struct, enum, const, var, test, use, extern)")
+    return p.err[Decl]("expected declaration (fn, struct, enum, const, var, test, use, extern, priv)")
 }
 
 // ---------- types ----------

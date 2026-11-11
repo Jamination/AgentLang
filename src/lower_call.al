@@ -847,7 +847,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                     nf := self.cx.types.structs.buf[sid].fields.len
                     for j in 0..nf {
                         f := self.cx.types.structs.buf[sid].fields.buf[j]
-                        if f.0 == name && lower_call_is_fn(self.cx.types.k(f.1)) {
+                        if f.0 == ast_plain(name) && lower_call_is_fn(self.cx.types.k(f.1)) {
                             is_fn_field = true
                             break
                         }
@@ -1246,6 +1246,18 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             return val_err()
         }
         alive = keep
+    }
+    if alive.len > 1 && ast_is_private(name) {
+        // private definitions of the file win over public ones of the same written name
+        own := vec[i64]()
+        for ai in 0..alive.len {
+            if ast_is_private(self.cx.fn_decls.buf[alive.buf[ai]].name) {
+                own.push(alive.buf[ai])
+            }
+        }
+        if own.len != 0 {
+            alive = own
+        }
     }
     pick := alive.buf[0]
     if alive.len > 1 {

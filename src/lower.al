@@ -230,7 +230,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         if kind == 0 {
             continue
         }
-        if is_some(lower_builtin_type(name)) {
+        if is_some(lower_builtin_type(ast_plain(name))) {
             cx.err(pos, fmt("`", name, "` is a builtin type name"))
             continue
         }
@@ -356,6 +356,16 @@ fn find_fn(self *Cx, n str) Opt[i64] {
 
 // all definitions a call to `n` may resolve to: user definitions first, then the prelude's
 fn fn_candidates(self *Cx, n str) Vec[i64] {
+    v := self.fn_candidates_of(n)
+    // a private function (see priv.al): the public definitions of the written name follow
+    if v.len != 0 && ast_is_private(n) {
+        more := self.fn_candidates_of(ast_plain(n))
+        v.extend(more.items())
+    }
+    return v
+}
+
+fn fn_candidates_of(self *Cx, n str) Vec[i64] {
     v := vec[i64]()
     if self.scope_prelude {
         // prelude code sees its own definitions; the synthesized entry also reaches user code
@@ -568,7 +578,7 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
         return known
     }
     sid := self.types.structs.len
-    name := self.inst_name(d.name, targs.items())
+    name := self.inst_name(ast_plain(d.name), targs.items())
     self.types.structs.push(StructInfo{
         name: name,
         decl: si,
@@ -615,7 +625,7 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
         return known
     }
     eid := self.types.enums.len
-    name := self.inst_name(d.name, targs.items())
+    name := self.inst_name(ast_plain(d.name), targs.items())
     simple := true
     for i in 0..d.variants.len {
         if !d.variants.buf[i].1.is_empty() {
@@ -720,7 +730,7 @@ fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
     self.scope_prelude = save_scope
     self.flush_layout_errors(d.pos)
     fid := self.module.funcs.len
-    f := func_new(self.inst_name(d.name, targs.items()))
+    f := func_new(self.inst_name(ast_plain(d.name), targs.items()))
     f.inl = d.inl
     f.noreturn = rty == T_NEVER
     match self.abi_ret(rty) {
@@ -769,9 +779,9 @@ fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
                 self.err(d.pos, fmt("extern function `", d.name, "`: ", tn, " cannot cross the C boundary (pass integers, floats and pointers)"))
             }
             got := self.module.globals.len
-            self.module.globals.push(Global{name: fmt("got.", d.name), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), relocs: vec[(i64, RelocTarget)](), readonly: false})
+            self.module.globals.push(Global{name: fmt("got.", ast_plain(d.name)), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), relocs: vec[(i64, RelocTarget)](), readonly: false})
             f.ext = Some(self.module.externs.len)
-            self.module.externs.push(ExternFn{name: d.name, lib: lib, got: got})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got})
         }
         None => {}
     }
@@ -836,7 +846,7 @@ fn global(self *Cx, name str) Opt[(i64, i64)] {
     size := self.types.size_of(ty)
     align := max(self.types.align_of(ty), 1)
     gid := self.module.globals.len
-    self.module.globals.push(Global{name: d.name, size: size, align: max(align, 8), data: None, relocs: vec[(i64, RelocTarget)](), readonly: false})
+    self.module.globals.push(Global{name: ast_plain(d.name), size: size, align: max(align, 8), data: None, relocs: vec[(i64, RelocTarget)](), readonly: false})
     self.globals.set(d.name, (ty, gid))
     match d.init {
         Some(init) => {

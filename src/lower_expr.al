@@ -556,7 +556,9 @@ fn auto_deref(self *Fx, v0 Val) Val {
     return v
 }
 
-fn field_of(self *Fx, base Val, name str, pos Pos) Opt[Val] {
+fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
+    // `x.f[..](..)` in a file with a private function `f` carries its internal name (priv.al)
+    name := ast_plain(written)
     bv := self.auto_deref(base)
     match self.vec_field(bv, name, pos) {
         Some(r) => { return r }

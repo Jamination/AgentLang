@@ -128,6 +128,8 @@ struct FnDecl {
     inl i64 // 1 = always inline, -1 = never, 0 = auto
     // `extern "lib" fn`: a C function in the named shared library (no body)
     ext Opt[str]
+    // declared with `priv`: visible only in its own file (see priv.al)
+    is_priv bool
 }
 
 struct StructDecl {
@@ -135,6 +137,8 @@ struct StructDecl {
     tparams Vec[str]
     fields Vec[(str, TypeAst)]
     pos Pos
+    // declared with `priv`: visible only in its own file (see priv.al)
+    is_priv bool
 }
 
 struct EnumDecl {
@@ -142,6 +146,8 @@ struct EnumDecl {
     tparams Vec[str]
     variants Vec[(str, Vec[TypeAst])]
     pos Pos
+    // declared with `priv`: visible only in its own file (see priv.al)
+    is_priv bool
 }
 
 struct ConstDecl {
@@ -149,6 +155,8 @@ struct ConstDecl {
     ty Opt[TypeAst]
     val Expr
     pos Pos
+    // declared with `priv`: visible only in its own file (see priv.al)
+    is_priv bool
 }
 
 struct GlobalDecl {
@@ -156,6 +164,8 @@ struct GlobalDecl {
     ty Opt[TypeAst]
     init Opt[Expr]
     pos Pos
+    // declared with `priv`: visible only in its own file (see priv.al)
+    is_priv bool
 }
 
 struct TestDecl {
@@ -228,4 +238,51 @@ fn ast_type_str(t *TypeAst) str {
         }
     }
     return ""
+}
+
+// A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte
+// 1 and `k` in decimal (see priv.al). ast_plain gives the name as it was written.
+fn ast_plain(name str) str {
+    i := len(name)
+    while i > 0 && name[i - 1] >= '0' && name[i - 1] <= '9' {
+        i -= 1
+    }
+    if i > 0 && i < len(name) && name[i - 1] == 1 {
+        return name[..i - 1]
+    }
+    return name
+}
+
+// is this the internal name of a `priv` declaration?
+fn ast_is_private(name str) bool {
+    return len(ast_plain(name)) != len(name)
+}
+
+// a text for the user (a diagnostic, a signature): every internal name in it as it was written
+fn ast_plain_text(s str) str {
+    first := -1
+    for i in 0..len(s) {
+        if s[i] == 1 {
+            first = i
+            break
+        }
+    }
+    if first < 0 {
+        return s
+    }
+    out := vec[u8]()
+    out.extend(s[..first])
+    i := first
+    while i < len(s) {
+        if s[i] == 1 {
+            i += 1
+            while i < len(s) && s[i] >= '0' && s[i] <= '9' {
+                i += 1
+            }
+        } else {
+            out.push(s[i])
+            i += 1
+        }
+    }
+    return out.items()
 }

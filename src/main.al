@@ -29,6 +29,7 @@ use "x86/regalloc.al"
 use "x86/emit.al"
 use "x86/mod.al"
 use "elf.al"
+use "priv.al"
 
 // `embed` is only accepted inside a function: PRELUDE and STD_MODULES are globals that
 // main_load_embedded fills once, first thing in main.
@@ -341,6 +342,7 @@ fn add_text(self *Sources, name str, text str, dir Opt[str]) {
     toks := lexer_lex(text, file, &self.errs)
     p := parser_new(toks, &self.errs)
     decls := p.file()
+    priv_apply(&decls, file, &self.errs)
     for di in 0..decls.len {
         d := decls.buf[di]
         match d {
@@ -456,7 +458,7 @@ fn main_report(names *Vec[str], errs *Vec[Diag]) bool {
         last := ""
         for d in errs.items() {
             file := main_file_name(names, d.pos.file)
-            item := fmt("{\"file\":", main_json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", main_json_str(d.msg), "}")
+            item := fmt("{\"file\":", main_json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", main_json_str(ast_plain_text(d.msg)), "}")
             if item != last {
                 items.push(item)
                 last = item
@@ -468,7 +470,7 @@ fn main_report(names *Vec[str], errs *Vec[Diag]) bool {
     last := ""
     n := 0
     for d in errs.items() {
-        line := fmt(main_file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", d.msg)
+        line := fmt(main_file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", ast_plain_text(d.msg))
         if line != last {
             eprint(fmt(line, "\n"))
             n += 1
@@ -506,6 +508,14 @@ fn main_print_sigs_fields(fs *Vec[(str, TypeAst)]) str {
     return join(parts.items(), ", ")
 }
 
+// "priv " in front of the signature of a private declaration
+fn main_sigs_priv(name str) str {
+    if ast_is_private(name) {
+        return "priv "
+    }
+    return ""
+}
+
 // `alc sigs`: one line per declaration, for a quick overview of a file
 fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
     for d in decls {
@@ -516,12 +526,12 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
                 ps := main_print_sigs_fields(&f.params)
                 r := main_print_sigs_opt_ty(&f.ret)
                 pos = f.pos
-                text = fmt("fn ", f.name, main_print_sigs_tp(&f.tparams), "(", ps, ")", r)
+                text = fmt(main_sigs_priv(f.name), "fn ", f.name, main_print_sigs_tp(&f.tparams), "(", ps, ")", r)
             }
             DeclStruct(s) => {
                 fs := main_print_sigs_fields(&s.fields)
                 pos = s.pos
-                text = fmt("struct ", s.name, main_print_sigs_tp(&s.tparams), " { ", fs, " }")
+                text = fmt(main_sigs_priv(s.name), "struct ", s.name, main_print_sigs_tp(&s.tparams), " { ", fs, " }")
             }
             DeclEnum(e) => {
                 vs := vec[str]()
@@ -538,15 +548,15 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
                     }
                 }
                 pos = e.pos
-                text = fmt("enum ", e.name, main_print_sigs_tp(&e.tparams), " { ", join(vs.items(), ", "), " }")
+                text = fmt(main_sigs_priv(e.name), "enum ", e.name, main_print_sigs_tp(&e.tparams), " { ", join(vs.items(), ", "), " }")
             }
             DeclConst(c) => {
                 pos = c.pos
-                text = fmt("const ", c.name, main_print_sigs_opt_ty(&c.ty))
+                text = fmt(main_sigs_priv(c.name), "const ", c.name, main_print_sigs_opt_ty(&c.ty))
             }
             DeclGlobal(g) => {
                 pos = g.pos
-                text = fmt("var ", g.name, main_print_sigs_opt_ty(&g.ty))
+                text = fmt(main_sigs_priv(g.name), "var ", g.name, main_print_sigs_opt_ty(&g.ty))
             }
             DeclTest(t) => {
                 pos = t.pos
@@ -559,12 +569,16 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
         if pos.file < from_file {
             continue
         }
-        print(fmt(main_file_name(names, pos.file), ":", pos.line, ": ", text))
+        print(fmt(main_file_name(names, pos.file), ":", pos.line, ": ", ast_plain_text(text)))
     }
 }
 
 // is a declaration shown by `alc sigs <file> -- std`?
 fn main_sigs_visible(d *Decl) bool {
+    // private declarations of the library cannot be used from outside
+    if priv_decl_info(d).2 {
+        return false
+    }
     match *d {
         DeclFn(f) => {
             return !starts_with(f.name, "__")
