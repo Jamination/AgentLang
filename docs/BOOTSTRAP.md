@@ -61,7 +61,7 @@ Conventions:
 - **Interface and private parts.** What a file offers to other files keeps a name that says
   where it comes from: `gvn_run`, `elf_link`, `lexer_lex`, `opt_optimize`. Everything else is
   `priv` and has the short name that is natural inside its file (`priv fn numberable`,
-  `priv struct Key`, `priv const K_R` ...): 520 of about 900 top-level names are private; a
+  `priv struct Key`, `priv const COUNT_MAX` ...): about 490 of 880 top-level names are private; a
   pass exports one `x_run`, the parser 12 names, `main.al` nothing. Several files have private
   declarations of the same name (`block`, `stmt`, `Ctx`, `run_find`). A short name is not
   used where a local variable or field of the file has it (a local would shadow the
