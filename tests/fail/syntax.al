@@ -5,5 +5,5 @@ fn main() {
 fn g() {
     if x > { }
 }
-h :: (a: i64 b: i64) { }
-S :: struct { a: i64 b }
+fn h(a: i64 b: i64) { }
+struct S { a: i64 b }

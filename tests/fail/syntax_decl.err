@@ -35,19 +35,18 @@ syntax_decl.al:35:3: error: a declaration that starts with a name declares a var
 syntax_decl.al:36:4: error: a declaration that starts with a name declares a variable, `g2: T` or `g2 := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found `=`
 syntax_decl.al:37:4: error: a declaration that starts with a name declares a variable, `g3: T` or `g3 := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found identifier `i64`
 syntax_decl.al:38:6: error: a declaration that starts with a name declares a variable, `stray: T` or `stray := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found `(`
-syntax_decl.al:39:1: error: a constant is declared `const x: i64 = value`
+syntax_decl.al:41:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
 syntax_decl.al:42:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
 syntax_decl.al:43:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
 syntax_decl.al:44:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-syntax_decl.al:45:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-syntax_decl.al:46:19: error: a function without a result has no arrow: leave out `-> ()`
-syntax_decl.al:47:13: error: a parameter is written `x: Type`: expected `:` after the name, found identifier `i64`
-syntax_decl.al:48:19: error: the result type follows an arrow: `-> i64`
-syntax_decl.al:49:22: error: a function without a result has no arrow: leave out `-> ()`
-syntax_decl.al:50:16: error: expected `)`, found identifier `i64`
-syntax_decl.al:51:22: error: the result type follows an arrow: `-> i64`
-syntax_decl.al:52:11: error: an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)
-syntax_decl.al:53:11: error: an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level
-syntax_decl.al:54:17: error: the result type follows an arrow: `-> i64`
-syntax_decl.al:55:22: error: the result type follows an arrow: `-> *u8`
-syntax_decl.al:56:17: error: a function without a result has no arrow: leave out `-> ()`
+syntax_decl.al:45:19: error: a function without a result has no arrow: leave out `-> ()`
+syntax_decl.al:46:13: error: a parameter is written `x: Type`: expected `:` after the name, found identifier `i64`
+syntax_decl.al:47:19: error: the result type follows an arrow: `-> i64`
+syntax_decl.al:48:22: error: a function without a result has no arrow: leave out `-> ()`
+syntax_decl.al:49:16: error: expected `)`, found identifier `i64`
+syntax_decl.al:50:22: error: the result type follows an arrow: `-> i64`
+syntax_decl.al:51:11: error: an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)
+syntax_decl.al:52:11: error: an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level
+syntax_decl.al:53:17: error: the result type follows an arrow: `-> i64`
+syntax_decl.al:54:22: error: the result type follows an arrow: `-> *u8`
+syntax_decl.al:55:17: error: a function without a result has no arrow: leave out `-> ()`

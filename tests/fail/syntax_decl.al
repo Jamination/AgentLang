@@ -36,7 +36,6 @@ g1[T]: i64
 g2 = 5
 g3 i64
 stray()
-x : i64 : 5
 
 fn main() {
     const L1 = 5

@@ -1,5 +1,5 @@
 // `priv` stands once in front of a declaration.
-priv priv twice :: (x: i64) -> i64 { x * 2 }
+priv priv fn twice(x: i64) -> i64 { x * 2 }
 
 priv 5
 
@@ -17,6 +17,6 @@ enum E {
     priv A
 }
 
-inline priv late :: () {}
+inline priv fn late() {}
 
 fn main() {}

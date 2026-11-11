@@ -22,6 +22,8 @@ LEXER_KEYWORDS := [26]str{
     "inline", "noinline", "extern", "priv",
 }
 
+// (`::` is not used by the grammar: it is a token so that the parser can say how a
+// `name :: ...` declaration of the previous syntax is written now)
 LEXER_PUNCTS := [48]str{
     "<<=", ">>=", "..=", ":=", "::", "->", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "+=", "-=",
     "*=", "/=", "%=", "&=", "|=", "^=", "..", "=>", "+", "-", "*", "/", "%", "&", "|", "^", "~", "!",
