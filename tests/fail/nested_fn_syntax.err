@@ -1,0 +1,5 @@
+3:5: error: `inline` applies to top-level functions only: a nested function is declared as `fn name(...) { ... }`
+4:5: error: `noinline` applies to top-level functions only
+5:5: error: `priv` applies to top-level declarations only
+6:5: error: `extern` applies to top-level functions only
+7:10: error: there are no anonymous functions: declare a nested function with a name in the block
