@@ -113,7 +113,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         }
         dbg, dbg_set := env_get("ALC_DEBUG")
         if dbg_set && dbg == "mir" {
-            eprint(mir_print_mfunc(&mf))
+            eput(mir_print_mfunc(&mf))
         }
         code := emit_emit(&mf, &ra, layout.items(), local.items())
         if dump_asm {

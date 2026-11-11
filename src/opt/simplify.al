@@ -1212,7 +1212,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
     loop {
         guard_merge += 1
         if guard_merge > 20000 {
-            eprint(fmt("simplify_cfg: step merge does not converge in ", f.name, "\n"))
+            eput(fmt("simplify_cfg: step merge does not converge in ", f.name, "\n"))
             break
         }
         // per-round tables live on the scratch heap (see base.al)
@@ -1287,7 +1287,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
     loop {
         guard_forward += 1
         if guard_forward > 20000 {
-            eprint(fmt("simplify_cfg: step forward does not converge in ", f.name, "\n"))
+            eput(fmt("simplify_cfg: step forward does not converge in ", f.name, "\n"))
             break
         }
         scratch_reset()
@@ -1379,7 +1379,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             break
         }
         if guard_thread4 > 20000 {
-            eprint(fmt("simplify_cfg: step thread4 does not converge in ", f.name, "\n"))
+            eput(fmt("simplify_cfg: step thread4 does not converge in ", f.name, "\n"))
             break
         }
         scratch_reset()
@@ -1529,7 +1529,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             break
         }
         if guard_thread5 > 20000 {
-            eprint(fmt("simplify_cfg: step thread5 does not converge in ", f.name, "\n"))
+            eput(fmt("simplify_cfg: step thread5 does not converge in ", f.name, "\n"))
             break
         }
         scratch_reset()

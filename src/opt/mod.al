@@ -34,12 +34,12 @@ fn opt_trace(what: str, f: *Func) {
     opt_read_env()
     v := opt_env_debug
     if v == "trace" {
-        eprint(fmt("[trace] ", what, " ", f.name, " (size ", f.size(), ")\n"))
+        eput(fmt("[trace] ", what, " ", f.name, " (size ", f.size(), ")\n"))
     } else if v == "verify" {
         // `what` names the pass about to run, so a failure belongs to the previous one
         e := ir_verify(f)
         if e != "" {
-            eprint(fmt("IR verification failed before `", what, "` in ", f.name, ": ", e, "\n", ir_print_func(f, None), "\n"))
+            eput(fmt("IR verification failed before `", what, "` in ", f.name, ": ", e, "\n", ir_print_func(f, None), "\n"))
             exit(3)
         }
     }
@@ -95,7 +95,7 @@ fn opt_local_opt(f: *Func, level: i64) {
         opt_trace("after-unroll", f)
         dbg, has_dbg := env_get("ALC_DEBUG")
         if has_dbg && dbg == "unroll" {
-            eprint(fmt("after unroll:\n", ir_print_func(f, None), "\n"))
+            eput(fmt("after unroll:\n", ir_print_func(f, None), "\n"))
         }
         for it2 in 0..3 {
             ch := false

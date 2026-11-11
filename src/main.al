@@ -271,7 +271,7 @@ struct Args {
 }
 
 fn main_usage() -> never {
-    eprint(concat("usage: alc <command> <file.al> [options]\n",
+    eput(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
         "options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
@@ -314,13 +314,13 @@ fn main_parse_args() -> Args {
             a.rest = vec_of(av[i + 1..av.len])
             break
         } else if starts_with(s, "-") {
-            eprint(fmt("unknown option ", s, "\n"))
+            eput(fmt("unknown option ", s, "\n"))
             main_usage()
         } else {
             if len(a.input) == 0 {
                 a.input = s
             } else {
-                eprint(fmt("unexpected argument ", s, "\n"))
+                eput(fmt("unexpected argument ", s, "\n"))
                 main_usage()
             }
         }
@@ -403,7 +403,7 @@ fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
         match from {
             Some(pos) => self.errs.push(Diag{pos: pos, msg: msg})
             None => {
-                eprint(fmt("error: ", msg, "\n"))
+                eput(fmt("error: ", msg, "\n"))
                 exit(1)
             }
         }
@@ -476,12 +476,12 @@ fn main_report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     for d in errs.items() {
         line := fmt(main_file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", ast_plain_text(d.msg))
         if line != last {
-            eprint(fmt(line, "\n"))
+            eput(fmt(line, "\n"))
             n += 1
             last = line
         }
     }
-    eprint(fmt(n, " error(s)\n"))
+    eput(fmt(n, " error(s)\n"))
     return true
 }
 
@@ -684,7 +684,7 @@ fn main_real_main() -> i64 {
     main_mem("compiled")
     bytes, link_err := elf_link(&module, &out)
     if len(link_err) != 0 {
-        eprint(fmt("error: ", link_err, "\n"))
+        eput(fmt("error: ", link_err, "\n"))
         return 1
     }
     out_path := ""
@@ -721,14 +721,14 @@ fn main_real_main() -> i64 {
         } else {
             syscall(3, fd)
         }
-        eprint(fmt("error: cannot write `", out_path, "`: ", main_os_error(errno), "\n"))
+        eput(fmt("error: cannot write `", out_path, "`: ", main_os_error(errno), "\n"))
         return 1
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
         code := run_program(out_path, ar.rest.items())
         if code < 0 {
-            eprint(fmt("error: cannot run `", out_path, "`: ", main_os_error(11), "\n"))
+            eput(fmt("error: cannot run `", out_path, "`: ", main_os_error(11), "\n"))
             return 1
         }
         return code
@@ -751,6 +751,6 @@ main_t0: i64
 fn main_mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
-        eprint(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - main_t0) / 1000000, " ms\n"))
+        eput(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - main_t0) / 1000000, " ms\n"))
     }
 }
