@@ -74,19 +74,6 @@ fn is_r(o: Opnd) -> bool {
     }
 }
 
-// Opnd equality (`==` does not work on enums with data)
-fn eq(a: Opnd, b: Opnd) -> bool {
-    match (a, b) {
-        (Opnd.None, Opnd.None) => true
-        (R(r), R(r2)) => r == r2
-        (I(i), I(i2)) => i == i2
-        (M(m), M(m2)) => m == m2
-        (GAddr(g, d), GAddr(g2, d2)) => g == g2 && d == d2
-        (FAddr(f), FAddr(f2)) => f == f2
-        _ => false
-    }
-}
-
 enum MOp {
     Mov,
     Movzx, // sz = source size, 32-bit destination

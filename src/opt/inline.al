@@ -10,7 +10,7 @@ priv fn cost(f: *Func) -> i64 {
                 n += 1
             }
         }
-        if !eq(b.term, Term.None) {
+        if b.term != Term.None {
             n += 1
         }
     }

@@ -506,7 +506,7 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                     if fi >= 0 {
                         r := st[fi].1
                         full_reload := ((i.op == Mov && i.sz == 8) || i.op == MovSd) && is_r(i.a)
-                        if full_reload && eq(i.a, R(r)) {
+                        if full_reload && i.a == R(r) {
                             continue
                         }
                         i.b = R(r)
@@ -968,7 +968,7 @@ priv fn spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool])
                         continue
                     }
                 }
-                if is_use && !is_def && eq(i.b, R(v)) && b_can_be_mem(&i) {
+                if is_use && !is_def && i.b == R(v) && b_can_be_mem(&i) {
                     // the only occurrence must be operand b
                     cnt := mir_count_reg(&i, v)
                     if cnt == 1 && !contains(&i.uses, v) {
@@ -979,7 +979,7 @@ priv fn spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool])
                         continue
                     }
                 }
-                if i.op == Mov && i.sz == 8 && eq(i.a, R(v)) && is_def && !is_use {
+                if i.op == Mov && i.sz == 8 && i.a == R(v) && is_def && !is_use {
                     match i.b {
                         I(k) if k >= -2147483648 && k <= 2147483647 => {
                             i.a = mem

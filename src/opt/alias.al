@@ -11,14 +11,6 @@ struct Addr {
     off: Opt[i64],
 }
 
-// `==` of two bases (derive(PartialEq))
-priv fn eq(a: Base, b: Base) -> bool {
-    match (a, b) {
-        (Alloca(x), Alloca(y)), (Glob(x), Glob(y)), (Unknown(x), Unknown(y)) => x == y
-        _ => false
-    }
-}
-
 // off.map(|o| o.wrapping_add(k))
 priv fn off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     match off {
@@ -190,7 +182,7 @@ fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
     if a.ptr == b.ptr && a.ptr != NOV {
         return true
     }
-    if eq(a.addr.base, b.addr.base) {
+    if a.addr.base == b.addr.base {
         match (a.addr.off, b.addr.off) {
             (Some(oa), Some(ob)) => return oa < ob + b.size && ob < oa + a.size
             _ => {}
@@ -203,5 +195,5 @@ fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
     if a.size != b.size {
         return false
     }
-    return (a.ptr == b.ptr && a.ptr != NOV) || (eq(a.addr.base, b.addr.base) && off_some_eq(a.addr.off, b.addr.off))
+    return (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && off_some_eq(a.addr.off, b.addr.off))
 }

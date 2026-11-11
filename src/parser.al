@@ -41,20 +41,6 @@ priv fn tk_kw(t: Tk, k: str) -> bool {
     }
 }
 
-priv fn tk_nl(t: Tk) -> bool {
-    match t {
-        Nl => true
-        _ => false
-    }
-}
-
-priv fn tk_eof(t: Tk) -> bool {
-    match t {
-        Eof => true
-        _ => false
-    }
-}
-
 priv fn tk_id(t: Tk) -> bool {
     match t {
         Id(_) => true
@@ -279,7 +265,7 @@ priv fn ident(p: *Parser) -> (str, bool) {
 }
 
 priv fn skip_nl(p: *Parser) {
-    while tk_nl(p.peek()) || p.is_p(";") {
+    while p.peek() == Nl || p.is_p(";") {
         p.bump()
     }
 }
@@ -289,7 +275,7 @@ fn file(p: *Parser) -> Vec[Decl] {
     out := vec[Decl]()
     loop {
         p.skip_nl()
-        if tk_eof(p.peek()) {
+        if p.peek() == Eof {
             break
         }
         from := p.i
@@ -320,7 +306,7 @@ priv fn sync_decl(p: *Parser, from: i64) {
         p.bump()
     }
     loop {
-        starts := p.i > 0 && tk_nl(p.toks[p.i - 1].t)
+        starts := p.i > 0 && p.toks[p.i - 1].t == Nl
         match p.peek() {
             Eof => return
             P("{") => depth += 1
@@ -886,13 +872,13 @@ priv fn block(p: *Parser) -> (Block, bool) {
     stmts := vec[Stmt]()
     loop {
         p.skip_nl()
-        if p.is_p("}") || tk_eof(p.peek()) {
+        if p.is_p("}") || p.peek() == Eof {
             break
         }
         s, ok := p.stmt()
         if ok {
             stmts.push(s)
-            if !(tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+            if !(p.peek() == Nl || p.is_p(";") || p.is_p("}")) {
                 p.err[bool]("expected end of statement")
                 p.sync_stmt()
             }
@@ -964,7 +950,7 @@ priv fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
         return fail[(Expr, Block, Opt[Block])]()
     }
     j := p.i
-    while tk_nl(p.toks[j].t) {
+    while p.toks[j].t == Nl {
         j += 1
     }
     if tk_kw(p.toks[j].t, "else") {
@@ -1101,7 +1087,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         return (For(v1, v2, lo, hi, incl, step, body), true)
     }
     if p.eat_kw("return") {
-        if tk_nl(p.peek()) || p.is_p("}") || p.is_p(";") {
+        if p.peek() == Nl || p.is_p("}") || p.is_p(";") {
             return (Return(None), true)
         }
         e, ok := p.expr()
@@ -1119,7 +1105,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             _ => {}
         }
-        if !(tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+        if !(p.peek() == Nl || p.is_p(";") || p.is_p("}")) {
             return p.err[SK]("`break` leaves a loop and takes at most a loop label (`break outer`): expected end of statement")
         }
         return (Break, true)
@@ -1132,7 +1118,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             _ => {}
         }
-        if !(tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+        if !(p.peek() == Nl || p.is_p(";") || p.is_p("}")) {
             return p.err[SK]("`continue` takes at most a loop label (`continue outer`): expected end of statement")
         }
         return (Continue, true)
@@ -1501,7 +1487,7 @@ priv fn index_tail(p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
 priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
     v := vec[(Opt[str], Expr)]()
     loop {
-        while tk_nl(p.peek()) {
+        while p.peek() == Nl {
             p.bump()
         }
         if p.eat_p("}") {
@@ -1526,11 +1512,11 @@ priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
             }
             v.push((fname, e))
         }
-        while tk_nl(p.peek()) {
+        while p.peek() == Nl {
             p.bump()
         }
         if !p.eat_p(",") {
-            while tk_nl(p.peek()) {
+            while p.peek() == Nl {
                 p.bump()
             }
             if !p.expect_p("}") {
@@ -1774,7 +1760,7 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
             body = Block{stmts: vec_of([]Stmt{s}), end: p.pos()}
         }
         arms.push(MatchArm{pats: pats, body: body, pos: pos, guard: guard})
-        if !(tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+        if !(p.peek() == Nl || p.is_p(";") || p.is_p("}")) {
             return p.err[Vec[MatchArm]]("expected end of match arm")
         }
     }

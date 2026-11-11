@@ -1,14 +1,6 @@
 // Helpers shared by the compiler sources: Vec conveniences, processes, working memory.
 
 // ---------- Vec ----------
-// a Vec holding a copy of the elements of s
-fn vec_of[T](s: []T) -> Vec[T] {
-    n := len(s)
-    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
-    memcopy(ptr(buf), ptr(s), n * sizeof[T]())
-    return Vec[T]{buf: buf, len: n}
-}
-
 // Vecs of one and two elements without an intermediate slice (`succs` in ir.al is hot:
 // vec_of([]i64{t}) there costs 15 % of the whole compile time)
 fn vec_one[T](a: T) -> Vec[T] {
@@ -22,15 +14,6 @@ fn vec_two[T](a: T, b: T) -> Vec[T] {
     buf[0] = a
     buf[1] = b
     return Vec[T]{buf: buf, len: 2}
-}
-
-// a Vec of n copies of x
-fn vec_fill[T](n: i64, x: T) -> Vec[T] {
-    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
-    for i in 0..n {
-        buf[i] = x
-    }
-    return Vec[T]{buf: buf, len: n}
 }
 
 // ---------- process ----------

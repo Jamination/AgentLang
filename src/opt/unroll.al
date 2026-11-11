@@ -160,7 +160,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
             }
             // side exits must be traps that do not look at loop values
             sb := &f.blocks[s]
-            if !eq(sb.term, Trap) {
+            if sb.term != Trap {
                 return None
             }
             for v in sb.insts {

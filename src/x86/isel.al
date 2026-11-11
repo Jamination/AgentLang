@@ -8,13 +8,6 @@ priv struct ExitAlias {
     header: i64
 }
 
-priv fn term_is_trap(t: Term) -> bool {
-    match t {
-        Trap => true
-        _ => false
-    }
-}
-
 priv fn term_is_ret(t: Term) -> bool {
     match t {
         Ret(vs) => true
@@ -101,7 +94,7 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
             if loops.contains(li, s) || (b == latch && s == other) {
                 continue
             }
-            if !term_is_trap(f.blocks[s].term) {
+            if f.blocks[s].term != Trap {
                 return (none, false)
             }
             trap_exits.push(s)
@@ -850,7 +843,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
             d := pending[i].0
             blocked := false
             for j in 0..pending.len {
-                if j != i && eq(pending[j].1, R(d)) {
+                if j != i && pending[j].1 == R(d) {
                     blocked = true
                     break
                 }
@@ -870,7 +863,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
             t := new_vreg(&self.mf, cls)
             self.e(if cls == 1 { MovSd } else { Mov }, 8, R(t), R(d))
             for j in 0..pending.len {
-                if eq(pending[j].1, R(d)) {
+                if pending[j].1 == R(d) {
                     pending[j].1 = R(t)
                 }
             }

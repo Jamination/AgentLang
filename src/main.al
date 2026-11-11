@@ -39,7 +39,7 @@ priv const PRELUDE = embed("prelude.al")
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
-priv const STD_MODULES = [15](str, str){
+priv const STD_MODULES = [_](str, str){
     ("math", embed("../std/math.al")),
     ("rand", embed("../std/rand.al")),
     ("time", embed("../std/time.al")),

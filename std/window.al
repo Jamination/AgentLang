@@ -214,7 +214,7 @@ fn blit_fit(dst: []u32, dw: i64, dh: i64, src: []u8, sw: i64, sh: i64, swap_rb: 
     }
 }
 
-fn window_utf8_next(buf: []u8, pos: *i64) -> u32 {
+priv fn window_utf8_next(buf: []u8, pos: *i64) -> u32 {
     i := *pos
     c := u32(buf[i])
     n := if c < 0x80 { 0 } else if c < 0xE0 { 1 } else if c < 0xF0 { 2 } else { 3 }
@@ -317,12 +317,12 @@ fn set_title(w: *Window, title: str) {
     XFlush(w.dpy)
 }
 
-fn window_emit(w: *Window, e: Event) {
+priv fn window_emit(w: *Window, e: Event) {
     push_event(&w.events, e)
     feed(&w.input, e)
 }
 
-fn window_key_event(w: *Window, ev: *XEvent, pressed: bool) {
+priv fn window_key_event(w: *Window, ev: *XEvent, pressed: bool) {
     key := key_from_keysym(XLookupKeysym(ev, 0))
     mods := mods_from_x11(x_event_state(ev))
     if !pressed {
@@ -468,7 +468,7 @@ fn set_fullscreen(w: *Window, on: bool) {
     w.fullscreen = on
 }
 
-fn window_free_image(w: *Window) {
+priv fn window_free_image(w: *Window) {
     if w.image != nil {
         free(w.image_data)
         XFree(w.image)

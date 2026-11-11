@@ -220,17 +220,6 @@ enum Term {
     Trap,
 }
 
-// Term equality (`==` does not work on enums with data)
-fn eq(a: Term, b: Term) -> bool {
-    match (a, b) {
-        (Term.None, Term.None), (Trap, Trap) => true
-        (Jmp(t), Jmp(t2)) => t == t2
-        (Br(c, t, e), Br(c2, t2, e2)) => c == c2 && t == t2 && e == e2
-        (Ret(vs), Ret(vs2)) => vs.items() == vs2.items()
-        _ => false
-    }
-}
-
 struct BlockData {
     insts: Vec[i64]
     term: Term
@@ -342,7 +331,7 @@ fn is_const(self: *Func, v: i64) -> Opt[i64] {
 
 // a block that only traps (the failure block of a check)
 fn is_trap_block(f: *Func, b: i64) -> bool {
-    if !eq(f.blocks[b].term, Trap) {
+    if f.blocks[b].term != Trap {
         return false
     }
     for v in f.blocks[b].insts {
@@ -937,7 +926,7 @@ fn ir_verify(f: *Func) -> str {
                 return fmt("terminator of b", b, " uses %", a, " which does not dominate it")
             }
         }
-        if eq(blk.term, Term.None) {
+        if blk.term == Term.None {
             return fmt("b", b, " has no terminator")
         }
     }

@@ -309,12 +309,3 @@ by `tests/std/window_logic`. `tests/sys/window_x11` exercises a real window, but
 display named by the environment variable `AL_TEST_DISPLAY` (for example an `Xvfb` instance:
 `Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./build/alc window`); without it the
 test is skipped, so the test suite never opens a window on the desktop it runs on.
-
-## Internal helpers
-
-Public because the module's event translation is built from them; not meant for programs, and
-listed for completeness (`alc sigs file.al -- std` shows them):
-`window_emit(w: *Window, e: Event)` (queues an event and feeds it to the window's input state),
-`window_key_event(w: *Window, ev: *XEvent, pressed: bool)` (translates one X11 key event),
-`window_utf8_next(buf: []u8, pos: *i64) -> u32` (decodes the next UTF-8 code point and advances
-`pos`), `window_free_image(w: *Window)` (frees the conversion buffer of the software presentation).

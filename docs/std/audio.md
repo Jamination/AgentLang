@@ -197,16 +197,3 @@ usual rest of the playback API with their C names and signatures: `snd_pcm_open`
 `snd_strerror`; constants `SND_PCM_STREAM_*`, `SND_PCM_NONBLOCK`, `SND_PCM_FORMAT_*`,
 `SND_PCM_ACCESS_RW_INTERLEAVED`, `SND_PCM_STATE_*`. Handles are `*u8`, frame counts `i64` /
 `u64`, results are negative `errno` values on failure.
-
-## Internal helpers
-
-Public because the mixer and the WAV reader / writer are built from them; not meant for
-programs, and listed for completeness (`alc sigs file.al -- std` shows them):
-`audio_sin_turns(t: f64) -> f64` (sin(2 pi t)), `audio_u16(d: str, at: i64) -> i64`,
-`audio_u32(d: str, at: i64) -> i64`, `audio_put16(d: []u8, at: i64, v: i64)`,
-`audio_put32(d: []u8, at: i64, v: i64)` (little-endian fields), `audio_quantize(x: f32, scale: f64,
-lo: i64, hi: i64) -> i64` (`x * scale` rounded and limited to `lo..hi`), `audio_step(m: *Mixer,
-s: Sound, pitch: f32) -> i64` (the 32.32 fixed-point source step per output frame),
-`audio_voice(m: *Mixer, id: VoiceId) -> *Voice` (the live voice of an id, `nil` if there is none),
-`audio_mix_voice(m: *Mixer, v: *Voice, out: []f32, count: i64)` (adds `count` output frames of
-one voice to `out` and advances it).

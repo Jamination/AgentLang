@@ -36,7 +36,7 @@ fn duration(s: Sound) -> f32 {
 }
 
 // sin(2 pi t) for t in turns; accurate to about 1e-11.
-fn audio_sin_turns(t: f64) -> f64 {
+priv fn audio_sin_turns(t: f64) -> f64 {
     r := (t - floor(t + 0.5)) * 6.283185307179586
     if r > 1.5707963267948966 {
         r = 3.141592653589793 - r
@@ -81,26 +81,26 @@ const WAV_PCM24 = 3
 const WAV_PCM32 = 4
 const WAV_F32 = 5
 
-fn audio_u16(d: str, at: i64) -> i64 {
+priv fn audio_u16(d: str, at: i64) -> i64 {
     i64(d[at]) | i64(d[at + 1]) << 8
 }
 
-fn audio_u32(d: str, at: i64) -> i64 {
+priv fn audio_u32(d: str, at: i64) -> i64 {
     audio_u16(d, at) | audio_u16(d, at + 2) << 16
 }
 
-fn audio_put16(d: []u8, at: i64, v: i64) {
+priv fn audio_put16(d: []u8, at: i64, v: i64) {
     d[at] = u8(v)
     d[at + 1] = u8(v >> 8)
 }
 
-fn audio_put32(d: []u8, at: i64, v: i64) {
+priv fn audio_put32(d: []u8, at: i64, v: i64) {
     audio_put16(d, at, v)
     audio_put16(d, at + 2, v >> 16)
 }
 
 // x * scale rounded to the nearest integer and limited to lo..hi
-fn audio_quantize(x: f32, scale: f64, lo: i64, hi: i64) -> i64 {
+priv fn audio_quantize(x: f32, scale: f64, lo: i64, hi: i64) -> i64 {
     v := i64(floor(f64(x) * scale + 0.5))
     min(max(v, lo), hi)
 }
@@ -269,7 +269,7 @@ fn mixer_new(rate: i64, channels: i64, max_voices: i64) -> *Mixer {
     m
 }
 
-fn audio_step(m: *Mixer, s: Sound, pitch: f32) -> i64 {
+priv fn audio_step(m: *Mixer, s: Sound, pitch: f32) -> i64 {
     i64(f64(fmax(pitch, 0.0)) * f64(s.rate) / f64(m.rate) * 4294967296.0)
 }
 
@@ -292,7 +292,7 @@ fn play(m: *Mixer, s: Sound, volume: f32, pan: f32, pitch: f32, looped: bool) ->
     VoiceId{}
 }
 
-fn audio_voice(m: *Mixer, id: VoiceId) -> *Voice {
+priv fn audio_voice(m: *Mixer, id: VoiceId) -> *Voice {
     i := i64(id.index)
     if id.serial == 0 || i < 0 || i >= len(m.voices) {
         return nil
@@ -378,7 +378,7 @@ fn active_voices(m: *Mixer) -> i64 {
 }
 
 // adds `count` output frames of one voice to `out` and advances it
-fn audio_mix_voice(m: *Mixer, v: *Voice, out: []f32, count: i64) {
+priv fn audio_mix_voice(m: *Mixer, v: *Voice, out: []f32, count: i64) {
     src := v.sound.samples
     ch := v.sound.channels
     right := min(ch, 2) - 1

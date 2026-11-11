@@ -9,7 +9,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
     }
     changed := false
     for b in 0..f.blocks.len {
-        if !reach[b] && (!f.blocks[b].insts.is_empty() || !term_is_none(f.blocks[b].term)) {
+        if !reach[b] && (!f.blocks[b].insts.is_empty() || f.blocks[b].term != Term.None) {
             f.blocks[b].insts.clear()
             f.blocks[b].term = Term.None
             changed = true
@@ -36,13 +36,6 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
         }
     }
     return changed
-}
-
-priv fn term_is_none(t: Term) -> bool {
-    match t {
-        Term.None => true
-        _ => false
-    }
 }
 
 fn cleanup_is_root(op: Op) -> bool {

@@ -262,21 +262,21 @@ fn begin_frame(i: *Input) {
     i.text_len = 0
 }
 
-fn input_press(state: u8, repeat: bool) -> u8 {
+priv fn input_press(state: u8, repeat: bool) -> u8 {
     if state & INPUT_DOWN != 0 || repeat {
         return state | INPUT_DOWN | INPUT_REPEATED
     }
     state | INPUT_DOWN | INPUT_PRESSED
 }
 
-fn input_release(state: u8) -> u8 {
+priv fn input_release(state: u8) -> u8 {
     if state & INPUT_DOWN == 0 {
         return state
     }
     state & INPUT_PRESSED | INPUT_RELEASED
 }
 
-fn input_mouse_to(i: *Input, x: i64, y: i64) {
+priv fn input_mouse_to(i: *Input, x: i64, y: i64) {
     fx := f32(x)
     fy := f32(y)
     if i.mouse_seen {
@@ -343,14 +343,14 @@ fn release_all(i: *Input) {
     }
 }
 
-fn input_key_state(i: *Input, key: i64) -> u8 {
+priv fn input_key_state(i: *Input, key: i64) -> u8 {
     if key <= 0 || key >= KEY_COUNT {
         return 0
     }
     i.keys[key]
 }
 
-fn input_button_state(i: *Input, button: i64) -> u8 {
+priv fn input_button_state(i: *Input, button: i64) -> u8 {
     if button < 0 || button >= MOUSE_BUTTON_COUNT {
         return 0
     }
@@ -532,7 +532,7 @@ fn gamepad_close(g: *Gamepad) {
     *g = Gamepad{}
 }
 
-fn input_pad_state(g: *Gamepad, button: i64) -> u8 {
+priv fn input_pad_state(g: *Gamepad, button: i64) -> u8 {
     if button < 0 || button >= PAD_BUTTON_COUNT {
         return 0
     }
@@ -638,7 +638,7 @@ fn unbind(m: *ActionMap, action: i64) {
     m.binds.len = n
 }
 
-fn input_action_bits(m: *ActionMap, i: *Input, action: i64) -> u8 {
+priv fn input_action_bits(m: *ActionMap, i: *Input, action: i64) -> u8 {
     bits: u8 = 0
     for k in 0..m.binds.len {
         b := m.binds.buf[k]

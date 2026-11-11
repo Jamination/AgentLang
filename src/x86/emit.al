@@ -702,7 +702,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64]) {
                 R(r) => i64(r) < 16
                 _ => false
             }
-            zero := i.op == Mov && a_low_reg && eq(i.b, I(0))
+            zero := i.op == Mov && a_low_reg && i.b == I(0)
             add := peephole_lea_add(i)
             if !zero && !is_some(add) {
                 continue
