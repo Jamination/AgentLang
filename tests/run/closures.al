@@ -25,6 +25,15 @@ fn sel(c bool) |i64| i64 {
     if c { |x i64| i64 { x } } else { |x i64| i64 { -x } }
 }
 
+// `return` and the value of the body convert like every other place with an expected type
+fn pick(n i64) |i64| i64 {
+    if n == 0 { return double }
+    fv := triple
+    if n == 1 { return fv }
+    if n == 2 { return |x i64| i64 { x + 1 } }
+    double
+}
+
 fn counter(n i64) i64 {
     total := 0
     step := |d i64| { total += d }
@@ -155,6 +164,7 @@ fn main() {
     print(c2(8), m(3), sel(true)(4), sel(false)(4))
 
     // returned closures (no captures), immediate call
+    print(pick(0)(5), pick(1)(6), pick(2)(7), pick(3)(8), (|| i64 { 5 })())
     ad := adder()
     print(ad(3, 4), adder()(5, 6), |x i64| i64 { x + 1 }(41))
 

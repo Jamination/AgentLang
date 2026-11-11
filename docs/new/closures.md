@@ -230,7 +230,8 @@ print(seen.items())                          // [0, 7, 14]
   `|x i64| Point { Point{x, 0} }`.
 - Common mistakes are reported with the correct form: untyped parameters (`|a, b| ..`), a
   body that is not a block (`|x i64| x * 2`), a missing result type (`|x i64| { x * 2 }`),
-  `fn(a i64) i64 { .. }` as an anonymous function, names in a closure type.
+  `fn(a i64) i64 { .. }` as an anonymous function, names in a closure type, a line that
+  starts with the operator `|` or `||`.
 
 ### Library
 
@@ -317,6 +318,10 @@ primary   = ... | "|" [IDENT type {"," IDENT type}] "|" [type] block | "||" [typ
   function lowering shared with declared functions), with the type environment of the
   enclosing function; captured names are declared in its outermost scope as
   `(type, address loaded from the environment)`.
+- `tests/gen/fuzz_closure.py [count] [seed]` generates programs made of closures (nesting,
+  shadowing, early return, up to eight parameters, higher-order and generic functions,
+  struct fields, converted functions), computes their expected output itself and compares
+  it with the `-O0`, default and `--unchecked` builds.
 - The optimizer never turns an indirect call into a direct one, and the inliner and the
   tail-recursion pass only look at direct calls, so no pass sees a call whose argument
   count differs from the callee's parameter count. A pass that devirtualizes
