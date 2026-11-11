@@ -122,14 +122,12 @@ fn loadelim_run(f: *Func) -> bool {
                 // may read or write anything reachable: only non-escaped stack slots survive
                 n := 0
                 for k in 0..st.len {
-                    keep := false
                     match st[k].mref_addr.base {
-                        Alloca(x) => keep = !esc[x]
+                        Alloca(x) if !esc[x] => {
+                            st[n] = st[k]
+                            n += 1
+                        }
                         _ => {}
-                    }
-                    if keep {
-                        st[n] = st[k]
-                        n += 1
                     }
                 }
                 st.len = n

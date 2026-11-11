@@ -95,26 +95,11 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             if sig {
                 term := false
                 if out.len > 0 {
-                    match out[out.len - 1].t {
-                        Id(x) => {
-                            term = true
-                        }
-                        Int(x) => {
-                            term = true
-                        }
-                        Float(x) => {
-                            term = true
-                        }
-                        Str(x) => {
-                            term = true
-                        }
-                        P(p) => {
-                            term = p == ")" || p == "]" || p == "}"
-                        }
-                        Kw(k) => {
-                            term = k == "return" || k == "break" || k == "continue" || k == "true" || k == "false" || k == "nil"
-                        }
-                        _ => {}
+                    term = match out[out.len - 1].t {
+                        Id(_), Int(_), Float(_), Str(_) => true
+                        P(p) => p == ")" || p == "]" || p == "}"
+                        Kw(k) => k == "return" || k == "break" || k == "continue" || k == "true" || k == "false" || k == "nil"
+                        _ => false
                     }
                 }
                 if term {
@@ -355,15 +340,9 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     }
     p := lexer_pos(file, line, i, line_start)
     if out.len > 0 {
-        last_nl := false
         match out[out.len - 1].t {
-            Nl => {
-                last_nl = true
-            }
-            _ => {}
-        }
-        if !last_nl {
-            out.push(Token{t: Nl, pos: p})
+            Nl => {}
+            _ => out.push(Token{t: Nl, pos: p})
         }
     }
     out.push(Token{t: Eof, pos: p})

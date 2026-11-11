@@ -59,15 +59,8 @@ priv fn signum(x: i64) -> i64 {
 }
 
 priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i64) -> Opt[Iv] {
-    c := 0
-    t := 0
-    e := 0
-    match f.blocks[latch].term {
-        Br(c0, t0, e0) => {
-            c = c0
-            t = t0
-            e = e0
-        }
+    c, t, e := match f.blocks[latch].term {
+        Br(c0, t0, e0) => (c0, t0, e0)
         _ => return None
     }
     if t != header || in_loop[e] {
@@ -86,9 +79,8 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     if ni.op != Add {
         return None
     }
-    step := 0
-    match f.is_const(ni.args[1]) {
-        Some(k) => step = k
+    step := match f.is_const(ni.args[1]) {
+        Some(k) => k
         None => return None
     }
     phi := ni.args[0]
@@ -112,14 +104,12 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     ty := pi.ty
     if step != 1 && step != -1 {
         // other strides: only with constant bounds, where the last value can be computed
-        s0 := 0
-        match f.is_const(start) {
-            Some(k) => s0 = k
+        s0 := match f.is_const(start) {
+            Some(k) => k
             None => return None
         }
-        e0 := 0
-        match f.is_const(end) {
-            Some(k) => e0 = k
+        e0 := match f.is_const(end) {
+            Some(k) => k
             None => return None
         }
         if step == 0 {
@@ -138,11 +128,8 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
                 return None
             }
             match simplify_fold_icmp(ci.op, ty, nx, e0) {
-                Some(r) => {
-                    if !r {
-                        break
-                    }
-                }
+                Some(true) => {}
+                Some(false) => break
                 None => return None
             }
             i = nx
@@ -232,9 +219,8 @@ priv fn match_affine(f: *Func, idx: i64, iv: *Iv, in_loop: []bool, def_block: []
                 return None
             }
         } else if (i.op == Mul || i.op == Shl) && !is_some(ext) && iv.ty == I64 {
-            k := 0
-            match f.is_const(i.args[1]) {
-                Some(x) => k = x
+            k := match f.is_const(i.args[1]) {
+                Some(x) => x
                 None => return None
             }
             m := k
@@ -302,9 +288,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
             }
         }
         match f.blocks[b].term {
-            Ret(vs) => return false
-            Trap => return false
-            Term.None => return false
+            Ret(_), Trap, Term.None => return false
             _ => {}
         }
         ss := f.succs(b)
@@ -329,15 +313,8 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     // collect candidate checks
     cands := vec[(i64, i64, i64, i64, i64, i64, Kind)]() // block, cond, ok, trap, idx, len
     for b in l.blocks.items() {
-        c := 0
-        t := 0
-        e := 0
-        match f.blocks[b].term {
-            Br(c0, t0, e0) => {
-                c = c0
-                t = t0
-                e = e0
-            }
+        c, t, e := match f.blocks[b].term {
+            Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
         }
         if !in_loop[t] || in_loop[e] || !is_trap_block(f, e) || b == latch {
@@ -422,10 +399,9 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     fn index_at(f: *Func, at: i64, pre: i64, a: *BceAffine, iv: *Iv, in_loop: []bool, def_block: []i64) -> i64 {
         inner := clone_at(f, pre, a.inner, iv.phi, at, in_loop, def_block)
         match a.ext {
-            Some(op) => return f.push(pre, op, I64, vec_of([]i64{inner}), 0)
-            None => {}
+            Some(op) => f.push(pre, op, I64, vec_of([]i64{inner}), 0)
+            None => inner
         }
-        return inner
     }
     for ci in 0..cands.len {
         cand := cands[ci]
@@ -495,35 +471,24 @@ priv fn same(f: *Func, a: i64, b: i64) -> bool {
     if a == b {
         return true
     }
-    match f.is_const(a) {
-        Some(x) => {
-            match f.is_const(b) {
-                Some(y) => return x == y && f.insts[a].ty == f.insts[b].ty
-                None => {}
-            }
-        }
-        None => {}
+    match (f.is_const(a), f.is_const(b)) {
+        (Some(x), Some(y)) => x == y && f.insts[a].ty == f.insts[b].ty
+        _ => false
     }
-    return false
 }
 
 // Is `start < end` (in the sense of the loop's own test `iv.cmp`) known whenever the loop is
 // entered? Either both are constants, or a block that is the only way to the preheader
 // branches on that comparison.
 priv fn entry_guard(f: *Func, cfg: *Cfg, pre: i64, iv: *Iv) -> bool {
-    match f.is_const(iv.start) {
-        Some(s) => {
-            match f.is_const(iv.end) {
-                Some(e) => {
-                    match simplify_fold_icmp(iv.cmp, iv.ty, s, e) {
-                        Some(r) => return r
-                        None => return false
-                    }
-                }
-                None => {}
+    match (f.is_const(iv.start), f.is_const(iv.end)) {
+        (Some(s), Some(e)) => {
+            match simplify_fold_icmp(iv.cmp, iv.ty, s, e) {
+                Some(r) => return r
+                None => return false
             }
         }
-        None => {}
+        _ => {}
     }
     signed := iv.cmp == Slt
     lt := if signed { Slt } else { Ult }
@@ -577,11 +542,7 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
     any := false
     for b in l.blocks.items() {
         match f.blocks[b].term {
-            Br(c0, t0, e0) => {
-                if b != latch && is_trap_block(f, e0) {
-                    any = true
-                }
-            }
+            Br(_, _, e0) if b != latch && is_trap_block(f, e0) => any = true
             _ => {}
         }
         if any {
@@ -600,35 +561,23 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
         *def_block_v = f.block_of()
     }
     def_block := def_block_v.items()
-    iv: Iv
-    match find_iv(f, h, latch, pre, in_loop, def_block) {
-        Some(x) => iv = x
+    iv := match find_iv(f, h, latch, pre, in_loop, def_block) {
+        Some(x) => x
         None => return false
     }
     if iv.step != 1 || iv.ty != I64 || (iv.cmp != Slt && iv.cmp != Ult) {
         return false
     }
     match f.is_const(iv.start) {
-        Some(k) => {
-            if k < 0 {
-                return false
-            }
-        }
-        None => return false
+        Some(k) if k >= 0 => {}
+        _ => return false
     }
     guarded := false
     guard_known := false
     did := false
     for b in l.blocks.items() {
-        c := 0
-        t := 0
-        e := 0
-        match f.blocks[b].term {
-            Br(c0, t0, e0) => {
-                c = c0
-                t = t0
-                e = e0
-            }
+        c, t, e := match f.blocks[b].term {
+            Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
         }
         if b == latch || t == e || !is_trap_block(f, e) {

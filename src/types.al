@@ -190,9 +190,9 @@ fn intern(self: *Types, k: TyK) -> i64 {
 // the kind with its own type lists (the table must not share a buffer with the caller)
 priv fn kind_copy(k: TyK) -> TyK {
     match k {
-        Tuple(v) => return Tuple(clone(&v))
-        Fn(p, r) => return Fn(clone(&p), r)
-        _ => return k
+        Tuple(v) => Tuple(clone(&v))
+        Fn(p, r) => Fn(clone(&p), r)
+        _ => k
     }
 }
 
@@ -207,9 +207,9 @@ fn is_float(self: *Types, t: i64) -> bool {
 // vec2 / vec3 / vec4 / quat: the number of f32 lanes
 fn vec_lanes(self: *Types, t: i64) -> Opt[i64] {
     match self.k(t) {
-        Vec(n) => return Some(n)
-        Quat => return Some(4)
-        _ => return None
+        Vec(n) => Some(n)
+        Quat => Some(4)
+        _ => None
     }
 }
 
@@ -224,27 +224,23 @@ fn slice(self: *Types, t: i64) -> i64 {
 
 fn is_int(self: *Types, t: i64) -> bool {
     match self.k(t) {
-        Int(b, s) => return true
-        _ => return false
+        Int(_, _) => true
+        _ => false
     }
 }
 
 fn is_signed(self: *Types, t: i64) -> bool {
     match self.k(t) {
-        Int(b, s) => return s
-        _ => return false
+        Int(_, s) => s
+        _ => false
     }
 }
 
 fn is_scalar(self: *Types, t: i64) -> bool {
     match self.k(t) {
-        Bool, F64, F32, Quat => return true
-        Int(b, s) => return true
-        Vec(n) => return true
-        Ptr(e) => return true
-        Fn(p, r) => return true
-        Enum(e) => return self.enums[e].simple
-        _ => return false
+        Bool, F64, F32, Quat, Int(_, _), Vec(_), Ptr(_), Fn(_, _) => true
+        Enum(e) => self.enums[e].simple
+        _ => false
     }
 }
 
@@ -258,36 +254,25 @@ priv fn names(self: *Types, v: Vec[i64]) -> str {
 
 fn name(self: *Types, t: i64) -> str {
     match self.k(t) {
-        Err => return "<error>"
-        Unit => return "()"
-        Never => return "never"
-        Bool => return "bool"
-        Int(b, s) => return fmt(if s { "i" } else { "u" }, b)
-        F64 => return "f64"
-        F32 => return "f32"
-        Vec(n) => return fmt("vec", n)
-        Quat => return "quat"
-        Mat4 => return "mat4"
-        Ptr(e) => return concat("*", self.name(e))
-        Slice(e) => {
-            if e == T_U8 {
-                return "str"
-            } else {
-                return concat("[]", self.name(e))
-            }
-        }
-        Array(e, n) => return fmt("[", n, "]", self.name(e))
-        Struct(s) => return self.structs[s].name
-        Enum(s) => return self.enums[s].name
-        Tuple(v) => return fmt("(", names(self, v), ")")
-        Fn(p, r) => {
-            ps := names(self, p)
-            if r == T_UNIT {
-                return fmt("fn(", ps, ")")
-            } else {
-                return fmt("fn(", ps, ") -> ", self.name(r))
-            }
-        }
+        Err => "<error>"
+        Unit => "()"
+        Never => "never"
+        Bool => "bool"
+        Int(b, s) => fmt(if s { "i" } else { "u" }, b)
+        F64 => "f64"
+        F32 => "f32"
+        Vec(n) => fmt("vec", n)
+        Quat => "quat"
+        Mat4 => "mat4"
+        Ptr(e) => concat("*", self.name(e))
+        Slice(T_U8) => "str"
+        Slice(e) => concat("[]", self.name(e))
+        Array(e, n) => fmt("[", n, "]", self.name(e))
+        Struct(s) => self.structs[s].name
+        Enum(s) => self.enums[s].name
+        Tuple(v) => fmt("(", names(self, v), ")")
+        Fn(p, T_UNIT) => fmt("fn(", names(self, p), ")")
+        Fn(p, r) => fmt("fn(", names(self, p), ") -> ", self.name(r))
     }
 }
 
@@ -390,15 +375,13 @@ fn size_of(self: *Types, t: i64) -> i64 {
     match self.k(t) {
         Err, Unit, Never => return 0
         Bool => return 1
-        Int(b, s) => return b / 8
-        F64 => return 8
-        Ptr(e) => return 8
-        Fn(p, r) => return 8
+        Int(b, _) => return b / 8
+        F64, Ptr(_), Fn(_, _) => return 8
         F32 => return 4
         Vec(n) => return 4 * n
         Quat => return 16
         Mat4 => return 64
-        Slice(e) => return 16
+        Slice(_) => return 16
         Array(e, n) => {
             // (size as u64 * n).min(u32::MAX): unsigned, wrapping like the Rust
             total := u64(self.size_of(e)) * u64(n)
@@ -421,22 +404,16 @@ fn size_of(self: *Types, t: i64) -> i64 {
 
 fn align_of(self: *Types, t: i64) -> i64 {
     match self.k(t) {
-        Err, Unit, Never => return 1
-        Bool => return 1
-        Int(b, s) => return b / 8
-        F64 => return 8
-        Ptr(e) => return 8
-        Fn(p, r) => return 8
-        Slice(e) => return 8
-        Enum(e) => return 8
-        F32, Quat, Mat4 => return 4
-        Vec(n) => return 4
-        Array(e, n) => return self.align_of(e)
+        Err, Unit, Never, Bool => 1
+        Int(b, _) => b / 8
+        F64, Ptr(_), Fn(_, _), Slice(_), Enum(_) => 8
+        F32, Quat, Mat4, Vec(_) => 4
+        Array(e, _) => self.align_of(e)
         Struct(s) => {
             self.layout_struct(s)
-            return self.structs[s].align
+            self.structs[s].align
         }
-        Tuple(v) => return self.layout_fields(v.items()).2
+        Tuple(v) => self.layout_fields(v.items()).2
     }
 }
 
@@ -454,35 +431,17 @@ priv fn field_id(self: *Types, owner: i64, idx: i64) -> i64 {
 // IR type + alias kind of a scalar type
 fn scalar_ir(self: *Types, t: i64) -> (T, i64) {
     match self.k(t) {
-        Bool => return (I8, AK_ANY)
-        Int(b, s) => {
-            if b == 8 {
-                return (I8, AK_ANY)
-            }
-            if b == 16 {
-                return (I16, AK_I16)
-            }
-            if b == 32 {
-                return (I32, AK_I32)
-            }
-            return (I64, AK_I64)
-        }
-        F64 => return (T.F64, AK_F64)
-        F32 => return (T.F32, AK_F32)
-        Vec(n) => {
-            if n == 2 {
-                return (V2, AK_VEC)
-            }
-            if n == 3 {
-                return (V3, AK_VEC)
-            }
-            return (V4, AK_VEC)
-        }
-        Quat => return (V4, AK_VEC)
-        Ptr(e) => return (I64, AK_PTR)
-        Fn(p, r) => return (I64, AK_PTR)
-        Enum(e) => return (I64, AK_I64)
-        _ => return (I64, AK_ANY)
+        Bool, Int(8, _) => (I8, AK_ANY)
+        Int(16, _) => (I16, AK_I16)
+        Int(32, _) => (I32, AK_I32)
+        Int(_, _), Enum(_) => (I64, AK_I64)
+        F64 => (T.F64, AK_F64)
+        F32 => (T.F32, AK_F32)
+        Vec(2) => (V2, AK_VEC)
+        Vec(3) => (V3, AK_VEC)
+        Vec(_), Quat => (V4, AK_VEC)
+        Ptr(_), Fn(_, _) => (I64, AK_PTR)
+        _ => (I64, AK_ANY)
     }
 }
 
@@ -522,11 +481,7 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
                 out.push(Leaf{off: base + 16 * c, t: V4, alias: AK_VEC})
             }
         }
-        Bool, F64, F32, Quat => leaves_scalar(self, t, base, out)
-        Int(b, s) => leaves_scalar(self, t, base, out)
-        Vec(n) => leaves_scalar(self, t, base, out)
-        Ptr(e) => leaves_scalar(self, t, base, out)
-        Fn(p, r) => leaves_scalar(self, t, base, out)
+        Bool, F64, F32, Quat, Int(_, _), Vec(_), Ptr(_), Fn(_, _) => leaves_scalar(self, t, base, out)
         Slice(e) => {
             f0 := self.field_id(t, 0)
             f1 := self.field_id(t, 1)
@@ -613,9 +568,9 @@ fn leaf_count(self: *Types, t: i64) -> i64 {
             }
             return total
         }
-        Slice(e) => return 2
+        Slice(_) => return 2
         Mat4 => return 4
-        Enum(e) => return self.size_of(t) / 8
+        Enum(_) => return self.size_of(t) / 8
         Err, Unit, Never => return 0
         _ => return 1
     }

@@ -69,43 +69,14 @@ enum Opnd {
 
 // Opnd equality (PartialEq in the Rust source)
 fn eq(a: Opnd, b: Opnd) -> bool {
-    match a {
-        Opnd.None => {
-            match b {
-                Opnd.None => return true
-                _ => return false
-            }
-        }
-        R(r) => {
-            match b {
-                R(r2) => return r == r2
-                _ => return false
-            }
-        }
-        I(i) => {
-            match b {
-                I(i2) => return i == i2
-                _ => return false
-            }
-        }
-        M(m) => {
-            match b {
-                M(m2) => return m == m2
-                _ => return false
-            }
-        }
-        GAddr(g, d) => {
-            match b {
-                GAddr(g2, d2) => return g == g2 && d == d2
-                _ => return false
-            }
-        }
-        FAddr(f) => {
-            match b {
-                FAddr(f2) => return f == f2
-                _ => return false
-            }
-        }
+    match (a, b) {
+        (Opnd.None, Opnd.None) => true
+        (R(r), R(r2)) => r == r2
+        (I(i), I(i2)) => i == i2
+        (M(m), M(m2)) => m == m2
+        (GAddr(g, d), GAddr(g2, d2)) => g == g2 && d == d2
+        (FAddr(f), FAddr(f2)) => f == f2
+        _ => false
     }
 }
 
@@ -213,17 +184,8 @@ priv fn clone(i: *MInst) -> MInst {
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
 fn is_copy(self: *MInst) -> (i64, i64, bool) {
     if self.op == Mov || self.op == MovSd {
-        match self.a {
-            R(d) => {
-                match self.b {
-                    R(s) => {
-                        if self.op == MovSd || self.sz == 8 {
-                            return (d, s, true)
-                        }
-                    }
-                    _ => {}
-                }
-            }
+        match (&self.a, &self.b) {
+            (R(d), R(s)) if self.op == MovSd || self.sz == 8 => return (d, s, true)
             _ => {}
         }
     }
@@ -403,18 +365,17 @@ priv fn map_regs_lookup(r: i64, table: []i64) -> i64 {
 
 priv fn map_regs_mo(o: Opnd, table: []i64) -> Opnd {
     match o {
-        R(r) => return R(map_regs_lookup(r, table))
-        M(m) => {
-            mm := m
-            if mm.base != NOREG {
-                mm.base = map_regs_lookup(mm.base, table)
+        R(r) => R(map_regs_lookup(r, table))
+        M(&m) => {
+            if m.base != NOREG {
+                m.base = map_regs_lookup(m.base, table)
             }
-            if mm.idx != NOREG {
-                mm.idx = map_regs_lookup(mm.idx, table)
+            if m.idx != NOREG {
+                m.idx = map_regs_lookup(m.idx, table)
             }
-            return M(mm)
+            o
         }
-        _ => return o
+        _ => o
     }
 }
 
@@ -428,23 +389,17 @@ fn mir_map_regs(i: *MInst, table: []i64) {
 
 priv fn replace_reg_mo(o: Opnd, from: i64, to: i64) -> Opnd {
     match o {
-        R(r) => {
-            if r == from {
-                return R(to)
+        R(r) if r == from => R(to)
+        M(&m) => {
+            if m.base != NOREG && m.base == from {
+                m.base = to
             }
-            return o
+            if m.idx != NOREG && m.idx == from {
+                m.idx = to
+            }
+            o
         }
-        M(m) => {
-            mm := m
-            if mm.base != NOREG && mm.base == from {
-                mm.base = to
-            }
-            if mm.idx != NOREG && mm.idx == from {
-                mm.idx = to
-            }
-            return M(mm)
-        }
-        _ => return o
+        _ => o
     }
 }
 
@@ -457,12 +412,7 @@ fn mir_replace_reg(i: *MInst, from: i64, to: i64) {
 
 priv fn count_reg_mo(o: Opnd, r: i64) -> i64 {
     match o {
-        R(x) => {
-            if x == r {
-                return 1
-            }
-            return 0
-        }
+        R(x) if x == r => 1
         M(m) => {
             n := 0
             if m.base != NOREG && m.base == r {
@@ -471,9 +421,9 @@ priv fn count_reg_mo(o: Opnd, r: i64) -> i64 {
             if m.idx != NOREG && m.idx == r {
                 n += 1
             }
-            return n
+            n
         }
-        _ => return 0
+        _ => 0
     }
 }
 
@@ -498,20 +448,20 @@ priv fn reg_name(r: i64, sz: u8) -> str {
         return fmt("xmm", r - 16)
     }
     match sz {
-        1 => return N8[r]
-        2 => return N16[r]
-        4 => return N32[r]
-        _ => return N64[r]
+        1 => N8[r]
+        2 => N16[r]
+        4 => N32[r]
+        _ => N64[r]
     }
 }
 
 priv fn opnd_str(o: Opnd, sz: u8) -> str {
     match o {
-        Opnd.None => return ""
-        R(r) => return reg_name(r, sz)
-        I(i) => return fmt(i)
-        GAddr(g, d) => return fmt("&g", g, "+", d)
-        FAddr(f) => return fmt("&f", f)
+        Opnd.None => ""
+        R(r) => reg_name(r, sz)
+        I(i) => fmt(i)
+        GAddr(g, d) => fmt("&g", g, "+", d)
+        FAddr(f) => fmt("&f", f)
         M(m) => {
             s := "["
             match m.kind {
@@ -545,7 +495,7 @@ priv fn opnd_str(o: Opnd, sz: u8) -> str {
                 }
                 s = fmt(s, m.disp)
             }
-            return concat(s, "]")
+            concat(s, "]")
         }
     }
 }

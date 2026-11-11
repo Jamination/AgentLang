@@ -45,21 +45,18 @@ fn licm_make_preheaders(f: *Func) -> bool {
         f.blocks[p].term = Jmp(h)
         for o in outside.items() {
             match f.blocks[o].term {
-                Jmp(t) => {
-                    if t == h {
-                        f.blocks[o].term = Jmp(p)
+                Jmp(&t) => {
+                    if *t == h {
+                        *t = p
                     }
                 }
-                Br(c, a, b) => {
-                    na := a
-                    nb := b
-                    if a == h {
-                        na = p
+                Br(_, &a, &b) => {
+                    if *a == h {
+                        *a = p
                     }
-                    if b == h {
-                        nb = p
+                    if *b == h {
+                        *b = p
                     }
-                    f.blocks[o].term = Br(c, na, nb)
                 }
                 _ => {}
             }
@@ -187,8 +184,7 @@ fn licm_run(f: *Func) -> bool {
             }
             if !leaves {
                 match f.blocks[b].term {
-                    Ret(vs) => leaves = true
-                    Trap => leaves = true
+                    Ret(_), Trap => leaves = true
                     _ => {}
                 }
             }
@@ -216,10 +212,9 @@ fn licm_run(f: *Func) -> bool {
                         if i.op.is_pure() {
                             ok = true
                         } else if i.op == SDiv || i.op == UDiv || i.op == SRem || i.op == URem {
-                            safe_const := false
-                            match f.is_const(i.args[1]) {
-                                Some(k) => safe_const = k != 0 && !(k == -1 && (i.op == SDiv || i.op == SRem))
-                                None => {}
+                            safe_const := match f.is_const(i.args[1]) {
+                                Some(k) => k != 0 && !(k == -1 && (i.op == SDiv || i.op == SRem))
+                                None => false
                             }
                             ok = safe_const || run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
                         } else if i.op == Load {

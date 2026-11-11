@@ -215,48 +215,22 @@ priv fn type_str_list(ts: *Vec[TypeAst]) -> str {
 // source form of a type (for signatures in diagnostics and `alc sigs`)
 fn ast_type_str(t: *TypeAst) -> str {
     match *t {
-        Name(n, args, _) => {
-            if args.is_empty() {
-                return n
-            } else {
-                return fmt(n, "[", type_str_list(&args), "]")
-            }
-        }
-        Ptr(e) => {
-            return fmt("*", ast_type_str(e))
-        }
-        Slice(e) => {
-            return fmt("[]", ast_type_str(e))
-        }
+        Name(n, args, _) if args.is_empty() => n
+        Name(n, args, _) => fmt(n, "[", type_str_list(&args), "]")
+        Ptr(e) => fmt("*", ast_type_str(e))
+        Slice(e) => fmt("[]", ast_type_str(e))
         Array(n, e) => {
-            len: str = "_"
-            match n.k {
-                Int(k) => {
-                    len = fmt(k)
-                }
-                Ident(name) => {
-                    len = name
-                }
-                _ => {}
+            len := match n.k {
+                Int(k) => fmt(k)
+                Ident(name) => name
+                _ => "_"
             }
-            return fmt("[", len, "]", ast_type_str(e))
+            fmt("[", len, "]", ast_type_str(e))
         }
-        Fn(ps, r) => {
-            p := type_str_list(&ps)
-            match r {
-                Some(r2) => {
-                    return fmt("fn(", p, ") -> ", ast_type_str(r2))
-                }
-                None => {
-                    return fmt("fn(", p, ")")
-                }
-            }
-        }
-        Tuple(ts) => {
-            return fmt("(", type_str_list(&ts), ")")
-        }
+        Fn(ps, Some(r)) => fmt("fn(", type_str_list(&ps), ") -> ", ast_type_str(r))
+        Fn(ps, None) => fmt("fn(", type_str_list(&ps), ")")
+        Tuple(ts) => fmt("(", type_str_list(&ts), ")")
     }
-    return ""
 }
 
 // the header of a function as it is declared: `fn name[T](a: A, b: B) -> R`; for an
@@ -266,12 +240,9 @@ fn ast_sig_str(f: *FnDecl) -> str {
     for i in 0..f.params.len {
         parts.push(fmt(f.params[i].0, ": ", ast_type_str(&f.params[i].1)))
     }
-    r := ""
-    match f.ret {
-        Some(t) => {
-            r = fmt(" -> ", ast_type_str(&t))
-        }
-        None => {}
+    r := match f.ret {
+        Some(&t) => fmt(" -> ", ast_type_str(t))
+        None => ""
     }
     head := if f.name == "" { "fn" } else { fmt("fn ", f.name, tparams_str(&f.tparams)) }
     return fmt(head, "(", join(parts.items(), ", "), ")", r)

@@ -54,15 +54,8 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     for b in l.blocks.items() {
         in_loop[b] = true
     }
-    c := 0
-    t := 0
-    e := 0
-    match f.blocks[latch].term {
-        Br(c0, t0, e0) => {
-            c = c0
-            t = t0
-            e = e0
-        }
+    c, t, e := match f.blocks[latch].term {
+        Br(c0, t0, e0) => (c0, t0, e0)
         _ => return None
     }
     back_true := false
@@ -83,18 +76,16 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     }
     next := ci.args[0]
     end := ci.args[1]
-    endk := 0
-    match f.is_const(end) {
-        Some(k) => endk = k
+    endk := match f.is_const(end) {
+        Some(k) => k
         None => return None
     }
     ni := &f.insts[next]
     if ni.op != Add {
         return None
     }
-    step := 0
-    match f.is_const(ni.args[1]) {
-        Some(k) => step = k
+    step := match f.is_const(ni.args[1]) {
+        Some(k) => k
         None => return None
     }
     phi := ni.args[0]
@@ -112,9 +103,8 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
             back = pi.args[k]
         }
     }
-    start := 0
-    match start_opt {
-        Some(k) => start = k
+    start := match start_opt {
+        Some(k) => k
         None => return None
     }
     if back != next || step == 0 {
@@ -129,9 +119,8 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
             return None
         }
         nx := ir_canon(ty, i + step)
-        cont := false
-        match simplify_fold_icmp(ci.op, ty, nx, endk) {
-            Some(r) => cont = r == back_true
+        cont := match simplify_fold_icmp(ci.op, ty, nx, endk) {
+            Some(r) => r == back_true
             None => return None
         }
         if !cont {
@@ -161,9 +150,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     for b in l.blocks.items() {
         size += f.blocks[b].insts.len + 1
         match f.blocks[b].term {
-            Ret(vs) => return None
-            Term.None => return None
-            Trap => return None
+            Ret(_), Term.None, Trap => return None
             _ => {}
         }
         ss := f.succs(b)
@@ -313,13 +300,11 @@ priv fn apply(f: *Func, p: *Plan) {
                 f.blocks[nb].insts.push(nv)
             }
             src_term := if b == p.latch { clone(orig_latch_term) } else { clone(f.blocks[b].term) }
-            term := src_term
-            match src_term {
-                Jmp(t) => term = Jmp(bmap.get_or(t, t))
-                Br(c, t, e) => term = Br(look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
-                _ => {}
+            f.blocks[nb].term = match src_term {
+                Jmp(t) => Jmp(bmap.get_or(t, t))
+                Br(c, t, e) => Br(look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
+                _ => src_term
             }
-            f.blocks[nb].term = term
         }
         // the previous copy's latch falls into this copy
         f.blocks[prev_latch].term = Jmp(bmap_at(&bmap, p.header))
@@ -333,16 +318,13 @@ priv fn apply(f: *Func, p: *Plan) {
     } else if p.trip > 1 {
         // the last copy branches back to the first one
         match f.blocks[prev_latch].term {
-            Br(c, t, e) => {
-                nt := t
-                ne := e
-                if t != p.exit {
-                    nt = p.header
+            Br(_, &t, &e) => {
+                if *t != p.exit {
+                    *t = p.header
                 }
-                if e != p.exit {
-                    ne = p.header
+                if *e != p.exit {
+                    *e = p.header
                 }
-                f.blocks[prev_latch].term = Br(c, nt, ne)
             }
             _ => {}
         }
@@ -372,9 +354,9 @@ priv fn apply(f: *Func, p: *Plan) {
                 }
             }
             match f.blocks[b].term {
-                Br(c, t, e) => {
-                    if loop_def(c, n0, def_block, in_loop) {
-                        f.blocks[b].term = Br(last_m[c], t, e)
+                Br(&c, _, _) => {
+                    if loop_def(*c, n0, def_block, in_loop) {
+                        *c = last_m[*c]
                     }
                 }
                 Ret(vs) => {

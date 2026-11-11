@@ -123,8 +123,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
                 rets.push((nb, rv))
                 f.blocks[nb].term = Jmp(cont)
             }
-            Trap => f.blocks[nb].term = Trap
-            Term.None => f.blocks[nb].term = Trap
+            Trap, Term.None => f.blocks[nb].term = Trap
         }
     }
     // allocas live in the caller's entry block

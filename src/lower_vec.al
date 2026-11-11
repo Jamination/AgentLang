@@ -3,13 +3,12 @@
 
 priv fn lane_of(c: u8) -> Opt[i64] {
     match c {
-        'x', 'r' => return Some(0)
-        'y', 'g' => return Some(1)
-        'z', 'b' => return Some(2)
-        'w', 'a' => return Some(3)
-        _ => {}
+        'x', 'r' => Some(0)
+        'y', 'g' => Some(1)
+        'z', 'b' => Some(2)
+        'w', 'a' => Some(3)
+        _ => None
     }
-    return None
 }
 
 fn is_vecish(self: *Fx, t: i64) -> bool {
@@ -19,14 +18,9 @@ fn is_vecish(self: *Fx, t: i64) -> bool {
 // the float type an untyped literal takes in a context expecting `expect`
 fn float_expect(self: *Fx, expect: Opt[i64]) -> i64 {
     match expect {
-        Some(t) => {
-            if t == T_F32 || self.is_vecish(t) {
-                return T_F32
-            }
-        }
-        None => {}
+        Some(t) if t == T_F32 || self.is_vecish(t) => T_F32
+        _ => T_F64
     }
-    return T_F64
 }
 
 fn fconst_ty(self: *Fx, ty: i64, f: f64) -> Val {
@@ -41,11 +35,10 @@ fn fconst_ty(self: *Fx, ty: i64, f: f64) -> Val {
 
 priv fn fx_vec_ty(n: i64) -> i64 {
     match n {
-        2 => return T_VEC2
-        3 => return T_VEC3
-        _ => {}
+        2 => T_VEC2
+        3 => T_VEC3
+        _ => T_VEC4
     }
-    return T_VEC4
 }
 
 // like `expr`, but a variable / field / element of scalar type stays a place (not loaded)
@@ -72,33 +65,27 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
                 }
             }
         }
-        Field(bb, name) => {
-            if name != "len" {
-                x := self.lvalue_base(bb)
-                match self.field_of(x, name, b.pos) {
-                    Some(p) => return p
-                    None => return val_err()
-                }
+        Field(bb, name) if name != "len" => {
+            x := self.lvalue_base(bb)
+            match self.field_of(x, name, b.pos) {
+                Some(p) => return p
+                None => return val_err()
             }
         }
-        Index(bb, idx) => {
-            if idx.len == 1 {
-                match self.index_place(bb, &idx[0], b.pos) {
-                    Some(p) => return p
-                    None => return val_err()
-                }
+        Index(bb, idx) if idx.len == 1 => {
+            match self.index_place(bb, &idx[0], b.pos) {
+                Some(p) => return p
+                None => return val_err()
             }
         }
-        Un(op, p) => {
-            if op == Deref {
-                pv := self.expr(p, None)
-                match self.cx.types.k(pv.ty) {
-                    Ptr(t) => {
-                        a := self.scalar(pv)
-                        return self.mval(t, a)
-                    }
-                    _ => {}
+        Un(Deref, p) => {
+            pv := self.expr(p, None)
+            match self.cx.types.k(pv.ty) {
+                Ptr(t) => {
+                    a := self.scalar(pv)
+                    return self.mval(t, a)
                 }
+                _ => {}
             }
         }
         _ => {}
@@ -111,19 +98,14 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
     bv := bv0
     no_val: Opt[Val] = None
     match self.cx.types.k(bv.ty) {
-        Ptr(t) => {
-            if is_some(self.cx.types.vec_lanes(t)) {
-                a := self.scalar(bv)
-                bv = self.mval(t, a)
-            }
+        Ptr(t) if is_some(self.cx.types.vec_lanes(t)) => {
+            a := self.scalar(bv)
+            bv = self.mval(t, a)
         }
         _ => {}
     }
-    n: i64
-    match self.cx.types.vec_lanes(bv.ty) {
-        Some(vn) => {
-            n = vn
-        }
+    n := match self.cx.types.vec_lanes(bv.ty) {
+        Some(vn) => vn
         None => return None
     }
     vt := self.irt(bv.ty)
@@ -175,11 +157,8 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
 
 // v[i] on a vector: a lane place for constant i, an f32 in memory otherwise
 fn vec_index(self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
-    n: i64
-    match self.cx.types.vec_lanes(bv.ty) {
-        Some(vn) => {
-            n = vn
-        }
+    n := match self.cx.types.vec_lanes(bv.ty) {
+        Some(vn) => vn
         None => return None
     }
     vt := self.irt(bv.ty)
@@ -304,11 +283,8 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         if l.ty != r.ty {
             return vec_binary_bad(self, l, r, pos)
         }
-        lanes: i64
-        match ln {
-            Some(k) => {
-                lanes = k
-            }
+        lanes := match ln {
+            Some(k) => k
             None => panic("unwrap of None")
         }
         e := self.vec_eq(l, r, lanes)
@@ -318,20 +294,11 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         }
         return Some(self.sval(T_BOOL, e))
     }
-    o: Op
-    match op {
-        Add => {
-            o = FAdd
-        }
-        Sub => {
-            o = FSub
-        }
-        Mul => {
-            o = FMul
-        }
-        Div => {
-            o = FDiv
-        }
+    o := match op {
+        Add => FAdd
+        Sub => FSub
+        Mul => FMul
+        Div => FDiv
         _ => return vec_binary_bad(self, l, r, pos)
     }
     // vector op vector, vector op f32, f32 op vector
@@ -405,11 +372,8 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
         }
         return self.mval(T_MAT4, t)
     }
-    n: i64
-    match self.cx.types.vec_lanes(to) {
-        Some(vn) => {
-            n = vn
-        }
+    n := match self.cx.types.vec_lanes(to) {
+        Some(vn) => vn
         None => panic("unwrap of None")
     }
     it := self.irt(to)
@@ -424,15 +388,13 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
             return self.sval(to, r)
         }
         match self.cx.types.vec_lanes(v.ty) {
-            Some(m) => {
-                if m >= n {
-                    // drop trailing lanes (or reinterpret vec4 <-> quat)
-                    x := self.scalar(v)
-                    r := self.ins(VShuf, it, vec_of([]i64{x, x}), 0xE4)
-                    return self.sval(to, r)
-                }
+            Some(m) if m >= n => {
+                // drop trailing lanes (or reinterpret vec4 <-> quat)
+                x := self.scalar(v)
+                r := self.ins(VShuf, it, vec_of([]i64{x, x}), 0xE4)
+                return self.sval(to, r)
             }
-            None => {}
+            _ => {}
         }
     }
     lanes := vec[i64]()
@@ -480,11 +442,8 @@ fn put_vec(self: *Fx, v: Val, pos: Pos) {
         self.put_lit_pub(")", pos)
         return
     }
-    n: i64
-    match self.cx.types.vec_lanes(v.ty) {
-        Some(vn) => {
-            n = vn
-        }
+    n := match self.cx.types.vec_lanes(v.ty) {
+        Some(vn) => vn
         None => panic("unwrap of None")
     }
     tn := self.tyname(v.ty)

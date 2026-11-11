@@ -6,22 +6,20 @@
 fn lower_mem_is_builtin(name: str) -> bool {
     // (a `priv` function named like a builtin shares the name in its file as well)
     match ast_plain(name) {
-        "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => return true
-        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed", "panic" => return true
-        "fmt", "hash", "put", "print", "clone", "mulhi" => return true
-        _ => {}
+        "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
+        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed", "panic" => true
+        "fmt", "hash", "put", "print", "clone", "mulhi" => true
+        _ => false
     }
-    return false
 }
 
 // builtins that can be called as a method: `x.f(a)` means `f(x, a)`
 priv fn is_method_builtin(name: str) -> bool {
     match name {
-        "len", "clone", "hash", "ptr", "sqrt", "fabs", "fmin", "fmax" => return true
-        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr" => return true
-        _ => {}
+        "len", "clone", "hash", "ptr", "sqrt", "fabs", "fmin", "fmax" => true
+        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr" => true
+        _ => false
     }
-    return false
 }
 
 // Would `call_decl` accept these arguments for declaration `d`? `tys[i]` is the type of
@@ -58,21 +56,11 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
                     env = e2
                 } else {
                     e3 := lower_call_clone_env(&env)
-                    ok := false
-                    is_ptr_param := false
-                    match *pt {
-                        Ptr(inner) => {
-                            is_ptr_param = true
-                            ok = self.unify(inner, rv.ty, d.tparams.items(), &e3)
-                        }
-                        _ => {}
-                    }
-                    if !is_ptr_param {
-                        match self.cx.types.k(rv.ty) {
-                            Ptr(t) => {
-                                ok = self.unify(pt, t, d.tparams.items(), &e3)
-                            }
-                            _ => {}
+                    ok := match *pt {
+                        Ptr(inner) => self.unify(inner, rv.ty, d.tparams.items(), &e3)
+                        _ => match self.cx.types.k(rv.ty) {
+                            Ptr(t) => self.unify(pt, t, d.tparams.items(), &e3)
+                            _ => false
                         }
                     }
                     if ok {
@@ -141,32 +129,17 @@ priv fn literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     }
     vn := s.variant_ref(a)
     if vn != "" {
-        match k {
-            Enum(eid) => {
-                return s.cx.variant_of(s.cx.types.enums[eid].decl, vn) >= 0
-            }
-            _ => {}
+        return match k {
+            Enum(eid) => s.cx.variant_of(s.cx.types.enums[eid].decl, vn) >= 0
+            _ => false
         }
-        return false
     }
     match s.cx.const_eval(a) {
-        Some(cv) => {
-            match cv {
-                Str(_) => {
-                    return t == T_STR
-                }
-                Bool(_) => {
-                    return t == T_BOOL
-                }
-                Float(_) => {
-                    return s.cx.types.is_float(t)
-                }
-                Int(_) => {}
-            }
-        }
-        None => {}
+        Some(Str(_)) => t == T_STR
+        Some(Bool(_)) => t == T_BOOL
+        Some(Float(_)) => s.cx.types.is_float(t)
+        _ => s.cx.types.is_int(t) || s.cx.types.is_float(t)
     }
-    return s.cx.types.is_int(t) || s.cx.types.is_float(t)
 }
 
 // the type an untyped literal (or constant) takes without context; -1 if it has none
@@ -195,23 +168,11 @@ priv fn literal_type(s: *Fx, a: *Expr) -> i64 {
         return -1
     }
     match s.cx.const_eval(a) {
-        Some(cv) => {
-            match cv {
-                Str(_) => {
-                    return T_STR
-                }
-                Bool(_) => {
-                    return T_BOOL
-                }
-                Float(_) => {
-                    return T_F64
-                }
-                Int(_) => {}
-            }
-        }
-        None => {}
+        Some(Str(_)) => T_STR
+        Some(Bool(_)) => T_BOOL
+        Some(Float(_)) => T_F64
+        _ => T_I64
     }
-    return T_I64
 }
 
 // A call of a name that is a builtin and may also be declared as a function. The declared
@@ -247,12 +208,9 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
     alive := vec[i64]()
     for ci in 0..cands.len {
         d := self.cx.fn_decls[cands[ci]]
-        targs_ok := true
-        match explicit {
-            Some(t) => {
-                targs_ok = t.len == d.tparams.len
-            }
-            None => {}
+        targs_ok := match explicit {
+            Some(t) => t.len == d.tparams.len
+            None => true
         }
         if targs_ok && d.params.len == len(args) + nrecv {
             if nrecv == 1 && !self.param_accepts(d, &d.params[0].1, lower_call_unwrap(recv).ty, true, lower_call_as_slice(explicit)) {
@@ -338,12 +296,9 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
             }
             None => {}
         }
-        has_targs := false
-        match explicit {
-            Some(t) => {
-                has_targs = t.len != 0
-            }
-            None => {}
+        has_targs := match explicit {
+            Some(t) => t.len != 0
+            None => false
         }
         if usable && has_targs && ast_plain(name) != "sizeof" && ast_plain(name) != "cast" && ast_plain(name) != "mkslice" {
             usable = false
@@ -405,24 +360,16 @@ priv fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
 // (pointer to the elements, length, element type) of a `Vec` in memory: what indexing,
 // slicing and iteration use. The pointer is only loaded when `want_ptr` (NOV otherwise).
 fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
-    et := 0
-    match self.cx.vec_elem(v.ty) {
-        Some(t) => {
-            et = t
-        }
-        None => {
-            return None
-        }
+    et := match self.cx.vec_elem(v.ty) {
+        Some(t) => t
+        None => return None
     }
     if !v.mem {
         return None
     }
-    sid := 0
-    match self.cx.types.k(v.ty) {
-        Struct(s) => {
-            sid = s
-        }
-        _ => {}
+    sid := match self.cx.types.k(v.ty) {
+        Struct(s) => s
+        _ => 0
     }
     // struct Vec[T] { buf []T, len i64 }
     self.cx.types.layout_struct(sid)
@@ -514,23 +461,13 @@ priv fn clone_fields(s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i64], po
         if !s.cx.has_heap(tys[i], 0) {
             continue
         }
-        src: Val
-        match s.field_of(v, names[i], pos) {
-            Some(p) => {
-                src = p
-            }
-            None => {
-                continue
-            }
+        src := match s.field_of(v, names[i], pos) {
+            Some(p) => p
+            None => continue
         }
-        dst: Val
-        match s.field_of(tv, names[i], pos) {
-            Some(p) => {
-                dst = p
-            }
-            None => {
-                continue
-            }
+        dst := match s.field_of(tv, names[i], pos) {
+            Some(p) => p
+            None => continue
         }
         c := s.clone_val(src, pos, depth + 1)
         s.store(dst, c)

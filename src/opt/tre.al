@@ -25,10 +25,9 @@ priv fn identity(op: Op) -> Opt[i64] {
 // acc_op.is_none() || acc_op == Some(op)
 priv fn none_or_same(acc_op: Opt[Op], op: Op) -> bool {
     match acc_op {
-        Some(o) => return o == op
-        None => {}
+        Some(o) => o == op
+        None => true
     }
-    return true
 }
 
 fn tre_run(f: *Func, fid: i64) -> bool {
@@ -46,9 +45,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     sites := vec[Site]()
     acc_op: Opt[Op] = None
     for b in rpo.items() {
-        rv := vec[i64]()
-        match f.blocks[b].term {
-            Ret(vs) => rv = clone(vs)
+        rv := match f.blocks[b].term {
+            Ret(vs) => clone(vs)
             _ => continue
         }
         insts := &f.blocks[b].insts
@@ -141,9 +139,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     acc_phi: Opt[i64] = None
     match acc_op {
         Some(op) => {
-            idk := 0
-            match identity(op) {
-                Some(x) => idk = x
+            idk := match identity(op) {
+                Some(x) => x
                 None => panic("called `Option::unwrap()` on a `None` value")
             }
             c := f.mk(Const, ret_ty, vec[i64](), ir_canon(ret_ty, idk))
@@ -178,21 +175,17 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         call_args := clone(&f.insts[s.call].args)
         // new accumulator value
         new_acc: Opt[i64] = None
-        match acc_phi {
-            Some(ap) => {
-                match s.acc {
-                    Some(cx) => {
-                        // read the operand again: parameters have been replaced by the loop phis
-                        ci := &f.insts[cx.0]
-                        op := ci.op
-                        x := if ci.args[0] == s.call { ci.args[1] } else { ci.args[0] }
-                        nv := f.mk(op, ret_ty, vec_of([]i64{ap, x}), 0)
-                        new_acc = Some(nv)
-                    }
-                    None => new_acc = Some(ap)
-                }
+        match (acc_phi, s.acc) {
+            (Some(ap), Some(cx)) => {
+                // read the operand again: parameters have been replaced by the loop phis
+                ci := &f.insts[cx.0]
+                op := ci.op
+                x := if ci.args[0] == s.call { ci.args[1] } else { ci.args[0] }
+                nv := f.mk(op, ret_ty, vec_of([]i64{ap, x}), 0)
+                new_acc = Some(nv)
             }
-            None => {}
+            (Some(ap), None) => new_acc = Some(ap)
+            _ => {}
         }
         // drop the call (and the combining instruction)
         drop := vec[i64]()
@@ -214,12 +207,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         }
         blk.insts.len = n
         match new_acc {
-            Some(nv) => {
-                if is_some(s.acc) {
-                    f.blocks[b].insts.push(nv)
-                }
-            }
-            None => {}
+            Some(nv) if is_some(s.acc) => f.blocks[b].insts.push(nv)
+            _ => {}
         }
         f.blocks[b].term = Jmp(header)
         for pp in pphi.items() {
@@ -228,44 +217,32 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             i.args.push(a)
             i.pb.push(b)
         }
-        match acc_phi {
-            Some(ap) => {
-                match new_acc {
-                    Some(nv) => {
-                        i := f.im(ap)
-                        i.args.push(nv)
-                        i.pb.push(b)
-                    }
-                    None => {}
-                }
+        match (acc_phi, new_acc) {
+            (Some(ap), Some(nv)) => {
+                i := f.im(ap)
+                i.args.push(nv)
+                i.pb.push(b)
             }
-            None => {}
+            _ => {}
         }
     }
     // every other return folds the accumulator in
-    match acc_phi {
-        Some(ap) => {
-            match acc_op {
-                Some(op) => {
-                    for bi in 0..f.blocks.len {
-                        if contains(&site_blocks, bi) {
-                            continue
-                        }
-                        match f.blocks[bi].term {
-                            Ret(vs) => {
-                                if vs.len == 1 {
-                                    nv := f.push(bi, op, ret_ty, vec_of([]i64{ap, vs[0]}), 0)
-                                    f.blocks[bi].term = Ret(vec_of([]i64{nv}))
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+    match (acc_phi, acc_op) {
+        (Some(ap), Some(op)) => {
+            for bi in 0..f.blocks.len {
+                if contains(&site_blocks, bi) {
+                    continue
                 }
-                None => {}
+                match f.blocks[bi].term {
+                    Ret(vs) if vs.len == 1 => {
+                        nv := f.push(bi, op, ret_ty, vec_of([]i64{ap, vs[0]}), 0)
+                        f.blocks[bi].term = Ret(vec_of([]i64{nv}))
+                    }
+                    _ => {}
+                }
             }
         }
-        None => {}
+        _ => {}
     }
     return true
 }

@@ -34,11 +34,9 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
         for rl in m.globals[gi].relocs.items() {
             t := rl.1
             match t {
-                Function(f) => {
-                    if !seen[f] {
-                        seen[f] = true
-                        out.push(f)
-                    }
+                Function(f) if !seen[f] => {
+                    seen[f] = true
+                    out.push(f)
                 }
                 _ => {}
             }
@@ -78,12 +76,8 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
                 innermost := true
                 for oi in 0..loops.loops.len {
                     match loops.loops[oi].parent {
-                        Some(p) => {
-                            if oi != li && p == li {
-                                innermost = false
-                            }
-                        }
-                        None => {}
+                        Some(p) if oi != li && p == li => innermost = false
+                        _ => {}
                     }
                     if !innermost {
                         break
@@ -167,8 +161,7 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
             }
             tm := f.blocks[b].term
             c := match tm {
-                Trap => true
-                Term.None => true
+                Trap, Term.None => true
                 Jmp(t) => cold[t]
                 Br(x, t, e) => cold[t] && cold[e]
                 Ret(vs) => false

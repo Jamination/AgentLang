@@ -592,15 +592,8 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
             ExprStmt(e) => {
                 v = self.expr(&e, expect)
             }
-            If(c, t, eo) => {
-                match eo {
-                    Some(e) => {
-                        v = self.if_value(&c, &t, &e, true, expect)
-                    }
-                    None => {
-                        self.stmt(s)
-                    }
-                }
+            If(c, t, Some(e)) => {
+                v = self.if_value(&c, &t, &e, true, expect)
             }
             _ => {
                 self.stmt(s)
@@ -621,28 +614,6 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
     self.blocks.pop()
     self.pop_scope()
     return v
-}
-
-// how an expression statement is treated: 0 = `match`, 1 = an expression without effect,
-// 2 = `&&` / `||` (may have effects through its operands), 3 = anything else
-priv fn stmt_expr_kind(e: *Expr) -> i64 {
-    match e.k {
-        Match(_, _) => return 0
-        Int(_) => return 1
-        Float(_) => return 1
-        Str(_) => return 1
-        Bool(_) => return 1
-        Ident(_) => return 1
-        Fn(_) => return 1
-        Bin(op, _, _) => {
-            if op == LAnd || op == LOr {
-                return 2
-            }
-            return 1
-        }
-        _ => {}
-    }
-    return 3
 }
 
 // `break` / `continue`
@@ -699,21 +670,21 @@ priv fn break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
 priv fn stmt(self: *Fx, s: *Stmt) {
     match s.k {
         ExprStmt(e) => {
-            kind := stmt_expr_kind(&e)
-            if kind == 0 {
-                match e.k {
-                    Match(sc, arms) => {
-                        self.match_expr(sc, arms.items(), false, None, e.pos)
-                    }
-                    _ => {}
+            match e.k {
+                Match(sc, arms) => {
+                    self.match_expr(sc, arms.items(), false, None, e.pos)
                 }
-            } else if kind == 1 || kind == 2 {
-                self.expr(&e, None)
-                if kind == 1 {
+                // `&&` / `||` may have effects through their operands
+                Bin(LAnd, _, _), Bin(LOr, _, _) => {
+                    self.expr(&e, None)
+                }
+                Int(_), Float(_), Str(_), Bool(_), Ident(_), Fn(_), Bin(_, _, _) => {
+                    self.expr(&e, None)
                     self.err(e.pos, "expression statement has no effect (did you mean `=` or `:=`?)")
                 }
-            } else {
-                self.expr(&e, None)
+                _ => {
+                    self.expr(&e, None)
+                }
             }
         }
         Let(names, e) => {
@@ -727,22 +698,14 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 dst := self.mval(v.ty, addr)
                 self.store(dst, v)
             } else {
-                tys: Vec[i64]
-                is_tuple := false
-                match self.cx.types.k(v.ty) {
-                    Tuple(ts) => {
-                        if ts.len == names.len {
-                            tys = ts
-                            is_tuple = true
-                        }
-                    }
+                tys := match self.cx.types.k(v.ty) {
+                    Tuple(ts) if ts.len == names.len => ts
                     Err => return
-                    _ => {}
-                }
-                if !is_tuple {
-                    tn := self.tyname(v.ty)
-                    self.err(s.pos, fmt("cannot destructure ", tn, " into ", names.len, " names"))
-                    return
+                    _ => {
+                        tn := self.tyname(v.ty)
+                        self.err(s.pos, fmt("cannot destructure ", tn, " into ", names.len, " names"))
+                        return
+                    }
                 }
                 offs := self.cx.types.tuple_offsets(tys.items())
                 for i in 0..names.len {
@@ -759,29 +722,22 @@ priv fn stmt(self: *Fx, s: *Stmt) {
         }
         MultiAssign(lhs, e) => {
             v := self.expr(&e, None)
-            is_tuple := false
             match self.cx.types.k(v.ty) {
-                Tuple(ts) => {
-                    is_tuple = ts.len == lhs.len
-                }
+                Tuple(ts) if ts.len == lhs.len => {}
                 Err => return
-                _ => {}
-            }
-            if !is_tuple {
-                tn := self.tyname(v.ty)
-                self.err(s.pos, fmt("cannot destructure ", tn, " into ", lhs.len, " places"))
-                return
+                _ => {
+                    tn := self.tyname(v.ty)
+                    self.err(s.pos, fmt("cannot destructure ", tn, " into ", lhs.len, " places"))
+                    return
+                }
             }
             // copy first: the right side may alias the destinations
             t := self.temp(v.ty)
             tv := self.mval(v.ty, t)
             self.store(tv, v)
             for i in 0..lhs.len {
-                src: Val
-                match self.field_of(tv, fmt(i), s.pos) {
-                    Some(p) => {
-                        src = p
-                    }
+                src := match self.field_of(tv, fmt(i), s.pos) {
+                    Some(p) => p
                     None => return
                 }
                 match self.place(&lhs[i]) {
@@ -794,12 +750,9 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             }
         }
         Var(name, ty, init) => {
-            t: Opt[i64] = None
-            match ty {
-                Some(ta) => {
-                    t = Some(self.cx.resolve(&ta, &self.tenv))
-                }
-                None => {}
+            t: Opt[i64] = match ty {
+                Some(ta) => Some(self.cx.resolve(&ta, &self.tenv))
+                None => None
             }
             match init {
                 Some(e) => {
@@ -834,19 +787,14 @@ priv fn stmt(self: *Fx, s: *Stmt) {
         }
         Assign(lhs, op, rhs) => {
             match lhs.k {
-                Ident(n) => {
-                    if n == "_" {
-                        self.expr(&rhs, None)
-                        return
-                    }
+                Ident("_") => {
+                    self.expr(&rhs, None)
+                    return
                 }
                 _ => {}
             }
-            dst: Val
-            match self.place(&lhs) {
-                Some(d) => {
-                    dst = d
-                }
+            dst := match self.place(&lhs) {
+                Some(d) => d
                 None => {
                     self.expr(&rhs, None)
                     return
@@ -932,25 +880,14 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             self.dead = !reach
         }
         For(var1, var2, lo, hi, incl, step_e, body) => {
-            // the optional bounds are copied to locals of this arm so that they can be
-            // passed by pointer
-            hi_e: Expr
-            hi_p: Opt[*Expr] = None
-            match hi {
-                Some(h) => {
-                    hi_e = h
-                    hi_p = Some(&hi_e)
-                }
-                None => {}
+            // the optional bounds are passed by pointer (into this arm's copies)
+            hi_p: Opt[*Expr] = match hi {
+                Some(&h) => Some(h)
+                None => None
             }
-            step_x: Expr
-            step_p: Opt[*Expr] = None
-            match step_e {
-                Some(se) => {
-                    step_x = se
-                    step_p = Some(&step_x)
-                }
-                None => {}
+            step_p: Opt[*Expr] = match step_e {
+                Some(&se) => Some(se)
+                None => None
             }
             self.for_stmt(var1, var2, &lo, hi_p, incl, step_p, &body, s.pos)
         }
@@ -991,15 +928,12 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             self.cond_br(&c, ok, fail)
             self.switch_to(fail)
             loc := self.loc_str(s.pos)
-            m: Val
-            match msg {
+            m := match msg {
                 Some(me) => {
                     v := self.expr(&me, Some(T_STR))
-                    m = self.coerce(v, T_STR, me.pos)
+                    self.coerce(v, T_STR, me.pos)
                 }
-                None => {
-                    m = self.str_val("assertion failed")
-                }
+                None => self.str_val("assertion failed")
             }
             self.call_rt("__assert_fail", vec[i64](), vec_of([]Val{loc, m}), s.pos)
             if !self.dead {
@@ -1042,36 +976,32 @@ priv fn stmt(self: *Fx, s: *Stmt) {
 priv fn do_return(self: *Fx, v: Opt[Val]) {
     rets := vec[i64]()
     match v {
+        Some(rv) if rv.ty == T_ERR => {
+            self.run_defers_down_to(0)
+            self.terminate(Trap)
+            return
+        }
         Some(rv) => {
-            if rv.ty != T_ERR {
-                match self.cx.abi_ret(self.ret_ty) {
-                    RetAbi.None => {}
-                    Scalar(_) => {
-                        rets.push(self.scalar(rv))
-                    }
-                    Flat(leaves) => {
-                        for i in 0..leaves.len {
-                            l := leaves[i]
-                            a := self.add_off(rv.v, l.off)
-                            rets.push(self.load_raw(a, l.t, l.alias))
-                        }
-                    }
-                    SRet => {
-                        sp: i64
-                        match self.sret {
-                            Some(p) => {
-                                sp = p
-                            }
-                            None => panic("unwrap of None")
-                        }
-                        dst := self.mval(self.ret_ty, sp)
-                        self.store(dst, rv)
+            match self.cx.abi_ret(self.ret_ty) {
+                RetAbi.None => {}
+                Scalar(_) => {
+                    rets.push(self.scalar(rv))
+                }
+                Flat(leaves) => {
+                    for i in 0..leaves.len {
+                        l := leaves[i]
+                        a := self.add_off(rv.v, l.off)
+                        rets.push(self.load_raw(a, l.t, l.alias))
                     }
                 }
-            } else {
-                self.run_defers_down_to(0)
-                self.terminate(Trap)
-                return
+                SRet => {
+                    sp := match self.sret {
+                        Some(p) => p
+                        None => panic("unwrap of None")
+                    }
+                    dst := self.mval(self.ret_ty, sp)
+                    self.store(dst, rv)
+                }
             }
         }
         None => {}
@@ -1097,12 +1027,9 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
     }
     self.jmp(bj)
     self.switch_to(be)
-    exp2 := expect
-    match slot {
-        Some(s) => {
-            exp2 = Some(s.ty)
-        }
-        None => {}
+    exp2 := match slot {
+        Some(s) => Some(s.ty)
+        None => expect
     }
     v2 := self.block_value(e, want, exp2)
     d2 := self.dead
@@ -1177,21 +1104,12 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             match step_o {
                 Some(se) => {
                     match self.cx.const_eval(se) {
-                        Some(cv) => {
-                            good := false
-                            match cv {
-                                Int(k) => {
-                                    if k != 0 {
-                                        stepk = k
-                                        good = true
-                                    }
-                                }
-                                _ => {}
-                            }
-                            if !good {
-                                self.err(se.pos, "`by` step must be a non-zero integer")
-                                stepk = 1
-                            }
+                        Some(Int(k)) if k != 0 => {
+                            stepk = k
+                        }
+                        Some(_) => {
+                            self.err(se.pos, "`by` step must be a non-zero integer")
+                            stepk = 1
                         }
                         None => {
                             // runtime step: must be positive
@@ -1239,14 +1157,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             self.jmp(bc)
             self.switch_to(bc)
             cur := self.load_raw(addr, it, iv.alias)
-            st: i64
-            match step_dyn {
-                Some(s) => {
-                    st = s
-                }
-                None => {
-                    st = self.iconst(it, stepk)
-                }
+            st := match step_dyn {
+                Some(s) => s
+                None => self.iconst(it, stepk)
             }
             next := self.ins(Add, it, vec_of([]i64{cur, st}), 0)
             self.store_raw(addr, next, it, iv.alias)
@@ -1258,55 +1171,34 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                 self.err(pos, "`by` is only valid with a range")
             }
             cv := self.expr(lo, None)
-            p: i64
-            ln: i64
-            et: i64
-            iterable := false
-            match self.cx.types.k(cv.ty) {
+            p, ln, et := match self.cx.types.k(cv.ty) {
                 Slice(st) => {
                     parts := self.slice_parts(cv)
-                    p = parts.0
-                    ln = parts.1
-                    et = st
-                    iterable = true
+                    (parts.0, parts.1, st)
                 }
                 Array(at, n) => {
-                    ln = self.iconst(I64, n)
-                    p = cv.v
-                    et = at
-                    iterable = true
+                    n_v := self.iconst(I64, n)
+                    (cv.v, n_v, at)
                 }
                 Err => {
                     self.pop_scope()
                     return
                 }
-                _ => {
-                    // the live elements of a Vec (also through a pointer)
-                    match self.vec_parts(self.auto_deref(cv), true) {
-                        Some(x) => {
-                            p = x.0
-                            ln = x.1
-                            et = x.2
-                            iterable = true
-                        }
-                        None => {}
+                // the live elements of a Vec (also through a pointer)
+                _ => match self.vec_parts(self.auto_deref(cv), true) {
+                    Some(x) => x
+                    None => {
+                        tn := self.tyname(cv.ty)
+                        self.err(lo.pos, fmt("cannot iterate over ", tn))
+                        self.pop_scope()
+                        return
                     }
                 }
             }
-            if !iterable {
-                tn := self.tyname(cv.ty)
-                self.err(lo.pos, fmt("cannot iterate over ", tn))
-                self.pop_scope()
-                return
-            }
-            iname: str = "_"
-            ename: Opt[str] = Some(var1)
-            match var2 {
-                Some(v2) => {
-                    iname = var1
-                    ename = Some(v2)
-                }
-                None => {}
+            // `for x in v`: the index is hidden; `for i, x in v`: both are named
+            iname, ename := match var2 {
+                Some(v2) => (var1, v2)
+                None => ("_", var1)
             }
             iaddr := self.declare(iname, T_I64, pos)
             zero := self.iconst(I64, 0)
@@ -1315,20 +1207,15 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             self.br(c, bb, bx)
             self.switch_to(bb)
             self.push_scope()
-            match ename {
-                Some(en) => {
-                    i := self.load_raw(iaddr, I64, AK_I64)
-                    es := self.cx.types.size_of(et)
-                    esz := self.iconst(I64, es)
-                    off := self.ins(Mul, I64, vec_of([]i64{i, esz}), 0)
-                    ea := self.ins(Add, I64, vec_of([]i64{p, off}), 0)
-                    src := self.mval(et, ea)
-                    eaddr := self.declare(en, et, pos)
-                    dst := self.mval(et, eaddr)
-                    self.store(dst, src)
-                }
-                None => {}
-            }
+            i := self.load_raw(iaddr, I64, AK_I64)
+            es := self.cx.types.size_of(et)
+            esz := self.iconst(I64, es)
+            off := self.ins(Mul, I64, vec_of([]i64{i, esz}), 0)
+            ea := self.ins(Add, I64, vec_of([]i64{p, off}), 0)
+            src := self.mval(et, ea)
+            eaddr := self.declare(ename, et, pos)
+            dst := self.mval(et, eaddr)
+            self.store(dst, src)
             self.loops.push(LoopCtx{brk: bx, cont: bc, scope_depth: self.scopes.len})
             self.block(body)
             self.loops.pop()
@@ -1350,27 +1237,23 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
 // ---------- conditions ----------
 fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
     match e.k {
-        Bin(op, a, b) => {
-            if op == LAnd {
-                mid := self.new_block()
-                self.cond_br(a, mid, f)
-                self.switch_to(mid)
-                self.cond_br(b, t, f)
-                return
-            }
-            if op == LOr {
-                mid := self.new_block()
-                self.cond_br(a, t, mid)
-                self.switch_to(mid)
-                self.cond_br(b, t, f)
-                return
-            }
+        Bin(LAnd, a, b) => {
+            mid := self.new_block()
+            self.cond_br(a, mid, f)
+            self.switch_to(mid)
+            self.cond_br(b, t, f)
+            return
         }
-        Un(op, a) => {
-            if op == Not {
-                self.cond_br(a, f, t)
-                return
-            }
+        Bin(LOr, a, b) => {
+            mid := self.new_block()
+            self.cond_br(a, t, mid)
+            self.switch_to(mid)
+            self.cond_br(b, t, f)
+            return
+        }
+        Un(Not, a) => {
+            self.cond_br(a, f, t)
+            return
         }
         _ => {}
     }

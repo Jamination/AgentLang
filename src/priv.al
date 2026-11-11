@@ -210,10 +210,8 @@ priv fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
 
 priv fn opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
     match o {
-        Some(t) => {
-            tt: TypeAst = t
-            priv_type(r, &tt)
-            return Some(tt)
+        Some(&t) => {
+            priv_type(r, t)
         }
         None => {}
     }
@@ -222,10 +220,8 @@ priv fn opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
 
 priv fn opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
     match o {
-        Some(e) => {
-            ee: Expr = e
-            expr(r, &ee)
-            return Some(ee)
+        Some(&e) => {
+            expr(r, e)
         }
         None => {}
     }
@@ -234,12 +230,9 @@ priv fn opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
 
 priv fn opt_pexpr(r: *PrivCx, o: Opt[*Expr]) -> bool {
     match o {
-        Some(e) => {
-            return expr(r, e)
-        }
-        None => {}
+        Some(e) => expr(r, e)
+        None => true
     }
-    return true
 }
 
 priv fn exprs(r: *PrivCx, es: *Vec[Expr]) -> bool {
@@ -317,12 +310,7 @@ priv fn expr(r: *PrivCx, e: *Expr) -> bool {
             }
             true
         }
-        TypeE(t) => {
-            tt: TypeAst = t
-            priv_type(r, &tt)
-            e.k = TypeE(tt)
-            true
-        }
+        TypeE(&t) => priv_type(r, t)
         If(c, a, b) => {
             expr(r, c)
             block(r, a)
@@ -353,12 +341,7 @@ priv fn expr(r: *PrivCx, e: *Expr) -> bool {
 priv fn pat(r: *PrivCx, p: *Pat) -> bool {
     return match *p {
         Wild => true
-        Const(e) => {
-            ee: Expr = e
-            expr(r, &ee)
-            *p = Const(ee)
-            true
-        }
+        Const(&e) => expr(r, e)
         // the variant name stays (variants are not private); the bindings are local variables
         // (a name inside is a constant, a variant or a binding: renamed like any identifier)
         Variant(name, subs, pos, qual) => {
@@ -410,41 +393,25 @@ priv fn block(r: *PrivCx, b: Block) -> bool {
 
 priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
     return match s.k {
-        ExprStmt(e) => {
-            ee: Expr = e
-            expr(r, &ee)
-            s.k = ExprStmt(ee)
-            true
+        ExprStmt(&e) => expr(r, e)
+        Let(&names, &e) => {
+            priv_names(r, names)
+            expr(r, e)
         }
-        Let(names, e) => {
-            priv_names(r, &names)
-            ee: Expr = e
-            expr(r, &ee)
-            s.k = Let(names, ee)
-            true
-        }
-        MultiAssign(lhs, e) => {
-            exprs(r, &lhs)
-            ee: Expr = e
-            expr(r, &ee)
-            s.k = MultiAssign(lhs, ee)
-            true
+        MultiAssign(&lhs, &e) => {
+            exprs(r, lhs)
+            expr(r, e)
         }
         Var(name, ty, init) => {
             s.k = Var(priv_name(r, name), opt_type(r, ty), opt_expr(r, init))
             true
         }
-        Assign(a, op, b) => {
-            aa: Expr = a
-            bb: Expr = b
-            expr(r, &aa)
-            expr(r, &bb)
-            s.k = Assign(aa, op, bb)
-            true
+        Assign(&a, _, &b) => {
+            expr(r, a)
+            expr(r, b)
         }
-        If(c, then, els) => {
-            cc: Expr = c
-            expr(r, &cc)
+        If(&c, then, els) => {
+            expr(r, c)
             block(r, then)
             match els {
                 Some(eb) => {
@@ -452,23 +419,17 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
                 }
                 None => {}
             }
-            s.k = If(cc, then, els)
             true
         }
-        While(c, body) => {
-            cc: Expr = c
-            expr(r, &cc)
-            s.k = While(cc, body)
+        While(&c, body) => {
+            expr(r, c)
             block(r, body)
         }
         LoopStmt(body) => block(r, body)
         For(v1, v2, lo, hi, incl, step, body) => {
-            v2n: Opt[str] = v2
-            match v2 {
-                Some(n2) => {
-                    v2n = Some(priv_name(r, n2))
-                }
-                None => {}
+            v2n: Opt[str] = match v2 {
+                Some(n2) => Some(priv_name(r, n2))
+                None => None
             }
             ll: Expr = lo
             expr(r, &ll)

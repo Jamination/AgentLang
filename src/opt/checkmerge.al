@@ -38,27 +38,15 @@ fn checkmerge_run(f: *Func) -> bool {
     changed := false
     rpo := f.rpo()
     for b in rpo.items() {
-        c := 0
-        ok := 0
-        trap := 0
-        match f.blocks[b].term {
-            Br(c0, t0, e0) => {
-                c = c0
-                ok = t0
-                trap = e0
-            }
+        c, ok, trap := match f.blocks[b].term {
+            Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
         }
         if !is_trap_block(f, trap) {
             continue
         }
-        ln := 0
-        k0 := 0
-        match const_check(f, c) {
-            Some(x) => {
-                ln = x.0
-                k0 = x.1
-            }
+        ln, k0 := match const_check(f, c) {
+            Some(x) => x
             None => continue
         }
         if f.insts[ln].ty != I64 || k0 < 0 {
@@ -90,14 +78,12 @@ fn checkmerge_run(f: *Func) -> bool {
                         break
                     }
                     match const_check(f, c2) {
-                        Some(x) => {
-                            if x.0 == ln && x.1 >= 0 {
-                                kmax = max(kmax, x.1)
-                                f.blocks[cur].term = Jmp(t2)
-                                changed = true
-                            }
+                        Some((l2, k2)) if l2 == ln && k2 >= 0 => {
+                            kmax = max(kmax, k2)
+                            f.blocks[cur].term = Jmp(t2)
+                            changed = true
                         }
-                        None => {}
+                        _ => {}
                     }
                     cur = t2
                 }

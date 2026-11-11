@@ -608,14 +608,9 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
 // register or 32-bit immediate
 priv fn rmi(self: *Sel, v: i64) -> Opnd {
     match self.f.is_const(v) {
-        Some(k) => {
-            if fits32(k) {
-                return I(k)
-            }
-        }
-        None => {}
+        Some(k) if fits32(k) => I(k)
+        _ => R(self.reg(v))
     }
-    return R(self.reg(v))
 }
 
 // can the load `v` be folded into the instruction currently being selected?
@@ -662,12 +657,9 @@ priv fn xm(self: *Sel, v: i64) -> Opnd {
         return R(self.reg(v))
     }
     match self.load_mem(v) {
-        Some(m) => {
-            return M(m)
-        }
-        None => {}
+        Some(m) => M(m)
+        None => R(self.reg(v))
     }
-    return R(self.reg(v))
 }
 
 // ---------- addressing modes ----------
@@ -957,28 +949,21 @@ priv fn cmp_flags(self: *Sel, c: i64) -> (u8, u8) {
         }
         // memory operands: cmp [mem], imm  /  cmp reg, [mem]
         match self.f.is_const(y) {
-            Some(k) => {
-                if fits32(k) {
-                    match self.load_mem(x) {
-                        Some(m) => {
-                            self.e(Cmp, sz, M(m), I(k))
-                            return (cc, 0)
-                        }
-                        None => {}
+            Some(k) if fits32(k) => {
+                match self.load_mem(x) {
+                    Some(m) => {
+                        self.e(Cmp, sz, M(m), I(k))
+                        return (cc, 0)
                     }
+                    None => {}
                 }
             }
-            None => {}
+            _ => {}
         }
         xr := self.reg(x)
-        yo: Opnd
-        match self.load_mem(y) {
-            Some(m) => {
-                yo = M(m)
-            }
-            None => {
-                yo = self.rmi(y)
-            }
+        yo := match self.load_mem(y) {
+            Some(m) => M(m)
+            None => self.rmi(y)
         }
         self.e(Cmp, sz, R(xr), yo)
         return (cc, 0)
@@ -1100,10 +1085,7 @@ priv fn term(self: *Sel, b: i64) {
             i.uses = used
             self.out.push(i)
         }
-        Trap => {
-            self.e(Ud2, 0, Opnd.None, Opnd.None)
-        }
-        Term.None => {
+        Trap, Term.None => {
             self.e(Ud2, 0, Opnd.None, Opnd.None)
         }
     }
@@ -1254,19 +1236,18 @@ priv fn inst(self: *Sel, v: i64) {
             }
             d := self.vr(v)
             match self.f.is_const(b) {
-                Some(k) => {
-                    if fits32(k) {
-                        ar := self.reg(a)
-                        mi := minst_new(Imul3, osz(ty), R(d), R(ar))
-                        mi.c = I(k)
-                        self.out.push(mi)
-                    } else {
-                        // a constant too wide for an immediate: multiply two registers
-                        ar := self.reg(a)
-                        br := self.reg(b)
-                        self.e(Mov, 8, R(d), R(ar))
-                        self.e(Imul, osz(ty), R(d), R(br))
-                    }
+                Some(k) if fits32(k) => {
+                    ar := self.reg(a)
+                    mi := minst_new(Imul3, osz(ty), R(d), R(ar))
+                    mi.c = I(k)
+                    self.out.push(mi)
+                }
+                Some(_) => {
+                    // a constant too wide for an immediate: multiply two registers
+                    ar := self.reg(a)
+                    br := self.reg(b)
+                    self.e(Mov, 8, R(d), R(ar))
+                    self.e(Imul, osz(ty), R(d), R(br))
                 }
                 None => self.binop(v, Imul, true)
             }
@@ -1274,25 +1255,20 @@ priv fn inst(self: *Sel, v: i64) {
         And => {
             // masks that are zero-extensions
             match self.f.is_const(i.args[1]) {
-                Some(k) => {
-                    if (k == 0xFF || k == 0xFFFF) && ty != I8 {
-                        d := self.vr(v)
-                        r := self.reg(i.args[0])
-                        mi := minst_new(Movzx, if k == 0xFF { 1 } else { 2 }, R(d), R(r))
-                        mi.sz2 = 4
-                        self.out.push(mi)
-                        return
-                    }
-                    if k == 0xFFFF_FFFF && ty == I64 {
-                        d := self.vr(v)
-                        r := self.reg(i.args[0])
-                        self.e(Mov, 4, R(d), R(r))
-                        return
-                    }
+                Some(k) if (k == 0xFF || k == 0xFFFF) && ty != I8 => {
+                    d := self.vr(v)
+                    r := self.reg(i.args[0])
+                    mi := minst_new(Movzx, if k == 0xFF { 1 } else { 2 }, R(d), R(r))
+                    mi.sz2 = 4
+                    self.out.push(mi)
                 }
-                None => {}
+                Some(k) if k == 0xFFFF_FFFF && ty == I64 => {
+                    d := self.vr(v)
+                    r := self.reg(i.args[0])
+                    self.e(Mov, 4, R(d), R(r))
+                }
+                _ => self.binop(v, MOp.And, true)
             }
-            self.binop(v, MOp.And, true)
         }
         Or => self.binop(v, MOp.Or, true)
         Xor => {
@@ -1398,14 +1374,9 @@ priv fn inst(self: *Sel, v: i64) {
         SExt => {
             d := self.vr(v)
             st := self.f.insts[i.args[0]].ty
-            s: Opnd
-            match self.load_mem(i.args[0]) {
-                Some(m) => {
-                    s = M(m)
-                }
-                None => {
-                    s = R(self.reg(i.args[0]))
-                }
+            s := match self.load_mem(i.args[0]) {
+                Some(m) => M(m)
+                None => R(self.reg(i.args[0]))
             }
             mi := minst_new(Movsx, sz_of(st), R(d), s)
             mi.sz2 = if ty == I64 { 8 } else { 4 }
@@ -1454,13 +1425,9 @@ priv fn inst(self: *Sel, v: i64) {
             st := self.f.insts[i.args[0]].ty
             s: Opnd
             if st == I32 || st == I64 {
-                match self.load_mem(i.args[0]) {
-                    Some(m) => {
-                        s = M(m)
-                    }
-                    None => {
-                        s = R(self.reg(i.args[0]))
-                    }
+                s = match self.load_mem(i.args[0]) {
+                    Some(m) => M(m)
+                    None => R(self.reg(i.args[0]))
                 }
             } else {
                 s = R(self.ext32(i.args[0], true))
@@ -1808,32 +1775,18 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             ni += 1
         } else {
             ms := self.mov_src(a)
-            s: Opnd
-            match ms {
-                I(k) => {
-                    if fits32(k) {
-                        s = I(k)
-                    } else {
-                        s = R(self.reg(a))
-                    }
-                }
-                R(r) => {
-                    s = R(r)
-                }
-                _ => {
-                    s = R(self.reg(a))
-                }
+            s := match ms {
+                I(k) if fits32(k) => I(k)
+                R(r) => R(r)
+                _ => R(self.reg(a))
             }
             stack_moves.push((nstack, s, 0))
             nstack += 1
         }
     }
-    tr: Opt[i64] = None
-    match target {
-        Some(t) => {
-            tr = Some(self.reg(t))
-        }
-        None => {}
+    tr: Opt[i64] = match target {
+        Some(t) => Some(self.reg(t))
+        None => None
     }
     self.mf.out_args = max(self.mf.out_args, nstack)
     for sm in stack_moves.items() {

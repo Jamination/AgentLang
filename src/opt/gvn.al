@@ -57,19 +57,17 @@ fn gvn_run(f: *Func) -> bool {
                 if cfg.preds[b].len == 1 {
                     p := cfg.preds[b][0]
                     match f.blocks[p].term {
-                        Br(c0, t, e) => {
-                            if t != e {
-                                c := run_find(repl.items(), c0)
-                                val := t == b
-                                old: Opt[bool] = None
-                                ov, had := known.get(c)
-                                if had {
-                                    old = Some(ov)
-                                }
-                                known.set(c, val)
-                                facts.push((c, old))
-                                // an equivalent negated compare is also decided
+                        Br(c0, t, e) if t != e => {
+                            c := run_find(repl.items(), c0)
+                            val := t == b
+                            old: Opt[bool] = None
+                            ov, had := known.get(c)
+                            if had {
+                                old = Some(ov)
                             }
+                            known.set(c, val)
+                            facts.push((c, old))
+                            // an equivalent negated compare is also decided
                         }
                         _ => {}
                     }

@@ -38,13 +38,11 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
     return changed
 }
 
-// `term != Term::None`
 priv fn term_is_none(t: Term) -> bool {
     match t {
-        Term.None => { return true }
-        _ => {}
+        Term.None => true
+        _ => false
     }
-    return false
 }
 
 fn cleanup_is_root(op: Op) -> bool {
@@ -64,11 +62,9 @@ fn cleanup_dce(f: *Func) -> bool {
             }
         }
         match b.term {
-            Br(c, t, e) => {
-                if !live[c] {
-                    live[c] = true
-                    work.push(c)
-                }
+            Br(c, _, _) if !live[c] => {
+                live[c] = true
+                work.push(c)
             }
             Ret(vs) => {
                 for v in vs.items() {

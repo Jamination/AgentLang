@@ -227,45 +227,20 @@ enum Term {
 
 // Term equality (PartialEq in the Rust source)
 fn eq(a: Term, b: Term) -> bool {
-    match a {
-        Term.None => {
-            match b {
-                Term.None => return true
-                _ => return false
-            }
-        }
-        Jmp(t) => {
-            match b {
-                Jmp(t2) => return t == t2
-                _ => return false
-            }
-        }
-        Br(c, t, e) => {
-            match b {
-                Br(c2, t2, e2) => return c == c2 && t == t2 && e == e2
-                _ => return false
-            }
-        }
-        Ret(vs) => {
-            match b {
-                Ret(vs2) => return vs.items() == vs2.items()
-                _ => return false
-            }
-        }
-        Trap => {
-            match b {
-                Trap => return true
-                _ => return false
-            }
-        }
+    match (a, b) {
+        (Term.None, Term.None), (Trap, Trap) => true
+        (Jmp(t), Jmp(t2)) => t == t2
+        (Br(c, t, e), Br(c2, t2, e2)) => c == c2 && t == t2 && e == e2
+        (Ret(vs), Ret(vs2)) => vs.items() == vs2.items()
+        _ => false
     }
 }
 
 // an independent copy (the value list of Ret is not shared)
 fn clone(t: Term) -> Term {
     match t {
-        Ret(vs) => return Ret(clone(&vs))
-        _ => return t
+        Ret(vs) => Ret(clone(&vs))
+        _ => t
     }
 }
 
@@ -329,12 +304,9 @@ struct Global {
 }
 
 fn clone(g: *Global) -> Global {
-    data: Opt[Vec[u8]] = None
-    match g.data {
-        Some(d) => {
-            data = Some(clone(&d))
-        }
-        None => {}
+    data: Opt[Vec[u8]] = match g.data {
+        Some(d) => Some(clone(&d))
+        None => None
     }
     return Global{name: g.name, size: g.size, align: g.align, data: data, relocs: clone(&g.relocs), readonly: g.readonly}
 }
@@ -418,15 +390,9 @@ fn is_const(self: *Func, v: i64) -> Opt[i64] {
 
 fn succs(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
-        Jmp(t) => return vec_one(t)
-        Br(c, t, f) => {
-            if t == f {
-                return vec_one(t)
-            } else {
-                return vec_two(t, f)
-            }
-        }
-        _ => return vec[i64]()
+        Jmp(t) => vec_one(t)
+        Br(_, t, f) => if t == f { vec_one(t) } else { vec_two(t, f) }
+        _ => vec[i64]()
     }
 }
 
@@ -472,9 +438,9 @@ fn rpo(self: *Func) -> Vec[i64] {
 
 fn term_uses(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
-        Br(c, t, e) => return vec_of([]i64{c})
-        Ret(v) => return clone(&v)
-        _ => return vec[i64]()
+        Br(c, _, _) => vec_of([]i64{c})
+        Ret(v) => clone(&v)
+        _ => vec[i64]()
     }
 }
 
@@ -532,9 +498,9 @@ fn apply_repl(self: *Func, map: *Vec[i64]) {
             }
         }
         match self.blocks[bi].term {
-            Br(c, t, e) => {
-                if map[c] != NOV {
-                    self.blocks[bi].term = Br(apply_repl_find(map, c), t, e)
+            Br(&c, _, _) => {
+                if map[*c] != NOV {
+                    *c = apply_repl_find(map, *c)
                 }
             }
             Ret(vs) => {
@@ -688,15 +654,12 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
         ss := f.succs(b)
         for s in ss.items() {
             if cfg.dom(s, b) {
-                li := 0
-                match by_header[s] {
-                    Some(x) => {
-                        li = x
-                    }
+                li := match by_header[s] {
+                    Some(x) => x
                     None => {
                         loops.push(Loop{header: s, blocks: vec_of([]i64{s}), latches: vec[i64](), parent: None, depth: 0})
                         by_header[s] = Some(loops.len - 1)
-                        li = loops.len - 1
+                        loops.len - 1
                     }
                 }
                 loops[li].latches.push(b)
@@ -745,13 +708,9 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
     for li in order.items() {
         parent := loop_of[loops[li].header]
         loops[li].parent = parent
-        match parent {
-            Some(p) => {
-                loops[li].depth = loops[p].depth + 1
-            }
-            None => {
-                loops[li].depth = 1
-            }
+        loops[li].depth = match parent {
+            Some(p) => loops[p].depth + 1
+            None => 1
         }
         for bi in 0..loops[li].blocks.len {
             loop_of[loops[li].blocks[bi]] = Some(li)
@@ -762,8 +721,8 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
 
 fn depth(self: *Loops, b: i64) -> i64 {
     match self.loop_of[b] {
-        Some(l) => return self.loops[l].depth
-        None => return 0
+        Some(l) => self.loops[l].depth
+        None => 0
     }
 }
 
@@ -771,15 +730,9 @@ fn contains(self: *Loops, li: i64, b: i64) -> bool {
     cur := self.loop_of[b]
     loop {
         match cur {
-            Some(c) => {
-                if c == li {
-                    return true
-                }
-                cur = self.loops[c].parent
-            }
-            None => {
-                return false
-            }
+            Some(c) if c == li => return true
+            Some(c) => cur = self.loops[c].parent
+            None => return false
         }
     }
     return false
@@ -893,22 +846,16 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
                     s.push(fmt(" #", i.k))
                 }
                 GAddr => {
-                    name := ""
-                    match m {
-                        Some(mm) => {
-                            name = mm.globals[i.k].name
-                        }
-                        None => {}
+                    name := match m {
+                        Some(mm) => mm.globals[i.k].name
+                        None => ""
                     }
                     s.push(fmt(" @g", i.k, "(", name, ")"))
                 }
                 Call, FAddr => {
-                    name := ""
-                    match m {
-                        Some(mm) => {
-                            name = mm.funcs[i.k].name
-                        }
-                        None => {}
+                    name := match m {
+                        Some(mm) => mm.funcs[i.k].name
+                        None => ""
                     }
                     s.push(fmt(" @f", i.k, "(", name, ")"))
                 }

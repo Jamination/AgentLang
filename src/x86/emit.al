@@ -79,15 +79,10 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
 
 priv fn rm(self: *Enc, o: Opnd) -> RM {
     match o {
-        R(r) => {
-            return rm_reg(i64(r))
-        }
-        M(m) => {
-            return self.rm_mem(&m)
-        }
-        _ => {}
+        R(r) => rm_reg(i64(r))
+        M(m) => self.rm_mem(&m)
+        _ => panic(fmt("encoder: operand ", o, " is not r/m"))
     }
-    panic(fmt("encoder: operand ", o, " is not r/m"))
 }
 
 // [prefix66] [mandatory prefix] [REX] opcode modrm [sib] [disp]
@@ -203,85 +198,39 @@ priv fn fp_pfx(sz: u8) -> u8 {
 
 priv fn byte_reg_needs_rex(o: Opnd) -> bool {
     match o {
-        R(r) => {
-            return i64(r) >= 4 && i64(r) < 8
-        }
-        _ => {}
+        R(r) => i64(r) >= 4 && i64(r) < 8
+        _ => false
     }
-    return false
 }
 
 priv fn reg_of(o: Opnd) -> i64 {
     match o {
-        R(r) => {
-            return i64(r)
-        }
-        _ => {}
+        R(r) => i64(r)
+        _ => panic(fmt("encoder: expected register, got ", o))
     }
-    panic(fmt("encoder: expected register, got ", o))
-}
-
-// operand shapes for the `match (&i.a, &i.b)` dispatch of the Rust encoder
-priv const K_NONE = 0
-priv const K_R = 1
-priv const K_I = 2
-priv const K_M = 3
-priv const K_GADDR = 4
-priv const K_FADDR = 5
-
-priv fn emit_kind(o: Opnd) -> i64 {
-    return match o {
-        Opnd.None => K_NONE
-        R(r) => K_R
-        I(k) => K_I
-        M(m) => K_M
-        GAddr(g, off) => K_GADDR
-        FAddr(f) => K_FADDR
-    }
-}
-
-// the immediate of an Opnd::I (only called when the shape is known)
-priv fn imm_of(o: Opnd) -> i64 {
-    match o {
-        I(k) => {
-            return k
-        }
-        _ => {}
-    }
-    panic("unreachable")
 }
 
 // relocation of a symbol address operand: (kind, addend)
 priv fn addr_reloc(o: Opnd) -> (RelocKind, i32) {
     match o {
-        GAddr(g, off) => {
-            return (Abs32Global(i64(g)), i32(off))
-        }
-        FAddr(f) => {
-            return (Abs32Func(i64(f)), 0)
-        }
-        _ => {}
+        GAddr(g, off) => (Abs32Global(i64(g)), i32(off))
+        FAddr(f) => (Abs32Func(i64(f)), 0)
+        _ => panic("unreachable")
     }
-    panic("unreachable")
 }
 
 priv fn enc_inst(e: *Enc, i: *MInst) {
     sz := u8(i.sz)
     w := sz == 8
     p66 := sz == 2
-    ka := emit_kind(i.a)
-    kb := emit_kind(i.b)
     match i.op {
-        Mov => {
-            if ka == K_R && kb == K_R {
-                d := reg_of(i.a)
-                s := reg_of(i.b)
+        Mov => match (&i.a, &i.b) {
+            (R(d), R(s)) => {
                 force := sz == 1 && (byte_reg_needs_rex(i.a) || byte_reg_needs_rex(i.b))
                 rm := rm_reg(d)
                 e.op(p66, 0, w, []u8{if sz == 1 { 0x88 } else { 0x89 }}, u8(s & 15), &rm, force)
-            } else if ka == K_R && kb == K_I {
-                d := reg_of(i.a)
-                k := imm_of(i.b)
+            }
+            (R(d), I(k)) => {
                 d8 := u8(d & 15)
                 if sz == 8 && !(k >= 0 && k <= 0xFFFFFFFF) {
                     if k >= -2147483648 && k <= 2147483647 {
@@ -300,8 +249,8 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                     e.out.push(0xB8 | (d8 & 7))
                     e.imm(k, 4)
                 }
-            } else if ka == K_R && (kb == K_GADDR || kb == K_FADDR) {
-                d := reg_of(i.a)
+            }
+            (R(d), GAddr(_, _)), (R(d), FAddr(_)) => {
                 d8 := u8(d & 15)
                 if d8 >= 8 {
                     e.out.push(0x41)
@@ -310,30 +259,30 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                 kind, addend := addr_reloc(i.b)
                 e.relocs.push(Reloc{off: e.out.len, kind: kind, addend: addend})
                 e.imm(0, 4)
-            } else if ka == K_R && kb == K_M {
-                d := reg_of(i.a)
+            }
+            (R(d), M(_)) => {
                 rm := e.rm(i.b)
                 force := sz == 1 && byte_reg_needs_rex(i.a)
                 e.op(p66, 0, w, []u8{if sz == 1 { 0x8A } else { 0x8B }}, u8(d & 15), &rm, force)
-            } else if ka == K_M && kb == K_R {
-                s := reg_of(i.b)
+            }
+            (M(_), R(s)) => {
                 rm := e.rm(i.a)
                 force := sz == 1 && byte_reg_needs_rex(i.b)
                 e.op(p66, 0, w, []u8{if sz == 1 { 0x88 } else { 0x89 }}, u8(s & 15), &rm, force)
-            } else if ka == K_M && kb == K_I {
-                k := imm_of(i.b)
+            }
+            (M(_), I(k)) => {
                 rm := e.rm(i.a)
                 e.op(p66, 0, w, []u8{if sz == 1 { 0xC6 } else { 0xC7 }}, 0, &rm, false)
                 e.imm(k, if sz == 1 { 1 } else if sz == 2 { 2 } else { 4 })
-            } else if ka == K_M && (kb == K_GADDR || kb == K_FADDR) {
+            }
+            (M(_), GAddr(_, _)), (M(_), FAddr(_)) => {
                 rm := e.rm(i.a)
                 e.op(false, 0, true, []u8{0xC7}, 0, &rm, false)
                 kind, addend := addr_reloc(i.b)
                 e.relocs.push(Reloc{off: e.out.len, kind: kind, addend: addend})
                 e.imm(0, 4)
-            } else {
-                panic(fmt("encoder: bad mov ", *i))
             }
+            _ => panic(fmt("encoder: bad mov ", *i))
         }
         Movzx => {
             d := reg_of(i.a)
@@ -374,51 +323,49 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                 Xor => 6
                 _ => 7
             }
-            if kb == K_I {
-                k := imm_of(i.b)
-                rm := e.rm(i.a)
-                force := sz == 1 && byte_reg_needs_rex(i.a)
-                if sz == 1 {
-                    e.op(false, 0, false, []u8{0x80}, n, &rm, force)
-                    e.imm(k, 1)
-                } else if k >= -128 && k <= 127 {
-                    e.op(p66, 0, w, []u8{0x83}, n, &rm, false)
-                    e.imm(k, 1)
-                } else {
-                    e.op(p66, 0, w, []u8{0x81}, n, &rm, false)
-                    e.imm(k, if sz == 2 { 2 } else { 4 })
+            match (&i.a, &i.b) {
+                (_, I(k)) => {
+                    rm := e.rm(i.a)
+                    force := sz == 1 && byte_reg_needs_rex(i.a)
+                    if sz == 1 {
+                        e.op(false, 0, false, []u8{0x80}, n, &rm, force)
+                        e.imm(k, 1)
+                    } else if k >= -128 && k <= 127 {
+                        e.op(p66, 0, w, []u8{0x83}, n, &rm, false)
+                        e.imm(k, 1)
+                    } else {
+                        e.op(p66, 0, w, []u8{0x81}, n, &rm, false)
+                        e.imm(k, if sz == 2 { 2 } else { 4 })
+                    }
                 }
-            } else if ka == K_R && kb == K_M {
-                d := reg_of(i.a)
-                rm := e.rm(i.b)
-                force := sz == 1 && byte_reg_needs_rex(i.a)
-                lo: u8 = if sz == 1 { 2 } else { 3 }
-                e.op(p66, 0, w, []u8{(n << 3) | lo}, u8(d & 15), &rm, force)
-            } else if kb == K_R {
-                s := reg_of(i.b)
-                rm := e.rm(i.a)
-                force := sz == 1 && (byte_reg_needs_rex(i.a) || byte_reg_needs_rex(i.b))
-                lo: u8 = if sz == 1 { 0 } else { 1 }
-                e.op(p66, 0, w, []u8{(n << 3) | lo}, u8(s & 15), &rm, force)
-            } else {
-                panic(fmt("encoder: bad alu ", *i))
+                (R(d), M(_)) => {
+                    rm := e.rm(i.b)
+                    force := sz == 1 && byte_reg_needs_rex(i.a)
+                    lo: u8 = if sz == 1 { 2 } else { 3 }
+                    e.op(p66, 0, w, []u8{(n << 3) | lo}, u8(d & 15), &rm, force)
+                }
+                (_, R(s)) => {
+                    rm := e.rm(i.a)
+                    force := sz == 1 && (byte_reg_needs_rex(i.a) || byte_reg_needs_rex(i.b))
+                    lo: u8 = if sz == 1 { 0 } else { 1 }
+                    e.op(p66, 0, w, []u8{(n << 3) | lo}, u8(s & 15), &rm, force)
+                }
+                _ => panic(fmt("encoder: bad alu ", *i))
             }
         }
-        Test => {
-            if kb == K_I {
-                k := imm_of(i.b)
+        Test => match i.b {
+            I(k) => {
                 rm := e.rm(i.a)
                 force := sz == 1 && byte_reg_needs_rex(i.a)
                 e.op(p66, 0, w, []u8{if sz == 1 { 0xF6 } else { 0xF7 }}, 0, &rm, force)
                 e.imm(k, if sz == 1 { 1 } else if sz == 2 { 2 } else { 4 })
-            } else if kb == K_R {
-                s := reg_of(i.b)
+            }
+            R(s) => {
                 rm := e.rm(i.a)
                 force := sz == 1 && (byte_reg_needs_rex(i.a) || byte_reg_needs_rex(i.b))
                 e.op(p66, 0, w, []u8{if sz == 1 { 0x84 } else { 0x85 }}, u8(s & 15), &rm, force)
-            } else {
-                panic(fmt("encoder: bad test ", *i))
             }
+            _ => panic(fmt("encoder: bad test ", *i))
         }
         Imul => {
             d := reg_of(i.a)
@@ -428,10 +375,10 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
         Imul3 => {
             d := reg_of(i.a)
             rm := e.rm(i.b)
-            if emit_kind(i.c) != K_I {
-                panic("encoder: imul3 without immediate")
+            k := match i.c {
+                I(k0) => k0
+                _ => panic("encoder: imul3 without immediate")
             }
-            k := imm_of(i.c)
             if k >= -128 && k <= 127 {
                 e.op(false, 0, w, []u8{0x6B}, u8(d & 15), &rm, false)
                 e.imm(k, 1)
@@ -463,18 +410,14 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             }
             rm := e.rm(i.a)
             force := sz == 1 && byte_reg_needs_rex(i.a)
-            if kb == K_I {
-                k := imm_of(i.b)
-                if k == 1 {
-                    e.op(p66, 0, w, []u8{if sz == 1 { 0xD0 } else { 0xD1 }}, n, &rm, force)
-                } else {
+            match i.b {
+                I(1) => e.op(p66, 0, w, []u8{if sz == 1 { 0xD0 } else { 0xD1 }}, n, &rm, force)
+                I(k) => {
                     e.op(p66, 0, w, []u8{if sz == 1 { 0xC0 } else { 0xC1 }}, n, &rm, force)
                     e.imm(k, 1)
                 }
-            } else if kb == K_R {
-                e.op(p66, 0, w, []u8{if sz == 1 { 0xD2 } else { 0xD3 }}, n, &rm, force)
-            } else {
-                panic(fmt("encoder: bad shift ", *i))
+                R(_) => e.op(p66, 0, w, []u8{if sz == 1 { 0xD2 } else { 0xD3 }}, n, &rm, force)
+                _ => panic(fmt("encoder: bad shift ", *i))
             }
         }
         Cqo => {
@@ -507,20 +450,20 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
         MovSd => {
             // movaps between registers; movsd / movss / movups to and from memory
             pfx := fp_pfx(sz)
-            if ka == K_R && kb == K_R {
-                d := reg_of(i.a)
-                rm := rm_reg(reg_of(i.b))
-                e.op(false, 0, false, []u8{0x0F, 0x28}, u8(d & 15), &rm, false)
-            } else if ka == K_R && kb == K_M {
-                d := reg_of(i.a)
-                rm := e.rm(i.b)
-                e.op(false, pfx, false, []u8{0x0F, 0x10}, u8(d & 15), &rm, false)
-            } else if ka == K_M && kb == K_R {
-                s := reg_of(i.b)
-                rm := e.rm(i.a)
-                e.op(false, pfx, false, []u8{0x0F, 0x11}, u8(s & 15), &rm, false)
-            } else {
-                panic(fmt("encoder: bad movsd ", *i))
+            match (&i.a, &i.b) {
+                (R(d), R(s)) => {
+                    rm := rm_reg(s)
+                    e.op(false, 0, false, []u8{0x0F, 0x28}, u8(d & 15), &rm, false)
+                }
+                (R(d), M(_)) => {
+                    rm := e.rm(i.b)
+                    e.op(false, pfx, false, []u8{0x0F, 0x10}, u8(d & 15), &rm, false)
+                }
+                (M(_), R(s)) => {
+                    rm := e.rm(i.a)
+                    e.op(false, pfx, false, []u8{0x0F, 0x11}, u8(s & 15), &rm, false)
+                }
+                _ => panic(fmt("encoder: bad movsd ", *i))
             }
         }
         Addsd, Subsd, Mulsd, Divsd, Sqrtsd, Minsd, Maxsd => {
@@ -547,10 +490,11 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             d := reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0, false, []u8{0x0F, 0xC6}, u8(d & 15), &rm, false)
-            if emit_kind(i.c) != K_I {
-                panic("encoder: shufps without immediate")
+            k := match i.c {
+                I(k0) => k0
+                _ => panic("encoder: shufps without immediate")
             }
-            e.imm(imm_of(i.c), 1)
+            e.imm(k, 1)
         }
         Movlo => {
             d := reg_of(i.a)
@@ -661,24 +605,16 @@ priv fn peephole_resolve(b0: i64, fwd: *Vec[i64]) -> i64 {
 priv fn peephole_lea_add(i: *MInst) -> Opt[Opnd] {
     add: Opt[Opnd] = None
     if i.op == Lea {
-        match i.a {
-            R(d0) => {
-                d := i64(d0)
-                match i.b {
-                    M(m) => {
-                        if m.kind == Normal {
-                            base := i64(m.base)
-                            idx := i64(m.idx)
-                            if base == d && idx == NOREG && i32(m.disp) != 0 {
-                                add = Some(I(i64(m.disp)))
-                            } else if base == d && idx != NOREG && u8(m.scale) == 1 && i32(m.disp) == 0 && idx != d {
-                                add = Some(R(m.idx))
-                            } else if idx == d && u8(m.scale) == 1 && i32(m.disp) == 0 && base != NOREG && base != d {
-                                add = Some(R(m.base))
-                            }
-                        }
-                    }
-                    _ => {}
+        match (&i.a, &i.b) {
+            (R(d), M(m)) if m.kind == Normal => {
+                base := i64(m.base)
+                idx := i64(m.idx)
+                if base == d && idx == NOREG && i32(m.disp) != 0 {
+                    add = Some(I(i64(m.disp)))
+                } else if base == d && idx != NOREG && u8(m.scale) == 1 && i32(m.disp) == 0 && idx != d {
+                    add = Some(R(m.idx))
+                } else if idx == d && u8(m.scale) == 1 && i32(m.disp) == 0 && base != NOREG && base != d {
+                    add = Some(R(m.base))
                 }
             }
             _ => {}
@@ -896,16 +832,10 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         for k in 0..items.len {
             offs[k] = o
             o += match items[k] {
-                Bytes(b, r) => b.len
-                Jump(cc, tgt, long) => {
-                    if !long {
-                        2
-                    } else if !is_some(cc) {
-                        5
-                    } else {
-                        6
-                    }
-                }
+                Bytes(b, _) => b.len
+                Jump(_, _, false) => 2
+                Jump(None, _, true) => 5
+                Jump(Some(_), _, true) => 6
                 Align(a) => align_pad(o, a)
             }
         }
@@ -913,14 +843,12 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         changed := false
         for k in 0..items.len {
             match items[k] {
-                Jump(cc, tgt, long) => {
-                    if !long {
-                        t := offs[block_item[tgt]]
-                        d := t - (offs[k] + 2)
-                        if !(d >= -128 && d <= 127) {
-                            items[k] = Jump(cc, tgt, true)
-                            changed = true
-                        }
+                Jump(_, tgt, &long) if !*long => {
+                    t := offs[block_item[tgt]]
+                    d := t - (offs[k] + 2)
+                    if !(d >= -128 && d <= 127) {
+                        *long = true
+                        changed = true
                     }
                 }
                 _ => {}

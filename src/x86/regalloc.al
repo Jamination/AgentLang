@@ -562,29 +562,20 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                     _ => {}
                 }
             } else {
-                // `else if let (Some(s), Opnd::R(d)) = (spill_slot(b), a)`, otherwise the copy case
-                matched := false
-                match spill_slot(i.b, first_spill) {
-                    Some(s) => {
-                        match i.a {
-                            R(d) => {
-                                matched = true
-                                if ((i.op == Mov && i.sz == 8) || i.op == MovSd) && find_slot(&st, s) < 0 {
-                                    st.push((s, d))
-                                }
-                            }
-                            _ => {}
+                match (spill_slot(i.b, first_spill), i.a) {
+                    (Some(s), R(d)) => {
+                        if ((i.op == Mov && i.sz == 8) || i.op == MovSd) && find_slot(&st, s) < 0 {
+                            st.push((s, d))
                         }
                     }
-                    None => {}
-                }
-                if !matched {
-                    d, src, is_cp := i.is_copy()
-                    if is_cp {
-                        // a register copy of a slot value is another home for it
-                        fi := find_reg(&st, src)
-                        if fi >= 0 {
-                            st.push((st[fi].0, d))
+                    _ => {
+                        d, src, is_cp := i.is_copy()
+                        if is_cp {
+                            // a register copy of a slot value is another home for it
+                            fi := find_reg(&st, src)
+                            if fi >= 0 {
+                                st.push((st[fi].0, d))
+                            }
                         }
                     }
                 }
@@ -603,11 +594,7 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
             ops := [3]Opnd{i.a, i.b, i.c}
             for k, o in ops {
                 match o {
-                    M(m) => {
-                        if m.kind == Slot && i64(m.id) >= first_spill && !(k == 0 && is_store) {
-                            reads[i64(m.id)] += 1
-                        }
-                    }
+                    M(m) if m.kind == Slot && i64(m.id) >= first_spill && !(k == 0 && is_store) => reads[i64(m.id)] += 1
                     _ => {}
                 }
             }
@@ -1016,11 +1003,9 @@ priv fn spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool])
                 }
                 if i.op == Mov && i.sz == 8 && eq(i.a, R(v)) && is_def && !is_use {
                     match i.b {
-                        I(k) => {
-                            if k >= -2147483648 && k <= 2147483647 {
-                                i.a = mem
-                                continue
-                            }
+                        I(k) if k >= -2147483648 && k <= 2147483647 => {
+                            i.a = mem
+                            continue
                         }
                         _ => {}
                     }

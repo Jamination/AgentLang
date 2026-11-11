@@ -17,47 +17,34 @@ priv struct Use {
 // is `e` a place that is copied when read: a field or element of something (not a call)
 priv fn is_place(e: *Expr) -> bool {
     match e.k {
-        Index(b, idx) => return is_root(b)
-        Field(b, f) => return is_root(b)
-        _ => return false
+        Index(b, _), Field(b, _) => is_root(b)
+        _ => false
     }
 }
 
 priv fn is_root(e: *Expr) -> bool {
     match e.k {
-        Ident(n) => return true
-        Index(b, idx) => return is_root(b)
-        Field(b, f) => return is_root(b)
-        Un(op, x) => {
-            match op {
-                Deref => return is_root(x)
-                _ => return false
-            }
-        }
-        _ => return false
+        Ident(_) => true
+        Index(b, _), Field(b, _), Un(Deref, b) => is_root(b)
+        _ => false
     }
 }
 
 // source text of a place expression (an index that is not a name or number is shown as `..`)
 priv fn place_str(e: *Expr) -> str {
     match e.k {
-        Ident(n) => return ast_plain(n)
-        Int(v) => return fmt(v)
-        Field(b, f) => return fmt(place_str(b), ".", f)
+        Ident(n) => ast_plain(n)
+        Int(v) => fmt(v)
+        Field(b, f) => fmt(place_str(b), ".", f)
         Index(b, idx) => {
             parts := vec[str]()
             for i in 0..idx.len {
                 parts.push(place_str(&idx[i]))
             }
-            return fmt(place_str(b), "[", join(parts.items(), ", "), "]")
+            fmt(place_str(b), "[", join(parts.items(), ", "), "]")
         }
-        Un(op, x) => {
-            match op {
-                Deref => return fmt("(*", place_str(x), ")")
-                _ => return ".."
-            }
-        }
-        _ => return ".."
+        Un(Deref, x) => fmt("(*", place_str(x), ")")
+        _ => ".."
     }
 }
 
@@ -70,8 +57,8 @@ priv fn exprs(u: *Use, es: *Vec[Expr]) -> bool {
 
 priv fn opt(u: *Use, e: Opt[*Expr]) -> bool {
     match e {
-        Some(x) => return expr(u, x)
-        None => return true
+        Some(x) => expr(u, x)
+        None => true
     }
 }
 
@@ -245,14 +232,13 @@ fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
                 return
             }
             name := names[0]
-            match self.lookup(name) {
-                Some(v) => {
-                    match self.cx.types.k(v.0) {
-                        Struct(sid) => {}
-                        _ => return
-                    }
-                }
+            v := match self.lookup(name) {
+                Some(v) => v
                 None => return
+            }
+            match self.cx.types.k(v.0) {
+                Struct(_) => {}
+                _ => return
             }
             u := Use{name: name, writes: 0, first: s.pos, field: "", others: 0}
             for j in i + 1..b.stmts.len {

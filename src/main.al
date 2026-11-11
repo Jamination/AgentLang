@@ -148,21 +148,19 @@ priv fn path_parent(p: str) -> Opt[str] {
 
 // Path::file_stem: the file name without its last extension
 priv fn path_file_stem(p: str) -> Opt[str] {
-    match path_file_name(p) {
-        Some(name) => {
-            k := len(name) - 1
-            while k > 0 && name[k] != '.' {
-                k -= 1
-            }
-            if k <= 0 {
-                // no dot, or only a leading one
-                return Some(name)
-            }
-            return Some(name[..k])
-        }
-        None => {}
+    name := match path_file_name(p) {
+        Some(n) => n
+        None => return None
     }
-    return None
+    k := len(name) - 1
+    while k > 0 && name[k] != '.' {
+        k -= 1
+    }
+    if k <= 0 {
+        // no dot, or only a leading one
+        return Some(name)
+    }
+    return Some(name[..k])
 }
 
 // std::fs::canonicalize, as far as the driver needs it (to recognise a file that is included
@@ -496,43 +494,27 @@ priv fn sigs_priv(name: str) -> str {
 // `alc sigs`: one line per declaration, for a quick overview of a file
 priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
     for d in decls {
-        pos: Pos
-        text := ""
-        match d {
-            Fn(f) => {
-                pos = f.pos
-                text = fmt(sigs_priv(f.name), ast_sig_str(&f))
-            }
-            Struct(s) => {
-                pos = s.pos
-                text = fmt(sigs_priv(s.name), ast_struct_str(&s))
-            }
-            Enum(e) => {
-                pos = e.pos
-                text = fmt(sigs_priv(e.name), ast_enum_str(&e))
-            }
+        pos, text := match d {
+            Fn(f) => (f.pos, fmt(sigs_priv(f.name), ast_sig_str(&f)))
+            Struct(s) => (s.pos, fmt(sigs_priv(s.name), ast_struct_str(&s)))
+            Enum(e) => (e.pos, fmt(sigs_priv(e.name), ast_enum_str(&e)))
             // (the value of a constant or a global is not shown: `...`)
             Const(c) => {
-                pos = c.pos
-                text = match c.ty {
+                sig := match c.ty {
                     Some(ty) => fmt(sigs_priv(c.name), "const ", c.name, ": ", ast_type_str(&ty), " = ...")
                     None => fmt(sigs_priv(c.name), "const ", c.name, " = ...")
                 }
+                (c.pos, sig)
             }
             Glob(g) => {
-                pos = g.pos
-                text = match g.ty {
+                sig := match g.ty {
                     Some(ty) => fmt(sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
                     None => fmt(sigs_priv(g.name), g.name, " := ...")
                 }
+                (g.pos, sig)
             }
-            Test(t) => {
-                pos = t.pos
-                text = fmt("test \"", t.name, "\"")
-            }
-            Use(path, upos) => {
-                continue
-            }
+            Test(t) => (t.pos, fmt("test \"", t.name, "\""))
+            Use(_, _) => continue
         }
         if pos.file < from_file {
             continue
@@ -544,15 +526,10 @@ priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
 // is a declaration shown by `alc sigs <file> -- std`?
 priv fn sigs_visible(d: *Decl) -> bool {
     match *d {
-        Fn(f) => {
-            return !starts_with(f.name, "__")
-        }
-        Glob(g) => {
-            return !starts_with(g.name, "__")
-        }
-        _ => {}
+        Fn(f) => !starts_with(f.name, "__")
+        Glob(g) => !starts_with(g.name, "__")
+        _ => true
     }
-    return true
 }
 
 priv fn real_main() -> i64 {
@@ -687,11 +664,8 @@ priv fn real_main() -> i64 {
         eput(fmt("error: ", link_err, "\n"))
         return 1
     }
-    out_path := ""
-    match ar.output {
-        Some(op) => {
-            out_path = op
-        }
+    out_path := match ar.output {
+        Some(op) => op
         None => {
             stem := match path_file_stem(ar.input) {
                 Some(s) => s
@@ -702,11 +676,7 @@ priv fn real_main() -> i64 {
                 None => ""
             }
             cand := path_join(dir, stem)
-            if path_comps(cand).items() == path_comps(ar.input).items() {
-                out_path = fmt(cand, ".out")
-            } else {
-                out_path = cand
-            }
+            if path_comps(cand).items() == path_comps(ar.input).items() { fmt(cand, ".out") } else { cand }
         }
     }
     if find(out_path, "/") < 0 {

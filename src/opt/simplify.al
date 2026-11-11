@@ -11,19 +11,17 @@ priv fn mask(bits: i64) -> u64 {
 priv fn unopt[T](o: Opt[T]) -> (T, bool) {
     z: T
     match o {
-        Some(x) => { return (x, true) }
-        None => {}
+        Some(x) => (x, true)
+        None => (z, false)
     }
-    return (z, false)
 }
 
 // `o == Some(k)`
 priv fn opt_is(o: Opt[i64], k: i64) -> bool {
     match o {
-        Some(x) => { return x == k }
-        None => {}
+        Some(x) => x == k
+        None => false
     }
-    return false
 }
 
 priv fn is_pow2(x: u64) -> bool {
@@ -88,60 +86,59 @@ priv fn fold_bin(op: Op, ty: T, a: i64, b: i64) -> Opt[i64] {
     ua := u64(a) & m
     ub := u64(b) & m
     sh := i64(u32(u64(b) & (u64(bits) - 1)))
-    r: i64
-    match op {
-        Add => { r = a + b }
-        Sub => { r = a - b }
-        Mul => { r = a * b }
+    r := match op {
+        Add => a + b
+        Sub => a - b
+        Mul => a * b
         SDiv => {
             if b == 0 {
                 return None
             }
-            r = wrapping_div(a, b)
+            wrapping_div(a, b)
         }
         SRem => {
             if b == 0 {
                 return None
             }
-            r = wrapping_rem(a, b)
+            wrapping_rem(a, b)
         }
         UDiv => {
             if ub == 0 {
                 return None
             }
-            r = i64(ua / ub)
+            i64(ua / ub)
         }
         URem => {
             if ub == 0 {
                 return None
             }
-            r = i64(ua % ub)
+            i64(ua % ub)
         }
-        And => { r = a & b }
-        Or => { r = a | b }
-        Xor => { r = a ^ b }
-        Shl => { r = i64((ua << sh) & m) }
-        LShr => { r = i64(ua >> sh) }
-        AShr => { r = a >> sh }
+        And => a & b
+        Or => a | b
+        Xor => a ^ b
+        Shl => i64((ua << sh) & m)
+        LShr => i64(ua >> sh)
+        AShr => a >> sh
         Rotl => {
             if sh == 0 {
-                r = a
+                a
             } else {
-                r = i64(((ua << sh) | (ua >> (bits - sh))) & m)
+                i64(((ua << sh) | (ua >> (bits - sh))) & m)
             }
         }
         Rotr => {
             if sh == 0 {
-                r = a
+                a
             } else {
-                r = i64(((ua >> sh) | (ua << (bits - sh))) & m)
+                i64(((ua >> sh) | (ua << (bits - sh))) & m)
             }
         }
         // ((a as i128) * (b as i128)) >> bits
-        MulHiS => { r = shr128(u64(a) * u64(b), u64(mulhs(a, b)), bits, true) }
+        MulHiS => shr128(u64(a) * u64(b), u64(mulhs(a, b)), bits, true)
         // ((ua as u128) * (ub as u128)) >> bits
-        MulHiU => { r = shr128(ua * ub, mulhu(ua, ub), bits, false) }
-        _ => { return None }
+        MulHiU => shr128(ua * ub, mulhu(ua, ub), bits, false)
+        _ => return None
     }
     return Some(ir_canon(ty, r))
 }
@@ -167,19 +164,18 @@ fn simplify_fold_icmp(op: Op, ty: T, a: i64, b: i64) -> Opt[bool] {
     ua := u64(a) & m
     ub := u64(b) & m
     match op {
-        Eq => { return Some(a == b) }
-        Ne => { return Some(a != b) }
-        Slt => { return Some(a < b) }
-        Sle => { return Some(a <= b) }
-        Sgt => { return Some(a > b) }
-        Sge => { return Some(a >= b) }
-        Ult => { return Some(ua < ub) }
-        Ule => { return Some(ua <= ub) }
-        Ugt => { return Some(ua > ub) }
-        Uge => { return Some(ua >= ub) }
-        _ => {}
+        Eq => Some(a == b)
+        Ne => Some(a != b)
+        Slt => Some(a < b)
+        Sle => Some(a <= b)
+        Sgt => Some(a > b)
+        Sge => Some(a >= b)
+        Ult => Some(ua < ub)
+        Ule => Some(ua <= ub)
+        Ugt => Some(ua > ub)
+        Uge => Some(ua >= ub)
+        _ => None
     }
-    return None
 }
 
 // `new` is a builtin: the field is `new_insts`
@@ -508,8 +504,8 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // rotate idioms: (x >>> n) | (x << (bits - n))
             if op == Or || op == Xor || op == Add {
                 match self.match_rotate(a, b, ty) {
-                    Some(r) => {
-                        self.set(v, r.0, vec_of([]i64{r.1, r.2}), 0)
+                    Some((rop, x, n)) => {
+                        self.set(v, rop, vec_of([]i64{x, n}), 0)
                         return None
                     }
                     None => {}
@@ -823,11 +819,9 @@ priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
     if i.op == Const {
         r = 64 - i64(clz(u64(i.k) & mask(tb)))
     } else if i.op == LShr {
-        k, hk := unopt(self.c(i.args[1]))
-        if hk {
-            r = sat_sub(self.ubits(i.args[0], depth - 1), i64(u32(k & (tb - 1))))
-        } else {
-            r = tb
+        r = match self.c(i.args[1]) {
+            Some(k) => sat_sub(self.ubits(i.args[0], depth - 1), i64(u32(k & (tb - 1))))
+            None => tb
         }
     } else if i.op == And {
         r0 := self.ubits(i.args[0], depth - 1)
@@ -836,18 +830,14 @@ priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
         r0 := self.ubits(i.args[0], depth - 1)
         r = min(r0, i64(self.f.insts[i.args[0]].ty.bits()))
     } else if i.op == URem {
-        k, hk := unopt(self.c(i.args[1]))
-        if hk {
-            r = 64 - i64(clz(u64(k) & mask(tb)))
-        } else {
-            r = tb
+        r = match self.c(i.args[1]) {
+            Some(k) => 64 - i64(clz(u64(k) & mask(tb)))
+            None => tb
         }
     } else if i.op == UDiv {
-        k, hk := unopt(self.c(i.args[1]))
-        if hk && k > 0 {
-            r = sat_sub(self.ubits(i.args[0], depth - 1), 63 - i64(clz(u64(k))))
-        } else {
-            r = tb
+        r = match self.c(i.args[1]) {
+            Some(k) if k > 0 => sat_sub(self.ubits(i.args[0], depth - 1), 63 - i64(clz(u64(k))))
+            _ => tb
         }
     } else if i.op.is_cmp() {
         r = 1
@@ -862,11 +852,10 @@ priv fn match_rotate_is_complement(s: *Ctx, bits: i64, m: i64, n: i64) -> bool {
     if !(mi.op == Sub && mi.args[1] == n) {
         return false
     }
-    k, hk := unopt(s.c(mi.args[0]))
-    if hk {
-        return k & (bits - 1) == 0
+    match s.c(mi.args[0]) {
+        Some(k) => k & (bits - 1) == 0
+        None => false
     }
-    return false
 }
 
 priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
@@ -1115,10 +1104,9 @@ priv fn simplify_cfg_side(f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[i64] {
     if x == 0 || preds[x].len != 1 {
         return None
     }
-    j := 0
-    match f.blocks[x].term {
-        Jmp(j1) => { j = j1 }
-        _ => { return None }
+    j := match f.blocks[x].term {
+        Jmp(j1) => j1
+        _ => return None
     }
     insts := f.blocks[x].insts
     real := 0
@@ -1153,21 +1141,18 @@ priv fn all_phis(f: *Func, binsts: *Vec[i64]) -> bool {
 // redirect the edge p -> from to p -> to
 priv fn retarget(f: *Func, p: i64, from: i64, to: i64) {
     match f.blocks[p].term {
-        Jmp(x) => {
-            if x == from {
-                f.blocks[p].term = Jmp(to)
+        Jmp(&x) => {
+            if *x == from {
+                *x = to
             }
         }
-        Br(c, x, y) => {
-            nx := x
-            ny := y
-            if x == from {
-                nx = to
+        Br(_, &x, &y) => {
+            if *x == from {
+                *x = to
             }
-            if y == from {
-                ny = to
+            if *y == from {
+                *y = to
             }
-            f.blocks[p].term = Br(c, nx, ny)
         }
         _ => {}
     }
@@ -1229,17 +1214,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 continue
             }
             loop {
-                s := 0
-                is_jmp := false
-                match f.blocks[b].term {
-                    Jmp(s1) => {
-                        s = s1
-                        is_jmp = true
-                    }
-                    _ => {}
-                }
-                if !is_jmp {
-                    break
+                s := match f.blocks[b].term {
+                    Jmp(s1) => s1
+                    _ => break
                 }
                 if s == 0 || s == b || preds[s].len != 1 || dead[s] {
                     break
@@ -1300,19 +1277,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
             if e == 0 || !f.blocks[e].insts.is_empty() {
                 continue
             }
-            t := 0
-            is_jmp := false
-            match f.blocks[e].term {
-                Jmp(t1) => {
-                    if t1 != e {
-                        t = t1
-                        is_jmp = true
-                    }
-                }
-                _ => {}
-            }
-            if !is_jmp {
-                continue
+            t := match f.blocks[e].term {
+                Jmp(t1) if t1 != e => t1
+                _ => continue
             }
             t_has_phi := false
             if f.blocks[t].insts.len > 0 {
@@ -1328,17 +1295,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 }
                 // a conditional branch whose other arm already goes to t would need a select
                 if t_has_phi {
-                    skip := false
                     match f.blocks[p].term {
-                        Br(c, a, b2) => {
-                            if a == t || b2 == t {
-                                skip = true
-                            }
-                        }
+                        Br(_, a, b2) if a == t || b2 == t => continue
                         _ => {}
-                    }
-                    if skip {
-                        continue
                     }
                 }
                 // redirect p -> e to p -> t
@@ -1390,23 +1349,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         rpo := f.rpo()
         scratch_off()
         for b in rpo.items() {
-            c := 0
-            t := 0
-            e := 0
-            is_br := false
-            match f.blocks[b].term {
-                Br(c1, t1, e1) => {
-                    if t1 != e1 && t1 != b && e1 != b {
-                        c = c1
-                        t = t1
-                        e = e1
-                        is_br = true
-                    }
-                }
-                _ => {}
-            }
-            if !is_br {
-                continue
+            c, t, e := match f.blocks[b].term {
+                Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
+                _ => continue
             }
             binsts := clone(&f.blocks[b].insts)
             if binsts.is_empty() || !all_phis(f, &binsts) || !contains(&binsts, c) {
@@ -1470,17 +1415,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     continue
                 }
                 // a conditional branch in p with both arms into b cannot be threaded simply
-                both := false
                 match f.blocks[p].term {
-                    Br(pc, x, y) => {
-                        if x == b && y == b {
-                            both = true
-                        }
-                    }
+                    Br(_, x, y) if x == b && y == b => continue
                     _ => {}
-                }
-                if both {
-                    continue
                 }
                 // new phi inputs in the target for the edge p -> target
                 for ii in 0..f.blocks[target].insts.len {
@@ -1539,23 +1476,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         scratch_off()
         did := false
         for b in cfg.rpo.items() {
-            c := 0
-            t := 0
-            e := 0
-            is_br := false
-            match f.blocks[b].term {
-                Br(c1, t1, e1) => {
-                    if t1 != e1 && t1 != b && e1 != b {
-                        c = c1
-                        t = t1
-                        e = e1
-                        is_br = true
-                    }
-                }
-                _ => {}
-            }
-            if !is_br {
-                continue
+            c, t, e := match f.blocks[b].term {
+                Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
+                _ => continue
             }
             binsts := clone(&f.blocks[b].insts)
             if b == 0 || binsts.is_empty() || !all_phis(f, &binsts) || !contains(&binsts, c) {
@@ -1580,15 +1503,11 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     break
                 }
                 match f.blocks[p].term {
-                    Br(pc, x, y) => {
-                        if x == b && y == b {
-                            bad = true
-                        }
+                    Br(_, x, y) if x == b && y == b => {
+                        bad = true
+                        break
                     }
                     _ => {}
-                }
-                if bad {
-                    break
                 }
                 if kc != 0 {
                     dest.push((p, t))
@@ -1721,8 +1640,8 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 }
                 side_t := cfg.dom(t, bb)
                 match f.blocks[bb].term {
-                    Br(cc, x, y) => {
-                        f.blocks[bb].term = Br(simplify_cfg_fix(cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e), x, y)
+                    Br(&cc, _, _) => {
+                        *cc = simplify_cfg_fix(*cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e)
                     }
                     Ret(vs) => {
                         // vs shares its buffer with the terminator
@@ -1758,23 +1677,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         rpo := f.rpo()
         scratch_off()
         for b in rpo.items() {
-            c := 0
-            t := 0
-            e := 0
-            is_br := false
-            match f.blocks[b].term {
-                Br(c1, t1, e1) => {
-                    if t1 != e1 {
-                        c = c1
-                        t = t1
-                        e = e1
-                        is_br = true
-                    }
-                }
-                _ => {}
-            }
-            if !is_br {
-                continue
+            c, t, e := match f.blocks[b].term {
+                Br(c1, t1, e1) if t1 != e1 => (c1, t1, e1)
+                _ => continue
             }
             j1, h1 := unopt(simplify_cfg_side(f, &preds, t))
             j2, h2 := unopt(simplify_cfg_side(f, &preds, e))
@@ -1797,15 +1702,13 @@ priv fn simplify_cfg(f: *Func) -> bool {
             if j == b || j == 0 {
                 continue
             }
-            from_t := b
-            match tb {
-                Some(x) => { from_t = x }
-                None => {}
+            from_t := match tb {
+                Some(x) => x
+                None => b
             }
-            from_e := b
-            match eb {
-                Some(x) => { from_e = x }
-                None => {}
+            from_e := match eb {
+                Some(x) => x
+                None => b
             }
             // the join's phis decide whether this is worth it
             phis := vec[i64]()
@@ -1889,11 +1792,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
     // normalize `br c, t, t`
     for b in 0..f.blocks.len {
         match f.blocks[b].term {
-            Br(c, t, e) => {
-                if t == e {
-                    f.blocks[b].term = Jmp(t)
-                    changed = true
-                }
+            Br(_, t, e) if t == e => {
+                f.blocks[b].term = Jmp(t)
+                changed = true
             }
             _ => {}
         }

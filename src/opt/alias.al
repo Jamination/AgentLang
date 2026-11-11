@@ -13,50 +13,26 @@ struct Addr {
 
 // `==` of two bases (derive(PartialEq))
 priv fn eq(a: Base, b: Base) -> bool {
-    match a {
-        Alloca(x) => {
-            match b {
-                Alloca(y) => return x == y
-                _ => return false
-            }
-        }
-        Glob(x) => {
-            match b {
-                Glob(y) => return x == y
-                _ => return false
-            }
-        }
-        Unknown(x) => {
-            match b {
-                Unknown(y) => return x == y
-                _ => return false
-            }
-        }
+    match (a, b) {
+        (Alloca(x), Alloca(y)), (Glob(x), Glob(y)), (Unknown(x), Unknown(y)) => x == y
+        _ => false
     }
-    return false
 }
 
 // off.map(|o| o.wrapping_add(k))
 priv fn off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     match off {
-        Some(o) => return Some(o + k)
-        None => {}
+        Some(o) => Some(o + k)
+        None => None
     }
-    return None
 }
 
 // a.is_some() && a == b
 priv fn off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
-    match a {
-        Some(x) => {
-            match b {
-                Some(y) => return x == y
-                None => return false
-            }
-        }
-        None => {}
+    match (a, b) {
+        (Some(x), Some(y)) => x == y
+        _ => false
     }
-    return false
 }
 
 priv fn decompose(f: *Func, addr: i64) -> Addr {
@@ -205,56 +181,19 @@ fn alias_memref(f: *Func, v: i64) -> MemRef {
 }
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
-    match a.addr.base {
-        Alloca(x) => {
-            match b.addr.base {
-                Alloca(y) => {
-                    if x != y {
-                        return false
-                    }
-                }
-                Glob(y) => return false
-                Unknown(y) => {
-                    if !esc[x] {
-                        return false
-                    }
-                }
-            }
-        }
-        Glob(x) => {
-            match b.addr.base {
-                Alloca(y) => return false
-                Glob(y) => {
-                    if x != y {
-                        return false
-                    }
-                }
-                Unknown(y) => {}
-            }
-        }
-        Unknown(u) => {
-            match b.addr.base {
-                Alloca(x) => {
-                    if !esc[x] {
-                        return false
-                    }
-                }
-                _ => {}
-            }
-        }
+    match (a.addr.base, b.addr.base) {
+        (Alloca(x), Alloca(y)), (Glob(x), Glob(y)) if x != y => return false
+        (Alloca(_), Glob(_)), (Glob(_), Alloca(_)) => return false
+        (Alloca(x), Unknown(_)), (Unknown(_), Alloca(x)) if !esc[x] => return false
+        _ => {}
     }
     if a.ptr == b.ptr && a.ptr != NOV {
         return true
     }
     if eq(a.addr.base, b.addr.base) {
-        match a.addr.off {
-            Some(oa) => {
-                match b.addr.off {
-                    Some(ob) => return oa < ob + b.size && ob < oa + a.size
-                    None => {}
-                }
-            }
-            None => {}
+        match (a.addr.off, b.addr.off) {
+            (Some(oa), Some(ob)) => return oa < ob + b.size && ob < oa + a.size
+            _ => {}
         }
     }
     return types_may_alias_class(a.class, b.class)

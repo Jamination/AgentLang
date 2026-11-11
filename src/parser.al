@@ -29,63 +29,45 @@ fn parser_box[T](x: T) -> *T {
 
 priv fn tk_p(t: Tk, p: str) -> bool {
     match t {
-        P(q) => {
-            return q == p
-        }
-        _ => {}
+        P(q) => q == p
+        _ => false
     }
-    return false
 }
 
 priv fn tk_kw(t: Tk, k: str) -> bool {
     match t {
-        Kw(q) => {
-            return q == k
-        }
-        _ => {}
+        Kw(q) => q == k
+        _ => false
     }
-    return false
 }
 
 priv fn tk_nl(t: Tk) -> bool {
     match t {
-        Nl => {
-            return true
-        }
-        _ => {}
+        Nl => true
+        _ => false
     }
-    return false
 }
 
 priv fn tk_eof(t: Tk) -> bool {
     match t {
-        Eof => {
-            return true
-        }
-        _ => {}
+        Eof => true
+        _ => false
     }
-    return false
 }
 
 priv fn tk_id(t: Tk) -> bool {
     match t {
-        Id(s) => {
-            return true
-        }
-        _ => {}
+        Id(_) => true
+        _ => false
     }
-    return false
 }
 
 // is `t` the identifier `w`?
 priv fn tk_word(t: Tk, w: str) -> bool {
     match t {
-        Id(s) => {
-            return s == w
-        }
-        _ => {}
+        Id(s) => s == w
+        _ => false
     }
-    return false
 }
 
 priv fn cont(s: str, i: i64, lo: u8, hi: u8) -> bool {
@@ -214,32 +196,14 @@ priv fn eat_kw(p: *Parser, k: str) -> bool {
 
 priv fn tok_desc(p: *Parser) -> str {
     match p.peek() {
-        Id(s) => {
-            return fmt("identifier `", s, "`")
-        }
-        Int(n) => {
-            return "number"
-        }
-        Float(f) => {
-            return "number"
-        }
-        Str(s) => {
-            return "string"
-        }
-        Kw(k) => {
-            return fmt("keyword `", k, "`")
-        }
-        P(q) => {
-            return fmt("`", q, "`")
-        }
-        Nl => {
-            return "end of line"
-        }
-        Eof => {
-            return "end of file"
-        }
+        Id(s) => fmt("identifier `", s, "`")
+        Int(_), Float(_) => "number"
+        Str(_) => "string"
+        Kw(k) => fmt("keyword `", k, "`")
+        P(q) => fmt("`", q, "`")
+        Nl => "end of line"
+        Eof => "end of file"
     }
-    return ""
 }
 
 // declaration words of other languages
@@ -271,10 +235,8 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
                 }
             }
         }
-        P(q) => {
-            if q == "+" || q == "-" {
-                hint = " (there is no `++`/`--`: use `x += 1`)"
-            }
+        P("+"), P("-") => {
+            hint = " (there is no `++`/`--`: use `x += 1`)"
         }
         Kw(k) => {
             // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`
@@ -317,11 +279,10 @@ priv fn ident(p: *Parser) -> (str, bool) {
     match p.peek() {
         Id(s) => {
             p.bump()
-            return (s, true)
+            (s, true)
         }
-        _ => {}
+        _ => p.err[str]("expected identifier")
     }
-    return p.err[str]("expected identifier")
 }
 
 priv fn skip_nl(p: *Parser) {
@@ -368,26 +329,15 @@ priv fn sync_decl(p: *Parser, from: i64) {
     loop {
         starts := p.i > 0 && tk_nl(p.toks[p.i - 1].t)
         match p.peek() {
-            Eof => {
-                return
-            }
-            P(q) => {
-                if q == "{" {
-                    depth += 1
-                } else if q == "}" {
-                    depth -= 1
-                }
-            }
+            Eof => return
+            P("{") => depth += 1
+            P("}") => depth -= 1
             Kw(k) => {
                 if starts && (depth <= 0 || p.pos().col == 1) && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern" || k == "priv") {
                     return
                 }
             }
-            Id(s) => {
-                if starts && depth <= 0 {
-                    return
-                }
-            }
+            Id(_) if starts && depth <= 0 => return
             _ => {}
         }
         p.bump()
@@ -591,17 +541,12 @@ priv fn fn_expr(p: *Parser, pos: Pos) -> (Expr, bool) {
         }
         // `fn() -> R { ... }`
         match t {
-            Fn(ps, r) => {
-                if !ps.is_empty() {
-                    p.errs.push(Diag{pos: pos, msg: "an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)"})
-                    return fail[Expr]()
-                }
-                match r {
-                    Some(rt) => {
-                        d.ret = Some(*rt)
-                    }
-                    None => {}
-                }
+            Fn(ps, _) if !ps.is_empty() => {
+                p.errs.push(Diag{pos: pos, msg: "an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)"})
+                return fail[Expr]()
+            }
+            Fn(_, Some(rt)) => {
+                d.ret = Some(*rt)
             }
             _ => {}
         }
@@ -799,11 +744,8 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
         return p.kw_decl(pos)
     }
     if p.eat_kw("test") {
-        name := ""
-        match p.bump() {
-            Str(s) => {
-                name = utf8_lossy(s)
-            }
+        name := match p.bump() {
+            Str(s) => utf8_lossy(s)
             _ => {
                 p.i -= 1
                 return p.err[Decl]("expected test name string")
@@ -817,19 +759,10 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
     }
     if p.eat_kw("use") {
         // use "file.al"   or   use std.name (a module bundled with the compiler)
-        match p.peek() {
-            Id(a) => {
-                if tk_p(p.peek_at(1), ".") {
-                    match p.peek_at(2) {
-                        Id(b) => {
-                            if a == "std" {
-                                p.i += 3
-                                return (Use(fmt("std:", b), pos), true)
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+        match (p.peek(), p.peek_at(1), p.peek_at(2)) {
+            (Id("std"), P("."), Id(b)) => {
+                p.i += 3
+                return (Use(fmt("std:", b), pos), true)
             }
             _ => {}
         }
@@ -914,12 +847,9 @@ priv fn ty(p: *Parser) -> (TypeAst, bool) {
         if !p.expect_p("(") || !p.type_list(&v) || !p.result(&rt) {
             return fail[TypeAst]()
         }
-        ret: Opt[*TypeAst] = None
-        match rt {
-            Some(r) => {
-                ret = Some(parser_box(r))
-            }
-            None => {}
+        ret: Opt[*TypeAst] = match rt {
+            Some(r) => Some(parser_box(r))
+            None => None
         }
         return (Fn(v, ret), true)
     }
@@ -993,23 +923,14 @@ priv fn sync_stmt(p: *Parser) {
     depth := 0
     loop {
         match p.peek() {
-            Eof => {
-                return
-            }
-            Nl => {
+            Eof => return
+            Nl if depth == 0 => return
+            P("{") => depth += 1
+            P("}") => {
                 if depth == 0 {
                     return
                 }
-            }
-            P(q) => {
-                if q == "{" {
-                    depth += 1
-                } else if q == "}" {
-                    if depth == 0 {
-                        return
-                    }
-                    depth -= 1
-                }
+                depth -= 1
             }
             _ => {}
         }
@@ -1034,12 +955,9 @@ priv fn header_expr(p: *Parser) -> (Expr, bool) {
 // literal: a type alone is not a value.
 priv fn lit_in_header(e: *Expr) -> bool {
     match e.k {
-        TypeE(t) => {
-            return true
-        }
-        _ => {}
+        TypeE(_) => true
+        _ => false
     }
-    return false
 }
 
 priv fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
@@ -1325,11 +1243,8 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         return fail[SK]()
     }
     if p.eat_p(":=") {
-        name := ""
-        match e.k {
-            Ident(n) => {
-                name = n
-            }
+        name := match e.k {
+            Ident(n) => n
             _ => {
                 p.errs.push(Diag{pos: e.pos, msg: "left side of `:=` must be an identifier"})
                 return fail[SK]()
@@ -1348,44 +1263,18 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         }
         return (Assign(e, None, v), true)
     }
-    op: Opt[BinOp] = None
-    match p.peek() {
-        P(q) => {
-            match q {
-                "+=" => {
-                    op = Some(Add)
-                }
-                "-=" => {
-                    op = Some(Sub)
-                }
-                "*=" => {
-                    op = Some(Mul)
-                }
-                "/=" => {
-                    op = Some(Div)
-                }
-                "%=" => {
-                    op = Some(Rem)
-                }
-                "&=" => {
-                    op = Some(And)
-                }
-                "|=" => {
-                    op = Some(Or)
-                }
-                "^=" => {
-                    op = Some(Xor)
-                }
-                "<<=" => {
-                    op = Some(Shl)
-                }
-                ">>=" => {
-                    op = Some(Shr)
-                }
-                _ => {}
-            }
-        }
-        _ => {}
+    op: Opt[BinOp] = match p.peek() {
+        P("+=") => Some(Add)
+        P("-=") => Some(Sub)
+        P("*=") => Some(Mul)
+        P("/=") => Some(Div)
+        P("%=") => Some(Rem)
+        P("&=") => Some(And)
+        P("|=") => Some(Or)
+        P("^=") => Some(Xor)
+        P("<<=") => Some(Shl)
+        P(">>=") => Some(Shr)
+        _ => None
     }
     if is_some(op) {
         p.bump()
@@ -1404,74 +1293,28 @@ priv fn expr(p: *Parser) -> (Expr, bool) {
 }
 
 priv fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
-    q := ""
-    match p.peek() {
-        P(s) => {
-            q = s
-        }
-        _ => {
-            return None
-        }
-    }
     // precedence as in Rust: arithmetic, shifts, &, ^, |, comparisons, &&, ||
-    match q {
-        "*" => {
-            return Some((Mul, 9))
-        }
-        "/" => {
-            return Some((Div, 9))
-        }
-        "%" => {
-            return Some((Rem, 9))
-        }
-        "+" => {
-            return Some((Add, 8))
-        }
-        "-" => {
-            return Some((Sub, 8))
-        }
-        "<<" => {
-            return Some((Shl, 7))
-        }
-        ">>" => {
-            return Some((Shr, 7))
-        }
-        "&" => {
-            return Some((And, 6))
-        }
-        "^" => {
-            return Some((Xor, 5))
-        }
-        "|" => {
-            return Some((Or, 4))
-        }
-        "==" => {
-            return Some((Eq, 3))
-        }
-        "!=" => {
-            return Some((Ne, 3))
-        }
-        "<" => {
-            return Some((Lt, 3))
-        }
-        "<=" => {
-            return Some((Le, 3))
-        }
-        ">" => {
-            return Some((Gt, 3))
-        }
-        ">=" => {
-            return Some((Ge, 3))
-        }
-        "&&" => {
-            return Some((LAnd, 2))
-        }
-        "||" => {
-            return Some((LOr, 1))
-        }
-        _ => {}
+    match p.peek() {
+        P("*") => Some((Mul, 9))
+        P("/") => Some((Div, 9))
+        P("%") => Some((Rem, 9))
+        P("+") => Some((Add, 8))
+        P("-") => Some((Sub, 8))
+        P("<<") => Some((Shl, 7))
+        P(">>") => Some((Shr, 7))
+        P("&") => Some((And, 6))
+        P("^") => Some((Xor, 5))
+        P("|") => Some((Or, 4))
+        P("==") => Some((Eq, 3))
+        P("!=") => Some((Ne, 3))
+        P("<") => Some((Lt, 3))
+        P("<=") => Some((Le, 3))
+        P(">") => Some((Gt, 3))
+        P(">=") => Some((Ge, 3))
+        P("&&") => Some((LAnd, 2))
+        P("||") => Some((LOr, 1))
+        _ => None
     }
-    return None
 }
 
 priv fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
@@ -1480,20 +1323,9 @@ priv fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
         return fail[Expr]()
     }
     loop {
-        op: BinOp = Add
-        prec := 0
-        match p.binop() {
-            Some(x) => {
-                if x.1 >= min_prec {
-                    op = x.0
-                    prec = x.1
-                } else {
-                    break
-                }
-            }
-            None => {
-                break
-            }
+        op, prec := match p.binop() {
+            Some((o, pr)) if pr >= min_prec => (o, pr)
+            _ => break
         }
         pos := p.pos()
         p.bump()
@@ -1508,64 +1340,33 @@ priv fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
 
 priv fn unary(p: *Parser) -> (Expr, bool) {
     pos := p.pos()
-    op: Opt[UnOp] = None
-    match p.peek() {
-        P(q) => {
-            match q {
-                "-" => {
-                    op = Some(Neg)
-                }
-                "!" => {
-                    op = Some(Not)
-                }
-                "~" => {
-                    op = Some(BitNot)
-                }
-                "&" => {
-                    op = Some(AddrOf)
-                }
-                "*" => {
-                    op = Some(Deref)
-                }
-                _ => {}
-            }
-        }
-        _ => {}
+    op: UnOp = match p.peek() {
+        P("-") => Neg
+        P("!") => Not
+        P("~") => BitNot
+        P("&") => AddrOf
+        P("*") => Deref
+        _ => return p.postfix()
     }
-    match op {
-        Some(o) => {
-            p.bump()
-            e, ok := p.unary()
-            if !ok {
-                return fail[Expr]()
-            }
-            return (Expr{k: Un(o, parser_box(e)), pos: pos}, true)
-        }
-        None => {}
+    p.bump()
+    e, ok := p.unary()
+    if !ok {
+        return fail[Expr]()
     }
-    return p.postfix()
+    return (Expr{k: Un(op, parser_box(e)), pos: pos}, true)
 }
 
 priv fn typeish(e: *Expr) -> bool {
     match e.k {
-        Ident(n) => {
-            return true
-        }
-        TypeE(t) => {
-            return true
-        }
-        Index(b, a) => {
+        Ident(_), TypeE(_) => true
+        Index(b, _) => {
             match b.k {
-                Ident(n) => {
-                    return true
-                }
-                _ => {}
+                Ident(_) => true
+                _ => false
             }
-            return false
         }
-        _ => {}
+        _ => false
     }
-    return false
 }
 
 // the closure in `args`
@@ -1703,14 +1504,9 @@ priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
         if p.eat_p("}") {
             break
         }
-        fname: Opt[str] = None
-        match p.peek() {
-            Id(n) => {
-                if tk_p(p.peek_at(1), ":") {
-                    fname = Some(n)
-                }
-            }
-            _ => {}
+        fname: Opt[str] = match p.peek() {
+            Id(n) if tk_p(p.peek_at(1), ":") => Some(n)
+            _ => None
         }
         if is_some(fname) {
             p.bump()
@@ -1791,74 +1587,70 @@ priv fn primary(p: *Parser) -> (Expr, bool) {
             p.bump()
             return (Expr{k: Ident(n), pos: pos}, true)
         }
-        Kw(k) => {
-            if k == "true" {
-                p.bump()
-                return (Expr{k: Bool(true), pos: pos}, true)
+        Kw("true") => {
+            p.bump()
+            return (Expr{k: Bool(true), pos: pos}, true)
+        }
+        Kw("false") => {
+            p.bump()
+            return (Expr{k: Bool(false), pos: pos}, true)
+        }
+        Kw("nil") => {
+            p.bump()
+            return (Expr{k: Nil, pos: pos}, true)
+        }
+        Kw("if") => {
+            p.bump()
+            r, ok := p.if_stmt()
+            if !ok {
+                return fail[Expr]()
             }
-            if k == "false" {
-                p.bump()
-                return (Expr{k: Bool(false), pos: pos}, true)
-            }
-            if k == "nil" {
-                p.bump()
-                return (Expr{k: Nil, pos: pos}, true)
-            }
-            if k == "if" {
-                p.bump()
-                r, ok := p.if_stmt()
-                if !ok {
+            match r.2 {
+                Some(e) => {
+                    return (Expr{k: If(parser_box(r.0), r.1, e), pos: pos}, true)
+                }
+                None => {
+                    p.errs.push(Diag{pos: pos, msg: "`if` used as an expression needs an `else` branch"})
                     return fail[Expr]()
                 }
-                match r.2 {
-                    Some(e) => {
-                        return (Expr{k: If(parser_box(r.0), r.1, e), pos: pos}, true)
-                    }
-                    None => {
-                        p.errs.push(Diag{pos: pos, msg: "`if` used as an expression needs an `else` branch"})
-                        return fail[Expr]()
-                    }
-                }
-            }
-            if k == "match" {
-                p.bump()
-                scrut, ok1 := p.header_expr()
-                if !ok1 {
-                    return fail[Expr]()
-                }
-                if !p.expect_p("{") {
-                    return fail[Expr]()
-                }
-                save := p.no_lit
-                p.no_lit = false
-                r, ok2 := p.match_arms()
-                p.no_lit = save
-                sb := parser_box(scrut)
-                if !ok2 {
-                    return fail[Expr]()
-                }
-                return (Expr{k: Match(sb, r), pos: pos}, true)
-            }
-            if k == "fn" {
-                return p.fn_expr(pos)
             }
         }
-        P(q) => {
-            if q == "(" {
-                p.bump()
-                save := p.no_lit
-                p.no_lit = false
-                r, ok := primary_r(p, pos)
-                p.no_lit = save
-                return (r, ok)
+        Kw("match") => {
+            p.bump()
+            scrut, ok1 := p.header_expr()
+            if !ok1 {
+                return fail[Expr]()
             }
-            if q == "[" {
-                t, ok := p.ty()
-                if !ok {
-                    return fail[Expr]()
-                }
-                return (Expr{k: TypeE(t), pos: pos}, true)
+            if !p.expect_p("{") {
+                return fail[Expr]()
             }
+            save := p.no_lit
+            p.no_lit = false
+            r, ok2 := p.match_arms()
+            p.no_lit = save
+            sb := parser_box(scrut)
+            if !ok2 {
+                return fail[Expr]()
+            }
+            return (Expr{k: Match(sb, r), pos: pos}, true)
+        }
+        Kw("fn") => {
+            return p.fn_expr(pos)
+        }
+        P("(") => {
+            p.bump()
+            save := p.no_lit
+            p.no_lit = false
+            r, ok := primary_r(p, pos)
+            p.no_lit = save
+            return (r, ok)
+        }
+        P("[") => {
+            t, ok := p.ty()
+            if !ok {
+                return fail[Expr]()
+            }
+            return (Expr{k: TypeE(t), pos: pos}, true)
         }
         _ => {}
     }
@@ -1868,21 +1660,9 @@ priv fn primary(p: *Parser) -> (Expr, bool) {
 // where an expression starts in the source (its `pos` may be that of an operator)
 fn parser_expr_start(e: *Expr) -> Pos {
     match e.k {
-        Call(c, _) => {
-            return parser_expr_start(c)
-        }
-        Field(b, _) => {
-            return parser_expr_start(b)
-        }
-        Index(b, _) => {
-            return parser_expr_start(b)
-        }
-        Bin(_, a, _) => {
-            return parser_expr_start(a)
-        }
-        _ => {}
+        Call(b, _), Field(b, _), Index(b, _), Bin(_, b, _) => parser_expr_start(b)
+        _ => e.pos
     }
-    return e.pos
 }
 
 // A pattern is parsed as an expression and then read as a pattern: `_`, `Variant(p, ..)`,
@@ -1890,10 +1670,8 @@ fn parser_expr_start(e: *Expr) -> Pos {
 // an expression (a constant, or a name that lowering resolves).
 priv fn pat(e: Expr) -> Pat {
     match e.k {
-        Ident(n) => {
-            if n == "_" {
-                return Wild
-            }
+        Ident("_") => {
+            return Wild
         }
         Call(c, args) => {
             name := ""
@@ -1935,14 +1713,12 @@ priv fn pat(e: Expr) -> Pat {
             }
             return Pat.Tuple(subs, e.pos)
         }
-        Un(op, x) => {
-            if op == AddrOf {
-                match x.k {
-                    Ident(n) => {
-                        return Ref(n, e.pos)
-                    }
-                    _ => {}
+        Un(AddrOf, x) => {
+            match x.k {
+                Ident(n) => {
+                    return Ref(n, e.pos)
                 }
+                _ => {}
             }
         }
         _ => {}

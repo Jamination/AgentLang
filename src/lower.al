@@ -106,34 +106,33 @@ fn priv_hint(self: *Cx, n: str) -> str {
 
 fn lower_builtin_type(name: str) -> Opt[i64] {
     match name {
-        "i8" => return Some(T_I8)
-        "i16" => return Some(T_I16)
-        "i32" => return Some(T_I32)
-        "i64" => return Some(T_I64)
-        "u8" => return Some(T_U8)
-        "u16" => return Some(T_U16)
-        "u32" => return Some(T_U32)
-        "u64" => return Some(T_U64)
-        "f64" => return Some(T_F64)
-        "f32" => return Some(T_F32)
-        "vec2" => return Some(T_VEC2)
-        "vec3" => return Some(T_VEC3)
-        "vec4" => return Some(T_VEC4)
-        "quat" => return Some(T_QUAT)
-        "mat4" => return Some(T_MAT4)
-        "bool" => return Some(T_BOOL)
-        "str" => return Some(T_STR)
-        "never" => return Some(T_NEVER)
-        _ => {}
+        "i8" => Some(T_I8)
+        "i16" => Some(T_I16)
+        "i32" => Some(T_I32)
+        "i64" => Some(T_I64)
+        "u8" => Some(T_U8)
+        "u16" => Some(T_U16)
+        "u32" => Some(T_U32)
+        "u64" => Some(T_U64)
+        "f64" => Some(T_F64)
+        "f32" => Some(T_F32)
+        "vec2" => Some(T_VEC2)
+        "vec3" => Some(T_VEC3)
+        "vec4" => Some(T_VEC4)
+        "quat" => Some(T_QUAT)
+        "mat4" => Some(T_MAT4)
+        "bool" => Some(T_BOOL)
+        "str" => Some(T_STR)
+        "never" => Some(T_NEVER)
+        _ => None
     }
-    return None
 }
 
 // the value of an optional type, or `d`
 priv fn opt_or(o: Opt[i64], d: i64) -> i64 {
     match o {
-        Some(t) => return t
-        None => return d
+        Some(t) => t
+        None => d
     }
 }
 
@@ -561,19 +560,9 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
         }
         Array(n, e) => {
             e2 := self.resolve(e, env)
-            ln := -1
-            match self.const_eval(n) {
-                Some(cv) => {
-                    match cv {
-                        Int(v) => {
-                            if v >= 0 {
-                                ln = v
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                None => {}
+            ln := match self.const_eval(n) {
+                Some(Int(v)) if v >= 0 => v
+                _ => -1
             }
             if ln < 0 {
                 self.err(n.pos, "array length must be a non-negative integer constant")
@@ -595,12 +584,9 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
             for i in 0..ps.len {
                 pts.push(self.resolve(&ps[i], env))
             }
-            rt := T_UNIT
-            match r {
-                Some(rr) => {
-                    rt = self.resolve(rr, env)
-                }
-                None => {}
+            rt := match r {
+                Some(rr) => self.resolve(rr, env)
+                None => T_UNIT
             }
             if contains(&pts, T_ERR) || rt == T_ERR {
                 return T_ERR
@@ -826,12 +812,9 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     for i in 0..d.params.len {
         ptys.push(self.resolve(&d.params[i].1, &env))
     }
-    rty := T_UNIT
-    match d.ret {
-        Some(r) => {
-            rty = self.resolve(&r, &env)
-        }
-        None => {}
+    rty := match d.ret {
+        Some(r) => self.resolve(&r, &env)
+        None => T_UNIT
     }
     self.scope_prelude = save_scope
     self.flush_layout_errors(d.pos)
@@ -993,17 +976,12 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
         _ => {}
     }
     match self.const_eval(e) {
-        Some(cv) => {
-            match cv {
-                Int(_) => return T_I64
-                Float(_) => return T_F64
-                Bool(_) => return T_BOOL
-                Str(_) => return T_STR
-            }
-        }
-        None => {}
+        Some(Int(_)) => T_I64
+        Some(Float(_)) => T_F64
+        Some(Bool(_)) => T_BOOL
+        Some(Str(_)) => T_STR
+        None => T_ERR
     }
-    return T_ERR
 }
 
 // interpret an expression as a type (for literals, casts, generic args)
@@ -1039,11 +1017,8 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
             return None
         }
         Index(b, args) => {
-            n: str
-            match b.k {
-                Ident(bn) => {
-                    n = bn
-                }
+            n := match b.k {
+                Ident(bn) => bn
                 _ => return None
             }
             is_s := self.find_struct(n)
@@ -1073,10 +1048,7 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
         TypeE(t) => {
             return Some(self.resolve(&t, env))
         }
-        Un(op, inner) => {
-            if op != Deref {
-                return None
-            }
+        Un(Deref, inner) => {
             match self.expr_type(inner, env) {
                 Some(t) => return Some(self.types.ptr_to(t))
                 None => return None
@@ -1115,10 +1087,7 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
     self.const_kind.set(name, 0)
     mem := false
     match d.val.k {
-        Lit(_, _) => {
-            mem = true
-        }
-        Tuple(_) => {
+        Lit(_, _), Tuple(_) => {
             mem = true
         }
         Call(c, _) => {
@@ -1129,13 +1098,7 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
             match self.expr_type(c, &env) {
                 Some(t) => {
                     match self.types.k(t) {
-                        Vec(_) => {
-                            mem = true
-                        }
-                        Quat => {
-                            mem = true
-                        }
-                        Mat4 => {
+                        Vec(_), Quat, Mat4 => {
                             mem = true
                         }
                         _ => {}
@@ -1226,11 +1189,8 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
         self.err(pos, fmt("`embed` takes 1 argument(s), got ", len(args)))
         return None
     }
-    rel: str
-    match args[0].k {
-        Str(s) => {
-            rel = s
-        }
+    rel := match args[0].k {
+        Str(s) => s
         _ => {
             self.err(args[0].pos, "`embed` takes a string literal path")
             return None
@@ -1301,59 +1261,21 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
             match ty {
                 Some(t) => {
                     // typed constant: check/coerce
-                    ok := false
-                    match self.types.k(t) {
-                        Int(bits, signed) => {
-                            match v0 {
-                                Int(i) => {
-                                    v = CV.Int(wrap_int(i, bits, signed))
-                                    ok = true
-                                }
-                                _ => {}
-                            }
+                    ok := match (self.types.k(t), v0) {
+                        (Int(bits, signed), Int(i)) => {
+                            v = CV.Int(wrap_int(i, bits, signed))
+                            true
                         }
-                        F64 => {
-                            match v0 {
-                                Int(i) => {
-                                    v = Float(f64(i))
-                                    ok = true
-                                }
-                                Float(_) => {
-                                    ok = true
-                                }
-                                _ => {}
-                            }
+                        (F64, Int(i)), (F32, Int(i)) => {
+                            v = Float(f64(i))
+                            true
                         }
-                        F32 => {
-                            match v0 {
-                                Int(i) => {
-                                    v = Float(f64(i))
-                                    ok = true
-                                }
-                                Float(f) => {
-                                    v = Float(f64(f32(f)))
-                                    ok = true
-                                }
-                                _ => {}
-                            }
+                        (F32, Float(f)) => {
+                            v = Float(f64(f32(f)))
+                            true
                         }
-                        Bool => {
-                            match v0 {
-                                Bool(_) => {
-                                    ok = true
-                                }
-                                _ => {}
-                            }
-                        }
-                        Slice(et) => {
-                            match v0 {
-                                Str(_) => {
-                                    ok = et == T_U8
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
+                        (F64, Float(_)), (Bool, Bool(_)), (Slice(T_U8), Str(_)) => true
+                        _ => false
                     }
                     if !ok {
                         self.err(d.pos, fmt("constant `", name, "` value does not match its declared type"))
@@ -1423,16 +1345,10 @@ priv fn const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
 // the operand of a mixed / float operation as a float: (value, ok)
 priv fn const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
     match cx.const_eval(e) {
-        Some(cv) => {
-            match cv {
-                Int(i) => return (f64(i), true)
-                Float(f) => return (f, true)
-                _ => {}
-            }
-        }
-        None => {}
+        Some(Int(i)) => (f64(i), true)
+        Some(Float(f)) => (f, true)
+        _ => (0.0, false)
     }
-    return (0.0, false)
 }
 
 // float (op) float, with integers converted; the operands are evaluated again
@@ -1446,19 +1362,18 @@ priv fn const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
         return None
     }
     match op {
-        Add => return Some(Float(x + y))
-        Sub => return Some(Float(x - y))
-        Mul => return Some(Float(x * y))
-        Div => return Some(Float(x / y))
-        Eq => return Some(Bool(x == y))
-        Ne => return Some(Bool(x != y))
-        Lt => return Some(Bool(x < y))
-        Le => return Some(Bool(x <= y))
-        Gt => return Some(Bool(x > y))
-        Ge => return Some(Bool(x >= y))
-        _ => {}
+        Add => Some(Float(x + y))
+        Sub => Some(Float(x - y))
+        Mul => Some(Float(x * y))
+        Div => Some(Float(x / y))
+        Eq => Some(Bool(x == y))
+        Ne => Some(Bool(x != y))
+        Lt => Some(Bool(x < y))
+        Le => Some(Bool(x <= y))
+        Gt => Some(Bool(x > y))
+        Ge => Some(Bool(x >= y))
+        _ => None
     }
-    return None
 }
 
 fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
@@ -1477,75 +1392,32 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
             return None
         }
         Un(op, x) => {
-            match self.const_eval(x) {
-                Some(v) => {
-                    match v {
-                        Int(i) => {
-                            if op == Neg {
-                                return Some(CV.Int(-i))
-                            }
-                            if op == BitNot {
-                                return Some(CV.Int(~i))
-                            }
-                        }
-                        Float(f) => {
-                            if op == Neg {
-                                return Some(CV.Float(-f))
-                            }
-                        }
-                        Bool(b) => {
-                            if op == Not {
-                                return Some(CV.Bool(!b))
-                            }
-                        }
-                        _ => {}
-                    }
-                    return None
-                }
-                None => return None
+            match (op, self.const_eval(x)) {
+                (Neg, Some(Int(i))) => return Some(CV.Int(-i))
+                (BitNot, Some(Int(i))) => return Some(CV.Int(~i))
+                (Neg, Some(Float(f))) => return Some(CV.Float(-f))
+                (Not, Some(Bool(b))) => return Some(CV.Bool(!b))
+                _ => return None
             }
         }
         Bin(op, a, b) => {
-            x: CV
-            match self.const_eval(a) {
-                Some(xv) => {
-                    x = xv
-                }
+            x := match self.const_eval(a) {
+                Some(xv) => xv
                 None => return None
             }
-            y: CV
-            match self.const_eval(b) {
-                Some(yv) => {
-                    y = yv
-                }
+            y := match self.const_eval(b) {
+                Some(yv) => yv
                 None => return None
             }
-            match x {
-                Int(xi) => {
-                    match y {
-                        Int(yi) => return const_bin_int(self, op, xi, yi, e.pos)
-                        Float(_) => return const_bin_float(self, op, a, b)
-                        _ => return None
-                    }
-                }
-                Float(_) => {
-                    match y {
-                        Int(_) => return const_bin_float(self, op, a, b)
-                        Float(_) => return const_bin_float(self, op, a, b)
-                        _ => return None
-                    }
-                }
-                Bool(xb) => {
-                    match y {
-                        Bool(yb) => {
-                            match op {
-                                LAnd => return Some(CV.Bool(xb && yb))
-                                LOr => return Some(CV.Bool(xb || yb))
-                                Eq => return Some(CV.Bool(xb == yb))
-                                Ne => return Some(CV.Bool(xb != yb))
-                                _ => return None
-                            }
-                        }
+            match (x, y) {
+                (Int(xi), Int(yi)) => return const_bin_int(self, op, xi, yi, e.pos)
+                (Int(_), Float(_)), (Float(_), Int(_)), (Float(_), Float(_)) => return const_bin_float(self, op, a, b)
+                (Bool(xb), Bool(yb)) => {
+                    match op {
+                        LAnd => return Some(CV.Bool(xb && yb))
+                        LOr => return Some(CV.Bool(xb || yb))
+                        Eq => return Some(CV.Bool(xb == yb))
+                        Ne => return Some(CV.Bool(xb != yb))
                         _ => return None
                     }
                 }
@@ -1554,13 +1426,11 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         }
         Call(c, args) => {
             match c.k {
-                Ident(fname) => {
-                    // embed("file"): the content of a file as a string constant
-                    if fname == "embed" && !self.fn_names.has(fname) {
-                        match self.embed_bytes(args.items(), e.pos) {
-                            Some(bytes) => return Some(CV.Str(bytes))
-                            None => return None
-                        }
+                // embed("file"): the content of a file as a string constant
+                Ident("embed") if !self.fn_names.has("embed") => {
+                    match self.embed_bytes(args.items(), e.pos) {
+                        Some(bytes) => return Some(CV.Str(bytes))
+                        None => return None
                     }
                 }
                 _ => {}
@@ -1568,54 +1438,30 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
             if args.len == 1 {
                 // numeric conversion of a constant: T(x); sizeof[T]()
                 env := map[str, i64]()
-                t: i64
-                match self.expr_type(c, &env) {
-                    Some(ct) => {
-                        t = ct
-                    }
+                t := match self.expr_type(c, &env) {
+                    Some(ct) => ct
                     None => return None
                 }
-                v: CV
-                match self.const_eval(&args[0]) {
-                    Some(av) => {
-                        v = av
-                    }
+                v := match self.const_eval(&args[0]) {
+                    Some(av) => av
                     None => return None
                 }
-                match self.types.k(t) {
-                    Int(bits, signed) => {
-                        match v {
-                            Int(i) => return Some(CV.Int(wrap_int(i, bits, signed)))
-                            Float(f) => return Some(CV.Int(wrap_int(f64_to_i64(f), bits, signed)))
-                            _ => return None
-                        }
-                    }
-                    F64 => {
-                        match v {
-                            Int(i) => return Some(CV.Float(f64(i)))
-                            Float(f) => return Some(CV.Float(f))
-                            _ => return None
-                        }
-                    }
-                    F32 => {
-                        match v {
-                            Int(i) => return Some(CV.Float(f64(f32(i))))
-                            Float(f) => return Some(CV.Float(f64(f32(f))))
-                            _ => return None
-                        }
-                    }
+                match (self.types.k(t), v) {
+                    (Int(bits, signed), Int(i)) => return Some(CV.Int(wrap_int(i, bits, signed)))
+                    (Int(bits, signed), Float(f)) => return Some(CV.Int(wrap_int(f64_to_i64(f), bits, signed)))
+                    (F64, Int(i)) => return Some(CV.Float(f64(i)))
+                    (F64, Float(f)) => return Some(CV.Float(f))
+                    (F32, Int(i)) => return Some(CV.Float(f64(f32(i))))
+                    (F32, Float(f)) => return Some(CV.Float(f64(f32(f))))
                     _ => return None
                 }
             }
             if args.is_empty() {
                 match c.k {
                     Index(b, targs) => {
-                        is_sizeof := false
-                        match b.k {
-                            Ident(n) => {
-                                is_sizeof = n == "sizeof"
-                            }
-                            _ => {}
+                        is_sizeof := match b.k {
+                            Ident("sizeof") => true
+                            _ => false
                         }
                         if is_sizeof && targs.len == 1 {
                             env := map[str, i64]()
@@ -1645,12 +1491,8 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                 Array(et, n) => {
                     env := map[str, i64]()
                     match self.expr_type(te, &env) {
-                        Some(t) => {
-                            if t != ty {
-                                return false
-                            }
-                        }
-                        None => return false
+                        Some(t) if t == ty => {}
+                        _ => return false
                     }
                     if items.len > n {
                         self.err(e.pos, fmt("too many elements in array literal (max ", n, ")"))
@@ -1670,12 +1512,8 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                 Struct(sid) => {
                     env := map[str, i64]()
                     match self.expr_type(te, &env) {
-                        Some(t) => {
-                            if t != ty {
-                                return false
-                            }
-                        }
-                        None => return false
+                        Some(t) if t == ty => {}
+                        _ => return false
                     }
                     self.types.layout_struct(sid)
                     fields := clone(self.types.structs[sid].fields)
@@ -1763,17 +1601,9 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                 }
                 Fn(ptys, rty) => {
                     // address of a (non-generic) function
-                    di := -1
-                    match self.find_fn(n) {
-                        Some(fdi) => {
-                            if self.fn_decls[fdi].tparams.is_empty() {
-                                di = fdi
-                            }
-                        }
-                        None => {}
-                    }
-                    if di < 0 {
-                        return false
+                    di := match self.find_fn(n) {
+                        Some(fdi) if self.fn_decls[fdi].tparams.is_empty() => fdi
+                        _ => return false
                     }
                     fid := self.inst_fn(di, vec[i64]())
                     sig := self.fn_sigs[fid]
@@ -1789,8 +1619,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
         }
         Nil => {
             match k {
-                Ptr(_) => return true
-                Fn(_, _) => return true
+                Ptr(_), Fn(_, _) => return true
                 _ => {}
             }
         }
@@ -1818,12 +1647,8 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
             if is_vec {
                 env := map[str, i64]()
                 match self.expr_type(c, &env) {
-                    Some(t) => {
-                        if t != ty {
-                            return false
-                        }
-                    }
-                    None => return false
+                    Some(t) if t == ty => {}
+                    _ => return false
                 }
                 if args.len != n {
                     return false
@@ -1838,91 +1663,37 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
         }
         _ => {}
     }
-    v: CV
-    match self.const_eval(e) {
-        Some(cv) => {
-            v = cv
-        }
+    v := match self.const_eval(e) {
+        Some(cv) => cv
         None => return false
     }
-    match k {
-        Int(bits, _) => {
-            match v {
-                Int(i) => {
-                    put_le(data, off, u64(i), bits / 8)
-                    return true
-                }
-                _ => {}
-            }
+    match (k, v) {
+        (Int(bits, _), Int(i)) => put_le(data, off, u64(i), bits / 8)
+        (F32, Float(f)) => put_le(data, off, u64(cast[u32](f32(f))), 4)
+        (F32, Int(i)) => put_le(data, off, u64(cast[u32](f32(i))), 4)
+        (F64, Float(f)) => put_le(data, off, cast[u64](f), 8)
+        (F64, Int(i)) => put_le(data, off, cast[u64](f64(i)), 8)
+        (Bool, Bool(b)) => {
+            data[off] = if b { u8(1) } else { u8(0) }
         }
-        F32 => {
-            match v {
-                Float(f) => {
-                    put_le(data, off, u64(cast[u32](f32(f))), 4)
-                    return true
-                }
-                Int(i) => {
-                    put_le(data, off, u64(cast[u32](f32(i))), 4)
-                    return true
-                }
-                _ => {}
-            }
+        (Slice(T_U8), Str(s)) => {
+            g := self.string_global(s)
+            relocs.push((off, Glob(g, 0)))
+            put_le(data, off + 8, u64(len(s)), 8)
         }
-        F64 => {
-            match v {
-                Float(f) => {
-                    put_le(data, off, cast[u64](f), 8)
-                    return true
-                }
-                Int(i) => {
-                    put_le(data, off, cast[u64](f64(i)), 8)
-                    return true
-                }
-                _ => {}
-            }
-        }
-        Bool => {
-            match v {
-                Bool(b) => {
-                    data[off] = if b { u8(1) } else { u8(0) }
-                    return true
-                }
-                _ => {}
-            }
-        }
-        Slice(et) => {
-            match v {
-                Str(s) => {
-                    if et == T_U8 {
-                        g := self.string_global(s)
-                        relocs.push((off, Glob(g, 0)))
-                        put_le(data, off + 8, u64(len(s)), 8)
-                        return true
-                    }
-                }
-                _ => {}
-            }
-        }
-        _ => {}
+        _ => return false
     }
-    return false
+    return true
 }
 
 priv fn wrap_int(v: i64, bits: i64, signed: bool) -> i64 {
-    if signed {
-        match bits {
-            8 => return i64(i8(v))
-            16 => return i64(i16(v))
-            32 => return i64(i32(v))
-            _ => {}
-        }
-    } else {
-        match bits {
-            8 => return i64(u8(v))
-            16 => return i64(u16(v))
-            32 => return i64(u32(v))
-            _ => {}
-        }
+    match (signed, bits) {
+        (true, 8) => i64(i8(v))
+        (true, 16) => i64(i16(v))
+        (true, 32) => i64(i32(v))
+        (false, 8) => i64(u8(v))
+        (false, 16) => i64(u16(v))
+        (false, 32) => i64(u32(v))
+        _ => v
     }
-    return v
 }

@@ -49,14 +49,9 @@ fn lower_nested_outer(p: *Fx, name: str) -> Opt[(i64, i64)] {
 // the nested function that the name `n` means here: its index in `cx.nested`, or -1
 fn nested_named(self: *Fx, n: str) -> i64 {
     match self.lookup(n) {
-        Some(x) => {
-            if x.0 < 0 && x.0 != LOWER_NESTED_OUTER {
-                return -x.0 - 1
-            }
-        }
-        None => {}
+        Some(x) if x.0 < 0 && x.0 != LOWER_NESTED_OUTER => -x.0 - 1
+        _ => -1
     }
-    return -1
 }
 
 // the nested function that a method call `x.name(..)` means, or -1
@@ -190,12 +185,9 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
     for i in 0..d.params.len {
         ptys.push(cx.resolve(&d.params[i].1, &self.tenv))
     }
-    rty := T_UNIT
-    match d.ret {
-        Some(r) => {
-            rty = cx.resolve(&r, &self.tenv)
-        }
-        None => {}
+    rty := match d.ret {
+        Some(r) => cx.resolve(&r, &self.tenv)
+        None => T_UNIT
     }
     cx.flush_layout_errors(d.pos)
     if contains(&ptys, T_ERR) || rty == T_ERR {
