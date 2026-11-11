@@ -148,29 +148,29 @@ class Gen:
 
     def program(self):
         r = self.r
-        self.out.append("struct S { p vec3, c vec4, k f32 }")
-        self.out.append("var ga [8]vec3")
-        self.out.append("var gs S")
-        self.out.append("var gf f32")
+        self.out.append("S :: struct { p: vec3, c: vec4, k: f32 }")
+        self.out.append("ga: [8]vec3")
+        self.out.append("gs: S")
+        self.out.append("gf: f32")
         for fi in range(r.randint(1, 4)):
             ptys = [r.choice(["f32", "vec2", "vec3", "vec4", "quat", "mat4"]) for _ in range(r.randint(1, 5))]
             rt = r.choice(["f32", "vec2", "vec3", "vec4", "quat"])
             env = {f"p{i}": t for i, t in enumerate(ptys)}
-            ps = ", ".join(f"p{i} {t}" for i, t in enumerate(ptys))
-            self.out.append(f"fn f{fi}({ps}) {rt} {{")
+            ps = ", ".join(f"p{i}: {t}" for i, t in enumerate(ptys))
+            self.out.append(f"f{fi} :: ({ps}) -> {rt} {{")
             self.stmts(env, r.randint(0, 3), 1, 1)
             self.out.append(f"    return {self.expr(env, rt, 3)}")
             self.out.append("}")
             self.funcs.append((f"f{fi}", ptys, rt))
-        self.out.append("fn show(v vec4) {")
+        self.out.append("show :: (v: vec4) {")
         self.out.append("    print(hex(u64(cast[u32](v.x))), hex(u64(cast[u32](v.y))), hex(u64(cast[u32](v.z))), hex(u64(cast[u32](v.w))))")
         self.out.append("}")
-        self.out.append("fn main() {")
+        self.out.append("main :: () {")
         self.out.append("    for i in 0..8 { ga[i] = vec3(f32(i), f32(i) * 0.5, 1.0 - f32(i)) }")
         env = {}
         for i, t in enumerate(["f32", "f32", "vec2", "vec3", "vec3", "vec4", "vec4", "quat", "mat4"]):
             env[f"x{i}"] = t
-            self.out.append(f"    var x{i} {t} = {self.expr({}, t, 1)}")
+            self.out.append(f"    x{i}: {t} = {self.expr({}, t, 1)}")
         self.stmts(env, r.randint(6, 16), 1, 0)
         for n, t in env.items():
             if t == "f32":

@@ -352,12 +352,12 @@ def generate(reg):
     w("// VkBool32 is u32, VkDeviceSize and size_t are u64; structs have the C layout.")
     w("")
     w("// ---- constants ----")
-    w("const VK_NULL_HANDLE u64 = 0")
+    w("VK_NULL_HANDLE : u64 : 0")
     for v in VERSIONS:
         major, minor = v.split(".")
-        w("const VK_API_VERSION_%s_%s u32 = 0x%08X" % (major, minor, int(major) << 22 | int(minor) << 12))
+        w("VK_API_VERSION_%s_%s : u32 : 0x%08X" % (major, minor, int(major) << 22 | int(minor) << 12))
     for name, al, value in reg.consts:
-        w("const %s%s = %s" % (name, " " + al if al else "", value))
+        w("%s %s %s" % (name, ": %s :" % al if al else "::", value))
 
     w("")
     w("// ---- handles ----")
@@ -376,7 +376,7 @@ def generate(reg):
         w("// " + name)
         for vname, v in vals:
             lit = str(v) if al == "i32" else "0x%X" % v
-            w("const %s %s = %s" % (vname, al, lit))
+            w("%s : %s : %s" % (vname, al, lit))
 
     w("")
     w("// ---- structs ----")
@@ -398,14 +398,14 @@ def generate(reg):
             size, align, _ = reg.layout(name)
             word = {1: "u8", 2: "u16", 4: "u32", 8: "u64"}[align]
             w("// union %s { %s }" % (name, "; ".join(d.ctext for d in members)))
-            w("struct %s { data [%d]%s }" % (name, size // align, word))
+            w("%s :: struct { data: [%d]%s }" % (name, size // align, word))
             reg.struct_names.append(name)
             continue
         if any(d.bitfield for d in members):
             w("// %s is not bound: it contains bit-fields" % name)
             reg.skipped.append(name)
             continue
-        w("struct %s {" % name)
+        w("%s :: struct {" % name)
         for d in members:
             al = reg.al_type(d)[0]
             kind = c_kind(reg, d.base)
@@ -414,7 +414,7 @@ def generate(reg):
                 note = "    // " + kind + "*" * d.nptr
             elif d.base in ("char", "void") and d.nptr:
                 note = "    // " + d.base + "*" * d.nptr
-            w("    %s %s%s" % (al_name(d.name), al, note))
+            w("    %s: %s%s" % (al_name(d.name), al, note))
         w("}")
         reg.struct_names.append(name)
         if members and members[0].name == "sType" and members[0].values:
@@ -430,18 +430,18 @@ def generate(reg):
         params = [Decl(p) for p in cmd.findall("param") if api_ok(p)]
         ret = ""
         if proto.base != "void" or proto.nptr:
-            ret = " " + reg.al_type(proto)[0]
+            ret = " -> " + reg.al_type(proto)[0]
         sig = "(%s)%s" % (
-            ", ".join("%s %s" % (al_name(p.name), reg.al_type(p, True)[0]) for p in params), ret)
+            ", ".join("%s: %s" % (al_name(p.name), reg.al_type(p, True)[0]) for p in params), ret)
         if exported is not None and name not in exported:
-            missing.append("%s: fn(%s)%s" % (
-                name, ", ".join(reg.al_type(p, True)[0] for p in params), ret))
+            missing.append("%s: (%s)%s" % (
+                name, ", ".join(reg.al_type(p, True)[0] for p in params), ret or " -> ()"))
             continue
         w("// %s %s(%s)" % (proto.base + "*" * proto.nptr, name, ", ".join(p.ctext for p in params)))
-        w('extern "%s" fn %s%s' % (LIB, name, sig))
+        w('extern "%s" %s :: %s' % (LIB, name, sig))
     if missing:
         w("// Not exported by the loader; get the address with vkGetInstanceProcAddr and cast it to")
-        w("// the function type shown: cast[fn(...) i32](vkGetInstanceProcAddr(instance, ptr(\"vkName\")))")
+        w("// the function type shown: cast[(...) -> i32](vkGetInstanceProcAddr(instance, ptr(\"vkName\")))")
         for line in missing:
             w("//   " + line)
 
@@ -449,12 +449,12 @@ def generate(reg):
     w("// ---- constructors: a zeroed struct with sType filled in ----")
     for name, stype in ctors:
         w("// %s with sType set." % name)
-        w("fn %s() %s { %s{sType: %s} }" % (snake(name), name, name, stype))
+        w("%s :: () -> %s { %s{sType: %s} }" % (snake(name), name, name, stype))
 
     w("")
     w("// ---- result names ----")
     w("// Name of a VkResult value (\"VK_SUCCESS\", \"VK_ERROR_DEVICE_LOST\", ...).")
-    w("fn vk_result_name(result i32) str {")
+    w("vk_result_name :: (result: i32) -> str {")
     w("    match result {")
     seen = set()
     for vname, v in reg.enums["VkResult"]:
@@ -474,7 +474,7 @@ def verify(reg):
     os.makedirs(SCRATCH, exist_ok=True)
     c = ["#define %s" % PLATFORM_DEFINES[p] for p in reg.platforms]
     c += ["#include <vulkan/vulkan.h>", "#include <stdio.h>", "#include <stddef.h>", "int main(void) {"]
-    al = ["use std.vk", "fn o(base i64, p i64) { put(\" \", p - base) }"]
+    al = ["use std.vk", "o :: (base: i64, p: i64) { put(\" \", p - base) }"]
     calls = []
     nfields = 0
     for name in reg.struct_names:
@@ -484,8 +484,8 @@ def verify(reg):
         c.append('    printf("%s %%zu%s\\n", sizeof(%s)%s);' % (
             name, " %zu" * len(fields), name,
             "".join(", offsetof(%s, %s)" % (name, d.name) for d in fields)))
-        al.append("fn l_%s() {" % name)
-        al.append("    var s %s" % name)
+        al.append("l_%s :: () {" % name)
+        al.append("    s: %s" % name)
         al.append("    b := cast[i64](&s)")
         al.append('    put("%s ", sizeof[%s]())' % (name, name))
         for d in fields:
@@ -504,12 +504,12 @@ def verify(reg):
         if i % 200 == 0:
             if i:
                 al.append("}")
-            al.append("fn c_%d() {" % (i // 200))
+            al.append("c_%d :: () {" % (i // 200))
             calls.append("c_%d()" % (i // 200))
         al.append('    print("%s", %s)' % (name, name))
     al.append("}")
     c += ["    return 0;", "}"]
-    al += ["fn main() {"] + ["    " + x for x in calls] + ["}"]
+    al += ["main :: () {"] + ["    " + x for x in calls] + ["}"]
     cpath, alpath = os.path.join(SCRATCH, "layout.c"), os.path.join(SCRATCH, "layout.al")
     with open(cpath, "w") as f:
         f.write("\n".join(c) + "\n")

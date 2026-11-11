@@ -531,6 +531,8 @@ class Parser:
         while not self.is_p(")"):
             if self.is_dots():
                 self.bump()
+            elif self.fragment and self.is_id() and (self.is_p(")", 1) or self.is_p(",", 1)):
+                self.bump()               # documentation: `fn name(params) R`
             else:
                 pn = self.ident()
                 if self.is_p(":"):        # already has its colon

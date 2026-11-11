@@ -836,7 +836,7 @@ stmt :: (self: *Fx, s: *Stmt) {
                             self.zero(dst)
                         }
                         None => {
-                            self.err(s.pos, "`var` needs a type or an initializer")
+                            self.err(s.pos, "a variable needs a type or an initializer")
                         }
                     }
                 }

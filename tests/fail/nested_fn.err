@@ -17,6 +17,6 @@
 31:5: error: `i64` is a builtin type name
 32:33: error: unknown function `later_fn`: the nested function `later_fn` is declared at line 33, after `main.
 37:10: error: unknown function `local`
-38:24: error: type mismatch: expected fn(i64) i64, found fn(i64, i64) i64
-39:11: error: argument `f` of `apply`: expected fn(i64) i64, found fn(str) i64
+38:24: error: type mismatch: expected (i64) -> i64, found (i64, i64) -> i64
+39:11: error: argument `f` of `apply`: expected (i64) -> i64, found (str) -> i64
 43:24: error: `p` is a variable of the enclosing function `param`: the anonymous function `param.fn@43:12` doe

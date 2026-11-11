@@ -1,11 +1,11 @@
-// Nested functions: `fn name(params) R { body }` as a statement of a block, and anonymous
-// functions: the expression `fn(params) R { body }`.
+// Nested functions: `name :: (params) -> R { body }` as a statement of a block, and anonymous
+// functions: the expression `(params) -> R { body }`.
 //
 // Both are ordinary functions that happen to be written inside another one. They see
 // globals, constants, top-level functions, the type parameters of the enclosing function
 // (so they are lowered once per instantiation of it) and the nested functions declared
 // before them or around them, but no variable of an enclosing function. Each is therefore a
-// plain function value `fn(A) R`. In the IR and the symbol table they are `outer.name` and
+// plain function value `(A) -> R`. In the IR and the symbol table they are `outer.name` and
 // `outer.fn@line:col`.
 //
 // The name of a nested function lives in the scope of its block like a variable
@@ -217,7 +217,7 @@ nested_lower :: (self: *Fx, d: *FnDecl) -> i64 {
     return idx
 }
 
-// the statement `fn name(params) R { body }`
+// the statement `name :: (params) -> R { body }`
 nested_fn :: (self: *Fx, d: *FnDecl) {
     top := self.scopes.len - 1
     if self.scopes[top].vars.has(d.name) {

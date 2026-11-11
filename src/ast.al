@@ -72,7 +72,7 @@ EK :: enum {
     EKIf(*Expr, Block, Block),
     EKTuple(Vec[Expr]),
     EKMatch(*Expr, Vec[MatchArm]),
-    // anonymous function `fn(a A, b B) R { body }` (the declaration has an empty name)
+    // anonymous function `(a: A, b: B) -> R { body }` (the declaration has an empty name)
     EKFn(*FnDecl),
 }
 
@@ -132,7 +132,7 @@ SK :: enum {
     // `break name` / `continue name`
     SKBreakTo(str),
     SKContinueTo(str),
-    // `fn name(params) R { body }` inside a block: a nested function
+    // `name :: (params) -> R { body }` inside a block: a nested function
     SKFn(*FnDecl),
 }
 
@@ -145,7 +145,7 @@ FnDecl :: struct {
     pos: Pos
     // `inline` in the Rust source (a keyword in AL)
     inl: i64 // 1 = always inline, -1 = never, 0 = auto
-    // `extern "lib" fn`: a C function in the named shared library (no body)
+    // `extern "lib" name :: (params) -> R`: a C function in the named shared library (no body)
     ext: Opt[str]
     // declared with `priv`: visible only in its own file (see priv.al)
     is_priv: bool
@@ -193,7 +193,7 @@ TestDecl :: struct {
     pos: Pos
 }
 
-// `type Name = T`: another name for the type `T`
+// `Name :: type T`: another name for the type `T`
 TypeDecl :: struct {
     name: str
     ty: TypeAst
@@ -254,10 +254,10 @@ ast_type_str :: (t: *TypeAst) -> str {
             p := ast_type_str_list(&ps)
             match r {
                 Some(r2) => {
-                    return fmt("fn(", p, ") ", ast_type_str(r2))
+                    return fmt("(", p, ") -> ", ast_type_str(r2))
                 }
                 None => {
-                    return fmt("fn(", p, ")")
+                    return fmt("(", p, ") -> ()")
                 }
             }
         }
@@ -266,6 +266,28 @@ ast_type_str :: (t: *TypeAst) -> str {
         }
     }
     return ""
+}
+
+// the header of a function as it is declared: `name[T] :: (a: A, b: B) -> R`; for an
+// anonymous function `(a: A, b: B) -> R` (for diagnostics and `alc sigs`)
+ast_sig_str :: (f: *FnDecl) -> str {
+    parts := vec[str]()
+    for i in 0..f.params.len {
+        parts.push(fmt(f.params[i].0, ": ", ast_type_str(&f.params[i].1)))
+    }
+    head := ""
+    if f.name != "" {
+        tp := if f.tparams.is_empty() { "" } else { fmt("[", join(f.tparams.items(), ", "), "]") }
+        head = fmt(f.name, tp, " :: ")
+    }
+    r := ""
+    match f.ret {
+        Some(t) => {
+            r = fmt(" -> ", ast_type_str(&t))
+        }
+        None => {}
+    }
+    return fmt(head, "(", join(parts.items(), ", "), ")", r)
 }
 
 // A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte

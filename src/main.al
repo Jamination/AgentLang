@@ -492,22 +492,11 @@ main_print_sigs_tp :: (t: *Vec[str]) -> str {
     return fmt("[", join(t.items(), ", "), "]")
 }
 
-// " <type>" of an optional type annotation, or nothing
-main_print_sigs_opt_ty :: (t: *Opt[TypeAst]) -> str {
-    match *t {
-        Some(ty) => {
-            return fmt(" ", ast_type_str(&ty))
-        }
-        None => {}
-    }
-    return ""
-}
-
-// "name type, name type"
+// "name: type, name: type"
 main_print_sigs_fields :: (fs: *Vec[(str, TypeAst)]) -> str {
     parts := vec[str]()
     for x in 0..fs.len {
-        parts.push(fmt(fs[x].0, " ", ast_type_str(&fs[x].1)))
+        parts.push(fmt(fs[x].0, ": ", ast_type_str(&fs[x].1)))
     }
     return join(parts.items(), ", ")
 }
@@ -527,15 +516,13 @@ main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
         text := ""
         match d {
             DeclFn(f) => {
-                ps := main_print_sigs_fields(&f.params)
-                r := main_print_sigs_opt_ty(&f.ret)
                 pos = f.pos
-                text = fmt(main_sigs_priv(f.name), "fn ", f.name, main_print_sigs_tp(&f.tparams), "(", ps, ")", r)
+                text = fmt(main_sigs_priv(f.name), ast_sig_str(&f))
             }
             DeclStruct(s) => {
                 fs := main_print_sigs_fields(&s.fields)
                 pos = s.pos
-                text = fmt(main_sigs_priv(s.name), "struct ", s.name, main_print_sigs_tp(&s.tparams), " { ", fs, " }")
+                text = fmt(main_sigs_priv(s.name), s.name, main_print_sigs_tp(&s.tparams), " :: struct { ", fs, " }")
             }
             DeclEnum(e) => {
                 vs := vec[str]()
@@ -552,15 +539,22 @@ main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
                     }
                 }
                 pos = e.pos
-                text = fmt(main_sigs_priv(e.name), "enum ", e.name, main_print_sigs_tp(&e.tparams), " { ", join(vs.items(), ", "), " }")
+                text = fmt(main_sigs_priv(e.name), e.name, main_print_sigs_tp(&e.tparams), " :: enum { ", join(vs.items(), ", "), " }")
             }
+            // (the value of a constant or a global is not shown: `...`)
             DeclConst(c) => {
                 pos = c.pos
-                text = fmt(main_sigs_priv(c.name), "const ", c.name, main_print_sigs_opt_ty(&c.ty))
+                text = match c.ty {
+                    Some(ty) => fmt(main_sigs_priv(c.name), c.name, " : ", ast_type_str(&ty), " : ...")
+                    None => fmt(main_sigs_priv(c.name), c.name, " :: ...")
+                }
             }
             DeclGlobal(g) => {
                 pos = g.pos
-                text = fmt(main_sigs_priv(g.name), "var ", g.name, main_print_sigs_opt_ty(&g.ty))
+                text = match g.ty {
+                    Some(ty) => fmt(main_sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
+                    None => fmt(main_sigs_priv(g.name), g.name, " := ...")
+                }
             }
             DeclTest(t) => {
                 pos = t.pos
@@ -571,7 +565,7 @@ main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
             }
             DeclType(t) => {
                 pos = t.pos
-                text = fmt(main_sigs_priv(t.name), "type ", t.name, " = ", ast_type_str(&t.ty))
+                text = fmt(main_sigs_priv(t.name), t.name, " :: type ", ast_type_str(&t.ty))
             }
         }
         if pos.file < from_file {
@@ -664,7 +658,7 @@ main_real_main :: () -> i64 {
         }
     }
     entry := vec[str]()
-    entry.push("fn __entry(sp i64) never {\n __rt_init(sp)\n")
+    entry.push("__entry :: (sp: i64) -> never {\n __rt_init(sp)\n")
     if test_mode {
         for i in 0..tests.len {
             name := tests[i]
@@ -676,7 +670,7 @@ main_real_main :: () -> i64 {
         }
         entry.push(" exit(__tests_done())\n}\n")
     } else if !has_main {
-        src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `fn main()`"})
+        src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `main :: () { ... }`, the function where the program starts"})
         entry.push(" exit(0)\n}\n")
     } else if main_ret {
         entry.push(" exit(main())\n}\n")

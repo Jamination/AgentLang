@@ -1,0 +1,35 @@
+old_syntax.al:2:1: error: structs are declared `Item :: struct { field: Type, ... }` (the name comes first)
+old_syntax.al:3:1: error: structs are declared `Stack[T] :: struct { field: Type, ... }` (the name comes first)
+old_syntax.al:7:1: error: enums are declared `Shape :: enum { A, B(Type), ... }` (the name comes first)
+old_syntax.al:8:1: error: enums are declared `Maybe[T] :: enum { A, B(Type), ... }` (the name comes first)
+old_syntax.al:9:1: error: type aliases are declared `Reg :: type i64` (the name comes first)
+old_syntax.al:10:1: error: type aliases are declared `Cb :: type (i64) -> bool` (the name comes first)
+old_syntax.al:11:1: error: constants are declared `N :: value` (there is no `const` keyword)
+old_syntax.al:12:1: error: constants are declared `LIMIT : i64 : value` (there is no `const` keyword)
+old_syntax.al:13:1: error: variables are declared `counter: i64` (there is no `var` keyword)
+old_syntax.al:14:1: error: variables are declared `ratio: f64 = value` (there is no `var` keyword)
+old_syntax.al:15:1: error: variables are declared `table := value` (there is no `var` keyword)
+old_syntax.al:16:1: error: functions are declared `area :: (s: Shape) -> f64 { ... }` (there is no `fn` keyword)
+old_syntax.al:17:1: error: functions are declared `apply[T, U] :: (x: T, f: (T) -> U) -> U { ... }` (there is no `fn` keyword)
+old_syntax.al:18:13: error: functions are declared `helper :: () { ... }` (there is no `fn` keyword)
+old_syntax.al:19:20: error: C functions are declared `extern "libc.so.6" getpid :: () -> i32` (there is no `fn` keyword)
+old_syntax.al:20:1: error: functions are declared `pair :: (x: i64) -> (i64, bool) { ... }` (there is no `fn` keyword)
+old_syntax.al:22:27: error: a field is written `b: Type`: expected `:` after the name, found identifier `i64`
+old_syntax.al:23:21: error: a parameter is written `y: Type`: expected `:` after the name, found identifier `i64`
+old_syntax.al:24:23: error: the result type of a function follows an arrow (`name :: (a: A) -> R { ... }`): expected `->` or `{`, found identifier `i64`
+old_syntax.al:25:5: error: function types are written `(i64) -> ()` (there is no `fn` keyword)
+old_syntax.al:26:6: error: function types are written `(i64, i64) -> bool` (there is no `fn` keyword)
+old_syntax.al:27:12: error: a function type is written with an arrow, `(i64) -> R` (`(i64)` alone is a tuple type): expected `->`, found identifier `bool`
+old_syntax.al:30:5: error: variables are declared `x: i64 = value` (there is no `var` keyword)
+old_syntax.al:31:5: error: variables are declared `y: i64` (there is no `var` keyword)
+old_syntax.al:32:5: error: variables are declared `z := value` (there is no `var` keyword)
+old_syntax.al:33:5: error: constants are declared at the top level, as `NAME :: value` (there is no `const` keyword); a variable is `name := value`
+old_syntax.al:34:5: error: functions are declared `keep :: (it: Item, n: *i64) -> bool { ... }` (there is no `fn` keyword)
+old_syntax.al:35:10: error: anonymous functions are written `(v: i64) -> i64 { ... }` (there is no `fn` keyword)
+old_syntax.al:36:10: error: anonymous functions are written `() { ... }` (there is no `fn` keyword)
+old_syntax.al:37:13: error: function types are written `(i64) -> i64` (there is no `fn` keyword)
+old_syntax.al:38:15: error: function types are written `(i64) -> ()` (there is no `fn` keyword)
+old_syntax.al:39:13: error: a parameter of an anonymous function is written `a: Type`: expected `:` after the name, found identifier `i64`
+old_syntax.al:40:5: error: types are declared at the top level, as `Name :: struct { ... }` or `Name :: enum { ... }`
+old_syntax.al:41:9: error: expected end of statement, found identifier `q` (declare variables with `name := value` or `name: T = value`)
+old_syntax.al:44:6: error: a declaration is `func :: ...` (a function, type or constant), `func: T` or `func := value` (a variable): expected `::`, `:` or `:=` after the name, found identifier `other` (functions are declared `name :: (a: A) -> R { ... }`)

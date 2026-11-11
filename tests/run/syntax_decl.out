@@ -1,0 +1,32 @@
+5 6 0 6 true 6 true (1, true) (0, false) [0, 0, 0, 0, 0] true
+5 22 (9, 6) 17 true 5 5 (5, (6, 0))
+axe bow
+same
+k
+sword
+matched
+matched 1
+i 0
+i 2
+false true 2
+10 12
+b c a
+a c b
+49 42 213 <3>
+(2, 2) 1
+false true
+2 -1 -1 9 8 313 16 -5 12 10 3 -9
+4 -2 8 8 16
+eq
+1 true (1, 2) 3 42 7 Just(1) [(1, 2)] 1 6.0 3.0 0.0
+5 100 [1, 2, 4, 8] -6 12 (5, 100) 7 15 0.5 [a, b] 3 -4 true
+7 2 3 4 3 true
+4
+lt
+gt
+0 1 four
+pair 4
+6 4 (4, 4) (4, 4)
+0 -2 42 101 1 -5 9 8 (0, false)
+pos 3
+0 1 2 0 2

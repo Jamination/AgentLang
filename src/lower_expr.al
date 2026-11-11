@@ -529,7 +529,7 @@ const_root :: (self: *Fx, e: *Expr) -> Opt[str] {
 const_place_err :: (self: *Fx, e: *Expr, what: str) {
     match self.const_root(e) {
         Some(n) => {
-            self.err(e.pos, fmt("`", n, "` is a constant: ", what, " (copy it to a variable, or declare it with `var` to make it a global variable)"))
+            self.err(e.pos, fmt("`", n, "` is a constant: ", what, " (copy it to a variable, or declare it as `", n, " := value` or `", n, ": T = value` instead of `::` to make it a global variable)"))
         }
         None => {
             self.err(e.pos, fmt("this is part of a constant: ", what))

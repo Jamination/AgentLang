@@ -1,0 +1,42 @@
+syntax_decl.al:2:19: error: a function without a result is declared without an arrow: leave out `-> ()` (only a function type is written with it: `(i64) -> ()`)
+syntax_decl.al:3:10: error: a parameter is written `x: Type`: expected `:` after the name, found identifier `i64`
+syntax_decl.al:4:16: error: the result type of a function follows an arrow (`name :: (a: A) -> R { ... }`): expected `->` or `{`, found identifier `i64`
+syntax_decl.al:5:26: error: a function type is written with an arrow, `(i64) -> R` (`(i64)` alone is a tuple type): expected `->`, found identifier `bool`
+syntax_decl.al:6:10: error: a parameter is written `a: Type`: expected `:` after the name, found `*`
+syntax_decl.al:7:9: error: a parameter is written `a: Type` (a type alias for a function type is declared `Name :: type (A) -> R`): expected `:` after the name, found `)`
+syntax_decl.al:8:22: error: expected `{`, found end of line
+syntax_decl.al:9:9: error: the constant `K` needs a value: `K : i64 : value`
+syntax_decl.al:10:18: error: a field is written `a: Type`: expected `:` after the name, found identifier `i64`
+syntax_decl.al:11:33: error: a function type is written with an arrow, `(i64) -> R` (`(i64)` alone is a tuple type): expected `->`, found identifier `i64`
+syntax_decl.al:12:1: error: `inline` applies to functions only, and this declares a struct: remove `inline`
+syntax_decl.al:13:1: error: `noinline` applies to functions only, and this declares an enum: remove `noinline`
+syntax_decl.al:14:1: error: `inline` applies to functions only, and this declares a type alias: remove `inline`
+syntax_decl.al:15:1: error: `noinline` applies to functions only, and this declares a constant: remove `noinline`
+syntax_decl.al:16:1: error: `inline` applies to functions only, and this declares a constant: remove `inline`
+syntax_decl.al:17:1: error: `inline` applies to functions only, and this declares a variable: remove `inline`
+syntax_decl.al:18:1: error: `noinline` applies to functions only, and this declares a variable: remove `noinline`
+syntax_decl.al:19:1: error: `extern` applies to functions only, and this declares a variable: remove `extern`
+syntax_decl.al:20:1: error: `extern` applies to functions only, and this declares a struct: remove `extern`
+syntax_decl.al:21:1: error: the C function `c_gen` cannot have type parameters
+syntax_decl.al:22:40: error: an `extern` function is a C function of the library and has no body: expected end of line after the declaration of `c_body`, found `{`
+syntax_decl.al:23:8: error: expected a library name string after `extern`, e.g. `extern "libc.so.6" getpid :: () -> i32`, found identifier `getpid`
+syntax_decl.al:24:8: error: `priv` is written first: `priv inline name :: ...`, found keyword `priv`
+syntax_decl.al:25:1: error: a type alias cannot have type parameters: write `A1 :: type ...`
+syntax_decl.al:26:1: error: only functions, structs and enums have type parameters: `C3[T] ::` must be followed by `(`, `struct` or `enum`
+syntax_decl.al:27:7: error: expected `::` after the type parameters of a declaration, found `:`
+syntax_decl.al:28:10: error: `dangling ::` is followed on the same line by what it declares: `(a: A) -> R { ... }` (a function), `struct { ... }`, `enum { ... }`, `type T`, or the value of a constant
+syntax_decl.al:29:8: error: expected a parameter, `name: Type`, found number
+syntax_decl.al:30:11: error: a parameter is written `i64: Type` (a type alias for a function type is declared `Name :: type (A) -> R`): expected `:` after the name, found `)`
+syntax_decl.al:33:5: error: inside a function only functions can be declared with `::` (`L1 :: (a: A) -> R { ... }`): a constant is declared at the top level
+syntax_decl.al:34:14: error: a constant is declared at the top level (`L2 : i64 : value` outside the function); a variable is `L2: i64 = value`
+syntax_decl.al:35:5: error: inside a function only functions can be declared with `::` (`L3 :: (a: A) -> R { ... }`): a struct is declared at the top level
+syntax_decl.al:36:5: error: inside a function only functions can be declared with `::` (`L4 :: (a: A) -> R { ... }`): an enum is declared at the top level
+syntax_decl.al:37:5: error: inside a function only functions can be declared with `::` (`L5 :: (a: A) -> R { ... }`): a type alias is declared at the top level
+syntax_decl.al:38:23: error: a function without a result is declared without an arrow: leave out `-> ()` (only a function type is written with it: `(i64) -> ()`)
+syntax_decl.al:39:14: error: a parameter is written `x: Type`: expected `:` after the name, found identifier `i64`
+syntax_decl.al:40:23: error: a function without a result is declared without an arrow: leave out `-> ()` (only a function type is written with it: `(i64) -> ()`)
+syntax_decl.al:41:14: error: a parameter of an anonymous function is written `x: Type`: expected `:` after the name, found identifier `i64`
+syntax_decl.al:42:20: error: the result type of a function follows an arrow (`name :: (a: A) -> R { ... }`): expected `->` or `{`, found identifier `i64`
+syntax_decl.al:43:11: error: an anonymous function names its parameters and gives each one a type, like any function: `(a: i64, b: i64) -> bool { a < b }` (`(A, B) -> R` alone is a function type)
+syntax_decl.al:44:15: error: a function type is written with an arrow, `(i64) -> R` (`(i64)` alone is a tuple type): expected `->`, found identifier `i64`
+syntax_decl.al:45:20: error: a function type is written with an arrow, `(i64, i64) -> R` (`(i64, i64)` alone is a tuple type): expected `->`, found `*`

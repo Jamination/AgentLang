@@ -1,4 +1,5 @@
-// File-private declarations (`priv fn`, `priv struct`, `priv enum`, `priv const`, `priv var`).
+// File-private declarations: `priv` in front of a function, struct, enum, type alias,
+// constant or global variable (`priv helper :: () { ... }`, `priv counter: i64`).
 //
 // All top-level names of a program share one namespace. A private declaration `name` of file
 // number `k` is taken out of it by renaming: right after the file is parsed, the declaration

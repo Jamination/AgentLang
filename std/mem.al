@@ -85,7 +85,7 @@ arena_new :: (bytes: i64) -> Arena {
     return Arena{base: p, cur: p, end: p + bytes, dirty: p}
 }
 
-// an arena over caller-provided storage, for example a global `var buf [65536]u8`
+// an arena over caller-provided storage, for example a global `buf: [65536]u8`
 arena_of :: (buf: []u8) -> Arena {
     p := (cast[i64](ptr(buf)) + 15) & ~15
     e := cast[i64](ptr(buf)) + len(buf)

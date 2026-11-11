@@ -16,6 +16,8 @@ Token :: struct {
     pos: Pos
 }
 
+// (`fn`, `var` and `const` are not used by the grammar any more; they stay reserved so that
+// the parser can say how the declaration is written now)
 LEXER_KEYWORDS := [27]str{
     "fn", "struct", "enum", "const", "var", "test", "use", "if", "else", "while", "loop", "for",
     "in", "return", "break", "continue", "assert", "true", "false", "nil", "match", "by", "defer",

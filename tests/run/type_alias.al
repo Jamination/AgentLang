@@ -1,4 +1,4 @@
-// type aliases: `type Name = T` is another name for T, usable before its declaration
+// type aliases: `Name :: type T` is another name for T, usable before its declaration
 total :: (l: List) -> Reg {
     s := 0
     p := l
