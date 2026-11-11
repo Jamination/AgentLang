@@ -102,6 +102,10 @@ class Gen:
                 out.append(self.pure(ints, ptrs, fns, depth, me))
         return out
 
+    # (a loop variable is not handed out by address: changing it would change the loop)
+    def addressable(self, ints):
+        return [n for n in ints if not n.startswith("i")]
+
     def new_fn(self, fns, named, level):
         r = self.r
         rec = named and r.random() < 0.2
@@ -216,7 +220,7 @@ class Gen:
                 if helper == "fold":
                     extra = [[r.randint(0, 50) for _ in range(r.randint(0, 5))], self.pure(ints, [], vis, 1)]
                 elif helper == "poke":
-                    extra = [r.choice(ints), self.pure(ints, [], vis, 1)]
+                    extra = [r.choice(self.addressable(ints)), self.pure(ints, [], vis, 1)]
                 else:
                     extra = [self.pure(ints, [], vis, 2)]
                 out.append(("help", nm, helper, fa, extra))
@@ -226,7 +230,7 @@ class Gen:
                 cands = [c for c in vis if not c[-1].pure() and not c[-1].rec]
                 if cands and r.random() < 0.6:
                     c = r.choice(cands)
-                    out.append(("calllet", nm, c, self.args(c[-1], ints, [], vis, 2, None, ints)))
+                    out.append(("calllet", nm, c, self.args(c[-1], ints, [], vis, 2, None, self.addressable(ints))))
                 else:
                     out.append(("let", nm, self.pure(ints, [], vis, 3)))
                 ints.append(nm)
