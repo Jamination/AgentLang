@@ -28,6 +28,38 @@ halfway rotation: 22.5 degrees around y=1.0
 sin(30 deg) = 0.500000  atan2(1, 1) = 0.785398
 ```
 
+## The built-in types: `f32`, `vec2 vec3 vec4`, `quat`, `mat4`
+
+`vec2 vec3 vec4` are vectors of 2 / 3 / 4 `f32` (8 / 12 / 16 bytes, C-compatible), each held in
+one SSE register; `quat` is a quaternion `(x, y, z, w)` of `f32` (`w` is the scalar part);
+`mat4` is a 4x4 `f32` matrix of four `vec4` columns (column-major, 64 bytes).
+
+```
+x: f32 = 1.5                     // literals adapt; f32 and f64 never mix implicitly
+y := f32(n) * x + f32(d)         // conversions: f32(i), f32(f64), f64(f32), i64(f32) (truncates)
+a := vec3(1.0, 2.0, 3.0)         // constructors: components, one value for all lanes,
+b := vec3(0.5)                   //   or smaller vectors plus components: vec4(a, 1.0)
+c := a + b * 2.0 - a / b         // + - * / work lane-wise; a vector combines with an f32
+a.y = 4.0                        // components x y z w (or r g b a); a[i] also works
+d := a.zyx                       // swizzles (read-only), any 2-4 components: v.xy, v.xyzx
+e := vec3(v4)                    // drop trailing lanes
+a == b, a != b, -a               // comparisons are all-lanes; < > are not defined
+m := mat4(1.0)                   // diagonal matrix; mat4(c0, c1, c2, c3) from columns
+m[3] = vec4(1.0, 2.0, 3.0, 1.0)  // m[c] is a column, m[c][r] / m[c].x an element
+p := m * vec4(a, 1.0)            // mat4 * vec4, mat4 * mat4
+q := quat(0.0, 0.0, 0.0, 1.0)    // quat * quat composes, quat * vec3 rotates
+```
+
+- A literal next to an `f32` or a vector is an `f32` (`v * 2.0`, `x + 1`).
+- `sqrt`, `fabs`, `fmin`, `fmax` are builtins that work on `f32`, `f64` and vectors (lane-wise).
+- `cast[u32](x)` / `cast[f32](bits)` reinterpret an `f32`; `cast[u64]` / `cast[f64]` an `f64`.
+- `print` shows the shortest decimal that reads back to the same value: `0.1`,
+  `vec3(1.0, 2.0, 3.0)`. `putf(f64(x), n)` prints with `n` decimals like C's `%.nf`.
+- `vec3` in memory is exactly 12 bytes, so `[]vec3` or a struct of vectors can be handed to a
+  GPU API as is.
+- The address of a component (`&v.x`) cannot be taken; copy it to a variable.
+- Vector, matrix and quaternion constants (`const UP = vec3(0.0, 1.0, 0.0)`) are allowed.
+
 ## Constants
 
 `PI`, `TAU`, `HALF_PI`, `E`, `DEG2RAD`, `RAD2DEG`, `EPSILON` (1e-6), `INF`, `NAN`. They are

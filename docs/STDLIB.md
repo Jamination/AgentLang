@@ -1,15 +1,15 @@
 # AL standard library
 
 Everything here ships inside the compiler: there is nothing to install and no search path.
-`alc sigs file.al -- std` lists every declaration that a program can see (the modules' internal
-helpers are `priv` and do not appear: a program may reuse their names).
+`alc sigs file.al -- std` lists every declaration that a program can see (internal helpers that
+are `priv` do not appear: a program may reuse their names).
 
 ## Always available (no `use`)
 
 | Part | What it gives | Reference |
 |------|---------------|-----------|
-| core | printing, `Vec`, `Map`, strings, sorting, parsing, file I/O with `io_error()`, arena memory and regions, `clone`, `args` | [LANGUAGE.md](LANGUAGE.md#standard-library) |
-| built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [LANGUAGE.md](LANGUAGE.md#f32-vectors-matrices) |
+| core | printing (`print`, `eprint`), `Vec`, `Map`, strings, sorting, parsing, `Opt`, file I/O with `io_error()`, `args`, `env_get`, arena memory and regions, `clone`: every signature with its edge cases | [LANGUAGE.md](LANGUAGE.md#standard-library) |
+| built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [std/math.md](std/math.md#the-built-in-types-f32-vec2-vec3-vec4-quat-mat4) |
 | math | scalar functions for `f32`/`f64`, vector / quaternion / matrix functions, geometry tests, easing, colour | [std/math.md](std/math.md) |
 | rand | seedable generators, ranges, shuffles, noise | [std/rand.md](std/rand.md) |
 | time | clocks, sleeping, frame clock, fixed timestep, timers | [std/time.md](std/time.md) |
@@ -34,3 +34,6 @@ dynamically linked executable that needs only the libraries of the functions it 
 For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 How to structure a game on top of these: [GAMES.md](GAMES.md).
+
+Language fine print that few programs need (exact overloading and `priv` rules, bounds-check
+placement, region limits, C interop, the grammar): [DETAILS.md](DETAILS.md).

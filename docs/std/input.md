@@ -194,3 +194,13 @@ frame 2 move -1.0 jump pressed false jump held false typed 0
 ```
 
 Note: `in` is a keyword in AL, so call the variable `inp` or `input`.
+
+## Internal helpers
+
+Public because the module's own state machine is built from them; not meant for programs, and
+listed for completeness (`alc sigs file.al -- std` shows them):
+`input_press(state: u8, repeat: bool) -> u8`, `input_release(state: u8) -> u8` (the next state
+byte of a key or button), `input_mouse_to(i: *Input, x: i64, y: i64)`,
+`input_key_state(i: *Input, key: i64) -> u8`, `input_button_state(i: *Input, button: i64) -> u8`,
+`input_pad_state(g: *Gamepad, button: i64) -> u8` (the raw state bytes behind the `*_down` /
+`*_pressed` / `*_released` queries), `input_action_bits(m: *ActionMap, i: *Input, action: i64) -> u8`.

@@ -39,13 +39,13 @@ Vulkan loader), which must be installed together with a driver.
 | `VK_API_VERSION_1_x`, `VK_NULL_HANDLE`, `VK_WHOLE_SIZE`, `VK_KHR_SWAPCHAIN_EXTENSION_NAME`, ... | constants (`u32`, `u64`, `str`) |
 | window-system types | `Display*`, `xcb_connection_t*`, `wl_display*`, `wl_surface*` are `*u8`; `Window`, `VisualID` are `u64`; `xcb_window_t`, `xcb_visualid_t` are `u32` |
 
-AL has no type aliases, so the C type of a field or parameter that became `i32`/`u32`/`u64`/`*u8`
+AL types have one name each, so the C type of a field or parameter that became `i32`/`u32`/`u64`/`*u8`
 is kept as a comment: every struct field carries `// VkFormat`-style notes and every `extern` is
 preceded by its C prototype. `std/vk.al` is meant to be searched (`grep -n 'struct VkImageCreateInfo' -A 16 std/vk.al`).
 
 A field or parameter whose name is an AL keyword would get a trailing underscore (none of the
-current names needs it). Struct names that are aliases in C (`VkPhysicalDeviceVariablePointerFeatures`)
-are listed as comments only; use the name they point to.
+current names needs it). Struct names that C defines as a second name of another struct
+(`VkPhysicalDeviceVariablePointerFeatures`) are listed as comments only; use the name they point to.
 
 ## Passing things to Vulkan
 
