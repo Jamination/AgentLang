@@ -687,7 +687,8 @@ fn bar_newline(p *Parser) {
 
 // the parameter types of a closure type after the opening `|`, and the closing `|`
 fn parser_closure_types(p *Parser, v *Vec[TypeAst]) bool {
-    while !(p.is_p("|") || p.is_p("||")) {
+    // (a `|` here starts a parameter that is itself a closure type: `| |i64| bool, i64|`)
+    loop {
         t, ok := p.ty()
         if !ok {
             return false
@@ -696,6 +697,10 @@ fn parser_closure_types(p *Parser, v *Vec[TypeAst]) bool {
         if !p.eat_p(",") {
             break
         }
+    }
+    if !(p.is_p("|") || p.is_p("||")) && p.starts_type() {
+        z, ok := p.err[bool]("a closure type lists only the parameter types, without names (`|i64, i64| bool`): expected `,` or `|`")
+        return ok
     }
     return p.close_bar()
 }

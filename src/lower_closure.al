@@ -259,6 +259,14 @@ fn closure_fn_type(self *Fx, t i64) i64 {
     }
 }
 
+// the note for a type mismatch where a closure value meets a plain function type
+fn closure_fn_hint(self *Fx, from i64, to i64) str {
+    if self.cx.types.fn_to_closure(to, from) {
+        return " (a closure value may carry an environment, so it is not a plain function; only a closure literal that uses no local variables can be written where `fn` is expected)"
+    }
+    return ""
+}
+
 // ---------- values ----------
 // the closure value (code, env) of type `ty` in a fresh temporary
 fn closure_make(self *Fx, ty i64, code i64, env i64) Val {

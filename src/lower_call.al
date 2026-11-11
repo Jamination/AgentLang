@@ -1655,7 +1655,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b))
+            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, self.closure_fn_hint(v.ty, pt)))
             failed = true
         }
         final_vals.push(v)

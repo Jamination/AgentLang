@@ -333,6 +333,10 @@ fn name(self *Types, t i64) str {
         }
         TyKClosure(p, r) => {
             ps := types_names(self, p)
+            if starts_with(ps, "|") {
+                // `||` would be read as an empty parameter list
+                ps = concat(" ", ps)
+            }
             if r == T_UNIT {
                 return fmt("|", ps, "|")
             } else {

@@ -232,6 +232,10 @@ fn ast_type_str(t *TypeAst) str {
         }
         TypeAstClosure(ps, r) => {
             p := ast_type_str_list(&ps)
+            if starts_with(p, "|") {
+                // `||` would be read as an empty parameter list
+                p = concat(" ", p)
+            }
             match r {
                 Some(r2) => {
                     return fmt("|", p, "| ", ast_type_str(r2))
