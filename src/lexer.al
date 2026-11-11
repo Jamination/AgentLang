@@ -14,9 +14,6 @@ enum Tk {
 struct Token {
     t Tk
     pos Pos
-    // a `|` or `||` at the end of a line where a newline ends a statement: the parser turns
-    // the line end into a TkNl when the token closes a closure type (`var f |i64|`)
-    nl bool
 }
 
 var LEXER_KEYWORDS = [27]str{
@@ -113,9 +110,6 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
                         }
                         TkP(p) => {
                             term = p == ")" || p == "]" || p == "}"
-                            if p == "|" || p == "||" {
-                                out[out.len - 1].nl = true
-                            }
                         }
                         TkKw(k) => {
                             term = k == "return" || k == "break" || k == "continue" || k == "true" || k == "false" || k == "nil"

@@ -18,8 +18,6 @@ enum TypeAst {
     TypeAstArray(*Expr, *TypeAst),
     TypeAstFn(Vec[TypeAst], Opt[*TypeAst]),
     TypeAstTuple(Vec[TypeAst]),
-    // closure type `|A, B| R`
-    TypeAstClosure(Vec[TypeAst], Opt[*TypeAst]),
 }
 
 enum UnOp {
@@ -74,8 +72,6 @@ enum EK {
     EKIf(*Expr, Block, Block),
     EKTuple(Vec[Expr]),
     EKMatch(*Expr, Vec[MatchArm]),
-    // closure literal `|a A, b B| R { body }`: parameters, result type, body
-    EKClosure(Vec[(str, TypeAst)], Opt[*TypeAst], *Block),
 }
 
 struct MatchArm {
@@ -134,6 +130,8 @@ enum SK {
     // `break name` / `continue name`
     SKBreakTo(str),
     SKContinueTo(str),
+    // `fn name(params) R { body }` inside a block: a nested function
+    SKFn(*FnDecl),
 }
 
 struct FnDecl {
@@ -263,21 +261,6 @@ fn ast_type_str(t *TypeAst) str {
         }
         TypeAstTuple(ts) => {
             return fmt("(", ast_type_str_list(&ts), ")")
-        }
-        TypeAstClosure(ps, r) => {
-            p := ast_type_str_list(&ps)
-            if starts_with(p, "|") {
-                // `||` would be read as an empty parameter list
-                p = concat(" ", p)
-            }
-            match r {
-                Some(r2) => {
-                    return fmt("|", p, "| ", ast_type_str(r2))
-                }
-                None => {
-                    return fmt("|", p, "|")
-                }
-            }
         }
     }
     return ""

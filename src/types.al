@@ -18,8 +18,6 @@ enum TyK {
     TyKTuple(Vec[i64]),
     TyKFn(Vec[i64], i64),
     TyKNever,
-    // closure `|A, B| R`: code pointer + environment pointer (16 bytes)
-    TyKClosure(Vec[i64], i64),
 }
 
 const T_ERR = 0
@@ -138,13 +136,6 @@ fn types_key(k TyK) str {
             return fmt("F", join(parts.items(), ","), ">", r)
         }
         TyKNever => return "!"
-        TyKClosure(p, r) => {
-            parts := vec[str]()
-            for t in p.items() {
-                parts.push(fmt(t))
-            }
-            return fmt("C", join(parts.items(), ","), ">", r)
-        }
     }
 }
 
@@ -201,7 +192,6 @@ fn types_kind_copy(k TyK) TyK {
     match k {
         TyKTuple(v) => return TyKTuple(clone(&v))
         TyKFn(p, r) => return TyKFn(clone(&p), r)
-        TyKClosure(p, r) => return TyKClosure(clone(&p), r)
         _ => return k
     }
 }
@@ -230,41 +220,6 @@ fn ptr_to(self *Types, t i64) i64 {
 
 fn slice(self *Types, t i64) i64 {
     return self.intern(TyKSlice(t))
-}
-
-// the closure type `|P...| R`
-fn closure(self *Types, ptys Vec[i64], rty i64) i64 {
-    return self.intern(TyKClosure(ptys, rty))
-}
-
-// (parameter types, result type) of a function type or a closure type
-fn callable_sig(self *Types, t i64) Opt[(Vec[i64], i64)] {
-    match self.k(t) {
-        TyKFn(p, r) => return Some((p, r))
-        TyKClosure(p, r) => return Some((p, r))
-        _ => return None
-    }
-}
-
-fn is_closure(self *Types, t i64) bool {
-    match self.k(t) {
-        TyKClosure(p, r) => return true
-        _ => return false
-    }
-}
-
-// is `from` a function type with the parameter and result types of the closure type `to`?
-// (such a value converts to the closure implicitly)
-fn fn_to_closure(self *Types, from i64, to i64) bool {
-    match self.k(to) {
-        TyKClosure(cp, cr) => {
-            match self.k(from) {
-                TyKFn(fp, fr) => return fr == cr && fp.items() == cp.items()
-                _ => return false
-            }
-        }
-        _ => return false
-    }
 }
 
 fn is_int(self *Types, t i64) bool {
@@ -331,18 +286,6 @@ fn name(self *Types, t i64) str {
                 return fmt("fn(", ps, ")")
             } else {
                 return fmt("fn(", ps, ") ", self.name(r))
-            }
-        }
-        TyKClosure(p, r) => {
-            ps := types_names(self, p)
-            if starts_with(ps, "|") {
-                // `||` would be read as an empty parameter list
-                ps = concat(" ", ps)
-            }
-            if r == T_UNIT {
-                return fmt("|", ps, "|")
-            } else {
-                return fmt("|", ps, "| ", self.name(r))
             }
         }
     }
@@ -473,7 +416,6 @@ fn size_of(self *Types, t i64) i64 {
             return self.enums[e].size
         }
         TyKTuple(v) => return self.layout_fields(v.items()).1
-        TyKClosure(p, r) => return 16
     }
 }
 
@@ -495,7 +437,6 @@ fn align_of(self *Types, t i64) i64 {
             return self.structs[s].align
         }
         TyKTuple(v) => return self.layout_fields(v.items()).2
-        TyKClosure(p, r) => return 8
     }
 }
 
@@ -626,13 +567,6 @@ fn leaves(self *Types, t i64, base i64, out *Vec[Leaf]) {
                 }
             }
         }
-        TyKClosure(p, r) => {
-            // code pointer, environment pointer
-            f0 := self.field_id(t, 0)
-            f1 := self.field_id(t, 1)
-            out.push(Leaf{off: base, t: TI64, alias: AK_PTR | (f0 << 4)})
-            out.push(Leaf{off: base + 8, t: TI64, alias: AK_PTR | (f1 << 4)})
-        }
     }
 }
 
@@ -680,7 +614,6 @@ fn leaf_count(self *Types, t i64) i64 {
             return total
         }
         TyKSlice(e) => return 2
-        TyKClosure(p, r) => return 2
         TyKMat4 => return 4
         TyKEnum(e) => return self.size_of(t) / 8
         TyKErr, TyKUnit, TyKNever => return 0

@@ -51,6 +51,13 @@ struct Fx {
     // argument expressions that were evaluated ahead of their call (see `call_shared`):
     // `expr` yields the stored value instead of lowering the expression again
     memo Vec[(*Expr, Val)]
+    // the nested functions that can be called here (lower_nested.al); a name in `scopes`
+    // whose type slot is negative refers to the entry -(slot) - 1
+    nested Vec[NestedFn]
+    // the blocks that are being lowered, outermost first
+    blocks Vec[*Block]
+    // in a nested function: names declared after it in the enclosing function (name, line)
+    later Vec[(str, i64)]
 }
 
 fn lower_fn_str_less(a str, b str) bool {
@@ -179,14 +186,15 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
     for i in 0..min(d.tparams.len, targs.len) {
         tenv.set(d.tparams[i], targs[i])
     }
-    lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, vec[(str, i64)]())
+    lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, nil)
 }
 
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
-// declared function `name`, or the function of a closure literal (`name` is empty). `caps`
-// are the variables a closure captures (name, type): the last IR parameter is then the
-// environment, an array of their addresses, and the names are declared in the outermost scope.
-fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, caps Vec[(str, i64)]) {
+// top-level function (`nest` is nil) or a nested function. The IR parameters of a nested
+// function end with the addresses of the variables it uses of the enclosing function
+// (`nest.caps`); those names, and the nested functions it may call, are declared in the
+// outermost scope.
+fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, nest *NestCtx) {
     sig := cx.fn_sigs[fid]
     ptys := sig.0
     rty := sig.1
@@ -249,16 +257,36 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
             }
         }
     }
-    if caps.len != 0 {
-        // the environment of a closure: the addresses of the captured variables
-        envp := fx.ins(OpParam, TI64, vec[i64](), pi)
-        for i in 0..caps.len {
-            if !fx.scopes[0].vars.has(caps[i].0) {
-                a := fx.add_off(envp, 8 * i)
-                addr := fx.load_raw(a, TI64, AK_PTR)
-                fx.scopes[0].vars.set(caps[i].0, (caps[i].1, addr))
+    if nest != nil {
+        hidden := vec[i64]()
+        for i in 0..nest.caps.len {
+            c := nest.caps[i]
+            p := fx.ins(OpParam, TI64, vec[i64](), pi)
+            pi += 1
+            hidden.push(p)
+            if c.by_name && !fx.scopes[0].vars.has(c.name) {
+                fx.scopes[0].vars.set(c.name, (c.ty, p))
             }
         }
+        for i in 0..nest.imports.len {
+            // a nested function this one may call: what it needs is among the hidden parameters
+            imp := nest.imports[i]
+            mine := NestedFn{decl: imp.decl, fid: imp.fid, ptys: imp.ptys, rty: imp.rty, caps: vec[Capture]()}
+            for j in 0..imp.caps.len {
+                c := imp.caps[j]
+                for k in 0..nest.caps.len {
+                    if nest.caps[k].addr == c.addr {
+                        mine.caps.push(Capture{name: c.name, ty: c.ty, addr: hidden[k], by_name: c.by_name})
+                        break
+                    }
+                }
+            }
+            if !fx.scopes[0].vars.has(imp.decl.name) {
+                fx.scopes[0].vars.set(imp.decl.name, (-(fx.nested.len + 1), 0))
+            }
+            fx.nested.push(mine)
+        }
+        fx.later = nest.later
     }
     want := rty != T_UNIT && rty != T_NEVER
     var expect Opt[i64] = None
@@ -272,8 +300,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
         } else if rty == T_UNIT {
             fx.terminate(TermRet(vec[i64]()))
         } else if v.ty == T_UNIT {
-            what := if name == "" { "the closure" } else { fmt("function `", name, "`") }
-            fx.cx.err(body.end, fmt(what, " must return a value of type ", fx.cx.types.name(rty)))
+            fx.cx.err(body.end, fmt("function `", name, "` must return a value of type ", fx.cx.types.name(rty)))
             fx.terminate(TermTrap)
         } else {
             v2 := fx.coerce(v, rty, body.end)
@@ -494,16 +521,9 @@ fn coerce(self *Fx, v Val, to i64, pos Pos) Val {
     if v.ty == T_NEVER {
         return val_never()
     }
-    if self.cx.types.fn_to_closure(v.ty, to) {
-        return self.fn_as_closure(v, to)
-    }
     a := self.tyname(to)
     b := self.tyname(v.ty)
-    var hint str = self.closure_fn_hint(v.ty, to)
-    if hint == "" {
-        hint = lower_match_same_name(a, b)
-    }
-    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, hint))
+    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, lower_match_same_name(a, b)))
     return val_err()
 }
 
@@ -563,8 +583,13 @@ fn declare(self *Fx, name str, ty i64, pos Pos) i64 {
     if name == "_" {
         return addr
     }
-    if self.scopes[self.scopes.len - 1].vars.has(name) {
-        self.err(pos, fmt("`", name, "` is already declared in this scope (use `=` to assign)"))
+    old, known := self.scopes[self.scopes.len - 1].vars.get(name)
+    if known {
+        if old.0 < 0 {
+            self.err(pos, fmt("`", name, "` is already declared in this scope, as a nested function"))
+        } else {
+            self.err(pos, fmt("`", name, "` is already declared in this scope (use `=` to assign)"))
+        }
     }
     self.scopes[self.scopes.len - 1].vars.set(name, (ty, addr))
     return addr
@@ -573,10 +598,12 @@ fn declare(self *Fx, name str, ty i64, pos Pos) i64 {
 // ---------- blocks / statements ----------
 fn block(self *Fx, b *Block) {
     self.push_scope()
+    self.blocks.push(b)
     for i in 0..b.stmts.len {
         self.stmt(&b.stmts[i])
         lint_copy_writes(self, b, i)
     }
+    self.blocks.pop()
     self.pop_scope()
 }
 
@@ -586,6 +613,7 @@ fn block_value(self *Fx, b *Block, want bool, expect Opt[i64]) Val {
         return val_unit()
     }
     self.push_scope()
+    self.blocks.push(b)
     n := b.stmts.len
     v := val_unit()
     for i in 0..n {
@@ -625,6 +653,7 @@ fn block_value(self *Fx, b *Block, want bool, expect Opt[i64]) Val {
         s := self.scalar(v)
         v = self.sval(v.ty, s)
     }
+    self.blocks.pop()
     self.pop_scope()
     return v
 }
@@ -645,7 +674,6 @@ fn lower_fn_stmt_expr_kind(e *Expr) i64 {
             }
             return 1
         }
-        EKClosure(_, _, _) => return 1
         _ => {}
     }
     return 3
@@ -1032,6 +1060,9 @@ fn stmt(self *Fx, s *Stmt) {
         }
         SKContinueTo(label) => {
             lower_fn_break_continue_to(self, s.pos, false, label)
+        }
+        SKFn(d) => {
+            self.nested_fn(d)
         }
     }
 }

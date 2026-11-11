@@ -229,12 +229,6 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                             self.zero(v)
                             return v
                         }
-                        TyKClosure(ps, r) => {
-                            tmp := self.temp(et)
-                            v := self.mval(et, tmp)
-                            self.zero(v)
-                            return v
-                        }
                         TyKErr => { return val_err() }
                         _ => {}
                     }
@@ -363,13 +357,6 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             return dst
         }
         EKTypeE(ta) => {
-            match ta {
-                TypeAstClosure(cps, cr) => {
-                    self.err(e.pos, "a closure type cannot be used as a value here (a closure literal has typed parameters and a block body: `|a i64, b i64| bool { a < b }`)")
-                    return val_err()
-                }
-                _ => {}
-            }
             self.err(e.pos, "a type cannot be used as a value here")
             return val_err()
         }
@@ -398,15 +385,6 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                     None => {}
                 }
                 v0 := self.expr(x, xe)
-                match exp_tys {
-                    Some(t) => {
-                        if self.cx.types.fn_to_closure(v0.ty, t[i]) {
-                            // a function value for an element of a closure type
-                            v0 = self.fn_as_closure(v0, t[i])
-                        }
-                    }
-                    None => {}
-                }
                 // stabilize scalars now; aggregates are copied below
                 if v0.ty == T_ERR {
                     return val_err()
@@ -442,7 +420,6 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             return self.mval(ty, t)
         }
         EKMatch(sc, arms) => { return self.match_expr(sc, arms.items(), true, expect, e.pos) }
-        EKClosure(ps, r, body) => { return self.closure_lit(&ps, r, body, expect, e.pos) }
     }
     return val_err()
 }
@@ -459,6 +436,9 @@ fn rvalue(self *Fx, p Val) Val {
 fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
     match self.lookup(n) {
         Some(x) => {
+            if x.0 < 0 {
+                return self.nested_value(-x.0 - 1, pos)
+            }
             m := self.mval(x.0, x.1)
             return self.rvalue(m)
         }
@@ -524,7 +504,7 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
         "self", "this" => " (methods are plain functions: name the receiver parameter explicitly)"
         _ => ""
     }
-    self.err(pos, fmt("unknown identifier `", n, "`", hint, self.cx.priv_hint(n)))
+    self.err(pos, fmt("unknown identifier `", n, "`", hint, self.nested_hint(n, pos), self.cx.priv_hint(n)))
     return val_err()
 }
 
@@ -579,7 +559,13 @@ fn place_raw(self *Fx, e *Expr) Opt[Val] {
     match e.k {
         EKIdent(n) => {
             match self.lookup(n) {
-                Some(x) => { return Some(self.mval(x.0, x.1)) }
+                Some(x) => {
+                    if x.0 < 0 {
+                        self.err(e.pos, fmt("`", n, "` is a nested function: it is not assignable"))
+                        return None
+                    }
+                    return Some(self.mval(x.0, x.1))
+                }
                 None => {}
             }
             if !self.cx.const_decls.has(n) {
@@ -594,7 +580,12 @@ fn place_raw(self *Fx, e *Expr) Opt[Val] {
             if self.cx.const_decls.has(n) || is_some(self.cx.find_fn(n)) {
                 self.err(e.pos, fmt("`", n, "` is not assignable"))
             } else {
-                self.err(e.pos, fmt("unknown variable `", n, "` (declare it with `:=`)", self.cx.priv_hint(n)))
+                hint := self.nested_hint(n, e.pos)
+                if hint != "" {
+                    self.err(e.pos, fmt("unknown variable `", n, "`", hint))
+                } else {
+                    self.err(e.pos, fmt("unknown variable `", n, "` (declare it with `:=`)", self.cx.priv_hint(n)))
+                }
             }
             return None
         }
@@ -1246,11 +1237,6 @@ fn binary_vals(self *Fx, op BinOp, l Val, r Val, pos Pos) Val {
             TyKArray(et, n) => { agg_eq = true }
             TyKStruct(sid) => { agg_eq = true }
             TyKTuple(ts) => { agg_eq = true }
-            TyKClosure(ps, rt) => {
-                tn := self.tyname(l.ty)
-                self.err(pos, fmt("closures cannot be compared (operands of type ", tn, ")"))
-                return val_err()
-            }
             _ => {}
         }
         if is_f {

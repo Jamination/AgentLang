@@ -3,8 +3,6 @@
 enum Callee {
     CalleeDirect(i64),
     CalleeInd(i64),
-    // a closure value: code pointer, environment pointer (passed as an extra last argument)
-    CalleeClosure(i64, i64),
 }
 
 fn lower_call_has_call(e *Expr) bool {
@@ -133,19 +131,6 @@ fn lower_call_mentions_unbound(t *TypeAst, tparams []str, env *Map[str, i64]) bo
         TypeAstTuple(ts) => {
             return lower_call_any_mentions_unbound(&ts, tparams, env)
         }
-        TypeAstClosure(ps, r) => {
-            if lower_call_any_mentions_unbound(&ps, tparams, env) {
-                return true
-            }
-            match r {
-                Some(rt) => {
-                    return lower_call_mentions_unbound(rt, tparams, env)
-                }
-                None => {
-                    return false
-                }
-            }
-        }
     }
     return false
 }
@@ -183,14 +168,6 @@ fn lower_call_is_fn(k TyK) bool {
     }
 }
 
-// a function type or a closure type
-fn lower_call_is_callable(k TyK) bool {
-    match k {
-        TyKFn(_, _) => true
-        TyKClosure(_, _) => true
-        _ => false
-    }
-}
 
 fn lower_call_is_slice(k TyK) bool {
     match k {
@@ -486,35 +463,6 @@ fn unify(self *Fx, t *TypeAst, ty i64, tparams []str, env *Map[str, i64]) bool {
                 }
             }
         }
-        TypeAstClosure(ps, r) => {
-            // a closure parameter also takes a function value with these types
-            match self.cx.types.callable_sig(ty) {
-                Some(sig) => {
-                    pt := sig.0
-                    if pt.len != ps.len {
-                        return false
-                    }
-                    ok := true
-                    for i in 0..ps.len {
-                        if !self.unify(&ps[i], pt[i], tparams, env) {
-                            ok = false
-                        }
-                    }
-                    match r {
-                        Some(ra) => {
-                            if !self.unify(ra, sig.1, tparams, env) {
-                                ok = false
-                            }
-                        }
-                        None => {}
-                    }
-                    return ok
-                }
-                None => {
-                    return false
-                }
-            }
-        }
     }
     return false
 }
@@ -606,9 +554,6 @@ fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
         CalleeInd(f) => {
             ir_args.push(f)
         }
-        CalleeClosure(f, env) => {
-            ir_args.push(f)
-        }
         _ => {}
     }
     rabi := self.cx.abi_ret(rty)
@@ -652,12 +597,6 @@ fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
             k = fid
         }
         CalleeInd(_) => {
-            op = OpCallInd
-            k = 0
-        }
-        CalleeClosure(_, env) => {
-            // the environment follows the declared arguments; a plain function ignores it
-            ir_args.push(env)
             op = OpCallInd
             k = 0
         }
@@ -716,16 +655,10 @@ fn stabilize(self *Fx, v Val, later []Expr) Val {
 fn call_indirect(self *Fx, fv Val, args []Expr, pos Pos) Val {
     var ptys Vec[i64]
     rty := 0
-    is_closure := false
     match self.cx.types.k(fv.ty) {
         TyKFn(p, r) => {
             ptys = p
             rty = r
-        }
-        TyKClosure(p, r) => {
-            ptys = p
-            rty = r
-            is_closure = true
         }
         TyKErr => {
             return val_err()
@@ -737,19 +670,10 @@ fn call_indirect(self *Fx, fv Val, args []Expr, pos Pos) Val {
         }
     }
     if ptys.len != len(args) {
-        what := if is_closure { fmt("closure of type ", self.tyname(fv.ty)) } else { "function value" }
-        self.err(pos, fmt(what, " expects ", ptys.len, " argument(s), got ", len(args)))
+        self.err(pos, fmt("function value expects ", ptys.len, " argument(s), got ", len(args)))
         return val_err()
     }
-    f := 0
-    env := 0
-    if is_closure {
-        parts := self.closure_parts(fv)
-        f = parts.0
-        env = parts.1
-    } else {
-        f = self.scalar(fv)
-    }
+    f := self.scalar(fv)
     vals := vec[Val]()
     for i in 0..len(args) {
         a := &args[i]
@@ -757,9 +681,6 @@ fn call_indirect(self *Fx, fv Val, args []Expr, pos Pos) Val {
         v = self.coerce(v, ptys[i], a.pos)
         v = self.stabilize(v, args[i + 1..])
         vals.push(v)
-    }
-    if is_closure {
-        return self.emit_call(CalleeClosure(f, env), ptys.items(), rty, vals)
     }
     return self.emit_call(CalleeInd(f), ptys.items(), rty, vals)
 }
@@ -819,9 +740,15 @@ fn recv_val(self *Fx, recv *Expr) Val {
 fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
     match c.k {
         EKIdent(n) => {
-            if is_some(self.lookup(n)) {
-                fv := self.expr(c, None)
-                return self.call_indirect(fv, args, pos)
+            match self.lookup(n) {
+                Some(x) => {
+                    if x.0 < 0 {
+                        return self.call_nested(-x.0 - 1, None, args, expect, pos)
+                    }
+                    fv := self.expr(c, None)
+                    return self.call_indirect(fv, args, pos)
+                }
+                None => {}
             }
             // a variant; in a call, a builtin function or type of the same name wins
             // (`len(x)`, `i64(x)`): such a variant is constructed as `Enum.Variant(..)`
@@ -870,13 +797,18 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 "int", "float" => " (convert with a type name: `i64(x)`, `f64(x)`)"
                 _ => ""
             }
-            self.err(pos, fmt("unknown function `", n, "`", hint, self.cx.priv_hint(n)))
+            self.err(pos, fmt("unknown function `", n, "`", hint, self.nested_hint(n, pos), self.cx.priv_hint(n)))
             lower_call_eval_all(self, args)
             return val_err()
         }
         EKIndex(b, targs) => {
             match b.k {
                 EKIdent(n) => {
+                    if self.nested_named(n) >= 0 {
+                        self.err(pos, fmt("the nested function `", n, "` takes no type arguments (a nested function has no type parameters of its own)"))
+                        lower_call_eval_all(self, args)
+                        return val_err()
+                    }
                     is_var := is_some(self.lookup(n)) || (self.cx.global_decls.has(n) && !is_some(self.cx.find_fn(n)))
                     if !is_var {
                         env := self.tenv
@@ -993,7 +925,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                     nf := self.cx.types.structs[sid].fields.len
                     for j in 0..nf {
                         f := self.cx.types.structs[sid].fields[j]
-                        if f.0 == ast_plain(name) && lower_call_is_callable(self.cx.types.k(f.1)) {
+                        if f.0 == ast_plain(name) && lower_call_is_fn(self.cx.types.k(f.1)) {
                             is_fn_field = true
                             break
                         }
@@ -1012,6 +944,11 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                     }
                 }
                 _ => {}
+            }
+            // a nested function in scope comes before the top-level functions and builtins
+            ni := self.nested_method(name)
+            if ni >= 0 {
+                return self.call_nested(ni, Some(rv), args, expect, pos)
             }
             cands := self.cx.fn_candidates(name)
             if lower_mem_is_builtin(name) {
@@ -1094,8 +1031,6 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
     has_want := false
     var wp Vec[i64]
     wr := 0
-    // the expected type when it is a closure type: the function is converted to it
-    want_closure := T_ERR
     match expect {
         Some(t) => {
             match self.cx.types.k(t) {
@@ -1103,12 +1038,6 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
                     has_want = true
                     wp = p
                     wr = r
-                }
-                TyKClosure(p, r) => {
-                    has_want = true
-                    wp = p
-                    wr = r
-                    want_closure = t
                 }
                 _ => {}
             }
@@ -1178,12 +1107,12 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
                 got := self.cx.module.externs[x].got
                 a := self.ins(OpGAddr, TI64, vec[i64](), got)
                 v := self.load_raw(a, TI64, AK_PTR)
-                return Some(self.coerce_fn_value(self.sval(ty, v), want_closure))
+                return Some(self.sval(ty, v))
             }
             None => {}
         }
         v := self.ins(OpFAddr, TI64, vec[i64](), fid)
-        return Some(self.coerce_fn_value(self.sval(ty, v), want_closure))
+        return Some(self.sval(ty, v))
     }
     return None
 }
@@ -1214,7 +1143,7 @@ fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *Type
         return true
     }
     t := lower_call_resolve_in(s, d, pt, &env)
-    return t == ty || s.cx.types.fn_to_closure(ty, t)
+    return t == ty
 }
 
 // does parameter type `pt` of declaration `d` accept a value of type `ty`?
@@ -1223,7 +1152,7 @@ fn param_accepts(self *Fx, d *FnDecl, pt *TypeAst, ty i64, is_recv bool, explici
     if d.tparams.len == 0 {
         empty := map[str, i64]()
         t := lower_call_resolve_in(self, d, pt, &empty)
-        return t == ty || lower_call_param_accepts_adjust(self, is_recv, ty, t) || self.cx.types.fn_to_closure(ty, t)
+        return t == ty || lower_call_param_accepts_adjust(self, is_recv, ty, t)
     }
     base := map[str, i64]()
     match explicit {
@@ -1288,7 +1217,7 @@ fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
     }
     match a.k {
         EKNil => {
-            if lower_call_is_ptr(k) || lower_call_is_callable(k) || lower_call_is_slice(k) {
+            if lower_call_is_ptr(k) || lower_call_is_fn(k) || lower_call_is_slice(k) {
                 return Some(0)
             }
             return None
@@ -1394,34 +1323,6 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             if keep.len != 0 {
                 alive = keep
             }
-            continue
-        }
-        // a closure literal has the closure type of its written parameter and result types;
-        // it is lowered later, when the parameter type is known
-        lit_ty := self.closure_lit_type_of(a)
-        if lit_ty != T_ERR {
-            for round in 0..2 {
-                // an exact closure parameter first, then a plain function type
-                want_ty := if round == 0 { lit_ty } else { self.closure_fn_type(lit_ty) }
-                for ai in 0..alive.len {
-                    di := alive[ai]
-                    d := self.cx.fn_decls[di]
-                    if self.param_accepts(d, &d.params[off + i].1, want_ty, false, lower_call_as_slice(explicit)) {
-                        keep.push(di)
-                    }
-                }
-                if keep.len != 0 {
-                    break
-                }
-            }
-            if keep.len == 0 {
-                tn := self.tyname(lit_ty)
-                s := lower_call_call_overloaded_sigs(self, cands)
-                self.err(a.pos, fmt("no definition of `", name, "` takes ", tn, " as argument ", off + i + 1, " here; candidates: ", s))
-                lower_call_eval_all(self, args[i + 1..])
-                return val_err()
-            }
-            alive = keep
             continue
         }
         var v Val = self.expr(a, None)
@@ -1534,7 +1435,13 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
 }
 
 fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Expr, expect Opt[i64], pos Pos, pre [](i64, Val)) Val {
-    d := self.cx.fn_decls[di]
+    return self.call_fn(self.cx.fn_decls[di], di, -1, explicit, recv, args, expect, pos, pre)
+}
+
+// A call of the function declared by `d`: the top-level declaration `di`, or (`nest` >= 0)
+// the nested function `self.nested[nest]`, whose types are resolved already and which gets
+// the addresses of the variables it uses as extra arguments.
+fn call_fn(self *Fx, d *FnDecl, di i64, nest i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Expr, expect Opt[i64], pos Pos, pre [](i64, Val)) Val {
     nrecv := if is_some(recv) { 1 } else { 0 }
     if d.params.len != len(args) + nrecv {
         sig := vec[str]()
@@ -1611,8 +1518,13 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
                     }
                 }
             } else if rv.mem && rv.ty != T_ERR && self.cx.types.is_scalar(rv.ty) {
-                empty := map[str, i64]()
-                p0 := lower_call_resolve_in(self, d, &d.params[0].1, &empty)
+                p0 := T_ERR
+                if nest >= 0 {
+                    p0 = self.nested[nest].ptys[0]
+                } else {
+                    empty := map[str, i64]()
+                    p0 = lower_call_resolve_in(self, d, &d.params[0].1, &empty)
+                }
                 by_ref = lower_call_is_ptr_to(self.cx.types.k(p0), rv.ty)
             }
             // a scalar receiver that is passed by value is read now, before the arguments
@@ -1663,23 +1575,8 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             var exp Opt[i64] = None
             if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
                 exp = None
-                // the type of a closure literal is known before it is lowered: it binds the
-                // type parameters, so that the literal is lowered with the parameter type
-                lit_ty := self.closure_lit_type_of(a)
-                if lit_ty != T_ERR {
-                    e2 := lower_call_clone_env(&env)
-                    if self.unify(pt, lit_ty, d.tparams.items(), &e2) {
-                        env = e2
-                    } else {
-                        e3 := lower_call_clone_env(&env)
-                        if self.unify(pt, self.closure_fn_type(lit_ty), d.tparams.items(), &e3) {
-                            env = e3
-                        }
-                    }
-                    if !lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
-                        exp = Some(self.cx.resolve(pt, &env))
-                    }
-                }
+            } else if nest >= 0 {
+                exp = Some(self.nested[nest].ptys[pi])
             } else {
                 // (errors in the parameter type are reported where the function is declared)
                 t := lower_call_resolve_in(self, d, pt, &env)
@@ -1731,17 +1628,26 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             }
         }
     }
-    self.cx.inst_depth += 1
-    if self.cx.inst_depth > 200 {
-        self.err(pos, "generic instantiation is too deep")
+    fid := 0
+    var ptys Vec[i64]
+    rty := T_UNIT
+    if nest >= 0 {
+        fid = self.nested[nest].fid
+        ptys = clone(&self.nested[nest].ptys)
+        rty = self.nested[nest].rty
+    } else {
+        self.cx.inst_depth += 1
+        if self.cx.inst_depth > 200 {
+            self.err(pos, "generic instantiation is too deep")
+            self.cx.inst_depth -= 1
+            return val_err()
+        }
+        fid = self.cx.inst_fn(di, targs)
         self.cx.inst_depth -= 1
-        return val_err()
+        fsig := self.cx.fn_sigs[fid]
+        ptys = clone(fsig.0)
+        rty = fsig.1
     }
-    fid := self.cx.inst_fn(di, targs)
-    self.cx.inst_depth -= 1
-    fsig := self.cx.fn_sigs[fid]
-    ptys := clone(fsig.0)
-    rty := fsig.1
     final_vals := vec[Val]()
     for i in 0..vals.len {
         v := lower_call_unwrap(vals[i])
@@ -1791,17 +1697,10 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
         if i >= nrecv {
             apos = args[i - nrecv].pos
         }
-        if v.ty != pt && self.cx.types.fn_to_closure(v.ty, pt) {
-            // a function value where a closure is expected
-            v = self.fn_as_closure(v, pt)
-        }
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            var hint str = self.closure_fn_hint(v.ty, pt)
-            if hint == "" {
-                hint = lower_match_same_name(a, b)
-            }
+            var hint str = lower_match_same_name(a, b)
             if lower_call_is_ptr_to(self.cx.types.k(pt), v.ty) {
                 hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
             }
@@ -1812,6 +1711,15 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
     }
     if failed {
         return val_err()
+    }
+    if nest >= 0 {
+        // the addresses of the variables the nested function uses
+        for i in 0..self.nested[nest].caps.len {
+            c := self.nested[nest].caps[i]
+            pt := self.cx.types.ptr_to(c.ty)
+            ptys.push(pt)
+            final_vals.push(self.sval(pt, c.addr))
+        }
     }
     return self.emit_call(CalleeDirect(fid), ptys.items(), rty, final_vals)
 }
@@ -2538,9 +2446,6 @@ fn put_val(self *Fx, v Val, pos Pos, depth i64) {
             s := self.scalar(v)
             a := self.sval(T_I64, s)
             self.call_rt("__put_ptr", vec[i64](), vec_of([]Val{a}), pos)
-        }
-        TyKClosure(_, _) => {
-            self.put_lit("<closure>", pos)
         }
         TyKSlice(et) => {
             if et == T_U8 {

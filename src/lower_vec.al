@@ -53,7 +53,13 @@ fn lvalue_base(self *Fx, b *Expr) Val {
     match b.k {
         EKIdent(n) => {
             match self.lookup(n) {
-                Some(x) => return self.mval(x.0, x.1)
+                Some(x) => {
+                    if x.0 >= 0 {
+                        return self.mval(x.0, x.1)
+                    }
+                    // a nested function
+                    return self.expr(b, None)
+                }
                 None => {}
             }
             if !self.cx.const_decls.has(n) {

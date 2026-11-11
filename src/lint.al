@@ -136,7 +136,6 @@ fn lint_expr(u *LintUse, e *Expr) bool {
             }
             true
         }
-        EKClosure(ps, r, body) => lint_block(u, body)
     }
 }
 
@@ -230,6 +229,8 @@ fn lint_stmt(u *LintUse, s *Stmt) bool {
         SKLabeled(label, st) => lint_stmt(u, st)
         SKBreakTo(label) => true
         SKContinueTo(label) => true
+        // a use inside a nested function is a use
+        SKFn(d) => lint_block(u, &d.body)
     }
 }
 

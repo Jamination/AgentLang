@@ -696,23 +696,6 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
             }
             return self.types.intern(TyKTuple(tys))
         }
-        TypeAstClosure(ps, r) => {
-            pts := vec[i64]()
-            for i in 0..ps.len {
-                pts.push(self.resolve(&ps[i], env))
-            }
-            rt := T_UNIT
-            match r {
-                Some(rr) => {
-                    rt = self.resolve(rr, env)
-                }
-                None => {}
-            }
-            if contains(&pts, T_ERR) || rt == T_ERR {
-                return T_ERR
-            }
-            return self.types.closure(pts, rt)
-        }
     }
     return T_ERR
 }
@@ -1037,18 +1020,7 @@ fn global(self *Cx, name str) Opt[(i64, i64)] {
                         g.relocs = relocs
                     }
                 } else {
-                    is_closure_lit := false
-                    match init.k {
-                        EKClosure(_, _, _) => {
-                            is_closure_lit = true
-                        }
-                        _ => {}
-                    }
-                    if is_closure_lit {
-                        self.err(init.pos, "a global cannot be initialized with a closure literal; name a function (`var g |i64| i64 = double`) or assign the literal inside a function")
-                    } else {
-                        self.err(init.pos, "global initializer must be a compile-time constant")
-                    }
+                    self.err(init.pos, "global initializer must be a compile-time constant")
                 }
             }
         }
@@ -1892,32 +1864,6 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     relocs.push((off, RelocTargetFunc(fid)))
                     return true
                 }
-                TyKClosure(ptys, rty) => {
-                    // a (non-generic) function as a closure: its address, no environment
-                    di := -1
-                    match self.find_fn(n) {
-                        Some(fdi) => {
-                            if self.fn_decls[fdi].tparams.is_empty() {
-                                di = fdi
-                            }
-                        }
-                        None => {}
-                    }
-                    if di < 0 {
-                        return false
-                    }
-                    fid := self.inst_fn(di, vec[i64]())
-                    sig := self.fn_sigs[fid]
-                    if sig.0.items() != ptys.items() || sig.1 != rty {
-                        self.err(e.pos, fmt("function `", n, "` does not have the parameter and result types of ", self.types.name(ty)))
-                        return false
-                    }
-                    if is_some(self.module.funcs[fid].ext) {
-                        return false
-                    }
-                    relocs.push((off, RelocTargetFunc(fid)))
-                    return true
-                }
                 _ => {}
             }
         }
@@ -1925,7 +1871,6 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
             match k {
                 TyKPtr(_) => return true
                 TyKFn(_, _) => return true
-                TyKClosure(_, _) => return true
                 _ => {}
             }
         }

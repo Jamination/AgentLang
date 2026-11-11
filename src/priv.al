@@ -120,17 +120,22 @@ fn priv_names(r *PrivCx, v *Vec[str]) {
     }
 }
 
+// a function, top-level or nested: its name, parameters, types and body
+fn priv_fn(r *PrivCx, f *FnDecl) bool {
+    f.name = priv_name(r, f.name)
+    priv_names(r, &f.tparams)
+    for i in 0..f.params.len {
+        f.params[i].0 = priv_name(r, f.params[i].0)
+        priv_type(r, &f.params[i].1)
+    }
+    f.ret = priv_opt_type(r, f.ret)
+    return priv_block(r, f.body)
+}
+
 fn priv_rewrite(r *PrivCx, d Decl) Decl {
     return match d {
         DeclFn(f) => {
-            f.name = priv_name(r, f.name)
-            priv_names(r, &f.tparams)
-            for i in 0..f.params.len {
-                f.params[i].0 = priv_name(r, f.params[i].0)
-                priv_type(r, &f.params[i].1)
-            }
-            f.ret = priv_opt_type(r, f.ret)
-            priv_block(r, f.body)
+            priv_fn(r, &f)
             DeclFn(f)
         }
         DeclStruct(s) => {
@@ -205,13 +210,6 @@ fn priv_type(r *PrivCx, t *TypeAst) bool {
             }
         }
         TypeAstTuple(ts) => priv_types(r, &ts)
-        TypeAstClosure(ps, ret) => {
-            priv_types(r, &ps)
-            match ret {
-                Some(rt) => priv_type(r, rt)
-                None => true
-            }
-        }
     }
 }
 
@@ -289,19 +287,6 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
         EKStr(s) => true
         EKBool(b) => true
         EKNil => true
-        EKClosure(ps, ret, body) => {
-            for i in 0..ps.len {
-                ps[i].0 = priv_name(r, ps[i].0)
-                priv_type(r, &ps[i].1)
-            }
-            match ret {
-                Some(rt) => {
-                    priv_type(r, rt)
-                }
-                None => {}
-            }
-            priv_block(r, *body)
-        }
         EKIdent(n) => {
             nn, found := r.names.get(n)
             if found {
@@ -511,5 +496,7 @@ fn priv_stmt(r *PrivCx, s *Stmt) bool {
         }
         SKBlock(b) => priv_block(r, b)
         SKDefer(b) => priv_block(r, b)
+        // a nested function is a local name: renamed like the variables of that spelling
+        SKFn(d) => priv_fn(r, d)
     }
 }
