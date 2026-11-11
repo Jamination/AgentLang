@@ -216,6 +216,12 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                             self.zero(v)
                             return v
                         }
+                        TyKClosure(ps, r) => {
+                            tmp := self.temp(et)
+                            v := self.mval(et, tmp)
+                            self.zero(v)
+                            return v
+                        }
                         TyKErr => { return val_err() }
                         _ => {}
                     }
@@ -338,6 +344,13 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             return dst
         }
         EKTypeE(ta) => {
+            match ta {
+                TypeAstClosure(cps, cr) => {
+                    self.err(e.pos, "a closure type cannot be used as a value here (a closure literal has typed parameters and a block body: `|a i64, b i64| bool { a < b }`)")
+                    return val_err()
+                }
+                _ => {}
+            }
             self.err(e.pos, "a type cannot be used as a value here")
             return val_err()
         }
@@ -401,6 +414,7 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             return self.mval(ty, t)
         }
         EKMatch(sc, arms) => { return self.match_expr(sc, arms.items(), true, expect, e.pos) }
+        EKClosure(ps, r, body) => { return self.closure_lit(&ps, r, body, expect, e.pos) }
     }
     return val_err()
 }
@@ -1085,6 +1099,11 @@ fn binary_vals(self *Fx, op BinOp, l Val, r Val, pos Pos) Val {
             TyKArray(et, n) => { agg_eq = true }
             TyKStruct(sid) => { agg_eq = true }
             TyKTuple(ts) => { agg_eq = true }
+            TyKClosure(ps, rt) => {
+                tn := self.tyname(l.ty)
+                self.err(pos, fmt("closures cannot be compared (operands of type ", tn, ")"))
+                return val_err()
+            }
             _ => {}
         }
         if is_f {

@@ -542,6 +542,23 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
             }
             return self.types.intern(TyKTuple(tys))
         }
+        TypeAstClosure(ps, r) => {
+            pts := vec[i64]()
+            for i in 0..ps.len {
+                pts.push(self.resolve(&ps.buf[i], env))
+            }
+            rt := T_UNIT
+            match r {
+                Some(rr) => {
+                    rt = self.resolve(rr, env)
+                }
+                None => {}
+            }
+            if contains(&pts, T_ERR) || rt == T_ERR {
+                return T_ERR
+            }
+            return self.types.closure(pts, rt)
+        }
     }
     return T_ERR
 }
@@ -693,6 +710,40 @@ fn abi_ret(self *Cx, t i64) RetAbi {
     return RetAbiSRet
 }
 
+// the IR parameters and results of a function with parameter types `ptys` and result `rty`
+fn fn_abi(self *Cx, f *Func, ptys []i64, rty i64) {
+    match self.abi_ret(rty) {
+        RetAbiNone => {}
+        RetAbiScalar(t) => {
+            f.rets.push(t)
+        }
+        RetAbiFlat(l) => {
+            for i in 0..l.len {
+                f.rets.push(l.buf[i].t)
+            }
+        }
+        RetAbiSRet => {
+            f.params.push(TI64)
+        }
+    }
+    for pi in 0..len(ptys) {
+        pt := ptys[pi]
+        match self.abi_param(pt) {
+            ParamAbiScalar(t) => {
+                f.params.push(t)
+            }
+            ParamAbiFlat(l) => {
+                for i in 0..l.len {
+                    f.params.push(l.buf[i].t)
+                }
+            }
+            ParamAbiByRef => {
+                f.params.push(TI64)
+            }
+        }
+    }
+}
+
 // ---------- function instances ----------
 fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
     known, found := self.fn_insts.get((di, targs.items()))
@@ -723,36 +774,7 @@ fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
     f := func_new(self.inst_name(d.name, targs.items()))
     f.inl = d.inl
     f.noreturn = rty == T_NEVER
-    match self.abi_ret(rty) {
-        RetAbiNone => {}
-        RetAbiScalar(t) => {
-            f.rets.push(t)
-        }
-        RetAbiFlat(l) => {
-            for i in 0..l.len {
-                f.rets.push(l.buf[i].t)
-            }
-        }
-        RetAbiSRet => {
-            f.params.push(TI64)
-        }
-    }
-    for pi in 0..ptys.len {
-        pt := ptys.buf[pi]
-        match self.abi_param(pt) {
-            ParamAbiScalar(t) => {
-                f.params.push(t)
-            }
-            ParamAbiFlat(l) => {
-                for i in 0..l.len {
-                    f.params.push(l.buf[i].t)
-                }
-            }
-            ParamAbiByRef => {
-                f.params.push(TI64)
-            }
-        }
-    }
+    self.fn_abi(&f, ptys.items(), rty)
     match d.ext {
         Some(lib) => {
             // a C function: scalar arguments and result only
@@ -1442,6 +1464,32 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     relocs.push((off, RelocTargetFunc(fid)))
                     return true
                 }
+                TyKClosure(ptys, rty) => {
+                    // a (non-generic) function as a closure: its address, no environment
+                    di := -1
+                    match self.find_fn(n) {
+                        Some(fdi) => {
+                            if self.fn_decls.buf[fdi].tparams.is_empty() {
+                                di = fdi
+                            }
+                        }
+                        None => {}
+                    }
+                    if di < 0 {
+                        return false
+                    }
+                    fid := self.inst_fn(di, vec[i64]())
+                    sig := self.fn_sigs.buf[fid]
+                    if sig.0.items() != ptys.items() || sig.1 != rty {
+                        self.err(e.pos, fmt("function `", n, "` does not have the parameter and result types of ", self.types.name(ty)))
+                        return false
+                    }
+                    if is_some(self.module.funcs.buf[fid].ext) {
+                        return false
+                    }
+                    relocs.push((off, RelocTargetFunc(fid)))
+                    return true
+                }
                 _ => {}
             }
         }
@@ -1449,6 +1497,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
             match k {
                 TyKPtr(_) => return true
                 TyKFn(_, _) => return true
+                TyKClosure(_, _) => return true
                 _ => {}
             }
         }
