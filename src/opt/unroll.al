@@ -19,11 +19,11 @@ const MAX_PARTIAL_SIZE = 400
 
 // the closure `back_of` of analyze: the back-edge input of a header phi, or NOV
 fn unroll_analyze_back_of(f *Func, ph i64, latch i64) i64 {
-    i := &f.insts.buf[ph]
+    i := &f.insts[ph]
     n := min(i.pb.len, i.args.len)
     for k in 0..n {
-        if i.pb.buf[k] == latch {
-            return i.args.buf[k]
+        if i.pb[k] == latch {
+            return i.args[k]
         }
     }
     return NOV
@@ -32,8 +32,8 @@ fn unroll_analyze_back_of(f *Func, ph i64, latch i64) i64 {
 // the leading phis of block `h`
 fn unroll_header_phis(f *Func, h i64) Vec[i64] {
     hphis := vec[i64]()
-    for v in f.blocks.buf[h].insts.items() {
-        if f.insts.buf[v].op != OpPhi {
+    for v in f.blocks[h].insts.items() {
+        if f.insts[v].op != OpPhi {
             break
         }
         hphis.push(v)
@@ -42,22 +42,22 @@ fn unroll_header_phis(f *Func, h i64) Vec[i64] {
 }
 
 fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
-    l := &loops.loops.buf[li]
+    l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
-    if outside.len != 1 || f.succs(outside.buf[0]).len != 1 || l.latches.len != 1 {
+    if outside.len != 1 || f.succs(outside[0]).len != 1 || l.latches.len != 1 {
         return None
     }
-    pre := outside.buf[0]
-    latch := l.latches.buf[0]
+    pre := outside[0]
+    latch := l.latches[0]
     in_loop := vec_fill(f.blocks.len, false)
     for b in l.blocks.items() {
-        in_loop.buf[b] = true
+        in_loop[b] = true
     }
     c := 0
     t := 0
     e := 0
-    match f.blocks.buf[latch].term {
+    match f.blocks[latch].term {
         TermBr(c0, t0, e0) => {
             c = c0
             t = t0
@@ -67,49 +67,49 @@ fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
     }
     back_true := false
     exit_b := 0
-    if t == h && !in_loop.buf[e] {
+    if t == h && !in_loop[e] {
         back_true = true
         exit_b = e
-    } else if e == h && !in_loop.buf[t] {
+    } else if e == h && !in_loop[t] {
         back_true = false
         exit_b = t
     } else {
         return None
     }
     // counted loop with constant bounds
-    ci := &f.insts.buf[c]
+    ci := &f.insts[c]
     if !ci.op.is_icmp() {
         return None
     }
-    next := ci.args.buf[0]
-    end := ci.args.buf[1]
+    next := ci.args[0]
+    end := ci.args[1]
     endk := 0
     match f.is_const(end) {
         Some(k) => endk = k
         None => return None
     }
-    ni := &f.insts.buf[next]
+    ni := &f.insts[next]
     if ni.op != OpAdd {
         return None
     }
     step := 0
-    match f.is_const(ni.args.buf[1]) {
+    match f.is_const(ni.args[1]) {
         Some(k) => step = k
         None => return None
     }
-    phi := ni.args.buf[0]
-    pi := &f.insts.buf[phi]
-    if pi.op != OpPhi || pi.args.len != 2 || !contains(&f.blocks.buf[h].insts, phi) {
+    phi := ni.args[0]
+    pi := &f.insts[phi]
+    if pi.op != OpPhi || pi.args.len != 2 || !contains(&f.blocks[h].insts, phi) {
         return None
     }
     var start_opt Opt[i64] = None
     back := NOV
     for k in 0..pi.pb.len {
-        pb := pi.pb.buf[k]
+        pb := pi.pb[k]
         if pb == pre {
-            start_opt = f.is_const(pi.args.buf[k])
+            start_opt = f.is_const(pi.args[k])
         } else if pb == latch {
-            back = pi.args.buf[k]
+            back = pi.args[k]
         }
     }
     start := 0
@@ -159,8 +159,8 @@ fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
     def_block := f.block_of()
     size := 0
     for b in l.blocks.items() {
-        size += f.blocks.buf[b].insts.len + 1
-        match f.blocks.buf[b].term {
+        size += f.blocks[b].insts.len + 1
+        match f.blocks[b].term {
             TermRet(vs) => return None
             TermNone => return None
             TermTrap => return None
@@ -168,21 +168,21 @@ fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
         }
         ss := f.succs(b)
         for s in ss.items() {
-            if in_loop.buf[s] || (b == latch && s == exit_b) {
+            if in_loop[s] || (b == latch && s == exit_b) {
                 continue
             }
             // side exits must be traps that do not look at loop values
-            sb := &f.blocks.buf[s]
+            sb := &f.blocks[s]
             if !eq(sb.term, TermTrap) {
                 return None
             }
             for v in sb.insts.items() {
-                inst := &f.insts.buf[v]
+                inst := &f.insts[v]
                 if inst.op == OpPhi {
                     return None
                 }
                 for a in inst.args.items() {
-                    if def_block.buf[a] != 0xFFFFFFFF && in_loop.buf[def_block.buf[a]] {
+                    if def_block[a] != 0xFFFFFFFF && in_loop[def_block[a]] {
                         return None
                     }
                 }
@@ -208,7 +208,7 @@ fn unroll_apply_loop_def(v i64, n0 i64, def_block []i64, in_loop []bool) bool {
 // the closure `look` of apply
 fn unroll_apply_look(m *Vec[i64], v i64, n0 i64, def_block []i64, in_loop []bool) i64 {
     if unroll_apply_loop_def(v, n0, def_block, in_loop) {
-        return m.buf[v]
+        return m[v]
     }
     return v
 }
@@ -232,7 +232,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
     for b in p.blocks.items() {
-        in_loop_v.buf[b] = true
+        in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
     def_block_v := f.block_of()
@@ -241,15 +241,15 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
     // (start value, back-edge value) of each header phi
     phi_in := map[i64, (i64, i64)]()
     for ph in hphis.items() {
-        i := &f.insts.buf[ph]
+        i := &f.insts[ph]
         s := NOV
         bk := NOV
         for k in 0..i.pb.len {
-            pb := i.pb.buf[k]
+            pb := i.pb[k]
             if pb == p.pre {
-                s = i.args.buf[k]
+                s = i.args[k]
             } else if pb == p.latch {
-                bk = i.args.buf[k]
+                bk = i.args[k]
             }
         }
         phi_in.set(ph, (s, bk))
@@ -260,7 +260,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
         prev.push(v)
     }
     prev_latch := p.latch
-    orig_latch_term := clone(f.blocks.buf[p.latch].term)
+    orig_latch_term := clone(f.blocks[p.latch].term)
     prev_header_of_last := p.header
     for kk in 1..p.trip {
         bmap := map[i64, i64]()
@@ -270,71 +270,71 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
         cur := vec_fill(n0, NOV)
         for ph in hphis.items() {
             bk := unroll_phi_in_at(&phi_in, ph).1
-            cur.buf[ph] = unroll_apply_look(&prev, bk, n0, def_block, in_loop)
+            cur[ph] = unroll_apply_look(&prev, bk, n0, def_block, in_loop)
         }
         // allocate ids
         for b in p.blocks.items() {
-            for ii in 0..f.blocks.buf[b].insts.len {
-                v := f.blocks.buf[b].insts.buf[ii]
-                if v >= n0 || cur.buf[v] != NOV {
+            for ii in 0..f.blocks[b].insts.len {
+                v := f.blocks[b].insts[ii]
+                if v >= n0 || cur[v] != NOV {
                     continue
                 }
-                if b == p.header && f.insts.buf[v].op == OpPhi {
+                if b == p.header && f.insts[v].op == OpPhi {
                     continue
                 }
-                op := f.insts.buf[v].op
-                ty := f.insts.buf[v].ty
-                k := f.insts.buf[v].k
-                aux := f.insts.buf[v].aux
+                op := f.insts[v].op
+                ty := f.insts[v].ty
+                k := f.insts[v].k
+                aux := f.insts[v].aux
                 nv := f.mk(op, ty, vec[i64](), k)
                 f.im(nv).aux = aux
-                cur.buf[v] = nv
+                cur[v] = nv
             }
         }
         for b in p.blocks.items() {
             nb := unroll_bmap_at(&bmap, b)
-            insts := clone(&f.blocks.buf[b].insts)
+            insts := clone(&f.blocks[b].insts)
             for v in insts.items() {
                 if v >= n0 {
                     continue
                 }
-                if b == p.header && f.insts.buf[v].op == OpPhi {
+                if b == p.header && f.insts[v].op == OpPhi {
                     continue
                 }
-                nv := cur.buf[v]
+                nv := cur[v]
                 args := vec[i64]()
-                for a in f.insts.buf[v].args.items() {
+                for a in f.insts[v].args.items() {
                     args.push(unroll_apply_look(&cur, a, n0, def_block, in_loop))
                 }
                 pb := vec[i64]()
-                for x in f.insts.buf[v].pb.items() {
+                for x in f.insts[v].pb.items() {
                     pb.push(bmap.get_or(x, x))
                 }
                 f.im(nv).args = args
                 f.im(nv).pb = pb
-                f.blocks.buf[nb].insts.push(nv)
+                f.blocks[nb].insts.push(nv)
             }
-            src_term := if b == p.latch { clone(orig_latch_term) } else { clone(f.blocks.buf[b].term) }
+            src_term := if b == p.latch { clone(orig_latch_term) } else { clone(f.blocks[b].term) }
             term := src_term
             match src_term {
                 TermJmp(t) => term = TermJmp(bmap.get_or(t, t))
                 TermBr(c, t, e) => term = TermBr(unroll_apply_look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
                 _ => {}
             }
-            f.blocks.buf[nb].term = term
+            f.blocks[nb].term = term
         }
         // the previous copy's latch falls into this copy
-        f.blocks.buf[prev_latch].term = TermJmp(unroll_bmap_at(&bmap, p.header))
+        f.blocks[prev_latch].term = TermJmp(unroll_bmap_at(&bmap, p.header))
         prev_latch = unroll_bmap_at(&bmap, p.latch)
         prev_header_of_last = unroll_bmap_at(&bmap, p.header)
         prev = cur
     }
     if p.full {
         // the last copy leaves the loop
-        f.blocks.buf[prev_latch].term = TermJmp(p.exit)
+        f.blocks[prev_latch].term = TermJmp(p.exit)
     } else if p.trip > 1 {
         // the last copy branches back to the first one
-        match f.blocks.buf[prev_latch].term {
+        match f.blocks[prev_latch].term {
             TermBr(c, t, e) => {
                 nt := t
                 ne := e
@@ -344,7 +344,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
                 if e != p.exit {
                     ne = p.header
                 }
-                f.blocks.buf[prev_latch].term = TermBr(c, nt, ne)
+                f.blocks[prev_latch].term = TermBr(c, nt, ne)
             }
             _ => {}
         }
@@ -356,37 +356,37 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
             if in_loop[b] {
                 continue
             }
-            for ii in 0..f.blocks.buf[b].insts.len {
-                v := f.blocks.buf[b].insts.buf[ii]
-                for ai in 0..f.insts.buf[v].args.len {
-                    a := f.insts.buf[v].args.buf[ai]
+            for ii in 0..f.blocks[b].insts.len {
+                v := f.blocks[b].insts[ii]
+                for ai in 0..f.insts[v].args.len {
+                    a := f.insts[v].args[ai]
                     if unroll_apply_loop_def(a, n0, def_block, in_loop) {
-                        f.insts.buf[v].args.buf[ai] = last_m.buf[a]
+                        f.insts[v].args[ai] = last_m[a]
                     }
                 }
-                if f.insts.buf[v].op == OpPhi && b == p.exit {
-                    pbs := &f.insts.buf[v].pb
+                if f.insts[v].op == OpPhi && b == p.exit {
+                    pbs := &f.insts[v].pb
                     for k in 0..pbs.len {
-                        if pbs.buf[k] == p.latch {
-                            pbs.buf[k] = prev_latch
+                        if pbs[k] == p.latch {
+                            pbs[k] = prev_latch
                         }
                     }
                 }
             }
-            match f.blocks.buf[b].term {
+            match f.blocks[b].term {
                 TermBr(c, t, e) => {
                     if unroll_apply_loop_def(c, n0, def_block, in_loop) {
-                        f.blocks.buf[b].term = TermBr(last_m.buf[c], t, e)
+                        f.blocks[b].term = TermBr(last_m[c], t, e)
                     }
                 }
                 TermRet(vs) => {
                     nvs := clone(vs)
                     for k in 0..nvs.len {
-                        if unroll_apply_loop_def(nvs.buf[k], n0, def_block, in_loop) {
-                            nvs.buf[k] = last_m.buf[nvs.buf[k]]
+                        if unroll_apply_loop_def(nvs[k], n0, def_block, in_loop) {
+                            nvs[k] = last_m[nvs[k]]
                         }
                     }
-                    f.blocks.buf[b].term = TermRet(nvs)
+                    f.blocks[b].term = TermRet(nvs)
                 }
                 _ => {}
             }
@@ -397,12 +397,12 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
         if p.trip > 1 {
             for ph in hphis.items() {
                 bk := unroll_phi_in_at(&phi_in, ph).1
-                nv := if unroll_apply_loop_def(bk, n0, def_block, in_loop) { prev.buf[bk] } else { bk }
+                nv := if unroll_apply_loop_def(bk, n0, def_block, in_loop) { prev[bk] } else { bk }
                 i := f.im(ph)
                 for k in 0..i.pb.len {
-                    if i.pb.buf[k] == p.latch {
-                        i.pb.buf[k] = prev_latch
-                        i.args.buf[k] = nv
+                    if i.pb[k] == p.latch {
+                        i.pb[k] = prev_latch
+                        i.args[k] = nv
                     }
                 }
             }
@@ -412,14 +412,14 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
     // copy 0: header phis take their initial values
     repl := vec_fill(f.insts.len, NOV)
     for ph in hphis.items() {
-        repl.buf[ph] = unroll_phi_in_at(&phi_in, ph).0
+        repl[ph] = unroll_phi_in_at(&phi_in, ph).0
     }
-    hb := &f.blocks.buf[p.header]
+    hb := &f.blocks[p.header]
     n := 0
     for ii in 0..hb.insts.len {
-        v := hb.insts.buf[ii]
+        v := hb.insts[ii]
         if !contains(&hphis, v) {
-            hb.insts.buf[n] = v
+            hb.insts[n] = v
             n += 1
         }
     }

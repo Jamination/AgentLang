@@ -60,7 +60,7 @@ fn lower_fn_str_less(a str, b str) bool {
 fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
     edi, has_entry := cx.fn_names.get(entry)
     if has_entry {
-        cx.entry_file = cx.fn_decls.buf[edi].pos.file
+        cx.entry_file = cx.fn_decls[edi].pos.file
         fid := cx.inst_fn(edi, vec[i64]())
         cx.module.entry = fid
     } else {
@@ -79,7 +79,7 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
         checked_all = true
         // type-check every non-generic user function, even if unreachable
         for di in 0..cx.fn_decls.len {
-            d := cx.fn_decls.buf[di]
+            d := cx.fn_decls[di]
             eager := d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file)
             if d.tparams.is_empty() && eager {
                 l, has_l := cx.fn_over.get(d.name)
@@ -98,21 +98,21 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
                 continue
             }
             for a in 1..l.len {
-                da := cx.fn_decls.buf[l.buf[a]]
+                da := cx.fn_decls[l[a]]
                 if da.tparams.len != 0 || da.pos.file < check_from_file || cx.lazy_files.has(da.pos.file) {
                     continue
                 }
-                fa, has_a := cx.fn_insts.get((l.buf[a], vec[i64]().items()))
-                if !has_a || contains(&cx.fn_sigs.buf[fa].0, T_ERR) {
+                fa, has_a := cx.fn_insts.get((l[a], vec[i64]().items()))
+                if !has_a || contains(&cx.fn_sigs[fa].0, T_ERR) {
                     continue
                 }
                 for b in 0..a {
-                    db := cx.fn_decls.buf[l.buf[b]]
+                    db := cx.fn_decls[l[b]]
                     if db.tparams.len != 0 {
                         continue
                     }
-                    fb, has_b := cx.fn_insts.get((l.buf[b], vec[i64]().items()))
-                    if has_b && cx.fn_sigs.buf[fa].0.items() == cx.fn_sigs.buf[fb].0.items() {
+                    fb, has_b := cx.fn_insts.get((l[b], vec[i64]().items()))
+                    if has_b && cx.fn_sigs[fa].0.items() == cx.fn_sigs[fb].0.items() {
                         at := cx.pos_str(db.pos)
                         cx.err(da.pos, fmt("`", n, "` is already declared with these parameter types at ", at, " (", lower_new_sig(da), " and ", lower_new_sig(db), " are the same types)"))
                         break
@@ -133,7 +133,7 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
             }
         }
         for i in 0..cnames.len {
-            cx.const_named(cnames.buf[i])
+            cx.const_named(cnames[i])
         }
         gkeys := cx.global_decls.keys()
         sort_by(gkeys, lower_fn_str_less)
@@ -145,7 +145,7 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
             }
         }
         for i in 0..gnames.len {
-            cx.global(gnames.buf[i])
+            cx.global(gnames[i])
         }
         // and resolution of user type aliases
         akeys := cx.alias_decls.keys()
@@ -161,9 +161,9 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
     // exposed scalar fields lose their private alias class
     if cx.exposed.len != 0 {
         for fi in 0..cx.module.funcs.len {
-            f := &cx.module.funcs.buf[fi]
+            f := &cx.module.funcs[fi]
             for ii in 0..f.insts.len {
-                i := &f.insts.buf[ii]
+                i := &f.insts[ii]
                 if (i.op == OpLoad || i.op == OpStore) && i.aux >> 4 != 0 && cx.exposed.has(i.aux >> 4) {
                     i.aux &= 15
                 }
@@ -173,11 +173,11 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
 }
 
 fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
-    d := cx.fn_decls.buf[di]
+    d := cx.fn_decls[di]
     cx.scope_prelude = cx.internal_file(d.pos.file)
     tenv := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
-        tenv.set(d.tparams.buf[i], targs.buf[i])
+        tenv.set(d.tparams[i], targs[i])
     }
     lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, vec[(str, i64)]())
 }
@@ -187,11 +187,11 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
 // are the variables a closure captures (name, type): the last IR parameter is then the
 // environment, an array of their addresses, and the names are declared in the outermost scope.
 fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, caps Vec[(str, i64)]) {
-    sig := cx.fn_sigs.buf[fid]
+    sig := cx.fn_sigs[fid]
     ptys := sig.0
     rty := sig.1
-    f := cx.module.funcs.buf[fid]
-    cx.module.funcs.buf[fid] = func_new("")
+    f := cx.module.funcs[fid]
+    cx.module.funcs[fid] = func_new("")
     fx := Fx{
         cx: cx,
         f: f,
@@ -218,8 +218,8 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
         _ => {}
     }
     for i in 0..params.len {
-        pname := params.buf[i].0
-        pt := ptys.buf[i]
+        pname := params[i].0
+        pt := ptys[i]
         match fx.cx.abi_param(pt) {
             ParamAbiScalar(t) => {
                 p := fx.ins(OpParam, t, vec[i64](), pi)
@@ -231,7 +231,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
             ParamAbiFlat(leaves) => {
                 addr := fx.declare(pname, pt, pos)
                 for li in 0..leaves.len {
-                    l := leaves.buf[li]
+                    l := leaves[li]
                     p := fx.ins(OpParam, l.t, vec[i64](), pi)
                     pi += 1
                     a := fx.add_off(addr, l.off)
@@ -241,8 +241,8 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
             ParamAbiByRef => {
                 p := fx.ins(OpParam, TI64, vec[i64](), pi)
                 pi += 1
-                had := fx.scopes.buf[0].vars.has(pname)
-                fx.scopes.buf[0].vars.set(pname, (pt, p))
+                had := fx.scopes[0].vars.has(pname)
+                fx.scopes[0].vars.set(pname, (pt, p))
                 if had {
                     fx.cx.err(pos, fmt("duplicate parameter `", pname, "`"))
                 }
@@ -253,10 +253,10 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
         // the environment of a closure: the addresses of the captured variables
         envp := fx.ins(OpParam, TI64, vec[i64](), pi)
         for i in 0..caps.len {
-            if !fx.scopes.buf[0].vars.has(caps.buf[i].0) {
+            if !fx.scopes[0].vars.has(caps[i].0) {
                 a := fx.add_off(envp, 8 * i)
                 addr := fx.load_raw(a, TI64, AK_PTR)
-                fx.scopes.buf[0].vars.set(caps.buf[i].0, (caps.buf[i].1, addr))
+                fx.scopes[0].vars.set(caps[i].0, (caps[i].1, addr))
             }
         }
     }
@@ -282,12 +282,12 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
     }
     // finalize: allocas at the top of the entry block
     entry := clone(fx.allocas)
-    entry.extend(fx.f.blocks.buf[0].insts.items())
-    fx.f.blocks.buf[0].insts = entry
+    entry.extend(fx.f.blocks[0].insts.items())
+    fx.f.blocks[0].insts = entry
     for bi in 0..fx.f.blocks.len {
-        match fx.f.blocks.buf[bi].term {
+        match fx.f.blocks[bi].term {
             TermNone => {
-                fx.f.blocks.buf[bi].term = TermTrap
+                fx.f.blocks[bi].term = TermTrap
             }
             _ => {}
         }
@@ -295,7 +295,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
     lf := fx.f
     lf.lowered = true
     cx.flush_layout_errors(pos)
-    cx.module.funcs.buf[fid] = lf
+    cx.module.funcs[fid] = lf
 }
 
 // ---------- builder primitives ----------
@@ -317,20 +317,20 @@ fn switch_to(self *Fx, b i64) {
 }
 
 fn terminate(self *Fx, t Term) {
-    self.f.blocks.buf[self.cur].term = t
+    self.f.blocks[self.cur].term = t
     self.cur = self.f.new_block()
     self.dead = true
 }
 
 fn jmp(self *Fx, b i64) {
     d := self.dead
-    self.f.blocks.buf[self.cur].term = TermJmp(b)
+    self.f.blocks[self.cur].term = TermJmp(b)
     self.cur = self.f.new_block()
     self.dead = d
 }
 
 fn br(self *Fx, c i64, t i64, e i64) {
-    self.f.blocks.buf[self.cur].term = TermBr(c, t, e)
+    self.f.blocks[self.cur].term = TermBr(c, t, e)
     self.cur = self.f.new_block()
 }
 
@@ -446,14 +446,14 @@ fn store(self *Fx, dst Val, src Val) {
         self.cx.types.leaves(dst.ty, 0, &leaves)
         vals := vec[i64]()
         for i in 0..leaves.len {
-            l := leaves.buf[i]
+            l := leaves[i]
             a := self.add_off(src.v, l.off)
             vals.push(self.load_raw(a, l.t, l.alias))
         }
         for i in 0..leaves.len {
-            l := leaves.buf[i]
+            l := leaves[i]
             a := self.add_off(dst.v, l.off)
-            self.store_raw(a, vals.buf[i], l.t, l.alias)
+            self.store_raw(a, vals[i], l.t, l.alias)
         }
     } else {
         sz := self.cx.types.size_of(dst.ty)
@@ -471,7 +471,7 @@ fn zero(self *Fx, dst Val) {
         leaves := vec[Leaf]()
         self.cx.types.leaves(dst.ty, 0, &leaves)
         for i in 0..leaves.len {
-            l := leaves.buf[i]
+            l := leaves[i]
             a := self.add_off(dst.v, l.off)
             z := if l.t.is_fp() { self.ins(OpFConst, l.t, vec[i64](), 0) } else { self.iconst(l.t, 0) }
             self.store_raw(a, z, l.t, l.alias)
@@ -514,9 +514,9 @@ fn push_scope(self *Fx) {
 
 fn pop_scope(self *Fx) {
     if !self.dead {
-        defers := clone(self.scopes.buf[self.scopes.len - 1].defers)
+        defers := clone(self.scopes[self.scopes.len - 1].defers)
         for i in defers.len - 1..=0 by -1 {
-            self.block(defers.buf[i])
+            self.block(defers[i])
         }
     }
     self.scopes.pop()
@@ -526,9 +526,9 @@ fn run_defers_down_to(self *Fx, depth i64) {
     // emit defers of scopes [depth..] innermost first, without popping
     all := vec[*Block]()
     for si in self.scopes.len - 1..=depth by -1 {
-        s := &self.scopes.buf[si]
+        s := &self.scopes[si]
         for di in s.defers.len - 1..=0 by -1 {
-            all.push(s.defers.buf[di])
+            all.push(s.defers[di])
         }
     }
     if all.is_empty() {
@@ -537,20 +537,20 @@ fn run_defers_down_to(self *Fx, depth i64) {
     // defers must not see themselves again: temporarily hide them
     saved := vec[Vec[*Block]]()
     for si in 0..self.scopes.len {
-        saved.push(self.scopes.buf[si].defers)
-        self.scopes.buf[si].defers = vec[*Block]()
+        saved.push(self.scopes[si].defers)
+        self.scopes[si].defers = vec[*Block]()
     }
     for i in 0..all.len {
-        self.block(all.buf[i])
+        self.block(all[i])
     }
     for si in 0..min(self.scopes.len, saved.len) {
-        self.scopes.buf[si].defers = saved.buf[si]
+        self.scopes[si].defers = saved[si]
     }
 }
 
 fn lookup(self *Fx, name str) Opt[(i64, i64)] {
     for si in self.scopes.len - 1..=0 by -1 {
-        x, ok := self.scopes.buf[si].vars.get(name)
+        x, ok := self.scopes[si].vars.get(name)
         if ok {
             return Some(x)
         }
@@ -563,10 +563,10 @@ fn declare(self *Fx, name str, ty i64, pos Pos) i64 {
     if name == "_" {
         return addr
     }
-    if self.scopes.buf[self.scopes.len - 1].vars.has(name) {
+    if self.scopes[self.scopes.len - 1].vars.has(name) {
         self.err(pos, fmt("`", name, "` is already declared in this scope (use `=` to assign)"))
     }
-    self.scopes.buf[self.scopes.len - 1].vars.set(name, (ty, addr))
+    self.scopes[self.scopes.len - 1].vars.set(name, (ty, addr))
     return addr
 }
 
@@ -574,7 +574,7 @@ fn declare(self *Fx, name str, ty i64, pos Pos) i64 {
 fn block(self *Fx, b *Block) {
     self.push_scope()
     for i in 0..b.stmts.len {
-        self.stmt(&b.stmts.buf[i])
+        self.stmt(&b.stmts[i])
         lint_copy_writes(self, b, i)
     }
     self.pop_scope()
@@ -589,7 +589,7 @@ fn block_value(self *Fx, b *Block, want bool, expect Opt[i64]) Val {
     n := b.stmts.len
     v := val_unit()
     for i in 0..n {
-        s := &b.stmts.buf[i]
+        s := &b.stmts[i]
         if i + 1 < n {
             self.stmt(s)
             lint_copy_writes(self, b, i)
@@ -616,7 +616,7 @@ fn block_value(self *Fx, b *Block, want bool, expect Opt[i64]) Val {
     }
     if self.dead {
         v = val_never()
-    } else if v.mem && !self.scopes.buf[self.scopes.len - 1].defers.is_empty() {
+    } else if v.mem && !self.scopes[self.scopes.len - 1].defers.is_empty() {
         t := self.temp(v.ty)
         tv := self.mval(v.ty, t)
         self.store(tv, v)
@@ -657,11 +657,11 @@ fn lower_fn_break_continue(fx *Fx, pos Pos, is_break bool) {
         fx.err(pos, "`break`/`continue` outside of a loop")
         return
     }
-    l := fx.loops.buf[fx.loops.len - 1]
+    l := fx.loops[fx.loops.len - 1]
     target := if is_break { l.brk } else { l.cont }
     depth := l.scope_depth
     fx.run_defers_down_to(depth)
-    fx.f.blocks.buf[fx.cur].term = TermJmp(target)
+    fx.f.blocks[fx.cur].term = TermJmp(target)
     fx.cur = fx.f.new_block()
     fx.dead = true
 }
@@ -670,8 +670,8 @@ fn lower_fn_break_continue(fx *Fx, pos Pos, is_break bool) {
 fn lower_fn_break_continue_to(fx *Fx, pos Pos, is_break bool, label str) {
     idx := -1
     for i in fx.labels.len - 1..=0 by -1 {
-        if fx.labels.buf[i].0 == label {
-            idx = fx.labels.buf[i].1
+        if fx.labels[i].0 == label {
+            idx = fx.labels[i].1
             break
         }
     }
@@ -682,16 +682,16 @@ fn lower_fn_break_continue_to(fx *Fx, pos Pos, is_break bool, label str) {
         } else {
             names := vec[str]()
             for i in fx.labels.len - 1..=0 by -1 {
-                names.push(fmt("`", fx.labels.buf[i].0, "`"))
+                names.push(fmt("`", fx.labels[i].0, "`"))
             }
             fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (labels in scope: ", join(names.items(), ", "), ")"))
         }
         return
     }
-    l := fx.loops.buf[idx]
+    l := fx.loops[idx]
     target := if is_break { l.brk } else { l.cont }
     fx.run_defers_down_to(l.scope_depth)
-    fx.f.blocks.buf[fx.cur].term = TermJmp(target)
+    fx.f.blocks[fx.cur].term = TermJmp(target)
     fx.cur = fx.f.new_block()
     fx.dead = true
 }
@@ -720,10 +720,10 @@ fn stmt(self *Fx, s *Stmt) {
             v := self.expr(&e, None)
             if names.len == 1 {
                 if v.ty == T_UNIT || v.ty == T_NEVER {
-                    self.err(s.pos, fmt("cannot bind `", names.buf[0], "` to an expression without a value"))
+                    self.err(s.pos, fmt("cannot bind `", names[0], "` to an expression without a value"))
                     return
                 }
-                addr := self.declare(names.buf[0], v.ty, s.pos)
+                addr := self.declare(names[0], v.ty, s.pos)
                 dst := self.mval(v.ty, addr)
                 self.store(dst, v)
             } else {
@@ -746,13 +746,13 @@ fn stmt(self *Fx, s *Stmt) {
                 }
                 offs := self.cx.types.tuple_offsets(tys.items())
                 for i in 0..names.len {
-                    src_a := self.add_off(v.v, offs.buf[i])
-                    src := self.mval(tys.buf[i], src_a)
-                    if self.cx.types.is_scalar(tys.buf[i]) {
-                        src.alias = self.cx.types.field_alias(v.ty, i, tys.buf[i])
+                    src_a := self.add_off(v.v, offs[i])
+                    src := self.mval(tys[i], src_a)
+                    if self.cx.types.is_scalar(tys[i]) {
+                        src.alias = self.cx.types.field_alias(v.ty, i, tys[i])
                     }
-                    addr := self.declare(names.buf[i], tys.buf[i], s.pos)
-                    dst := self.mval(tys.buf[i], addr)
+                    addr := self.declare(names[i], tys[i], s.pos)
+                    dst := self.mval(tys[i], addr)
                     self.store(dst, src)
                 }
             }
@@ -784,9 +784,9 @@ fn stmt(self *Fx, s *Stmt) {
                     }
                     None => return
                 }
-                match self.place(&lhs.buf[i]) {
+                match self.place(&lhs[i]) {
                     Some(dst) => {
-                        sv := self.coerce(src, dst.ty, lhs.buf[i].pos)
+                        sv := self.coerce(src, dst.ty, lhs[i].pos)
                         self.store(dst, sv)
                     }
                     None => {}
@@ -916,7 +916,7 @@ fn stmt(self *Fx, s *Stmt) {
             // reachable only through `break`
             reach := false
             for bi in 0..self.f.blocks.len {
-                match self.f.blocks.buf[bi].term {
+                match self.f.blocks[bi].term {
                     TermJmp(t) => {
                         reach = t == bx
                     }
@@ -1014,12 +1014,12 @@ fn stmt(self *Fx, s *Stmt) {
             // the scope keeps a pointer: the block is copied to the heap
             bp := new[Block]()
             *bp = b
-            self.scopes.buf[self.scopes.len - 1].defers.push(bp)
+            self.scopes[self.scopes.len - 1].defers.push(bp)
         }
         SKLabeled(label, inner) => {
             for i in 0..self.labels.len {
-                if self.labels.buf[i].0 == label {
-                    self.err(s.pos, fmt("loop label `", label, "` is already used by the enclosing loop at line ", self.labels.buf[i].2, " (give nested loops different labels)"))
+                if self.labels[i].0 == label {
+                    self.err(s.pos, fmt("loop label `", label, "` is already used by the enclosing loop at line ", self.labels[i].2, " (give nested loops different labels)"))
                 }
             }
             // the loop statement pushes its entry of `loops` at the current length
@@ -1048,7 +1048,7 @@ fn do_return(self *Fx, v Opt[Val]) {
                     }
                     RetAbiFlat(leaves) => {
                         for i in 0..leaves.len {
-                            l := leaves.buf[i]
+                            l := leaves[i]
                             a := self.add_off(rv.v, l.off)
                             rets.push(self.load_raw(a, l.t, l.alias))
                         }
@@ -1383,7 +1383,7 @@ fn cond_br(self *Fx, e *Expr, t i64, f i64) {
 fn loc_str(self *Fx, pos Pos) Val {
     var fname str = ""
     if pos.file >= 0 && pos.file < self.cx.file_names.len {
-        fname = self.cx.file_names.buf[pos.file]
+        fname = self.cx.file_names[pos.file]
     }
     s := fmt(fname, ":", pos.line)
     return self.str_val(s)

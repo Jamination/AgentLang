@@ -650,8 +650,8 @@ fn emit_reads_flags(op MOp) bool {
 fn emit_peephole_resolve(b0 i64, fwd *Vec[i64]) i64 {
     b := b0
     n := 0
-    while fwd.buf[b] != b && n < 64 {
-        b = fwd.buf[b]
+    while fwd[b] != b && n < 64 {
+        b = fwd[b]
         n += 1
     }
     return b
@@ -696,14 +696,14 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
         fwd.push(b)
     }
     for b in 0..nb {
-        blk := &mf.blocks.buf[b]
-        if blk.insts.len == 1 && blk.insts.buf[0].op == MOpJmp && i64(blk.insts.buf[0].tgt) != b {
-            fwd.buf[b] = i64(blk.insts.buf[0].tgt)
+        blk := &mf.blocks[b]
+        if blk.insts.len == 1 && blk.insts[0].op == MOpJmp && i64(blk.insts[0].tgt) != b {
+            fwd[b] = i64(blk.insts[0].tgt)
         }
     }
     for b in 0..nb {
-        for x in 0..mf.blocks.buf[b].insts.len {
-            i := &mf.blocks.buf[b].insts.buf[x]
+        for x in 0..mf.blocks[b].insts.len {
+            i := &mf.blocks[b].insts[x]
             if i.op == MOpJmp || i.op == MOpJcc {
                 i.tgt = emit_peephole_resolve(i64(i.tgt), &fwd)
             }
@@ -712,14 +712,14 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
     // drop blocks that are no longer reachable
     {
         reach := vec_fill(nb, false)
-        work := vec_of([]i64{layout.buf[0]})
-        reach.buf[layout.buf[0]] = true
+        work := vec_of([]i64{layout[0]})
+        reach[layout[0]] = true
         while work.len > 0 {
             b := work.pop()
-            for x in 0..mf.blocks.buf[b].insts.len {
-                i := &mf.blocks.buf[b].insts.buf[x]
-                if (i.op == MOpJmp || i.op == MOpJcc) && !reach.buf[i64(i.tgt)] {
-                    reach.buf[i64(i.tgt)] = true
+            for x in 0..mf.blocks[b].insts.len {
+                i := &mf.blocks[b].insts[x]
+                if (i.op == MOpJmp || i.op == MOpJcc) && !reach[i64(i.tgt)] {
+                    reach[i64(i.tgt)] = true
                     work.push(i64(i.tgt))
                 }
             }
@@ -727,8 +727,8 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
         // layout.retain(|b| reach[b])
         n := 0
         for x in 0..layout.len {
-            if reach.buf[layout.buf[x]] {
-                layout.buf[n] = layout.buf[x]
+            if reach[layout[x]] {
+                layout[n] = layout[x]
                 n += 1
             }
         }
@@ -736,32 +736,32 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
     }
     // 2. fallthrough and branch inversion
     for li in 0..layout.len {
-        b := layout.buf[li]
-        next := if li + 1 < layout.len { layout.buf[li + 1] } else { 0xFFFFFFFF }
-        insts := &mf.blocks.buf[b].insts
+        b := layout[li]
+        next := if li + 1 < layout.len { layout[li + 1] } else { 0xFFFFFFFF }
+        insts := &mf.blocks[b].insts
         n := insts.len
-        if n >= 2 && insts.buf[n - 1].op == MOpJmp && insts.buf[n - 2].op == MOpJcc {
-            single_jcc := n < 3 || insts.buf[n - 3].op != MOpJcc
-            if i64(insts.buf[n - 2].tgt) == i64(insts.buf[n - 1].tgt) && single_jcc {
+        if n >= 2 && insts[n - 1].op == MOpJmp && insts[n - 2].op == MOpJcc {
+            single_jcc := n < 3 || insts[n - 3].op != MOpJcc
+            if i64(insts[n - 2].tgt) == i64(insts[n - 1].tgt) && single_jcc {
                 insts.remove(n - 2)
-            } else if i64(insts.buf[n - 2].tgt) == next && single_jcc {
-                f := insts.buf[n - 1].tgt
-                insts.buf[n - 2].cc ^= 1
-                insts.buf[n - 2].tgt = f
+            } else if i64(insts[n - 2].tgt) == next && single_jcc {
+                f := insts[n - 1].tgt
+                insts[n - 2].cc ^= 1
+                insts[n - 2].tgt = f
                 insts.pop()
             }
         }
         n2 := insts.len
-        if n2 >= 1 && insts.buf[n2 - 1].op == MOpJmp && i64(insts.buf[n2 - 1].tgt) == next {
+        if n2 >= 1 && insts[n2 - 1].op == MOpJmp && i64(insts[n2 - 1].tgt) == next {
             insts.pop()
         }
     }
     // 3. flag-clobbering shorter forms when flags are dead:
     //    mov r, 0 -> xor r, r ; lea r, [r + x] -> add r, x
     for b in 0..nb {
-        n := mf.blocks.buf[b].insts.len
+        n := mf.blocks[b].insts.len
         for k in 0..n {
-            i := &mf.blocks.buf[b].insts.buf[k]
+            i := &mf.blocks[b].insts[k]
             a_low_reg := match i.a {
                 OpndR(r) => i64(r) < 16
                 _ => false
@@ -773,7 +773,7 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
             }
             dead := true
             for j in k + 1..n {
-                o := mf.blocks.buf[b].insts.buf[j].op
+                o := mf.blocks[b].insts[j].op
                 if emit_reads_flags(o) {
                     dead = false
                     break
@@ -788,11 +788,11 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
             a := i.a
             sz := i.sz
             if zero {
-                mf.blocks.buf[b].insts.buf[k] = minst_new(MOpZero, 4, a, OpndNone)
+                mf.blocks[b].insts[k] = minst_new(MOpZero, 4, a, OpndNone)
             } else {
                 match add {
                     Some(src) => {
-                        mf.blocks.buf[b].insts.buf[k] = minst_new(MOpAdd, sz, a, src)
+                        mf.blocks[b].insts[k] = minst_new(MOpAdd, sz, a, src)
                     }
                     None => {}
                 }
@@ -835,41 +835,41 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
         pro.push(minst_new(MOpSub, 8, OpndR(RSP), OpndI(i64(size))))
     }
     layout := vec_of(layout0)
-    entry := layout.buf[0]
-    body := mf.blocks.buf[entry].insts
-    mf.blocks.buf[entry].insts = vec[MInst]()
+    entry := layout[0]
+    body := mf.blocks[entry].insts
+    mf.blocks[entry].insts = vec[MInst]()
     pro.extend(body.items())
-    mf.blocks.buf[entry].insts = pro
+    mf.blocks[entry].insts = pro
     for b in layout.items() {
-        insts := mf.blocks.buf[b].insts
-        mf.blocks.buf[b].insts = vec[MInst]()
+        insts := mf.blocks[b].insts
+        mf.blocks[b].insts = vec[MInst]()
         out := vec[MInst]()
         for x in 0..insts.len {
-            i := insts.buf[x]
+            i := insts[x]
             if i.op == MOpRet {
                 if size > 0 {
                     out.push(minst_new(MOpAdd, 8, OpndR(RSP), OpndI(i64(size))))
                 }
                 for y in alloc.used_callee_saved.len - 1..=0 by -1 {
-                    out.push(minst_new(MOpPop, 8, OpndR(alloc.used_callee_saved.buf[y]), OpndNone))
+                    out.push(minst_new(MOpPop, 8, OpndR(alloc.used_callee_saved[y]), OpndNone))
                 }
             }
             out.push(i)
         }
-        mf.blocks.buf[b].insts = out
+        mf.blocks[b].insts = out
     }
     emit_peephole(mf, &layout)
     // encode
     items := vec[EmitItem]()
     block_item := vec_fill(mf.blocks.len, -1)
     for b in layout.items() {
-        if mf.blocks.buf[b].align {
+        if mf.blocks[b].align {
             items.push(EmitItemAlign(16))
         }
-        block_item.buf[b] = items.len
+        block_item[b] = items.len
         enc := EmitEnc{out: vec[u8](), relocs: vec[Reloc](), frame: &frame, fpool: fpool}
-        for x in 0..mf.blocks.buf[b].insts.len {
-            i := &mf.blocks.buf[b].insts.buf[x]
+        for x in 0..mf.blocks[b].insts.len {
+            i := &mf.blocks[b].insts[x]
             if i.op == MOpJmp || i.op == MOpJcc {
                 if !enc.out.is_empty() {
                     items.push(EmitItemBytes(enc.out, enc.relocs))
@@ -894,8 +894,8 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
     loop {
         o := 0
         for k in 0..items.len {
-            offs.buf[k] = o
-            o += match items.buf[k] {
+            offs[k] = o
+            o += match items[k] {
                 EmitItemBytes(b, r) => b.len
                 EmitItemJump(cc, tgt, long) => {
                     if !long {
@@ -909,16 +909,16 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
                 EmitItemAlign(a) => emit_align_pad(o, a)
             }
         }
-        offs.buf[items.len] = o
+        offs[items.len] = o
         changed := false
         for k in 0..items.len {
-            match items.buf[k] {
+            match items[k] {
                 EmitItemJump(cc, tgt, long) => {
                     if !long {
-                        t := offs.buf[block_item.buf[tgt]]
-                        d := t - (offs.buf[k] + 2)
+                        t := offs[block_item[tgt]]
+                        d := t - (offs[k] + 2)
                         if !(d >= -128 && d <= 127) {
-                            items.buf[k] = EmitItemJump(cc, tgt, true)
+                            items[k] = EmitItemJump(cc, tgt, true)
                             changed = true
                         }
                     }
@@ -933,8 +933,8 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
     bytes := vec[u8]()
     relocs := vec[Reloc]()
     for k in 0..items.len {
-        assert bytes.len == offs.buf[k]
-        match items.buf[k] {
+        assert bytes.len == offs[k]
+        match items[k] {
             EmitItemBytes(b, r) => {
                 for rr in r.items() {
                     relocs.push(Reloc{off: rr.off + bytes.len, kind: rr.kind, addend: rr.addend})
@@ -942,23 +942,23 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
                 bytes.extend(b.items())
             }
             EmitItemJump(cc, tgt, long) => {
-                t := offs.buf[block_item.buf[tgt]]
+                t := offs[block_item[tgt]]
                 if long {
                     match cc {
                         Some(c) => {
                             bytes.push(0x0F)
                             bytes.push(0x80 | c)
-                            d := t - (offs.buf[k] + 6)
+                            d := t - (offs[k] + 6)
                             emit_put_le32(&bytes, i32(d))
                         }
                         None => {
                             bytes.push(0xE9)
-                            d := t - (offs.buf[k] + 5)
+                            d := t - (offs[k] + 5)
                             emit_put_le32(&bytes, i32(d))
                         }
                     }
                 } else {
-                    d := t - (offs.buf[k] + 2)
+                    d := t - (offs[k] + 2)
                     var opc u8 = match cc {
                         Some(c) => 0x70 | c
                         None => 0xEB

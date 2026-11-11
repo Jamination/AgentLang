@@ -241,7 +241,7 @@ fn main_read_to_string(path str) (str, str) {
 fn main_std_text(name str) Opt[str] {
     mi := -1
     for i in 0..STD_MODULES.len {
-        if STD_MODULES.buf[i].0 == name {
+        if STD_MODULES[i].0 == name {
             mi = i
             break
         }
@@ -256,7 +256,7 @@ fn main_std_text(name str) Opt[str] {
             return Some(t)
         }
     }
-    return Some(STD_MODULES.buf[mi].1)
+    return Some(STD_MODULES[mi].1)
 }
 
 struct Args {
@@ -286,16 +286,16 @@ fn main_parse_args() Args {
     if av.len < 2 {
         main_usage()
     }
-    a := Args{cmd: av.buf[0], input: "", output: None, emit_ir: false, emit_asm: false, unchecked: false, opt: 2, rest: vec[str]()}
+    a := Args{cmd: av[0], input: "", output: None, emit_ir: false, emit_asm: false, unchecked: false, opt: 2, rest: vec[str]()}
     i := 1
     while i < av.len {
-        s := av.buf[i]
+        s := av[i]
         if s == "-o" {
             i += 1
             if i >= av.len {
                 main_usage()
             }
-            a.output = Some(av.buf[i])
+            a.output = Some(av[i])
         } else if s == "--json" {
             main_json = true
         } else if s == "--emit-ir" {
@@ -311,7 +311,7 @@ fn main_parse_args() Args {
         } else if s == "-O2" {
             a.opt = 2
         } else if s == "--" {
-            a.rest = vec_of(av.buf[i + 1..av.len])
+            a.rest = vec_of(av[i + 1..av.len])
             break
         } else if starts_with(s, "-") {
             eprint(fmt("unknown option ", s, "\n"))
@@ -348,7 +348,7 @@ fn add_text(self *Sources, name str, text str, dir Opt[str]) {
     decls := p.file()
     priv_apply(&decls, file, &self.errs)
     for di in 0..decls.len {
-        d := decls.buf[di]
+        d := decls[di]
         match d {
             DeclUse(path, pos) => {
                 if starts_with(path, "std:") {
@@ -365,7 +365,7 @@ fn add_text(self *Sources, name str, text str, dir Opt[str]) {
                         None => {
                             all := vec[str]()
                             for mi in 0..STD_MODULES.len {
-                                all.push(STD_MODULES.buf[mi].0)
+                                all.push(STD_MODULES[mi].0)
                             }
                             self.errs.push(Diag{pos: pos, msg: fmt("unknown module `std.", mname, "` (available: ", join(all.items(), ", "), ")")})
                         }
@@ -446,7 +446,7 @@ fn main_report_less(a Diag, b Diag) bool {
 // names.get(file) or "?"
 fn main_file_name(names *Vec[str], file i64) str {
     if file >= 0 && file < names.len {
-        return names.buf[file]
+        return names[file]
     }
     return "?"
 }
@@ -507,7 +507,7 @@ fn main_print_sigs_opt_ty(t *Opt[TypeAst]) str {
 fn main_print_sigs_fields(fs *Vec[(str, TypeAst)]) str {
     parts := vec[str]()
     for x in 0..fs.len {
-        parts.push(fmt(fs.buf[x].0, " ", ast_type_str(&fs.buf[x].1)))
+        parts.push(fmt(fs[x].0, " ", ast_type_str(&fs[x].1)))
     }
     return join(parts.items(), ", ")
 }
@@ -540,13 +540,13 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
             DeclEnum(e) => {
                 vs := vec[str]()
                 for x in 0..e.variants.len {
-                    v := &e.variants.buf[x]
+                    v := &e.variants[x]
                     if v.1.is_empty() {
                         vs.push(v.0)
                     } else {
                         ts := vec[str]()
                         for y in 0..v.1.len {
-                            ts.push(ast_type_str(&v.1.buf[y]))
+                            ts.push(ast_type_str(&v.1[y]))
                         }
                         vs.push(fmt(v.0, "(", join(ts.items(), ", "), ")"))
                     }
@@ -624,10 +624,10 @@ fn main_real_main() i64 {
         if from == 0 {
             for x in 0..src.decls.len {
                 // private declarations of the library cannot be used from outside
-                info := priv_decl_info(&src.decls.buf[x])
+                info := priv_decl_info(&src.decls[x])
                 lib_private := info.2 && (info.3.file < n_prelude || contains(&src.std_files, info.3.file))
-                if main_sigs_visible(&src.decls.buf[x]) && !lib_private {
-                    sdecls.push(src.decls.buf[x])
+                if main_sigs_visible(&src.decls[x]) && !lib_private {
+                    sdecls.push(src.decls[x])
                 }
             }
         } else {
@@ -644,7 +644,7 @@ fn main_real_main() i64 {
     taken := src.decls
     src.decls = vec[Decl]()
     for x in 0..taken.len {
-        d := taken.buf[x]
+        d := taken[x]
         match d {
             DeclTest(t) => {
                 fname := fmt("__test_", tests.len)
@@ -667,7 +667,7 @@ fn main_real_main() i64 {
     entry.push("fn __entry(sp i64) never {\n __rt_init(sp)\n")
     if test_mode {
         for i in 0..tests.len {
-            name := tests.buf[i]
+            name := tests[i]
             esc := alloc[u8](len(name))
             for k, c in name {
                 esc[k] = if c == '"' || c == '\\' { '_' } else { c }
@@ -715,8 +715,8 @@ fn main_real_main() i64 {
     main_mem("optimized")
     if ar.emit_ir {
         for fi in 0..module.funcs.len {
-            if module.funcs.buf[fi].lowered {
-                put(ir_print_func(&module.funcs.buf[fi], Some(&module)))
+            if module.funcs[fi].lowered {
+                put(ir_print_func(&module.funcs[fi], Some(&module)))
             }
         }
     }

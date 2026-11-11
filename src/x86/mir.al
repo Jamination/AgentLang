@@ -259,7 +259,7 @@ fn class(self *MFunc, r i64) u8 {
     } else if r < 32 {
         return 1
     } else {
-        return self.vclass.buf[r - VREG0]
+        return self.vclass[r - VREG0]
     }
 }
 
@@ -554,10 +554,10 @@ fn mir_print_mfunc(f *MFunc) str {
     s := vec[str]()
     s.push(fmt(f.name, ":\n"))
     for bi in 0..f.blocks.len {
-        b := &f.blocks.buf[bi]
+        b := &f.blocks[bi]
         s.push(fmt(".L", bi, ":  ; depth ", b.depth, " succs ", b.succs.items(), "\n"))
         for ii in 0..b.insts.len {
-            i := &b.insts.buf[ii]
+            i := &b.insts[ii]
             // the variant name without its `MOp` prefix, as `{:?}` prints it
             line := concat("    ", to_lower(fmt(i.op)[3..]))
             match i.op {

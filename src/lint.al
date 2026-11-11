@@ -47,7 +47,7 @@ fn lint_place_str(e *Expr) str {
         EKIndex(b, idx) => {
             parts := vec[str]()
             for i in 0..idx.len {
-                parts.push(lint_place_str(&idx.buf[i]))
+                parts.push(lint_place_str(&idx[i]))
             }
             return fmt(lint_place_str(b), "[", join(parts.items(), ", "), "]")
         }
@@ -63,7 +63,7 @@ fn lint_place_str(e *Expr) str {
 
 fn lint_exprs(u *LintUse, es *Vec[Expr]) bool {
     for i in 0..es.len {
-        lint_expr(u, &es.buf[i])
+        lint_expr(u, &es[i])
     }
     return true
 }
@@ -77,7 +77,7 @@ fn lint_opt(u *LintUse, e Opt[*Expr]) bool {
 
 fn lint_block(u *LintUse, b *Block) bool {
     for i in 0..b.stmts.len {
-        lint_stmt(u, &b.stmts.buf[i])
+        lint_stmt(u, &b.stmts[i])
     }
     return true
 }
@@ -117,7 +117,7 @@ fn lint_expr(u *LintUse, e *Expr) bool {
         EKLit(t, fields) => {
             lint_expr(u, t)
             for i in 0..fields.len {
-                lint_expr(u, &fields.buf[i].1)
+                lint_expr(u, &fields[i].1)
             }
             true
         }
@@ -131,8 +131,8 @@ fn lint_expr(u *LintUse, e *Expr) bool {
         EKMatch(sc, arms) => {
             lint_expr(u, sc)
             for i in 0..arms.len {
-                lint_opt(u, arms.buf[i].guard)
-                lint_block(u, &arms.buf[i].body)
+                lint_opt(u, arms[i].guard)
+                lint_block(u, &arms[i].body)
             }
             true
         }
@@ -236,13 +236,13 @@ fn lint_stmt(u *LintUse, s *Stmt) bool {
 // Statement `i` of `b` has just been lowered. If it is `x := <field or element>` of a struct
 // type and the rest of the block only assigns fields of `x`, that is reported.
 fn lint_copy_writes(self *Fx, b *Block, i i64) {
-    s := &b.stmts.buf[i]
+    s := &b.stmts[i]
     match s.k {
         SKLet(names, e) => {
-            if names.len != 1 || names.buf[0] == "_" || !lint_is_place(&e) {
+            if names.len != 1 || names[0] == "_" || !lint_is_place(&e) {
                 return
             }
-            name := names.buf[0]
+            name := names[0]
             match self.lookup(name) {
                 Some(v) => {
                     match self.cx.types.k(v.0) {
@@ -254,7 +254,7 @@ fn lint_copy_writes(self *Fx, b *Block, i i64) {
             }
             u := LintUse{name: name, writes: 0, first: s.pos, field: "", others: 0}
             for j in i + 1..b.stmts.len {
-                lint_stmt(&u, &b.stmts.buf[j])
+                lint_stmt(&u, &b.stmts[j])
                 if u.others > 0 {
                     return
                 }

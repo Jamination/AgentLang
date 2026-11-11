@@ -9,15 +9,15 @@
 fn variant_of(self *Cx, ei i64, n str) i64 {
     var l Vec[(i64, i64)]
     has := false
-    if self.enum_decls.buf[ei].pos.file < self.n_prelude {
+    if self.enum_decls[ei].pos.file < self.n_prelude {
         l, has = self.p_variants.get(n)
     } else {
         l, has = self.variants.get(n)
     }
     if has {
         for i in 0..l.len {
-            if l.buf[i].0 == ei {
-                return l.buf[i].1
+            if l[i].0 == ei {
+                return l[i].1
             }
         }
     }
@@ -26,14 +26,14 @@ fn variant_of(self *Cx, ei i64, n str) i64 {
 
 // "A, B, C": the variants of an enum declaration, for diagnostics
 fn lower_match_variant_list(cx *Cx, ei i64) str {
-    d := cx.enum_decls.buf[ei]
+    d := cx.enum_decls[ei]
     parts := vec[str]()
     for i in 0..d.variants.len {
         if i == 8 {
             parts.push("...")
             break
         }
-        parts.push(d.variants.buf[i].0)
+        parts.push(d.variants[i].0)
     }
     return join(parts.items(), ", ")
 }
@@ -43,7 +43,7 @@ fn lower_match_variant_list(cx *Cx, ei i64) str {
 fn qual_enum_name(self *Cx, n str) i64 {
     match self.find_enum(n) {
         Some(ei) => {
-            own := (self.enum_decls.buf[ei].pos.file < self.n_prelude) == self.scope_prelude
+            own := (self.enum_decls[ei].pos.file < self.n_prelude) == self.scope_prelude
             if !own {
                 bit := if self.scope_prelude { 1 } else { 2 }
                 if self.decl_layers.get_or(n, 0) & bit != 0 {
@@ -88,19 +88,19 @@ fn bare_variant(self *Fx, n str, expect Opt[i64]) (i64, i64, i64) {
         Some(t) => {
             match cx.types.k(t) {
                 TyKEnum(eid) => {
-                    ed := cx.types.enums.buf[eid].decl
-                    if (cx.enum_decls.buf[ed].pos.file < cx.n_prelude) == cx.scope_prelude {
+                    ed := cx.types.enums[eid].decl
+                    if (cx.enum_decls[ed].pos.file < cx.n_prelude) == cx.scope_prelude {
                         if own_has {
                             for i in 0..own.len {
-                                if own.buf[i].0 == ed {
-                                    return (ed, own.buf[i].1, 1)
+                                if own[i].0 == ed {
+                                    return (ed, own[i].1, 1)
                                 }
                             }
                         }
                     } else if other_has && !hidden {
                         for i in 0..other.len {
-                            if other.buf[i].0 == ed {
-                                return (ed, other.buf[i].1, 1)
+                            if other[i].0 == ed {
+                                return (ed, other[i].1, 1)
                             }
                         }
                     }
@@ -111,12 +111,12 @@ fn bare_variant(self *Fx, n str, expect Opt[i64]) (i64, i64, i64) {
         None => {}
     }
     if own_has {
-        return (own.buf[0].0, own.buf[0].1, if own.len == 1 { 1 } else { 2 })
+        return (own[0].0, own[0].1, if own.len == 1 { 1 } else { 2 })
     }
     if hidden {
         return (0, 0, 0)
     }
-    return (other.buf[0].0, other.buf[0].1, if other.len == 1 { 1 } else { 2 })
+    return (other[0].0, other[0].1, if other.len == 1 { 1 } else { 2 })
 }
 
 // the diagnostic for a bare variant name that several enums have
@@ -131,7 +131,7 @@ fn variant_ambiguous(self *Fx, n str, pos Pos) {
     names := vec[str]()
     forms := vec[str]()
     for i in 0..l.len {
-        en := cx.enum_decls.buf[l.buf[i].0].name
+        en := cx.enum_decls[l[i].0].name
         names.push(fmt("`", en, "`"))
         forms.push(fmt("`", en, ".", n, "`"))
     }
@@ -153,7 +153,7 @@ fn variant_ref(self *Fx, e *Expr) str {
             match b.k {
                 EKIdent(q) => {
                     ei := self.cx.qual_enum_name(q)
-                    if ei >= 0 && self.cx.enum_decls.buf[ei].tparams.len != 0 && !is_some(self.lookup(q)) {
+                    if ei >= 0 && self.cx.enum_decls[ei].tparams.len != 0 && !is_some(self.lookup(q)) {
                         return n
                     }
                 }
@@ -184,7 +184,7 @@ fn qual_enum(self *Fx, b *Expr) (i64, i64) {
             if ei < 0 || is_some(self.lookup(n)) {
                 return (-1, -1)
             }
-            if self.cx.enum_decls.buf[ei].tparams.len == 0 {
+            if self.cx.enum_decls[ei].tparams.len == 0 {
                 return (ei, self.cx.inst_enum(ei, vec[i64](), b.pos))
             }
             return (ei, -1)
@@ -223,7 +223,7 @@ fn qual_variant(self *Fx, ei i64, ety i64, name str, args []Expr, expect Opt[i64
     }
     vi := self.cx.variant_of(ei, name)
     if vi < 0 {
-        en := self.cx.enum_decls.buf[ei].name
+        en := self.cx.enum_decls[ei].name
         self.err(pos, fmt("enum `", en, "` has no variant `", name, "` (variants: ", lower_match_variant_list(self.cx, ei), ")"))
         lower_call_eval_all(self, args)
         return val_err()
@@ -303,7 +303,7 @@ fn lower_match_enum_of(s *Fx, ty i64) i64 {
 // does a variant or tuple pattern have a sub-pattern that can fail?
 fn lower_match_subs_refutable(rp *RPat) bool {
     for i in 0..rp.subs.len {
-        if rp.subs.buf[i].refutable {
+        if rp.subs[i].refutable {
             return true
         }
     }
@@ -316,7 +316,7 @@ fn lower_match_subs(s *Fx, r RPat, subs *Vec[Pat], tys *Vec[i64]) RPat {
     out.subs = Vec[RPat]{buf: alloc[RPat](subs.len), len: 0}
     bad := false
     for i in 0..subs.len {
-        sp := s.pat_resolve(&subs.buf[i], tys.buf[i], false)
+        sp := s.pat_resolve(&subs[i], tys[i], false)
         if sp.k == RP_ERR {
             bad = true
         }
@@ -343,7 +343,7 @@ fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr],
         self.err(pos, fmt("`", name, if parens { "(..)" } else { "" }, "` is an enum variant pattern, but the matched value has type ", tn))
         return lower_match_err(ty, pos)
     }
-    ed := self.cx.types.enums.buf[eid].decl
+    ed := self.cx.types.enums[eid].decl
     match qual {
         Some(q) => {
             qe := self.qual_enum(q)
@@ -351,11 +351,11 @@ fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr],
                 return lower_match_err(ty, pos)
             }
             if qe.0 < 0 {
-                self.err(pos, fmt("the qualifier of the pattern `.", name, "` is not an enum; write `", name, "` or `", self.cx.enum_decls.buf[ed].name, ".", name, "`"))
+                self.err(pos, fmt("the qualifier of the pattern `.", name, "` is not an enum; write `", name, "` or `", self.cx.enum_decls[ed].name, ".", name, "`"))
                 return lower_match_err(ty, pos)
             }
             if qe.0 != ed || (qe.1 >= 0 && qe.1 != ty) {
-                qn := if qe.1 >= 0 { self.tyname(qe.1) } else { self.cx.enum_decls.buf[qe.0].name }
+                qn := if qe.1 >= 0 { self.tyname(qe.1) } else { self.cx.enum_decls[qe.0].name }
                 self.err(pos, fmt("the pattern names a variant of ", qn, ", but the matched value has type ", tn))
                 return lower_match_err(ty, pos)
             }
@@ -363,9 +363,9 @@ fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr],
         None => {}
     }
     vi := -1
-    nv := self.cx.types.enums.buf[eid].variants.len
+    nv := self.cx.types.enums[eid].variants.len
     for i in 0..nv {
-        if self.cx.types.enums.buf[eid].variants.buf[i].0 == name {
+        if self.cx.types.enums[eid].variants[i].0 == name {
             vi = i
             break
         }
@@ -374,7 +374,7 @@ fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr],
         self.err(pos, fmt("`", name, "` is not a variant of ", tn, " (variants: ", lower_match_variant_list(self.cx, ed), ")"))
         return lower_match_err(ty, pos)
     }
-    ptys := clone(self.cx.types.enums.buf[eid].variants.buf[vi].1)
+    ptys := clone(self.cx.types.enums[eid].variants[vi].1)
     if !parens {
         if ptys.len != 0 {
             us := vec[str]()
@@ -424,9 +424,9 @@ fn lower_match_structural(s *Fx, p *Pat, ty i64) bool {
             }
             match e.k {
                 EKIdent(n) => {
-                    nv := s.cx.types.enums.buf[eid].variants.len
+                    nv := s.cx.types.enums[eid].variants.len
                     for i in 0..nv {
-                        if s.cx.types.enums.buf[eid].variants.buf[i].0 == n {
+                        if s.cx.types.enums[eid].variants[i].0 == n {
                             return true
                         }
                     }
@@ -552,9 +552,9 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
                 EKIdent(n) => {
                     if eid >= 0 {
                         has := false
-                        nv := self.cx.types.enums.buf[eid].variants.len
+                        nv := self.cx.types.enums[eid].variants.len
                         for i in 0..nv {
-                            if self.cx.types.enums.buf[eid].variants.buf[i].0 == n {
+                            if self.cx.types.enums[eid].variants[i].0 == n {
                                 has = true
                                 break
                             }
@@ -614,7 +614,7 @@ fn lower_match_collect(s *Fx, rp *RPat, out *Vec[(str, i64, Pos)]) {
     }
     if rp.k == RP_BIND || rp.k == RP_REF {
         for i in 0..out.len {
-            if out.buf[i].0 == rp.name {
+            if out[i].0 == rp.name {
                 s.err(rp.pos, fmt("`", rp.name, "` is bound more than once in this pattern"))
                 return
             }
@@ -627,7 +627,7 @@ fn lower_match_collect(s *Fx, rp *RPat, out *Vec[(str, i64, Pos)]) {
         return
     }
     for i in 0..rp.subs.len {
-        lower_match_collect(s, &rp.subs.buf[i], out)
+        lower_match_collect(s, &rp.subs[i], out)
     }
 }
 
@@ -640,12 +640,12 @@ fn lower_match_names(s *Fx, p *Pat, top bool, out *Vec[str]) {
         }
         PatTuple(subs, _) => {
             for i in 0..subs.len {
-                lower_match_names(s, &subs.buf[i], false, out)
+                lower_match_names(s, &subs[i], false, out)
             }
         }
         PatVariant(_, subs, _, _) => {
             for i in 0..subs.len {
-                lower_match_names(s, &subs.buf[i], false, out)
+                lower_match_names(s, &subs[i], false, out)
             }
         }
         PatConst(e) => {
@@ -672,14 +672,14 @@ fn lower_match_has_ref(p *Pat) bool {
         PatRef(_, _) => return true
         PatTuple(subs, _) => {
             for i in 0..subs.len {
-                if lower_match_has_ref(&subs.buf[i]) {
+                if lower_match_has_ref(&subs[i]) {
                     return true
                 }
             }
         }
         PatVariant(_, subs, _, _) => {
             for i in 0..subs.len {
-                if lower_match_has_ref(&subs.buf[i]) {
+                if lower_match_has_ref(&subs[i]) {
                     return true
                 }
             }
@@ -706,8 +706,8 @@ fn pat_offsets(self *Fx, rp *RPat) Vec[i64] {
 // The part of `part` that sub-pattern `i` of `rp` looks at, and whether it lies in the
 // payload of an enum (payload memory is read with the "any" alias class).
 fn pat_part(self *Fx, rp *RPat, offs *Vec[i64], part Val, payload bool, i i64) (Val, bool) {
-    sty := rp.subs.buf[i].ty
-    a := self.add_off(part.v, offs.buf[i])
+    sty := rp.subs[i].ty
+    a := self.add_off(part.v, offs[i])
     v := self.mval(sty, a)
     in_payload := payload || rp.k == RP_VARIANT
     if self.cx.types.is_scalar(sty) {
@@ -761,18 +761,18 @@ fn pat_const_val(self *Fx, rp *RPat, top bool) Val {
 fn pat_test_subs(self *Fx, rp *RPat, part Val, payload bool, ok_b i64, fail_b i64) {
     last := -1
     for i in 0..rp.subs.len {
-        if rp.subs.buf[i].refutable {
+        if rp.subs[i].refutable {
             last = i
         }
     }
     offs := self.pat_offsets(rp)
     for i in 0..rp.subs.len {
-        if !rp.subs.buf[i].refutable {
+        if !rp.subs[i].refutable {
             continue
         }
         sp := self.pat_part(rp, &offs, part, payload, i)
         target := if i == last { ok_b } else { self.new_block() }
-        self.pat_test(&rp.subs.buf[i], sp.0, sp.1, NOV, false, target, fail_b)
+        self.pat_test(&rp.subs[i], sp.0, sp.1, NOV, false, target, fail_b)
         if i != last {
             self.switch_to(target)
         }
@@ -842,7 +842,7 @@ fn pat_test(self *Fx, rp *RPat, part Val, payload bool, key i64, top bool, ok_b 
         b := self.new_block()
         self.br(ne, b, fail_b)
         self.switch_to(b)
-        sub := &rp.subs.buf[0]
+        sub := &rp.subs[0]
         self.pat_test(sub, self.mval(sub.ty, p), false, NOV, false, ok_b, fail_b)
         return
     }
@@ -864,7 +864,7 @@ fn copy_any(self *Fx, dst i64, src i64, ty i64) {
         return
     }
     for i in 0..lvs.len {
-        l := lvs.buf[i]
+        l := lvs[i]
         a := self.add_off(src, l.off)
         v := self.load_raw(a, l.t, AK_ANY)
         d := self.add_off(dst, l.off)
@@ -875,8 +875,8 @@ fn copy_any(self *Fx, dst i64, src i64, ty i64) {
 // the variable of an arm with several alternatives that holds the binding `name`
 fn lower_match_slot(slots *Vec[(str, i64, i64)], name str) i64 {
     for i in 0..slots.len {
-        if slots.buf[i].0 == name {
-            return slots.buf[i].2
+        if slots[i].0 == name {
+            return slots[i].2
         }
     }
     return NOV
@@ -910,7 +910,7 @@ fn pat_bind(self *Fx, rp *RPat, part Val, payload bool, slots *Vec[(str, i64, i6
             tmp = self.mval(rp.ty, t)
             self.store(tmp, part)
         }
-        self.scopes.buf[self.scopes.len - 1].vars.set(rp.name, (rp.ty, tmp.v))
+        self.scopes[self.scopes.len - 1].vars.set(rp.name, (rp.ty, tmp.v))
         return
     }
     if rp.k == RP_REF {
@@ -930,23 +930,23 @@ fn pat_bind(self *Fx, rp *RPat, part Val, payload bool, slots *Vec[(str, i64, i6
         }
         self.store(self.mval(pt, a), self.sval(pt, part.v))
         if !use_slots {
-            self.scopes.buf[self.scopes.len - 1].vars.set(rp.name, (pt, a))
+            self.scopes[self.scopes.len - 1].vars.set(rp.name, (pt, a))
         }
         return
     }
     if rp.k == RP_DEREF {
         p := self.scalar(part)
-        sub := &rp.subs.buf[0]
+        sub := &rp.subs[0]
         self.pat_bind(sub, self.mval(sub.ty, p), false, slots, use_slots)
         return
     }
     offs := self.pat_offsets(rp)
     for i in 0..rp.subs.len {
-        if rp.subs.buf[i].nbinds == 0 {
+        if rp.subs[i].nbinds == 0 {
             continue
         }
         sp := self.pat_part(rp, &offs, part, payload, i)
-        self.pat_bind(&rp.subs.buf[i], sp.0, sp.1, slots, use_slots)
+        self.pat_bind(&rp.subs[i], sp.0, sp.1, slots, use_slots)
     }
 }
 
@@ -994,7 +994,7 @@ fn lower_match_is_wild(p *RPat) bool {
 // the row `r` with its first pattern replaced by that pattern's sub-patterns (`n` wildcards
 // if it is a wildcard)
 fn lower_match_expand(r *Vec[*RPat], n i64, wild *RPat) Vec[*RPat] {
-    p := r.buf[0]
+    p := r[0]
     out := vec[*RPat]()
     if lower_match_is_wild(p) {
         for i in 0..n {
@@ -1002,11 +1002,11 @@ fn lower_match_expand(r *Vec[*RPat], n i64, wild *RPat) Vec[*RPat] {
         }
     } else {
         for i in 0..p.subs.len {
-            out.push(&p.subs.buf[i])
+            out.push(&p.subs[i])
         }
     }
     for i in 1..r.len {
-        out.push(r.buf[i])
+        out.push(r[i])
     }
     return out
 }
@@ -1015,12 +1015,12 @@ fn lower_match_expand(r *Vec[*RPat], n i64, wild *RPat) Vec[*RPat] {
 fn lower_match_witness(head str, w *Vec[str], n i64, parens bool) Vec[str] {
     out := vec[str]()
     if parens {
-        out.push(fmt(head, "(", join(w.buf[..n], ", "), ")"))
+        out.push(fmt(head, "(", join(w[..n], ", "), ")"))
     } else {
         out.push(head)
     }
     for i in n..w.len {
-        out.push(w.buf[i])
+        out.push(w[i])
     }
     return out
 }
@@ -1028,11 +1028,11 @@ fn lower_match_witness(head str, w *Vec[str], n i64, parens bool) Vec[str] {
 // The rows of `rows` that can match a value whose first part is variant `vi` of enum `eid`,
 // checked against that variant's fields and the remaining columns.
 fn lower_match_uncovered_variant(s *Fx, rows *Vec[Vec[*RPat]], rest *Vec[i64], eid i64, vi i64, wild *RPat) (Vec[str], bool) {
-    ptys := clone(s.cx.types.enums.buf[eid].variants.buf[vi].1)
+    ptys := clone(s.cx.types.enums[eid].variants[vi].1)
     sub := vec[Vec[*RPat]]()
     for i in 0..rows.len {
-        r := &rows.buf[i]
-        p := r.buf[0]
+        r := &rows[i]
+        p := r[0]
         if lower_match_is_wild(p) || (p.k == RP_VARIANT && p.vi == vi) {
             sub.push(lower_match_expand(r, ptys.len, wild))
         }
@@ -1043,7 +1043,7 @@ fn lower_match_uncovered_variant(s *Fx, rows *Vec[Vec[*RPat]], rest *Vec[i64], e
     if !unc {
         return (w, false)
     }
-    name := s.cx.types.enums.buf[eid].variants.buf[vi].0
+    name := s.cx.types.enums[eid].variants[vi].0
     return (lower_match_witness(name, &w, ptys.len, ptys.len != 0), true)
 }
 
@@ -1054,11 +1054,11 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
     if tys.len == 0 {
         return (vec[str](), rows.len == 0)
     }
-    t := tys.buf[0]
-    rest := vec_of(tys.buf[1..tys.len])
+    t := tys[0]
+    rest := vec_of(tys[1..tys.len])
     eid := lower_match_enum_of(s, t)
     if eid >= 0 {
-        nv := s.cx.types.enums.buf[eid].variants.len
+        nv := s.cx.types.enums[eid].variants.len
         for vi in 0..nv {
             w, unc := lower_match_uncovered_variant(s, rows, &rest, eid, vi, wild)
             if unc {
@@ -1079,8 +1079,8 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
     if is_tuple {
         sub := vec[Vec[*RPat]]()
         for i in 0..rows.len {
-            r := &rows.buf[i]
-            if lower_match_is_wild(r.buf[0]) || r.buf[0].k == RP_TUPLE {
+            r := &rows[i]
+            if lower_match_is_wild(r[0]) || r[0].k == RP_TUPLE {
                 sub.push(lower_match_expand(r, elems.len, wild))
             }
         }
@@ -1096,8 +1096,8 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
         for bv in 1..=0 by -1 {
             sub := vec[Vec[*RPat]]()
             for i in 0..rows.len {
-                r := &rows.buf[i]
-                if lower_match_is_wild(r.buf[0]) || lower_match_bool_pat(s, r.buf[0]) == bv {
+                r := &rows[i]
+                if lower_match_is_wild(r[0]) || lower_match_bool_pat(s, r[0]) == bv {
                     sub.push(lower_match_expand(r, 0, wild))
                 }
             }
@@ -1115,7 +1115,7 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
         TyKPtr(inner) => {
             target = inner
             for i in 0..rows.len {
-                if rows.buf[i].buf[0].k == RP_DEREF {
+                if rows[i][0].k == RP_DEREF {
                     is_ptr = true
                 }
             }
@@ -1126,8 +1126,8 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
         nil_rows := vec[Vec[*RPat]]()
         sub := vec[Vec[*RPat]]()
         for i in 0..rows.len {
-            r := &rows.buf[i]
-            p := r.buf[0]
+            r := &rows[i]
+            p := r[0]
             if lower_match_is_wild(p) || lower_match_is_nil(p) {
                 nil_rows.push(lower_match_expand(r, 0, wild))
             }
@@ -1147,8 +1147,8 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
     // integers, strings, ...: constants never cover the type; only wildcards count
     sub := vec[Vec[*RPat]]()
     for i in 0..rows.len {
-        r := &rows.buf[i]
-        if lower_match_is_wild(r.buf[0]) {
+        r := &rows[i]
+        if lower_match_is_wild(r[0]) {
             sub.push(lower_match_expand(r, 0, wild))
         }
     }
@@ -1168,11 +1168,11 @@ fn lower_match_missing(s *Fx, rows *Vec[Vec[*RPat]], ty i64) Vec[str] {
     eid := lower_match_enum_of(s, ty)
     if eid >= 0 {
         none := vec[i64]()
-        nv := s.cx.types.enums.buf[eid].variants.len
+        nv := s.cx.types.enums[eid].variants.len
         for vi in 0..nv {
             w, unc := lower_match_uncovered_variant(s, rows, &none, eid, vi, wild)
             if unc {
-                out.push(w.buf[0])
+                out.push(w[0])
             }
         }
         return out
@@ -1184,8 +1184,8 @@ fn lower_match_missing(s *Fx, rows *Vec[Vec[*RPat]], ty i64) Vec[str] {
             nil_rows := vec[Vec[*RPat]]()
             sub := vec[Vec[*RPat]]()
             for i in 0..rows.len {
-                r := &rows.buf[i]
-                p := r.buf[0]
+                r := &rows[i]
+                p := r[0]
                 if p.k == RP_DEREF {
                     any = true
                 }
@@ -1209,7 +1209,7 @@ fn lower_match_missing(s *Fx, rows *Vec[Vec[*RPat]], ty i64) Vec[str] {
     tys := vec_one(ty)
     w, unc := lower_match_uncovered(s, rows, &tys, wild)
     if unc {
-        out.push(w.buf[0])
+        out.push(w[0])
     }
     return out
 }
@@ -1230,7 +1230,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
     }
     payload_enum := false
     match enum_id {
-        Some(e) => { payload_enum = !self.cx.types.enums.buf[e].simple }
+        Some(e) => { payload_enum = !self.cx.types.enums[e].simple }
         None => {}
     }
     // scrutinee: scalar value, or tag for payload enums
@@ -1259,7 +1259,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         guard_call := false
         for ai in 0..len(arms) {
             for pi in 0..arms[ai].pats.len {
-                if lower_match_has_ref(&arms[ai].pats.buf[pi]) {
+                if lower_match_has_ref(&arms[ai].pats[pi]) {
                     has_ref = true
                 }
             }
@@ -1291,7 +1291,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
     covered := vec[bool]()
     match enum_id {
         Some(e) => {
-            covered = vec_fill(self.cx.types.enums.buf[e].variants.len, false)
+            covered = vec_fill(self.cx.types.enums[e].variants.len, false)
         }
         None => {}
     }
@@ -1315,7 +1315,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         binds := vec[(str, i64, Pos)]()
         pat_err := false
         for pi in 0..npats {
-            rp := self.pat_resolve(&arm.pats.buf[pi], sv.ty, true)
+            rp := self.pat_resolve(&arm.pats[pi], sv.ty, true)
             if rp.k == RP_ERR {
                 pat_err = true
             } else if pi == 0 {
@@ -1326,30 +1326,30 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
                 for i in 0..binds.len {
                     found := false
                     for j in 0..others.len {
-                        if others.buf[j].0 == binds.buf[i].0 {
+                        if others[j].0 == binds[i].0 {
                             found = true
-                            if others.buf[j].1 != binds.buf[i].1 && !pat_err {
-                                a := self.tyname(binds.buf[i].1)
-                                b := self.tyname(others.buf[j].1)
-                                self.err(others.buf[j].2, fmt("`", binds.buf[i].0, "` has type ", a, " in one alternative of this arm and ", b, " in another; every alternative must bind it with the same type"))
+                            if others[j].1 != binds[i].1 && !pat_err {
+                                a := self.tyname(binds[i].1)
+                                b := self.tyname(others[j].1)
+                                self.err(others[j].2, fmt("`", binds[i].0, "` has type ", a, " in one alternative of this arm and ", b, " in another; every alternative must bind it with the same type"))
                                 pat_err = true
                             }
                         }
                     }
                     if !found && !pat_err {
-                        self.err(arm.pos, fmt("`", binds.buf[i].0, "` is not bound by every alternative of this arm; all patterns of an arm must bind the same names"))
+                        self.err(arm.pos, fmt("`", binds[i].0, "` is not bound by every alternative of this arm; all patterns of an arm must bind the same names"))
                         pat_err = true
                     }
                 }
                 for j in 0..others.len {
                     found := false
                     for i in 0..binds.len {
-                        if others.buf[j].0 == binds.buf[i].0 {
+                        if others[j].0 == binds[i].0 {
                             found = true
                         }
                     }
                     if !found && !pat_err {
-                        self.err(others.buf[j].2, fmt("`", others.buf[j].0, "` is not bound by every alternative of this arm; all patterns of an arm must bind the same names"))
+                        self.err(others[j].2, fmt("`", others[j].0, "` is not bound by every alternative of this arm; all patterns of an arm must bind the same names"))
                         pat_err = true
                     }
                 }
@@ -1361,13 +1361,13 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         use_slots := npats > 1 && binds.len != 0 && !pat_err
         if use_slots {
             for i in 0..binds.len {
-                slots.push((binds.buf[i].0, binds.buf[i].1, self.temp(binds.buf[i].1)))
+                slots.push((binds[i].0, binds[i].1, self.temp(binds[i].1)))
             }
         }
         for pi in 0..npats {
             last := pi + 1 == npats
             fail_b := if last { next_b } else { self.new_block() }
-            rp := &rps.buf[pi]
+            rp := &rps[pi]
             // what the arm covers (an arm with a guard covers nothing)
             if rp.k == RP_ERR {
                 any_pat_err = true
@@ -1375,7 +1375,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
                 any_guard = true
             } else if rp.k == RP_VARIANT {
                 if !lower_match_subs_refutable(rp) {
-                    covered.buf[rp.vi] = true
+                    covered[rp.vi] = true
                 }
             } else if !rp.refutable {
                 has_wild = true
@@ -1412,21 +1412,21 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         self.push_scope()
         if use_slots {
             for i in 0..slots.len {
-                self.scopes.buf[self.scopes.len - 1].vars.set(slots.buf[i].0, (slots.buf[i].1, slots.buf[i].2))
+                self.scopes[self.scopes.len - 1].vars.set(slots[i].0, (slots[i].1, slots[i].2))
             }
         } else if pat_err {
             // the arm's variables are unknown: give them the error type, which is silent
             names := vec[str]()
             for pi in 0..npats {
-                lower_match_names(self, &arm.pats.buf[pi], true, &names)
+                lower_match_names(self, &arm.pats[pi], true, &names)
             }
             for i in 0..names.len {
-                if names.buf[i] != "_" {
-                    self.scopes.buf[self.scopes.len - 1].vars.set(names.buf[i], (T_ERR, self.temp(T_ERR)))
+                if names[i] != "_" {
+                    self.scopes[self.scopes.len - 1].vars.set(names[i], (T_ERR, self.temp(T_ERR)))
                 }
             }
         } else if npats == 1 {
-            self.pat_bind(&rps.buf[0], part, false, &slots, false)
+            self.pat_bind(&rps[0], part, false, &slots, false)
         }
         match arm.guard {
             Some(g) => {
@@ -1480,7 +1480,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
     // fallthrough when no arm matched
     all_covered := true
     for i in 0..covered.len {
-        if !covered.buf[i] {
+        if !covered[i] {
             all_covered = false
         }
     }
@@ -1502,8 +1502,8 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
             match enum_id {
                 Some(e) => {
                     for i in 0..covered.len {
-                        if !covered.buf[i] {
-                            missing.push(self.cx.types.enums.buf[e].variants.buf[i].0)
+                        if !covered[i] {
+                            missing.push(self.cx.types.enums[e].variants[i].0)
                         }
                     }
                 }

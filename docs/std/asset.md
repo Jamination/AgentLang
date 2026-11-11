@@ -11,11 +11,17 @@ program using this module stays a static, libc-free executable.
 
 Failures are ordinary results (`false`, `-1`, an empty list, `nil`), never a panic: a missing
 file is a situation, not a bug. Paths are relative to the working directory of the process
-unless they start with `/`, and are limited to 4095 bytes (longer paths simply fail).
+unless they start with `/`, and are limited to 4095 bytes (longer paths fail with error 36).
+
+**Why it failed.** The functions that open, read, write, create or delete (`read_bytes`,
+`write_bytes`, `remove_file`, `remove_dir`, `make_dir`, `list_dir`, and the loader built on
+them) record their outcome: right after a failure `io_error()` is the OS error number and
+`error_text(io_error())` its text (`no such file or directory`, ...); after a success
+`io_error()` is 0. Both are core functions (language reference, "Standard library").
 
 **Allocation.** Functions that return file contents, lists, joined paths or parsed data
-allocate from the program arena (see [mem](mem.md)); wrap temporary work in
-`mark()`/`release()` or `frame_begin()`/`frame_end()`. The queries `file_exists`, `is_dir`,
+allocate from the arena in use (see [mem](mem.md)); wrap temporary work in
+`mark()`/`release()`, `frame_begin()`/`frame_end()` or a `Region`. The queries `file_exists`, `is_dir`,
 `file_size`, `modified_time` and `changed` do not allocate and are fine to call every frame.
 
 ## Files and directories
@@ -26,7 +32,7 @@ allocate from the program arena (see [mem](mem.md)); wrap temporary work in
 | `is_dir(path str) bool` | True if `path` names a directory. |
 | `file_size(path str) i64` | Size in bytes, or -1 if the file does not exist. |
 | `modified_time(path str) i64` | Time of the last modification in nanoseconds since 1970, or 0 if the file does not exist. Compare two readings to detect a change. |
-| `read_bytes(path str) ([]u8, bool)` | The whole file; `(empty, false)` if it cannot be opened. One allocation of exactly the file size. Since `str` is `[]u8`, this also reads text. |
+| `read_bytes(path str) ([]u8, bool)` | The whole file; `(empty, false)` if it cannot be opened or cannot be read (a directory, for example). One allocation of exactly the file size. Since `str` is `[]u8`, this also reads text. |
 | `write_bytes(path str, data []u8) bool` | Creates or replaces the file; `false` on failure. Does not create directories. |
 | `remove_file(path str) bool` | Deletes a file. |
 | `make_dir(path str) bool` | Creates a directory and any missing parents; true if the directory exists afterwards (also when it existed before). |

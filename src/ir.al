@@ -295,11 +295,11 @@ struct Func {
 fn clone(f *Func) Func {
     insts := vec[Inst]()
     for i in 0..f.insts.len {
-        insts.push(clone(&f.insts.buf[i]))
+        insts.push(clone(&f.insts[i]))
     }
     blocks := vec[BlockData]()
     for i in 0..f.blocks.len {
-        blocks.push(clone(&f.blocks.buf[i]))
+        blocks.push(clone(&f.blocks[i]))
     }
     return Func{
         name: f.name,
@@ -398,17 +398,17 @@ fn mk(self *Func, op Op, ty T, args Vec[i64], k i64) i64 {
 
 fn push(self *Func, b i64, op Op, ty T, args Vec[i64], k i64) i64 {
     v := self.mk(op, ty, args, k)
-    self.blocks.buf[b].insts.push(v)
+    self.blocks[b].insts.push(v)
     return v
 }
 
 // pointer to instruction v (stale after the next mk / push)
 fn im(self *Func, v i64) *Inst {
-    return &self.insts.buf[v]
+    return &self.insts[v]
 }
 
 fn is_const(self *Func, v i64) Opt[i64] {
-    i := &self.insts.buf[v]
+    i := &self.insts[v]
     if i.op == OpConst {
         return Some(i.k)
     } else {
@@ -417,7 +417,7 @@ fn is_const(self *Func, v i64) Opt[i64] {
 }
 
 fn succs(self *Func, b i64) Vec[i64] {
-    match self.blocks.buf[b].term {
+    match self.blocks[b].term {
         TermJmp(t) => return vec_one(t)
         TermBr(c, t, f) => {
             if t == f {
@@ -435,7 +435,7 @@ fn preds(self *Func) Vec[Vec[i64]] {
     for b in 0..self.blocks.len {
         ss := self.succs(b)
         for s in ss.items() {
-            p.buf[s].push(b)
+            p[s].push(b)
         }
     }
     return p
@@ -448,17 +448,17 @@ fn rpo(self *Func) Vec[i64] {
     post := vec[i64]()
     stack := vec[(i64, i64)]()
     stack.push((0, 0))
-    seen.buf[0] = true
+    seen[0] = true
     while stack.len > 0 {
         top := stack.len - 1
-        b := stack.buf[top].0
-        i := stack.buf[top].1
+        b := stack[top].0
+        i := stack[top].1
         ss := self.succs(b)
         if i < ss.len {
-            s := ss.buf[i]
-            stack.buf[top].1 = i + 1
-            if !seen.buf[s] {
-                seen.buf[s] = true
+            s := ss[i]
+            stack[top].1 = i + 1
+            if !seen[s] {
+                seen[s] = true
                 stack.push((s, 0))
             }
         } else {
@@ -471,7 +471,7 @@ fn rpo(self *Func) Vec[i64] {
 }
 
 fn term_uses(self *Func, b i64) Vec[i64] {
-    match self.blocks.buf[b].term {
+    match self.blocks[b].term {
         TermBr(c, t, e) => return vec_of([]i64{c})
         TermRet(v) => return clone(&v)
         _ => return vec[i64]()
@@ -481,19 +481,19 @@ fn term_uses(self *Func, b i64) Vec[i64] {
 fn use_counts(self *Func) Vec[i64] {
     c := vec_fill(self.insts.len, 0)
     for bi in 0..self.blocks.len {
-        b := &self.blocks.buf[bi]
+        b := &self.blocks[bi]
         for v in b.insts.items() {
-            for a in self.insts.buf[v].args.items() {
-                c.buf[a] += 1
+            for a in self.insts[v].args.items() {
+                c[a] += 1
             }
         }
         match b.term {
             TermBr(v, t, e) => {
-                c.buf[v] += 1
+                c[v] += 1
             }
             TermRet(vs) => {
                 for v in vs.items() {
-                    c.buf[v] += 1
+                    c[v] += 1
                 }
             }
             _ => {}
@@ -504,13 +504,13 @@ fn use_counts(self *Func) Vec[i64] {
 
 fn ir_apply_repl_find(map *Vec[i64], v i64) i64 {
     r := v
-    while map.buf[r] != NOV {
-        r = map.buf[r]
+    while map[r] != NOV {
+        r = map[r]
     }
     c := v
-    while map.buf[c] != NOV {
-        n := map.buf[c]
-        map.buf[c] = r
+    while map[c] != NOV {
+        n := map[c]
+        map[c] = r
         c = n
     }
     return r
@@ -522,26 +522,26 @@ fn apply_repl(self *Func, map *Vec[i64]) {
         map.resize(self.insts.len, NOV)
     }
     for bi in 0..self.blocks.len {
-        for ii in 0..self.blocks.buf[bi].insts.len {
-            v := self.blocks.buf[bi].insts.buf[ii]
-            for ai in 0..self.insts.buf[v].args.len {
-                a := self.insts.buf[v].args.buf[ai]
-                if map.buf[a] != NOV {
-                    self.insts.buf[v].args.buf[ai] = ir_apply_repl_find(map, a)
+        for ii in 0..self.blocks[bi].insts.len {
+            v := self.blocks[bi].insts[ii]
+            for ai in 0..self.insts[v].args.len {
+                a := self.insts[v].args[ai]
+                if map[a] != NOV {
+                    self.insts[v].args[ai] = ir_apply_repl_find(map, a)
                 }
             }
         }
-        match self.blocks.buf[bi].term {
+        match self.blocks[bi].term {
             TermBr(c, t, e) => {
-                if map.buf[c] != NOV {
-                    self.blocks.buf[bi].term = TermBr(ir_apply_repl_find(map, c), t, e)
+                if map[c] != NOV {
+                    self.blocks[bi].term = TermBr(ir_apply_repl_find(map, c), t, e)
                 }
             }
             TermRet(vs) => {
                 // vs shares its buffer with the terminator: updated in place
                 for i in 0..vs.len {
-                    if map.buf[vs.buf[i]] != NOV {
-                        vs.buf[i] = ir_apply_repl_find(map, vs.buf[i])
+                    if map[vs[i]] != NOV {
+                        vs[i] = ir_apply_repl_find(map, vs[i])
                     }
                 }
             }
@@ -553,8 +553,8 @@ fn apply_repl(self *Func, map *Vec[i64]) {
 fn block_of(self *Func) Vec[i64] {
     bo := vec_fill(self.insts.len, 0xFFFFFFFF)
     for bi in 0..self.blocks.len {
-        for v in self.blocks.buf[bi].insts.items() {
-            bo.buf[v] = bi
+        for v in self.blocks[bi].insts.items() {
+            bo[v] = bi
         }
     }
     return bo
@@ -563,7 +563,7 @@ fn block_of(self *Func) Vec[i64] {
 fn size(self *Func) i64 {
     n := 0
     for bi in 0..self.blocks.len {
-        n += self.blocks.buf[bi].insts.len + 1
+        n += self.blocks[bi].insts.len + 1
     }
     return n
 }
@@ -584,25 +584,25 @@ fn cfg_new(f *Func) Cfg {
     rpo := f.rpo()
     rpo_idx := vec_fill(n, 0xFFFFFFFF)
     for i in 0..rpo.len {
-        rpo_idx.buf[rpo.buf[i]] = i
+        rpo_idx[rpo[i]] = i
     }
     preds := ir_lists(n)
     for b in rpo.items() {
         ss := f.succs(b)
         for s in ss.items() {
-            preds.buf[s].push(b)
+            preds[s].push(b)
         }
     }
     idom := vec_fill(n, 0xFFFFFFFF)
-    idom.buf[0] = 0
+    idom[0] = 0
     changed := true
     while changed {
         changed = false
         for bi in 1..rpo.len {
-            b := rpo.buf[bi]
+            b := rpo[bi]
             nw := 0xFFFFFFFF
-            for p in preds.buf[b].items() {
-                if idom.buf[p] == 0xFFFFFFFF {
+            for p in preds[b].items() {
+                if idom[p] == 0xFFFFFFFF {
                     continue
                 }
                 if nw == 0xFFFFFFFF {
@@ -611,46 +611,46 @@ fn cfg_new(f *Func) Cfg {
                     x := p
                     y := nw
                     while x != y {
-                        while rpo_idx.buf[x] > rpo_idx.buf[y] {
-                            x = idom.buf[x]
+                        while rpo_idx[x] > rpo_idx[y] {
+                            x = idom[x]
                         }
-                        while rpo_idx.buf[y] > rpo_idx.buf[x] {
-                            y = idom.buf[y]
+                        while rpo_idx[y] > rpo_idx[x] {
+                            y = idom[y]
                         }
                     }
                     nw = x
                 }
             }
-            if idom.buf[b] != nw {
-                idom.buf[b] = nw
+            if idom[b] != nw {
+                idom[b] = nw
                 changed = true
             }
         }
     }
     children := ir_lists(n)
     for bi in 1..rpo.len {
-        b := rpo.buf[bi]
-        children.buf[idom.buf[b]].push(b)
+        b := rpo[bi]
+        children[idom[b]].push(b)
     }
     pre := vec_fill(n, 0)
     post := vec_fill(n, 0)
     t := 0
     stack := vec[(i64, i64)]()
     stack.push((0, 0))
-    pre.buf[0] = 0
+    pre[0] = 0
     while stack.len > 0 {
         top := stack.len - 1
-        b := stack.buf[top].0
-        i := stack.buf[top].1
-        if i < children.buf[b].len {
-            c := children.buf[b].buf[i]
-            stack.buf[top].1 = i + 1
+        b := stack[top].0
+        i := stack[top].1
+        if i < children[b].len {
+            c := children[b][i]
+            stack[top].1 = i + 1
             t += 1
-            pre.buf[c] = t
+            pre[c] = t
             stack.push((c, 0))
         } else {
             t += 1
-            post.buf[b] = t
+            post[b] = t
             stack.pop()
         }
     }
@@ -658,12 +658,12 @@ fn cfg_new(f *Func) Cfg {
 }
 
 fn reachable(self *Cfg, b i64) bool {
-    return self.rpo_idx.buf[b] != 0xFFFFFFFF
+    return self.rpo_idx[b] != 0xFFFFFFFF
 }
 
 // a dominates b (reflexive)
 fn dom(self *Cfg, a i64, b i64) bool {
-    return self.pre.buf[a] <= self.pre.buf[b] && self.post.buf[b] <= self.post.buf[a]
+    return self.pre[a] <= self.pre[b] && self.post[b] <= self.post[a]
 }
 
 struct Loop {
@@ -689,37 +689,37 @@ fn loops_new(f *Func, cfg *Cfg) Loops {
         for s in ss.items() {
             if cfg.dom(s, b) {
                 li := 0
-                match by_header.buf[s] {
+                match by_header[s] {
                     Some(x) => {
                         li = x
                     }
                     None => {
                         loops.push(Loop{header: s, blocks: vec_of([]i64{s}), latches: vec[i64](), parent: None, depth: 0})
-                        by_header.buf[s] = Some(loops.len - 1)
+                        by_header[s] = Some(loops.len - 1)
                         li = loops.len - 1
                     }
                 }
-                loops.buf[li].latches.push(b)
+                loops[li].latches.push(b)
             }
         }
     }
     for li in 0..loops.len {
-        l := &loops.buf[li]
+        l := &loops[li]
         inl := vec_fill(n, false)
-        inl.buf[l.header] = true
+        inl[l.header] = true
         work := vec[i64]()
         for lt in l.latches.items() {
-            if !inl.buf[lt] {
-                inl.buf[lt] = true
+            if !inl[lt] {
+                inl[lt] = true
                 work.push(lt)
                 l.blocks.push(lt)
             }
         }
         while work.len > 0 {
             b := work.pop()
-            for p in cfg.preds.buf[b].items() {
-                if !inl.buf[p] {
-                    inl.buf[p] = true
+            for p in cfg.preds[b].items() {
+                if !inl[p] {
+                    inl[p] = true
                     l.blocks.push(p)
                     work.push(p)
                 }
@@ -734,48 +734,48 @@ fn loops_new(f *Func, cfg *Cfg) Loops {
     }
     for i in 1..order.len {
         j := i
-        while j > 0 && loops.buf[order.buf[j - 1]].blocks.len < loops.buf[order.buf[j]].blocks.len {
-            tmp := order.buf[j - 1]
-            order.buf[j - 1] = order.buf[j]
-            order.buf[j] = tmp
+        while j > 0 && loops[order[j - 1]].blocks.len < loops[order[j]].blocks.len {
+            tmp := order[j - 1]
+            order[j - 1] = order[j]
+            order[j] = tmp
             j -= 1
         }
     }
     loop_of := vec_fill(n, none)
     for li in order.items() {
-        parent := loop_of.buf[loops.buf[li].header]
-        loops.buf[li].parent = parent
+        parent := loop_of[loops[li].header]
+        loops[li].parent = parent
         match parent {
             Some(p) => {
-                loops.buf[li].depth = loops.buf[p].depth + 1
+                loops[li].depth = loops[p].depth + 1
             }
             None => {
-                loops.buf[li].depth = 1
+                loops[li].depth = 1
             }
         }
-        for bi in 0..loops.buf[li].blocks.len {
-            loop_of.buf[loops.buf[li].blocks.buf[bi]] = Some(li)
+        for bi in 0..loops[li].blocks.len {
+            loop_of[loops[li].blocks[bi]] = Some(li)
         }
     }
     return Loops{loops: loops, loop_of: loop_of}
 }
 
 fn depth(self *Loops, b i64) i64 {
-    match self.loop_of.buf[b] {
-        Some(l) => return self.loops.buf[l].depth
+    match self.loop_of[b] {
+        Some(l) => return self.loops[l].depth
         None => return 0
     }
 }
 
 fn contains(self *Loops, li i64, b i64) bool {
-    cur := self.loop_of.buf[b]
+    cur := self.loop_of[b]
     loop {
         match cur {
             Some(c) => {
                 if c == li {
                     return true
                 }
-                cur = self.loops.buf[c].parent
+                cur = self.loops[c].parent
             }
             None => {
                 return false
@@ -823,15 +823,15 @@ fn ir_float_debug(s str) str {
     // value = 0.d1d2.. * 10^e10
     e10 := point + exp
     lead := 0
-    while lead < digits.len && digits.buf[lead] == '0' {
+    while lead < digits.len && digits[lead] == '0' {
         lead += 1
     }
     e10 -= lead
     end := digits.len
-    while end > lead && digits.buf[end - 1] == '0' {
+    while end > lead && digits[end - 1] == '0' {
         end -= 1
     }
-    d := digits.buf[lead..end]
+    d := digits[lead..end]
     sign := if neg { "-" } else { "" }
     if len(d) == 0 {
         return concat(sign, "0.0")
@@ -869,8 +869,8 @@ fn ir_print_func(f *Func, m Opt[*Module]) str {
     rpo := f.rpo()
     for b in rpo.items() {
         s.push(fmt("b", b, ":\n"))
-        for v in f.blocks.buf[b].insts.items() {
-            i := &f.insts.buf[v]
+        for v in f.blocks[b].insts.items() {
+            i := &f.insts[v]
             if i.ty != TVoid && i.op != OpStore {
                 s.push(fmt("  %", v, " = "))
             } else {
@@ -896,7 +896,7 @@ fn ir_print_func(f *Func, m Opt[*Module]) str {
                     name := ""
                     match m {
                         Some(mm) => {
-                            name = mm.globals.buf[i.k].name
+                            name = mm.globals[i.k].name
                         }
                         None => {}
                     }
@@ -906,7 +906,7 @@ fn ir_print_func(f *Func, m Opt[*Module]) str {
                     name := ""
                     match m {
                         Some(mm) => {
-                            name = mm.funcs.buf[i.k].name
+                            name = mm.funcs[i.k].name
                         }
                         None => {}
                     }
@@ -921,16 +921,16 @@ fn ir_print_func(f *Func, m Opt[*Module]) str {
                 _ => {}
             }
             for ai in 0..i.args.len {
-                a := i.args.buf[ai]
+                a := i.args[ai]
                 if i.op == OpPhi {
-                    s.push(fmt(" [b", i.pb.buf[ai], ": %", a, "]"))
+                    s.push(fmt(" [b", i.pb[ai], ": %", a, "]"))
                 } else {
                     s.push(fmt(" %", a))
                 }
             }
             s.push("\n")
         }
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermNone => {
                 s.push("  <no terminator>\n")
             }
@@ -964,52 +964,52 @@ fn ir_verify(f *Func) str {
     def_block := vec_fill(n, 0xFFFFFFFF)
     def_pos := vec_fill(n, 0)
     for b in cfg.rpo.items() {
-        for pi in 0..f.blocks.buf[b].insts.len {
-            v := f.blocks.buf[b].insts.buf[pi]
-            if def_block.buf[v] != 0xFFFFFFFF {
-                return fmt("%", v, " appears twice (b", def_block.buf[v], " and b", b, ")")
+        for pi in 0..f.blocks[b].insts.len {
+            v := f.blocks[b].insts[pi]
+            if def_block[v] != 0xFFFFFFFF {
+                return fmt("%", v, " appears twice (b", def_block[v], " and b", b, ")")
             }
-            def_block.buf[v] = b
-            def_pos.buf[v] = pi
+            def_block[v] = b
+            def_pos[v] = pi
         }
     }
     for b in cfg.rpo.items() {
-        blk := &f.blocks.buf[b]
+        blk := &f.blocks[b]
         seen_non_phi := false
         for pi in 0..blk.insts.len {
-            v := blk.insts.buf[pi]
-            i := &f.insts.buf[v]
+            v := blk.insts[pi]
+            i := &f.insts[v]
             if i.op == OpPhi {
                 if seen_non_phi {
                     return fmt("phi %", v, " after non-phi in b", b)
                 }
                 pbs := clone(&i.pb)
                 sort(pbs.items())
-                ps := clone(&cfg.preds.buf[b])
+                ps := clone(&cfg.preds[b])
                 sort(ps.items())
                 ps.dedup()
                 if pbs.items() != ps.items() {
-                    return fmt("phi %", v, " in b", b, " has inputs from ", i.pb.items(), " but predecessors are ", cfg.preds.buf[b].items())
+                    return fmt("phi %", v, " in b", b, " has inputs from ", i.pb.items(), " but predecessors are ", cfg.preds[b].items())
                 }
                 for k in 0..i.args.len {
-                    a := i.args.buf[k]
-                    db := def_block.buf[a]
+                    a := i.args[k]
+                    db := def_block[a]
                     if db == 0xFFFFFFFF {
                         return fmt("phi %", v, " in b", b, " uses %", a, " which is not defined in reachable code")
                     }
-                    if !cfg.dom(db, i.pb.buf[k]) {
-                        return fmt("phi %", v, " in b", b, ": input %", a, " (b", db, ") does not dominate predecessor b", i.pb.buf[k])
+                    if !cfg.dom(db, i.pb[k]) {
+                        return fmt("phi %", v, " in b", b, ": input %", a, " (b", db, ") does not dominate predecessor b", i.pb[k])
                     }
                 }
             } else {
                 seen_non_phi = true
                 for a in i.args.items() {
-                    db := def_block.buf[a]
+                    db := def_block[a]
                     if db == 0xFFFFFFFF {
                         return fmt("%", v, " in b", b, " uses %", a, " which is not defined in reachable code")
                     }
                     if db == b {
-                        if def_pos.buf[a] >= pi {
+                        if def_pos[a] >= pi {
                             return fmt("%", v, " in b", b, " uses %", a, " before its definition")
                         }
                     } else if !cfg.dom(db, b) {
@@ -1020,7 +1020,7 @@ fn ir_verify(f *Func) str {
         }
         tu := f.term_uses(b)
         for a in tu.items() {
-            db := def_block.buf[a]
+            db := def_block[a]
             if db == 0xFFFFFFFF || !cfg.dom(db, b) {
                 return fmt("terminator of b", b, " uses %", a, " which does not dominate it")
             }

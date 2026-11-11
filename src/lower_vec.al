@@ -77,7 +77,7 @@ fn lvalue_base(self *Fx, b *Expr) Val {
         }
         EKIndex(bb, idx) => {
             if idx.len == 1 {
-                match self.index_place(bb, &idx.buf[0], b.pos) {
+                match self.index_place(bb, &idx[0], b.pos) {
                     Some(p) => return p
                     None => return val_err()
                 }
@@ -136,7 +136,7 @@ fn vec_field(self *Fx, bv0 Val, name str, pos Pos) Opt[Opt[Val]] {
     if good {
         good = !lanes.is_empty() && lanes.len <= 4
         for i in 0..lanes.len {
-            if lanes.buf[i] >= n {
+            if lanes[i] >= n {
                 good = false
             }
         }
@@ -151,15 +151,15 @@ fn vec_field(self *Fx, bv0 Val, name str, pos Pos) Opt[Opt[Val]] {
             return Some(no_val)
         }
         if bv.mem {
-            return Some(Some(Val{ty: T_F32, v: bv.v, mem: true, alias: bv.alias, lane: Some((lanes.buf[0], vt))}))
+            return Some(Some(Val{ty: T_F32, v: bv.v, mem: true, alias: bv.alias, lane: Some((lanes[0], vt))}))
         }
-        x := self.ins(OpVExt, TF32, vec_of([]i64{bv.v}), lanes.buf[0])
+        x := self.ins(OpVExt, TF32, vec_of([]i64{bv.v}), lanes[0])
         return Some(Some(self.sval(T_F32, x)))
     }
     x := self.scalar(bv)
     imm := 0
     for i in 0..lanes.len {
-        imm |= lanes.buf[i] << (2 * i)
+        imm |= lanes[i] << (2 * i)
     }
     rt := fx_vec_ty(lanes.len)
     it := self.irt(rt)
@@ -371,15 +371,15 @@ fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
         vals.push((v, args[i].pos))
     }
     if to == T_MAT4 {
-        if vals.len == 1 && vals.buf[0].0.ty == T_MAT4 {
-            return vals.buf[0].0
+        if vals.len == 1 && vals[0].0.ty == T_MAT4 {
+            return vals[0].0
         }
-        if vals.len == 1 && vals.buf[0].0.ty == T_F32 {
-            return self.call_rt("__mat4_diag", vec[i64](), vec_of([]Val{vals.buf[0].0}), pos)
+        if vals.len == 1 && vals[0].0.ty == T_F32 {
+            return self.call_rt("__mat4_diag", vec[i64](), vec_of([]Val{vals[0].0}), pos)
         }
         all_vec4 := true
         for i in 0..vals.len {
-            if vals.buf[i].0.ty != T_VEC4 {
+            if vals[i].0.ty != T_VEC4 {
                 all_vec4 = false
                 break
             }
@@ -390,12 +390,12 @@ fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
         }
         cols := vec[i64]()
         for i in 0..vals.len {
-            cols.push(self.scalar(vals.buf[i].0))
+            cols.push(self.scalar(vals[i].0))
         }
         t := self.temp(T_MAT4)
         for c in 0..cols.len {
             a := self.add_off(t, 16 * c)
-            self.store_raw(a, cols.buf[c], TV4, AK_VEC)
+            self.store_raw(a, cols[c], TV4, AK_VEC)
         }
         return self.mval(T_MAT4, t)
     }
@@ -408,7 +408,7 @@ fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
     }
     it := self.irt(to)
     if vals.len == 1 {
-        v := vals.buf[0].0
+        v := vals[0].0
         if v.ty == to {
             return v
         }
@@ -431,8 +431,8 @@ fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
     }
     lanes := vec[i64]()
     for i in 0..vals.len {
-        v := vals.buf[i].0
-        apos := vals.buf[i].1
+        v := vals[i].0
+        apos := vals[i].1
         if v.ty == T_F32 {
             lanes.push(self.scalar(v))
         } else {

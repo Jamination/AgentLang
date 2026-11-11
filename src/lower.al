@@ -103,7 +103,7 @@ fn priv_hint(self *Cx, n str) str {
     }
     var fname str = "?"
     if pos.file >= 0 && pos.file < self.file_names.len {
-        fname = self.file_names.buf[pos.file]
+        fname = self.file_names[pos.file]
     }
     return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
@@ -158,7 +158,7 @@ fn lower_f64_to_i64(f f64) i64 {
 // the low `n` bytes of `x`, little-endian, into `data` at `off`
 fn lower_put_le(data *Vec[u8], off i64, x u64, n i64) {
     for j in 0..n {
-        data.buf[off + j] = u8(x >> u64(8 * j))
+        data[off + j] = u8(x >> u64(8 * j))
     }
 }
 
@@ -166,7 +166,7 @@ fn lower_put_le(data *Vec[u8], off i64, x u64, n i64) {
 fn lower_new_sig(g *FnDecl) str {
     parts := vec[str]()
     for i in 0..g.params.len {
-        parts.push(ast_type_str(&g.params.buf[i].1))
+        parts.push(ast_type_str(&g.params[i].1))
     }
     return join(parts.items(), ",")
 }
@@ -304,14 +304,14 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
                 dup := -1
                 if has_layer {
                     for k in 0..l.len {
-                        if lower_new_sig(cx.fn_decls.buf[l.buf[k]]) == lower_new_sig(fp) {
-                            dup = l.buf[k]
+                        if lower_new_sig(cx.fn_decls[l[k]]) == lower_new_sig(fp) {
+                            dup = l[k]
                             break
                         }
                     }
                 }
                 if dup >= 0 {
-                    at := cx.pos_str(cx.fn_decls.buf[dup].pos)
+                    at := cx.pos_str(cx.fn_decls[dup].pos)
                     cx.err(pos, fmt("`", name, "` is already declared with these parameter types at ", at))
                     continue
                 }
@@ -390,17 +390,17 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
     // enum variants: two enums may use the same variant name; within a layer (prelude / user)
     // a variant must not have the name of another kind of declaration
     for ei in 0..cx.enum_decls.len {
-        e := cx.enum_decls.buf[ei]
+        e := cx.enum_decls[ei]
         layer := if e.pos.file < np { 1 } else { 2 }
         for vi in 0..e.variants.len {
-            vn := e.variants.buf[vi].0
+            vn := e.variants[vi].0
             if cx.decl_layers.get_or(vn, 0) & layer != 0 {
                 cx.err(e.pos, fmt("enum variant `", vn, "` conflicts with another declaration"))
                 continue
             }
             dup := false
             for vj in 0..vi {
-                if e.variants.buf[vj].0 == vn {
+                if e.variants[vj].0 == vn {
                     dup = true
                     break
                 }
@@ -562,7 +562,7 @@ fn internal_file(self *Cx, file i64) bool {
 fn pos_str(self *Cx, p Pos) str {
     var fname str = "?"
     if p.file >= 0 && p.file < self.file_names.len {
-        fname = self.file_names.buf[p.file]
+        fname = self.file_names[p.file]
     }
     return fmt(fname, ":", p.line, ":", p.col)
 }
@@ -597,7 +597,7 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
             }
             targs := vec[i64]()
             for i in 0..args.len {
-                targs.push(self.resolve(&args.buf[i], env))
+                targs.push(self.resolve(&args[i], env))
             }
             if contains(&targs, T_ERR) {
                 return T_ERR
@@ -669,7 +669,7 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
         TypeAstFn(ps, r) => {
             pts := vec[i64]()
             for i in 0..ps.len {
-                pts.push(self.resolve(&ps.buf[i], env))
+                pts.push(self.resolve(&ps[i], env))
             }
             rt := T_UNIT
             match r {
@@ -686,7 +686,7 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
         TypeAstTuple(ts) => {
             tys := vec[i64]()
             for i in 0..ts.len {
-                tys.push(self.resolve(&ts.buf[i], env))
+                tys.push(self.resolve(&ts[i], env))
             }
             if contains(&tys, T_ERR) {
                 return T_ERR
@@ -699,7 +699,7 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
         TypeAstClosure(ps, r) => {
             pts := vec[i64]()
             for i in 0..ps.len {
-                pts.push(self.resolve(&ps.buf[i], env))
+                pts.push(self.resolve(&ps[i], env))
             }
             rt := T_UNIT
             match r {
@@ -729,7 +729,7 @@ fn inst_name(self *Cx, base str, targs []i64) str {
 }
 
 fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
-    d := self.struct_decls.buf[si]
+    d := self.struct_decls[si]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("struct `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
         return T_ERR
@@ -754,30 +754,30 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
     self.struct_insts.set((si, clone(targs).items()), ty)
     env := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
-        env.set(d.tparams.buf[i], targs.buf[i])
+        env.set(d.tparams[i], targs[i])
     }
     fields := vec[(str, i64)]()
     seen := map[str, bool]()
     save_scope := self.scope_prelude
     self.scope_prelude = self.internal_file(d.pos.file)
     for i in 0..d.fields.len {
-        fname := d.fields.buf[i].0
+        fname := d.fields[i].0
         if seen.has(fname) {
             self.err(d.pos, fmt("duplicate field `", fname, "` in struct `", d.name, "`"))
         } else {
             seen.set(fname, true)
         }
-        t := self.resolve(&d.fields.buf[i].1, &env)
+        t := self.resolve(&d.fields[i].1, &env)
         fields.push((fname, t))
     }
     self.scope_prelude = save_scope
-    self.types.structs.buf[sid].fields = fields
-    self.types.structs.buf[sid].state = 0
+    self.types.structs[sid].fields = fields
+    self.types.structs[sid].state = 0
     return ty
 }
 
 fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
-    d := self.enum_decls.buf[ei]
+    d := self.enum_decls[ei]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("enum `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
         return T_ERR
@@ -790,7 +790,7 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
     name := self.inst_name(ast_plain(d.name), targs.items())
     simple := true
     for i in 0..d.variants.len {
-        if !d.variants.buf[i].1.is_empty() {
+        if !d.variants[i].1.is_empty() {
             simple = false
             break
         }
@@ -808,23 +808,23 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
     self.enum_insts.set((ei, clone(targs).items()), ty)
     env := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
-        env.set(d.tparams.buf[i], targs.buf[i])
+        env.set(d.tparams[i], targs[i])
     }
     vars := vec[(str, Vec[i64])]()
     save_scope := self.scope_prelude
     self.scope_prelude = self.internal_file(d.pos.file)
     for i in 0..d.variants.len {
-        vts := &d.variants.buf[i].1
+        vts := &d.variants[i].1
         ts := vec[i64]()
         for j in 0..vts.len {
-            ts.push(self.resolve(&vts.buf[j], &env))
+            ts.push(self.resolve(&vts[j], &env))
         }
-        vars.push((d.variants.buf[i].0, ts))
+        vars.push((d.variants[i].0, ts))
     }
     self.scope_prelude = save_scope
-    self.types.enums.buf[eid].variants = vars
+    self.types.enums[eid].variants = vars
     if !simple {
-        self.types.enums.buf[eid].state = 0
+        self.types.enums[eid].state = 0
     }
     return ty
 }
@@ -833,7 +833,7 @@ fn flush_layout_errors(self *Cx, pos Pos) {
     errs := self.types.layout_errors
     self.types.layout_errors = vec[str]()
     for i in 0..errs.len {
-        self.err(pos, errs.buf[i])
+        self.err(pos, errs[i])
     }
 }
 
@@ -877,7 +877,7 @@ fn fn_abi(self *Cx, f *Func, ptys []i64, rty i64) {
         }
         RetAbiFlat(l) => {
             for i in 0..l.len {
-                f.rets.push(l.buf[i].t)
+                f.rets.push(l[i].t)
             }
         }
         RetAbiSRet => {
@@ -892,7 +892,7 @@ fn fn_abi(self *Cx, f *Func, ptys []i64, rty i64) {
             }
             ParamAbiFlat(l) => {
                 for i in 0..l.len {
-                    f.params.push(l.buf[i].t)
+                    f.params.push(l[i].t)
                 }
             }
             ParamAbiByRef => {
@@ -908,16 +908,16 @@ fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
     if found {
         return known
     }
-    d := self.fn_decls.buf[di]
+    d := self.fn_decls[di]
     env := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
-        env.set(d.tparams.buf[i], targs.buf[i])
+        env.set(d.tparams[i], targs[i])
     }
     save_scope := self.scope_prelude
     self.scope_prelude = self.internal_file(d.pos.file)
     ptys := vec[i64]()
     for i in 0..d.params.len {
-        ptys.push(self.resolve(&d.params.buf[i].1, &env))
+        ptys.push(self.resolve(&d.params[i].1, &env))
     }
     rty := T_UNIT
     match d.ret {
@@ -938,7 +938,7 @@ fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
             // a C function: scalar arguments and result only
             bad := -1
             for i in 0..ptys.len + 1 {
-                t := if i < ptys.len { ptys.buf[i] } else { rty }
+                t := if i < ptys.len { ptys[i] } else { rty }
                 if t != T_UNIT && t != T_NEVER && t != T_ERR && (!self.types.is_scalar(t) || is_some(self.types.vec_lanes(t))) {
                     bad = t
                     break
@@ -1026,13 +1026,13 @@ fn global(self *Cx, name str) Opt[(i64, i64)] {
                 if self.const_init(&init, ty, 0, &data, &relocs) {
                     nonzero := false
                     for i in 0..data.len {
-                        if data.buf[i] != 0 {
+                        if data[i] != 0 {
                             nonzero = true
                             break
                         }
                     }
                     if nonzero || !relocs.is_empty() {
-                        g := &self.module.globals.buf[gid]
+                        g := &self.module.globals[gid]
                         g.data = Some(data)
                         g.relocs = relocs
                     }
@@ -1078,7 +1078,7 @@ fn const_type_of(self *Cx, e *Expr) i64 {
         EKTuple(es) => {
             ts := vec[i64]()
             for i in 0..es.len {
-                t := self.const_type_of(&es.buf[i])
+                t := self.const_type_of(&es[i])
                 if t == T_ERR {
                     return T_ERR
                 }
@@ -1128,7 +1128,7 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
             }
             match self.find_struct(n) {
                 Some(si) => {
-                    if self.struct_decls.buf[si].tparams.is_empty() {
+                    if self.struct_decls[si].tparams.is_empty() {
                         return Some(self.inst_struct(si, vec[i64](), e.pos))
                     }
                     return None
@@ -1137,7 +1137,7 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
             }
             match self.find_enum(n) {
                 Some(ei) => {
-                    if self.enum_decls.buf[ei].tparams.is_empty() {
+                    if self.enum_decls[ei].tparams.is_empty() {
                         return Some(self.inst_enum(ei, vec[i64](), e.pos))
                     }
                     return None
@@ -1161,7 +1161,7 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
             }
             targs := vec[i64]()
             for i in 0..args.len {
-                match self.expr_type(&args.buf[i], env) {
+                match self.expr_type(&args[i], env) {
                     Some(at) => {
                         targs.push(at)
                     }
@@ -1193,7 +1193,7 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
         EKTuple(es) => {
             ts := vec[i64]()
             for i in 0..es.len {
-                match self.expr_type(&es.buf[i], env) {
+                match self.expr_type(&es[i], env) {
                     Some(xt) => {
                         ts.push(xt)
                     }
@@ -1346,7 +1346,7 @@ fn embed_bytes(self *Cx, args []Expr, pos Pos) Opt[str] {
     }
     src := ""
     if pos.file >= 0 && pos.file < self.file_names.len {
-        src = self.file_names.buf[pos.file]
+        src = self.file_names[pos.file]
     }
     dir := ""
     if starts_with(src, "<") {
@@ -1684,7 +1684,7 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
                     None => return None
                 }
                 var v CV
-                match self.const_eval(&args.buf[0]) {
+                match self.const_eval(&args[0]) {
                     Some(av) => {
                         v = av
                     }
@@ -1727,7 +1727,7 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
                         }
                         if is_sizeof && targs.len == 1 {
                             env := map[str, i64]()
-                            match self.expr_type(&targs.buf[0], &env) {
+                            match self.expr_type(&targs[0], &env) {
                                 Some(t) => return Some(CVInt(self.types.size_of(t)))
                                 None => return None
                             }
@@ -1766,10 +1766,10 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     }
                     es := self.types.size_of(et)
                     for i in 0..items.len {
-                        if is_some(items.buf[i].0) {
+                        if is_some(items[i].0) {
                             return false
                         }
-                        if !self.const_init(&items.buf[i].1, et, off + i * es, data, relocs) {
+                        if !self.const_init(&items[i].1, et, off + i * es, data, relocs) {
                             return false
                         }
                     }
@@ -1786,15 +1786,15 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                         None => return false
                     }
                     self.types.layout_struct(sid)
-                    fields := clone(self.types.structs.buf[sid].fields)
-                    offs := clone(self.types.structs.buf[sid].offsets)
+                    fields := clone(self.types.structs[sid].fields)
+                    offs := clone(self.types.structs[sid].offsets)
                     for i in 0..items.len {
                         fi := i
-                        match items.buf[i].0 {
+                        match items[i].0 {
                             Some(n) => {
                                 fi = -1
                                 for j in 0..fields.len {
-                                    if fields.buf[j].0 == n {
+                                    if fields[j].0 == n {
                                         fi = j
                                         break
                                     }
@@ -1808,7 +1808,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                         if fi >= fields.len {
                             return false
                         }
-                        if !self.const_init(&items.buf[i].1, fields.buf[fi].1, off + offs.buf[fi], data, relocs) {
+                        if !self.const_init(&items[i].1, fields[fi].1, off + offs[fi], data, relocs) {
                             return false
                         }
                     }
@@ -1825,7 +1825,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     }
                     offs := self.types.tuple_offsets(tys.items())
                     for i in 0..es.len {
-                        if !self.const_init(&es.buf[i], tys.buf[i], off + offs.buf[i], data, relocs) {
+                        if !self.const_init(&es[i], tys[i], off + offs[i], data, relocs) {
                             return false
                         }
                     }
@@ -1842,17 +1842,17 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                         if g.0 != ty {
                             return false
                         }
-                        match self.module.globals.buf[g.1].data {
+                        match self.module.globals[g.1].data {
                             Some(src) => {
                                 for i in 0..src.len {
-                                    data.buf[off + i] = src.buf[i]
+                                    data[off + i] = src[i]
                                 }
                             }
                             None => {}
                         }
-                        srel := self.module.globals.buf[g.1].relocs
+                        srel := self.module.globals[g.1].relocs
                         for i in 0..srel.len {
-                            relocs.push((off + srel.buf[i].0, srel.buf[i].1))
+                            relocs.push((off + srel[i].0, srel[i].1))
                         }
                         return true
                     }
@@ -1862,8 +1862,8 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
             match k {
                 TyKEnum(eid) => {
                     // a variant of an enum without data
-                    vi := self.variant_of(self.types.enums.buf[eid].decl, n)
-                    if vi >= 0 && self.types.enums.buf[eid].simple {
+                    vi := self.variant_of(self.types.enums[eid].decl, n)
+                    if vi >= 0 && self.types.enums[eid].simple {
                         lower_put_le(data, off, u64(vi), 8)
                         return true
                     }
@@ -1874,7 +1874,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     di := -1
                     match self.find_fn(n) {
                         Some(fdi) => {
-                            if self.fn_decls.buf[fdi].tparams.is_empty() {
+                            if self.fn_decls[fdi].tparams.is_empty() {
                                 di = fdi
                             }
                         }
@@ -1884,7 +1884,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                         return false
                     }
                     fid := self.inst_fn(di, vec[i64]())
-                    sig := self.fn_sigs.buf[fid]
+                    sig := self.fn_sigs[fid]
                     if sig.0.items() != ptys.items() || sig.1 != rty {
                         self.err(e.pos, fmt("function `", n, "` does not have the type ", self.types.name(ty)))
                         return false
@@ -1897,7 +1897,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     di := -1
                     match self.find_fn(n) {
                         Some(fdi) => {
-                            if self.fn_decls.buf[fdi].tparams.is_empty() {
+                            if self.fn_decls[fdi].tparams.is_empty() {
                                 di = fdi
                             }
                         }
@@ -1907,12 +1907,12 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                         return false
                     }
                     fid := self.inst_fn(di, vec[i64]())
-                    sig := self.fn_sigs.buf[fid]
+                    sig := self.fn_sigs[fid]
                     if sig.0.items() != ptys.items() || sig.1 != rty {
                         self.err(e.pos, fmt("function `", n, "` does not have the parameter and result types of ", self.types.name(ty)))
                         return false
                     }
-                    if is_some(self.module.funcs.buf[fid].ext) {
+                    if is_some(self.module.funcs[fid].ext) {
                         return false
                     }
                     relocs.push((off, RelocTargetFunc(fid)))
@@ -1964,7 +1964,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                     return false
                 }
                 for i in 0..args.len {
-                    if !self.const_init(&args.buf[i], et, off + i * es, data, relocs) {
+                    if !self.const_init(&args[i], et, off + i * es, data, relocs) {
                         return false
                     }
                 }
@@ -2019,7 +2019,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
         TyKBool => {
             match v {
                 CVBool(b) => {
-                    data.buf[off] = if b { u8(1) } else { u8(0) }
+                    data[off] = if b { u8(1) } else { u8(0) }
                     return true
                 }
                 _ => {}

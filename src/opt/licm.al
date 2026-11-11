@@ -4,7 +4,7 @@
 // (cfg.preds[h].iter().copied().filter(|p| !loops.contains(li, *p)).collect())
 fn licm_outside_preds(cfg *Cfg, loops *Loops, li i64, h i64) Vec[i64] {
     outside := vec[i64]()
-    for p in cfg.preds.buf[h].items() {
+    for p in cfg.preds[h].items() {
         if !loops.contains(li, p) {
             outside.push(p)
         }
@@ -19,11 +19,11 @@ fn licm_loop_order(loops *Loops) Vec[i64] {
     for li in 0..loops.loops.len {
         order.push(li)
         k := order.len - 1
-        while k > 0 && loops.loops.buf[order.buf[k - 1]].depth < loops.loops.buf[li].depth {
-            order.buf[k] = order.buf[k - 1]
+        while k > 0 && loops.loops[order[k - 1]].depth < loops.loops[li].depth {
+            order[k] = order[k - 1]
             k -= 1
         }
-        order.buf[k] = li
+        order[k] = li
     }
     return order
 }
@@ -33,21 +33,21 @@ fn licm_make_preheaders(f *Func) bool {
     loops := loops_new(f, &cfg)
     changed := false
     for li in 0..loops.loops.len {
-        h := loops.loops.buf[li].header
+        h := loops.loops[li].header
         outside := licm_outside_preds(&cfg, &loops, li, h)
         if outside.is_empty() {
             continue
         }
-        if outside.len == 1 && f.succs(outside.buf[0]).len == 1 {
+        if outside.len == 1 && f.succs(outside[0]).len == 1 {
             continue
         }
         p := f.new_block()
-        f.blocks.buf[p].term = TermJmp(h)
+        f.blocks[p].term = TermJmp(h)
         for o in outside.items() {
-            match f.blocks.buf[o].term {
+            match f.blocks[o].term {
                 TermJmp(t) => {
                     if t == h {
-                        f.blocks.buf[o].term = TermJmp(p)
+                        f.blocks[o].term = TermJmp(p)
                     }
                 }
                 TermBr(c, a, b) => {
@@ -59,33 +59,33 @@ fn licm_make_preheaders(f *Func) bool {
                     if b == h {
                         nb = p
                     }
-                    f.blocks.buf[o].term = TermBr(c, na, nb)
+                    f.blocks[o].term = TermBr(c, na, nb)
                 }
                 _ => {}
             }
         }
         // fix header phis
-        hinsts := clone(&f.blocks.buf[h].insts)
+        hinsts := clone(&f.blocks[h].insts)
         for v in hinsts.items() {
-            if f.insts.buf[v].op != OpPhi {
+            if f.insts[v].op != OpPhi {
                 break
             }
-            inst := clone(&f.insts.buf[v])
+            inst := clone(&f.insts[v])
             out_vals := vec[(i64, i64)]()
             keep_args := vec[i64]()
             keep_pb := vec[i64]()
             for k in 0..inst.pb.len {
-                pb := inst.pb.buf[k]
+                pb := inst.pb[k]
                 if contains(&outside, pb) {
-                    out_vals.push((pb, inst.args.buf[k]))
+                    out_vals.push((pb, inst.args[k]))
                 } else {
-                    keep_args.push(inst.args.buf[k])
+                    keep_args.push(inst.args[k])
                     keep_pb.push(pb)
                 }
             }
             all_same := true
             for x in out_vals.items() {
-                if x.1 != out_vals.buf[0].1 {
+                if x.1 != out_vals[0].1 {
                     all_same = false
                     break
                 }
@@ -102,7 +102,7 @@ fn licm_make_preheaders(f *Func) bool {
                 }
                 np := f.mk(OpPhi, inst.ty, vals, 0)
                 f.im(np).pb = pbs
-                f.blocks.buf[p].insts.push(np)
+                f.blocks[p].insts.push(np)
                 incoming = np
             }
             keep_args.push(incoming)
@@ -142,35 +142,35 @@ fn licm_run(f *Func) bool {
     def_block := f.block_of()
     order := licm_loop_order(&loops)
     for li in order.items() {
-        l := &loops.loops.buf[li]
+        l := &loops.loops[li]
         h := l.header
         outside := licm_outside_preds(&cfg, &loops, li, h)
-        if outside.len != 1 || f.succs(outside.buf[0]).len != 1 {
+        if outside.len != 1 || f.succs(outside[0]).len != 1 {
             continue
         }
-        pre := outside.buf[0]
+        pre := outside[0]
         in_loop := vec_fill(f.blocks.len, false)
         for b in l.blocks.items() {
-            in_loop.buf[b] = true
+            in_loop[b] = true
         }
         // blocks.sort_by_key(|b| cfg.rpo_idx[*b as usize]) (stable)
         blocks := vec[i64]()
         for b in l.blocks.items() {
             blocks.push(b)
             k := blocks.len - 1
-            while k > 0 && cfg.rpo_idx.buf[blocks.buf[k - 1]] > cfg.rpo_idx.buf[b] {
-                blocks.buf[k] = blocks.buf[k - 1]
+            while k > 0 && cfg.rpo_idx[blocks[k - 1]] > cfg.rpo_idx[b] {
+                blocks[k] = blocks[k - 1]
                 k -= 1
             }
-            blocks.buf[k] = b
+            blocks[k] = b
         }
         // memory effects and exits
         stores := vec[MemRef]()
         has_call := false
         exiting := vec[i64]()
         for b in blocks.items() {
-            for v in f.blocks.buf[b].insts.items() {
-                o := f.insts.buf[v].op
+            for v in f.blocks[b].insts.items() {
+                o := f.insts[v].op
                 if o == OpStore {
                     stores.push(alias_memref(f, v))
                 } else if o == OpCall || o == OpCallInd || o == OpSyscall || o == OpMemCpy || o == OpMemSet {
@@ -180,13 +180,13 @@ fn licm_run(f *Func) bool {
             leaves := false
             ss := f.succs(b)
             for s in ss.items() {
-                if !in_loop.buf[s] {
+                if !in_loop[s] {
                     leaves = true
                     break
                 }
             }
             if !leaves {
-                match f.blocks.buf[b].term {
+                match f.blocks[b].term {
                     TermRet(vs) => leaves = true
                     TermTrap => leaves = true
                     _ => {}
@@ -199,14 +199,14 @@ fn licm_run(f *Func) bool {
         loop {
             moved := false
             for b in blocks.items() {
-                insts := clone(&f.blocks.buf[b].insts)
+                insts := clone(&f.blocks[b].insts)
                 keep := vec[i64]()
                 for v in insts.items() {
-                    i := &f.insts.buf[v]
+                    i := &f.insts[v]
                     invariant_args := true
                     for a in i.args.items() {
-                        db := def_block.buf[a]
-                        if !(db == 0xFFFFFFFF || !in_loop.buf[db]) {
+                        db := def_block[a]
+                        if !(db == 0xFFFFFFFF || !in_loop[db]) {
                             invariant_args = false
                             break
                         }
@@ -217,7 +217,7 @@ fn licm_run(f *Func) bool {
                             ok = true
                         } else if i.op == OpSDiv || i.op == OpUDiv || i.op == OpSRem || i.op == OpURem {
                             safe_const := false
-                            match f.is_const(i.args.buf[1]) {
+                            match f.is_const(i.args[1]) {
                                 Some(k) => safe_const = k != 0 && !(k == -1 && (i.op == OpSDiv || i.op == OpSRem))
                                 None => {}
                             }
@@ -228,7 +228,7 @@ fn licm_run(f *Func) bool {
                             safe_addr := false
                             match m.addr.base {
                                 BaseAlloca(x) => {
-                                    private = !esc.buf[x]
+                                    private = !esc[x]
                                     safe_addr = is_some(m.addr.off)
                                 }
                                 BaseGlobal(g) => safe_addr = is_some(m.addr.off)
@@ -237,7 +237,7 @@ fn licm_run(f *Func) bool {
                             if !has_call || private {
                                 aliased := false
                                 for si in 0..stores.len {
-                                    if alias_may_alias(&stores.buf[si], &m, esc.items()) {
+                                    if alias_may_alias(&stores[si], &m, esc.items()) {
                                         aliased = true
                                         break
                                     }
@@ -249,14 +249,14 @@ fn licm_run(f *Func) bool {
                         }
                     }
                     if ok {
-                        f.blocks.buf[pre].insts.push(v)
-                        def_block.buf[v] = pre
+                        f.blocks[pre].insts.push(v)
+                        def_block[v] = pre
                         moved = true
                     } else {
                         keep.push(v)
                     }
                 }
-                f.blocks.buf[b].insts = keep
+                f.blocks[b].insts = keep
             }
             if !moved {
                 break

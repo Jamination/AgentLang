@@ -216,7 +216,7 @@ enum Decl {
 fn ast_type_str_list(ts *Vec[TypeAst]) str {
     parts := vec[str]()
     for i in 0..ts.len {
-        parts.push(ast_type_str(&ts.buf[i]))
+        parts.push(ast_type_str(&ts[i]))
     }
     return join(parts.items(), ", ")
 }

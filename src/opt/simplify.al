@@ -196,7 +196,7 @@ fn c(self *SimplifyCtx, v i64) Opt[i64] {
 
 // scalar float constants only (vector constants are never folded)
 fn fc(self *SimplifyCtx, v i64) Opt[f64] {
-    i := &self.f.insts.buf[v]
+    i := &self.f.insts[v]
     if i.op == OpFConst && i.ty == TF64 {
         return Some(cast[f64](u64(i.k)))
     } else if i.op == OpFConst && i.ty == TF32 {
@@ -237,12 +237,12 @@ fn set(self *SimplifyCtx, v i64, op Op, args Vec[i64], k i64) {
 }
 
 fn set_const(self *SimplifyCtx, v i64, k i64) {
-    ty := self.f.insts.buf[v].ty
+    ty := self.f.insts[v].ty
     self.set(v, OpConst, vec[i64](), ir_canon(ty, k))
 }
 
 fn op(self *SimplifyCtx, v i64) Op {
-    return self.f.insts.buf[v].op
+    return self.f.insts[v].op
 }
 
 fn simplify_simplify_small(k i64) bool {
@@ -250,20 +250,20 @@ fn simplify_simplify_small(k i64) bool {
 }
 
 fn simplify_simplify_is_not(s *SimplifyCtx, n i64, x i64) bool {
-    ni := s.f.insts.buf[n]
-    return ni.op == OpXor && simplify_opt_is(s.c(ni.args.buf[1]), -1) && ni.args.buf[0] == x
+    ni := s.f.insts[n]
+    return ni.op == OpXor && simplify_opt_is(s.c(ni.args[1]), -1) && ni.args[0] == x
 }
 
 // returns Some(w) when v should be replaced by the existing value w
 fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
-    inst := self.f.insts.buf[v]
+    inst := self.f.insts[v]
     ty := inst.ty
     op := inst.op
     match op {
         OpAdd, OpSub, OpMul, OpSDiv, OpUDiv, OpSRem, OpURem, OpAnd, OpOr, OpXor, OpShl, OpLShr, OpAShr,
         OpRotl, OpRotr, OpMulHiS, OpMulHiU => {
-            a := inst.args.buf[0]
-            b := inst.args.buf[1]
+            a := inst.args[0]
+            b := inst.args[1]
             x0, hx0 := simplify_unopt(self.c(a))
             y0, hy0 := simplify_unopt(self.c(b))
             if hx0 && hy0 {
@@ -298,7 +298,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                     self.set_const(v, 0)
                     return None
                 } else if op == OpXor && k == 1 && ty == TI8 && self.op(a).is_cmp() {
-                    ai := self.f.insts.buf[a]
+                    ai := self.f.insts[a]
                     if ai.op.is_icmp() {
                         self.set(v, ai.op.negate_icmp(), clone(&ai.args), 0)
                         return None
@@ -396,11 +396,11 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             // (x op c1) op c2 for associative ops
             if hk {
                 k2 := k
-                ai := self.f.insts.buf[a]
+                ai := self.f.insts[a]
                 if ai.op == op && (op == OpAdd || op == OpMul || op == OpAnd || op == OpOr || op == OpXor) {
-                    k1, hk1 := simplify_unopt(self.c(ai.args.buf[1]))
+                    k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     if hk1 {
-                        x := ai.args.buf[0]
+                        x := ai.args[0]
                         kf, hkf := simplify_unopt(simplify_fold_bin(op, ty, k1, k2))
                         assert hkf
                         kc := self.konst(ty, kf)
@@ -410,11 +410,11 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                 }
                 // (x << c1) << c2, (x >>> c1) >>> c2
                 if ai.op == op && (op == OpShl || op == OpLShr) {
-                    k1, hk1 := simplify_unopt(self.c(ai.args.buf[1]))
+                    k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     if hk1 {
                         s1 := k1 & (bits - 1)
                         s2 := k2 & (bits - 1)
-                        x := ai.args.buf[0]
+                        x := ai.args[0]
                         if s1 + s2 >= bits {
                             self.set_const(v, 0)
                         } else {
@@ -428,9 +428,9 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             // (x + c1) << c2  =>  (x << c2) + (c1 << c2) ; (x + c1) * c2  =>  x * c2 + c1 * c2
             if hk {
                 k2 := k
-                ai := self.f.insts.buf[a]
+                ai := self.f.insts[a]
                 if (op == OpShl || op == OpMul) && ai.op == OpAdd {
-                    k1, hk1 := simplify_unopt(self.c(ai.args.buf[1]))
+                    k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     prod_small := false
                     if hk1 {
                         pr, hpr := simplify_unopt(simplify_fold_bin(op, ty, k1, k2))
@@ -439,7 +439,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                         }
                     }
                     if hk1 && prod_small {
-                        x := ai.args.buf[0]
+                        x := ai.args[0]
                         inner := self.mk(op, ty, vec_of([]i64{x, b}))
                         kf, hkf := simplify_unopt(simplify_fold_bin(op, ty, k1, k2))
                         assert hkf
@@ -450,15 +450,15 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                 }
             }
             if op == OpXor || op == OpOr {
-                ai := self.f.insts.buf[a]
-                bi := self.f.insts.buf[b]
+                ai := self.f.insts[a]
+                bi := self.f.insts[b]
                 ua := 2
                 if a < self.uses.len {
-                    ua = self.uses.buf[a]
+                    ua = self.uses[a]
                 }
                 ub := 2
                 if b < self.uses.len {
-                    ub = self.uses.buf[b]
+                    ub = self.uses[b]
                 }
                 if ai.op == OpAnd && bi.op == OpAnd && ua == 1 && ub == 1 {
                     // bit select: (x & y) ^ (~x & z)  =>  z ^ (x & (y ^ z))
@@ -475,11 +475,11 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                         }
                         for pi in 0..2 {
                             for qi in 0..2 {
-                                if !has_sel && simplify_simplify_is_not(self, q.args.buf[qi], p.args.buf[pi]) {
+                                if !has_sel && simplify_simplify_is_not(self, q.args[qi], p.args[pi]) {
                                     has_sel = true
-                                    sel_x = p.args.buf[pi]
-                                    sel_y = p.args.buf[1 - pi]
-                                    sel_z = q.args.buf[1 - qi]
+                                    sel_x = p.args[pi]
+                                    sel_y = p.args[1 - pi]
+                                    sel_z = q.args[1 - qi]
                                 }
                             }
                         }
@@ -494,9 +494,9 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                     if op == OpXor {
                         for pi in 0..2 {
                             for qi in 0..2 {
-                                if ai.args.buf[pi] == bi.args.buf[qi] {
-                                    x := ai.args.buf[pi]
-                                    yz := self.mk(OpXor, ty, vec_of([]i64{ai.args.buf[1 - pi], bi.args.buf[1 - qi]}))
+                                if ai.args[pi] == bi.args[qi] {
+                                    x := ai.args[pi]
+                                    yz := self.mk(OpXor, ty, vec_of([]i64{ai.args[1 - pi], bi.args[1 - qi]}))
                                     self.set(v, OpAnd, vec_of([]i64{x, yz}), 0)
                                     return None
                                 }
@@ -517,9 +517,9 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             }
             // x + (0 - y) => x - y
             if op == OpAdd {
-                bi := self.f.insts.buf[b]
-                if bi.op == OpSub && simplify_opt_is(self.c(bi.args.buf[0]), 0) {
-                    y := bi.args.buf[1]
+                bi := self.f.insts[b]
+                if bi.op == OpSub && simplify_opt_is(self.c(bi.args[0]), 0) {
+                    y := bi.args[1]
                     self.set(v, OpSub, vec_of([]i64{a, y}), 0)
                     return None
                 }
@@ -527,9 +527,9 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpFAdd, OpFSub, OpFMul, OpFDiv => {
-            x, hx := simplify_unopt(self.fc(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
-                y, hy := simplify_unopt(self.fc(inst.args.buf[1]))
+                y, hy := simplify_unopt(self.fc(inst.args[1]))
                 if hy {
                     var r f64
                     if op == OpFAdd {
@@ -547,7 +547,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpFNeg, OpFAbs, OpFSqrt => {
-            x, hx := simplify_unopt(self.fc(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
                 var r f64
                 if op == OpFNeg {
@@ -562,9 +562,9 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpEq, OpNe, OpSlt, OpSle, OpSgt, OpSge, OpUlt, OpUle, OpUgt, OpUge => {
-            a := inst.args.buf[0]
-            b := inst.args.buf[1]
-            at := self.f.insts.buf[a].ty
+            a := inst.args[0]
+            b := inst.args[1]
+            at := self.f.insts[a].ty
             x, hx := simplify_unopt(self.c(a))
             y, hy := simplify_unopt(self.c(b))
             if hx && hy {
@@ -605,7 +605,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             // comparisons of booleans with constants
             k, hk := simplify_unopt(self.c(b))
             if hk {
-                ai := self.f.insts.buf[a]
+                ai := self.f.insts[a]
                 if (op == OpEq || op == OpNe) && at == TI8 && ai.op.is_cmp() {
                     truth := (op == OpNe) == (k == 0)
                     // (cmp != 0) or (cmp == 1) => cmp ; (cmp == 0) or (cmp != 1) => !cmp
@@ -638,10 +638,10 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                 }
                 // (x + c1) == c2  =>  x == c2 - c1
                 if (op == OpEq || op == OpNe) && ai.op == OpAdd {
-                    k1, hk1 := simplify_unopt(self.c(ai.args.buf[1]))
+                    k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     if hk1 {
                         nk := self.konst(at, k - k1)
-                        self.set(v, op, vec_of([]i64{ai.args.buf[0], nk}), 0)
+                        self.set(v, op, vec_of([]i64{ai.args[0], nk}), 0)
                         return None
                     }
                 }
@@ -649,9 +649,9 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpFEq, OpFNe, OpFLt, OpFLe, OpFGt, OpFGe => {
-            x, hx := simplify_unopt(self.fc(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
-                y, hy := simplify_unopt(self.fc(inst.args.buf[1]))
+                y, hy := simplify_unopt(self.fc(inst.args[1]))
                 if hy {
                     var r bool
                     if op == OpFEq {
@@ -673,8 +673,8 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpSExt, OpZExt, OpTrunc => {
-            a := inst.args.buf[0]
-            at := self.f.insts.buf[a].ty
+            a := inst.args[0]
+            at := self.f.insts[a].ty
             if at == ty {
                 return Some(a)
             }
@@ -687,15 +687,15 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                 self.set_const(v, r)
                 return None
             }
-            ai := self.f.insts.buf[a]
+            ai := self.f.insts[a]
             if (op == OpSExt && ai.op == OpSExt) || (op == OpZExt && ai.op == OpZExt) {
-                self.set(v, op, vec_of([]i64{ai.args.buf[0]}), 0)
+                self.set(v, op, vec_of([]i64{ai.args[0]}), 0)
             } else if op == OpSExt && ai.op == OpZExt {
                 // zero-extended value is non-negative
-                self.set(v, OpZExt, vec_of([]i64{ai.args.buf[0]}), 0)
+                self.set(v, OpZExt, vec_of([]i64{ai.args[0]}), 0)
             } else if op == OpTrunc && (ai.op == OpSExt || ai.op == OpZExt || ai.op == OpTrunc) {
-                src := ai.args.buf[0]
-                st := self.f.insts.buf[src].ty
+                src := ai.args[0]
+                st := self.f.insts[src].ty
                 if st == ty {
                     return Some(src)
                 }
@@ -708,7 +708,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpSIToF => {
-            x, hx := simplify_unopt(self.c(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.c(inst.args[0]))
             if hx {
                 var fbits i64
                 if ty == TF32 {
@@ -721,7 +721,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpFToSI => {
-            x, hx := simplify_unopt(self.fc(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
                 if simplify_is_finite(x) && fabs(x) < 9.0e18 && (ty == TI64 || fabs(x) < 2.0e9) {
                     self.set_const(v, i64(x))
@@ -730,7 +730,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpBitsToF => {
-            x, hx := simplify_unopt(self.c(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.c(inst.args[0]))
             if hx {
                 kb := x
                 if ty == TF32 {
@@ -741,7 +741,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpFToBits => {
-            i := self.f.insts.buf[inst.args.buf[0]]
+            i := self.f.insts[inst.args[0]]
             if i.op == OpFConst {
                 k := i.k
                 self.set_const(v, k)
@@ -749,16 +749,16 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             return None
         }
         OpFExt, OpFTrunc => {
-            x, hx := simplify_unopt(self.fc(inst.args.buf[0]))
+            x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
                 self.set(v, OpFConst, vec[i64](), simplify_ctx_fbits(ty, x))
             }
             return None
         }
         OpSelect => {
-            c := inst.args.buf[0]
-            a := inst.args.buf[1]
-            b := inst.args.buf[2]
+            c := inst.args[0]
+            a := inst.args[1]
+            b := inst.args[2]
             if a == b {
                 return Some(a)
             }
@@ -783,15 +783,15 @@ fn simplify_is_finite(x f64) bool {
 }
 
 fn simplify_masked_by_is_len_m1(s *SimplifyCtx, lenv i64, m i64) bool {
-    mi := s.f.insts.buf[m]
-    return mi.op == OpAdd && mi.args.buf[0] == lenv && simplify_opt_is(s.c(mi.args.buf[1]), -1)
+    mi := s.f.insts[m]
+    return mi.op == OpAdd && mi.args[0] == lenv && simplify_opt_is(s.c(mi.args[1]), -1)
 }
 
 // is v always of the form (x & (len - 1)), directly or through phis?
 fn masked_by(self *SimplifyCtx, v i64, lenv i64, depth i64, root i64) bool {
-    i := self.f.insts.buf[v]
+    i := self.f.insts[v]
     if i.op == OpAnd {
-        return simplify_masked_by_is_len_m1(self, lenv, i.args.buf[0]) || simplify_masked_by_is_len_m1(self, lenv, i.args.buf[1])
+        return simplify_masked_by_is_len_m1(self, lenv, i.args[0]) || simplify_masked_by_is_len_m1(self, lenv, i.args[1])
     }
     if i.op == OpPhi && depth > 0 && !i.args.is_empty() {
         for a in i.args.items() {
@@ -814,7 +814,7 @@ fn simplify_sat_sub(a i64, b i64) i64 {
 
 // upper bound on the number of significant bits of an unsigned value
 fn ubits(self *SimplifyCtx, v i64, depth i64) i64 {
-    i := self.f.insts.buf[v]
+    i := self.f.insts[v]
     tb := max(i64(i.ty.bits()), 1)
     if depth == 0 {
         return tb
@@ -823,29 +823,29 @@ fn ubits(self *SimplifyCtx, v i64, depth i64) i64 {
     if i.op == OpConst {
         r = 64 - i64(clz(u64(i.k) & simplify_mask(tb)))
     } else if i.op == OpLShr {
-        k, hk := simplify_unopt(self.c(i.args.buf[1]))
+        k, hk := simplify_unopt(self.c(i.args[1]))
         if hk {
-            r = simplify_sat_sub(self.ubits(i.args.buf[0], depth - 1), i64(u32(k & (tb - 1))))
+            r = simplify_sat_sub(self.ubits(i.args[0], depth - 1), i64(u32(k & (tb - 1))))
         } else {
             r = tb
         }
     } else if i.op == OpAnd {
-        r0 := self.ubits(i.args.buf[0], depth - 1)
-        r = min(r0, self.ubits(i.args.buf[1], depth - 1))
+        r0 := self.ubits(i.args[0], depth - 1)
+        r = min(r0, self.ubits(i.args[1], depth - 1))
     } else if i.op == OpZExt {
-        r0 := self.ubits(i.args.buf[0], depth - 1)
-        r = min(r0, i64(self.f.insts.buf[i.args.buf[0]].ty.bits()))
+        r0 := self.ubits(i.args[0], depth - 1)
+        r = min(r0, i64(self.f.insts[i.args[0]].ty.bits()))
     } else if i.op == OpURem {
-        k, hk := simplify_unopt(self.c(i.args.buf[1]))
+        k, hk := simplify_unopt(self.c(i.args[1]))
         if hk {
             r = 64 - i64(clz(u64(k) & simplify_mask(tb)))
         } else {
             r = tb
         }
     } else if i.op == OpUDiv {
-        k, hk := simplify_unopt(self.c(i.args.buf[1]))
+        k, hk := simplify_unopt(self.c(i.args[1]))
         if hk && k > 0 {
-            r = simplify_sat_sub(self.ubits(i.args.buf[0], depth - 1), 63 - i64(clz(u64(k))))
+            r = simplify_sat_sub(self.ubits(i.args[0], depth - 1), 63 - i64(clz(u64(k))))
         } else {
             r = tb
         }
@@ -858,11 +858,11 @@ fn ubits(self *SimplifyCtx, v i64, depth i64) i64 {
 }
 
 fn simplify_match_rotate_is_complement(s *SimplifyCtx, bits i64, m i64, n i64) bool {
-    mi := s.f.insts.buf[m]
-    if !(mi.op == OpSub && mi.args.buf[1] == n) {
+    mi := s.f.insts[m]
+    if !(mi.op == OpSub && mi.args[1] == n) {
         return false
     }
-    k, hk := simplify_unopt(s.c(mi.args.buf[0]))
+    k, hk := simplify_unopt(s.c(mi.args[0]))
     if hk {
         return k & (bits - 1) == 0
     }
@@ -871,8 +871,8 @@ fn simplify_match_rotate_is_complement(s *SimplifyCtx, bits i64, m i64, n i64) b
 
 fn match_rotate(self *SimplifyCtx, a i64, b i64, ty T) Opt[(Op, i64, i64)] {
     bits := i64(ty.bits())
-    ai := self.f.insts.buf[a]
-    bi := self.f.insts.buf[b]
+    ai := self.f.insts[a]
+    bi := self.f.insts[b]
     var shr Inst
     var shl Inst
     if ai.op == OpLShr && bi.op == OpShl {
@@ -884,12 +884,12 @@ fn match_rotate(self *SimplifyCtx, a i64, b i64, ty T) Opt[(Op, i64, i64)] {
     } else {
         return None
     }
-    if shr.args.buf[0] != shl.args.buf[0] {
+    if shr.args[0] != shl.args[0] {
         return None
     }
-    x := shr.args.buf[0]
-    nr := shr.args.buf[1]
-    nl := shl.args.buf[1]
+    x := shr.args[0]
+    nr := shr.args[1]
+    nl := shl.args[1]
     kr0, hkr := simplify_unopt(self.c(nr))
     kl0, hkl := simplify_unopt(self.c(nl))
     if hkr && hkl {
@@ -1054,8 +1054,8 @@ fn sdiv_magic(self *SimplifyCtx, n i64, ty T, d i64) i64 {
 
 fn simplify_fold_insts_find(repl *Vec[i64], v0 i64) i64 {
     v := v0
-    while v < repl.len && repl.buf[v] != NOV {
-        v = repl.buf[v]
+    while v < repl.len && repl[v] != NOV {
+        v = repl[v]
     }
     return v
 }
@@ -1066,15 +1066,15 @@ fn simplify_fold_insts(f *Func) bool {
     uses := f.use_counts()
     cx := SimplifyCtx{f: f, new_insts: vec[i64](), changed: false, uses: uses}
     for b in rpo.items() {
-        old := cx.f.blocks.buf[b].insts
-        cx.f.blocks.buf[b].insts = vec[i64]()
+        old := cx.f.blocks[b].insts
+        cx.f.blocks[b].insts = vec[i64]()
         cx.new_insts = vec[i64]()
         for v in old.items() {
-            for ai in 0..cx.f.insts.buf[v].args.len {
-                a := cx.f.insts.buf[v].args.buf[ai]
+            for ai in 0..cx.f.insts[v].args.len {
+                a := cx.f.insts[v].args[ai]
                 r := simplify_fold_insts_find(&repl, a)
                 if r != a {
-                    cx.f.insts.buf[v].args.buf[ai] = r
+                    cx.f.insts[v].args[ai] = r
                 }
             }
             match cx.simplify(v) {
@@ -1082,13 +1082,13 @@ fn simplify_fold_insts(f *Func) bool {
                     if repl.len < cx.f.insts.len {
                         repl.resize(cx.f.insts.len, NOV)
                     }
-                    repl.buf[v] = w
+                    repl[v] = w
                     cx.changed = true
                 }
                 None => { cx.new_insts.push(v) }
             }
         }
-        cx.f.blocks.buf[b].insts = cx.new_insts
+        cx.f.blocks[b].insts = cx.new_insts
         cx.new_insts = vec[i64]()
     }
     changed := cx.changed
@@ -1099,31 +1099,31 @@ fn simplify_fold_insts(f *Func) bool {
 
 // `fix` of step 5: the replacement of a value defined in b
 fn simplify_simplify_cfg_fix(a i64, def_block *Vec[i64], b i64, binsts *Vec[i64], side_t bool, repl_t *Vec[i64], repl_e *Vec[i64]) i64 {
-    if a < def_block.len && def_block.buf[a] == b {
+    if a < def_block.len && def_block[a] == b {
         k := index_of(binsts.items(), a)
         assert k >= 0
         if side_t {
-            return repl_t.buf[k]
+            return repl_t[k]
         }
-        return repl_e.buf[k]
+        return repl_e[k]
     }
     return a
 }
 
 // `side` of step 6: the block x is a tiny side-effect-free arm; returns where it jumps to
 fn simplify_simplify_cfg_side(f *Func, preds *Vec[Vec[i64]], x i64) Opt[i64] {
-    if x == 0 || preds.buf[x].len != 1 {
+    if x == 0 || preds[x].len != 1 {
         return None
     }
     j := 0
-    match f.blocks.buf[x].term {
+    match f.blocks[x].term {
         TermJmp(j1) => { j = j1 }
         _ => { return None }
     }
-    insts := f.blocks.buf[x].insts
+    insts := f.blocks[x].insts
     real := 0
     for v in insts.items() {
-        op := f.insts.buf[v].op
+        op := f.insts[v].op
         cheap := op == OpConst || op == OpFConst || op == OpGAddr || op == OpFAddr || op == OpAdd || op == OpSub ||
             op == OpAnd || op == OpOr || op == OpXor || op == OpShl || op == OpLShr || op == OpAShr || op == OpSExt ||
             op == OpZExt || op == OpTrunc
@@ -1143,7 +1143,7 @@ fn simplify_simplify_cfg_side(f *Func, preds *Vec[Vec[i64]], x i64) Opt[i64] {
 // all instructions of the block are phis
 fn simplify_all_phis(f *Func, binsts *Vec[i64]) bool {
     for v in binsts.items() {
-        if f.insts.buf[v].op != OpPhi {
+        if f.insts[v].op != OpPhi {
             return false
         }
     }
@@ -1152,10 +1152,10 @@ fn simplify_all_phis(f *Func, binsts *Vec[i64]) bool {
 
 // redirect the edge p -> from to p -> to
 fn simplify_retarget(f *Func, p i64, from i64, to i64) {
-    match f.blocks.buf[p].term {
+    match f.blocks[p].term {
         TermJmp(x) => {
             if x == from {
-                f.blocks.buf[p].term = TermJmp(to)
+                f.blocks[p].term = TermJmp(to)
             }
         }
         TermBr(c, x, y) => {
@@ -1167,7 +1167,7 @@ fn simplify_retarget(f *Func, p i64, from i64, to i64) {
             if y == from {
                 ny = to
             }
-            f.blocks.buf[p].term = TermBr(c, nx, ny)
+            f.blocks[p].term = TermBr(c, nx, ny)
         }
         _ => {}
     }
@@ -1177,26 +1177,26 @@ fn simplify_simplify_cfg(f *Func) bool {
     changed := false
     // 1. fold constant / degenerate branches
     for b in 0..f.blocks.len {
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermBr(c, t, e) => {
                 if t == e {
-                    f.blocks.buf[b].term = TermJmp(t)
+                    f.blocks[b].term = TermJmp(t)
                     changed = true
                     continue
                 }
-                ci := f.insts.buf[c]
+                ci := f.insts[c]
                 if ci.op == OpConst {
                     if ci.k != 0 {
-                        f.blocks.buf[b].term = TermJmp(t)
+                        f.blocks[b].term = TermJmp(t)
                     } else {
-                        f.blocks.buf[b].term = TermJmp(e)
+                        f.blocks[b].term = TermJmp(e)
                     }
                     changed = true
-                } else if ci.op == OpXor && simplify_opt_is(f.is_const(ci.args.buf[1]), 1) && f.insts.buf[ci.args.buf[0]].ty == TI8 {
+                } else if ci.op == OpXor && simplify_opt_is(f.is_const(ci.args[1]), 1) && f.insts[ci.args[0]].ty == TI8 {
                     // br !x, t, e  =>  br x, e, t  (x is a boolean)
-                    x := ci.args.buf[0]
-                    if f.insts.buf[x].op.is_cmp() {
-                        f.blocks.buf[b].term = TermBr(x, e, t)
+                    x := ci.args[0]
+                    if f.insts[x].op.is_cmp() {
+                        f.blocks[b].term = TermBr(x, e, t)
                         changed = true
                     }
                 }
@@ -1225,13 +1225,13 @@ fn simplify_simplify_cfg(f *Func) bool {
         rpo := f.rpo()
         scratch_off()
         for b in rpo.items() {
-            if dead.buf[b] {
+            if dead[b] {
                 continue
             }
             loop {
                 s := 0
                 is_jmp := false
-                match f.blocks.buf[b].term {
+                match f.blocks[b].term {
                     TermJmp(s1) => {
                         s = s1
                         is_jmp = true
@@ -1241,34 +1241,34 @@ fn simplify_simplify_cfg(f *Func) bool {
                 if !is_jmp {
                     break
                 }
-                if s == 0 || s == b || preds.buf[s].len != 1 || dead.buf[s] {
+                if s == 0 || s == b || preds[s].len != 1 || dead[s] {
                     break
                 }
-                sinsts := f.blocks.buf[s].insts
-                f.blocks.buf[s].insts = vec[i64]()
+                sinsts := f.blocks[s].insts
+                f.blocks[s].insts = vec[i64]()
                 for v in sinsts.items() {
-                    if f.insts.buf[v].op == OpPhi {
-                        repl.buf[v] = f.insts.buf[v].args.buf[0]
+                    if f.insts[v].op == OpPhi {
+                        repl[v] = f.insts[v].args[0]
                     } else {
-                        f.blocks.buf[b].insts.push(v)
+                        f.blocks[b].insts.push(v)
                     }
                 }
-                st := f.blocks.buf[s].term
-                f.blocks.buf[s].term = TermNone
-                f.blocks.buf[b].term = st
-                dead.buf[s] = true
+                st := f.blocks[s].term
+                f.blocks[s].term = TermNone
+                f.blocks[b].term = st
+                dead[s] = true
                 // successors of s now come from b
                 succs := f.succs(b)
                 for ss in succs.items() {
-                    for ii in 0..f.blocks.buf[ss].insts.len {
-                        v := f.blocks.buf[ss].insts.buf[ii]
-                        if f.insts.buf[v].op != OpPhi {
+                    for ii in 0..f.blocks[ss].insts.len {
+                        v := f.blocks[ss].insts[ii]
+                        if f.insts[v].op != OpPhi {
                             break
                         }
-                        pb := f.insts.buf[v].pb
+                        pb := f.insts[v].pb
                         for pk in 0..pb.len {
-                            if pb.buf[pk] == s {
-                                pb.buf[pk] = b
+                            if pb[pk] == s {
+                                pb[pk] = b
                             }
                         }
                     }
@@ -1297,12 +1297,12 @@ fn simplify_simplify_cfg(f *Func) bool {
         rpo := f.rpo()
         scratch_off()
         for e in rpo.items() {
-            if e == 0 || !f.blocks.buf[e].insts.is_empty() {
+            if e == 0 || !f.blocks[e].insts.is_empty() {
                 continue
             }
             t := 0
             is_jmp := false
-            match f.blocks.buf[e].term {
+            match f.blocks[e].term {
                 TermJmp(t1) => {
                     if t1 != e {
                         t = t1
@@ -1315,21 +1315,21 @@ fn simplify_simplify_cfg(f *Func) bool {
                 continue
             }
             t_has_phi := false
-            if f.blocks.buf[t].insts.len > 0 {
-                t_has_phi = f.insts.buf[f.blocks.buf[t].insts.buf[0]].op == OpPhi
+            if f.blocks[t].insts.len > 0 {
+                t_has_phi = f.insts[f.blocks[t].insts[0]].op == OpPhi
             }
             moved_any := false
-            for p in preds.buf[e].items() {
+            for p in preds[e].items() {
                 if p == e {
                     continue
                 }
-                if t_has_phi && (contains(&preds.buf[t], p) || moved_any && false) {
+                if t_has_phi && (contains(&preds[t], p) || moved_any && false) {
                     continue
                 }
                 // a conditional branch whose other arm already goes to t would need a select
                 if t_has_phi {
                     skip := false
-                    match f.blocks.buf[p].term {
+                    match f.blocks[p].term {
                         TermBr(c, a, b2) => {
                             if a == t || b2 == t {
                                 skip = true
@@ -1344,15 +1344,15 @@ fn simplify_simplify_cfg(f *Func) bool {
                 // redirect p -> e to p -> t
                 simplify_retarget(f, p, e, t)
                 if t_has_phi {
-                    for ii in 0..f.blocks.buf[t].insts.len {
-                        v := f.blocks.buf[t].insts.buf[ii]
-                        if f.insts.buf[v].op != OpPhi {
+                    for ii in 0..f.blocks[t].insts.len {
+                        v := f.blocks[t].insts[ii]
+                        if f.insts[v].op != OpPhi {
                             break
                         }
                         inst := f.im(v)
                         k := index_of(inst.pb.items(), e)
                         if k >= 0 {
-                            val := inst.args.buf[k]
+                            val := inst.args[k]
                             inst.args.push(val)
                             inst.pb.push(p)
                         }
@@ -1394,7 +1394,7 @@ fn simplify_simplify_cfg(f *Func) bool {
             t := 0
             e := 0
             is_br := false
-            match f.blocks.buf[b].term {
+            match f.blocks[b].term {
                 TermBr(c1, t1, e1) => {
                     if t1 != e1 && t1 != b && e1 != b {
                         c = c1
@@ -1408,7 +1408,7 @@ fn simplify_simplify_cfg(f *Func) bool {
             if !is_br {
                 continue
             }
-            binsts := clone(&f.blocks.buf[b].insts)
+            binsts := clone(&f.blocks[b].insts)
             if binsts.is_empty() || !simplify_all_phis(f, &binsts) || !contains(&binsts, c) {
                 continue
             }
@@ -1419,17 +1419,17 @@ fn simplify_simplify_cfg(f *Func) bool {
                 if si == 1 {
                     s = e
                 }
-                for v in f.blocks.buf[s].insts.items() {
-                    i := f.insts.buf[v]
+                for v in f.blocks[s].insts.items() {
+                    i := f.insts[v]
                     if i.op != OpPhi {
                         break
                     }
                     for k in 0..i.args.len {
-                        a := i.args.buf[k]
-                        if i.pb.buf[k] == b {
+                        a := i.args[k]
+                        if i.pb[k] == b {
                             pi := index_of(binsts.items(), a)
                             if pi >= 0 {
-                                phi_uses.buf[pi] += 1
+                                phi_uses[pi] += 1
                             }
                         }
                     }
@@ -1438,12 +1438,12 @@ fn simplify_simplify_cfg(f *Func) bool {
             // `continue 'blocks`
             bad := false
             for pi in 0..binsts.len {
-                ph := binsts.buf[pi]
+                ph := binsts[pi]
                 extra := 0
                 if ph == c {
                     extra = 1
                 }
-                if uses.buf[ph] != phi_uses.buf[pi] + extra {
+                if uses[ph] != phi_uses[pi] + extra {
                     bad = true
                     break
                 }
@@ -1451,14 +1451,14 @@ fn simplify_simplify_cfg(f *Func) bool {
             if bad {
                 continue
             }
-            cphi := f.insts.buf[c]
+            cphi := f.insts[c]
             for k in 0..cphi.pb.len {
-                p := cphi.pb.buf[k]
-                kc, hkc := simplify_unopt(f.is_const(cphi.args.buf[k]))
+                p := cphi.pb[k]
+                kc, hkc := simplify_unopt(f.is_const(cphi.args[k]))
                 if !hkc {
                     continue
                 }
-                if p == b || !contains(&preds.buf[b], p) {
+                if p == b || !contains(&preds[b], p) {
                     continue
                 }
                 target := e
@@ -1466,12 +1466,12 @@ fn simplify_simplify_cfg(f *Func) bool {
                     target = t
                 }
                 // p must not already reach the target directly (its phis would need two inputs)
-                if contains(&preds.buf[target], p) {
+                if contains(&preds[target], p) {
                     continue
                 }
                 // a conditional branch in p with both arms into b cannot be threaded simply
                 both := false
-                match f.blocks.buf[p].term {
+                match f.blocks[p].term {
                     TermBr(pc, x, y) => {
                         if x == b && y == b {
                             both = true
@@ -1483,22 +1483,22 @@ fn simplify_simplify_cfg(f *Func) bool {
                     continue
                 }
                 // new phi inputs in the target for the edge p -> target
-                for ii in 0..f.blocks.buf[target].insts.len {
-                    v := f.blocks.buf[target].insts.buf[ii]
-                    if f.insts.buf[v].op != OpPhi {
+                for ii in 0..f.blocks[target].insts.len {
+                    v := f.blocks[target].insts[ii]
+                    if f.insts[v].op != OpPhi {
                         break
                     }
-                    inst := f.insts.buf[v]
+                    inst := f.insts[v]
                     bk := index_of(inst.pb.items(), b)
                     if bk >= 0 {
-                        val := inst.args.buf[bk]
+                        val := inst.args[bk]
                         // a phi of b seen through p is its input from p
                         nv := val
                         if contains(&binsts, val) {
-                            vi := f.insts.buf[val]
+                            vi := f.insts[val]
                             pk := index_of(vi.pb.items(), p)
                             assert pk >= 0
-                            nv = vi.args.buf[pk]
+                            nv = vi.args[pk]
                         }
                         im := f.im(v)
                         im.args.push(nv)
@@ -1543,7 +1543,7 @@ fn simplify_simplify_cfg(f *Func) bool {
             t := 0
             e := 0
             is_br := false
-            match f.blocks.buf[b].term {
+            match f.blocks[b].term {
                 TermBr(c1, t1, e1) => {
                     if t1 != e1 && t1 != b && e1 != b {
                         c = c1
@@ -1557,20 +1557,20 @@ fn simplify_simplify_cfg(f *Func) bool {
             if !is_br {
                 continue
             }
-            binsts := clone(&f.blocks.buf[b].insts)
+            binsts := clone(&f.blocks[b].insts)
             if b == 0 || binsts.is_empty() || !simplify_all_phis(f, &binsts) || !contains(&binsts, c) {
                 continue
             }
-            if cfg.preds.buf[t].len != 1 || cfg.preds.buf[e].len != 1 || cfg.preds.buf[b].len < 2 {
+            if cfg.preds[t].len != 1 || cfg.preds[e].len != 1 || cfg.preds[b].len < 2 {
                 continue
             }
-            cphi := f.insts.buf[c]
+            cphi := f.insts[c]
             dest := vec[(i64, i64)]()
             // `continue 'blocks2`
             bad := false
             for k in 0..cphi.pb.len {
-                p := cphi.pb.buf[k]
-                kc, hkc := simplify_unopt(f.is_const(cphi.args.buf[k]))
+                p := cphi.pb[k]
+                kc, hkc := simplify_unopt(f.is_const(cphi.args[k]))
                 if !hkc {
                     bad = true
                     break
@@ -1579,7 +1579,7 @@ fn simplify_simplify_cfg(f *Func) bool {
                     bad = true
                     break
                 }
-                match f.blocks.buf[p].term {
+                match f.blocks[p].term {
                     TermBr(pc, x, y) => {
                         if x == b && y == b {
                             bad = true
@@ -1599,7 +1599,7 @@ fn simplify_simplify_cfg(f *Func) bool {
             if bad {
                 continue
             }
-            if dest.len != cfg.preds.buf[b].len {
+            if dest.len != cfg.preds[b].len {
                 continue
             }
             // every use of b's phis must be dominated by t or by e
@@ -1607,14 +1607,14 @@ fn simplify_simplify_cfg(f *Func) bool {
                 if !cfg.reachable(bb) || bb == b {
                     continue
                 }
-                for v in f.blocks.buf[bb].insts.items() {
-                    i := f.insts.buf[v]
+                for v in f.blocks[bb].insts.items() {
+                    i := f.insts[v]
                     for k in 0..i.args.len {
-                        a := i.args.buf[k]
-                        if def_block.buf[a] == b {
+                        a := i.args[k]
+                        if def_block[a] == b {
                             at := bb
                             if i.op == OpPhi {
-                                at = i.pb.buf[k]
+                                at = i.pb[k]
                             }
                             if !(cfg.dom(t, at) || cfg.dom(e, at)) {
                                 bad = true
@@ -1631,7 +1631,7 @@ fn simplify_simplify_cfg(f *Func) bool {
                 }
                 tu := f.term_uses(bb)
                 for a in tu.items() {
-                    if def_block.buf[a] == b && !(cfg.dom(t, bb) || cfg.dom(e, bb)) {
+                    if def_block[a] == b && !(cfg.dom(t, bb) || cfg.dom(e, bb)) {
                         bad = true
                         break
                     }
@@ -1658,12 +1658,12 @@ fn simplify_simplify_cfg(f *Func) bool {
                     }
                 }
                 for ph in binsts.items() {
-                    pi := f.insts.buf[ph]
+                    pi := f.insts[ph]
                     vals := vec[i64]()
                     for p in ps.items() {
                         pk := index_of(pi.pb.items(), p)
                         assert pk >= 0
-                        vals.push(pi.args.buf[pk])
+                        vals.push(pi.args[pk])
                     }
                     nv := ph
                     if ps.is_empty() {
@@ -1671,17 +1671,17 @@ fn simplify_simplify_cfg(f *Func) bool {
                     } else {
                         all_same := true
                         for x in vals.items() {
-                            if x != vals.buf[0] {
+                            if x != vals[0] {
                                 all_same = false
                                 break
                             }
                         }
                         if all_same {
-                            nv = vals.buf[0]
+                            nv = vals[0]
                         } else {
                             np := f.mk(OpPhi, pi.ty, vals, 0)
                             f.im(np).pb = clone(&ps)
-                            f.blocks.buf[s].insts.insert(0, np)
+                            f.blocks[s].insts.insert(0, np)
                             nv = np
                         }
                     }
@@ -1697,37 +1697,37 @@ fn simplify_simplify_cfg(f *Func) bool {
                 if !cfg.reachable(bb) || bb == b {
                     continue
                 }
-                for ii in 0..f.blocks.buf[bb].insts.len {
-                    v := f.blocks.buf[bb].insts.buf[ii]
+                for ii in 0..f.blocks[bb].insts.len {
+                    v := f.blocks[bb].insts[ii]
                     if v >= def_block.len {
                         continue
                     }
-                    for ai in 0..f.insts.buf[v].args.len {
-                        a := f.insts.buf[v].args.buf[ai]
-                        if a < def_block.len && def_block.buf[a] == b {
+                    for ai in 0..f.insts[v].args.len {
+                        a := f.insts[v].args[ai]
+                        if a < def_block.len && def_block[a] == b {
                             at := bb
-                            if f.insts.buf[v].op == OpPhi {
-                                at = f.insts.buf[v].pb.buf[ai]
+                            if f.insts[v].op == OpPhi {
+                                at = f.insts[v].pb[ai]
                             }
                             k := index_of(binsts.items(), a)
                             assert k >= 0
                             if cfg.dom(t, at) {
-                                f.insts.buf[v].args.buf[ai] = repl_t.buf[k]
+                                f.insts[v].args[ai] = repl_t[k]
                             } else {
-                                f.insts.buf[v].args.buf[ai] = repl_e.buf[k]
+                                f.insts[v].args[ai] = repl_e[k]
                             }
                         }
                     }
                 }
                 side_t := cfg.dom(t, bb)
-                match f.blocks.buf[bb].term {
+                match f.blocks[bb].term {
                     TermBr(cc, x, y) => {
-                        f.blocks.buf[bb].term = TermBr(simplify_simplify_cfg_fix(cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e), x, y)
+                        f.blocks[bb].term = TermBr(simplify_simplify_cfg_fix(cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e), x, y)
                     }
                     TermRet(vs) => {
                         // vs shares its buffer with the terminator
                         for vi in 0..vs.len {
-                            vs.buf[vi] = simplify_simplify_cfg_fix(vs.buf[vi], &def_block, b, &binsts, side_t, &repl_t, &repl_e)
+                            vs[vi] = simplify_simplify_cfg_fix(vs[vi], &def_block, b, &binsts, side_t, &repl_t, &repl_e)
                         }
                     }
                     _ => {}
@@ -1762,7 +1762,7 @@ fn simplify_simplify_cfg(f *Func) bool {
             t := 0
             e := 0
             is_br := false
-            match f.blocks.buf[b].term {
+            match f.blocks[b].term {
                 TermBr(c1, t1, e1) => {
                     if t1 != e1 {
                         c = c1
@@ -1809,8 +1809,8 @@ fn simplify_simplify_cfg(f *Func) bool {
             }
             // the join's phis decide whether this is worth it
             phis := vec[i64]()
-            for v in f.blocks.buf[j].insts.items() {
-                if f.insts.buf[v].op != OpPhi {
+            for v in f.blocks[j].insts.items() {
+                if f.insts[v].op != OpPhi {
                     break
                 }
                 phis.push(v)
@@ -1819,12 +1819,12 @@ fn simplify_simplify_cfg(f *Func) bool {
             ok := true
             selects := 0
             for ph in phis.items() {
-                i := f.insts.buf[ph]
+                i := f.insts[ph]
                 kt := index_of(i.pb.items(), from_t)
                 ke := index_of(i.pb.items(), from_e)
                 if kt >= 0 && ke >= 0 {
-                    vt := i.args.buf[kt]
-                    ve := i.args.buf[ke]
+                    vt := i.args[kt]
+                    ve := i.args[ke]
                     if vt != ve {
                         if !i.ty.is_int() {
                             ok = false
@@ -1847,9 +1847,9 @@ fn simplify_simplify_cfg(f *Func) bool {
                 }
                 match xo {
                     Some(x) => {
-                        moved := f.blocks.buf[x].insts
-                        f.blocks.buf[x].insts = vec[i64]()
-                        f.blocks.buf[b].insts.extend(moved.items())
+                        moved := f.blocks[x].insts
+                        f.blocks[x].insts = vec[i64]()
+                        f.blocks[b].insts.extend(moved.items())
                     }
                     None => {}
                 }
@@ -1858,7 +1858,7 @@ fn simplify_simplify_cfg(f *Func) bool {
                 ph := pr.0
                 vt := pr.1
                 ve := pr.2
-                ty := f.insts.buf[ph].ty
+                ty := f.insts[ph].ty
                 nv := vt
                 if vt != ve {
                     nv = f.push(b, OpSelect, ty, vec_of([]i64{c, vt, ve}), 0)
@@ -1866,7 +1866,7 @@ fn simplify_simplify_cfg(f *Func) bool {
                 i := f.im(ph)
                 k := 0
                 while k < i.pb.len {
-                    if i.pb.buf[k] == from_t || i.pb.buf[k] == from_e {
+                    if i.pb[k] == from_t || i.pb[k] == from_e {
                         i.pb.remove(k)
                         i.args.remove(k)
                     } else {
@@ -1876,7 +1876,7 @@ fn simplify_simplify_cfg(f *Func) bool {
                 i.pb.push(b)
                 i.args.push(nv)
             }
-            f.blocks.buf[b].term = TermJmp(j)
+            f.blocks[b].term = TermJmp(j)
             did = true
             break
         }
@@ -1888,10 +1888,10 @@ fn simplify_simplify_cfg(f *Func) bool {
     }
     // normalize `br c, t, t`
     for b in 0..f.blocks.len {
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermBr(c, t, e) => {
                 if t == e {
-                    f.blocks.buf[b].term = TermJmp(t)
+                    f.blocks[b].term = TermJmp(t)
                     changed = true
                 }
             }

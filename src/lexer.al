@@ -94,11 +94,11 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
     while i < len(s) {
         c := s[i]
         if c == '\n' {
-            sig := stack.len == 0 || stack.buf[stack.len - 1] == '{'
+            sig := stack.len == 0 || stack[stack.len - 1] == '{'
             if sig {
                 term := false
                 if out.len > 0 {
-                    match out.buf[out.len - 1].t {
+                    match out[out.len - 1].t {
                         TkId(x) => {
                             term = true
                         }
@@ -114,7 +114,7 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
                         TkP(p) => {
                             term = p == ")" || p == "]" || p == "}"
                             if p == "|" || p == "||" {
-                                out.buf[out.len - 1].nl = true
+                                out[out.len - 1].nl = true
                             }
                         }
                         TkKw(k) => {
@@ -324,14 +324,14 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
                 errs.push(Diag{pos: p, msg: "unterminated string/char literal"})
             }
             if q == '"' {
-                out.push(Token{t: TkStr(buf.buf[..buf.len]), pos: p})
+                out.push(Token{t: TkStr(buf[..buf.len]), pos: p})
             } else {
                 if buf.len != 1 {
                     errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
                 }
                 var first u8 = 0
                 if buf.len > 0 {
-                    first = buf.buf[0]
+                    first = buf[0]
                 }
                 out.push(Token{t: TkInt(u64(first)), pos: p})
             }
@@ -362,7 +362,7 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
     p := lexer_pos(file, line, i, line_start)
     if out.len > 0 {
         last_nl := false
-        match out.buf[out.len - 1].t {
+        match out[out.len - 1].t {
             TkNl => {
                 last_nl = true
             }

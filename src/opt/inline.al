@@ -3,9 +3,9 @@
 fn inline_cost(f *Func) i64 {
     n := 0
     for bi in 0..f.blocks.len {
-        b := &f.blocks.buf[bi]
+        b := &f.blocks[bi]
         for v in b.insts.items() {
-            o := f.insts.buf[v].op
+            o := f.insts[v].op
             if !(o == OpConst || o == OpFConst || o == OpParam || o == OpGAddr || o == OpFAddr || o == OpAlloca || o == OpPhi || o == OpProj) {
                 n += 1
             }
@@ -26,29 +26,29 @@ fn inline_bmap_at(bmap *Map[i64, i64], b i64) i64 {
 
 // inline one call site: `call` (in block `cb`) to callee `g`
 fn inline_inline_call(f *Func, cb i64, call i64, g *Func) {
-    pos := index_of(f.blocks.buf[cb].insts.items(), call)
+    pos := index_of(f.blocks[cb].insts.items(), call)
     assert pos >= 0
-    call_inst := clone(&f.insts.buf[call])
+    call_inst := clone(&f.insts[call])
     // split the block
     cont := f.new_block()
-    tail := vec_of(f.blocks.buf[cb].insts.buf[pos + 1..f.blocks.buf[cb].insts.len])
-    f.blocks.buf[cb].insts.len = pos + 1
-    f.blocks.buf[cb].insts.pop()
-    f.blocks.buf[cont].insts = tail
-    old_term := f.blocks.buf[cb].term
-    f.blocks.buf[cb].term = TermNone
-    f.blocks.buf[cont].term = old_term
+    tail := vec_of(f.blocks[cb].insts[pos + 1..f.blocks[cb].insts.len])
+    f.blocks[cb].insts.len = pos + 1
+    f.blocks[cb].insts.pop()
+    f.blocks[cont].insts = tail
+    old_term := f.blocks[cb].term
+    f.blocks[cb].term = TermNone
+    f.blocks[cont].term = old_term
     ss := f.succs(cont)
     for s in ss.items() {
-        for ii in 0..f.blocks.buf[s].insts.len {
-            v := f.blocks.buf[s].insts.buf[ii]
-            if f.insts.buf[v].op != OpPhi {
+        for ii in 0..f.blocks[s].insts.len {
+            v := f.blocks[s].insts[ii]
+            if f.insts[v].op != OpPhi {
                 break
             }
-            pbs := &f.insts.buf[v].pb
+            pbs := &f.insts[v].pb
             for k in 0..pbs.len {
-                if pbs.buf[k] == cb {
-                    pbs.buf[k] = cont
+                if pbs[k] == cb {
+                    pbs[k] = cont
                 }
             }
         }
@@ -61,30 +61,30 @@ fn inline_inline_call(f *Func, cb i64, call i64, g *Func) {
     }
     vmap := vec_fill(g.insts.len, NOV)
     for gb in grpo.items() {
-        for gv in g.blocks.buf[gb].insts.items() {
-            gi := &g.insts.buf[gv]
+        for gv in g.blocks[gb].insts.items() {
+            gi := &g.insts[gv]
             if gi.op == OpParam {
-                vmap.buf[gv] = call_inst.args.buf[gi.k]
+                vmap[gv] = call_inst.args[gi.k]
                 continue
             }
             nv := f.mk(gi.op, gi.ty, vec[i64](), gi.k)
             f.im(nv).aux = gi.aux
-            vmap.buf[gv] = nv
+            vmap[gv] = nv
         }
     }
     rets := vec[(i64, Vec[i64])]()
     allocas := vec[i64]()
     for gb in grpo.items() {
         nb := inline_bmap_at(&bmap, gb)
-        for gv in g.blocks.buf[gb].insts.items() {
-            gi := &g.insts.buf[gv]
+        for gv in g.blocks[gb].insts.items() {
+            gi := &g.insts[gv]
             if gi.op == OpParam {
                 continue
             }
-            nv := vmap.buf[gv]
+            nv := vmap[gv]
             args := vec[i64]()
             for a in gi.args.items() {
-                args.push(vmap.buf[a])
+                args.push(vmap[a])
             }
             pb := vec[i64]()
             for p in gi.pb.items() {
@@ -95,9 +95,9 @@ fn inline_inline_call(f *Func, cb i64, call i64, g *Func) {
                 a2 := vec[i64]()
                 p2 := vec[i64]()
                 for k in 0..pb.len {
-                    if pb.buf[k] != 0xFFFFFFFF {
-                        a2.push(args.buf[k])
-                        p2.push(pb.buf[k])
+                    if pb[k] != 0xFFFFFFFF {
+                        a2.push(args[k])
+                        p2.push(pb[k])
                     }
                 }
                 f.im(nv).args = a2
@@ -109,36 +109,36 @@ fn inline_inline_call(f *Func, cb i64, call i64, g *Func) {
             if gi.op == OpAlloca {
                 allocas.push(nv)
             } else {
-                f.blocks.buf[nb].insts.push(nv)
+                f.blocks[nb].insts.push(nv)
             }
         }
-        match g.blocks.buf[gb].term {
-            TermJmp(t) => f.blocks.buf[nb].term = TermJmp(inline_bmap_at(&bmap, t))
-            TermBr(c, t, e) => f.blocks.buf[nb].term = TermBr(vmap.buf[c], inline_bmap_at(&bmap, t), inline_bmap_at(&bmap, e))
+        match g.blocks[gb].term {
+            TermJmp(t) => f.blocks[nb].term = TermJmp(inline_bmap_at(&bmap, t))
+            TermBr(c, t, e) => f.blocks[nb].term = TermBr(vmap[c], inline_bmap_at(&bmap, t), inline_bmap_at(&bmap, e))
             TermRet(vs) => {
                 rv := vec[i64]()
                 for v in vs.items() {
-                    rv.push(vmap.buf[v])
+                    rv.push(vmap[v])
                 }
                 rets.push((nb, rv))
-                f.blocks.buf[nb].term = TermJmp(cont)
+                f.blocks[nb].term = TermJmp(cont)
             }
-            TermTrap => f.blocks.buf[nb].term = TermTrap
-            TermNone => f.blocks.buf[nb].term = TermTrap
+            TermTrap => f.blocks[nb].term = TermTrap
+            TermNone => f.blocks[nb].term = TermTrap
         }
     }
     // allocas live in the caller's entry block
     if !allocas.is_empty() {
         e := allocas
-        e.extend(f.blocks.buf[0].insts.items())
-        f.blocks.buf[0].insts = e
+        e.extend(f.blocks[0].insts.items())
+        f.blocks[0].insts = e
     }
-    f.blocks.buf[cb].term = TermJmp(inline_bmap_at(&bmap, 0))
+    f.blocks[cb].term = TermJmp(inline_bmap_at(&bmap, 0))
     // results
     nrets := g.rets.len
     results := vec[i64]()
     for k in 0..nrets {
-        rt := g.rets.buf[k]
+        rt := g.rets[k]
         if rets.is_empty() {
             // callee never returns: any value will do
             z := 0
@@ -147,46 +147,46 @@ fn inline_inline_call(f *Func, cb i64, call i64, g *Func) {
             } else {
                 z = f.mk(OpConst, rt, vec[i64](), 0)
             }
-            f.blocks.buf[0].insts.insert(0, z)
+            f.blocks[0].insts.insert(0, z)
             results.push(z)
         } else if rets.len == 1 {
-            results.push(rets.buf[0].1.at(k))
+            results.push(rets[0].1.at(k))
         } else {
             vals := vec[i64]()
             for ri in 0..rets.len {
-                vals.push(rets.buf[ri].1.at(k))
+                vals.push(rets[ri].1.at(k))
             }
             phi := f.mk(OpPhi, rt, vals, 0)
             pbs := vec[i64]()
             for ri in 0..rets.len {
-                pbs.push(rets.buf[ri].0)
+                pbs.push(rets[ri].0)
             }
             f.im(phi).pb = pbs
-            f.blocks.buf[cont].insts.insert(k, phi)
+            f.blocks[cont].insts.insert(k, phi)
             results.push(phi)
         }
     }
     repl := vec_fill(f.insts.len, NOV)
     if nrets == 1 {
-        repl.buf[call] = results.buf[0]
+        repl[call] = results[0]
     } else if nrets > 1 {
         // projections of the call
         for b in 0..f.blocks.len {
-            for ii in 0..f.blocks.buf[b].insts.len {
-                v := f.blocks.buf[b].insts.buf[ii]
-                i := &f.insts.buf[v]
-                if i.op == OpProj && i.args.buf[0] == call {
-                    repl.buf[v] = results.at(i.k)
+            for ii in 0..f.blocks[b].insts.len {
+                v := f.blocks[b].insts[ii]
+                i := &f.insts[v]
+                if i.op == OpProj && i.args[0] == call {
+                    repl[v] = results.at(i.k)
                 }
             }
         }
         for b in 0..f.blocks.len {
-            blk := &f.blocks.buf[b]
+            blk := &f.blocks[b]
             n := 0
             for ii in 0..blk.insts.len {
-                v := blk.insts.buf[ii]
-                if repl.buf[v] == NOV {
-                    blk.insts.buf[n] = v
+                v := blk.insts[ii]
+                if repl[v] == NOV {
+                    blk.insts[n] = v
                     n += 1
                 }
             }
@@ -212,19 +212,19 @@ fn inline_run(m *Module, fid i64, done []bool, call_counts []i64, addr_taken []b
         if budget == 0 {
             break
         }
-        caller_size := inline_cost(&m.funcs.buf[fid])
+        caller_size := inline_cost(&m.funcs[fid])
         if caller_size > pol.max_caller {
             break
         }
         // find the next inlinable call
         var found Opt[(i64, i64, i64)] = None
         {
-            f := &m.funcs.buf[fid]
+            f := &m.funcs[fid]
             frpo := f.rpo()
             for b in frpo.items() {
                 hit := false
-                for v in f.blocks.buf[b].insts.items() {
-                    i := &f.insts.buf[v]
+                for v in f.blocks[b].insts.items() {
+                    i := &f.insts[v]
                     if i.op != OpCall {
                         continue
                     }
@@ -232,7 +232,7 @@ fn inline_run(m *Module, fid i64, done []bool, call_counts []i64, addr_taken []b
                     if g == fid || !done[g] {
                         continue
                     }
-                    gf := &m.funcs.buf[g]
+                    gf := &m.funcs[g]
                     if gf.inl < 0 || gf.noreturn || !gf.lowered {
                         continue
                     }
@@ -262,8 +262,8 @@ fn inline_run(m *Module, fid i64, done []bool, call_counts []i64, addr_taken []b
         }
         match found {
             Some(x) => {
-                gf := clone(&m.funcs.buf[x.2])
-                inline_inline_call(&m.funcs.buf[fid], x.0, x.1, &gf)
+                gf := clone(&m.funcs[x.2])
+                inline_inline_call(&m.funcs[fid], x.0, x.1, &gf)
                 any = true
                 budget -= 1
             }

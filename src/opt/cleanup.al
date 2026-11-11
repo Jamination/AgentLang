@@ -5,27 +5,27 @@ fn cleanup_prune_unreachable(f *Func) bool {
     rpo := f.rpo()
     reach := vec_fill(f.blocks.len, false)
     for b in rpo.items() {
-        reach.buf[b] = true
+        reach[b] = true
     }
     changed := false
     for b in 0..f.blocks.len {
-        if !reach.buf[b] && (!f.blocks.buf[b].insts.is_empty() || !cleanup_term_is_none(f.blocks.buf[b].term)) {
-            f.blocks.buf[b].insts.clear()
-            f.blocks.buf[b].term = TermNone
+        if !reach[b] && (!f.blocks[b].insts.is_empty() || !cleanup_term_is_none(f.blocks[b].term)) {
+            f.blocks[b].insts.clear()
+            f.blocks[b].term = TermNone
             changed = true
         }
     }
     preds := f.preds()
     for b in rpo.items() {
-        for ii in 0..f.blocks.buf[b].insts.len {
-            v := f.blocks.buf[b].insts.buf[ii]
-            if f.insts.buf[v].op != OpPhi {
+        for ii in 0..f.blocks[b].insts.len {
+            v := f.blocks[b].insts[ii]
+            if f.insts[v].op != OpPhi {
                 continue
             }
-            inst := &f.insts.buf[v]
+            inst := &f.insts[v]
             k := 0
             while k < inst.pb.len {
-                if !contains(&preds.buf[b], inst.pb.buf[k]) {
+                if !contains(&preds[b], inst.pb[k]) {
                     inst.pb.remove(k)
                     inst.args.remove(k)
                     changed = true
@@ -56,24 +56,24 @@ fn cleanup_dce(f *Func) bool {
     live := vec_fill(n, false)
     work := vec[i64]()
     for bi in 0..f.blocks.len {
-        b := &f.blocks.buf[bi]
+        b := &f.blocks[bi]
         for v in b.insts.items() {
-            if cleanup_is_root(f.insts.buf[v].op) {
-                live.buf[v] = true
+            if cleanup_is_root(f.insts[v].op) {
+                live[v] = true
                 work.push(v)
             }
         }
         match b.term {
             TermBr(c, t, e) => {
-                if !live.buf[c] {
-                    live.buf[c] = true
+                if !live[c] {
+                    live[c] = true
                     work.push(c)
                 }
             }
             TermRet(vs) => {
                 for v in vs.items() {
-                    if !live.buf[v] {
-                        live.buf[v] = true
+                    if !live[v] {
+                        live[v] = true
                         work.push(v)
                     }
                 }
@@ -83,24 +83,24 @@ fn cleanup_dce(f *Func) bool {
     }
     while work.len > 0 {
         v := work.pop()
-        for ai in 0..f.insts.buf[v].args.len {
-            a := f.insts.buf[v].args.buf[ai]
-            if !live.buf[a] {
-                live.buf[a] = true
+        for ai in 0..f.insts[v].args.len {
+            a := f.insts[v].args[ai]
+            if !live[a] {
+                live[a] = true
                 work.push(a)
             }
         }
     }
     changed := false
     for bi in 0..f.blocks.len {
-        b := &f.blocks.buf[bi]
+        b := &f.blocks[bi]
         before := b.insts.len
         // retain(|v| live[v])
         kept := 0
         for i in 0..before {
-            v := b.insts.buf[i]
-            if live.buf[v] {
-                b.insts.buf[kept] = v
+            v := b.insts[i]
+            if live[v] {
+                b.insts[kept] = v
                 kept += 1
             }
         }
@@ -114,8 +114,8 @@ fn cleanup_dce(f *Func) bool {
 
 fn cleanup_trivial_phis_res(repl *Vec[i64], v0 i64) i64 {
     v := v0
-    while repl.buf[v] != NOV {
-        v = repl.buf[v]
+    while repl[v] != NOV {
+        v = repl[v]
     }
     return v
 }
@@ -127,14 +127,14 @@ fn cleanup_trivial_phis(f *Func) bool {
     loop {
         changed := false
         for bi in 0..f.blocks.len {
-            for ii in 0..f.blocks.buf[bi].insts.len {
-                v := f.blocks.buf[bi].insts.buf[ii]
-                if f.insts.buf[v].op != OpPhi || repl.buf[v] != NOV {
+            for ii in 0..f.blocks[bi].insts.len {
+                v := f.blocks[bi].insts[ii]
+                if f.insts[v].op != OpPhi || repl[v] != NOV {
                     continue
                 }
                 same := NOV
                 trivial := true
-                for a0 in f.insts.buf[v].args.items() {
+                for a0 in f.insts[v].args.items() {
                     a := cleanup_trivial_phis_res(&repl, a0)
                     if a == v || a == same {
                         continue
@@ -146,7 +146,7 @@ fn cleanup_trivial_phis(f *Func) bool {
                     same = a
                 }
                 if trivial && same != NOV {
-                    repl.buf[v] = same
+                    repl[v] = same
                     changed = true
                 }
             }
@@ -158,13 +158,13 @@ fn cleanup_trivial_phis(f *Func) bool {
     }
     if any {
         for bi in 0..f.blocks.len {
-            b := &f.blocks.buf[bi]
+            b := &f.blocks[bi]
             // retain(|v| repl[v] == NOV)
             kept := 0
             for i in 0..b.insts.len {
-                v := b.insts.buf[i]
-                if repl.buf[v] == NOV {
-                    b.insts.buf[kept] = v
+                v := b.insts[i]
+                if repl[v] == NOV {
+                    b.insts[kept] = v
                     kept += 1
                 }
             }

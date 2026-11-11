@@ -23,7 +23,7 @@ struct CapWalk {
 
 fn lower_closure_use(w *CapWalk, n str) bool {
     for i in w.bound.len - 1..=0 by -1 {
-        if w.bound.buf[i] == n {
+        if w.bound[i] == n {
             return true
         }
     }
@@ -43,7 +43,7 @@ fn lower_closure_walk_opt(w *CapWalk, e Opt[*Expr]) bool {
 
 fn lower_closure_walk_exprs(w *CapWalk, es *Vec[Expr]) bool {
     for i in 0..es.len {
-        lower_closure_walk_expr(w, &es.buf[i])
+        lower_closure_walk_expr(w, &es[i])
     }
     true
 }
@@ -51,7 +51,7 @@ fn lower_closure_walk_exprs(w *CapWalk, es *Vec[Expr]) bool {
 fn lower_closure_walk_block(w *CapWalk, b *Block) bool {
     mark := w.bound.len
     for i in 0..b.stmts.len {
-        lower_closure_walk_stmt(w, &b.stmts.buf[i])
+        lower_closure_walk_stmt(w, &b.stmts[i])
     }
     w.bound.truncate(mark)
     true
@@ -59,7 +59,7 @@ fn lower_closure_walk_block(w *CapWalk, b *Block) bool {
 
 fn lower_closure_walk_pats(w *CapWalk, ps *Vec[Pat]) bool {
     for i in 0..ps.len {
-        lower_closure_walk_pat(w, &ps.buf[i])
+        lower_closure_walk_pat(w, &ps[i])
     }
     true
 }
@@ -110,7 +110,7 @@ fn lower_closure_walk_expr(w *CapWalk, e *Expr) bool {
         EKLit(te, items) => {
             // (`te` is a type)
             for i in 0..items.len {
-                lower_closure_walk_expr(w, &items.buf[i].1)
+                lower_closure_walk_expr(w, &items[i].1)
             }
             true
         }
@@ -124,10 +124,10 @@ fn lower_closure_walk_expr(w *CapWalk, e *Expr) bool {
         EKMatch(sc, arms) => {
             lower_closure_walk_expr(w, sc)
             for i in 0..arms.len {
-                arm := &arms.buf[i]
+                arm := &arms[i]
                 mark := w.bound.len
                 for j in 0..arm.pats.len {
-                    lower_closure_walk_pat(w, &arm.pats.buf[j])
+                    lower_closure_walk_pat(w, &arm.pats[j])
                 }
                 lower_closure_walk_opt(w, arm.guard)
                 lower_closure_walk_block(w, &arm.body)
@@ -139,7 +139,7 @@ fn lower_closure_walk_expr(w *CapWalk, e *Expr) bool {
             // a nested literal: what it captures from outside is captured here too
             mark := w.bound.len
             for i in 0..ps.len {
-                w.bound.push(ps.buf[i].0)
+                w.bound.push(ps[i].0)
             }
             lower_closure_walk_block(w, body)
             w.bound.truncate(mark)
@@ -243,7 +243,7 @@ fn closure_lit_type(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst]) i6
     saved := self.cx.errs.len
     ptys := vec[i64]()
     for i in 0..params.len {
-        ptys.push(self.cx.resolve(&params.buf[i].1, &self.tenv))
+        ptys.push(self.cx.resolve(&params[i].1, &self.tenv))
     }
     rty := T_UNIT
     match ret {
@@ -324,7 +324,7 @@ fn coerce_fn_value(self *Fx, v Val, want i64) Val {
 fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *Block, expect Opt[i64], pos Pos) Val {
     ptys := vec[i64]()
     for i in 0..params.len {
-        ptys.push(self.cx.resolve(&params.buf[i].1, &self.tenv))
+        ptys.push(self.cx.resolve(&params[i].1, &self.tenv))
     }
     rty := T_UNIT
     match ret {
@@ -339,7 +339,7 @@ fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *B
     }
     if rty == T_UNIT && body.stmts.len != 0 {
         // `|x i64| { x * 2 }`: the result type is never inferred
-        last := &body.stmts.buf[body.stmts.len - 1]
+        last := &body.stmts[body.stmts.len - 1]
         match last.k {
             SKExpr(e) => {
                 if lower_fn_stmt_expr_kind(&e) == 1 {
@@ -353,15 +353,15 @@ fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *B
     // the variables of this function that the body uses
     w := CapWalk{fx: self, bound: vec[str](), names: vec[str](), seen: map[str, bool]()}
     for i in 0..params.len {
-        w.bound.push(params.buf[i].0)
+        w.bound.push(params[i].0)
     }
     lower_closure_walk_block(&w, body)
     caps := vec[(str, i64)]()
     addrs := vec[i64]()
     for i in 0..w.names.len {
-        match self.lookup(w.names.buf[i]) {
+        match self.lookup(w.names[i]) {
             Some(x) => {
-                caps.push((w.names.buf[i], x.0))
+                caps.push((w.names[i], x.0))
                 addrs.push(x.1)
             }
             None => {}
@@ -387,7 +387,7 @@ fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *B
                     if er == rty && ep.items() == ptys.items() {
                         if caps.len != 0 {
                             ct := self.cx.types.closure(clone(&ptys), rty)
-                            self.err(pos, fmt("this closure literal uses the local variable `", caps.buf[0].0, "`, so it cannot be a plain function ", self.tyname(et), " (a code pointer without environment); give the destination the closure type ", self.tyname(ct), " or do not use local variables of the enclosing function"))
+                            self.err(pos, fmt("this closure literal uses the local variable `", caps[0].0, "`, so it cannot be a plain function ", self.tyname(et), " (a code pointer without environment); give the destination the closure type ", self.tyname(ct), " or do not use local variables of the enclosing function"))
                             return val_err()
                         }
                         return self.sval(et, code)
@@ -403,7 +403,7 @@ fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *B
         env = self.alloca(8 * caps.len, 8)
         for i in 0..addrs.len {
             a := self.add_off(env, 8 * i)
-            self.store_raw(a, addrs.buf[i], TI64, AK_PTR)
+            self.store_raw(a, addrs[i], TI64, AK_PTR)
         }
     }
     ty := self.cx.types.closure(ptys, rty)

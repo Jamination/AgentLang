@@ -34,16 +34,16 @@ fn elf_used_externs(m *Module, out *Output) Vec[i64] {
     used := vec_fill(m.externs.len, false)
     by_got := map[i64, i64]()
     for i in 0..m.externs.len {
-        by_got.set(m.externs.buf[i].got, i)
+        by_got.set(m.externs[i].got, i)
     }
     for ci in 0..out.funcs.len {
-        c := &out.funcs.buf[ci]
+        c := &out.funcs[ci]
         for r in c.code.relocs.items() {
             match r.kind {
                 RelocKindAbs32Global(g) => {
                     i, found := by_got.get(g)
                     if found {
-                        used.buf[i] = true
+                        used[i] = true
                     }
                 }
                 _ => {}
@@ -52,7 +52,7 @@ fn elf_used_externs(m *Module, out *Output) Vec[i64] {
     }
     res := vec[i64]()
     for i in 0..m.externs.len {
-        if used.buf[i] {
+        if used[i] {
             res.push(i)
         }
     }
@@ -70,7 +70,7 @@ fn elf_link_patch_data(buf *Vec[u8], base_addr i64, g *Global, ga i64, gaddr *Ve
         assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
         u := u64(val)
         for k in 0..8 {
-            buf.buf[at + k] = u8(u >> u64(8 * k))
+            buf[at + k] = u8(u >> u64(8 * k))
         }
     }
 }
@@ -114,9 +114,9 @@ fn elf_link(m *Module, out *Output) (str, str) {
     externs := elf_used_externs(m, out)
     dynamic := !externs.is_empty()
     for x in externs.items() {
-        lib := m.externs.buf[x].lib
+        lib := m.externs[x].lib
         if ends_with(lib, ".dll") || ends_with(lib, ".dylib") || find(lib, ".framework") >= 0 {
-            return ("", fmt("`", m.externs.buf[x].name, "` is imported from `", lib,
+            return ("", fmt("`", m.externs[x].name, "` is imported from `", lib,
                 "`, which is not a Linux library; this compiler emits x86-64 Linux executables (bindings for other platforms can be type-checked with `alc check`)"))
         }
     }
@@ -131,13 +131,13 @@ fn elf_link(m *Module, out *Output) (str, str) {
     func_size := vec_fill(m.funcs.len, 0)
     func_off := vec_fill(m.funcs.len, 0)
     for ci in 0..out.funcs.len {
-        c := &out.funcs.buf[ci]
+        c := &out.funcs[ci]
         while text.len % 16 != 0 {
             text.push(0xCC)
         }
-        func_off.buf[c.fid] = text.len
-        func_addr.buf[c.fid] = ELF_BASE + text_off + text.len
-        func_size.buf[c.fid] = c.code.bytes.len
+        func_off[c.fid] = text.len
+        func_addr[c.fid] = ELF_BASE + text_off + text.len
+        func_size[c.fid] = c.code.bytes.len
         text.extend(c.code.bytes.items())
     }
     // ---- rodata ----
@@ -150,13 +150,13 @@ fn elf_link(m *Module, out *Output) (str, str) {
     }
     gaddr := vec_fill(m.globals.len, 0)
     for gi in 0..m.globals.len {
-        g := &m.globals.buf[gi]
+        g := &m.globals[gi]
         if g.readonly {
             a := max(g.align, 1)
             while rodata.len % a != 0 {
                 rodata.push(0)
             }
-            gaddr.buf[gi] = ELF_BASE + ro_off + rodata.len
+            gaddr[gi] = ELF_BASE + ro_off + rodata.len
             match g.data {
                 Some(d) => rodata.extend(d.items())
                 None => rodata.resize(rodata.len + g.size, 0)
@@ -184,8 +184,8 @@ fn elf_link(m *Module, out *Output) (str, str) {
         dynstr := vec_of([]u8{0})
         libs := vec[str]()
         for x in externs.items() {
-            if !contains(&libs, m.externs.buf[x].lib) {
-                libs.push(m.externs.buf[x].lib)
+            if !contains(&libs, m.externs[x].lib) {
+                libs.push(m.externs[x].lib)
             }
         }
         for l in libs.items() {
@@ -196,7 +196,7 @@ fn elf_link(m *Module, out *Output) (str, str) {
         dynsym := vec_fill(24, u8(0))
         for x in externs.items() {
             elf_put32(&dynsym, dynstr.len)
-            dynstr.extend(m.externs.buf[x].name)
+            dynstr.extend(m.externs[x].name)
             dynstr.push(0)
             dynsym.push(0x12) // STB_GLOBAL, STT_FUNC
             dynsym.push(0)
@@ -232,7 +232,7 @@ fn elf_link(m *Module, out *Output) (str, str) {
     data_off := elf_align_up(ro_end, 0x1000)
     data := vec[u8]()
     for gi in 0..m.globals.len {
-        g := &m.globals.buf[gi]
+        g := &m.globals[gi]
         if !g.readonly {
             match g.data {
                 Some(d) => {
@@ -240,7 +240,7 @@ fn elf_link(m *Module, out *Output) (str, str) {
                     while data.len % a != 0 {
                         data.push(0)
                     }
-                    gaddr.buf[gi] = ELF_BASE + data_off + data.len
+                    gaddr[gi] = ELF_BASE + data_off + data.len
                     data.extend(d.items())
                 }
                 None => {}
@@ -278,14 +278,14 @@ fn elf_link(m *Module, out *Output) (str, str) {
         // one R_X86_64_GLOB_DAT relocation per import slot
         base := rela_at - (ELF_BASE + ro_off)
         for k in 0..externs.len {
-            x := externs.buf[k]
+            x := externs[k]
             r := vec[u8]()
-            elf_put64(&r, gaddr.at(m.externs.buf[x].got))
+            elf_put64(&r, gaddr.at(m.externs[x].got))
             elf_put64(&r, ((k + 1) << 32) | 6)
             elf_put64(&r, 0)
             assert base + 24 * k + 24 <= rodata.len
             for j in 0..24 {
-                rodata.buf[base + 24 * k + j] = r.buf[j]
+                rodata[base + 24 * k + j] = r[j]
             }
         }
     }
@@ -295,14 +295,14 @@ fn elf_link(m *Module, out *Output) (str, str) {
     bss_addr := ELF_BASE + data_off + data.len
     bss_size := 0
     for gi in 0..m.globals.len {
-        g := &m.globals.buf[gi]
+        g := &m.globals[gi]
         if !g.readonly && !is_some(g.data) {
             a := min(max(g.align, 1), 64)
             if g.size >= 64 {
                 a = max(a, 64)
             }
             bss_size = elf_align_up(bss_size, a)
-            gaddr.buf[gi] = bss_addr + bss_size
+            gaddr[gi] = bss_addr + bss_size
             bss_size += max(g.size, 1)
         }
     }
@@ -311,10 +311,10 @@ fn elf_link(m *Module, out *Output) (str, str) {
     start_addr := ELF_BASE + text_off
     rel := i32(entry_addr - (start_addr + 8))
     for k in 0..4 {
-        text.buf[4 + k] = u8(u32(rel) >> u32(8 * k))
+        text[4 + k] = u8(u32(rel) >> u32(8 * k))
     }
     for ci in 0..out.funcs.len {
-        c := &out.funcs.buf[ci]
+        c := &out.funcs[ci]
         fo := func_off.at(c.fid)
         fa := func_addr.at(c.fid)
         for r in c.code.relocs.items() {
@@ -329,19 +329,19 @@ fn elf_link(m *Module, out *Output) (str, str) {
             assert at >= 0 && at + 4 <= text.len
             v32 := u32(i32(val))
             for k in 0..4 {
-                text.buf[at + k] = u8(v32 >> u32(8 * k))
+                text[at + k] = u8(v32 >> u32(8 * k))
             }
         }
     }
     for gi in 0..m.globals.len {
-        g := &m.globals.buf[gi]
+        g := &m.globals[gi]
         if g.relocs.is_empty() {
             continue
         }
         if g.readonly {
-            elf_link_patch_data(&rodata, ELF_BASE + ro_off, g, gaddr.buf[gi], &gaddr, &func_addr)
+            elf_link_patch_data(&rodata, ELF_BASE + ro_off, g, gaddr[gi], &gaddr, &func_addr)
         } else if is_some(g.data) {
-            elf_link_patch_data(&data, ELF_BASE + data_off, g, gaddr.buf[gi], &gaddr, &func_addr)
+            elf_link_patch_data(&data, ELF_BASE + data_off, g, gaddr[gi], &gaddr, &func_addr)
         }
     }
     // ---- symbols ----
@@ -349,8 +349,8 @@ fn elf_link(m *Module, out *Output) (str, str) {
     symtab := vec_fill(24, u8(0))
     nsyms := 1
     for ci in 0..out.funcs.len {
-        c := &out.funcs.buf[ci]
-        f := &m.funcs.buf[c.fid]
+        c := &out.funcs[ci]
+        f := &m.funcs[c.fid]
         name_off := strtab.len
         strtab.extend(f.name)
         strtab.push(0)
@@ -358,8 +358,8 @@ fn elf_link(m *Module, out *Output) (str, str) {
         symtab.push(2) // STB_LOCAL, STT_FUNC
         symtab.push(0)
         elf_put16(&symtab, 1)
-        elf_put64(&symtab, func_addr.buf[c.fid])
-        elf_put64(&symtab, func_size.buf[c.fid])
+        elf_put64(&symtab, func_addr[c.fid])
+        elf_put64(&symtab, func_size[c.fid])
         nsyms += 1
     }
     shstr := "\0.text\0.rodata\0.data\0.bss\0.symtab\0.strtab\0.shstrtab\0.dynstr\0.dynsym\0.dynamic\0"
@@ -424,7 +424,7 @@ fn elf_link(m *Module, out *Output) (str, str) {
     elf_link_ph(&h, 0x6474e551, 6, 0, 0, 0, 0, 16)
     assert h.len <= file.len
     for k in 0..h.len {
-        file.buf[k] = h.buf[k]
+        file[k] = h[k]
     }
     return (file.items(), "")
 }

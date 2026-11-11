@@ -1,18 +1,19 @@
 # AL standard library
 
 Everything here ships inside the compiler: there is nothing to install and no search path.
-`alc sigs file.al -- std` lists every declaration that a program can see.
+`alc sigs file.al -- std` lists every declaration that a program can see (the modules' internal
+helpers are `priv` and do not appear: a program may reuse their names).
 
 ## Always available (no `use`)
 
 | Part | What it gives | Reference |
 |------|---------------|-----------|
-| core | printing, `Vec`, `Map`, strings, sorting, parsing, file I/O, arena memory, `args` | [LANGUAGE.md](LANGUAGE.md#standard-library) |
+| core | printing, `Vec`, `Map`, strings, sorting, slice helpers that take closures (`any`, `filter`, `map_to`, ...), parsing, file I/O with `io_error()`, arena memory and regions, `clone`, `args` | [LANGUAGE.md](LANGUAGE.md#standard-library) |
 | built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [LANGUAGE.md](LANGUAGE.md#f32-vectors-matrices) |
 | math | scalar functions for `f32`/`f64`, vector / quaternion / matrix functions, geometry tests, easing, colour | [std/math.md](std/math.md) |
 | rand | seedable generators, ranges, shuffles, noise | [std/rand.md](std/rand.md) |
 | time | clocks, sleeping, frame clock, fixed timestep, timers | [std/time.md](std/time.md) |
-| mem | sub-arenas, frame allocation, object pools with generational handles, ring buffers | [std/mem.md](std/mem.md) |
+| mem | sub-arenas, frame allocation, object pools with generational handles, ring buffers (regions themselves are core: [LANGUAGE.md](LANGUAGE.md#regions)) | [std/mem.md](std/mem.md) |
 
 ## Modules (`use std.<name>`)
 

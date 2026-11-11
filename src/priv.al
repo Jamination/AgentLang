@@ -47,7 +47,7 @@ fn priv_decl_info(d *Decl) (str, i64, bool, Pos) {
 fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
     any := false
     for i in 0..decls.len {
-        info := priv_decl_info(&decls.buf[i])
+        info := priv_decl_info(&decls[i])
         if info.2 {
             any = true
             break
@@ -60,7 +60,7 @@ fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
     // written name -> (private, kind, line) of its first declaration in this file
     seen := map[str, (bool, i64, i64)]()
     for i in 0..decls.len {
-        name, kind, is_private, pos := priv_decl_info(&decls.buf[i])
+        name, kind, is_private, pos := priv_decl_info(&decls[i])
         if kind == 0 {
             continue
         }
@@ -81,7 +81,7 @@ fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
         }
     }
     for i in 0..decls.len {
-        name, kind, is_private, pos := priv_decl_info(&decls.buf[i])
+        name, kind, is_private, pos := priv_decl_info(&decls[i])
         if kind == 1 && r.names.has(name) {
             r.methods.set(name, r.names.get_or(name, name))
         }
@@ -89,10 +89,10 @@ fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
     // enum variants are not private: inside this file a private declaration of the same name
     // would hide the variant
     for i in 0..decls.len {
-        match decls.buf[i] {
+        match decls[i] {
             DeclEnum(e) => {
                 for vi in 0..e.variants.len {
-                    vn := e.variants.buf[vi].0
+                    vn := e.variants[vi].0
                     if r.names.has(vn) {
                         errs.push(Diag{pos: e.pos, msg: fmt("enum variant `", vn, "` conflicts with the `priv` declaration `", vn, "` of this file (variants are never private); rename one of them")})
                     }
@@ -102,7 +102,7 @@ fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
         }
     }
     for i in 0..decls.len {
-        decls.buf[i] = priv_rewrite(&r, decls.buf[i])
+        decls[i] = priv_rewrite(&r, decls[i])
     }
 }
 
@@ -116,7 +116,7 @@ fn priv_name(r *PrivCx, n str) str {
 
 fn priv_names(r *PrivCx, v *Vec[str]) {
     for i in 0..v.len {
-        v.buf[i] = priv_name(r, v.buf[i])
+        v[i] = priv_name(r, v[i])
     }
 }
 
@@ -126,8 +126,8 @@ fn priv_rewrite(r *PrivCx, d Decl) Decl {
             f.name = priv_name(r, f.name)
             priv_names(r, &f.tparams)
             for i in 0..f.params.len {
-                f.params.buf[i].0 = priv_name(r, f.params.buf[i].0)
-                priv_type(r, &f.params.buf[i].1)
+                f.params[i].0 = priv_name(r, f.params[i].0)
+                priv_type(r, &f.params[i].1)
             }
             f.ret = priv_opt_type(r, f.ret)
             priv_block(r, f.body)
@@ -137,7 +137,7 @@ fn priv_rewrite(r *PrivCx, d Decl) Decl {
             s.name = priv_name(r, s.name)
             priv_names(r, &s.tparams)
             for i in 0..s.fields.len {
-                priv_type(r, &s.fields.buf[i].1)
+                priv_type(r, &s.fields[i].1)
             }
             DeclStruct(s)
         }
@@ -145,7 +145,7 @@ fn priv_rewrite(r *PrivCx, d Decl) Decl {
             e.name = priv_name(r, e.name)
             priv_names(r, &e.tparams)
             for i in 0..e.variants.len {
-                priv_types(r, &e.variants.buf[i].1)
+                priv_types(r, &e.variants[i].1)
             }
             DeclEnum(e)
         }
@@ -176,7 +176,7 @@ fn priv_rewrite(r *PrivCx, d Decl) Decl {
 
 fn priv_types(r *PrivCx, ts *Vec[TypeAst]) bool {
     for i in 0..ts.len {
-        priv_type(r, &ts.buf[i])
+        priv_type(r, &ts[i])
     }
     return true
 }
@@ -251,7 +251,7 @@ fn priv_opt_pexpr(r *PrivCx, o Opt[*Expr]) bool {
 
 fn priv_exprs(r *PrivCx, es *Vec[Expr]) bool {
     for i in 0..es.len {
-        priv_expr(r, &es.buf[i])
+        priv_expr(r, &es[i])
     }
     return true
 }
@@ -291,8 +291,8 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
         EKNil => true
         EKClosure(ps, ret, body) => {
             for i in 0..ps.len {
-                ps.buf[i].0 = priv_name(r, ps.buf[i].0)
-                priv_type(r, &ps.buf[i].1)
+                ps[i].0 = priv_name(r, ps[i].0)
+                priv_type(r, &ps[i].1)
             }
             match ret {
                 Some(rt) => {
@@ -333,7 +333,7 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
             priv_expr(r, te)
             // field labels stay as written
             for i in 0..items.len {
-                priv_expr(r, &items.buf[i].1)
+                priv_expr(r, &items[i].1)
             }
             true
         }
@@ -352,9 +352,9 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
         EKMatch(sc, arms) => {
             priv_expr(r, sc)
             for i in 0..arms.len {
-                arm := &arms.buf[i]
+                arm := &arms[i]
                 for j in 0..arm.pats.len {
-                    priv_pat(r, &arm.pats.buf[j])
+                    priv_pat(r, &arm.pats[j])
                 }
                 match arm.guard {
                     Some(g) => {
@@ -382,7 +382,7 @@ fn priv_pat(r *PrivCx, p *Pat) bool {
         // (a name inside is a constant, a variant or a binding: renamed like any identifier)
         PatVariant(name, subs, pos, qual) => {
             for i in 0..subs.len {
-                priv_pat(r, &subs.buf[i])
+                priv_pat(r, &subs[i])
             }
             // the qualifier `Enum` of `Enum.Variant(..)` may be a private enum
             match qual {
@@ -408,7 +408,7 @@ fn priv_pat(r *PrivCx, p *Pat) bool {
         }
         PatTuple(subs, pos) => {
             for i in 0..subs.len {
-                priv_pat(r, &subs.buf[i])
+                priv_pat(r, &subs[i])
             }
             true
         }
@@ -422,7 +422,7 @@ fn priv_pat(r *PrivCx, p *Pat) bool {
 // the statements are rewritten in place: a Block copy shares their storage
 fn priv_block(r *PrivCx, b Block) bool {
     for i in 0..b.stmts.len {
-        priv_stmt(r, &b.stmts.buf[i])
+        priv_stmt(r, &b.stmts[i])
     }
     return true
 }

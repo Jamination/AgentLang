@@ -34,3 +34,12 @@ test "failing with a private call" {
 }
 
 fn main() {}
+
+// a private function named like a builtin: the builtin still takes what it does not accept
+struct Wrapped { n i64 }
+priv fn len(w Wrapped) i64 { w.n }
+test "priv builtin name" {
+    assert len(Wrapped{n: 7}) == 7
+    assert len("abc") == 3
+    assert "abcd".len() == 4
+}

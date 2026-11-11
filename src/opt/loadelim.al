@@ -33,34 +33,34 @@ fn loadelim_run(f *Func) bool {
     out_state := vec_fill(f.blocks.len, no_state)
     for b in cfg.rpo.items() {
         st := vec[LoadelimAvail]()
-        if cfg.preds.buf[b].len == 1 {
-            p := cfg.preds.buf[b].buf[0]
-            match out_state.buf[p] {
+        if cfg.preds[b].len == 1 {
+            p := cfg.preds[b][0]
+            match out_state[p] {
                 Some(s) => {
                     st = clone(s)
                     for k in 0..st.len {
-                        st.buf[k].pending_store = None
+                        st[k].pending_store = None
                     }
                 }
                 None => {}
             }
         }
-        for ii in 0..f.blocks.buf[b].insts.len {
-            v := f.blocks.buf[b].insts.buf[ii]
-            for ai in 0..f.insts.buf[v].args.len {
-                a := f.insts.buf[v].args.buf[ai]
+        for ii in 0..f.blocks[b].insts.len {
+            v := f.blocks[b].insts[ii]
+            for ai in 0..f.insts[v].args.len {
+                a := f.insts[v].args[ai]
                 r := loadelim_run_find(repl.items(), a)
                 if r != a {
-                    f.insts.buf[v].args.buf[ai] = r
+                    f.insts[v].args[ai] = r
                 }
             }
-            op := f.insts.buf[v].op
+            op := f.insts[v].op
             if op == OpLoad {
                 m := alias_memref(f, v)
-                ty := f.insts.buf[v].ty
+                ty := f.insts[v].ty
                 var hit Opt[i64] = None
                 for k in 0..st.len {
-                    a := &st.buf[k]
+                    a := &st[k]
                     if a.ty == ty {
                         am := loadelim_mr(a)
                         if alias_must_alias(&am, &m) {
@@ -71,14 +71,14 @@ fn loadelim_run(f *Func) bool {
                 }
                 match hit {
                     Some(val) => {
-                        repl.buf[v] = val
-                        dead.buf[v] = true
+                        repl[v] = val
+                        dead[v] = true
                         changed = true
                     }
                     None => {
                         // this load observes any aliasing pending store
                         for k in 0..st.len {
-                            a := &st.buf[k]
+                            a := &st[k]
                             if is_some(a.pending_store) {
                                 am := loadelim_mr(a)
                                 if alias_may_alias(&am, &m, esc.items()) {
@@ -91,16 +91,16 @@ fn loadelim_run(f *Func) bool {
                 }
             } else if op == OpStore {
                 m := alias_memref(f, v)
-                ty := f.insts.buf[v].ty
-                val := f.insts.buf[v].args.buf[1]
+                ty := f.insts[v].ty
+                val := f.insts[v].args[1]
                 // a previous unobserved store to exactly this location is dead
                 for k in 0..st.len {
-                    a := &st.buf[k]
+                    a := &st[k]
                     match a.pending_store {
                         Some(s) => {
                             am := loadelim_mr(a)
                             if alias_must_alias(&am, &m) {
-                                dead.buf[s] = true
+                                dead[s] = true
                                 changed = true
                             }
                         }
@@ -110,9 +110,9 @@ fn loadelim_run(f *Func) bool {
                 // st.retain(|a| !may_alias(&mr(a), &m, &esc))
                 n := 0
                 for k in 0..st.len {
-                    am := loadelim_mr(&st.buf[k])
+                    am := loadelim_mr(&st[k])
                     if !alias_may_alias(&am, &m, esc.items()) {
-                        st.buf[n] = st.buf[k]
+                        st[n] = st[k]
                         n += 1
                     }
                 }
@@ -123,12 +123,12 @@ fn loadelim_run(f *Func) bool {
                 n := 0
                 for k in 0..st.len {
                     keep := false
-                    match st.buf[k].mref_addr.base {
-                        BaseAlloca(x) => keep = !esc.buf[x]
+                    match st[k].mref_addr.base {
+                        BaseAlloca(x) => keep = !esc[x]
                         _ => {}
                     }
                     if keep {
-                        st.buf[n] = st.buf[k]
+                        st[n] = st[k]
                         n += 1
                     }
                 }
@@ -138,20 +138,20 @@ fn loadelim_run(f *Func) bool {
                     st.clear()
                 }
                 for k in 0..st.len {
-                    st.buf[k].pending_store = None
+                    st[k].pending_store = None
                 }
             }
         }
-        out_state.buf[b] = Some(st)
+        out_state[b] = Some(st)
     }
     if changed {
         for bi in 0..f.blocks.len {
-            blk := &f.blocks.buf[bi]
+            blk := &f.blocks[bi]
             n := 0
             for k in 0..blk.insts.len {
-                v := blk.insts.buf[k]
-                if !dead.buf[v] {
-                    blk.insts.buf[n] = v
+                v := blk.insts[k]
+                if !dead[v] {
+                    blk.insts[n] = v
                     n += 1
                 }
             }

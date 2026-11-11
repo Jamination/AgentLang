@@ -40,23 +40,23 @@ fn read_in(self *Mem2regCtx, var_ i64, b i64) i64 {
     if found {
         return v0
     }
-    np := self.cfg.preds.buf[b].len
+    np := self.cfg.preds[b].len
     v := 0
     if np == 0 {
-        v = self.zero_of(self.var_ty.buf[var_])
+        v = self.zero_of(self.var_ty[var_])
     } else if np == 1 {
-        p := self.cfg.preds.buf[b].buf[0]
+        p := self.cfg.preds[b][0]
         // guard against a self-loop of a single block
         if p == b {
-            v = self.zero_of(self.var_ty.buf[var_])
+            v = self.zero_of(self.var_ty[var_])
         } else {
             v = self.read_out(var_, p)
         }
     } else {
-        phi := self.f.mk(OpPhi, self.var_ty.buf[var_], vec[i64](), 0)
+        phi := self.f.mk(OpPhi, self.var_ty[var_], vec[i64](), 0)
         self.def_in.set((var_, b), phi)
         self.new_phis.push((b, phi))
-        preds := clone(&self.cfg.preds.buf[b])
+        preds := clone(&self.cfg.preds[b])
         for p in preds.items() {
             a := self.read_out(var_, p)
             inst := self.f.im(phi)
@@ -87,44 +87,44 @@ fn mem2reg_run_once(f *Func) bool {
     users := vec_fill(n, vec[i64]())
     term_used := vec_fill(n, false)
     for b in cfg.rpo.items() {
-        for v in f.blocks.buf[b].insts.items() {
-            for a in f.insts.buf[v].args.items() {
-                users.buf[a].push(v)
+        for v in f.blocks[b].insts.items() {
+            for a in f.insts[v].args.items() {
+                users[a].push(v)
             }
         }
         tu := f.term_uses(b)
         for u in tu.items() {
-            term_used.buf[u] = true
+            term_used[u] = true
         }
     }
     // access: inst -> var
     access := map[i64, i64]()
     var_ty := vec[T]()
     allocas := vec[i64]()
-    for v in f.blocks.buf[0].insts.items() {
-        if f.insts.buf[v].op == OpAlloca {
+    for v in f.blocks[0].insts.items() {
+        if f.insts[v].op == OpAlloca {
             allocas.push(v)
         }
     }
     for a in allocas.items() {
-        escaped := term_used.buf[a]
+        escaped := term_used[a]
         derived := vec_of([](i64, i64){(a, 0)})
         is_derived := map[i64, i64]()
         is_derived.set(a, 0)
         accs := vec[(i64, i64, T)]()
         qi := 0
         while qi < derived.len && !escaped {
-            x := derived.buf[qi].0
-            off := derived.buf[qi].1
+            x := derived[qi].0
+            off := derived[qi].1
             qi += 1
-            if term_used.buf[x] {
+            if term_used[x] {
                 escaped = true
                 break
             }
-            for u in users.buf[x].items() {
-                inst := &f.insts.buf[u]
+            for u in users[x].items() {
+                inst := &f.insts[u]
                 if inst.op == OpAdd {
-                    other := if inst.args.buf[0] == x { inst.args.buf[1] } else { inst.args.buf[0] }
+                    other := if inst.args[0] == x { inst.args[1] } else { inst.args[0] }
                     if other == x {
                         escaped = true
                         break
@@ -145,7 +145,7 @@ fn mem2reg_run_once(f *Func) bool {
                 } else if inst.op == OpLoad {
                     accs.push((u, off, inst.ty))
                 } else if inst.op == OpStore {
-                    if inst.args.buf[1] == x || inst.args.buf[0] != x {
+                    if inst.args[1] == x || inst.args[0] != x {
                         escaped = true
                         break
                     }
@@ -163,7 +163,7 @@ fn mem2reg_run_once(f *Func) bool {
         stores_derived := false
         for acc in accs.items() {
             u := acc.0
-            if f.insts.buf[u].op == OpStore && is_derived.has(f.insts.buf[u].args.buf[1]) {
+            if f.insts[u].op == OpStore && is_derived.has(f.insts[u].args[1]) {
                 stores_derived = true
                 break
             }
@@ -172,7 +172,7 @@ fn mem2reg_run_once(f *Func) bool {
             continue
         }
         // slots: (offset, type); promotable when no partial overlap with a different slot
-        size := f.insts.buf[a].k
+        size := f.insts[a].k
         slots := vec[(i64, T)]()
         for acc in accs.items() {
             if !contains(&slots, (acc.1, acc.2)) {
@@ -181,34 +181,34 @@ fn mem2reg_run_once(f *Func) bool {
         }
         ok := vec_fill(slots.len, true)
         for i in 0..slots.len {
-            o1 := slots.buf[i].0
-            t1 := slots.buf[i].1
+            o1 := slots[i].0
+            t1 := slots[i].1
             if o1 < 0 || o1 + t1.size() > size {
-                ok.buf[i] = false
+                ok[i] = false
             }
             for j in 0..slots.len {
                 if i == j {
                     continue
                 }
-                o2 := slots.buf[j].0
-                t2 := slots.buf[j].1
+                o2 := slots[j].0
+                t2 := slots[j].1
                 if o1 < o2 + t2.size() && o2 < o1 + t1.size() {
-                    ok.buf[i] = false
+                    ok[i] = false
                 }
             }
         }
         slot_var := vec_fill(slots.len, 0xFFFFFFFF)
         for i in 0..slots.len {
-            if ok.buf[i] {
-                slot_var.buf[i] = var_ty.len
-                var_ty.push(slots.buf[i].1)
+            if ok[i] {
+                slot_var[i] = var_ty.len
+                var_ty.push(slots[i].1)
             }
         }
         for acc in accs.items() {
             si := index_of(slots.items(), (acc.1, acc.2))
             assert si >= 0
-            if ok.buf[si] {
-                access.set(acc.0, slot_var.buf[si])
+            if ok[si] {
+                access.set(acc.0, slot_var[si])
             }
         }
     }
@@ -218,11 +218,11 @@ fn mem2reg_run_once(f *Func) bool {
     // last store per (var, block)
     last_store := map[(i64, i64), i64]()
     for b in cfg.rpo.items() {
-        for v in f.blocks.buf[b].insts.items() {
-            if f.insts.buf[v].op == OpStore {
+        for v in f.blocks[b].insts.items() {
+            if f.insts[v].op == OpStore {
                 var_, found := access.get(v)
                 if found {
-                    last_store.set((var_, b), f.insts.buf[v].args.buf[1])
+                    last_store.set((var_, b), f.insts[v].args[1])
                 }
             }
         }
@@ -231,14 +231,14 @@ fn mem2reg_run_once(f *Func) bool {
     rpo := clone(&cfg.rpo)
     cx := Mem2regCtx{f: f, cfg: &cfg, var_ty: var_ty, last_store: last_store, def_in: map[(i64, i64), i64](), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: map[T, i64]()}
     for b in rpo.items() {
-        insts := clone(&cx.f.blocks.buf[b].insts)
+        insts := clone(&cx.f.blocks[b].insts)
         cur := map[i64, i64]()
         keep := vec[i64]()
         for v in insts.items() {
             var_, found := access.get(v)
             if found {
-                if cx.f.insts.buf[v].op == OpStore {
-                    cur.set(var_, cx.f.insts.buf[v].args.buf[1])
+                if cx.f.insts[v].op == OpStore {
+                    cur.set(var_, cx.f.insts[v].args[1])
                 } else {
                     val, have := cur.get(var_)
                     if !have {
@@ -248,13 +248,13 @@ fn mem2reg_run_once(f *Func) bool {
                     if repl.len < cx.f.insts.len {
                         repl.resize(cx.f.insts.len, NOV)
                     }
-                    repl.buf[v] = val
+                    repl[v] = val
                 }
             } else {
                 keep.push(v)
             }
         }
-        cx.f.blocks.buf[b].insts = keep
+        cx.f.blocks[b].insts = keep
     }
     new_phis := cx.new_phis
     entry_consts := cx.entry_consts
@@ -270,14 +270,14 @@ fn mem2reg_run_once(f *Func) bool {
     sort(bkeys)
     for b in bkeys {
         ps := by_block.get_or(b, vec[i64]())
-        ps.extend(f.blocks.buf[b].insts.items())
-        f.blocks.buf[b].insts = ps
+        ps.extend(f.blocks[b].insts.items())
+        f.blocks[b].insts = ps
     }
     if !entry_consts.is_empty() {
         // after allocas/phis is not required for constants; put them first
         e := entry_consts
-        e.extend(f.blocks.buf[0].insts.items())
-        f.blocks.buf[0].insts = e
+        e.extend(f.blocks[0].insts.items())
+        f.blocks[0].insts = e
     }
     repl.resize(f.insts.len, NOV)
     f.apply_repl(&repl)

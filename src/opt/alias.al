@@ -64,7 +64,7 @@ fn alias_decompose(f *Func, addr i64) Addr {
     var off Opt[i64] = Some(0)
     depth := 0
     loop {
-        i := &f.insts.buf[v]
+        i := &f.insts[v]
         if i.op == OpAlloca {
             return Addr{base: BaseAlloca(v), off: off}
         }
@@ -73,8 +73,8 @@ fn alias_decompose(f *Func, addr i64) Addr {
         }
         if i.op == OpAdd && depth < 32 {
             depth += 1
-            a := i.args.buf[0]
-            b := i.args.buf[1]
+            a := i.args[0]
+            b := i.args[1]
             match f.is_const(b) {
                 Some(k) => {
                     off = alias_off_add(off, k)
@@ -112,7 +112,7 @@ fn alias_decompose_obj(f *Func, v i64, depth i64) Opt[Base] {
     if depth > 32 {
         return None
     }
-    i := &f.insts.buf[v]
+    i := &f.insts[v]
     if i.op == OpAlloca {
         return Some(BaseAlloca(v))
     }
@@ -120,12 +120,12 @@ fn alias_decompose_obj(f *Func, v i64, depth i64) Opt[Base] {
         return Some(BaseGlobal(i.k))
     }
     if i.op == OpAdd {
-        r := alias_decompose_obj(f, i.args.buf[0], depth + 1)
+        r := alias_decompose_obj(f, i.args[0], depth + 1)
         match r {
             Some(x) => return r
             None => {}
         }
-        return alias_decompose_obj(f, i.args.buf[1], depth + 1)
+        return alias_decompose_obj(f, i.args[1], depth + 1)
     }
     return None
 }
@@ -136,9 +136,9 @@ fn alias_escaped_allocas(f *Func) Vec[bool] {
     esc := vec_fill(n, false)
     // derived[v] = alloca this pointer value is derived from
     derived := vec_fill(n, NOV)
-    for v in f.blocks.buf[0].insts.items() {
-        if f.insts.buf[v].op == OpAlloca {
-            derived.buf[v] = v
+    for v in f.blocks[0].insts.items() {
+        if f.insts[v].op == OpAlloca {
+            derived[v] = v
         }
     }
     rpo := f.rpo()
@@ -146,34 +146,34 @@ fn alias_escaped_allocas(f *Func) Vec[bool] {
     while changed {
         changed = false
         for b in rpo.items() {
-            for v in f.blocks.buf[b].insts.items() {
-                i := &f.insts.buf[v]
+            for v in f.blocks[b].insts.items() {
+                i := &f.insts[v]
                 if i.op == OpAdd {
                     for a in i.args.items() {
-                        d := derived.buf[a]
-                        if d != NOV && derived.buf[v] != d {
-                            if derived.buf[v] != NOV {
+                        d := derived[a]
+                        if d != NOV && derived[v] != d {
+                            if derived[v] != NOV {
                                 // derived from two allocas: treat both as escaped
-                                esc.buf[d] = true
-                                esc.buf[derived.buf[v]] = true
+                                esc[d] = true
+                                esc[derived[v]] = true
                             } else {
-                                derived.buf[v] = d
+                                derived[v] = d
                                 changed = true
                             }
                         }
                     }
                 } else if i.op == OpLoad {
                 } else if i.op == OpStore {
-                    d := derived.buf[i.args.buf[1]]
-                    if d != NOV && !esc.buf[d] {
-                        esc.buf[d] = true
+                    d := derived[i.args[1]]
+                    if d != NOV && !esc[d] {
+                        esc[d] = true
                         changed = true
                     }
                 } else {
                     for a in i.args.items() {
-                        d := derived.buf[a]
-                        if d != NOV && !esc.buf[d] {
-                            esc.buf[d] = true
+                        d := derived[a]
+                        if d != NOV && !esc[d] {
+                            esc[d] = true
                             changed = true
                         }
                     }
@@ -181,9 +181,9 @@ fn alias_escaped_allocas(f *Func) Vec[bool] {
             }
             tu := f.term_uses(b)
             for u in tu.items() {
-                d := derived.buf[u]
-                if d != NOV && !esc.buf[d] {
-                    esc.buf[d] = true
+                d := derived[u]
+                if d != NOV && !esc[d] {
+                    esc[d] = true
                     changed = true
                 }
             }
@@ -200,8 +200,8 @@ struct MemRef {
 }
 
 fn alias_memref(f *Func, v i64) MemRef {
-    i := &f.insts.buf[v]
-    return MemRef{addr: alias_decompose(f, i.args.buf[0]), size: i.ty.size(), class: i.aux, ptr: i.args.buf[0]}
+    i := &f.insts[v]
+    return MemRef{addr: alias_decompose(f, i.args[0]), size: i.ty.size(), class: i.aux, ptr: i.args[0]}
 }
 
 fn alias_may_alias(a *MemRef, b *MemRef, esc []bool) bool {

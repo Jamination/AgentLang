@@ -164,24 +164,24 @@ fn parser_utf8_lossy(s str) str {
         }
         i += n
     }
-    return out.buf[..out.len]
+    return out[..out.len]
 }
 
 fn peek(p *Parser) Tk {
-    return p.toks.buf[p.i].t
+    return p.toks[p.i].t
 }
 
 fn peek_at(p *Parser, n i64) Tk {
     j := min(p.i + n, p.toks.len - 1)
-    return p.toks.buf[j].t
+    return p.toks[j].t
 }
 
 fn pos(p *Parser) Pos {
-    return p.toks.buf[p.i].pos
+    return p.toks[p.i].pos
 }
 
 fn bump(p *Parser) Tk {
-    t := p.toks.buf[p.i].t
+    t := p.toks[p.i].t
     if p.i < p.toks.len - 1 {
         p.i += 1
     }
@@ -272,7 +272,7 @@ fn err[T](p *Parser, msg str) (T, bool) {
         _ => {}
     }
     if hint == "" && p.i >= 1 {
-        match p.toks.buf[p.i - 1].t {
+        match p.toks[p.i - 1].t {
             TkId(prev) => {
                 if prev == "let" || prev == "mut" || prev == "auto" || prev == "val" {
                     hint = " (declare variables with `name := value` or `var name T`)"
@@ -350,13 +350,13 @@ fn sync_decl(p *Parser) {
             }
             TkKw(k) => {
                 if depth <= 0 && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "var" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern" || k == "priv") {
-                    if p.i > 0 && parser_tk_nl(p.toks.buf[p.i - 1].t) {
+                    if p.i > 0 && parser_tk_nl(p.toks[p.i - 1].t) {
                         return
                     }
                 }
             }
             TkId(s) => {
-                if depth <= 0 && s == "type" && p.i > 0 && parser_tk_nl(p.toks.buf[p.i - 1].t) {
+                if depth <= 0 && s == "type" && p.i > 0 && parser_tk_nl(p.toks[p.i - 1].t) {
                     return
                 }
             }
@@ -781,8 +781,8 @@ fn starts_result(p *Parser) bool {
 // split in two (`|f |i64||`)
 fn close_bar(p *Parser) bool {
     if p.is_p("||") {
-        t := p.toks.buf[p.i]
-        p.toks.buf[p.i] = Token{t: TkP("|"), pos: t.pos, nl: false}
+        t := p.toks[p.i]
+        p.toks[p.i] = Token{t: TkP("|"), pos: t.pos, nl: false}
         p.toks.insert(p.i + 1, Token{t: TkP("|"), pos: Pos{file: t.pos.file, line: t.pos.line, col: t.pos.col + 1}, nl: t.nl})
     }
     return p.expect_p("|")
@@ -791,8 +791,8 @@ fn close_bar(p *Parser) bool {
 // A closure type can end a line (`var f |i64|`), but the lexer does not end a statement
 // after `|`: it only marks the token, and the newline token is added here.
 fn bar_newline(p *Parser) {
-    if p.i > 0 && p.toks.buf[p.i - 1].nl && !parser_tk_nl(p.peek()) {
-        p.toks.insert(p.i, Token{t: TkNl, pos: p.toks.buf[p.i - 1].pos, nl: false})
+    if p.i > 0 && p.toks[p.i - 1].nl && !parser_tk_nl(p.peek()) {
+        p.toks.insert(p.i, Token{t: TkNl, pos: p.toks[p.i - 1].pos, nl: false})
     }
 }
 
@@ -877,7 +877,7 @@ fn closure_expr(p *Parser, pos Pos) (Expr, bool) {
     p.i = start
     p.bars = save
     p.errs.truncate(nerr)
-    if start > 0 && (parser_tk_nl(p.toks.buf[start - 1].t) || parser_tk_p(p.toks.buf[start - 1].t, "{") || parser_tk_p(p.toks.buf[start - 1].t, ";")) {
+    if start > 0 && (parser_tk_nl(p.toks[start - 1].t) || parser_tk_p(p.toks[start - 1].t, "{") || parser_tk_p(p.toks[start - 1].t, ";")) {
         // a statement that starts with `|` or `||` and is not a closure literal
         op := if p.is_p("||") { "||" } else { "|" }
         p.errs.push(Diag{pos: pos, msg: fmt("a line cannot start with the binary operator `", op, "` (end the previous line with it); a closure literal is written `|a i64, b i64| bool { a < b }`")})
@@ -1151,7 +1151,7 @@ fn lit_in_header(p *Parser, e *Expr) bool {
     depth := 0
     arrow := false
     loop {
-        match p.toks.buf[j].t {
+        match p.toks[j].t {
             TkEof => {
                 return false
             }
@@ -1174,7 +1174,7 @@ fn lit_in_header(p *Parser, e *Expr) bool {
     if !p.hdr_stmt {
         return !arrow && j > p.i + 1
     }
-    after := p.toks.buf[min(j + 1, p.toks.len - 1)].t
+    after := p.toks[min(j + 1, p.toks.len - 1)].t
     return parser_tk_p(after, "{") || parser_tk_p(after, ".") || parser_tk_p(after, "[") || parser_tk_binop(after)
 }
 
@@ -1189,10 +1189,10 @@ fn if_stmt(p *Parser) ((Expr, Block, Opt[Block]), bool) {
         return parser_fail[(Expr, Block, Opt[Block])]()
     }
     j := p.i
-    while parser_tk_nl(p.toks.buf[j].t) {
+    while parser_tk_nl(p.toks[j].t) {
         j += 1
     }
-    if parser_tk_kw(p.toks.buf[j].t, "else") {
+    if parser_tk_kw(p.toks[j].t, "else") {
         p.i = j + 1
         if p.is_kw("if") {
             pos := p.pos()
@@ -2065,7 +2065,7 @@ fn parser_pat(e Expr) Pat {
             if is_variant {
                 subs := vec[Pat]()
                 for i in 0..args.len {
-                    subs.push(parser_pat(args.buf[i]))
+                    subs.push(parser_pat(args[i]))
                 }
                 return PatVariant(name, subs, parser_expr_start(c), qual)
             }
@@ -2073,7 +2073,7 @@ fn parser_pat(e Expr) Pat {
         EKTuple(es) => {
             subs := vec[Pat]()
             for i in 0..es.len {
-                subs.push(parser_pat(es.buf[i]))
+                subs.push(parser_pat(es[i]))
             }
             return PatTuple(subs, e.pos)
         }

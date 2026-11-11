@@ -13,17 +13,17 @@ struct Output {
 fn x86_reachable_funcs(m *Module) Vec[i64] {
     seen := vec_fill(m.funcs.len, false)
     work := vec_of([]i64{m.entry})
-    seen.buf[m.entry] = true
+    seen[m.entry] = true
     out := vec[i64]()
     while work.len > 0 {
         f := work.pop()
         out.push(f)
-        func := &m.funcs.buf[f]
+        func := &m.funcs[f]
         for bi in 0..func.blocks.len {
-            for v in func.blocks.buf[bi].insts.items() {
-                i := &func.insts.buf[v]
-                if (i.op == OpCall || i.op == OpFAddr) && !seen.buf[i.k] {
-                    seen.buf[i.k] = true
+            for v in func.blocks[bi].insts.items() {
+                i := &func.insts[v]
+                if (i.op == OpCall || i.op == OpFAddr) && !seen[i.k] {
+                    seen[i.k] = true
                     work.push(i.k)
                 }
             }
@@ -31,12 +31,12 @@ fn x86_reachable_funcs(m *Module) Vec[i64] {
     }
     // function pointers stored in global data
     for gi in 0..m.globals.len {
-        for rl in m.globals.buf[gi].relocs.items() {
+        for rl in m.globals[gi].relocs.items() {
             t := rl.1
             match t {
                 RelocTargetFunc(f) => {
-                    if !seen.buf[f] {
-                        seen.buf[f] = true
+                    if !seen[f] {
+                        seen[f] = true
                         out.push(f)
                     }
                 }
@@ -54,7 +54,7 @@ fn x86_compile(m *Module, dump_asm bool) Output {
     fpool_ix := map[Bits128, i64]()
     funcs := vec[Compiled]()
     for fid in fids.items() {
-        f := &m.funcs.buf[fid]
+        f := &m.funcs[fid]
         // everything up to the machine code of this function is temporary (see work_begin)
         work_begin()
         cleanup_prune_unreachable(f)
@@ -77,7 +77,7 @@ fn x86_compile(m *Module, dump_asm bool) Output {
             for li in 0..loops.loops.len {
                 innermost := true
                 for oi in 0..loops.loops.len {
-                    match loops.loops.buf[oi].parent {
+                    match loops.loops[oi].parent {
                         Some(p) => {
                             if oi != li && p == li {
                                 innermost = false
@@ -89,9 +89,9 @@ fn x86_compile(m *Module, dump_asm bool) Output {
                         break
                     }
                 }
-                header := loops.loops.buf[li].header
+                header := loops.loops[li].header
                 if innermost && header != 0 {
-                    mf.blocks.buf[header].align = true
+                    mf.blocks[header].align = true
                 }
             }
         }
@@ -135,18 +135,18 @@ fn x86_block_layout(f *Func) Vec[i64] {
     seen := vec_fill(n, false)
     post := vec[i64]()
     stack := vec_of([](i64, i64){(0, 0)})
-    seen.buf[0] = true
+    seen[0] = true
     while stack.len > 0 {
         top := stack.len - 1
-        b := stack.buf[top].0
-        i := stack.buf[top].1
+        b := stack[top].0
+        i := stack[top].1
         ss := f.succs(b)
         reverse(ss.items())
         if i < ss.len {
-            s := ss.buf[i]
-            stack.buf[top].1 = i + 1
-            if !seen.buf[s] {
-                seen.buf[s] = true
+            s := ss[i]
+            stack[top].1 = i + 1
+            if !seen[s] {
+                seen[s] = true
                 stack.push((s, 0))
             }
         } else {
@@ -161,32 +161,32 @@ fn x86_block_layout(f *Func) Vec[i64] {
     while changed {
         changed = false
         for pi in post.len - 1..=0 by -1 {
-            b := post.buf[pi]
-            if cold.buf[b] {
+            b := post[pi]
+            if cold[b] {
                 continue
             }
-            tm := f.blocks.buf[b].term
+            tm := f.blocks[b].term
             c := match tm {
                 TermTrap => true
                 TermNone => true
-                TermJmp(t) => cold.buf[t]
-                TermBr(x, t, e) => cold.buf[t] && cold.buf[e]
+                TermJmp(t) => cold[t]
+                TermBr(x, t, e) => cold[t] && cold[e]
                 TermRet(vs) => false
             }
             if c {
-                cold.buf[b] = true
+                cold[b] = true
                 changed = true
             }
         }
     }
     out := vec[i64]()
     for b in post.items() {
-        if !cold.buf[b] || b == 0 {
+        if !cold[b] || b == 0 {
             out.push(b)
         }
     }
     for b in post.items() {
-        if cold.buf[b] && b != 0 {
+        if cold[b] && b != 0 {
             out.push(b)
         }
     }

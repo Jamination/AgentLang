@@ -4,11 +4,11 @@
 // later check would end the program anyway and nothing observable happens in between.
 
 fn checkmerge_is_trap_block(f *Func, b i64) bool {
-    if !eq(f.blocks.buf[b].term, TermTrap) {
+    if !eq(f.blocks[b].term, TermTrap) {
         return false
     }
-    for v in f.blocks.buf[b].insts.items() {
-        if f.insts.buf[v].op == OpPhi {
+    for v in f.blocks[b].insts.items() {
+        if f.insts[v].op == OpPhi {
             return false
         }
     }
@@ -17,16 +17,16 @@ fn checkmerge_is_trap_block(f *Func, b i64) bool {
 
 // (len value, constant index) of a check condition `len >u k` / `k <u len`
 fn checkmerge_const_check(f *Func, c i64) Opt[(i64, i64)] {
-    i := &f.insts.buf[c]
+    i := &f.insts[c]
     if i.op == OpUgt {
-        match f.is_const(i.args.buf[1]) {
-            Some(k) => return Some((i.args.buf[0], k))
+        match f.is_const(i.args[1]) {
+            Some(k) => return Some((i.args[0], k))
             None => return None
         }
     }
     if i.op == OpUlt {
-        match f.is_const(i.args.buf[0]) {
-            Some(k) => return Some((i.args.buf[1], k))
+        match f.is_const(i.args[0]) {
+            Some(k) => return Some((i.args[1], k))
             None => return None
         }
     }
@@ -41,7 +41,7 @@ fn checkmerge_run(f *Func) bool {
         c := 0
         ok := 0
         trap := 0
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermBr(c0, t0, e0) => {
                 c = c0
                 ok = t0
@@ -61,7 +61,7 @@ fn checkmerge_run(f *Func) bool {
             }
             None => continue
         }
-        if f.insts.buf[ln].ty != TI64 || k0 < 0 {
+        if f.insts[ln].ty != TI64 || k0 < 0 {
             continue
         }
         kmax := k0
@@ -69,12 +69,12 @@ fn checkmerge_run(f *Func) bool {
         steps := 0
         loop {
             steps += 1
-            if steps > 256 || preds.buf[cur].len != 1 || cur == b {
+            if steps > 256 || preds[cur].len != 1 || cur == b {
                 break
             }
             blocked := false
-            for v in f.blocks.buf[cur].insts.items() {
-                o := f.insts.buf[v].op
+            for v in f.blocks[cur].insts.items() {
+                o := f.insts[v].op
                 if o == OpCall || o == OpCallInd || o == OpSyscall || o == OpPhi {
                     blocked = true
                     break
@@ -83,7 +83,7 @@ fn checkmerge_run(f *Func) bool {
             if blocked {
                 break
             }
-            match f.blocks.buf[cur].term {
+            match f.blocks[cur].term {
                 TermJmp(t) => cur = t
                 TermBr(c2, t2, e2) => {
                     if !checkmerge_is_trap_block(f, e2) {
@@ -93,7 +93,7 @@ fn checkmerge_run(f *Func) bool {
                         Some(x) => {
                             if x.0 == ln && x.1 >= 0 {
                                 kmax = max(kmax, x.1)
-                                f.blocks.buf[cur].term = TermJmp(t2)
+                                f.blocks[cur].term = TermJmp(t2)
                                 changed = true
                             }
                         }
@@ -107,7 +107,7 @@ fn checkmerge_run(f *Func) bool {
         if kmax > k0 {
             kc := f.push(b, OpConst, TI64, vec[i64](), kmax)
             nc := f.push(b, OpUgt, TI8, vec_of([]i64{ln, kc}), 0)
-            f.blocks.buf[b].term = TermBr(nc, ok, trap)
+            f.blocks[b].term = TermBr(nc, ok, trap)
         }
     }
     if changed {

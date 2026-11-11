@@ -147,7 +147,7 @@ fn opt_local_opt(f *Func, level i64) {
 fn opt_optimize(m *Module, level i64) {
     n := m.funcs.len
     for fid in 0..n {
-        f := &m.funcs.buf[fid]
+        f := &m.funcs[fid]
         if f.lowered {
             work_begin()
             cleanup_prune_unreachable(f)
@@ -162,7 +162,7 @@ fn opt_optimize(m *Module, level i64) {
             }
             // keep the function, drop the passes' temporary data (see work_begin in base.al)
             work_end()
-            m.funcs.buf[fid] = clone(f)
+            m.funcs[fid] = clone(f)
         }
     }
     if level == 0 {
@@ -173,37 +173,37 @@ fn opt_optimize(m *Module, level i64) {
     addr_taken := vec_fill(n, false)
     callees := vec_fill(n, vec[i64]())
     for fi in 0..n {
-        f := &m.funcs.buf[fi]
+        f := &m.funcs[fi]
         for bi in 0..f.blocks.len {
-            for v in f.blocks.buf[bi].insts.items() {
-                i := &f.insts.buf[v]
+            for v in f.blocks[bi].insts.items() {
+                i := &f.insts[v]
                 if i.op == OpCall {
-                    call_counts.buf[i.k] += 1
-                    callees.buf[fi].push(i.k)
+                    call_counts[i.k] += 1
+                    callees[fi].push(i.k)
                 } else if i.op == OpFAddr {
-                    addr_taken.buf[i.k] = true
+                    addr_taken[i.k] = true
                 }
             }
         }
     }
-    addr_taken.buf[m.entry] = true
+    addr_taken[m.entry] = true
     // bottom-up order (post-order DFS from every function)
     order := vec[i64]()
     state := vec_fill(n, u8(0))
     for root in 0..n {
-        if state.buf[root] != 0 {
+        if state[root] != 0 {
             continue
         }
         stack := vec_of([](i64, i64){(root, 0)})
-        state.buf[root] = 1
+        state[root] = 1
         while stack.len > 0 {
-            top := &stack.buf[stack.len - 1]
+            top := &stack[stack.len - 1]
             fx := top.0
-            if top.1 < callees.buf[fx].len {
-                c := callees.buf[fx].buf[top.1]
+            if top.1 < callees[fx].len {
+                c := callees[fx][top.1]
                 top.1 += 1
-                if state.buf[c] == 0 {
-                    state.buf[c] = 1
+                if state[c] == 0 {
+                    state[c] = 1
                     stack.push((c, 0))
                 }
             } else {
@@ -215,16 +215,16 @@ fn opt_optimize(m *Module, level i64) {
     pol := Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000}
     done := vec_fill(n, false)
     for fid in order.items() {
-        if m.funcs.buf[fid].lowered {
+        if m.funcs[fid].lowered {
             work_begin()
-            opt_local_opt(&m.funcs.buf[fid], level)
+            opt_local_opt(&m.funcs[fid], level)
             if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol) {
-                opt_trace("after-inline", &m.funcs.buf[fid])
-                opt_local_opt(&m.funcs.buf[fid], level)
+                opt_trace("after-inline", &m.funcs[fid])
+                opt_local_opt(&m.funcs[fid], level)
             }
             work_end()
-            m.funcs.buf[fid] = clone(&m.funcs.buf[fid])
+            m.funcs[fid] = clone(&m.funcs[fid])
         }
-        done.buf[fid] = true
+        done[fid] = true
     }
 }

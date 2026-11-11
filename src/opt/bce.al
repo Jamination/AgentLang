@@ -32,11 +32,11 @@ enum BceKind {
 }
 
 fn bce_is_trap_block(f *Func, b i64) bool {
-    if !eq(f.blocks.buf[b].term, TermTrap) {
+    if !eq(f.blocks[b].term, TermTrap) {
         return false
     }
-    for v in f.blocks.buf[b].insts.items() {
-        if f.insts.buf[v].op == OpPhi {
+    for v in f.blocks[b].insts.items() {
+        if f.insts[v].op == OpPhi {
             return false
         }
     }
@@ -62,7 +62,7 @@ fn bce_find_iv(f *Func, header i64, latch i64, pre i64, in_loop []bool, def_bloc
     c := 0
     t := 0
     e := 0
-    match f.blocks.buf[latch].term {
+    match f.blocks[latch].term {
         TermBr(c0, t0, e0) => {
             c = c0
             t = t0
@@ -73,37 +73,37 @@ fn bce_find_iv(f *Func, header i64, latch i64, pre i64, in_loop []bool, def_bloc
     if t != header || in_loop[e] {
         return None
     }
-    ci := &f.insts.buf[c]
+    ci := &f.insts[c]
     if !ci.op.is_icmp() {
         return None
     }
-    next := ci.args.buf[0]
-    end := ci.args.buf[1]
+    next := ci.args[0]
+    end := ci.args[1]
     if !bce_invariant(end, in_loop, def_block) {
         return None
     }
-    ni := &f.insts.buf[next]
+    ni := &f.insts[next]
     if ni.op != OpAdd {
         return None
     }
     step := 0
-    match f.is_const(ni.args.buf[1]) {
+    match f.is_const(ni.args[1]) {
         Some(k) => step = k
         None => return None
     }
-    phi := ni.args.buf[0]
-    pi := &f.insts.buf[phi]
+    phi := ni.args[0]
+    pi := &f.insts[phi]
     if pi.op != OpPhi || def_block[phi] != header || pi.args.len != 2 {
         return None
     }
     start := NOV
     back := NOV
     for k in 0..pi.pb.len {
-        pb := pi.pb.buf[k]
+        pb := pi.pb[k]
         if pb == pre {
-            start = pi.args.buf[k]
+            start = pi.args[k]
         } else if pb == latch {
-            back = pi.args.buf[k]
+            back = pi.args[k]
         }
     }
     if start == NOV || back != next {
@@ -188,10 +188,10 @@ fn bce_match_affine(f *Func, idx i64, iv *BceIv, in_loop []bool, def_block []i64
     var ext Opt[Op] = None
     inner := idx
     {
-        i := &f.insts.buf[idx]
+        i := &f.insts[idx]
         if (i.op == OpSExt || i.op == OpZExt) && !bce_invariant(idx, in_loop, def_block) {
             ext = Some(i.op)
-            inner = i.args.buf[0]
+            inner = i.args[0]
         }
     }
     // walk down the inner chain
@@ -206,13 +206,13 @@ fn bce_match_affine(f *Func, idx i64, iv *BceIv, in_loop []bool, def_block []i64
         if depth > 8 {
             return None
         }
-        i := &f.insts.buf[v]
+        i := &f.insts[v]
         if i.ty != iv.ty {
             return None
         }
         if i.op == OpAdd {
-            a := i.args.buf[0]
-            b := i.args.buf[1]
+            a := i.args[0]
+            b := i.args[1]
             if bce_invariant(b, in_loop, def_block) && !bce_invariant(a, in_loop, def_block) {
                 v = a
             } else if bce_invariant(a, in_loop, def_block) && !bce_invariant(b, in_loop, def_block) {
@@ -221,8 +221,8 @@ fn bce_match_affine(f *Func, idx i64, iv *BceIv, in_loop []bool, def_block []i64
                 return None
             }
         } else if i.op == OpSub {
-            a := i.args.buf[0]
-            b := i.args.buf[1]
+            a := i.args[0]
+            b := i.args[1]
             if bce_invariant(b, in_loop, def_block) && !bce_invariant(a, in_loop, def_block) {
                 v = a
             } else if bce_invariant(a, in_loop, def_block) && !bce_invariant(b, in_loop, def_block) {
@@ -233,7 +233,7 @@ fn bce_match_affine(f *Func, idx i64, iv *BceIv, in_loop []bool, def_block []i64
             }
         } else if (i.op == OpMul || i.op == OpShl) && !is_some(ext) && iv.ty == TI64 {
             k := 0
-            match f.is_const(i.args.buf[1]) {
+            match f.is_const(i.args[1]) {
                 Some(x) => k = x
                 None => return None
             }
@@ -248,12 +248,12 @@ fn bce_match_affine(f *Func, idx i64, iv *BceIv, in_loop []bool, def_block []i64
                 return None
             }
             coef *= m
-            v = i.args.buf[0]
+            v = i.args[0]
         } else {
             return None
         }
     }
-    if f.insts.buf[inner].ty != iv.ty {
+    if f.insts[inner].ty != iv.ty {
         return None
     }
     return Some(BceAffine{ext: ext, inner: inner, coef: coef})
@@ -271,7 +271,7 @@ fn bce_clone_at(f *Func, pre i64, v i64, iv_phi i64, at i64, in_loop []bool, def
     if db == 0xFFFFFFFF || !in_loop[db] {
         return v
     }
-    i := clone(&f.insts.buf[v])
+    i := clone(&f.insts[v])
     args := vec[i64]()
     for a in i.args.items() {
         args.push(bce_clone_at(f, pre, a, iv_phi, at, in_loop, def_block))
@@ -282,8 +282,8 @@ fn bce_clone_at(f *Func, pre i64, v i64, iv_phi i64, at i64, in_loop []bool, def
 // the closure `add_check` of hoist_in_loop (h: the loop header)
 fn bce_hoist_in_loop_add_check(f *Func, cur *i64, cond i64, trap i64, h i64) {
     nb := f.new_block()
-    f.blocks.buf[nb].term = TermJmp(h)
-    f.blocks.buf[*cur].term = TermBr(cond, nb, trap)
+    f.blocks[nb].term = TermJmp(h)
+    f.blocks[*cur].term = TermBr(cond, nb, trap)
     *cur = nb
 }
 
@@ -299,28 +299,28 @@ fn bce_hoist_in_loop_build(f *Func, at i64, pre i64, a *BceAffine, iv *BceIv, in
 }
 
 fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
-    l := &loops.loops.buf[li]
+    l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
-    if outside.len != 1 || f.succs(outside.buf[0]).len != 1 || l.latches.len != 1 {
+    if outside.len != 1 || f.succs(outside[0]).len != 1 || l.latches.len != 1 {
         return false
     }
-    pre := outside.buf[0]
-    latch := l.latches.buf[0]
+    pre := outside[0]
+    latch := l.latches[0]
     in_loop_v := vec_fill(f.blocks.len, false)
     for b in l.blocks.items() {
-        in_loop_v.buf[b] = true
+        in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
     // the loop may only be left through its latch or through failing checks, and has no calls
     for b in l.blocks.items() {
-        for v in f.blocks.buf[b].insts.items() {
-            o := f.insts.buf[v].op
+        for v in f.blocks[b].insts.items() {
+            o := f.insts[v].op
             if o == OpCall || o == OpCallInd || o == OpSyscall {
                 return false
             }
         }
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermRet(vs) => return false
             TermTrap => return false
             TermNone => return false
@@ -351,7 +351,7 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
         c := 0
         t := 0
         e := 0
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermBr(c0, t0, e0) => {
                 c = c0
                 t = t0
@@ -365,19 +365,19 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
         if !cfg.dom(b, latch) {
             continue
         }
-        ci := &f.insts.buf[c]
+        ci := &f.insts[c]
         idx := 0
         ln := 0
         if ci.op == OpUlt {
-            idx = ci.args.buf[0]
-            ln = ci.args.buf[1]
+            idx = ci.args[0]
+            ln = ci.args[1]
         } else if ci.op == OpUgt {
-            idx = ci.args.buf[1]
-            ln = ci.args.buf[0]
+            idx = ci.args[1]
+            ln = ci.args[0]
         } else {
             continue
         }
-        if f.insts.buf[idx].ty != TI64 || !bce_invariant(ln, in_loop, def_block) {
+        if f.insts[idx].ty != TI64 || !bce_invariant(ln, in_loop, def_block) {
             continue
         }
         if bce_invariant(idx, in_loop, def_block) {
@@ -404,7 +404,7 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
             None => {
                 any_affine := false
                 for ci in 0..cands.len {
-                    match cands.buf[ci].6 {
+                    match cands[ci].6 {
                         BceKindAffine(a) => any_affine = true
                         BceKindInvariant => {}
                     }
@@ -430,7 +430,7 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
     // build the chain of hoisted checks: pre -> n1 -> ... -> header
     cur := pre
     for ci in 0..cands.len {
-        cand := cands.buf[ci]
+        cand := cands[ci]
         b := cand.0
         c := cand.1
         ok := cand.2
@@ -471,19 +471,19 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
                 }
             }
         }
-        f.blocks.buf[b].term = TermJmp(ok)
+        f.blocks[b].term = TermJmp(ok)
     }
     // header phis now come from the end of the chain
     if cur != pre {
-        for ii in 0..f.blocks.buf[h].insts.len {
-            v := f.blocks.buf[h].insts.buf[ii]
-            if f.insts.buf[v].op != OpPhi {
+        for ii in 0..f.blocks[h].insts.len {
+            v := f.blocks[h].insts[ii]
+            if f.insts[v].op != OpPhi {
                 break
             }
-            pbs := &f.insts.buf[v].pb
+            pbs := &f.insts[v].pb
             for k in 0..pbs.len {
-                if pbs.buf[k] == pre {
-                    pbs.buf[k] = cur
+                if pbs[k] == pre {
+                    pbs[k] = cur
                 }
             }
         }
@@ -500,7 +500,7 @@ fn bce_same(f *Func, a i64, b i64) bool {
     match f.is_const(a) {
         Some(x) => {
             match f.is_const(b) {
-                Some(y) => return x == y && f.insts.buf[a].ty == f.insts.buf[b].ty
+                Some(y) => return x == y && f.insts[a].ty == f.insts[b].ty
                 None => {}
             }
         }
@@ -534,16 +534,16 @@ fn bce_entry_guard(f *Func, cfg *Cfg, pre i64, iv *BceIv) bool {
     le := if signed { OpSle } else { OpUle }
     b := pre
     for depth in 0..16 {
-        if cfg.preds.buf[b].len != 1 {
+        if cfg.preds[b].len != 1 {
             return false
         }
-        p := cfg.preds.buf[b].buf[0]
-        match f.blocks.buf[p].term {
+        p := cfg.preds[b][0]
+        match f.blocks[p].term {
             TermBr(c, t, e) => {
-                ci := &f.insts.buf[c]
+                ci := &f.insts[c]
                 if t != e && ci.args.len == 2 {
-                    x := ci.args.buf[0]
-                    y := ci.args.buf[1]
+                    x := ci.args[0]
+                    y := ci.args[1]
                     fwd := bce_same(f, x, iv.start) && bce_same(f, y, iv.end)
                     rev := bce_same(f, x, iv.end) && bce_same(f, y, iv.start)
                     if t == b && ((ci.op == lt && fwd) || (ci.op == gt && rev)) {
@@ -567,18 +567,18 @@ fn bce_entry_guard(f *Func, cfg *Cfg, pre i64, iv *BceIv) bool {
 // removed. Unlike hoisting this puts no condition on the loop body (calls, other exits).
 // `def_block`: the block of every instruction, computed when the first loop needs it.
 fn bce_eliminate_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64, def_block_v *Vec[i64]) bool {
-    l := &loops.loops.buf[li]
+    l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
-    if outside.len != 1 || f.succs(outside.buf[0]).len != 1 || l.latches.len != 1 {
+    if outside.len != 1 || f.succs(outside[0]).len != 1 || l.latches.len != 1 {
         return false
     }
-    pre := outside.buf[0]
-    latch := l.latches.buf[0]
+    pre := outside[0]
+    latch := l.latches[0]
     // is there a check at all? (most loops have none: do not analyse them)
     any := false
     for b in l.blocks.items() {
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermBr(c0, t0, e0) => {
                 if b != latch && bce_is_trap_block(f, e0) {
                     any = true
@@ -595,7 +595,7 @@ fn bce_eliminate_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64, def_block_v *V
     }
     in_loop_v := vec_fill(f.blocks.len, false)
     for b in l.blocks.items() {
-        in_loop_v.buf[b] = true
+        in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
     if def_block_v.len == 0 {
@@ -625,7 +625,7 @@ fn bce_eliminate_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64, def_block_v *V
         c := 0
         t := 0
         e := 0
-        match f.blocks.buf[b].term {
+        match f.blocks[b].term {
             TermBr(c0, t0, e0) => {
                 c = c0
                 t = t0
@@ -636,15 +636,15 @@ fn bce_eliminate_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64, def_block_v *V
         if b == latch || t == e || !bce_is_trap_block(f, e) {
             continue
         }
-        ci := &f.insts.buf[c]
+        ci := &f.insts[c]
         idx := 0
         ln := 0
         if ci.op == OpUlt {
-            idx = ci.args.buf[0]
-            ln = ci.args.buf[1]
+            idx = ci.args[0]
+            ln = ci.args[1]
         } else if ci.op == OpUgt {
-            idx = ci.args.buf[1]
-            ln = ci.args.buf[0]
+            idx = ci.args[1]
+            ln = ci.args[0]
         } else {
             continue
         }
@@ -658,7 +658,7 @@ fn bce_eliminate_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64, def_block_v *V
         if !guarded {
             return false
         }
-        f.blocks.buf[b].term = TermJmp(t)
+        f.blocks[b].term = TermJmp(t)
         did = true
     }
     return did

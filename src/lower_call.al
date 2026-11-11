@@ -29,7 +29,7 @@ fn lower_call_has_call(e *Expr) bool {
                 return true
             }
             for j in 0..i.len {
-                if lower_call_has_call(&i.buf[j]) {
+                if lower_call_has_call(&i[j]) {
                     return true
                 }
             }
@@ -62,7 +62,7 @@ fn lower_call_has_call(e *Expr) bool {
         }
         EKLit(_, items) => {
             for j in 0..items.len {
-                if lower_call_has_call(&items.buf[j].1) {
+                if lower_call_has_call(&items[j].1) {
                     return true
                 }
             }
@@ -70,7 +70,7 @@ fn lower_call_has_call(e *Expr) bool {
         }
         EKTuple(es) => {
             for j in 0..es.len {
-                if lower_call_has_call(&es.buf[j]) {
+                if lower_call_has_call(&es[j]) {
                     return true
                 }
             }
@@ -96,7 +96,7 @@ fn lower_call_any_has_call(later []Expr) bool {
 // `ts.iter().any(|a| mentions_unbound(a, tparams, env))`
 fn lower_call_any_mentions_unbound(ts *Vec[TypeAst], tparams []str, env *Map[str, i64]) bool {
     for j in 0..ts.len {
-        if lower_call_mentions_unbound(&ts.buf[j], tparams, env) {
+        if lower_call_mentions_unbound(&ts[j], tparams, env) {
             return true
         }
     }
@@ -162,7 +162,7 @@ fn lower_call_clone_env(m *Map[str, i64]) Map[str, i64] {
 // `!env.contains_key(p)` for any type parameter
 fn lower_call_any_unbound(tparams *Vec[str], env *Map[str, i64]) bool {
     for j in 0..tparams.len {
-        if !env.has(tparams.buf[j]) {
+        if !env.has(tparams[j]) {
             return true
         }
     }
@@ -386,13 +386,13 @@ fn unify(self *Fx, t *TypeAst, ty i64, tparams []str, env *Map[str, i64]) bool {
             var targs Vec[i64]
             match self.cx.types.k(ty) {
                 TyKStruct(s) => {
-                    si := &self.cx.types.structs.buf[s]
-                    decl_name = self.cx.struct_decls.buf[si.decl].name
+                    si := &self.cx.types.structs[s]
+                    decl_name = self.cx.struct_decls[si.decl].name
                     targs = clone(si.targs)
                 }
                 TyKEnum(e) => {
-                    ei := &self.cx.types.enums.buf[e]
-                    decl_name = self.cx.enum_decls.buf[ei.decl].name
+                    ei := &self.cx.types.enums[e]
+                    decl_name = self.cx.enum_decls[ei.decl].name
                     targs = clone(ei.targs)
                 }
                 _ => {
@@ -404,7 +404,7 @@ fn unify(self *Fx, t *TypeAst, ty i64, tparams []str, env *Map[str, i64]) bool {
             }
             ok := true
             for i in 0..args.len {
-                if !self.unify(&args.buf[i], targs.buf[i], tparams, env) {
+                if !self.unify(&args[i], targs[i], tparams, env) {
                     ok = false
                 }
             }
@@ -448,7 +448,7 @@ fn unify(self *Fx, t *TypeAst, ty i64, tparams []str, env *Map[str, i64]) bool {
                     }
                     ok := true
                     for i in 0..ps.len {
-                        if !self.unify(&ps.buf[i], pt.buf[i], tparams, env) {
+                        if !self.unify(&ps[i], pt[i], tparams, env) {
                             ok = false
                         }
                     }
@@ -475,7 +475,7 @@ fn unify(self *Fx, t *TypeAst, ty i64, tparams []str, env *Map[str, i64]) bool {
                     }
                     ok := true
                     for i in 0..ts.len {
-                        if !self.unify(&ts.buf[i], tt.buf[i], tparams, env) {
+                        if !self.unify(&ts[i], tt[i], tparams, env) {
                             ok = false
                         }
                     }
@@ -496,7 +496,7 @@ fn unify(self *Fx, t *TypeAst, ty i64, tparams []str, env *Map[str, i64]) bool {
                     }
                     ok := true
                     for i in 0..ps.len {
-                        if !self.unify(&ps.buf[i], pt.buf[i], tparams, env) {
+                        if !self.unify(&ps[i], pt[i], tparams, env) {
                             ok = false
                         }
                     }
@@ -529,7 +529,7 @@ fn call_rt(self *Fx, name str, targs Vec[i64], args Vec[Val], pos Pos) Val {
         return val_err()
     }
     fid := self.cx.inst_fn(di, targs)
-    sig := self.cx.fn_sigs.buf[fid]
+    sig := self.cx.fn_sigs[fid]
     ptys := sig.0
     rty := sig.1
     return self.emit_call(CalleeDirect(fid), ptys.items(), rty, args)
@@ -537,12 +537,12 @@ fn call_rt(self *Fx, name str, targs Vec[i64], args Vec[Val], pos Pos) Val {
 
 // call of a C function through its import slot, with the C calling convention
 fn emit_extern_call(self *Fx, x i64, ptys []i64, rty i64, args Vec[Val]) Val {
-    got := self.cx.module.externs.buf[x].got
+    got := self.cx.module.externs[x].got
     a := self.ins(OpGAddr, TI64, vec[i64](), got)
     target := self.load_raw(a, TI64, AK_PTR)
     ir_args := vec_of([]i64{target})
     for i in 0..min(args.len, len(ptys)) {
-        v := args.buf[i]
+        v := args[i]
         pt := ptys[i]
         s := self.scalar(v)
         // C callees expect narrow integers extended to 32 bits
@@ -582,7 +582,7 @@ fn emit_extern_call(self *Fx, x i64, ptys []i64, rty i64, args Vec[Val]) Val {
 fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
     any_err := false
     for i in 0..args.len {
-        if args.buf[i].ty == T_ERR {
+        if args[i].ty == T_ERR {
             any_err = true
             break
         }
@@ -592,7 +592,7 @@ fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
     }
     match callee {
         CalleeDirect(fid) => {
-            match self.cx.module.funcs.buf[fid].ext {
+            match self.cx.module.funcs[fid].ext {
                 Some(x) => {
                     return self.emit_extern_call(x, ptys, rty, args)
                 }
@@ -621,7 +621,7 @@ fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
         _ => {}
     }
     for i in 0..min(args.len, len(ptys)) {
-        a := args.buf[i]
+        a := args[i]
         pt := ptys[i]
         match self.cx.abi_param(pt) {
             ParamAbiScalar(_) => {
@@ -630,7 +630,7 @@ fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
             }
             ParamAbiFlat(leaves) => {
                 for j in 0..leaves.len {
-                    l := leaves.buf[j]
+                    l := leaves[j]
                     ad := self.add_off(a.v, i64(l.off))
                     v := self.load_raw(ad, l.t, l.alias)
                     ir_args.push(v)
@@ -679,14 +679,14 @@ fn emit_call(self *Fx, callee Callee, ptys []i64, rty i64, args Vec[Val]) Val {
         RetAbiFlat(leaves) => {
             tmp := self.temp(rty)
             if leaves.len == 1 {
-                l0 := leaves.buf[0]
+                l0 := leaves[0]
                 c := self.ins(op, l0.t, ir_args, k)
                 a := self.add_off(tmp, i64(l0.off))
                 self.store_raw(a, c, l0.t, l0.alias)
             } else {
                 c := self.ins(op, TVoid, ir_args, k)
                 for i in 0..leaves.len {
-                    l := leaves.buf[i]
+                    l := leaves[i]
                     p := self.ins(OpProj, l.t, vec_of([]i64{c}), i)
                     a := self.add_off(tmp, i64(l.off))
                     self.store_raw(a, p, l.t, l.alias)
@@ -753,8 +753,8 @@ fn call_indirect(self *Fx, fv Val, args []Expr, pos Pos) Val {
     vals := vec[Val]()
     for i in 0..len(args) {
         a := &args[i]
-        v := self.expr(a, Some(ptys.buf[i]))
-        v = self.coerce(v, ptys.buf[i], a.pos)
+        v := self.expr(a, Some(ptys[i]))
+        v = self.coerce(v, ptys[i], a.pos)
         v = self.stabilize(v, args[i + 1..])
         vals.push(v)
     }
@@ -839,7 +839,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 return self.call_shared(n, cands, None, None, c, args, expect, pos)
             }
             if cands.len == 1 {
-                return self.call_decl(cands.buf[0], None, None, args, expect, pos, lower_call_no_pre())
+                return self.call_decl(cands[0], None, None, args, expect, pos, lower_call_no_pre())
             }
             if cands.len > 1 {
                 return self.call_overloaded(cands.items(), None, None, args, expect, pos)
@@ -885,7 +885,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                         if cands.len != 0 || is_builtin {
                             tys := vec[i64]()
                             for i in 0..targs.len {
-                                t := &targs.buf[i]
+                                t := &targs[i]
                                 match self.cx.expr_type(t, &env) {
                                     Some(ty) => {
                                         if ty != T_ERR {
@@ -904,7 +904,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                                 return self.call_shared(n, cands, Some(tys), None, c, args, expect, pos)
                             }
                             if cands.len == 1 {
-                                return self.call_decl(cands.buf[0], Some(tys), None, args, expect, pos, lower_call_no_pre())
+                                return self.call_decl(cands[0], Some(tys), None, args, expect, pos, lower_call_no_pre())
                             }
                             if cands.len > 1 {
                                 return self.call_overloaded(cands.items(), Some(tys), None, args, expect, pos)
@@ -938,7 +938,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                         tys := vec[i64]()
                         all := true
                         for i in 0..targs.len {
-                            match self.cx.expr_type(&targs.buf[i], &env) {
+                            match self.cx.expr_type(&targs[i], &env) {
                                 Some(x) => {
                                     if x != T_ERR {
                                         tys.push(x)
@@ -964,7 +964,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                                 return self.call_shared(name, cands, Some(tys), Some(rv), recv, args, expect, pos)
                             }
                             if cands.len == 1 {
-                                return self.call_decl(cands.buf[0], Some(tys), Some(rv), args, expect, pos, lower_call_no_pre())
+                                return self.call_decl(cands[0], Some(tys), Some(rv), args, expect, pos, lower_call_no_pre())
                             }
                             return self.call_overloaded(cands.items(), Some(tys), Some(rv), args, expect, pos)
                         }
@@ -990,9 +990,9 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
             match self.cx.types.k(dv.ty) {
                 TyKStruct(sid) => {
                     is_fn_field := false
-                    nf := self.cx.types.structs.buf[sid].fields.len
+                    nf := self.cx.types.structs[sid].fields.len
                     for j in 0..nf {
-                        f := self.cx.types.structs.buf[sid].fields.buf[j]
+                        f := self.cx.types.structs[sid].fields[j]
                         if f.0 == ast_plain(name) && lower_call_is_callable(self.cx.types.k(f.1)) {
                             is_fn_field = true
                             break
@@ -1018,7 +1018,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 return self.call_shared(name, cands, None, Some(rv), recv, args, expect, pos)
             }
             if cands.len == 1 {
-                return self.call_decl(cands.buf[0], None, Some(rv), args, expect, pos, lower_call_no_pre())
+                return self.call_decl(cands[0], None, Some(rv), args, expect, pos, lower_call_no_pre())
             }
             if cands.len > 1 {
                 return self.call_overloaded(cands.items(), None, Some(rv), args, expect, pos)
@@ -1116,8 +1116,8 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
         None => {}
     }
     for ci in 0..cands.len {
-        di := cands.buf[ci]
-        d := self.cx.fn_decls.buf[di]
+        di := cands[ci]
+        d := self.cx.fn_decls[di]
         var targs Vec[i64]
         match explicit {
             Some(t) => {
@@ -1140,7 +1140,7 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
                     env := map[str, i64]()
                     ok := true
                     for i in 0..d.params.len {
-                        if !self.unify(&d.params.buf[i].1, ps.buf[i], d.tparams.items(), &env) {
+                        if !self.unify(&d.params[i].1, ps[i], d.tparams.items(), &env) {
                             ok = false
                         }
                     }
@@ -1157,13 +1157,13 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
                     }
                     targs = vec[i64]()
                     for i in 0..d.tparams.len {
-                        targs.push(env.get_or(d.tparams.buf[i], 0))
+                        targs.push(env.get_or(d.tparams[i], 0))
                     }
                 }
             }
         }
         fid := self.cx.inst_fn(di, targs)
-        sig := self.cx.fn_sigs.buf[fid]
+        sig := self.cx.fn_sigs[fid]
         ptys := clone(sig.0)
         rty := sig.1
         if has_want {
@@ -1172,10 +1172,10 @@ fn fn_value(self *Fx, n str, explicit Opt[Vec[i64]], expect Opt[i64]) Opt[Val] {
             }
         }
         ty := self.cx.types.intern(TyKFn(ptys, rty))
-        match self.cx.module.funcs.buf[fid].ext {
+        match self.cx.module.funcs[fid].ext {
             Some(x) => {
                 // the address of a C function comes from its import slot
-                got := self.cx.module.externs.buf[x].got
+                got := self.cx.module.externs[x].got
                 a := self.ins(OpGAddr, TI64, vec[i64](), got)
                 v := self.load_raw(a, TI64, AK_PTR)
                 return Some(self.coerce_fn_value(self.sval(ty, v), want_closure))
@@ -1229,7 +1229,7 @@ fn param_accepts(self *Fx, d *FnDecl, pt *TypeAst, ty i64, is_recv bool, explici
     match explicit {
         Some(tys) => {
             for i in 0..min(d.tparams.len, len(tys)) {
-                base.set(d.tparams.buf[i], tys[i])
+                base.set(d.tparams[i], tys[i])
             }
         }
         None => {}
@@ -1260,7 +1260,7 @@ fn param_accepts(self *Fx, d *FnDecl, pt *TypeAst, ty i64, is_recv bool, explici
 // how well parameter `pi` of `d` fits an untyped literal argument: 0 = its default type,
 // 1 = same kind, 2 = generic, 3 = integer literal for a float; None = does not fit
 fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
-    pt := &d.params.buf[pi].1
+    pt := &d.params[pi].1
     empty := map[str, i64]()
     if lower_call_mentions_unbound(pt, d.tparams.items(), &empty) {
         return Some(2)
@@ -1275,9 +1275,9 @@ fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
         // a variant fits an enum that has it
         match k {
             TyKEnum(eid) => {
-                nv := self.cx.types.enums.buf[eid].variants.len
+                nv := self.cx.types.enums[eid].variants.len
                 for vi in 0..nv {
-                    if self.cx.types.enums.buf[eid].variants.buf[vi].0 == vn {
+                    if self.cx.types.enums[eid].variants[vi].0 == vn {
                         return Some(0)
                     }
                 }
@@ -1317,10 +1317,10 @@ fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
 fn lower_call_call_overloaded_sigs(s *Fx, cands []i64) str {
     parts := vec[str]()
     for ci in 0..len(cands) {
-        d := s.cx.fn_decls.buf[cands[ci]]
+        d := s.cx.fn_decls[cands[ci]]
         ps := vec[str]()
         for j in 0..d.params.len {
-            ps.push(ast_type_str(&d.params.buf[j].1))
+            ps.push(ast_type_str(&d.params[j].1))
         }
         parts.push(fmt(d.name, "(", join(ps.items(), ", "), ")"))
     }
@@ -1334,11 +1334,11 @@ fn lower_call_call_overloaded_sigs(s *Fx, cands []i64) str {
 fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Expr, expect Opt[i64], pos Pos) Val {
     off := if is_some(recv) { 1 } else { 0 }
     total := len(args) + off
-    name := self.cx.fn_decls.buf[cands[0]].name
+    name := self.cx.fn_decls[cands[0]].name
     alive := vec[i64]()
     for ci in 0..len(cands) {
         di := cands[ci]
-        d := self.cx.fn_decls.buf[di]
+        d := self.cx.fn_decls[di]
         targs_ok := true
         match explicit {
             Some(t) => {
@@ -1360,9 +1360,9 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
         Some(rv) => {
             keep := vec[i64]()
             for ai in 0..alive.len {
-                di := alive.buf[ai]
-                d := self.cx.fn_decls.buf[di]
-                if self.param_accepts(d, &d.params.buf[0].1, rv.ty, true, lower_call_as_slice(explicit)) {
+                di := alive[ai]
+                d := self.cx.fn_decls[di]
+                if self.param_accepts(d, &d.params[0].1, rv.ty, true, lower_call_as_slice(explicit)) {
                     keep.push(di)
                 }
             }
@@ -1386,8 +1386,8 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
         keep := vec[i64]()
         if self.is_untyped(a) {
             for ai in 0..alive.len {
-                di := alive.buf[ai]
-                if is_some(self.literal_fit(self.cx.fn_decls.buf[di], off + i, a)) {
+                di := alive[ai]
+                if is_some(self.literal_fit(self.cx.fn_decls[di], off + i, a)) {
                     keep.push(di)
                 }
             }
@@ -1404,9 +1404,9 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                 // an exact closure parameter first, then a plain function type
                 want_ty := if round == 0 { lit_ty } else { self.closure_fn_type(lit_ty) }
                 for ai in 0..alive.len {
-                    di := alive.buf[ai]
-                    d := self.cx.fn_decls.buf[di]
-                    if self.param_accepts(d, &d.params.buf[off + i].1, want_ty, false, lower_call_as_slice(explicit)) {
+                    di := alive[ai]
+                    d := self.cx.fn_decls[di]
+                    if self.param_accepts(d, &d.params[off + i].1, want_ty, false, lower_call_as_slice(explicit)) {
                         keep.push(di)
                     }
                 }
@@ -1429,9 +1429,9 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             v = self.stabilize(v, args[i + 1..])
             pre.push((i, v))
             for ai in 0..alive.len {
-                di := alive.buf[ai]
-                d := self.cx.fn_decls.buf[di]
-                if self.param_accepts(d, &d.params.buf[off + i].1, v.ty, false, lower_call_as_slice(explicit)) {
+                di := alive[ai]
+                d := self.cx.fn_decls[di]
+                if self.param_accepts(d, &d.params[off + i].1, v.ty, false, lower_call_as_slice(explicit)) {
                     keep.push(di)
                 }
             }
@@ -1451,21 +1451,21 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
         // private definitions of the file win over public ones of the same written name
         own := vec[i64]()
         for ai in 0..alive.len {
-            if ast_is_private(self.cx.fn_decls.buf[alive.buf[ai]].name) {
-                own.push(alive.buf[ai])
+            if ast_is_private(self.cx.fn_decls[alive[ai]].name) {
+                own.push(alive[ai])
             }
         }
         if own.len != 0 {
             alive = own
         }
     }
-    pick := alive.buf[0]
+    pick := alive[0]
     if alive.len > 1 {
         // rank by how naturally the literal arguments fit, then by the expected result type
         ranked := vec[(i64, i64)]()
         for ai in 0..alive.len {
-            di := alive.buf[ai]
-            d := self.cx.fn_decls.buf[di]
+            di := alive[ai]
+            d := self.cx.fn_decls[di]
             // a definition with exactly these types beats a generic one
             rank := if d.tparams.len == 0 { 0 } else { 1 }
             for i in 0..len(args) {
@@ -1484,13 +1484,13 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             ranked.push((rank, di))
         }
         sort_by(ranked.items(), lower_call_rank_less)
-        pick = ranked.buf[0].1
+        pick = ranked[0].1
         by_ret := false
         match expect {
             Some(et) => {
                 for ri in 0..ranked.len {
-                    di := ranked.buf[ri].1
-                    d := self.cx.fn_decls.buf[di]
+                    di := ranked[ri].1
+                    d := self.cx.fn_decls[di]
                     if d.tparams.len == 0 {
                         match d.ret {
                             Some(rt) => {
@@ -1509,7 +1509,7 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             }
             None => {}
         }
-        if !by_ret && ranked.buf[1].0 == ranked.buf[0].0 {
+        if !by_ret && ranked[1].0 == ranked[0].0 {
             // a variant that fits the enums of two definitions equally well decides nothing
             for i in 0..len(args) {
                 a := &args[i]
@@ -1519,8 +1519,8 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                 }
                 saved := self.cx.errs.len
                 empty := map[str, i64]()
-                t0 := self.cx.resolve(&self.cx.fn_decls.buf[ranked.buf[0].1].params.buf[off + i].1, &empty)
-                t1 := self.cx.resolve(&self.cx.fn_decls.buf[ranked.buf[1].1].params.buf[off + i].1, &empty)
+                t0 := self.cx.resolve(&self.cx.fn_decls[ranked[0].1].params[off + i].1, &empty)
+                t1 := self.cx.resolve(&self.cx.fn_decls[ranked[1].1].params[off + i].1, &empty)
                 self.cx.errs.truncate(saved)
                 if t0 != t1 && lower_call_is_enum(self.cx.types.k(t0)) && lower_call_is_enum(self.cx.types.k(t1)) {
                     s := lower_call_call_overloaded_sigs(self, cands)
@@ -1534,12 +1534,12 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
 }
 
 fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Expr, expect Opt[i64], pos Pos, pre [](i64, Val)) Val {
-    d := self.cx.fn_decls.buf[di]
+    d := self.cx.fn_decls[di]
     nrecv := if is_some(recv) { 1 } else { 0 }
     if d.params.len != len(args) + nrecv {
         sig := vec[str]()
         for j in 0..d.params.len {
-            sig.push(d.params.buf[j].0)
+            sig.push(d.params[j].0)
         }
         self.err(pos, fmt("function `", d.name, "(", join(sig.items(), ", "), ")` expects ", d.params.len, " argument(s), got ", len(args) + nrecv))
         lower_call_eval_all(self, args)
@@ -1557,7 +1557,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
                     return val_err()
                 }
                 for j in 0..d.tparams.len {
-                    env.set(d.tparams.buf[j], tys.buf[j])
+                    env.set(d.tparams[j], tys[j])
                 }
             }
             None => {}
@@ -1582,7 +1582,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             by_ref := false
             if generic {
                 // try by value, then through a pointer in either direction
-                pt := &d.params.buf[0].1
+                pt := &d.params[0].1
                 e2 := lower_call_clone_env(&env)
                 if self.unify(pt, rv.ty, d.tparams.items(), &e2) {
                     env = e2
@@ -1612,7 +1612,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
                 }
             } else if rv.mem && rv.ty != T_ERR && self.cx.types.is_scalar(rv.ty) {
                 empty := map[str, i64]()
-                p0 := lower_call_resolve_in(self, d, &d.params.buf[0].1, &empty)
+                p0 := lower_call_resolve_in(self, d, &d.params[0].1, &empty)
                 by_ref = lower_call_is_ptr_to(self.cx.types.k(p0), rv.ty)
             }
             // a scalar receiver that is passed by value is read now, before the arguments
@@ -1621,7 +1621,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             if !by_ref {
                 rv0 = self.rvalue(rv)
             }
-            vals.buf[0] = Some(rv0)
+            vals[0] = Some(rv0)
         }
         None => {}
     }
@@ -1642,13 +1642,13 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             if has_pre {
                 // an argument that overload resolution already evaluated
                 if pass == 0 {
-                    if generic && !self.unify(&d.params.buf[pi].1, pv.ty, d.tparams.items(), &env) {
+                    if generic && !self.unify(&d.params[pi].1, pv.ty, d.tparams.items(), &env) {
                         tn := self.tyname(pv.ty)
                         self.err(a.pos, fmt("argument ", i + 1, " of `", d.name, "` has type ", tn, ", which does not match the parameter type"))
                         failed = true
                     }
                     pv = self.stabilize(pv, args[i + 1..])
-                    vals.buf[pi] = Some(pv)
+                    vals[pi] = Some(pv)
                 }
                 continue
             }
@@ -1659,7 +1659,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             if !generic && pass == 1 {
                 continue
             }
-            pt := &d.params.buf[pi].1
+            pt := &d.params[pi].1
             var exp Opt[i64] = None
             if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
                 exp = None
@@ -1695,7 +1695,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
                 failed = true
             }
             v = self.stabilize(v, args[i + 1..])
-            vals.buf[pi] = Some(v)
+            vals[pi] = Some(v)
         }
     }
     if failed {
@@ -1721,7 +1721,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             None => {}
         }
         for j in 0..d.tparams.len {
-            p := d.tparams.buf[j]
+            p := d.tparams[j]
             t, bound := env.get(p)
             if bound {
                 targs.push(t)
@@ -1739,13 +1739,13 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
     }
     fid := self.cx.inst_fn(di, targs)
     self.cx.inst_depth -= 1
-    fsig := self.cx.fn_sigs.buf[fid]
+    fsig := self.cx.fn_sigs[fid]
     ptys := clone(fsig.0)
     rty := fsig.1
     final_vals := vec[Val]()
     for i in 0..vals.len {
-        v := lower_call_unwrap(vals.buf[i])
-        pt := ptys.buf[i]
+        v := lower_call_unwrap(vals[i])
+        pt := ptys[i]
         if i == 0 && is_some(recv) && v.ty != pt {
             // UFCS receiver adjustment: auto-ref / auto-deref
             adjusted := false
@@ -1805,7 +1805,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             if lower_call_is_ptr_to(self.cx.types.k(pt), v.ty) {
                 hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
             }
-            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, hint))
+            self.err(apos, fmt("argument `", d.params[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, hint))
             failed = true
         }
         final_vals.push(v)
@@ -2305,7 +2305,7 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
             }
             start := self.call_rt("__cap_begin", vec[i64](), vec[Val](), pos)
             for i in 0..vals.len {
-                self.put_val(vals.buf[i].0, vals.buf[i].1, 0)
+                self.put_val(vals[i].0, vals[i].1, 0)
             }
             return Some(self.call_rt("__cap_end", vec[i64](), vec_of([]Val{start}), pos))
         }
@@ -2422,9 +2422,9 @@ fn hash_val(self *Fx, v Val, pos Pos) Opt[i64] {
         }
         TyKStruct(sid) => {
             names := vec[str]()
-            nf := self.cx.types.structs.buf[sid].fields.len
+            nf := self.cx.types.structs[sid].fields.len
             for j in 0..nf {
-                names.push(self.cx.types.structs.buf[sid].fields.buf[j].0)
+                names.push(self.cx.types.structs[sid].fields[j].0)
             }
             return lower_call_hash_fields(self, v, names, pos)
         }
@@ -2446,7 +2446,7 @@ fn hash_val(self *Fx, v Val, pos Pos) Opt[i64] {
 fn lower_call_hash_fields(s *Fx, v Val, names Vec[str], pos Pos) Opt[i64] {
     h := s.iconst(TI64, 0x51ed270b)
     for j in 0..names.len {
-        n := names.buf[j]
+        n := names[j]
         var p Val
         match s.field_of(v, n, pos) {
             Some(x) => {
@@ -2562,11 +2562,11 @@ fn put_val(self *Fx, v Val, pos Pos, depth i64) {
                 self.put_lit("...", pos)
                 return
             }
-            name := self.cx.types.structs.buf[sid].name
-            fields := clone(self.cx.types.structs.buf[sid].fields)
+            name := self.cx.types.structs[sid].name
+            fields := clone(self.cx.types.structs[sid].fields)
             self.put_lit(fmt(name, "{"), pos)
             for i in 0..fields.len {
-                fname := fields.buf[i].0
+                fname := fields[i].0
                 sep := if i > 0 { ", " } else { "" }
                 self.put_lit(fmt(sep, fname, ": "), pos)
                 match self.field_of(v, fname, pos) {
@@ -2600,8 +2600,8 @@ fn put_val(self *Fx, v Val, pos Pos, depth i64) {
                 self.put_lit("...", pos)
                 return
             }
-            simple := self.cx.types.enums.buf[eid].simple
-            variants := clone(self.cx.types.enums.buf[eid].variants)
+            simple := self.cx.types.enums[eid].simple
+            variants := clone(self.cx.types.enums[eid].variants)
             tag := 0
             if simple {
                 tag = self.scalar(v)
@@ -2610,8 +2610,8 @@ fn put_val(self *Fx, v Val, pos Pos, depth i64) {
             }
             bj := self.new_block()
             for vi in 0..variants.len {
-                vname := variants.buf[vi].0
-                ptys := variants.buf[vi].1
+                vname := variants[vi].0
+                ptys := variants[vi].1
                 bt := self.new_block()
                 bn := self.new_block()
                 c := self.iconst(TI64, vi)
@@ -2626,8 +2626,8 @@ fn put_val(self *Fx, v Val, pos Pos, depth i64) {
                         if i > 0 {
                             self.put_lit(", ", pos)
                         }
-                        src := self.add_off(v.v, i64(offs.buf[i]))
-                        pv := self.load_any(src, ptys.buf[i])
+                        src := self.add_off(v.v, i64(offs[i]))
+                        pv := self.load_any(src, ptys[i])
                         pv = self.rvalue(pv)
                         self.put_val(pv, pos, depth + 1)
                     }

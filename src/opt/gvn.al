@@ -38,8 +38,8 @@ fn gvn_run(f *Func) bool {
                 }
                 fi := facts.len - 1
                 while fi >= 0 {
-                    c := facts.buf[fi].0
-                    match facts.buf[fi].1 {
+                    c := facts[fi].0
+                    match facts[fi].1 {
                         Some(o) => {
                             known.set(c, o)
                         }
@@ -54,9 +54,9 @@ fn gvn_run(f *Func) bool {
                 added := vec[GvnKey]()
                 facts := vec[(i64, Opt[bool])]()
                 // a block reached only through one arm of a conditional branch knows the condition
-                if cfg.preds.buf[b].len == 1 {
-                    p := cfg.preds.buf[b].buf[0]
-                    match f.blocks.buf[p].term {
+                if cfg.preds[b].len == 1 {
+                    p := cfg.preds[b][0]
+                    match f.blocks[p].term {
                         TermBr(c0, t, e) => {
                             if t != e {
                                 c := gvn_run_find(repl.items(), c0)
@@ -74,17 +74,17 @@ fn gvn_run(f *Func) bool {
                         _ => {}
                     }
                 }
-                old := f.blocks.buf[b].insts
-                f.blocks.buf[b].insts = vec[i64]()
+                old := f.blocks[b].insts
+                f.blocks[b].insts = vec[i64]()
                 nw := vec[i64]()
                 for v in old.items() {
-                    for ai in 0..f.insts.buf[v].args.len {
-                        a := f.insts.buf[v].args.buf[ai]
+                    for ai in 0..f.insts[v].args.len {
+                        a := f.insts[v].args[ai]
                         r := gvn_run_find(repl.items(), a)
                         // a condition decided by a dominating branch is a constant here
                         val, is_known := known.get(r)
                         if is_known {
-                            if f.insts.buf[r].op != OpConst {
+                            if f.insts[r].op != OpConst {
                                 // the constants live at the top of the entry block
                                 slot := i64(val)
                                 if bool_consts[slot] == NOV {
@@ -96,24 +96,24 @@ fn gvn_run(f *Func) bool {
                             }
                         }
                         if r != a {
-                            f.insts.buf[v].args.buf[ai] = r
+                            f.insts[v].args[ai] = r
                         }
                     }
-                    i := &f.insts.buf[v]
+                    i := &f.insts[v]
                     if !gvn_numberable(i.op) {
                         nw.push(v)
                         continue
                     }
                     args := clone(&i.args)
-                    if i.op.is_commutative() && args.len == 2 && args.buf[0] > args.buf[1] {
-                        t := args.buf[0]
-                        args.buf[0] = args.buf[1]
-                        args.buf[1] = t
+                    if i.op.is_commutative() && args.len == 2 && args[0] > args[1] {
+                        t := args[0]
+                        args[0] = args[1]
+                        args[1] = t
                     }
                     key := GvnKey{op: i.op, ty: i.ty, args: args.items(), k: i.k}
                     w, found := table.get(key)
                     if found {
-                        repl.buf[v] = w
+                        repl[v] = w
                         changed = true
                     } else {
                         table.set(key, v)
@@ -121,16 +121,16 @@ fn gvn_run(f *Func) bool {
                         nw.push(v)
                     }
                 }
-                f.blocks.buf[b].insts = nw
-                match f.blocks.buf[b].term {
+                f.blocks[b].insts = nw
+                match f.blocks[b].term {
                     TermBr(c0, t, e) => {
                         c := gvn_run_find(repl.items(), c0)
                         val, is_known := known.get(c)
                         if is_known {
                             if val {
-                                f.blocks.buf[b].term = TermJmp(t)
+                                f.blocks[b].term = TermJmp(t)
                             } else {
-                                f.blocks.buf[b].term = TermJmp(e)
+                                f.blocks[b].term = TermJmp(e)
                             }
                             changed = true
                         }
@@ -138,9 +138,9 @@ fn gvn_run(f *Func) bool {
                     _ => {}
                 }
                 stack.push(GvnStepExit(added, facts))
-                ci := cfg.children.buf[b].len - 1
+                ci := cfg.children[b].len - 1
                 while ci >= 0 {
-                    stack.push(GvnStepEnter(cfg.children.buf[b].buf[ci]))
+                    stack.push(GvnStepEnter(cfg.children[b][ci]))
                     ci -= 1
                 }
             }
@@ -155,8 +155,8 @@ fn gvn_run(f *Func) bool {
     if !extra.is_empty() {
         // after the entry block's phis there are none: block 0 has no predecessors
         e := extra
-        e.extend(f.blocks.buf[0].insts.items())
-        f.blocks.buf[0].insts = e
+        e.extend(f.blocks[0].insts.items())
+        f.blocks[0].insts = e
     }
     if changed {
         f.apply_repl(&repl)

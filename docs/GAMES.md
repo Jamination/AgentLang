@@ -94,7 +94,7 @@ things.
 | Lifetime | How |
 |----------|-----|
 | the whole program (window, assets, pools) | allocate at start-up, never release |
-| a level | `m := mark()` before loading, `release(m)` when leaving |
+| a level | `m := mark()` before loading, `release(m)` when leaving; or a `Region` entered while loading and `reset` when leaving |
 | a frame (scratch strings, lists built for one frame) | `frame_begin()` ... `frame_end()` around the frame |
 | objects that come and go (entities, particles, sounds) | a `Pool[T]`: slots are reused, the pool itself never grows past its capacity unless asked to |
 

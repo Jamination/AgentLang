@@ -187,8 +187,8 @@ fn const_val(self *Fx, ty Opt[i64], cv CV, expect Opt[i64], pos Pos) Val {
 fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
     if self.memo.len != 0 {
         for i in 0..self.memo.len {
-            if self.memo.buf[i].0 == e {
-                return self.memo.buf[i].1
+            if self.memo[i].0 == e {
+                return self.memo[i].1
             }
         }
     }
@@ -285,7 +285,7 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                         tys := vec[i64]()
                         ok := true
                         for i in 0..idx.len {
-                            match self.cx.expr_type(&idx.buf[i], &env) {
+                            match self.cx.expr_type(&idx[i], &env) {
                                 Some(x) => {
                                     if x != T_ERR {
                                         tys.push(x)
@@ -317,7 +317,7 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                 self.err(e.pos, "expected a single index")
                 return val_err()
             }
-            match self.index_place(b, &idx.buf[0], e.pos) {
+            match self.index_place(b, &idx[0], e.pos) {
                 Some(p) => { return self.rvalue(p) }
                 None => { return val_err() }
             }
@@ -339,8 +339,8 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                     p := self.call_rt("__alloc_raw", vec[i64](), vec_of([]Val{bv}), e.pos)
                     pv := self.scalar(p)
                     for i in 0..items.len {
-                        item := &items.buf[i].1
-                        if is_some(items.buf[i].0) {
+                        item := &items[i].1
+                        if is_some(items[i].0) {
                             self.err(item.pos, "slice literal elements cannot be named")
                         }
                         v0 := self.expr(item, Some(et))
@@ -391,18 +391,18 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             }
             vals := vec[Val]()
             for i in 0..es.len {
-                x := &es.buf[i]
+                x := &es[i]
                 var xe Opt[i64] = None
                 match exp_tys {
-                    Some(t) => { xe = Some(t.buf[i]) }
+                    Some(t) => { xe = Some(t[i]) }
                     None => {}
                 }
                 v0 := self.expr(x, xe)
                 match exp_tys {
                     Some(t) => {
-                        if self.cx.types.fn_to_closure(v0.ty, t.buf[i]) {
+                        if self.cx.types.fn_to_closure(v0.ty, t[i]) {
                             // a function value for an element of a closure type
-                            v0 = self.fn_as_closure(v0, t.buf[i])
+                            v0 = self.fn_as_closure(v0, t[i])
                         }
                     }
                     None => {}
@@ -426,18 +426,18 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             }
             tys := vec[i64]()
             for i in 0..vals.len {
-                tys.push(vals.buf[i].ty)
+                tys.push(vals[i].ty)
             }
             ty := self.cx.types.intern(TyKTuple(clone(tys)))
             offs := self.cx.types.tuple_offsets(tys.items())
             t := self.temp(ty)
             for i in 0..vals.len {
-                a := self.add_off(t, offs.buf[i])
-                dst := self.mval(tys.buf[i], a)
-                if self.cx.types.is_scalar(tys.buf[i]) {
-                    dst.alias = self.cx.types.field_alias(ty, i, tys.buf[i])
+                a := self.add_off(t, offs[i])
+                dst := self.mval(tys[i], a)
+                if self.cx.types.is_scalar(tys[i]) {
+                    dst.alias = self.cx.types.field_alias(ty, i, tys[i])
                 }
-                self.store(dst, vals.buf[i])
+                self.store(dst, vals[i])
             }
             return self.mval(ty, t)
         }
@@ -613,7 +613,7 @@ fn place_raw(self *Fx, e *Expr) Opt[Val] {
         }
         EKIndex(b, idx) => {
             if idx.len == 1 {
-                match self.index_place(b, &idx.buf[0], e.pos) {
+                match self.index_place(b, &idx[0], e.pos) {
                     Some(p) => {
                         if !p.mem {
                             self.err(e.pos, "expression is not assignable")
@@ -690,17 +690,17 @@ fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
     match self.cx.types.k(bv.ty) {
         TyKStruct(sid) => {
             self.cx.types.layout_struct(sid)
-            si := &self.cx.types.structs.buf[sid]
+            si := &self.cx.types.structs[sid]
             fi := -1
             for i in 0..si.fields.len {
-                if si.fields.buf[i].0 == name {
+                if si.fields[i].0 == name {
                     fi = i
                     break
                 }
             }
             if fi >= 0 {
-                fty := si.fields.buf[fi].1
-                off := si.offsets.buf[fi]
+                fty := si.fields[fi].1
+                off := si.offsets[fi]
                 a := self.add_off(bv.v, off)
                 v := self.mval(fty, a)
                 if self.cx.types.is_scalar(fty) {
@@ -711,9 +711,9 @@ fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
             }
             tn := self.tyname(bv.ty)
             names := vec[str]()
-            fields := self.cx.types.structs.buf[sid].fields
+            fields := self.cx.types.structs[sid].fields
             for i in 0..fields.len {
-                names.push(fields.buf[i].0)
+                names.push(fields[i].0)
             }
             self.err(pos, fmt(tn, " has no field `", name, "` (fields: ", join(names.items(), ", "), ")"))
             return None
@@ -722,10 +722,10 @@ fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
             i, ok := lower_expr_parse_usize(name)
             if ok && i < tys.len {
                 offs := self.cx.types.tuple_offsets(tys.items())
-                a := self.add_off(bv.v, offs.buf[i])
-                v := self.mval(tys.buf[i], a)
-                if self.cx.types.is_scalar(tys.buf[i]) {
-                    v.alias = self.cx.types.field_alias(bv.ty, i, tys.buf[i])
+                a := self.add_off(bv.v, offs[i])
+                v := self.mval(tys[i], a)
+                if self.cx.types.is_scalar(tys[i]) {
+                    v.alias = self.cx.types.field_alias(bv.ty, i, tys[i])
                 }
                 v.ro = bv.ro
                 return Some(v)
@@ -1392,9 +1392,9 @@ fn eq_vals(self *Fx, l Val, r Val, pos Pos) Opt[i64] {
         }
         TyKStruct(sid) => {
             fieldwise = true
-            fields := self.cx.types.structs.buf[sid].fields
+            fields := self.cx.types.structs[sid].fields
             for i in 0..fields.len {
-                names.push(fields.buf[i].0)
+                names.push(fields[i].0)
             }
         }
         TyKTuple(ts) => {
@@ -1408,7 +1408,7 @@ fn eq_vals(self *Fx, l Val, r Val, pos Pos) Opt[i64] {
     if fieldwise {
         acc := self.iconst(TI8, 1)
         for ni in 0..names.len {
-            n := names.buf[ni]
+            n := names[ni]
             var pl Val
             match self.field_of(l, n, pos) {
                 Some(p) => { pl = p }
@@ -1669,7 +1669,7 @@ fn lit_type(self *Fx, te *Expr, expect Opt[i64]) Opt[i64] {
                         Some(t) => {
                             match self.cx.types.k(t) {
                                 TyKStruct(sid) => {
-                                    if self.cx.types.structs.buf[sid].decl == si {
+                                    if self.cx.types.structs[sid].decl == si {
                                         return expect
                                     }
                                 }
@@ -1700,8 +1700,8 @@ fn init_lit(self *Fx, dst Val, items [](Opt[str], Expr), pos Pos) {
     match self.cx.types.k(dst.ty) {
         TyKStruct(sid) => {
             self.cx.types.layout_struct(sid)
-            fields := clone(self.cx.types.structs.buf[sid].fields)
-            offs := clone(self.cx.types.structs.buf[sid].offsets)
+            fields := clone(self.cx.types.structs[sid].fields)
+            offs := clone(self.cx.types.structs[sid].offsets)
             if len(items) < fields.len {
                 self.zero(dst)
             }
@@ -1713,7 +1713,7 @@ fn init_lit(self *Fx, dst Val, items [](Opt[str], Expr), pos Pos) {
                     Some(n) => {
                         fi = -1
                         for j in 0..fields.len {
-                            if fields.buf[j].0 == n {
+                            if fields[j].0 == n {
                                 fi = j
                                 break
                             }
@@ -1730,14 +1730,14 @@ fn init_lit(self *Fx, dst Val, items [](Opt[str], Expr), pos Pos) {
                     self.err(item.pos, "too many values in struct literal")
                     break
                 }
-                if seen.buf[fi] {
-                    self.err(item.pos, fmt("field `", fields.buf[fi].0, "` initialized twice"))
+                if seen[fi] {
+                    self.err(item.pos, fmt("field `", fields[fi].0, "` initialized twice"))
                 }
-                seen.buf[fi] = true
-                fty := fields.buf[fi].1
+                seen[fi] = true
+                fty := fields[fi].1
                 v0 := self.expr(item, Some(fty))
                 v := self.coerce(v0, fty, item.pos)
-                a := self.add_off(dst.v, offs.buf[fi])
+                a := self.add_off(dst.v, offs[fi])
                 fd := self.mval(fty, a)
                 if self.cx.types.is_scalar(fty) {
                     fd.alias = self.cx.types.field_alias(dst.ty, fi, fty)
@@ -1774,12 +1774,12 @@ fn init_lit(self *Fx, dst Val, items [](Opt[str], Expr), pos Pos) {
             offs := self.cx.types.tuple_offsets(tys.items())
             for i in 0..len(items) {
                 item := &items[i].1
-                v0 := self.expr(item, Some(tys.buf[i]))
-                v := self.coerce(v0, tys.buf[i], item.pos)
-                a := self.add_off(dst.v, offs.buf[i])
-                fd := self.mval(tys.buf[i], a)
-                if self.cx.types.is_scalar(tys.buf[i]) {
-                    fd.alias = self.cx.types.field_alias(dst.ty, i, tys.buf[i])
+                v0 := self.expr(item, Some(tys[i]))
+                v := self.coerce(v0, tys[i], item.pos)
+                a := self.add_off(dst.v, offs[i])
+                fd := self.mval(tys[i], a)
+                if self.cx.types.is_scalar(tys[i]) {
+                    fd.alias = self.cx.types.field_alias(dst.ty, i, tys[i])
                 }
                 self.store(fd, v)
             }
@@ -1793,10 +1793,10 @@ fn init_lit(self *Fx, dst Val, items [](Opt[str], Expr), pos Pos) {
 
 // ---------- enums ----------
 fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos Pos) Val {
-    d := self.cx.enum_decls.buf[ei]
-    vname := d.variants.buf[vi].0
-    if len(args) != d.variants.buf[vi].1.len {
-        self.err(pos, fmt("variant `", vname, "` takes ", d.variants.buf[vi].1.len, " value(s), got ", len(args)))
+    d := self.cx.enum_decls[ei]
+    vname := d.variants[vi].0
+    if len(args) != d.variants[vi].1.len {
+        self.err(pos, fmt("variant `", vname, "` takes ", d.variants[vi].1.len, " value(s), got ", len(args)))
         lower_call_eval_all(self, args)
         return val_err()
     }
@@ -1811,7 +1811,7 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
             Some(t) => {
                 match self.cx.types.k(t) {
                     TyKEnum(eid) => {
-                        if self.cx.types.enums.buf[eid].decl == ei {
+                        if self.cx.types.enums[eid].decl == ei {
                             from_expect = true
                             ety = t
                         }
@@ -1827,7 +1827,7 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
             ok := true
             for i in 0..len(args) {
                 v := self.expr(&args[i], None)
-                if !self.unify(&d.variants.buf[vi].1.buf[i], v.ty, d.tparams.items(), &env) {
+                if !self.unify(&d.variants[vi].1[i], v.ty, d.tparams.items(), &env) {
                     ok = false
                 }
                 v = self.stabilize(v, args[i + 1..])
@@ -1835,7 +1835,7 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
             }
             targs := vec[i64]()
             for i in 0..d.tparams.len {
-                t, has := env.get(d.tparams.buf[i])
+                t, has := env.get(d.tparams[i])
                 if has {
                     targs.push(t)
                 }
@@ -1867,12 +1867,12 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
         TyKEnum(x) => { eid = x }
         _ => { return val_err() }
     }
-    ptys := clone(self.cx.types.enums.buf[eid].variants.buf[vi].1)
+    ptys := clone(self.cx.types.enums[eid].variants[vi].1)
     if len(args) != ptys.len {
         self.err(pos, fmt("variant `", vname, "` takes ", ptys.len, " value(s), got ", len(args)))
         return val_err()
     }
-    if self.cx.types.enums.buf[eid].simple {
+    if self.cx.types.enums[eid].simple {
         v := self.iconst(TI64, vi)
         return self.sval(ety, v)
     }
@@ -1886,14 +1886,14 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
         a := &args[i]
         var v0 Val
         if pre.len == len(args) {
-            v0 = pre.buf[i]
+            v0 = pre[i]
         } else {
-            v0 = self.expr(a, Some(ptys.buf[i]))
+            v0 = self.expr(a, Some(ptys[i]))
         }
-        v := self.coerce(v0, ptys.buf[i], a.pos)
-        fa := self.add_off(t, offs.buf[i])
-        fd := self.mval(ptys.buf[i], fa)
-        fd.alias = if self.cx.types.is_scalar(ptys.buf[i]) { AK_ANY } else { 0 }
+        v := self.coerce(v0, ptys[i], a.pos)
+        fa := self.add_off(t, offs[i])
+        fd := self.mval(ptys[i], fa)
+        fd.alias = if self.cx.types.is_scalar(ptys[i]) { AK_ANY } else { 0 }
         self.store_any(fd, v)
     }
     return dst
@@ -1920,14 +1920,14 @@ fn store_any(self *Fx, dst Val, src Val) {
     }
     vals := vec[i64]()
     for i in 0..lvs.len {
-        l := lvs.buf[i]
+        l := lvs[i]
         a := self.add_off(src.v, l.off)
         vals.push(self.load_raw(a, l.t, l.alias))
     }
     for i in 0..lvs.len {
-        l := lvs.buf[i]
+        l := lvs[i]
         a := self.add_off(dst.v, l.off)
-        self.store_raw(a, vals.buf[i], l.t, AK_ANY)
+        self.store_raw(a, vals[i], l.t, AK_ANY)
     }
 }
 
@@ -1944,7 +1944,7 @@ fn load_any(self *Fx, src i64, ty i64) Val {
         return dst
     }
     for i in 0..lvs.len {
-        l := lvs.buf[i]
+        l := lvs[i]
         a := self.add_off(src, l.off)
         v := self.load_raw(a, l.t, AK_ANY)
         d := self.add_off(t, l.off)

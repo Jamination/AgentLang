@@ -1,4 +1,4 @@
-// the examples of docs/new/closures.md
+// the closure examples of docs/LANGUAGE.md
 struct Button { label str, on_click |i64| }
 struct Point { x i64, y i64 }
 

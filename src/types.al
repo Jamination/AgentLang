@@ -207,7 +207,7 @@ fn types_kind_copy(k TyK) TyK {
 }
 
 fn k(self *Types, t i64) TyK {
-    return self.kinds.buf[t]
+    return self.kinds[t]
 }
 
 fn is_float(self *Types, t i64) bool {
@@ -288,7 +288,7 @@ fn is_scalar(self *Types, t i64) bool {
         TyKVec(n) => return true
         TyKPtr(e) => return true
         TyKFn(p, r) => return true
-        TyKEnum(e) => return self.enums.buf[e].simple
+        TyKEnum(e) => return self.enums[e].simple
         _ => return false
     }
 }
@@ -322,8 +322,8 @@ fn name(self *Types, t i64) str {
             }
         }
         TyKArray(e, n) => return fmt("[", n, "]", self.name(e))
-        TyKStruct(s) => return self.structs.buf[s].name
-        TyKEnum(s) => return self.enums.buf[s].name
+        TyKStruct(s) => return self.structs[s].name
+        TyKEnum(s) => return self.enums[s].name
         TyKTuple(v) => return fmt("(", types_names(self, v), ")")
         TyKFn(p, r) => {
             ps := types_names(self, p)
@@ -365,14 +365,14 @@ fn layout_fields(self *Types, tys []i64) (Vec[i64], i64, i64) {
 }
 
 fn layout_struct(self *Types, sid i64) {
-    st := self.structs.buf[sid].state
+    st := self.structs[sid].state
     if st == 2 || st == 3 {
         return
     }
     if st == 1 {
-        n := self.structs.buf[sid].name
+        n := self.structs[sid].name
         self.layout_errors.push(fmt("struct `", n, "` contains itself by value (use a pointer)"))
-        s := &self.structs.buf[sid]
+        s := &self.structs[sid]
         s.state = 2
         // the fields are dropped: everything that walks a type by its fields would not end
         s.fields.truncate(0)
@@ -381,13 +381,13 @@ fn layout_struct(self *Types, sid i64) {
         s.align = 8
         return
     }
-    self.structs.buf[sid].state = 1
+    self.structs[sid].state = 1
     tys := vec[i64]()
-    for i in 0..self.structs.buf[sid].fields.len {
-        tys.push(self.structs.buf[sid].fields.buf[i].1)
+    for i in 0..self.structs[sid].fields.len {
+        tys.push(self.structs[sid].fields[i].1)
     }
     offs, size, align := self.layout_fields(tys.items())
-    s := &self.structs.buf[sid]
+    s := &self.structs[sid]
     if s.state == 2 {
         return
     }
@@ -398,29 +398,29 @@ fn layout_struct(self *Types, sid i64) {
 }
 
 fn layout_enum(self *Types, eid i64) {
-    st := self.enums.buf[eid].state
+    st := self.enums[eid].state
     if st == 2 || st == 3 {
         return
     }
     if st == 1 {
-        n := self.enums.buf[eid].name
+        n := self.enums[eid].name
         self.layout_errors.push(fmt("enum `", n, "` contains itself by value (use a pointer)"))
-        self.enums.buf[eid].state = 2
-        self.enums.buf[eid].size = 8
+        self.enums[eid].state = 2
+        self.enums[eid].size = 8
         return
     }
-    self.enums.buf[eid].state = 1
+    self.enums[eid].state = 1
     vars := vec[Vec[i64]]()
-    for i in 0..self.enums.buf[eid].variants.len {
-        vars.push(clone(&self.enums.buf[eid].variants.buf[i].1))
+    for i in 0..self.enums[eid].variants.len {
+        vars.push(clone(&self.enums[eid].variants[i].1))
     }
     size := 8
     for i in 0..vars.len {
-        o, s0, a := self.layout_fields(vars.buf[i].items())
+        o, s0, a := self.layout_fields(vars[i].items())
         s := (s0 + 7) / 8 * 8
         size = max(size, 8 + s)
     }
-    e := &self.enums.buf[eid]
+    e := &self.enums[eid]
     if e.state == 2 {
         return
     }
@@ -430,7 +430,7 @@ fn layout_enum(self *Types, eid i64) {
 
 // offsets of payload fields of a variant, relative to the enum start
 fn variant_offsets(self *Types, eid i64, var_ i64) Vec[i64] {
-    tys := clone(&self.enums.buf[eid].variants.buf[var_].1)
+    tys := clone(&self.enums[eid].variants[var_].1)
     offs, s, a := self.layout_fields(tys.items())
     out := vec[i64]()
     for o in offs.items() {
@@ -466,11 +466,11 @@ fn size_of(self *Types, t i64) i64 {
         }
         TyKStruct(s) => {
             self.layout_struct(s)
-            return self.structs.buf[s].size
+            return self.structs[s].size
         }
         TyKEnum(e) => {
             self.layout_enum(e)
-            return self.enums.buf[e].size
+            return self.enums[e].size
         }
         TyKTuple(v) => return self.layout_fields(v.items()).1
         TyKClosure(p, r) => return 16
@@ -492,7 +492,7 @@ fn align_of(self *Types, t i64) i64 {
         TyKArray(e, n) => return self.align_of(e)
         TyKStruct(s) => {
             self.layout_struct(s)
-            return self.structs.buf[s].align
+            return self.structs[s].align
         }
         TyKTuple(v) => return self.layout_fields(v.items()).2
         TyKClosure(p, r) => return 8
@@ -604,10 +604,10 @@ fn leaves(self *Types, t i64, base i64, out *Vec[Leaf]) {
         TyKStruct(s) => {
             self.layout_struct(s)
             tys := vec[i64]()
-            for i in 0..self.structs.buf[s].fields.len {
-                tys.push(self.structs.buf[s].fields.buf[i].1)
+            for i in 0..self.structs[s].fields.len {
+                tys.push(self.structs[s].fields[i].1)
             }
-            offs := clone(&self.structs.buf[s].offsets)
+            offs := clone(&self.structs[s].offsets)
             types_leaves_fields(self, t, tys.items(), offs.items(), base, out)
         }
         TyKTuple(v) => {
@@ -615,7 +615,7 @@ fn leaves(self *Types, t i64, base i64, out *Vec[Leaf]) {
             types_leaves_fields(self, t, v.items(), offs.items(), base, out)
         }
         TyKEnum(e) => {
-            if self.enums.buf[e].simple {
+            if self.enums[e].simple {
                 out.push(Leaf{off: base, t: TI64, alias: AK_I64})
             } else {
                 sz := self.size_of(t)
@@ -663,8 +663,8 @@ fn leaf_count(self *Types, t i64) i64 {
         TyKArray(e, n) => return types_sat_mul(self.leaf_count(e), n)
         TyKStruct(s) => {
             tys := vec[i64]()
-            for i in 0..self.structs.buf[s].fields.len {
-                tys.push(self.structs.buf[s].fields.buf[i].1)
+            for i in 0..self.structs[s].fields.len {
+                tys.push(self.structs[s].fields[i].1)
             }
             total := 0
             for ft in tys.items() {
