@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 
-ALC = os.path.join(os.path.dirname(__file__), "..", "..", "target", "release", "alc")
+ALC = os.path.join(os.path.dirname(__file__), "..", "..", "build", "alc")
 LANES = {"vec2": 2, "vec3": 3, "vec4": 4, "quat": 4}
 COMP = "xyzw"
 

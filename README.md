@@ -1,10 +1,11 @@
 # AL — a language for agents, with its own optimizing native compiler
 
 AL is a small statically typed language designed to be written by AI agents, and `alc` is its
-compiler: Rust, standard library only, no LLVM. It does its own optimization, instruction
+compiler, written in AL itself: it compiles its own source and reproduces itself byte for
+byte. No LLVM, no assembler, no linker, no libc: it does its own optimization, instruction
 selection, register allocation, x86-64 encoding and ELF linking. Programs are static Linux
-executables that use raw system calls (no libc, no dynamic loader); a program that calls C
-functions (`extern`) is linked dynamically against exactly the libraries it reaches.
+executables that use raw system calls; a program that calls C functions (`extern`) is linked
+dynamically against exactly the libraries it reaches.
 
 It is meant for high-performance software such as games: `f32`, vectors, quaternions and
 matrices are built-in types compiled to SSE code, functions overload on argument types, and a
@@ -12,27 +13,30 @@ game-oriented standard library ships inside the compiler.
 
 - Language reference: [docs/LANGUAGE.md](docs/LANGUAGE.md)
 - Standard library: [docs/STDLIB.md](docs/STDLIB.md); structuring a game: [docs/GAMES.md](docs/GAMES.md)
-- Verification (build, conformance and library tests, `f32` semantics against clang, the
+- How the compiler is built and organised: [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md)
+- Verification (self-compilation, conformance and library tests, `f32` semantics against clang, the
   Vulkan triangle, benchmarks against `clang -O2`): `./verify.sh`
 
 ```
-cargo build --release
-./target/release/alc run examples/hello.al
-./target/release/alc test tests/unit/basic.al
-./target/release/alc sigs bench/hashmap.al
+./build.sh                               # the compiler compiles itself -> build/alc
+./build/alc run examples/hello.al
+./build/alc test tests/unit/basic.al
+./build/alc sigs bench/hashmap.al
 ```
 
 ## Layout
 
 | Path | Contents |
 |------|----------|
-| `src/lexer.rs`, `parser.rs`, `ast.rs` | front end |
-| `src/types.rs`, `lower*.rs` | type checking fused with lowering to SSA IR |
-| `src/ir.rs` | SSA IR, dominators, loop analysis |
+| `build.sh`, `bootstrap/alc` | self-hosted build and its seed compiler |
+| `src/main.al`, `base.al` | driver; helpers shared by the compiler sources |
+| `src/lexer.al`, `parser.al`, `ast.al` | front end |
+| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR |
+| `src/ir.al` | SSA IR, dominators, loop analysis |
 | `src/opt/` | mem2reg/SROA, simplifier (const folding, strength reduction, magic-number division, CFG cleanup, jump threading, if-conversion), GVN with condition propagation, load/store elimination, LICM, inlining, tail-recursion elimination, full and partial loop unrolling, bounds-check hoisting and merging |
 | `src/x86/` | instruction selection (addressing modes, load folding, compare/branch fusion), graph-colouring register allocation with coalescing, peepholes, encoder with branch relaxation |
-| `src/lower_vec.rs` | lowering of the built-in vector / matrix types |
-| `src/elf.rs` | ELF writer / linker (static, or dynamic when C libraries are used) |
+| `src/lower_vec.al` | lowering of the built-in vector / matrix types |
+| `src/elf.al` | ELF writer / linker (static, or dynamic when C libraries are used) |
 | `src/prelude.al` | runtime and core library, written in AL |
 | `std/` | bundled modules (`use std.<name>`) and the always-loaded math / rand / time / mem |
 | `tools/` | binding generators (`gen_vk.py` from `vk.xml`, `gen_dx12.py` from the D3D12 headers) |

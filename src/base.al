@@ -13,22 +13,33 @@ fn is_some[T](o Opt[T]) bool {
 // ---------- Vec ----------
 // a Vec holding a copy of the elements of s
 fn vec_of[T](s []T) Vec[T] {
-    v := vec[T]()
-    reserve(&v, len(s))
-    memcopy(ptr(v.buf), ptr(s), len(s) * sizeof[T]())
-    v.len = len(s)
-    return v
+    n := len(s)
+    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    memcopy(ptr(buf), ptr(s), n * sizeof[T]())
+    return Vec[T]{buf: buf, len: n}
+}
+
+// Vecs of one and two elements without an intermediate slice
+fn vec_one[T](a T) Vec[T] {
+    buf := mkslice[T](__alloc_raw(sizeof[T]()), 1)
+    buf[0] = a
+    return Vec[T]{buf: buf, len: 1}
+}
+
+fn vec_two[T](a T, b T) Vec[T] {
+    buf := mkslice[T](__alloc_raw(2 * sizeof[T]()), 2)
+    buf[0] = a
+    buf[1] = b
+    return Vec[T]{buf: buf, len: 2}
 }
 
 // a Vec of n copies of x
 fn vec_fill[T](n i64, x T) Vec[T] {
-    v := vec[T]()
-    reserve(&v, n)
+    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
     for i in 0..n {
-        v.buf[i] = x
+        buf[i] = x
     }
-    v.len = n
-    return v
+    return Vec[T]{buf: buf, len: n}
 }
 
 // an independent copy (assigning a Vec shares its buffer)
@@ -288,4 +299,86 @@ fn ensure_stack(bytes i64) {
     }
     nenv[n] = cast[i64](ptr("ALC_STACK_SET=1"))
     syscall(59, ptr("/proc/self/exe"), __argv, ptr(nenv))
+}
+
+// ---------- working memory ----------
+// The compiler never frees: everything lives in the arena. Passes over one function create a
+// lot of short-lived data, so the compiler uses three heaps:
+//   0  the main heap: what must live to the end
+//   1  the work heap: one function being optimised or compiled. work_begin() switches every
+//      allocation to it, work_end() switches back and empties it. Whatever must survive is
+//      copied (deep `clone`) right after work_end(): the discarded memory stays readable until
+//      the next work_begin().
+//   2  the scratch heap: tables that a pass rebuilds on every round of a loop (predecessors,
+//      orderings, use counts). scratch_on() / scratch_off() bracket their construction and
+//      scratch_reset() at the top of the next round discards them. Nothing reachable from the
+//      function may be allocated between scratch_on() and scratch_off().
+var base_heaps [12]i64        // saved state of each heap: cur, end, base, hwm
+var base_heap_now i64         // the heap in use
+var base_heap_under i64       // the heap to return to at scratch_off()
+
+fn base_heap_use(h i64) {
+    o := base_heap_now * 4
+    base_heaps[o] = __heap_cur
+    base_heaps[o + 1] = __heap_end
+    base_heaps[o + 2] = __heap_base
+    base_heaps[o + 3] = __heap_hwm
+    n := h * 4
+    __heap_cur = base_heaps[n]
+    __heap_end = base_heaps[n + 1]
+    __heap_base = base_heaps[n + 2]
+    __heap_hwm = base_heaps[n + 3]
+    base_heap_now = h
+}
+
+// empties heap h (not the one in use); its memory is zeroed again when it is handed out
+fn base_heap_reset(h i64) {
+    o := h * 4
+    if base_heaps[o] > base_heaps[o + 3] {
+        base_heaps[o + 3] = base_heaps[o]
+    }
+    base_heaps[o] = base_heaps[o + 2]
+}
+
+fn work_begin() {
+    assert base_heap_now == 0, "work_begin: already working"
+    base_heap_use(1)
+}
+
+fn work_end() {
+    assert base_heap_now == 1, "work_end without work_begin"
+    base_heap_use(0)
+    base_heap_reset(1)
+    base_heap_reset(2)
+}
+
+// allocate from the main heap for a moment while working (for results that must stay)
+fn work_pause() {
+    assert base_heap_now == 1, "work_pause without work_begin"
+    base_heap_use(0)
+}
+
+fn work_resume() {
+    base_heap_use(1)
+}
+
+fn scratch_on() {
+    assert base_heap_now != 2, "scratch_on: already on"
+    base_heap_under = base_heap_now
+    base_heap_use(2)
+}
+
+fn scratch_off() {
+    assert base_heap_now == 2, "scratch_off without scratch_on"
+    base_heap_use(base_heap_under)
+}
+
+fn scratch_reset() {
+    assert base_heap_now != 2, "scratch_reset while the scratch heap is in use"
+    base_heap_reset(2)
+}
+
+// the largest size the work heap has had, in bytes
+fn work_peak() i64 {
+    return base_heaps[7] - base_heaps[6]
 }

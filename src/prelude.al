@@ -898,13 +898,14 @@ fn clock_ns() i64 {
 struct Vec[T] { buf []T, len i64 }
 
 fn vec[T]() Vec[T] {
-    return Vec[T]{buf: alloc[T](0), len: 0}
+    return Vec[T]{buf: mkslice[T](__heap_cur, 0), len: 0}
 }
 
 fn reserve[T](v *Vec[T], n i64) {
     if n > len(v.buf) {
         cap := max(len(v.buf) * 2, max(n, 8))
-        nb := alloc[T](cap)
+        // the spare capacity is never read before it is written: no need to zero it
+        nb := mkslice[T](__alloc_raw(cap * sizeof[T]()), cap)
         memcopy(ptr(nb), ptr(v.buf), v.len * sizeof[T]())
         v.buf = nb
     }

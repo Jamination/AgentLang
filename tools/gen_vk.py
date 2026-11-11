@@ -33,7 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "std", "vk.al")
 HELPERS = os.path.join(ROOT, "tools", "vk_helpers.al")
 SCRATCH = os.path.join(ROOT, "tmp", "VulkanBindings")
-ALC = os.path.join(ROOT, "target", "release", "alc")
+ALC = os.path.join(ROOT, "build", "alc")
 
 AL_KEYWORDS = set(
     "fn struct enum const var test use if else while loop for in by return break continue "

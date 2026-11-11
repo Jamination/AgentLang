@@ -6,7 +6,7 @@ RUNS=3; FLAGS=""
 while getopts "r:f:" o; do case $o in r) RUNS=$OPTARG;; f) FLAGS=$OPTARG;; esac; done
 shift $((OPTIND-1))
 NAMES=${*:-nbody spectralnorm fannkuch mandelbrot binarytrees sha256 matmul quicksort sieve hashmap}
-ALC=./target/release/alc; BIN=bench/bin; mkdir -p $BIN
+ALC=./build/alc; BIN=bench/bin; mkdir -p $BIN
 t_min() { local best=""; for _ in $(seq "$RUNS"); do local s e t; s=$(date +%s%N); "$@" >/dev/null 2>&1; e=$(date +%s%N); t=$((e-s)); if [[ -z "$best" || $t -lt $best ]]; then best=$t; fi; done; echo "$best"; }
 logsum=0; n=0
 for b in $NAMES; do

@@ -12,7 +12,7 @@
 # tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
 # Programs run with the repository root as working directory.
 cd "$(dirname "$0")/.." || exit 2
-ALC=${1:-./target/release/alc}
+ALC=${1:-./build/alc}
 FILTER=${2:-}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

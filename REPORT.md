@@ -4,6 +4,16 @@ State of the repository after the "fit for high-performance games" goal.
 `./verify.sh` is the single check for everything below; its last result is in
 [Verification](#verification).
 
+## Later change: the compiler is now written in AL
+
+After this report was written, the compiler was translated from Rust to AL and the Rust
+sources were removed (last Rust state: git tag `rust-final`). `alc` now compiles itself;
+see [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md). Everything below still holds, with
+"`cargo build --release`" replaced by "`./build.sh`" (seed compiler, three stages, stages 2
+and 3 byte-identical). The numbers in the verification section are from the Rust-built
+compiler; the AL-built compiler produced byte-identical executables for all of those
+programs, so they are unchanged apart from timing noise.
+
 ## Changes to the goal made by the user while the work was running
 
 - **No power-off.** The goal said to power the machine off at the end; the user came back and
@@ -55,7 +65,7 @@ have tests), the second passed. Two runs against a cap of 40 failures.
 
 | Check | Result |
 |-------|--------|
-| build | `cargo build --release`, Rust std only, no crates |
+| build | (at the time) `cargo build --release`, Rust std only, no crates; now `./build.sh` |
 | no external tools in the compile path | pass |
 | conformance | 190 passed, 0 failed, 1 skipped: language (default, `-O0`, `--unchecked`), standard library, system-dependent tests, bindings, diagnostics, unit tests |
 | `f32` against C | `tests/c/f32.al` prints the same 182 lines as `tests/c/f32.c` built with `clang -O2`, in all three build modes |

@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 
-ALC = os.path.join(os.path.dirname(__file__), "..", "..", "target", "release", "alc")
+ALC = os.path.join(os.path.dirname(__file__), "..", "..", "build", "alc")
 INT_TYPES = ["i64", "u64", "i32", "u32", "i16", "u16", "i8", "u8"]
 BITS = {"i64": 64, "u64": 64, "i32": 32, "u32": 32, "i16": 16, "u16": 16, "i8": 8, "u8": 8}
 

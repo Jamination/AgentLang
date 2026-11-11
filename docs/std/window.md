@@ -307,5 +307,5 @@ that many frames, which is handy for automated smoke tests.
 Window logic that does not need a display (key mapping, event translation, scaling) is covered
 by `tests/std/window_logic`. `tests/sys/window_x11` exercises a real window, but only on the
 display named by the environment variable `AL_TEST_DISPLAY` (for example an `Xvfb` instance:
-`Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./target/release/alc window`); without it the
+`Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./build/alc window`); without it the
 test is skipped, so the test suite never opens a window on the desktop it runs on.
