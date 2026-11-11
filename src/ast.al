@@ -115,6 +115,11 @@ enum SK {
     SKAssert(Expr, Opt[Expr]),
     SKBlock(Block),
     SKDefer(Block),
+    // `name: for/while/loop ...`: the loop statement with its label
+    SKLabeled(str, *Stmt),
+    // `break name` / `continue name`
+    SKBreakTo(str),
+    SKContinueTo(str),
 }
 
 struct FnDecl {

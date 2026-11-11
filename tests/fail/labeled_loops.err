@@ -1,0 +1,5 @@
+labeled_loops.al:4:9: error: `break nowhere`: there is no loop labelled `nowhere` around this statement (label a loop with `nowhere: for ...`, `nowhere: while ...` or `nowhere: loop ...`)
+labeled_loops.al:8:13: error: `continue outr`: there is no loop labelled `outr` around this statement (labels in scope: `inner`, `outer`)
+labeled_loops.al:12:9: error: loop label `again` is already used by the enclosing loop at line 11 (give nested loops different labels)
+labeled_loops.al:21:9: error: `continue done`: there is no loop labelled `done` around this statement
+labeled_loops.al:23:5: error: `break done`: there is no loop labelled `done` around this statement

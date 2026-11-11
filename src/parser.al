@@ -1021,9 +1021,30 @@ fn stmt_k(p *Parser) (SK, bool) {
         return (SKReturn(Some(e)), true)
     }
     if p.eat_kw("break") {
+        // a label must be on the same line (a newline after `break` ends the statement)
+        match p.peek() {
+            TkId(label) => {
+                p.bump()
+                return (SKBreakTo(label), true)
+            }
+            _ => {}
+        }
+        if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+            return p.err[SK]("`break` leaves a loop and takes at most a loop label (`break outer`): expected end of statement")
+        }
         return (SKBreak, true)
     }
     if p.eat_kw("continue") {
+        match p.peek() {
+            TkId(label) => {
+                p.bump()
+                return (SKContinueTo(label), true)
+            }
+            _ => {}
+        }
+        if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+            return p.err[SK]("`continue` takes at most a loop label (`continue outer`): expected end of statement")
+        }
         return (SKContinue, true)
     }
     if p.eat_kw("assert") {
@@ -1054,6 +1075,27 @@ fn stmt_k(p *Parser) (SK, bool) {
             return parser_fail[SK]()
         }
         return (SKBlock(b), true)
+    }
+    // a labelled loop: `name: for ...`, `name: while ...`, `name: loop ...`
+    if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ":") {
+        after := p.peek_at(2)
+        if parser_tk_kw(after, "for") || parser_tk_kw(after, "while") || parser_tk_kw(after, "loop") {
+            label, ok1 := p.ident()
+            if !ok1 {
+                return parser_fail[SK]()
+            }
+            p.bump()
+            inner, ok2 := p.stmt()
+            if !ok2 {
+                return parser_fail[SK]()
+            }
+            return (SKLabeled(label, parser_box(inner)), true)
+        }
+        if parser_tk_kw(after, "if") || parser_tk_kw(after, "match") || parser_tk_p(after, "{") {
+            p.bump()
+            p.bump()
+            return p.err[SK]("a label names a loop: expected `for`, `while` or `loop` after the label")
+        }
     }
     // multi-let: a, b := e
     if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ",") {

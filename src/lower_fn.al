@@ -44,6 +44,8 @@ struct Fx {
     sret Opt[i64]
     allocas Vec[i64]
     traps Map[(i64, i64), i64]
+    // labels of the enclosing labelled loops: (name, index of the loop in `loops`, line)
+    labels Vec[(str, i64, i64)]
 }
 
 fn lower_fn_str_less(a str, b str) bool {
@@ -157,6 +159,7 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
         sret: None,
         allocas: vec[i64](),
         traps: map[(i64, i64), i64](),
+        labels: vec[(str, i64, i64)](),
     }
     fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
     fx.cur = fx.f.new_block()
@@ -596,6 +599,36 @@ fn lower_fn_break_continue(fx *Fx, pos Pos, is_break bool) {
     fx.dead = true
 }
 
+// `break label` / `continue label`
+fn lower_fn_break_continue_to(fx *Fx, pos Pos, is_break bool, label str) {
+    idx := -1
+    for i in fx.labels.len - 1..=0 by -1 {
+        if fx.labels.buf[i].0 == label {
+            idx = fx.labels.buf[i].1
+            break
+        }
+    }
+    word := if is_break { "break" } else { "continue" }
+    if idx < 0 || idx >= fx.loops.len {
+        if fx.labels.len == 0 {
+            fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (label a loop with `", label, ": for ...`, `", label, ": while ...` or `", label, ": loop ...`)"))
+        } else {
+            names := vec[str]()
+            for i in fx.labels.len - 1..=0 by -1 {
+                names.push(fmt("`", fx.labels.buf[i].0, "`"))
+            }
+            fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (labels in scope: ", join(names.items(), ", "), ")"))
+        }
+        return
+    }
+    l := fx.loops.buf[idx]
+    target := if is_break { l.brk } else { l.cont }
+    fx.run_defers_down_to(l.scope_depth)
+    fx.f.blocks.buf[fx.cur].term = TermJmp(target)
+    fx.cur = fx.f.new_block()
+    fx.dead = true
+}
+
 fn stmt(self *Fx, s *Stmt) {
     match s.k {
         SKExpr(e) => {
@@ -915,6 +948,23 @@ fn stmt(self *Fx, s *Stmt) {
             bp := new[Block]()
             *bp = b
             self.scopes.buf[self.scopes.len - 1].defers.push(bp)
+        }
+        SKLabeled(label, inner) => {
+            for i in 0..self.labels.len {
+                if self.labels.buf[i].0 == label {
+                    self.err(s.pos, fmt("loop label `", label, "` is already used by the enclosing loop at line ", self.labels.buf[i].2, " (give nested loops different labels)"))
+                }
+            }
+            // the loop statement pushes its entry of `loops` at the current length
+            self.labels.push((label, self.loops.len, s.pos.line))
+            self.stmt(inner)
+            self.labels.pop()
+        }
+        SKBreakTo(label) => {
+            lower_fn_break_continue_to(self, s.pos, true, label)
+        }
+        SKContinueTo(label) => {
+            lower_fn_break_continue_to(self, s.pos, false, label)
         }
     }
 }

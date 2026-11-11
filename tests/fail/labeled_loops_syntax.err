@@ -1,0 +1,3 @@
+labeled_loops_syntax.al:4:10: error: a label names a loop: expected `for`, `while` or `loop` after the label, found keyword `if`
+labeled_loops_syntax.al:7:10: error: a label names a loop: expected `for`, `while` or `loop` after the label, found `{`
+labeled_loops_syntax.al:11:15: error: `break` leaves a loop and takes at most a loop label (`break outer`): expected end of statement, found number
