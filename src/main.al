@@ -29,6 +29,7 @@ use "x86/regalloc.al"
 use "x86/emit.al"
 use "x86/mod.al"
 use "elf.al"
+use "lower_mem.al"
 
 // `embed` is only accepted inside a function: PRELUDE and STD_MODULES are globals that
 // main_load_embedded fills once, first thing in main.

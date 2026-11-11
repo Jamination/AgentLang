@@ -44,6 +44,9 @@ struct Fx {
     sret Opt[i64]
     allocas Vec[i64]
     traps Map[(i64, i64), i64]
+    // argument expressions that were evaluated ahead of their call (see `call_shared`):
+    // `expr` yields the stored value instead of lowering the expression again
+    memo Vec[(*Expr, Val)]
 }
 
 fn lower_fn_str_less(a str, b str) bool {
@@ -1150,7 +1153,18 @@ fn for_stmt(self *Fx, var1 str, var2 Opt[str], lo *Expr, hi_o Opt[*Expr], incl b
                     self.pop_scope()
                     return
                 }
-                _ => {}
+                _ => {
+                    // the live elements of a Vec (also through a pointer)
+                    match self.vec_parts(self.auto_deref(cv), true) {
+                        Some(x) => {
+                            p = x.0
+                            ln = x.1
+                            et = x.2
+                            iterable = true
+                        }
+                        None => {}
+                    }
+                }
             }
             if !iterable {
                 tn := self.tyname(cv.ty)

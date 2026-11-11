@@ -699,6 +699,9 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 return self.call_indirect(fv, args, pos)
             }
             cands := self.cx.fn_candidates(n)
+            if cands.len != 0 && lower_mem_is_builtin(n) {
+                return self.call_shared(n, cands, None, None, c, args, expect, pos)
+            }
             if cands.len == 1 {
                 return self.call_decl(cands.buf[0], None, None, args, expect, pos, lower_call_no_pre())
             }
@@ -765,6 +768,9 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                                     }
                                 }
                             }
+                            if cands.len != 0 && lower_mem_is_builtin(n) {
+                                return self.call_shared(n, cands, Some(tys), None, c, args, expect, pos)
+                            }
                             if cands.len == 1 {
                                 return self.call_decl(cands.buf[0], Some(tys), None, args, expect, pos, lower_call_no_pre())
                             }
@@ -822,6 +828,9 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                             if rv.ty == T_ERR {
                                 return val_err()
                             }
+                            if lower_mem_is_builtin(name) {
+                                return self.call_shared(name, cands, Some(tys), Some(rv), recv, args, expect, pos)
+                            }
                             if cands.len == 1 {
                                 return self.call_decl(cands.buf[0], Some(tys), Some(rv), args, expect, pos, lower_call_no_pre())
                             }
@@ -868,6 +877,9 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 _ => {}
             }
             cands := self.cx.fn_candidates(name)
+            if lower_mem_is_builtin(name) && (cands.len != 0 || lower_mem_is_method_builtin(name)) {
+                return self.call_shared(name, cands, None, Some(rv), recv, args, expect, pos)
+            }
             if cands.len == 1 {
                 return self.call_decl(cands.buf[0], None, Some(rv), args, expect, pos, lower_call_no_pre())
             }
@@ -1556,7 +1568,7 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
                 }
                 None => {
                     tn := self.tyname(v.ty)
-                    self.err(pos, fmt("`len` needs a slice, array or str, found ", tn))
+                    self.err(pos, fmt("`len` needs a slice, array, str or Vec, found ", tn))
                     return Some(val_err())
                 }
             }
@@ -1988,6 +2000,9 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
                     return Some(val_err())
                 }
             }
+        }
+        "clone" => {
+            return Some(self.clone_builtin(args, expect, pos))
         }
         "put", "print" => {
             for i in 0..nargs {
