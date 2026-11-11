@@ -261,9 +261,7 @@ fn err[T](p *Parser, msg str) (T, bool) {
         }
         TkP(q) => {
             if q == "+" || q == "-" {
-                hint = " (there is no `++`/`--`/`->`: use `x += 1`, and write result types without an arrow)"
-            } else if q == ":" {
-                hint = " (types follow names without a colon: `x i64`)"
+                hint = " (there is no `++`/`--`: use `x += 1`)"
             }
         }
         _ => {}
@@ -320,20 +318,39 @@ fn file(p *Parser) Vec[Decl] {
         if parser_tk_eof(p.peek()) {
             break
         }
+        from := p.i
         d, ok := p.decl()
         if ok {
             out.push(d)
         } else {
-            p.sync_decl()
+            p.sync_decl(from)
         }
     }
     return out
 }
 
-fn sync_decl(p *Parser) {
-    // skip to the next top-level declaration keyword at line start
+// after an error in the declaration that starts at token `from`: skip to the next
+// top-level declaration, a line that starts outside all braces with a name followed by
+// `::`, `:` or `:=` or with a declaration keyword (also inside braces if it is at column 1:
+// the declaration in error may lack a `}`)
+fn sync_decl(p *Parser, from i64) {
     depth := 0
+    for j in from..p.i {
+        if parser_tk_p(p.toks[j].t, "{") {
+            depth += 1
+        } else if parser_tk_p(p.toks[j].t, "}") {
+            depth -= 1
+        }
+    }
+    if p.i == from {
+        p.bump()
+    }
+    // the parser may have stopped at the first token of a line (`name ::` at the end of a line)
+    starts := p.i > 0 && p.toks[p.i - 1].pos.line < p.pos().line && depth <= 0
     loop {
+        if p.i > 0 && parser_tk_nl(p.toks[p.i - 1].t) {
+            starts = depth <= 0 || p.pos().col == 1
+        }
         match p.peek() {
             TkEof => {
                 return
@@ -346,21 +363,42 @@ fn sync_decl(p *Parser) {
                 }
             }
             TkKw(k) => {
-                if depth <= 0 && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "var" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern" || k == "priv") {
-                    if p.i > 0 && parser_tk_nl(p.toks[p.i - 1].t) {
-                        return
-                    }
+                if starts && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "var" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern" || k == "priv") {
+                    return
                 }
             }
             TkId(s) => {
-                if depth <= 0 && s == "type" && p.i > 0 && parser_tk_nl(p.toks[p.i - 1].t) {
-                    return
+                if starts {
+                    t1 := p.peek_at(1)
+                    if parser_tk_p(t1, "::") || p.tparams_ahead() || (depth <= 0 && (parser_tk_p(t1, ":") || parser_tk_p(t1, ":=") || s == "type")) {
+                        return
+                    }
                 }
             }
             _ => {}
         }
         p.bump()
+        starts = false
     }
+}
+
+// With the parser at a name: do type parameters and `::` follow (`name[T, U] ::`)?
+fn tparams_ahead(p *Parser) bool {
+    if !parser_tk_p(p.peek_at(1), "[") {
+        return false
+    }
+    j := p.i + 2
+    loop {
+        if j >= p.toks.len || !parser_tk_id(p.toks[j].t) {
+            return false
+        }
+        j += 1
+        if !parser_tk_p(p.toks[j].t, ",") {
+            break
+        }
+        j += 1
+    }
+    return parser_tk_p(p.toks[j].t, "]") && parser_tk_p(p.toks[min(j + 1, p.toks.len - 1)].t, "::")
 }
 
 fn tparams(p *Parser) (Vec[str], bool) {
@@ -563,6 +601,400 @@ fn fn_expr(p *Parser, pos Pos) (Expr, bool) {
     return (Expr{k: EKTypeE(t), pos: pos}, true)
 }
 
+// With the parser at `(`: do the parameters of a function start here (in a declaration after
+// `::`, or an anonymous function)? `(` `)` followed by `->` or `{`, or `(` name `:`.
+fn at_fn(p *Parser) bool {
+    if !p.is_p("(") {
+        return false
+    }
+    if parser_tk_p(p.peek_at(1), ")") {
+        after := p.peek_at(2)
+        return parser_tk_p(after, "->") || parser_tk_p(after, "{")
+    }
+    return parser_tk_id(p.peek_at(1)) && parser_tk_p(p.peek_at(2), ":")
+}
+
+// With the parser at `(`: is the matching `)` followed by `what`? (`->`: a function type)
+fn parens_then(p *Parser, what str) bool {
+    if !p.is_p("(") {
+        return false
+    }
+    j := p.i + 1
+    depth := 1
+    while depth > 0 {
+        match p.toks[j].t {
+            TkEof => {
+                return false
+            }
+            TkP(q) => {
+                if q == "(" {
+                    depth += 1
+                } else if q == ")" {
+                    depth -= 1
+                }
+            }
+            _ => {}
+        }
+        j += 1
+    }
+    return parser_tk_p(p.toks[j].t, what)
+}
+
+// With the parser after the `::` of a declaration: is a function declared? The parameters
+// start as `at_fn` says; a `(...)` followed by `->` or `{` and a first parameter without
+// its colon are taken as a function too, for the error message.
+fn fn_ahead(p *Parser) bool {
+    return p.at_fn() || p.parens_then("->") || p.parens_then("{") || p.at_old_params()
+}
+
+// With the parser after a `->`: is `()` written for "no result"? (`() -> R` is a function type)
+fn at_no_result(p *Parser) bool {
+    return p.is_p("(") && parser_tk_p(p.peek_at(1), ")") && !parser_tk_p(p.peek_at(2), "->")
+}
+
+// `(a: A, b: B) [-> R]`: the parameters and the result of a function declaration or of an
+// anonymous function
+fn fn_sig(p *Parser, params *Vec[(str, TypeAst)], ret *Opt[TypeAst]) bool {
+    if !p.expect_p("(") {
+        return false
+    }
+    while !p.is_p(")") {
+        pn, ok1 := p.ident()
+        if !ok1 {
+            return false
+        }
+        if !p.eat_p(":") {
+            p.err[bool](fmt("a parameter is written `", pn, ": Type`: expected `:` after the name"))
+            return false
+        }
+        pt, ok2 := p.ty()
+        if !ok2 {
+            return false
+        }
+        params.push((pn, pt))
+        if !p.eat_p(",") {
+            break
+        }
+    }
+    if !p.expect_p(")") {
+        return false
+    }
+    if p.eat_p("->") {
+        if p.at_no_result() {
+            p.errs.push(Diag{pos: p.pos(), msg: "a function without a result is declared without an arrow: leave out `-> ()` (only a function type is written with it: `(i64) -> ()`)"})
+            p.bump()
+            p.bump()
+            return true
+        }
+        rt, ok3 := p.ty()
+        if !ok3 {
+            return false
+        }
+        *ret = Some(rt)
+    } else if p.starts_type() {
+        p.err[bool]("the result type of a function follows an arrow (`name :: (a: A) -> R { ... }`): expected `->` or `{`")
+        return false
+    }
+    return true
+}
+
+// At `(` where `at_fn` holds and an expression starts: an anonymous function
+// `(a: A, b: B) -> R { ... }`, or the function type `() -> R` (no body follows)
+fn anon_fn(p *Parser, pos Pos) (Expr, bool) {
+    if parser_tk_p(p.peek_at(1), ")") && parser_tk_p(p.peek_at(2), "->") {
+        start := p.i
+        nerr := p.errs.len
+        t, ok := p.ty()
+        if !ok {
+            return parser_fail[Expr]()
+        }
+        if !p.is_p("{") {
+            return (Expr{k: EKTypeE(t), pos: pos}, true)
+        }
+        p.i = start
+        p.errs.truncate(nerr)
+    }
+    params := vec[(str, TypeAst)]()
+    var ret Opt[TypeAst] = None
+    if !p.fn_sig(&params, &ret) {
+        return parser_fail[Expr]()
+    }
+    body, ok := p.block()
+    if !ok {
+        return parser_fail[Expr]()
+    }
+    d := FnDecl{name: "", tparams: vec[str](), params: params, ret: ret, body: body, pos: pos, inl: 0, ext: None}
+    return (Expr{k: EKFn(parser_box(d)), pos: pos}, true)
+}
+
+// the body of a struct after `struct`: `{ name: Type, ... }` (fields separated by `,` or
+// newlines)
+fn struct_rest(p *Parser, name str, tparams Vec[str], pos Pos) (Decl, bool) {
+    if !p.expect_p("{") {
+        return parser_fail[Decl]()
+    }
+    fields := vec[(str, TypeAst)]()
+    loop {
+        p.skip_nl()
+        if p.eat_p("}") {
+            break
+        }
+        if p.is_kw("priv") {
+            return p.err[Decl]("a struct field cannot be `priv` (only top-level declarations can): write `priv` in front of the declaration to make the whole struct private")
+        }
+        fname, ok1 := p.ident()
+        if !ok1 {
+            return parser_fail[Decl]()
+        }
+        if !p.eat_p(":") {
+            return p.err[Decl](fmt("a field is written `", fname, ": Type`: expected `:` after the name"))
+        }
+        fty, ok2 := p.ty()
+        if !ok2 {
+            return parser_fail[Decl]()
+        }
+        fields.push((fname, fty))
+        p.eat_p(",")
+    }
+    return (DeclStruct(StructDecl{name: name, tparams: tparams, fields: fields, pos: pos}), true)
+}
+
+// the body of an enum after `enum`: `{ Variant, Variant(Type, ...), ... }`
+fn enum_rest(p *Parser, name str, tparams Vec[str], pos Pos) (Decl, bool) {
+    if !p.expect_p("{") {
+        return parser_fail[Decl]()
+    }
+    variants := vec[(str, Vec[TypeAst])]()
+    loop {
+        p.skip_nl()
+        if p.eat_p("}") {
+            break
+        }
+        if p.is_kw("priv") {
+            return p.err[Decl]("an enum variant cannot be `priv` (only top-level declarations can): write `priv` in front of the declaration to make the enum type private")
+        }
+        vname, ok1 := p.ident()
+        if !ok1 {
+            return parser_fail[Decl]()
+        }
+        tys := vec[TypeAst]()
+        if p.eat_p("(") {
+            while !p.is_p(")") {
+                vt, ok2 := p.ty()
+                if !ok2 {
+                    return parser_fail[Decl]()
+                }
+                tys.push(vt)
+                if !p.eat_p(",") {
+                    break
+                }
+            }
+            if !p.expect_p(")") {
+                return parser_fail[Decl]()
+            }
+        }
+        variants.push((vname, tys))
+        p.eat_p(",")
+    }
+    return (DeclEnum(EnumDecl{name: name, tparams: tparams, variants: variants, pos: pos}), true)
+}
+
+// `inline` / `noinline` / `extern` in front of a declaration that is not a function
+fn not_fn(p *Parser, pos Pos, inl i64, ext *Opt[str], what str) bool {
+    word := ""
+    if is_some(*ext) {
+        word = "extern"
+    } else if inl > 0 {
+        word = "inline"
+    } else if inl < 0 {
+        word = "noinline"
+    }
+    if word == "" {
+        return false
+    }
+    p.errs.push(Diag{pos: pos, msg: fmt("`", word, "` applies to functions only, and this declares ", what, ": remove `", word, "`")})
+    return true
+}
+
+// A declaration that starts with its name (after the modifiers `inline` / `noinline` /
+// `extern "lib"`):
+//   name[T] :: (a: A) -> R { ... }    name[T] :: struct { ... }    name[T] :: enum { ... }
+//   name :: type T                    name :: value                name : T : value
+//   name : T                          name : T = value             name := value
+fn name_decl(p *Parser, pos Pos, inl i64, ext Opt[str]) (Decl, bool) {
+    name, ok1 := p.ident()
+    if !ok1 {
+        return parser_fail[Decl]()
+    }
+    tparams, ok2 := p.tparams()
+    if !ok2 {
+        return parser_fail[Decl]()
+    }
+    if p.is_p("::") {
+        cpos := p.pos()
+        p.bump()
+        if p.pos().line != cpos.line || parser_tk_eof(p.peek()) {
+            p.errs.push(Diag{pos: cpos, msg: fmt("`", name, " ::` is followed on the same line by what it declares: `(a: A) -> R { ... }` (a function), `struct { ... }`, `enum { ... }`, `type T`, or the value of a constant")})
+            return parser_fail[Decl]()
+        }
+        if p.eat_kw("struct") {
+            if p.not_fn(pos, inl, &ext, "a struct") {
+                return parser_fail[Decl]()
+            }
+            return p.struct_rest(name, tparams, pos)
+        }
+        if p.eat_kw("enum") {
+            if p.not_fn(pos, inl, &ext, "an enum") {
+                return parser_fail[Decl]()
+            }
+            return p.enum_rest(name, tparams, pos)
+        }
+        if parser_tk_word(p.peek(), "type") {
+            p.bump()
+            if p.not_fn(pos, inl, &ext, "a type alias") {
+                return parser_fail[Decl]()
+            }
+            if !tparams.is_empty() {
+                p.errs.push(Diag{pos: pos, msg: fmt("a type alias cannot have type parameters: write `", name, " :: type ...`")})
+                return parser_fail[Decl]()
+            }
+            at, ok3 := p.ty()
+            if !ok3 {
+                return parser_fail[Decl]()
+            }
+            return (DeclType(TypeDecl{name: name, ty: at, pos: pos}), true)
+        }
+        if p.fn_ahead() {
+            params := vec[(str, TypeAst)]()
+            var ret Opt[TypeAst] = None
+            if !p.fn_sig(&params, &ret) {
+                return parser_fail[Decl]()
+            }
+            match ext {
+                Some(lib) => {
+                    if !tparams.is_empty() {
+                        p.errs.push(Diag{pos: pos, msg: fmt("the C function `", name, "` cannot have type parameters")})
+                        return parser_fail[Decl]()
+                    }
+                    if p.is_p("{") {
+                        return p.err[Decl](fmt("an `extern` function is a C function of the library and has no body: expected end of line after the declaration of `", name, "`"))
+                    }
+                    return (DeclFn(FnDecl{name: name, tparams: tparams, params: params, ret: ret, body: Block{stmts: vec[Stmt](), end: pos}, pos: pos, inl: -1, ext: ext}), true)
+                }
+                None => {}
+            }
+            body, ok3 := p.block()
+            if !ok3 {
+                return parser_fail[Decl]()
+            }
+            return (DeclFn(FnDecl{name: name, tparams: tparams, params: params, ret: ret, body: body, pos: pos, inl: inl, ext: None}), true)
+        }
+        if p.not_fn(pos, inl, &ext, "a constant") {
+            return parser_fail[Decl]()
+        }
+        if !tparams.is_empty() {
+            p.errs.push(Diag{pos: pos, msg: fmt("only functions, structs and enums have type parameters: `", name, "[", join(tparams.items(), ", "), "] ::` must be followed by `(`, `struct` or `enum`")})
+            return parser_fail[Decl]()
+        }
+        val, ok3 := p.expr()
+        if !ok3 {
+            return parser_fail[Decl]()
+        }
+        if p.is_p("{") || p.is_p("->") {
+            return p.err[Decl](fmt("expected the end of the constant `", name, "` (a function is declared `", name, " :: (a: A) -> R { ... }`, a type alias `", name, " :: type T`)"))
+        }
+        return (DeclConst(ConstDecl{name: name, ty: None, val: val, pos: pos}), true)
+    }
+    if !tparams.is_empty() {
+        return p.err[Decl]("expected `::` after the type parameters of a declaration")
+    }
+    if p.eat_p(":=") {
+        if p.not_fn(pos, inl, &ext, "a variable") {
+            return parser_fail[Decl]()
+        }
+        ie, ok3 := p.expr()
+        if !ok3 {
+            return parser_fail[Decl]()
+        }
+        return (DeclGlobal(GlobalDecl{name: name, ty: None, init: Some(ie), pos: pos}), true)
+    }
+    if p.eat_p(":") {
+        vt, ok3 := p.ty()
+        if !ok3 {
+            return parser_fail[Decl]()
+        }
+        if p.is_p(":") {
+            cpos := p.pos()
+            p.bump()
+            if p.not_fn(pos, inl, &ext, "a constant") {
+                return parser_fail[Decl]()
+            }
+            if p.pos().line != cpos.line || parser_tk_eof(p.peek()) {
+                p.errs.push(Diag{pos: cpos, msg: fmt("the constant `", name, "` needs a value: `", name, " : ", ast_type_str(&vt), " : value`")})
+                return parser_fail[Decl]()
+            }
+            val, ok4 := p.expr()
+            if !ok4 {
+                return parser_fail[Decl]()
+            }
+            return (DeclConst(ConstDecl{name: name, ty: Some(vt), val: val, pos: pos}), true)
+        }
+        if p.not_fn(pos, inl, &ext, "a variable") {
+            return parser_fail[Decl]()
+        }
+        var init Opt[Expr] = None
+        if p.eat_p("=") {
+            ie, ok4 := p.expr()
+            if !ok4 {
+                return parser_fail[Decl]()
+            }
+            init = Some(ie)
+        }
+        return (DeclGlobal(GlobalDecl{name: name, ty: Some(vt), init: init, pos: pos}), true)
+    }
+    return p.err[Decl](fmt("expected `::`, `:` or `:=` after the name `", name, "` (`", name, " :: (a: A) -> R { ... }` declares a function, `", name, " :: value` a constant, `", name, ": T = value` a variable)"))
+}
+
+// With the parser at `(`: a parameter written without its colon (`(name Type`)?
+fn at_old_params(p *Parser) bool {
+    return p.is_p("(") && parser_tk_id(p.peek_at(1)) && (parser_tk_id(p.peek_at(2)) || parser_tk_kw(p.peek_at(2), "fn"))
+}
+
+// A function declared inside a block: `name :: (a: A) -> R { ... }`
+fn nested_fn(p *Parser) (SK, bool) {
+    pos := p.pos()
+    name, ok1 := p.ident()
+    if !ok1 {
+        return parser_fail[SK]()
+    }
+    tparams, ok2 := p.tparams()
+    if !ok2 || !p.expect_p("::") {
+        return parser_fail[SK]()
+    }
+    if !p.fn_ahead() {
+        what := "a constant is"
+        if p.is_kw("struct") {
+            what = "a struct is"
+        } else if p.is_kw("enum") {
+            what = "an enum is"
+        } else if parser_tk_word(p.peek(), "type") {
+            what = "a type alias is"
+        }
+        p.errs.push(Diag{pos: pos, msg: fmt("inside a function only functions can be declared with `::` (`", name, " :: (a: A) -> R { ... }`): ", what, " declared at the top level")})
+        return parser_fail[SK]()
+    }
+    params := vec[(str, TypeAst)]()
+    var ret Opt[TypeAst] = None
+    if !p.fn_sig(&params, &ret) {
+        return parser_fail[SK]()
+    }
+    body, ok3 := p.block()
+    if !ok3 {
+        return parser_fail[SK]()
+    }
+    return (SKFn(parser_box(FnDecl{name: name, tparams: tparams, params: params, ret: ret, body: body, pos: pos, inl: 0, ext: None})), true)
+}
+
 fn decl(p *Parser) (Decl, bool) {
     if p.is_kw("priv") {
         return p.priv_decl()
@@ -574,21 +1006,37 @@ fn decl(p *Parser) (Decl, bool) {
     } else if p.eat_kw("noinline") {
         inl = -1
     }
+    if p.is_kw("priv") {
+        return p.err[Decl]("`priv` is written first: `priv inline name :: ...`")
+    }
+    var ext Opt[str] = None
     if p.eat_kw("extern") {
-        // extern "libfoo.so.1" fn name(args) Result     (a C function; no body)
-        lib := ""
+        // extern "libfoo.so.1" name :: (a: A) -> R     (a C function; no body)
         match p.bump() {
             TkStr(s) => {
-                lib = parser_utf8_lossy(s)
+                ext = Some(parser_utf8_lossy(s))
             }
             _ => {
                 p.i -= 1
-                return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() i32`")
+                return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" getpid :: () -> i32`")
             }
         }
-        if !p.eat_kw("fn") {
-            return p.err[Decl]("expected `fn` after the library name")
+        if !p.is_kw("fn") && !parser_tk_id(p.peek()) {
+            return p.err[Decl]("expected the name of the C function after the library name, e.g. `extern \"libc.so.6\" getpid :: () -> i32`")
         }
+    }
+    if parser_tk_id(p.peek()) && !(parser_tk_word(p.peek(), "type") && parser_tk_id(p.peek_at(1))) {
+        return p.name_decl(pos, inl, ext)
+    }
+    if is_some(ext) {
+        lib := ""
+        match ext {
+            Some(l) => {
+                lib = l
+            }
+            None => {}
+        }
+        p.bump()
         name, ok1 := p.ident()
         if !ok1 {
             return parser_fail[Decl]()
@@ -633,7 +1081,7 @@ fn decl(p *Parser) (Decl, bool) {
         return (DeclFn(f), true)
     }
     if inl != 0 {
-        return p.err[Decl]("expected `fn` after inline/noinline")
+        return p.err[Decl]("`inline` / `noinline` stand in front of a function declaration: `inline name :: (a: A) -> R { ... }`")
     }
     if p.eat_kw("struct") {
         name, ok1 := p.ident()
@@ -892,6 +1340,21 @@ fn ty(p *Parser) (TypeAst, bool) {
         }
         if !p.expect_p(")") {
             return parser_fail[TypeAst]()
+        }
+        if p.eat_p("->") {
+            // a function type `(A, B) -> R`; `-> ()` for "no result"
+            var ret Opt[*TypeAst] = None
+            if p.at_no_result() {
+                p.bump()
+                p.bump()
+            } else {
+                rt, ok := p.ty()
+                if !ok {
+                    return parser_fail[TypeAst]()
+                }
+                ret = Some(parser_box(rt))
+            }
+            return (TypeAstFn(v, ret), true)
         }
         return (TypeAstTuple(v), true)
     }
@@ -1349,6 +1812,32 @@ fn stmt_k(p *Parser) (SK, bool) {
             p.bump()
             return p.err[SK]("a label names a loop: expected `for`, `while` or `loop` after the label")
         }
+        // a variable: `name: T` (zero value) or `name: T = value`
+        name, ok1 := p.ident()
+        if !ok1 {
+            return parser_fail[SK]()
+        }
+        p.bump()
+        vt, ok2 := p.ty()
+        if !ok2 {
+            return parser_fail[SK]()
+        }
+        if p.is_p(":") {
+            return p.err[SK](fmt("a constant is declared at the top level (`", name, " : ", ast_type_str(&vt), " : value` outside the function); a variable is `", name, ": ", ast_type_str(&vt), " = value`"))
+        }
+        var init Opt[Expr] = None
+        if p.eat_p("=") {
+            ie, ok3 := p.expr()
+            if !ok3 {
+                return parser_fail[SK]()
+            }
+            init = Some(ie)
+        }
+        return (SKVar(name, Some(vt), init), true)
+    }
+    // a nested function: `name :: (a: A) -> R { ... }`
+    if parser_tk_id(p.peek()) && (parser_tk_p(p.peek_at(1), "::") || p.tparams_ahead()) {
+        return p.nested_fn()
     }
     // multi-let: a, b := e
     if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ",") {
@@ -1911,6 +2400,21 @@ fn primary(p *Parser) (Expr, bool) {
         }
         TkP(q) => {
             if q == "(" {
+                if p.at_fn() {
+                    return p.anon_fn(pos)
+                }
+                if p.at_old_params() {
+                    p.bump()
+                    pn, okn := p.ident()
+                    return p.err[Expr](fmt("a parameter of an anonymous function is written `", pn, ": Type`: expected `:` after the name"))
+                }
+                if p.parens_then("->") {
+                    t, ok := p.ty()
+                    if !ok {
+                        return parser_fail[Expr]()
+                    }
+                    return (Expr{k: EKTypeE(t), pos: pos}, true)
+                }
                 p.bump()
                 save := p.no_lit
                 p.no_lit = false

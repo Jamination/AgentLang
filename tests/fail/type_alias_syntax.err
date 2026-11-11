@@ -1,4 +1,4 @@
 type_alias_syntax.al:2:7: error: a type alias cannot have type parameters: expected `=`, found `[`
-type_alias_syntax.al:3:6: error: expected identifier, found `=`
+type_alias_syntax.al:3:6: error: expected `::`, `:` or `:=` after the name `type` (`type :: (a: A) -> R { ... }` declares a function, `type :: value` a constant, `type: T = value` a variable), found `=`
 type_alias_syntax.al:4:8: error: expected `=`, found identifier `i64`
 3 error(s)
