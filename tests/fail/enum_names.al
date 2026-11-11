@@ -6,7 +6,7 @@ fn f(l: Light) -> str { "light" }
 fn Blue2() -> i64 { 1 }
 enum Bad { Blue2, f }
 enum Dup { X, Y, X }
-struct Red2 { x: i64 }
+const Red2 = 1
 enum Bad2 { Red2 }
 struct Node { next: *Node }
 fn main() {

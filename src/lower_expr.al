@@ -1004,6 +1004,39 @@ priv fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: 
             None => {}
         }
     }
+    if op == Eq || op == Ne {
+        // `x == Variant` with a variant without data of an enum with data: one tag comparison
+        ca := self.variant_cand(a)
+        if ca != self.variant_cand(b) {
+            c := if ca { a } else { b }
+            o := if ca { b } else { a }
+            if !self.is_untyped(o) {
+                oexp: Opt[i64] = None
+                match c.k {
+                    Field(q, _) => {
+                        qt := self.qual_enum(q).1
+                        if qt >= 0 && qt != T_ERR {
+                            oexp = Some(qt)
+                        }
+                    }
+                    _ => {}
+                }
+                x := self.expr(o, oexp)
+                vi := self.variant_tag(c, x.ty)
+                if vi >= 0 && x.mem {
+                    tag := self.load_raw(x.v, I64, AK_ANY)
+                    k := self.iconst(I64, vi)
+                    v := self.ins(if op == Eq { Op.Eq } else { Op.Ne }, I8, vec_two(tag, k), 0)
+                    return self.sval(T_BOOL, v)
+                }
+                cv := self.expr(c, Some(x.ty))
+                if ca {
+                    return self.binary_vals(op, cv, x, pos)
+                }
+                return self.binary_vals(op, x, cv, pos)
+            }
+        }
+    }
     both_untyped := self.is_untyped(a) && self.is_untyped(b)
     if both_untyped && (is_cv_float(self.cx.const_eval(a)) || is_cv_float(self.cx.const_eval(b))) {
         exp = Some(self.float_expect(exp))
@@ -1107,7 +1140,11 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
                 return self.sval(T_BOOL, v)
             }
             F64, F32 => { is_f = true }
-            Bool, Ptr(_), Fn(_, _), Enum(_) => { scalar_eq = true }
+            Bool, Ptr(_), Fn(_, _) => { scalar_eq = true }
+            Enum(_) => {
+                scalar_eq = self.cx.types.is_scalar(l.ty)
+                agg_eq = !scalar_eq
+            }
             Slice(et) if et == T_U8 => { str_eq = true }
             Slice(_), Array(_, _), Struct(_), Tuple(_) => { agg_eq = true }
             _ => {}
@@ -1160,7 +1197,11 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
             return self.sval(T_BOOL, x)
         }
         tn := self.tyname(l.ty)
-        self.err(pos, fmt("cannot compare values of type ", tn, " with this operator"))
+        if !eq_only {
+            self.err(pos, fmt("`<`, `<=`, `>`, `>=` work on numbers only, not on ", tn, if str_eq { " (order strings with `cmp(a, b) < 0`)" } else { "" }))
+        } else {
+            self.err(pos, fmt("values of type ", tn, " cannot be compared: `==` and `!=` work on numbers, bool, pointers, function values, enums, str, slices, arrays, structs and tuples"))
+        }
         return val_err()
     }
     is_f := false
@@ -1257,6 +1298,49 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
             for i in 0..ts.len {
                 names.push(fmt(i))
             }
+        }
+        Enum(eid) => {
+            // the same variant, and equal payload values
+            res := self.temp(T_BOOL)
+            tl := self.load_raw(l.v, I64, AK_ANY)
+            tr := self.load_raw(r.v, I64, AK_ANY)
+            same := self.ins(Op.Eq, I8, vec_two(tl, tr), 0)
+            self.store_raw(res, same, I8, 0)
+            bj := self.new_block()
+            b_same := self.new_block()
+            d := self.dead
+            self.br(same, b_same, bj)
+            self.switch_to(b_same)
+            for vi in 0..self.cx.types.enums[eid].variants.len {
+                ptys := clone(self.cx.types.enums[eid].variants[vi].1)
+                if ptys.len == 0 {
+                    continue
+                }
+                bt := self.new_block()
+                bn := self.new_block()
+                c := self.iconst(I64, vi)
+                is_v := self.ins(Op.Eq, I8, vec_two(tl, c), 0)
+                self.br(is_v, bt, bn)
+                self.switch_to(bt)
+                offs := self.cx.types.variant_offsets(eid, vi)
+                acc := self.iconst(I8, 1)
+                for i in 0..ptys.len {
+                    pl := self.load_any(self.add_off(l.v, offs[i]), ptys[i])
+                    pr := self.load_any(self.add_off(r.v, offs[i]), ptys[i])
+                    e := self.binary_vals(Eq, pl, pr, pos)
+                    if e.ty == T_ERR {
+                        return None
+                    }
+                    acc = self.ins(Op.And, I8, vec_two(acc, self.scalar(e)), 0)
+                }
+                self.store_raw(res, acc, I8, 0)
+                self.jmp(bj)
+                self.switch_to(bn)
+            }
+            self.jmp(bj)
+            self.switch_to(bj)
+            self.dead = d
+            return Some(self.load_raw(res, I8, 0))
         }
         _ => {}
     }

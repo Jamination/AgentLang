@@ -609,7 +609,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 if bv.2 == 1 {
                     return self.construct_variant(bv.0, bv.1, args, expect, pos)
                 }
-                self.variant_ambiguous(n, pos)
+                self.variant_ambiguous(n, c.pos)
                 lower_call_eval_all(self, args)
                 return val_err()
             }
@@ -1106,7 +1106,7 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
     }
     if alive.len == 0 {
         s := lower_call_call_overloaded_sigs(self, cands)
-        self.err(pos, fmt("no definition of `", name, "` takes ", total, " argument(s); candidates: ", s))
+        self.err(pos, fmt("no definition of `", name, "` takes ", total, " argument(s); candidates: ", s, self.cx.priv_note(name, pos)))
         lower_call_eval_all(self, args)
         return val_err()
     }
@@ -1164,7 +1164,7 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
             if keep.len == 0 {
                 tn := self.tyname(v.ty)
                 s := lower_call_call_overloaded_sigs(self, cands)
-                self.err(a.pos, fmt("no definition of `", name, "` takes ", tn, " as argument ", off + i + 1, " here; candidates: ", s))
+                self.err(a.pos, fmt("no definition of `", name, "` takes ", tn, " as argument ", off + i + 1, " here; candidates: ", s, self.cx.priv_note(name, pos)))
             }
         }
         if keep.len == 0 {
@@ -1270,7 +1270,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
         for j in 0..d.params.len {
             sig.push(d.params[j].0)
         }
-        self.err(pos, fmt("function `", d.name, "(", join(sig.items(), ", "), ")` expects ", d.params.len, " argument(s), got ", len(args) + nrecv))
+        self.err(pos, fmt("function `", d.name, "(", join(sig.items(), ", "), ")` expects ", d.params.len, " argument(s), got ", len(args) + nrecv, self.cx.priv_note(d.name, pos)))
         lower_call_eval_all(self, args)
         return val_err()
     }
@@ -1508,7 +1508,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             if is_ptr_to(self.cx.types.k(pt), v.ty) {
                 hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
             }
-            self.err(apos, fmt("argument `", d.params[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, hint))
+            self.err(apos, fmt("argument `", d.params[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, hint, self.cx.priv_note(d.name, pos)))
             failed = true
         }
         final_vals.push(v)
@@ -2058,6 +2058,48 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
         Enum(_) if self.cx.types.is_scalar(v.ty) => {
             x := self.scalar(v)
             return hash_u64(self, x, pos)
+        }
+        Enum(eid) => {
+            // the variant, mixed with the hashes of its payload values
+            res := self.alloca(8, 8)
+            tag := self.load_raw(v.v, I64, AK_ANY)
+            h0 := match hash_u64(self, tag, pos) {
+                Some(x) => x
+                None => return None
+            }
+            self.store_raw(res, h0, I64, 0)
+            bj := self.new_block()
+            d := self.dead
+            for vi in 0..self.cx.types.enums[eid].variants.len {
+                ptys := clone(self.cx.types.enums[eid].variants[vi].1)
+                if ptys.len == 0 {
+                    continue
+                }
+                bt := self.new_block()
+                bn := self.new_block()
+                c := self.iconst(I64, vi)
+                is_v := self.ins(Eq, I8, vec_two(tag, c), 0)
+                self.br(is_v, bt, bn)
+                self.switch_to(bt)
+                offs := self.cx.types.variant_offsets(eid, vi)
+                h := h0
+                for i in 0..ptys.len {
+                    pv := self.load_any(self.add_off(v.v, offs[i]), ptys[i])
+                    fh := match self.hash_val(pv, pos) {
+                        Some(x) => x
+                        None => return None
+                    }
+                    r := self.call_rt("__hash_mix", vec[i64](), vec_of([]Val{self.sval(T_U64, h), self.sval(T_U64, fh)}), pos)
+                    h = self.scalar(r)
+                }
+                self.store_raw(res, h, I64, 0)
+                self.jmp(bj)
+                self.switch_to(bn)
+            }
+            self.jmp(bj)
+            self.switch_to(bj)
+            self.dead = d
+            return Some(self.load_raw(res, I64, 0))
         }
         F32 => {
             d := self.convert(v, T_F64, pos)

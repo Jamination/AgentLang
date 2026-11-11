@@ -1432,6 +1432,16 @@ priv fn postfix(p: *Parser) -> (Expr, bool) {
             if !ok2 {
                 return fail[Expr]()
             }
+            // `[_]T{...}`: the length is the number of elements
+            match e.k {
+                TypeE(Array(n, t)) => {
+                    match n.k {
+                        Ident("_") => { e.k = TypeE(Array(parser_box(Expr{k: Int(u64(r.len)), pos: n.pos}), t)) }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
             e = Expr{k: Lit(parser_box(e), r), pos: pos}
         } else {
             break

@@ -187,7 +187,7 @@ fn main() {
     h2.val = 10
     h2.next.val = 20
     fp := clone(twice)
-    pp := clone(&p)
+    pp := &p
     pp.x = 77
     print(head.val, tail.val, h2.val, fp(4), p.x)
 

@@ -111,6 +111,16 @@ fn priv_hint(self: *Cx, n: str) -> str {
     return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
 
+// for a call that no visible definition of `n` accepts: says that a private declaration of
+// that name exists in another file than the one of the call
+fn priv_note(self: *Cx, n: str, at: Pos) -> str {
+    pos, found := self.priv_decls.get(n)
+    if !found || pos.file == at.file || pos.file < 0 || pos.file >= self.file_names.len {
+        return ""
+    }
+    return fmt(" (a `priv` declaration of `", n, "` exists in ", self.file_names[pos.file], ", line ", pos.line, ": it is visible only inside that file)")
+}
+
 fn lower_builtin_type(name: str) -> Opt[i64] {
     match name {
         "i8" => Some(T_I8)
@@ -212,6 +222,8 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
     names_fn := map[str, bool]()
+    // the layers (1 = prelude, 2 = user) in which a name is a struct
+    struct_layers := map[str, i64]()
     for i in 0..len(decls) {
         name: str
         pos: Pos
@@ -317,6 +329,9 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
         names.set(name, pos)
         names_fn.set(name, kind == 1)
         cx.decl_layers.set(name, cx.decl_layers.get_or(name, 0) | (if pos.file < np { 1 } else { 2 }))
+        if kind == 2 {
+            struct_layers.set(name, struct_layers.get_or(name, 0) | (if pos.file < np { 1 } else { 2 }))
+        }
         if kind == 1 {
             di := cx.fn_decls.len
             if pos.file < np {
@@ -363,15 +378,18 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
             cx.global_decls.set(name, gp)
         }
     }
-    // enum variants: two enums may use the same variant name; within a layer (prelude / user)
-    // a variant must not have the name of another kind of declaration
+    // enum variants: two enums may use the same variant name, and a variant may have the
+    // name of a struct (a struct name is a type; `Name{...}` is always the struct literal).
+    // Within a layer (prelude / user) it must not have the name of a function, constant,
+    // global or enum
     for ei in 0..cx.enum_decls.len {
         e := cx.enum_decls[ei]
         layer := if e.pos.file < np { 1 } else { 2 }
         for vi in 0..e.variants.len {
             vn := e.variants[vi].0
-            if cx.decl_layers.get_or(vn, 0) & layer != 0 {
-                cx.err(e.pos, fmt("enum variant `", vn, "` conflicts with another declaration"))
+            if cx.decl_layers.get_or(vn, 0) & layer != 0 && struct_layers.get_or(vn, 0) & layer == 0 {
+                what := if cx.const_decls.has(vn) { "constant" } else if cx.global_decls.has(vn) { "global variable" } else if names_fn.get_or(vn, false) { "function" } else { "enum" }
+                cx.err(e.pos, fmt("variant `", vn, "` of enum `", e.name, "` has the name of the ", what, " `", vn, "` declared at ", cx.pos_str(names.get_or(vn, e.pos)), "; a variant can share its name with variants of other enums and with a struct, not with a function, constant, global variable or enum"))
                 continue
             }
             dup := false

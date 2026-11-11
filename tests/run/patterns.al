@@ -275,7 +275,7 @@ fn main() {
         Small(n) => print(n)
     }
     match big {
-        Arr(a), Arr(a) => print(a[0])
+        Arr(a), Arr(a) if true => print(a[0])
         Small(_) => {}
     }
 

@@ -1,7 +1,7 @@
-enum variant `Blue2` conflicts with another declaration
-enum variant `f` conflicts with another declaration
+variant `Blue2` of enum `Bad` has the name of the function `Blue2` declared at tests/fail/enum_names.al:6:1; a variant can share its name with variants of other enums and with a struct
+variant `f` of enum `Bad` has the name of the function `f` declared at tests/fail/enum_names.al:5:1
 enum `Dup` declares the variant `X` twice
-enum variant `Red2` conflicts with another declaration
+variant `Red2` of enum `Bad2` has the name of the constant `Red2` declared at tests/fail/enum_names.al:9:1
 `Red` is a variant of Color and of Light, and `f` is defined for both; write `Enum.Red`
 `Red` is a variant of several enums (`Color`, `Light`) and the expected type does not say which; write `Color.Red` or `Light.Red`
 enum `Color` has no variant `Purple` (variants: Red, Green, Blue)

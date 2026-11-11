@@ -222,6 +222,13 @@ fn qual_variant(self: *Fx, ei: i64, ety: i64, name: str, args: []Expr, expect: O
     vi := self.cx.variant_of(ei, name)
     if vi < 0 {
         en := self.cx.enum_decls[ei].name
+        for v in self.cx.enum_decls[ei].variants {
+            if v.0 == name {
+                // declared, but its name clashes with another declaration: reported there
+                lower_call_eval_all(self, args)
+                return val_err()
+            }
+        }
         self.err(pos, fmt("enum `", en, "` has no variant `", name, "` (variants: ", variant_list(self.cx, ei), ")"))
         lower_call_eval_all(self, args)
         return val_err()
@@ -231,6 +238,58 @@ fn qual_variant(self: *Fx, ei: i64, ety: i64, name: str, args: []Expr, expect: O
         exp = Some(ety)
     }
     return self.construct_variant(ei, vi, args, exp, pos)
+}
+
+// Is `e` written like a variant without arguments: a bare variant name, `Enum.Variant` or
+// `Enum[T].Variant`?
+fn variant_cand(self: *Fx, e: *Expr) -> bool {
+    match e.k {
+        Ident(n) => return !is_some(self.lookup(n)) && self.bare_variant(n, None).2 != 0
+        Field(q, _) => {
+            match q.k {
+                Ident(qn) => return self.cx.qual_enum_name(qn) >= 0 && !is_some(self.lookup(qn))
+                Index(x, _) => {
+                    match x.k {
+                        Ident(qn) => return self.cx.qual_enum_name(qn) >= 0 && !is_some(self.lookup(qn))
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    return false
+}
+
+// If `ty` is an enum with data and `c` (see `variant_cand`) names one of its variants
+// without data: the index of that variant; otherwise -1.
+fn variant_tag(self: *Fx, c: *Expr, ty: i64) -> i64 {
+    eid := enum_of(self, ty)
+    if eid < 0 || self.cx.types.enums[eid].simple {
+        return -1
+    }
+    ed := self.cx.types.enums[eid].decl
+    vi := -1
+    match c.k {
+        Ident(n) => {
+            bv := self.bare_variant(n, Some(ty))
+            if bv.2 == 1 && bv.0 == ed {
+                vi = bv.1
+            }
+        }
+        Field(q, n) => {
+            qe := self.qual_enum(q)
+            if qe.0 == ed && (qe.1 < 0 || qe.1 == ty) {
+                vi = self.cx.variant_of(ed, n)
+            }
+        }
+        _ => {}
+    }
+    if vi >= 0 && self.cx.types.enums[eid].variants[vi].1.len != 0 {
+        return -1
+    }
+    return vi
 }
 
 // ---------- patterns ----------
@@ -548,6 +607,19 @@ priv fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
                     }
                     if !top {
                         if !self.cx.const_decls.has(n) {
+                            // a capitalised name where an enum is matched is meant as a variant
+                            pe := eid
+                            if pe < 0 {
+                                match self.cx.types.k(ty) {
+                                    Ptr(inner) => { pe = enum_of(self, inner) }
+                                    _ => {}
+                                }
+                            }
+                            if pe >= 0 && n[0] >= 'A' && n[0] <= 'Z' {
+                                en := self.cx.types.enums[pe].decl
+                                self.err(e.pos, fmt("`", n, "` is not a variant of `", self.cx.enum_decls[en].name, "` (variants: ", variant_list(self.cx, en), "); a binding starts with a lower-case letter"))
+                                return lower_match_err(ty, e.pos)
+                            }
                             return RPat{k: RP_BIND, ty: ty, pos: e.pos, name: n, nbinds: 1}
                         }
                         const_name = true
@@ -931,6 +1003,58 @@ priv fn bool_pat(s: *Fx, rp: *RPat) -> i64 {
     return r
 }
 
+// ---------- arms that cannot be reached ----------
+// the value of a constant pattern, if it is known at compile time
+priv fn const_key(s: *Fx, rp: *RPat) -> Opt[CV] {
+    match rp.e.k {
+        Int(n) => return Some(CV.Int(i64(n)))
+        Str(t) => return Some(CV.Str(t))
+        Ident(n) if is_some(s.lookup(n)) => return None
+        _ => {}
+    }
+    saved := s.cx.errs.len
+    r := s.cx.const_eval(rp.e)
+    s.cx.errs.truncate(saved)
+    return r
+}
+
+// Does the pattern `a` match every value that `b` matches? Only the plain cases: `a` matches
+// everything, or both have the same shape with parts that cover each other.
+priv fn covers(s: *Fx, a: *RPat, b: *RPat) -> bool {
+    if a.k == RP_WILD || a.k == RP_BIND || a.k == RP_REF {
+        return true
+    }
+    if a.k != b.k || a.k == RP_ERR {
+        return false
+    }
+    if a.k == RP_CONST {
+        match (a.e.k, b.e.k) {
+            (Nil, Nil) => return true
+            (Nil, _), (_, Nil) => return false
+            _ => {}
+        }
+        return match (const_key(s, a), const_key(s, b)) {
+            (Some(Int(x)), Some(Int(y))) => x == y
+            (Some(Float(x)), Some(Float(y))) => x == y
+            (Some(Bool(x)), Some(Bool(y))) => x == y
+            (Some(Str(x)), Some(Str(y))) => x == y
+            _ => false
+        }
+    }
+    if a.k == RP_VARIANT && a.vi != b.vi {
+        return false
+    }
+    if a.subs.len != b.subs.len {
+        return false
+    }
+    for i in 0..a.subs.len {
+        if !covers(s, &a.subs[i], &b.subs[i]) {
+            return false
+        }
+    }
+    return true
+}
+
 // ---------- exhaustiveness ----------
 // Patterns that always match the part they look at (a pattern with an error counts as one,
 // so that it does not cause a second diagnostic).
@@ -1155,6 +1279,133 @@ priv fn lower_match_missing(s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str]
     return out
 }
 
+// what the arms of a `match` share
+priv struct MatchSt {
+    // the value the patterns look at
+    part: Val
+    // the block after the match
+    bj: i64
+    want: bool
+    expect: Opt[i64]
+    // where the value of the match is stored, once an arm has fixed its type
+    slot: Opt[Val]
+    all_dead: bool
+    result_err: bool
+}
+
+// an arm after its patterns were checked and tested
+priv struct ArmSt {
+    body_b: i64
+    next_b: i64
+    rps: Vec[RPat]
+    // with several alternatives the bindings live in variables that each alternative fills
+    slots: Vec[(str, i64, i64)]
+    use_slots: bool
+    pat_err: bool
+}
+
+// Is the value of the arm `b` a variant whose enum type must come from the context: a name
+// that several enums have, or a variant of a generic enum without type arguments?
+priv fn needs_type(s: *Fx, b: *Block, binds: *Vec[(str, i64, Pos)]) -> bool {
+    if b.stmts.len == 0 {
+        return false
+    }
+    match b.stmts[b.stmts.len - 1].k {
+        ExprStmt(e) => {
+            match e.k {
+                Ident(n) => {
+                    for i in 0..binds.len {
+                        if binds[i].0 == n {
+                            return false
+                        }
+                    }
+                    if is_some(s.lookup(n)) {
+                        return false
+                    }
+                    bv := s.bare_variant(n, None)
+                    return bv.2 == 2 || (bv.2 == 1 && s.cx.enum_decls[bv.0].tparams.len != 0)
+                }
+                Field(_, _), Call(_, _) => return s.variant_ref(&e) != ""
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    return false
+}
+
+// the body of an arm: bindings, guard, value
+priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
+    npats := arm.pats.len
+    self.switch_to(a.body_b)
+    self.push_scope()
+    if a.use_slots {
+        for i in 0..a.slots.len {
+            self.scopes[self.scopes.len - 1].vars.set(a.slots[i].0, (a.slots[i].1, a.slots[i].2))
+        }
+    } else if a.pat_err {
+        // the arm's variables are unknown: give them the error type, which is silent
+        names := vec[str]()
+        for pi in 0..npats {
+            lower_match_names(self, &arm.pats[pi], true, &names)
+        }
+        for i in 0..names.len {
+            if names[i] != "_" {
+                self.scopes[self.scopes.len - 1].vars.set(names[i], (T_ERR, self.temp(T_ERR)))
+            }
+        }
+    } else if npats == 1 {
+        self.pat_bind(&a.rps[0], m.part, false, &a.slots, false)
+    }
+    match arm.guard {
+        Some(g) => {
+            // the guard sees the bindings; if it is false the next arm is tried
+            gb := self.new_block()
+            self.cond_br(g, gb, a.next_b)
+            self.switch_to(gb)
+        }
+        None => {}
+    }
+    exp := match m.slot {
+        Some(s) => Some(s.ty)
+        None => m.expect
+    }
+    v := self.block_value(&arm.body, m.want, exp)
+    d := self.dead
+    if m.want && !d {
+        if v.ty == T_ERR {
+            m.result_err = true
+        } else if v.ty == T_UNIT {
+            if is_some(m.slot) {
+                self.err(arm.pos, "match arm has no value but other arms do")
+            }
+        } else {
+            match m.slot {
+                Some(s) => {
+                    cv := self.coerce(v, s.ty, arm.pos)
+                    self.store(s, cv)
+                }
+                None => {
+                    // (after an arm with an error its type is unknown: no second message)
+                    if !m.all_dead && !m.result_err {
+                        self.err(arm.pos, "match arms have different types")
+                    } else {
+                        t := self.temp(v.ty)
+                        s := self.mval(v.ty, t)
+                        self.store(s, v)
+                        m.slot = Some(s)
+                    }
+                }
+            }
+        }
+    }
+    if !d {
+        m.all_dead = false
+    }
+    self.pop_scope()
+    self.jmp(m.bj)
+}
+
 // ---------- match ----------
 fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i64], pos: Pos) -> Val {
     sv := self.expr(sc, None)
@@ -1221,8 +1472,6 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
         }
     }
     bj := self.new_block()
-    slot: Opt[Val] = None
-    all_dead := true
     has_wild := false
     covered := match enum_id {
         Some(e) => vec_fill(self.cx.types.enums[e].variants.len, false)
@@ -1236,7 +1485,10 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     any_pat_err := false
     seen_true := false
     seen_false := false
-    result_err := false
+    m := MatchSt{part: part, bj: bj, want: want, expect: expect, slot: None, all_dead: true, result_err: false}
+    // the unguarded patterns so far with the line of their arm; the arms that wait for a type
+    prior := vec[(*RPat, i64)]()
+    deferred := vec[(i64, ArmSt)]()
     for ai in 0..len(arms) {
         arm := &arms[ai]
         body_b := self.new_block()
@@ -1301,6 +1553,19 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
             last := pi + 1 == npats
             fail_b := if last { next_b } else { self.new_block() }
             rp := &rps[pi]
+            if rp.k != RP_ERR {
+                for i in 0..prior.len {
+                    if covers(self, prior[i].0, rp) {
+                        at := if rp.pos.line != 0 { rp.pos } else { arm.pos }
+                        why := if prior[i].0.refutable { "has the same pattern" } else { "matches everything" }
+                        self.err(at, fmt("this pattern can never match: the arm in line ", prior[i].1, " ", why, if guarded { "" } else { " (remove one of them)" }))
+                        break
+                    }
+                }
+                if !guarded {
+                    prior.push((rp, arm.pos.line))
+                }
+            }
             // what the arm covers (an arm with a guard covers nothing)
             if rp.k == RP_ERR {
                 any_pat_err = true
@@ -1341,73 +1606,22 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
         if npats == 0 {
             self.jmp(next_b)
         }
-        self.switch_to(body_b)
-        self.push_scope()
-        if use_slots {
-            for i in 0..slots.len {
-                self.scopes[self.scopes.len - 1].vars.set(slots[i].0, (slots[i].1, slots[i].2))
-            }
-        } else if pat_err {
-            // the arm's variables are unknown: give them the error type, which is silent
-            names := vec[str]()
-            for pi in 0..npats {
-                lower_match_names(self, &arm.pats[pi], true, &names)
-            }
-            for i in 0..names.len {
-                if names[i] != "_" {
-                    self.scopes[self.scopes.len - 1].vars.set(names[i], (T_ERR, self.temp(T_ERR)))
-                }
-            }
-        } else if npats == 1 {
-            self.pat_bind(&rps[0], part, false, &slots, false)
+        // an arm whose value is a variant that needs its type from the other arms waits
+        // until one of them has fixed the type of the match
+        st := ArmSt{body_b: body_b, next_b: next_b, rps: rps, slots: slots, use_slots: use_slots, pat_err: pat_err}
+        if want && !is_some(m.slot) && !is_some(expect) && needs_type(self, &arm.body, &binds) {
+            deferred.push((ai, st))
+        } else {
+            self.arm_body(&m, arm, &st)
         }
-        match arm.guard {
-            Some(g) => {
-                // the guard sees the bindings; if it is false the next arm is tried
-                gb := self.new_block()
-                self.cond_br(g, gb, next_b)
-                self.switch_to(gb)
-            }
-            None => {}
-        }
-        exp := match slot {
-            Some(s) => Some(s.ty)
-            None => expect
-        }
-        v := self.block_value(&arm.body, want, exp)
-        d := self.dead
-        if want && !d {
-            if v.ty == T_ERR {
-                result_err = true
-            } else if v.ty == T_UNIT {
-                if is_some(slot) {
-                    self.err(arm.pos, "match arm has no value but other arms do")
-                }
-            } else {
-                match slot {
-                    Some(s) => {
-                        cv := self.coerce(v, s.ty, arm.pos)
-                        self.store(s, cv)
-                    }
-                    None => {
-                        if !all_dead {
-                            self.err(arm.pos, "match arms have different types")
-                        } else {
-                            a := self.temp(v.ty)
-                            s := self.mval(v.ty, a)
-                            self.store(s, v)
-                            slot = Some(s)
-                        }
-                    }
-                }
-            }
-        }
-        if !d {
-            all_dead = false
-        }
-        self.pop_scope()
-        self.jmp(bj)
         self.switch_to(next_b)
+    }
+    if deferred.len != 0 {
+        cur := self.cur
+        for i in 0..deferred.len {
+            self.arm_body(&m, &arms[deferred[i].0], &deferred[i].1)
+        }
+        self.switch_to(cur)
     }
     // fallthrough when no arm matched
     all_covered := true
@@ -1446,7 +1660,7 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     if exhaustive {
         self.terminate(Trap)
     } else {
-        if want && is_some(slot) && !any_pat_err {
+        if want && is_some(m.slot) && !any_pat_err {
             hint := if any_guard { " (an arm with a guard does not count: add an arm without a guard or `_ =>`)" } else { "" }
             if missing.len == 0 {
                 self.err(pos, if any_guard { "match used as a value must be exhaustive (add a `_ =>` arm; an arm with a guard does not count)" } else { "match used as a value must be exhaustive (add a `_ =>` arm)" })
@@ -1458,18 +1672,18 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
                 self.err(pos, fmt("match used as a value must be exhaustive; missing: ", join(missing.items(), ", "), hint))
             }
         }
-        all_dead = false
+        m.all_dead = false
         self.jmp(bj)
     }
     self.switch_to(bj)
-    self.dead = all_dead
-    if all_dead {
+    self.dead = m.all_dead
+    if m.all_dead {
         return val_never()
     }
-    if result_err {
+    if m.result_err {
         return val_err()
     }
-    match slot {
+    match m.slot {
         Some(s) => s
         None => val_unit()
     }

@@ -441,6 +441,14 @@ fn clone_builtin(self: *Fx, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
         self.err(args[0].pos, "`clone` needs a value; this expression has none")
         return val_err()
     }
+    match self.cx.types.k(v.ty) {
+        // (in a generic function the type may happen to be a pointer: copied as it is)
+        Ptr(_) if self.tenv.len == 0 => {
+            self.err(pos, "`clone` of a pointer would copy the pointer, not what it points to; write `clone(*p)` for a copy of the value, or assign the pointer itself")
+            return val_err()
+        }
+        _ => {}
+    }
     return self.clone_val(v, pos, 0)
 }
 
