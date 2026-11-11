@@ -336,9 +336,9 @@ Global initialisers (`x := ...`) follow the same rules and may name constants.
   independent copy).
 - No constant can be modified: assigning to it or to a field / element of it, and `&` on it or
   on a part of it are compile errors (`` `TABLE` is a constant: it cannot be assigned to (copy
-  it to a variable, or declare it as `TABLE := value` or `TABLE: T = value` instead of `::` to
-  make it a global variable)``). As the receiver
-  of a method call that takes a pointer, a constant is copied to a temporary.
+  it to a variable, or declare it without `const`, as `TABLE := value` or `TABLE: T = value`,
+  to make it a global variable)``). As the receiver of a method call that takes a pointer, a
+  constant is copied to a temporary.
 - `embed("file")` is the content of a file as a `str` constant. The path is relative to the
   source file that contains the call; the file is read once per path.
 
