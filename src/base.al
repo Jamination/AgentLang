@@ -302,83 +302,63 @@ fn ensure_stack(bytes i64) {
 }
 
 // ---------- working memory ----------
-// The compiler never frees: everything lives in the arena. Passes over one function create a
-// lot of short-lived data, so the compiler uses three heaps:
-//   0  the main heap: what must live to the end
-//   1  the work heap: one function being optimised or compiled. work_begin() switches every
-//      allocation to it, work_end() switches back and empties it. Whatever must survive is
-//      copied (deep `clone`) right after work_end(): the discarded memory stays readable until
-//      the next work_begin().
-//   2  the scratch heap: tables that a pass rebuilds on every round of a loop (predecessors,
-//      orderings, use counts). scratch_on() / scratch_off() bracket their construction and
-//      scratch_reset() at the top of the next round discards them. Nothing reachable from the
-//      function may be allocated between scratch_on() and scratch_off().
-var base_heaps [12]i64        // saved state of each heap: cur, end, base, hwm
-var base_heap_now i64         // the heap in use
-var base_heap_under i64       // the heap to return to at scratch_off()
-
-fn base_heap_use(h i64) {
-    o := base_heap_now * 4
-    base_heaps[o] = __heap_cur
-    base_heaps[o + 1] = __heap_end
-    base_heaps[o + 2] = __heap_base
-    base_heaps[o + 3] = __heap_hwm
-    n := h * 4
-    __heap_cur = base_heaps[n]
-    __heap_end = base_heaps[n + 1]
-    __heap_base = base_heaps[n + 2]
-    __heap_hwm = base_heaps[n + 3]
-    base_heap_now = h
-}
-
-// empties heap h (not the one in use); its memory is zeroed again when it is handed out
-fn base_heap_reset(h i64) {
-    o := h * 4
-    if base_heaps[o] > base_heaps[o + 3] {
-        base_heaps[o + 3] = base_heaps[o]
-    }
-    base_heaps[o] = base_heaps[o + 2]
-}
+// The compiler never frees: everything lives in an arena. Passes over one function create a
+// lot of short-lived data, so besides the main arena the compiler uses two regions:
+//   work     one function being optimised or compiled. work_begin() makes every allocation
+//            come from it, work_end() goes back and empties it. Whatever must survive is
+//            copied (deep `clone`) right after work_end(): the discarded memory stays readable
+//            until the next work_begin().
+//   scratch  tables that a pass rebuilds on every round of a loop (predecessors, orderings,
+//            use counts). scratch_on() / scratch_off() bracket their construction and
+//            scratch_reset() at the top of the next round discards them. Nothing reachable
+//            from the function may be allocated between scratch_on() and scratch_off().
+var base_work Region
+var base_scratch Region
+var base_working bool
+var base_scratching bool
 
 fn work_begin() {
-    assert base_heap_now == 0, "work_begin: already working"
-    base_heap_use(1)
+    assert !base_working, "work_begin: already working"
+    base_working = true
+    enter(&base_work)
 }
 
 fn work_end() {
-    assert base_heap_now == 1, "work_end without work_begin"
-    base_heap_use(0)
-    base_heap_reset(1)
-    base_heap_reset(2)
+    assert base_working && !base_scratching, "work_end without work_begin"
+    base_working = false
+    leave()
+    reset(&base_work)
+    reset(&base_scratch)
 }
 
-// allocate from the main heap for a moment while working (for results that must stay)
+// allocate from the main arena for a moment while working (for results that must stay)
 fn work_pause() {
-    assert base_heap_now == 1, "work_pause without work_begin"
-    base_heap_use(0)
+    assert base_working && !base_scratching, "work_pause without work_begin"
+    leave()
 }
 
 fn work_resume() {
-    base_heap_use(1)
+    enter(&base_work)
 }
 
 fn scratch_on() {
-    assert base_heap_now != 2, "scratch_on: already on"
-    base_heap_under = base_heap_now
-    base_heap_use(2)
+    assert !base_scratching, "scratch_on: already on"
+    base_scratching = true
+    enter(&base_scratch)
 }
 
 fn scratch_off() {
-    assert base_heap_now == 2, "scratch_off without scratch_on"
-    base_heap_use(base_heap_under)
+    assert base_scratching, "scratch_off without scratch_on"
+    base_scratching = false
+    leave()
 }
 
 fn scratch_reset() {
-    assert base_heap_now != 2, "scratch_reset while the scratch heap is in use"
-    base_heap_reset(2)
+    assert !base_scratching, "scratch_reset while the scratch region is in use"
+    reset(&base_scratch)
 }
 
-// the largest size the work heap has had, in bytes
+// the largest size the work region has had, in bytes (not to be called while working)
 fn work_peak() i64 {
-    return base_heaps[7] - base_heaps[6]
+    return max(base_work.hwm, base_work.cur) - base_work.base
 }
