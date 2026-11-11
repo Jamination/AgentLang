@@ -64,7 +64,7 @@ fn modified_time(path str) i64 {
 }
 
 fn __asset_read(dir str, name str) ([]u8, bool) {
-    fd := __asset_call(2, dir, name, 0, 0)
+    fd := __io_result(__asset_call(2, dir, name, 0, 0))
     if fd < 0 {
         return ("", false)
     }
@@ -72,7 +72,11 @@ fn __asset_read(dir str, name str) ([]u8, bool) {
     var st [18]i64
     if syscall(5, fd, ptr(st)) != 0 || st[6] <= 0 {
         // size unknown (pipes, /proc): read until end of file
-        return (read_all(fd), true)
+        data := read_all(fd)
+        if io_error() != 0 {
+            return ("", false)
+        }
+        return (data, true)
     }
     buf := alloc[u8](st[6])
     n := 0
@@ -81,7 +85,10 @@ fn __asset_read(dir str, name str) ([]u8, bool) {
         if r == -4 {
             continue
         }
-        if r <= 0 {
+        if __io_result(r) < 0 {
+            return ("", false)
+        }
+        if r == 0 {
             break
         }
         n += r
@@ -89,12 +96,13 @@ fn __asset_read(dir str, name str) ([]u8, bool) {
     return (buf[..n], true)
 }
 
-// the whole content of a file; (empty, false) if it cannot be opened. Allocates the result.
+// the whole content of a file; (empty, false) if it cannot be opened or read (`io_error()`
+// is then the OS error number, `error_text(io_error())` its text). Allocates the result.
 fn read_bytes(path str) ([]u8, bool) {
     return __asset_read(path, "")
 }
 
-// creates or replaces a file with the given content; false on failure
+// creates or replaces a file with the given content; false on failure (see `io_error()`)
 fn write_bytes(path str, data []u8) bool {
     m := mark()
     ok := write_file(path, data)
@@ -104,12 +112,12 @@ fn write_bytes(path str, data []u8) bool {
 
 // deletes a file; false if that failed
 fn remove_file(path str) bool {
-    return __asset_call(87, path, "", 0, 0) == 0
+    return __io_result(__asset_call(87, path, "", 0, 0)) == 0
 }
 
 // deletes an empty directory; false if that failed
 fn remove_dir(path str) bool {
-    return __asset_call(84, path, "", 0, 0) == 0
+    return __io_result(__asset_call(84, path, "", 0, 0)) == 0
 }
 
 // creates a directory and any missing parents; true if the directory exists afterwards
@@ -119,8 +127,14 @@ fn make_dir(path str) bool {
             __asset_call(83, path[..i], "", 493, 0)
         }
     }
-    __asset_call(83, path, "", 493, 0)
-    return is_dir(path)
+    r := __asset_call(83, path, "", 493, 0)
+    if is_dir(path) {
+        __io_result(0)
+        return true
+    }
+    // (not a directory although mkdir reported nothing: a file of that name exists)
+    __io_result(if r < 0 { r } else { -20 })
+    return false
 }
 
 fn __asset_name_less(a str, b str) bool {
@@ -132,7 +146,7 @@ fn __asset_name_less(a str, b str) bool {
 fn list_dir(path str) []str {
     names := vec[str]()
     // O_RDONLY | O_DIRECTORY
-    fd := __asset_call(2, path, "", 0x10000, 0)
+    fd := __io_result(__asset_call(2, path, "", 0x10000, 0))
     if fd < 0 {
         return names.items()
     }

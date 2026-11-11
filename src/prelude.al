@@ -1554,7 +1554,66 @@ fn __cstr(s str) i64 {
     return p
 }
 
-// everything readable from a file descriptor (0 = standard input)
+// the error number of the most recent failed file operation (0 after a success)
+var __io_errno i64
+
+// records the outcome of a system call: a negative result is `-errno`; returns `r`
+fn __io_result(r i64) i64 {
+    if r < 0 {
+        __io_errno = -r
+    } else {
+        __io_errno = 0
+    }
+    return r
+}
+
+// The OS error number (Linux errno) of the most recent failed file operation of the library
+// (`read_file`, `write_file`, `read_all`, and the file functions of std.asset); 0 if the
+// most recent one succeeded. Read it right after the call that returned `false`.
+fn io_error() i64 {
+    return __io_errno
+}
+
+// a short text for an OS error number, e.g. for `io_error()`
+fn error_text(e i64) str {
+    match e {
+        0 => return "no error"
+        1 => return "operation not permitted"
+        2 => return "no such file or directory"
+        4 => return "interrupted system call"
+        5 => return "input/output error"
+        6 => return "no such device or address"
+        9 => return "bad file descriptor"
+        11 => return "resource temporarily unavailable"
+        12 => return "out of memory"
+        13 => return "permission denied"
+        16 => return "device or resource busy"
+        17 => return "file exists"
+        18 => return "cross-device link"
+        19 => return "no such device"
+        20 => return "not a directory"
+        21 => return "is a directory"
+        22 => return "invalid argument"
+        23 => return "too many open files in system"
+        24 => return "too many open files"
+        26 => return "text file busy"
+        27 => return "file too large"
+        28 => return "no space left on device"
+        29 => return "illegal seek"
+        30 => return "read-only file system"
+        31 => return "too many links"
+        32 => return "broken pipe"
+        36 => return "file name too long"
+        39 => return "directory not empty"
+        40 => return "too many levels of symbolic links"
+        122 => return "disk quota exceeded"
+        _ => {}
+    }
+    return fmt("os error ", e)
+}
+
+// everything readable from a file descriptor (0 = standard input); what was read before an
+// error is returned, and `io_error()` tells whether there was one
 fn read_all(fd i64) str {
     buf := alloc[u8](65536)
     n := 0
@@ -1568,6 +1627,7 @@ fn read_all(fd i64) str {
         if r == -4 {
             continue
         }
+        __io_result(r)
         if r <= 0 {
             break
         }
@@ -1576,19 +1636,24 @@ fn read_all(fd i64) str {
     return buf[..n]
 }
 
+// the content of a file; ("", false) if it cannot be opened or read (see `io_error()`)
 fn read_file(path str) (str, bool) {
-    fd := syscall(2, __cstr(path), 0, 0)
+    fd := __io_result(syscall(2, __cstr(path), 0, 0))
     if fd < 0 {
         return ("", false)
     }
     data := read_all(fd)
     syscall(3, fd)
+    if __io_errno != 0 {
+        return ("", false)
+    }
     return (data, true)
 }
 
+// creates or replaces a file; false if that failed (see `io_error()`)
 fn write_file(path str, data str) bool {
     // O_WRONLY|O_CREAT|O_TRUNC, mode 0644
-    fd := syscall(2, __cstr(path), 577, 420)
+    fd := __io_result(syscall(2, __cstr(path), 577, 420))
     if fd < 0 {
         return false
     }
@@ -1601,6 +1666,8 @@ fn write_file(path str, data str) bool {
             continue
         }
         if r <= 0 {
+            // (a write of nothing without an error: reported as an input/output error)
+            __io_errno = if r < 0 { -r } else { 5 }
             ok = false
             break
         }
