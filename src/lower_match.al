@@ -831,6 +831,171 @@ fn lower_match_bool_pat(s *Fx, rp *RPat) i64 {
     return r
 }
 
+// ---------- exhaustiveness ----------
+// Patterns that always match the part they look at (a pattern with an error counts as one,
+// so that it does not cause a second diagnostic).
+fn lower_match_is_wild(p *RPat) bool {
+    return p.k == RP_WILD || p.k == RP_BIND || p.k == RP_REF || p.k == RP_ERR
+}
+
+// the row `r` with its first pattern replaced by that pattern's sub-patterns (`n` wildcards
+// if it is a wildcard)
+fn lower_match_expand(r *Vec[*RPat], n i64, wild *RPat) Vec[*RPat] {
+    p := r.buf[0]
+    out := vec[*RPat]()
+    if lower_match_is_wild(p) {
+        for i in 0..n {
+            out.push(wild)
+        }
+    } else {
+        for i in 0..p.subs.len {
+            out.push(&p.subs.buf[i])
+        }
+    }
+    for i in 1..r.len {
+        out.push(r.buf[i])
+    }
+    return out
+}
+
+// the witness `head(w[0], .., w[n-1])` followed by the rest of `w`
+fn lower_match_witness(head str, w *Vec[str], n i64, parens bool) Vec[str] {
+    out := vec[str]()
+    if parens {
+        out.push(fmt(head, "(", join(w.buf[..n], ", "), ")"))
+    } else {
+        out.push(head)
+    }
+    for i in n..w.len {
+        out.push(w.buf[i])
+    }
+    return out
+}
+
+// The rows of `rows` that can match a value whose first part is variant `vi` of enum `eid`,
+// checked against that variant's fields and the remaining columns.
+fn lower_match_uncovered_variant(s *Fx, rows *Vec[Vec[*RPat]], rest *Vec[i64], eid i64, vi i64, wild *RPat) (Vec[str], bool) {
+    ptys := clone(s.cx.types.enums.buf[eid].variants.buf[vi].1)
+    sub := vec[Vec[*RPat]]()
+    for i in 0..rows.len {
+        r := &rows.buf[i]
+        p := r.buf[0]
+        if lower_match_is_wild(p) || (p.k == RP_VARIANT && p.vi == vi) {
+            sub.push(lower_match_expand(r, ptys.len, wild))
+        }
+    }
+    sub_tys := clone(ptys)
+    sub_tys.extend(rest.items())
+    w, unc := lower_match_uncovered(s, &sub, &sub_tys, wild)
+    if !unc {
+        return (w, false)
+    }
+    name := s.cx.types.enums.buf[eid].variants.buf[vi].0
+    return (lower_match_witness(name, &w, ptys.len, ptys.len != 0), true)
+}
+
+// Is there a value (one part per column, of the types `tys`) that no row of patterns
+// matches? If so, such a value is returned in pattern form, one text per column.
+// (The usual algorithm: split on the constructors of the first column.)
+fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat) (Vec[str], bool) {
+    if tys.len == 0 {
+        return (vec[str](), rows.len == 0)
+    }
+    t := tys.buf[0]
+    rest := vec_of(tys.buf[1..tys.len])
+    eid := lower_match_enum_of(s, t)
+    if eid >= 0 {
+        nv := s.cx.types.enums.buf[eid].variants.len
+        for vi in 0..nv {
+            w, unc := lower_match_uncovered_variant(s, rows, &rest, eid, vi, wild)
+            if unc {
+                return (w, true)
+            }
+        }
+        return (vec[str](), false)
+    }
+    var elems Vec[i64]
+    is_tuple := false
+    match s.cx.types.k(t) {
+        TyKTuple(ts) => {
+            elems = ts
+            is_tuple = true
+        }
+        _ => {}
+    }
+    if is_tuple {
+        sub := vec[Vec[*RPat]]()
+        for i in 0..rows.len {
+            r := &rows.buf[i]
+            if lower_match_is_wild(r.buf[0]) || r.buf[0].k == RP_TUPLE {
+                sub.push(lower_match_expand(r, elems.len, wild))
+            }
+        }
+        sub_tys := clone(elems)
+        sub_tys.extend(rest.items())
+        w, unc := lower_match_uncovered(s, &sub, &sub_tys, wild)
+        if !unc {
+            return (w, false)
+        }
+        return (lower_match_witness("", &w, elems.len, true), true)
+    }
+    if t == T_BOOL {
+        for bv in 1..=0 by -1 {
+            sub := vec[Vec[*RPat]]()
+            for i in 0..rows.len {
+                r := &rows.buf[i]
+                if lower_match_is_wild(r.buf[0]) || lower_match_bool_pat(s, r.buf[0]) == bv {
+                    sub.push(lower_match_expand(r, 0, wild))
+                }
+            }
+            w, unc := lower_match_uncovered(s, &sub, &rest, wild)
+            if unc {
+                return (lower_match_witness(if bv == 1 { "true" } else { "false" }, &w, 0, false), true)
+            }
+        }
+        return (vec[str](), false)
+    }
+    // integers, strings, ...: constants never cover the type; only wildcards count
+    sub := vec[Vec[*RPat]]()
+    for i in 0..rows.len {
+        r := &rows.buf[i]
+        if lower_match_is_wild(r.buf[0]) {
+            sub.push(lower_match_expand(r, 0, wild))
+        }
+    }
+    w, unc := lower_match_uncovered(s, &sub, &rest, wild)
+    if !unc {
+        return (w, false)
+    }
+    return (lower_match_witness("_", &w, 0, false), true)
+}
+
+// What a match on a value of type `ty` with the pattern rows `rows` (one pattern each) does
+// not cover, in pattern form: for an enum one entry per variant that is not fully covered.
+fn lower_match_missing(s *Fx, rows *Vec[Vec[*RPat]], ty i64) Vec[str] {
+    out := vec[str]()
+    wild := new[RPat]()
+    wild.k = RP_WILD
+    eid := lower_match_enum_of(s, ty)
+    if eid >= 0 {
+        none := vec[i64]()
+        nv := s.cx.types.enums.buf[eid].variants.len
+        for vi in 0..nv {
+            w, unc := lower_match_uncovered_variant(s, rows, &none, eid, vi, wild)
+            if unc {
+                out.push(w.buf[0])
+            }
+        }
+        return out
+    }
+    tys := vec_one(ty)
+    w, unc := lower_match_uncovered(s, rows, &tys, wild)
+    if unc {
+        out.push(w.buf[0])
+    }
+    return out
+}
+
 // ---------- match ----------
 fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], pos Pos) Val {
     sv := self.expr(sc, None)
@@ -894,15 +1059,17 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
     all_dead := true
     has_wild := false
     covered := vec[bool]()
-    // variants that only have arms which do not count as covering them
-    partial := vec[bool]()
     match enum_id {
         Some(e) => {
             covered = vec_fill(self.cx.types.enums.buf[e].variants.len, false)
-            partial = vec_fill(self.cx.types.enums.buf[e].variants.len, false)
         }
         None => {}
     }
+    // payload enums and tuples: the unguarded patterns, for the exhaustiveness check
+    deep := payload_enum || is_tuple
+    rows := vec[Vec[*RPat]]()
+    any_guard := false
+    any_pat_err := false
     seen_true := false
     seen_false := false
     result_err := false
@@ -970,24 +1137,29 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
             last := pi + 1 == npats
             fail_b := if last { next_b } else { self.new_block() }
             rp := &rps.buf[pi]
-            // what the arm covers: only patterns that cannot fail below their top level
-            if rp.k == RP_VARIANT {
-                if !guarded && !lower_match_subs_refutable(rp) {
+            // what the arm covers (an arm with a guard covers nothing)
+            if rp.k == RP_ERR {
+                any_pat_err = true
+            } else if guarded {
+                any_guard = true
+            } else if rp.k == RP_VARIANT {
+                if !lower_match_subs_refutable(rp) {
                     covered.buf[rp.vi] = true
-                } else {
-                    partial.buf[rp.vi] = true
                 }
-            } else if rp.k != RP_ERR && !guarded {
-                if !rp.refutable {
-                    has_wild = true
-                } else if sv.ty == T_BOOL {
-                    bp := lower_match_bool_pat(self, rp)
-                    if bp == 1 {
-                        seen_true = true
-                    } else if bp == 0 {
-                        seen_false = true
-                    }
+            } else if !rp.refutable {
+                has_wild = true
+            } else if sv.ty == T_BOOL {
+                bp := lower_match_bool_pat(self, rp)
+                if bp == 1 {
+                    seen_true = true
+                } else if bp == 0 {
+                    seen_false = true
                 }
+            }
+            if deep && !guarded {
+                row := new[RPat]()
+                *row = *rp
+                rows.push(vec_one(row))
             }
             if use_slots {
                 bind_b := self.new_block()
@@ -1082,31 +1254,38 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         }
     }
     exhaustive := has_wild || (is_some(enum_id) && all_covered) || (seen_true && seen_false)
-    if exhaustive {
-        self.terminate(TermTrap)
-    } else {
-        if want && is_some(slot) {
-            missing := vec[str]()
-            any_partial := false
+    missing := vec[str]()
+    if !exhaustive {
+        if deep {
+            // patterns with constants or variants inside can cover a value together
+            missing = lower_match_missing(self, &rows, sv.ty)
+            exhaustive = missing.len == 0
+        } else {
             match enum_id {
                 Some(e) => {
                     for i in 0..covered.len {
                         if !covered.buf[i] {
                             missing.push(self.cx.types.enums.buf[e].variants.buf[i].0)
-                            if partial.buf[i] {
-                                any_partial = true
-                            }
                         }
                     }
                 }
                 None => {}
             }
+        }
+    }
+    if exhaustive {
+        self.terminate(TermTrap)
+    } else {
+        if want && is_some(slot) && !any_pat_err {
+            hint := if any_guard { " (an arm with a guard does not count: add an arm without a guard or `_ =>`)" } else { "" }
             if missing.len == 0 {
-                self.err(pos, "match used as a value must be exhaustive (add a `_ =>` arm)")
-            } else if any_partial {
-                self.err(pos, fmt("match used as a value must be exhaustive; missing: ", join(missing.items(), ", "), " (an arm with a guard, or with a constant or variant inside its pattern, does not cover its variant; add an arm without them or `_ =>`)"))
+                self.err(pos, if any_guard { "match used as a value must be exhaustive (add a `_ =>` arm; an arm with a guard does not count)" } else { "match used as a value must be exhaustive (add a `_ =>` arm)" })
             } else {
-                self.err(pos, fmt("match used as a value must be exhaustive; missing: ", join(missing.items(), ", ")))
+                if missing.len > 8 {
+                    missing.truncate(8)
+                    missing.push("...")
+                }
+                self.err(pos, fmt("match used as a value must be exhaustive; missing: ", join(missing.items(), ", "), hint))
             }
         }
         all_dead = false
