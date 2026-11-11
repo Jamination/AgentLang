@@ -1,0 +1,21 @@
+14:17: error: argument `f` of `takes`: expected |i64, i64| bool, found |i64, f64| bool
+15:19: error: this closure literal uses the local variable `k`, so it cannot be a plain function fn(i64) i64
+10:5: error: this closure literal uses the local variable `base`, so it cannot be a plain function fn(i64) i64
+17:12: error: closure of type |i64| i64 expects 1 argument(s), got 2
+18:13: error: closures cannot be compared (operands of type |i64| i64)
+19:15: error: values of type |i64| i64 cannot be hashed
+21:19: error: `break`/`continue` outside of a loop
+24:22: error: this closure literal has no result type, so its body cannot end in a value; write the result type after the parameters
+25:26: error: type mismatch: expected fn(i64) i64, found |i64| i64 (a closure value may carry an environment
+27:13: error: closures cannot be compared
+28:23: error: type mismatch: expected |i64| i64, found fn(|i64, i64| bool) bool
+29:19: error: the closure must return a value of type i64
+30:16: error: no definition of `pick` takes |f64| i64 as argument 1 here
+31:24: error: unknown identifier `later`
+33:40: error: type mismatch: expected bool, found i64
+34:19: error: type mismatch: expected |i64|, found |i64| i64
+35:20: error: argument `f` of `gen`: expected |str| str, found fn(|i64, i64| bool) bool
+36:10: error: a closure type cannot be used as a value here
+37:13: error: closures cannot be compared
+38:7: error: type mismatch: expected i64, found str
+40:9: error: |i64| i64 has no field `missing`

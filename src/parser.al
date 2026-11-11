@@ -7,6 +7,9 @@ struct Parser {
     no_lit bool
     // inside the header of `if`, `while` or `for` (not `match`); only looked at with `no_lit`
     hdr_stmt bool
+    // > 0 inside the `|...|` of a closure type or literal: there a `|` closes the list, so a
+    // function or closure type cannot be followed by a result type that starts with `|`
+    bars i64
 }
 
 fn parser_new(toks Vec[Token], errs *Vec[Diag]) Parser {
@@ -756,7 +759,7 @@ fn starts_type(p *Parser) bool {
             return true
         }
         TkP(q) => {
-            return q == "*" || q == "[" || q == "("
+            return q == "*" || q == "[" || q == "(" || q == "|" || q == "||"
         }
         TkKw(k) => {
             return k == "fn"
@@ -764,6 +767,131 @@ fn starts_type(p *Parser) bool {
         _ => {}
     }
     return false
+}
+
+// does a result type follow a function or closure type?
+fn starts_result(p *Parser) bool {
+    if p.bars > 0 && (p.is_p("|") || p.is_p("||")) {
+        return false
+    }
+    return p.starts_type()
+}
+
+// the `|` that closes the parameter list of a closure type or literal; a `||` token is
+// split in two (`|f |i64||`)
+fn close_bar(p *Parser) bool {
+    if p.is_p("||") {
+        t := p.toks.buf[p.i]
+        p.toks.buf[p.i] = Token{t: TkP("|"), pos: t.pos, nl: false}
+        p.toks.insert(p.i + 1, Token{t: TkP("|"), pos: Pos{file: t.pos.file, line: t.pos.line, col: t.pos.col + 1}, nl: t.nl})
+    }
+    return p.expect_p("|")
+}
+
+// A closure type can end a line (`var f |i64|`), but the lexer does not end a statement
+// after `|`: it only marks the token, and the newline token is added here.
+fn bar_newline(p *Parser) {
+    if p.i > 0 && p.toks.buf[p.i - 1].nl && !parser_tk_nl(p.peek()) {
+        p.toks.insert(p.i, Token{t: TkNl, pos: p.toks.buf[p.i - 1].pos, nl: false})
+    }
+}
+
+// the parameter types of a closure type after the opening `|`, and the closing `|`
+fn parser_closure_types(p *Parser, v *Vec[TypeAst]) bool {
+    // (a `|` here starts a parameter that is itself a closure type: `| |i64| bool, i64|`)
+    loop {
+        t, ok := p.ty()
+        if !ok {
+            return false
+        }
+        v.push(t)
+        if !p.eat_p(",") {
+            break
+        }
+    }
+    if !(p.is_p("|") || p.is_p("||")) && p.starts_type() {
+        z, ok := p.err[bool]("a closure type lists only the parameter types, without names (`|i64, i64| bool`): expected `,` or `|`")
+        return ok
+    }
+    return p.close_bar()
+}
+
+// the parameters `a A, b B` of a closure literal after the opening `|`, and the closing `|`
+fn parser_closure_params(p *Parser, params *Vec[(str, TypeAst)]) bool {
+    while !(p.is_p("|") || p.is_p("||")) {
+        name, ok1 := p.ident()
+        if !ok1 {
+            return false
+        }
+        t, ok2 := p.ty()
+        if !ok2 {
+            return false
+        }
+        params.push((name, t))
+        if !p.eat_p(",") {
+            break
+        }
+    }
+    return p.close_bar()
+}
+
+// `|a A, b B| R` of a closure literal; true if a `{` follows
+fn closure_header(p *Parser, params *Vec[(str, TypeAst)], ret *Opt[*TypeAst]) bool {
+    if !p.eat_p("||") {
+        p.bump()
+        save := p.bars
+        p.bars = save + 1
+        ok := parser_closure_params(p, params)
+        p.bars = save
+        if !ok {
+            return false
+        }
+    }
+    if !p.is_p("{") {
+        rt, ok := p.ty()
+        if !ok {
+            return false
+        }
+        *ret = Some(parser_box(rt))
+    }
+    return p.is_p("{")
+}
+
+// At `|` or `||` where an expression starts: a closure literal `|a A| R { ... }`, or a
+// closure type used as a type argument (`vec[|i64| bool]()`).
+fn closure_expr(p *Parser, pos Pos) (Expr, bool) {
+    start := p.i
+    nerr := p.errs.len
+    save := p.bars
+    params := vec[(str, TypeAst)]()
+    var ret Opt[*TypeAst] = None
+    if p.closure_header(&params, &ret) {
+        p.bars = 0
+        body, ok := p.block()
+        p.bars = save
+        if !ok {
+            return parser_fail[Expr]()
+        }
+        return (Expr{k: EKClosure(params, ret, parser_box(body)), pos: pos}, true)
+    }
+    p.i = start
+    p.bars = save
+    p.errs.truncate(nerr)
+    if start > 0 && (parser_tk_nl(p.toks.buf[start - 1].t) || parser_tk_p(p.toks.buf[start - 1].t, "{") || parser_tk_p(p.toks.buf[start - 1].t, ";")) {
+        // a statement that starts with `|` or `||` and is not a closure literal
+        op := if p.is_p("||") { "||" } else { "|" }
+        p.errs.push(Diag{pos: pos, msg: fmt("a line cannot start with the binary operator `", op, "` (end the previous line with it); a closure literal is written `|a i64, b i64| bool { a < b }`")})
+        return parser_fail[Expr]()
+    }
+    t, ok := p.ty()
+    p.bars = save
+    if ok && !p.is_p("{") {
+        return (Expr{k: EKTypeE(t), pos: pos}, true)
+    }
+    p.i = start
+    p.errs.truncate(nerr)
+    p.errs.push(Diag{pos: pos, msg: "expected a closure literal `|a i64, b i64| bool { a < b }` (every parameter has a name and a type, the result type follows the second `|`, the body is a block in braces) or a closure type `|i64, i64| bool`"})
+    return parser_fail[Expr]()
 }
 
 fn ty(p *Parser) (TypeAst, bool) {
@@ -801,6 +929,9 @@ fn ty(p *Parser) (TypeAst, bool) {
         return (TypeAstArray(nb, parser_box(t)), true)
     }
     if p.eat_p("(") {
+        // (inside brackets a `|` cannot close an enclosing closure parameter list)
+        save_bars := p.bars
+        p.bars = 0
         v := vec[TypeAst]()
         while !p.is_p(")") {
             t, ok := p.ty()
@@ -815,12 +946,15 @@ fn ty(p *Parser) (TypeAst, bool) {
         if !p.expect_p(")") {
             return parser_fail[TypeAst]()
         }
+        p.bars = save_bars
         return (TypeAstTuple(v), true)
     }
     if p.eat_kw("fn") {
         if !p.expect_p("(") {
             return parser_fail[TypeAst]()
         }
+        save_bars := p.bars
+        p.bars = 0
         v := vec[TypeAst]()
         while !p.is_p(")") {
             t, ok := p.ty()
@@ -835,8 +969,9 @@ fn ty(p *Parser) (TypeAst, bool) {
         if !p.expect_p(")") {
             return parser_fail[TypeAst]()
         }
+        p.bars = save_bars
         var ret Opt[*TypeAst] = None
-        if p.starts_type() {
+        if p.starts_result() {
             rt, ok := p.ty()
             if !ok {
                 return parser_fail[TypeAst]()
@@ -845,11 +980,37 @@ fn ty(p *Parser) (TypeAst, bool) {
         }
         return (TypeAstFn(v, ret), true)
     }
+    if p.is_p("|") || p.is_p("||") {
+        // closure type: |A, B| R
+        v := vec[TypeAst]()
+        if !p.eat_p("||") {
+            p.bump()
+            save_bars := p.bars
+            p.bars = save_bars + 1
+            ok := parser_closure_types(p, &v)
+            p.bars = save_bars
+            if !ok {
+                return parser_fail[TypeAst]()
+            }
+        }
+        p.bar_newline()
+        var ret Opt[*TypeAst] = None
+        if p.starts_result() {
+            rt, ok := p.ty()
+            if !ok {
+                return parser_fail[TypeAst]()
+            }
+            ret = Some(parser_box(rt))
+        }
+        return (TypeAstClosure(v, ret), true)
+    }
     match p.peek() {
         TkId(name) => {
             p.bump()
             args := vec[TypeAst]()
             if p.eat_p("[") {
+                save_bars := p.bars
+                p.bars = 0
                 loop {
                     t, ok := p.ty()
                     if !ok {
@@ -863,6 +1024,7 @@ fn ty(p *Parser) (TypeAst, bool) {
                 if !p.expect_p("]") {
                     return parser_fail[TypeAst]()
                 }
+                p.bars = save_bars
             }
             return (TypeAstName(name, args, pos), true)
         }
@@ -1809,6 +1971,10 @@ fn primary(p *Parser) (Expr, bool) {
                 return (Expr{k: EKMatch(sb, r), pos: pos}, true)
             }
             if k == "fn" {
+                if parser_tk_p(p.peek_at(1), "(") && parser_tk_id(p.peek_at(2)) && (parser_tk_id(p.peek_at(3)) || parser_tk_p(p.peek_at(3), "*") || parser_tk_kw(p.peek_at(3), "fn")) {
+                    p.errs.push(Diag{pos: pos, msg: "an anonymous function is written as a closure literal: `|a i64, b i64| bool { a < b }` (`fn(A, B) R` is a function type)"})
+                    return parser_fail[Expr]()
+                }
                 t, ok := p.ty()
                 if !ok {
                     return parser_fail[Expr]()
@@ -1817,6 +1983,9 @@ fn primary(p *Parser) (Expr, bool) {
             }
         }
         TkP(q) => {
+            if q == "|" || q == "||" {
+                return p.closure_expr(pos)
+            }
             if q == "(" {
                 p.bump()
                 save := p.no_lit

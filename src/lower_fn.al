@@ -175,15 +175,23 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
 fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
     d := cx.fn_decls.buf[di]
     cx.scope_prelude = cx.internal_file(d.pos.file)
+    tenv := map[str, i64]()
+    for i in 0..min(d.tparams.len, targs.len) {
+        tenv.set(d.tparams.buf[i], targs.buf[i])
+    }
+    lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, vec[(str, i64)]())
+}
+
+// Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
+// declared function `name`, or the function of a closure literal (`name` is empty). `caps`
+// are the variables a closure captures (name, type): the last IR parameter is then the
+// environment, an array of their addresses, and the names are declared in the outermost scope.
+fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, caps Vec[(str, i64)]) {
     sig := cx.fn_sigs.buf[fid]
     ptys := sig.0
     rty := sig.1
     f := cx.module.funcs.buf[fid]
     cx.module.funcs.buf[fid] = func_new("")
-    tenv := map[str, i64]()
-    for i in 0..min(d.tparams.len, targs.len) {
-        tenv.set(d.tparams.buf[i], targs.buf[i])
-    }
     fx := Fx{
         cx: cx,
         f: f,
@@ -209,19 +217,19 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
         }
         _ => {}
     }
-    for i in 0..d.params.len {
-        pname := d.params.buf[i].0
+    for i in 0..params.len {
+        pname := params.buf[i].0
         pt := ptys.buf[i]
         match fx.cx.abi_param(pt) {
             ParamAbiScalar(t) => {
                 p := fx.ins(OpParam, t, vec[i64](), pi)
                 pi += 1
-                addr := fx.declare(pname, pt, d.pos)
+                addr := fx.declare(pname, pt, pos)
                 ak := fx.cx.types.scalar_ir(pt).1
                 fx.store_raw(addr, p, t, ak)
             }
             ParamAbiFlat(leaves) => {
-                addr := fx.declare(pname, pt, d.pos)
+                addr := fx.declare(pname, pt, pos)
                 for li in 0..leaves.len {
                     l := leaves.buf[li]
                     p := fx.ins(OpParam, l.t, vec[i64](), pi)
@@ -236,8 +244,19 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
                 had := fx.scopes.buf[0].vars.has(pname)
                 fx.scopes.buf[0].vars.set(pname, (pt, p))
                 if had {
-                    fx.cx.err(d.pos, fmt("duplicate parameter `", pname, "`"))
+                    fx.cx.err(pos, fmt("duplicate parameter `", pname, "`"))
                 }
+            }
+        }
+    }
+    if caps.len != 0 {
+        // the environment of a closure: the addresses of the captured variables
+        envp := fx.ins(OpParam, TI64, vec[i64](), pi)
+        for i in 0..caps.len {
+            if !fx.scopes.buf[0].vars.has(caps.buf[i].0) {
+                a := fx.add_off(envp, 8 * i)
+                addr := fx.load_raw(a, TI64, AK_PTR)
+                fx.scopes.buf[0].vars.set(caps.buf[i].0, (caps.buf[i].1, addr))
             }
         }
     }
@@ -246,17 +265,18 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
     if want {
         expect = Some(rty)
     }
-    v := fx.block_value(&d.body, want, expect)
+    v := fx.block_value(body, want, expect)
     if !fx.dead {
         if rty == T_NEVER {
             fx.terminate(TermTrap)
         } else if rty == T_UNIT {
             fx.terminate(TermRet(vec[i64]()))
         } else if v.ty == T_UNIT {
-            fx.cx.err(d.body.end, fmt("function `", d.name, "` must return a value of type ", fx.cx.types.name(rty)))
+            what := if name == "" { "the closure" } else { fmt("function `", name, "`") }
+            fx.cx.err(body.end, fmt(what, " must return a value of type ", fx.cx.types.name(rty)))
             fx.terminate(TermTrap)
         } else {
-            v2 := fx.coerce(v, rty, d.body.end)
+            v2 := fx.coerce(v, rty, body.end)
             fx.do_return(Some(v2))
         }
     }
@@ -274,7 +294,7 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
     }
     lf := fx.f
     lf.lowered = true
-    cx.flush_layout_errors(d.pos)
+    cx.flush_layout_errors(pos)
     cx.module.funcs.buf[fid] = lf
 }
 
@@ -474,9 +494,12 @@ fn coerce(self *Fx, v Val, to i64, pos Pos) Val {
     if v.ty == T_NEVER {
         return val_never()
     }
+    if self.cx.types.fn_to_closure(v.ty, to) {
+        return self.fn_as_closure(v, to)
+    }
     a := self.tyname(to)
     b := self.tyname(v.ty)
-    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b))
+    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, self.closure_fn_hint(v.ty, to)))
     return val_err()
 }
 
@@ -616,6 +639,7 @@ fn lower_fn_stmt_expr_kind(e *Expr) i64 {
             }
             return 1
         }
+        EKClosure(_, _, _) => return 1
         _ => {}
     }
     return 3

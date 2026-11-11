@@ -205,6 +205,13 @@ fn priv_type(r *PrivCx, t *TypeAst) bool {
             }
         }
         TypeAstTuple(ts) => priv_types(r, &ts)
+        TypeAstClosure(ps, ret) => {
+            priv_types(r, &ps)
+            match ret {
+                Some(rt) => priv_type(r, rt)
+                None => true
+            }
+        }
     }
 }
 
@@ -282,6 +289,19 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
         EKStr(s) => true
         EKBool(b) => true
         EKNil => true
+        EKClosure(ps, ret, body) => {
+            for i in 0..ps.len {
+                ps.buf[i].0 = priv_name(r, ps.buf[i].0)
+                priv_type(r, &ps.buf[i].1)
+            }
+            match ret {
+                Some(rt) => {
+                    priv_type(r, rt)
+                }
+                None => {}
+            }
+            priv_block(r, *body)
+        }
         EKIdent(n) => {
             nn, found := r.names.get(n)
             if found {

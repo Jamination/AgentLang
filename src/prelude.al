@@ -1275,8 +1275,8 @@ fn sort[T](a []T) {
     __sort_range(a, 0, len(a) - 1)
 }
 
-// stable merge sort with a user-supplied "less than"
-fn sort_by[T](a []T, less fn(T, T) bool) {
+// stable merge sort with a user-supplied "less than" (a function or a closure)
+fn sort_by[T](a []T, less |T, T| bool) {
     n := len(a)
     if n < 2 {
         return
@@ -1324,6 +1324,77 @@ fn sort_by[T](a []T, less fn(T, T) bool) {
         for i in 0..n {
             a[i] = src[i]
         }
+    }
+}
+
+// ---------- slices with closures ----------
+// is p true for some element?
+fn any[T](s []T, p |T| bool) bool {
+    for x in s {
+        if p(x) {
+            return true
+        }
+    }
+    return false
+}
+
+// is p true for every element? (true for an empty slice)
+fn all[T](s []T, p |T| bool) bool {
+    for x in s {
+        if !p(x) {
+            return false
+        }
+    }
+    return true
+}
+
+// the number of elements for which p is true
+fn count_if[T](s []T, p |T| bool) i64 {
+    n := 0
+    for x in s {
+        if p(x) {
+            n += 1
+        }
+    }
+    return n
+}
+
+// index of the first element for which p is true, or -1
+fn index_where[T](s []T, p |T| bool) i64 {
+    for i, x in s {
+        if p(x) {
+            return i
+        }
+    }
+    return -1
+}
+
+// a new slice with the elements for which p is true, in order
+fn filter[T](s []T, p |T| bool) []T {
+    out := alloc[T](len(s))
+    n := 0
+    for x in s {
+        if p(x) {
+            out[n] = x
+            n += 1
+        }
+    }
+    return out[..n]
+}
+
+// a new slice with f applied to every element
+fn map_to[T, U](s []T, f |T| U) []U {
+    out := alloc[U](len(s))
+    for i, x in s {
+        out[i] = f(x)
+    }
+    return out
+}
+
+// calls f for every element, in order
+fn each[T](s []T, f |T|) {
+    for x in s {
+        f(x)
     }
 }
 
