@@ -486,223 +486,108 @@ parser_set_priv :: (d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
     }
 }
 
-// ---------- the declaration syntax of earlier versions ----------
-// `fn`, `var`, `const` and declarations that start with `struct`, `enum` or `type` are
-// recognised only to say how the declaration is written now. Each of them is one error; the
-// declaration is then read the old way so that the rest of the file is checked as well.
-
-// after `fn`: `name[T](a A, b B) R` of a declaration (`named`), or `(a A, b B) R` of an
-// anonymous function; parameters and result with or without `:` and `->`
-old_fn_header :: (p: *Parser, d: *FnDecl, named: bool) -> bool {
-    if named {
-        name, ok1 := p.ident()
-        if !ok1 {
-            return false
-        }
-        tparams, ok2 := p.tparams()
-        if !ok2 {
-            return false
-        }
-        d.name = name
-        d.tparams = tparams
-    }
-    if !p.expect_p("(") {
-        return false
-    }
-    while !p.is_p(")") {
-        pn, ok3 := p.ident()
-        if !ok3 {
-            return false
-        }
-        p.eat_p(":")
-        pt, ok4 := p.ty()
-        if !ok4 {
-            return false
-        }
-        d.params.push((pn, pt))
-        if !p.eat_p(",") {
-            break
-        }
-    }
-    if !p.expect_p(")") {
-        return false
-    }
-    arrow := p.eat_p("->")
-    if arrow || !(p.is_p("{") || parser_tk_nl(p.peek()) || parser_tk_eof(p.peek())) {
-        if !named && !arrow && !p.starts_type() {
-            return false
-        }
-        rt, ok5 := p.ty()
-        if !ok5 {
-            return false
-        }
-        d.ret = Some(rt)
-    }
-    return true
-}
+// ---------- declarations that start with a keyword ----------
 
 // At `fn` where a declaration starts (top level, after `extern "lib"`, or a statement):
-// `fn name[T](a A, b B) R { ... }`
-old_fn :: (p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (FnDecl, bool) {
-    fpos := p.pos()
+// `fn name[T](a: A, b: B) -> R { ... }`; a C function (`ext`) has no body
+fn_decl :: (p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (FnDecl, bool) {
     p.bump()
-    nerr := p.errs.len
-    c := is_some(ext)
-    d := FnDecl{name: "", tparams: vec[str](), params: vec[(str, TypeAst)](), ret: None, body: Block{stmts: vec[Stmt](), end: pos}, pos: pos, inl: if c { -1 } else { inl }, ext: ext}
-    if !p.old_fn_header(&d, true) {
-        p.errs.truncate(nerr)
-        p.errs.push(Diag{pos: fpos, msg: "functions are declared `name :: (a: A, b: B) -> R { ... }` (there is no `fn` keyword)"})
+    name, ok1 := p.ident()
+    if !ok1 {
         return parser_fail[FnDecl]()
     }
-    p.errs.truncate(nerr)
-    match ext {
-        Some(lib) => {
-            p.errs.push(Diag{pos: fpos, msg: fmt("C functions are declared `extern \"", lib, "\" ", ast_sig_str(&d), "` (there is no `fn` keyword)")})
-        }
-        None => {
-            p.errs.push(Diag{pos: fpos, msg: fmt("functions are declared `", ast_sig_str(&d), " { ... }` (there is no `fn` keyword)")})
-        }
+    tparams, ok2 := p.tparams()
+    if !ok2 {
+        return parser_fail[FnDecl]()
     }
-    if c {
+    d := FnDecl{name: name, tparams: tparams, params: vec[(str, TypeAst)](), ret: None, body: Block{stmts: vec[Stmt](), end: pos}, pos: pos, inl: inl, ext: ext}
+    if !p.fn_sig(&d.params, &d.ret) {
+        return parser_fail[FnDecl]()
+    }
+    if is_some(ext) {
+        if !tparams.is_empty() {
+            p.errs.push(Diag{pos: pos, msg: fmt("the C function `", name, "` cannot have type parameters")})
+            return parser_fail[FnDecl]()
+        }
+        if p.is_p("{") {
+            return p.err[FnDecl](fmt("an `extern` function is a C function of the library and has no body: expected end of line after the declaration of `", name, "`"))
+        }
+        d.inl = -1
         return (d, true)
     }
-    body, ok := p.block()
-    if !ok {
+    body, ok3 := p.block()
+    if !ok3 {
         return parser_fail[FnDecl]()
     }
     d.body = body
     return (d, true)
 }
 
-// At `fn` where an expression starts: `fn(a A, b B) R { ... }` (an anonymous function) or
-// `fn(A, B) R` (a function type)
-old_fn_expr :: (p: *Parser, pos: Pos) -> (Expr, bool) {
-    start := p.i
-    nerr := p.errs.len
-    p.bump()
+// At `fn` where an expression starts: an anonymous function `fn(a: A, b: B) -> R { ... }`
+// (its parameters have names; without parameters a body follows), or a function type
+// `fn(A, B) -> R` (a type argument, the type of a literal)
+fn_expr :: (p: *Parser, pos: Pos) -> (Expr, bool) {
+    if parser_tk_p(p.peek_at(1), "[") {
+        p.errs.push(Diag{pos: pos, msg: "an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level"})
+        return parser_fail[Expr]()
+    }
     d := FnDecl{name: "", tparams: vec[str](), params: vec[(str, TypeAst)](), ret: None, body: Block{stmts: vec[Stmt](), end: pos}, pos: pos, inl: 0, ext: None}
-    if p.old_fn_header(&d, false) && p.is_p("{") {
-        p.errs.truncate(nerr)
-        p.errs.push(Diag{pos: pos, msg: fmt("anonymous functions are written `", ast_sig_str(&d), " { ... }` (there is no `fn` keyword)")})
-        body, ok := p.block()
+    if parser_tk_id(p.peek_at(2)) && parser_tk_p(p.peek_at(3), ":") {
+        p.bump()
+        if !p.fn_sig(&d.params, &d.ret) {
+            return parser_fail[Expr]()
+        }
+    } else {
+        t, ok := p.ty()
         if !ok {
             return parser_fail[Expr]()
         }
-        d.body = body
-        return (Expr{k: EKFn(parser_box(d)), pos: pos}, true)
+        if !p.is_p("{") {
+            return (Expr{k: EKTypeE(t), pos: pos}, true)
+        }
+        // `fn() -> R { ... }`
+        match t {
+            TypeAstFn(ps, r) => {
+                if !ps.is_empty() {
+                    p.errs.push(Diag{pos: pos, msg: "an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)"})
+                    return parser_fail[Expr]()
+                }
+                match r {
+                    Some(rt) => {
+                        d.ret = Some(*rt)
+                    }
+                    None => {}
+                }
+            }
+            _ => {}
+        }
     }
-    p.i = start
-    p.errs.truncate(nerr)
-    t, ok := p.ty()
+    body, ok := p.block()
     if !ok {
         return parser_fail[Expr]()
     }
-    return (Expr{k: EKTypeE(t), pos: pos}, true)
+    d.body = body
+    return (Expr{k: EKFn(parser_box(d)), pos: pos}, true)
 }
 
-// At `fn` where a type starts: `fn(A, B) R`
-old_fn_type :: (p: *Parser) -> (TypeAst, bool) {
-    fpos := p.pos()
-    p.bump()
-    nerr := p.errs.len
-    v := vec[TypeAst]()
-    ok := p.eat_p("(")
-    while ok && !p.is_p(")") {
-        t, ok1 := p.ty()
-        if !ok1 {
-            ok = false
-            break
-        }
-        v.push(t)
-        if !p.eat_p(",") {
-            break
-        }
-    }
-    ok = ok && p.eat_p(")")
-    ret: Opt[*TypeAst] = None
-    if ok && (p.eat_p("->") || p.starts_type()) && !p.at_no_result() {
-        rt, ok2 := p.ty()
-        if ok2 {
-            ret = Some(parser_box(rt))
-        } else {
-            ok = false
-        }
-    } else if ok && p.at_no_result() {
-        p.bump()
-        p.bump()
-    }
-    p.errs.truncate(nerr)
-    if !ok {
-        p.errs.push(Diag{pos: fpos, msg: "function types are written `(A, B) -> R`, without a result `(A, B) -> ()` (there is no `fn` keyword)"})
-        return parser_fail[TypeAst]()
-    }
-    t := TypeAstFn(v, ret)
-    p.errs.push(Diag{pos: fpos, msg: fmt("function types are written `", ast_type_str(&t), "` (there is no `fn` keyword)")})
-    return (t, true)
-}
-
-// At `var` (top level or statement): `var name T`, `var name T = value`, `var name = value`
-old_var :: (p: *Parser) -> ((str, Opt[TypeAst], Opt[Expr]), bool) {
-    vpos := p.pos()
-    p.bump()
-    ty: Opt[TypeAst] = None
-    init: Opt[Expr] = None
-    if !parser_tk_id(p.peek()) {
-        p.errs.push(Diag{pos: vpos, msg: "variables are declared `name: T = value`, `name: T` or `name := value` (there is no `var` keyword)"})
-        return parser_fail[(str, Opt[TypeAst], Opt[Expr])]()
-    }
-    name, ok1 := p.ident()
-    shown := fmt(name, " := value")
-    if !p.is_p("=") && !p.is_p(":=") {
-        p.eat_p(":")
-        nerr := p.errs.len
-        vt, ok2 := p.ty()
-        if !ok2 {
-            p.errs.truncate(nerr)
-            p.errs.push(Diag{pos: vpos, msg: "variables are declared `name: T = value`, `name: T` or `name := value` (there is no `var` keyword)"})
-            return parser_fail[(str, Opt[TypeAst], Opt[Expr])]()
-        }
-        p.errs.truncate(nerr)
-        ty = Some(vt)
-        shown = fmt(name, ": ", ast_type_str(&vt), if p.is_p("=") { " = value" } else { "" })
-    }
-    p.errs.push(Diag{pos: vpos, msg: fmt("variables are declared `", shown, "` (there is no `var` keyword)")})
-    if p.eat_p("=") || p.eat_p(":=") {
-        ie, ok3 := p.expr()
-        if !ok3 {
-            return parser_fail[(str, Opt[TypeAst], Opt[Expr])]()
-        }
-        init = Some(ie)
-    }
-    return ((name, ty, init), true)
-}
-
-// At `const`, `struct`, `enum`, or `type` followed by a name, where a declaration starts
-old_decl :: (p: *Parser, pos: Pos) -> (Decl, bool) {
-    kpos := p.pos()
+// At `const`, `struct`, `enum`, or `type` followed by a name, where a declaration starts:
+//   const NAME = value      const NAME: T = value      type Name = T
+//   struct Name[T] { a: A, b: B }                      enum Name[T] { A, B(T) }
+kw_decl :: (p: *Parser, pos: Pos) -> (Decl, bool) {
     if p.eat_kw("const") {
-        general := "constants are declared `NAME :: value` or `NAME : T : value` (there is no `const` keyword)"
-        if !parser_tk_id(p.peek()) {
-            p.errs.push(Diag{pos: kpos, msg: general})
+        name, ok1 := p.ident()
+        if !ok1 {
             return parser_fail[Decl]()
         }
-        name, ok1 := p.ident()
         ty: Opt[TypeAst] = None
-        shown := fmt(name, " :: value")
-        if !p.is_p("=") && !p.is_p("::") {
-            p.eat_p(":")
-            nerr := p.errs.len
+        if p.eat_p(":") {
             ct, ok2 := p.ty()
-            p.errs.truncate(nerr)
             if !ok2 {
-                p.errs.push(Diag{pos: kpos, msg: general})
                 return parser_fail[Decl]()
             }
             ty = Some(ct)
-            shown = fmt(name, " : ", ast_type_str(&ct), " : value")
         }
-        p.errs.push(Diag{pos: kpos, msg: fmt("constants are declared `", shown, "` (there is no `const` keyword)")})
-        if !(p.eat_p("=") || p.eat_p("::") || p.eat_p(":")) {
+        if !p.expect_p("=") {
             return parser_fail[Decl]()
         }
         val, ok3 := p.expr()
@@ -714,67 +599,35 @@ old_decl :: (p: *Parser, pos: Pos) -> (Decl, bool) {
     is_struct := p.is_kw("struct")
     if is_struct || p.is_kw("enum") {
         p.bump()
-        general := if is_struct { "structs are declared `Name :: struct { field: Type, ... }` (the name comes first)" } else { "enums are declared `Name :: enum { A, B(Type), ... }` (the name comes first)" }
-        nerr := p.errs.len
         name, ok1 := p.ident()
-        tparams, ok2 := p.tparams()
-        if !ok1 || !ok2 {
-            p.errs.truncate(nerr)
-            p.errs.push(Diag{pos: kpos, msg: general})
+        if !ok1 {
             return parser_fail[Decl]()
         }
-        // the error stands at the keyword; its text is completed when the body is known
-        k := p.errs.len
-        tp := ast_tparams_str(&tparams)
+        tparams, ok2 := p.tparams()
+        if !ok2 {
+            return parser_fail[Decl]()
+        }
         if is_struct {
-            p.errs.push(Diag{pos: kpos, msg: fmt("structs are declared `", name, tp, " :: struct { field: Type, ... }` (the name comes first)")})
-            d, ok := p.struct_rest(name, tparams, pos, true)
-            match d {
-                DeclStruct(s) => {
-                    text := ast_struct_str(&s)
-                    if ok && len(text) <= 100 {
-                        p.errs.items()[k].msg = fmt("structs are declared `", text, "` (the name comes first)")
-                    }
-                }
-                _ => {}
-            }
-            return (d, ok)
+            return p.struct_rest(name, tparams, pos, false)
         }
-        p.errs.push(Diag{pos: kpos, msg: fmt("enums are declared `", name, tp, " :: enum { A, B(Type), ... }` (the name comes first)")})
-        d, ok := p.enum_rest(name, tparams, pos)
-        match d {
-            DeclEnum(e) => {
-                text := ast_enum_str(&e)
-                if ok && len(text) <= 100 {
-                    p.errs.items()[k].msg = fmt("enums are declared `", text, "` (the name comes first)")
-                }
-            }
-            _ => {}
-        }
-        return (d, ok)
+        return p.enum_rest(name, tparams, pos)
     }
-    // `type Name = T`
+    // `type Name = T` (`type` is only special at the start of a declaration)
     p.bump()
     name, ok1 := p.ident()
     if !ok1 {
         return parser_fail[Decl]()
     }
     if p.is_p("[") {
-        p.errs.push(Diag{pos: kpos, msg: fmt("type aliases are declared `", name, " :: type T`, and a type alias cannot have type parameters")})
-        return parser_fail[Decl]()
+        return p.err[Decl]("a type alias cannot have type parameters: expected `=`")
     }
-    nerr := p.errs.len
-    if !(p.eat_p("=") || p.eat_p("::")) {
-        p.errs.push(Diag{pos: kpos, msg: fmt("type aliases are declared `", name, " :: type T` (the name comes first)")})
+    if !p.expect_p("=") {
         return parser_fail[Decl]()
     }
     at, ok2 := p.ty()
-    p.errs.truncate(nerr)
     if !ok2 {
-        p.errs.push(Diag{pos: kpos, msg: fmt("type aliases are declared `", name, " :: type T` (the name comes first)")})
         return parser_fail[Decl]()
     }
-    p.errs.push(Diag{pos: kpos, msg: fmt("type aliases are declared `", name, " :: type ", ast_type_str(&at), "` (the name comes first)")})
     return (DeclType(TypeDecl{name: name, ty: at, pos: pos}), true)
 }
 
@@ -1230,24 +1083,17 @@ decl :: (p: *Parser) -> (Decl, bool) {
         return p.name_decl(pos, inl, ext)
     }
     if p.is_kw("fn") {
-        f, ok := p.old_fn(pos, inl, ext)
+        f, ok := p.fn_decl(pos, inl, ext)
         if !ok {
             return parser_fail[Decl]()
         }
         return (DeclFn(f), true)
     }
     if inl != 0 {
-        return p.err[Decl]("`inline` / `noinline` stand in front of a function declaration: `inline name :: (a: A) -> R { ... }`")
-    }
-    if p.is_kw("var") {
-        v, ok := p.old_var()
-        if !ok {
-            return parser_fail[Decl]()
-        }
-        return (DeclGlobal(GlobalDecl{name: v.0, ty: v.1, init: v.2, pos: pos}), true)
+        return p.err[Decl]("`inline` / `noinline` stand in front of a function declaration: `inline fn name(a: A) -> R { ... }`")
     }
     if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") || parser_tk_word(p.peek(), "type") {
-        return p.old_decl(pos)
+        return p.kw_decl(pos)
     }
     if p.eat_kw("test") {
         name := ""
@@ -1385,8 +1231,40 @@ ty :: (p: *Parser) -> (TypeAst, bool) {
         }
         return (TypeAstTuple(v), true)
     }
-    if p.is_kw("fn") {
-        return p.old_fn_type()
+    if p.eat_kw("fn") {
+        // a function type: `fn(A, B) -> R`, without a result `fn(A, B)`
+        if !p.expect_p("(") {
+            return parser_fail[TypeAst]()
+        }
+        v := vec[TypeAst]()
+        while !p.is_p(")") {
+            t, ok := p.ty()
+            if !ok {
+                return parser_fail[TypeAst]()
+            }
+            v.push(t)
+            if !p.eat_p(",") {
+                break
+            }
+        }
+        if !p.expect_p(")") {
+            return parser_fail[TypeAst]()
+        }
+        ret: Opt[*TypeAst] = None
+        if p.eat_p("->") {
+            if p.is_p("(") && parser_tk_p(p.peek_at(1), ")") {
+                p.errs.push(Diag{pos: p.pos(), msg: "a function type without a result has no arrow: leave out `-> ()`"})
+                p.bump()
+                p.bump()
+            } else {
+                rt, ok := p.ty()
+                if !ok {
+                    return parser_fail[TypeAst]()
+                }
+                ret = Some(parser_box(rt))
+            }
+        }
+        return (TypeAstFn(v, ret), true)
     }
     match p.peek() {
         TkId(name) => {
@@ -1621,18 +1499,11 @@ stmt_k :: (p: *Parser) -> (SK, bool) {
         _ => {}
     }
     if p.is_kw("fn") && parser_tk_id(p.peek_at(1)) {
-        f, ok := p.old_fn(p.pos(), 0, None)
+        f, ok := p.fn_decl(p.pos(), 0, None)
         if !ok {
             return parser_fail[SK]()
         }
         return (SKFn(parser_box(f)), true)
-    }
-    if p.is_kw("var") {
-        v, ok := p.old_var()
-        if !ok {
-            return parser_fail[SK]()
-        }
-        return (SKVar(v.0, v.1, v.2), true)
     }
     if p.is_kw("const") {
         p.errs.push(Diag{pos: p.pos(), msg: "constants are declared at the top level, as `NAME :: value` (there is no `const` keyword); a variable is `name := value`"})
@@ -2387,7 +2258,7 @@ primary :: (p: *Parser) -> (Expr, bool) {
                 return (Expr{k: EKMatch(sb, r), pos: pos}, true)
             }
             if k == "fn" {
-                return p.old_fn_expr(pos)
+                return p.fn_expr(pos)
             }
         }
         TkP(q) => {
