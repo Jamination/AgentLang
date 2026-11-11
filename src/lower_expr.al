@@ -114,12 +114,15 @@ fn is_untyped(self *Fx, e *Expr) bool {
             if is_some(self.lookup(n)) {
                 return false
             }
-            d, has := self.cx.const_decls.get(n)
-            if has && !is_some(d.ty) {
+            if self.bare_variant(n, None).2 != 0 {
                 return true
             }
-            return self.cx.variants.has(n) && !self.cx.const_decls.has(n)
+            d, has := self.cx.const_decls.get(n)
+            return has && !is_some(d.ty)
         }
+        // a variant whose enum type comes from the context
+        EKField(b, n) => { return self.variant_ref(e) != "" }
+        EKCall(c, args) => { return self.variant_ref(e) != "" }
         _ => { return false }
     }
     return false
@@ -231,6 +234,12 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
         EKBin(op, a, b) => { return self.binary(op, a, b, expect, e.pos) }
         EKCall(c, args) => { return self.call(c, args.items(), expect, e.pos) }
         EKField(b, name) => {
+            // Enum.Variant
+            q := self.qual_enum(b)
+            if q.0 >= 0 {
+                var no_args []Expr
+                return self.qual_variant(q.0, q.1, name, no_args, expect, e.pos)
+            }
             if name == "len" {
                 // .len on slices and arrays
                 bv := self.expr(b, None)
@@ -422,6 +431,17 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
         }
         None => {}
     }
+    // a variant of the expected enum, of an enum of this layer, or of the other layer if
+    // no other declaration of this layer has the name
+    bv := self.bare_variant(n, expect)
+    if bv.2 == 1 {
+        var no_args []Expr
+        return self.construct_variant(bv.0, bv.1, no_args, expect, pos)
+    }
+    if bv.2 == 2 {
+        self.variant_ambiguous(n, pos)
+        return val_err()
+    }
     if self.cx.const_decls.has(n) {
         match self.cx.const_named(n) {
             Some(c) => { return self.const_val(c.0, c.1, expect, pos) }
@@ -446,10 +466,9 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
             }
         }
     }
-    vv, is_variant := self.cx.variants.get(n)
-    if is_variant {
-        var no_args []Expr
-        return self.construct_variant(vv.0, vv.1, no_args, expect, pos)
+    if is_some(self.cx.find_enum(n)) {
+        self.err(pos, fmt("enum `", n, "` cannot be used as a value here; write `", n, ".Variant`"))
+        return val_err()
     }
     if is_some(lower_builtin_type(n)) || self.tenv.has(n) || is_some(self.cx.find_struct(n)) {
         self.err(pos, fmt("type `", n, "` cannot be used as a value here"))
@@ -1623,6 +1642,13 @@ fn init_lit(self *Fx, dst Val, items [](Opt[str], Expr), pos Pos) {
 fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos Pos) Val {
     d := self.cx.enum_decls.buf[ei]
     vname := d.variants.buf[vi].0
+    if len(args) != d.variants.buf[vi].1.len {
+        self.err(pos, fmt("variant `", vname, "` takes ", d.variants.buf[vi].1.len, " value(s), got ", len(args)))
+        lower_call_eval_all(self, args)
+        return val_err()
+    }
+    // payload values that were evaluated to infer the type arguments
+    pre := vec[Val]()
     var ety i64
     if d.tparams.len == 0 {
         ety = self.cx.inst_enum(ei, vec[i64](), pos)
@@ -1645,14 +1671,14 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
         if !from_expect {
             // infer type arguments from the payload
             env := map[str, i64]()
-            ok := len(args) == d.variants.buf[vi].1.len
-            if ok {
-                for i in 0..len(args) {
-                    v := self.expr(&args[i], None)
-                    if !self.unify(&d.variants.buf[vi].1.buf[i], v.ty, d.tparams.items(), &env) {
-                        ok = false
-                    }
+            ok := true
+            for i in 0..len(args) {
+                v := self.expr(&args[i], None)
+                if !self.unify(&d.variants.buf[vi].1.buf[i], v.ty, d.tparams.items(), &env) {
+                    ok = false
                 }
+                v = self.stabilize(v, args[i + 1..])
+                pre.push(v)
             }
             targs := vec[i64]()
             for i in 0..d.tparams.len {
@@ -1665,7 +1691,7 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
                 self.err(pos, fmt("cannot infer type arguments of enum `", d.name, "` for `", vname, "`; annotate the destination type"))
                 return val_err()
             }
-            // re-evaluating args below duplicates their code, so only allow it for inferred cases
+            // the payload was evaluated above; it is not evaluated again below
             ety = self.cx.inst_enum(ei, targs, pos)
         }
     }
@@ -1691,7 +1717,12 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
     offs := self.cx.types.variant_offsets(eid, vi)
     for i in 0..len(args) {
         a := &args[i]
-        v0 := self.expr(a, Some(ptys.buf[i]))
+        var v0 Val
+        if pre.len == len(args) {
+            v0 = pre.buf[i]
+        } else {
+            v0 = self.expr(a, Some(ptys.buf[i]))
+        }
         v := self.coerce(v0, ptys.buf[i], a.pos)
         fa := self.add_off(t, offs.buf[i])
         fd := self.mval(ptys.buf[i], fa)
@@ -1753,273 +1784,4 @@ fn load_any(self *Fx, src i64, ty i64) Val {
         self.store_raw(d, v, l.t, l.alias)
     }
     return dst
-}
-
-fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], pos Pos) Val {
-    sv := self.expr(sc, None)
-    if sv.ty == T_ERR {
-        return val_err()
-    }
-    sk := self.cx.types.k(sv.ty)
-    var enum_id Opt[i64] = None
-    match sk {
-        TyKEnum(e) => { enum_id = Some(e) }
-        _ => {}
-    }
-    payload_enum := false
-    match enum_id {
-        Some(e) => { payload_enum = !self.cx.types.enums.buf[e].simple }
-        None => {}
-    }
-    // scrutinee: scalar value, or tag for payload enums
-    var key i64
-    var key_ty i64
-    if payload_enum {
-        key = self.load_raw(sv.v, TI64, AK_ANY)
-        key_ty = T_I64
-    } else if self.cx.types.is_scalar(sv.ty) {
-        key = self.scalar(sv)
-        key_ty = sv.ty
-    } else if sv.ty == T_STR {
-        key = NOV
-        key_ty = T_STR
-    } else {
-        tn := self.tyname(sv.ty)
-        self.err(pos, fmt("cannot match on ", tn))
-        return val_err()
-    }
-    // keep a stable copy of string scrutinee
-    var str_tmp Opt[Val] = None
-    if sv.ty == T_STR {
-        t := self.temp(T_STR)
-        tv := self.mval(T_STR, t)
-        self.store(tv, sv)
-        str_tmp = Some(tv)
-    }
-    bj := self.new_block()
-    var slot Opt[Val] = None
-    all_dead := true
-    has_wild := false
-    covered := vec[bool]()
-    match enum_id {
-        Some(e) => { covered = vec_fill(self.cx.types.enums.buf[e].variants.len, false) }
-        None => {}
-    }
-    result_err := false
-    for ai in 0..len(arms) {
-        arm := &arms[ai]
-        body_b := self.new_block()
-        next_b := self.new_block()
-        var binds Opt[(i64, Vec[str])] = None
-        npats := arm.pats.len
-        for pi in 0..npats {
-            last := pi + 1 == npats
-            fail_b := if last { next_b } else { self.new_block() }
-            match arm.pats.buf[pi] {
-                PatWild => {
-                    has_wild = true
-                    self.jmp(body_b)
-                }
-                PatVariant(name, bnames, ppos) => {
-                    vi := -1
-                    match enum_id {
-                        Some(eid) => {
-                            vv, has := self.cx.variants.get(name)
-                            if has && self.cx.types.enums.buf[eid].decl == vv.0 {
-                                vi = vv.1
-                            }
-                        }
-                        None => {}
-                    }
-                    if vi < 0 {
-                        tn := self.tyname(sv.ty)
-                        self.err(ppos, fmt("`", name, "` is not a variant of ", tn))
-                        self.jmp(fail_b)
-                        if !last {
-                            self.switch_to(fail_b)
-                        }
-                        continue
-                    }
-                    covered.buf[vi] = true
-                    nfields := self.cx.types.enums.buf[lower_expr_unwrap(enum_id)].variants.buf[vi].1.len
-                    if bnames.len != nfields {
-                        self.err(ppos, fmt("variant `", name, "` has ", nfields, " field(s), pattern binds ", bnames.len))
-                    } else if npats > 1 && bnames.len != 0 {
-                        self.err(ppos, "patterns with bindings cannot be combined with `,`")
-                    } else {
-                        binds = Some((vi, bnames))
-                    }
-                    c := self.iconst(TI64, vi)
-                    eq := self.ins(OpEq, TI8, vec_of([]i64{key, c}), 0)
-                    self.br(eq, body_b, fail_b)
-                }
-                PatConst(pe0) => {
-                    pe := &pe0
-                    // payload-less variant name?
-                    done := false
-                    match pe.k {
-                        EKIdent(n) => {
-                            match enum_id {
-                                Some(eid) => {
-                                    vv, has := self.cx.variants.get(n)
-                                    if has {
-                                        vi := vv.1
-                                        if self.cx.types.enums.buf[eid].decl == vv.0 {
-                                            covered.buf[vi] = true
-                                            if self.cx.types.enums.buf[eid].variants.buf[vi].1.len != 0 {
-                                                self.err(pe.pos, fmt("variant `", n, "` has fields; write `", n, "(..)` with bindings"))
-                                            }
-                                            c := self.iconst(TI64, vi)
-                                            eq := self.ins(OpEq, TI8, vec_of([]i64{key, c}), 0)
-                                            self.br(eq, body_b, fail_b)
-                                            done = true
-                                        }
-                                    }
-                                }
-                                None => {}
-                            }
-                        }
-                        _ => {}
-                    }
-                    if !done {
-                        if payload_enum {
-                            self.err(pe.pos, "expected an enum variant pattern")
-                            self.jmp(fail_b)
-                        } else {
-                            match str_tmp {
-                                Some(st) => {
-                                    pv0 := self.expr(pe, Some(T_STR))
-                                    pv := self.coerce(pv0, T_STR, pe.pos)
-                                    r := self.call_rt("__str_eq", vec[i64](), vec_of([]Val{st, pv}), pe.pos)
-                                    c := self.scalar(r)
-                                    self.br(c, body_b, fail_b)
-                                }
-                                None => {
-                                    pv0 := self.expr(pe, Some(key_ty))
-                                    pv := self.coerce(pv0, key_ty, pe.pos)
-                                    p := self.scalar(pv)
-                                    eq := self.ins(OpEq, TI8, vec_of([]i64{key, p}), 0)
-                                    self.br(eq, body_b, fail_b)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if !last {
-                self.switch_to(fail_b)
-            }
-        }
-        if npats == 0 {
-            self.jmp(next_b)
-        }
-        self.switch_to(body_b)
-        self.push_scope()
-        match binds {
-            Some(bd) => {
-                vi := bd.0
-                bnames := bd.1
-                eid := lower_expr_unwrap(enum_id)
-                ptys := clone(self.cx.types.enums.buf[eid].variants.buf[vi].1)
-                offs := self.cx.types.variant_offsets(eid, vi)
-                for i in 0..bnames.len {
-                    bn := bnames.buf[i]
-                    src := self.add_off(sv.v, offs.buf[i])
-                    tmp := self.load_any(src, ptys.buf[i])
-                    if bn != "_" {
-                        self.scopes.buf[self.scopes.len - 1].vars.set(bn, (ptys.buf[i], tmp.v))
-                    }
-                }
-            }
-            None => {}
-        }
-        exp := expect
-        match slot {
-            Some(s) => { exp = Some(s.ty) }
-            None => {}
-        }
-        v := self.block_value(&arm.body, want, exp)
-        d := self.dead
-        if want && !d {
-            if v.ty == T_ERR {
-                result_err = true
-            } else if v.ty == T_UNIT {
-                if is_some(slot) {
-                    self.err(arm.pos, "match arm has no value but other arms do")
-                }
-            } else {
-                match slot {
-                    Some(s) => {
-                        cv := self.coerce(v, s.ty, arm.pos)
-                        self.store(s, cv)
-                    }
-                    None => {
-                        if !all_dead {
-                            self.err(arm.pos, "match arms have different types")
-                        } else {
-                            a := self.temp(v.ty)
-                            s := self.mval(v.ty, a)
-                            self.store(s, v)
-                            slot = Some(s)
-                        }
-                    }
-                }
-            }
-        }
-        if !d {
-            all_dead = false
-        }
-        self.pop_scope()
-        self.jmp(bj)
-        self.switch_to(next_b)
-    }
-    // fallthrough when no arm matched
-    all_covered := true
-    for i in 0..covered.len {
-        if !covered.buf[i] {
-            all_covered = false
-        }
-    }
-    npats_total := 0
-    for ai in 0..len(arms) {
-        npats_total += arms[ai].pats.len
-    }
-    exhaustive := has_wild || (is_some(enum_id) && all_covered) || (sv.ty == T_BOOL && npats_total >= 2)
-    if exhaustive {
-        self.terminate(TermTrap)
-    } else {
-        if want && is_some(slot) {
-            missing := vec[str]()
-            match enum_id {
-                Some(e) => {
-                    for i in 0..covered.len {
-                        if !covered.buf[i] {
-                            missing.push(self.cx.types.enums.buf[e].variants.buf[i].0)
-                        }
-                    }
-                }
-                None => {}
-            }
-            if missing.len == 0 {
-                self.err(pos, "match used as a value must be exhaustive (add a `_ =>` arm)")
-            } else {
-                self.err(pos, fmt("match used as a value must be exhaustive; missing: ", join(missing.items(), ", ")))
-            }
-        }
-        all_dead = false
-        self.jmp(bj)
-    }
-    self.switch_to(bj)
-    self.dead = all_dead
-    if all_dead {
-        return val_never()
-    }
-    if result_err {
-        return val_err()
-    }
-    match slot {
-        Some(s) => { return s }
-        None => {}
-    }
-    return val_unit()
 }

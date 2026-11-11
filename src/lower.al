@@ -44,7 +44,8 @@ struct Cx {
     struct_names Map[str, i64]
     enum_decls Vec[*EnumDecl]
     enum_names Map[str, i64]
-    variants Map[str, (i64, i64)]
+    // user enums' variants by name: (enum declaration, variant index) of every enum that has one
+    variants Map[str, Vec[(i64, i64)]]
     const_decls Map[str, *ConstDecl]
     const_vals Map[str, CState]
     global_decls Map[str, *GlobalDecl]
@@ -72,6 +73,10 @@ struct Cx {
     // files whose declarations are only checked when something uses them
     lazy_files Map[i64, bool]
     n_prelude i64
+    // the same for the enums of the prelude (see lower_match.al for the lookup rules)
+    p_variants Map[str, Vec[(i64, i64)]]
+    // which layers declare a function, type, constant or global of a name: 1 = prelude, 2 = user
+    decl_layers Map[str, i64]
 }
 
 fn lower_builtin_type(name str) Opt[i64] {
@@ -153,7 +158,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         struct_names: map[str, i64](),
         enum_decls: vec[*EnumDecl](),
         enum_names: map[str, i64](),
-        variants: map[str, (i64, i64)](),
+        variants: map[str, Vec[(i64, i64)]](),
         const_decls: map[str, *ConstDecl](),
         const_vals: map[str, CState](),
         global_decls: map[str, *GlobalDecl](),
@@ -174,6 +179,8 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         scope_prelude: false,
         entry_file: 0xFFFF,
         lazy_files: map[i64, bool](),
+        p_variants: map[str, Vec[(i64, i64)]](),
+        decl_layers: map[str, i64](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
@@ -279,6 +286,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         }
         names.set(name, pos)
         names_fn.set(name, kind == 1)
+        cx.decl_layers.set(name, cx.decl_layers.get_or(name, 0) | (if pos.file < np { 1 } else { 2 }))
         if kind == 1 {
             di := cx.fn_decls.len
             if pos.file < np {
@@ -325,16 +333,44 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
             cx.global_decls.set(name, gp)
         }
     }
-    // enum variants live in the global namespace
+    // enum variants: two enums may use the same variant name; within a layer (prelude / user)
+    // a variant must not have the name of another kind of declaration
     for ei in 0..cx.enum_decls.len {
         e := cx.enum_decls.buf[ei]
+        layer := if e.pos.file < np { 1 } else { 2 }
         for vi in 0..e.variants.len {
             vn := e.variants.buf[vi].0
-            if names.has(vn) || cx.variants.has(vn) {
+            if cx.decl_layers.get_or(vn, 0) & layer != 0 {
                 cx.err(e.pos, fmt("enum variant `", vn, "` conflicts with another declaration"))
                 continue
             }
-            cx.variants.set(vn, (ei, vi))
+            dup := false
+            for vj in 0..vi {
+                if e.variants.buf[vj].0 == vn {
+                    dup = true
+                    break
+                }
+            }
+            if dup {
+                cx.err(e.pos, fmt("enum `", e.name, "` declares the variant `", vn, "` twice"))
+                continue
+            }
+            var l Vec[(i64, i64)]
+            has_l := false
+            if layer == 1 {
+                l, has_l = cx.p_variants.get(vn)
+            } else {
+                l, has_l = cx.variants.get(vn)
+            }
+            if !has_l {
+                l = vec[(i64, i64)]()
+            }
+            l.push((ei, vi))
+            if layer == 1 {
+                cx.p_variants.set(vn, l)
+            } else {
+                cx.variants.set(vn, l)
+            }
         }
     }
     return cx

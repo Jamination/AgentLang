@@ -1605,6 +1605,89 @@ fn primary(p *Parser) (Expr, bool) {
     return p.err[Expr]("expected expression")
 }
 
+// where an expression starts in the source (its `pos` may be that of an operator)
+fn parser_expr_start(e *Expr) Pos {
+    match e.k {
+        EKCall(c, _) => {
+            return parser_expr_start(c)
+        }
+        EKField(b, _) => {
+            return parser_expr_start(b)
+        }
+        EKIndex(b, _) => {
+            return parser_expr_start(b)
+        }
+        EKBin(_, a, _) => {
+            return parser_expr_start(a)
+        }
+        _ => {}
+    }
+    return e.pos
+}
+
+// A pattern is parsed as an expression and then read as a pattern: `_`, `Variant(p, ..)`,
+// `Enum.Variant(p, ..)`, `Enum[T].Variant(p, ..)`, `(p, p)`, `&name`; anything else stays
+// an expression (a constant, or a name that lowering resolves).
+fn parser_pat(e Expr) Pat {
+    match e.k {
+        EKIdent(n) => {
+            if n == "_" {
+                return PatWild
+            }
+        }
+        EKCall(c, args) => {
+            name := ""
+            var qual Opt[*Expr] = None
+            is_variant := false
+            match c.k {
+                EKIdent(n) => {
+                    name = n
+                    is_variant = true
+                }
+                EKField(q, n) => {
+                    match q.k {
+                        EKTypeE(_) => {}
+                        _ => {
+                            if parser_typeish(q) {
+                                name = n
+                                qual = Some(q)
+                                is_variant = true
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if is_variant {
+                subs := vec[Pat]()
+                for i in 0..args.len {
+                    subs.push(parser_pat(args.buf[i]))
+                }
+                return PatVariant(name, subs, parser_expr_start(c), qual)
+            }
+        }
+        EKTuple(es) => {
+            subs := vec[Pat]()
+            for i in 0..es.len {
+                subs.push(parser_pat(es.buf[i]))
+            }
+            return PatTuple(subs, e.pos)
+        }
+        EKUn(op, x) => {
+            if op == UnOpAddr {
+                match x.k {
+                    EKIdent(n) => {
+                        return PatRef(n, e.pos)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    return PatConst(e)
+}
+
 fn match_arms(p *Parser) (Vec[MatchArm], bool) {
     arms := vec[MatchArm]()
     loop {
@@ -1615,52 +1698,22 @@ fn match_arms(p *Parser) (Vec[MatchArm], bool) {
         pos := p.pos()
         pats := vec[Pat]()
         loop {
-            ppos := p.pos()
-            is_id := false
-            match p.peek() {
-                TkId(n) => {
-                    is_id = true
-                    if n == "_" {
-                        p.bump()
-                        pats.push(PatWild)
-                    } else if parser_tk_p(p.peek_at(1), "(") {
-                        p.bump()
-                        p.bump()
-                        binds := vec[str]()
-                        while !p.is_p(")") {
-                            b, ok := p.ident()
-                            if !ok {
-                                return parser_fail[Vec[MatchArm]]()
-                            }
-                            binds.push(b)
-                            if !p.eat_p(",") {
-                                break
-                            }
-                        }
-                        if !p.expect_p(")") {
-                            return parser_fail[Vec[MatchArm]]()
-                        }
-                        pats.push(PatVariant(n, binds, ppos))
-                    } else {
-                        e, ok := p.expr()
-                        if !ok {
-                            return parser_fail[Vec[MatchArm]]()
-                        }
-                        pats.push(PatConst(e))
-                    }
-                }
-                _ => {}
+            e, ok := p.expr()
+            if !ok {
+                return parser_fail[Vec[MatchArm]]()
             }
-            if !is_id {
-                e, ok := p.expr()
-                if !ok {
-                    return parser_fail[Vec[MatchArm]]()
-                }
-                pats.push(PatConst(e))
-            }
+            pats.push(parser_pat(e))
             if !p.eat_p(",") {
                 break
             }
+        }
+        var guard Opt[*Expr] = None
+        if p.eat_kw("if") {
+            g, ok := p.expr()
+            if !ok {
+                return parser_fail[Vec[MatchArm]]()
+            }
+            guard = Some(parser_box(g))
         }
         if !p.expect_p("=>") {
             return parser_fail[Vec[MatchArm]]()
@@ -1679,7 +1732,7 @@ fn match_arms(p *Parser) (Vec[MatchArm], bool) {
             }
             body = Block{stmts: vec_of([]Stmt{s}), end: p.pos()}
         }
-        arms.push(MatchArm{pats: pats, body: body, pos: pos})
+        arms.push(MatchArm{pats: pats, body: body, pos: pos, guard: guard})
         if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
             return p.err[Vec[MatchArm]]("expected end of match arm")
         }
