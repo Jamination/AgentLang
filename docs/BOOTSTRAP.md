@@ -33,12 +33,19 @@ removed, both compilers were compared: byte-identical output for every program i
 `bench/` and `examples/` in all three build modes, for the compiler's own source, and for
 1000 random programs; identical diagnostics for every program in `tests/fail/`.
 
+The translation was done before AL had file-private names, per-enum variant namespaces,
+nested patterns and guards, a builtin `clone`, `embed` in constants and `v[i]` on a `Vec`, so
+the first AL sources prefixed every function with its file and every variant with its enum,
+nested their matches and copied by hand. Those workarounds were removed afterwards in one
+pass over the sources (27,500 lines became 25,400; the compiler produced byte-identical
+executables before and after); the conventions below describe the result.
+
 ## Sources
 
 | Path | Contents |
 |------|----------|
 | `src/main.al` | driver: arguments, source loading, bundled modules, diagnostics output; lists every other file |
-| `src/base.al` | helpers for compiler code: `Opt`, Vec / Map conveniences, environment, processes, the working-memory regions |
+| `src/base.al` | helpers for compiler code: Vec constructors (`vec_of`, `vec_fill`, `vec_one`, `vec_two`), processes, the working-memory regions |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
@@ -49,10 +56,49 @@ removed, both compilers were compared: byte-identical output for every program i
 | `src/elf.al` | ELF writer |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
 
-Naming: a function `f` of file `m.al` is `m_f` (`gvn_run`, `elf_link`); functions that act on
-a type take it as first parameter and are called as methods (`f.rpo()`, `cx.resolve(..)`);
-enum variants carry the enum name (`OpAdd`, `TermJmp`): the sources were written when variants
-were global names, and keep them until the seed compiler knows qualified variants.
+Conventions:
+
+- **Interface and private parts.** What a file offers to other files keeps a name that says
+  where it comes from: `gvn_run`, `elf_link`, `lexer_lex`, `opt_optimize`. Everything else is
+  `priv` and has the short name that is natural inside its file (`priv fn numberable`,
+  `priv struct Key`, `priv const K_R` ...): 520 of about 900 top-level names are private; a
+  pass exports one `x_run`, the parser 12 names, `main.al` nothing. Several files have private
+  declarations of the same name (`block`, `stmt`, `Ctx`, `run_find`). A short name is not
+  used where a local variable or field of the file has it (a local would shadow the
+  function): those keep the file prefix (`lexer_pos`, `lower_match_subs`, `emit_kind`).
+- **Methods.** Functions that act on a type take it as first parameter and are called as
+  methods (`f.rpo()`, `cx.resolve(..)`); they have no prefix and are overloaded across files
+  by that first parameter (`expr(self: *Fx, ..)` in lower_expr.al, a private
+  `expr(p: *Parser)` in parser.al, private `expr`s in lint.al and priv.al).
+- **Enum variants** have no enum prefix: `Op.Add`, `Term.Jmp`, `EK.Int`, `TyK.Ptr`, written
+  bare (`Add`, `Jmp(t)`) wherever the type is known, which is almost everywhere. 45 names
+  belong to several enums (`Add`: `BinOp`, `Op`, `MOp`; `Fn`: five enums). Written qualified:
+  the few places the compiler asks for; the constructed side in functions that translate
+  between two enums sharing a name (`Tuple(ts) => .. intern(TyK.Tuple(ids))`, `o = Op.Add`
+  next to `op == Add` on a `BinOp`); and always the variants called `None` (`Term.None`,
+  `Opnd.None`, `RetAbi.None`), because `None` alone reads as `Opt`. A variant cannot have the
+  name of a struct of the program, hence `SK.ExprStmt` / `LoopStmt` / `BlockStmt`,
+  `UnOp.AddrOf`, `Glob` (for `Global`), `RelocTarget.Function`.
+- **`match`.** Nested patterns, guards, alternatives and tuple matches replace nested
+  matches (`match (fk, tk) { (Int(fb, fs), F64) => .. }` in `convert`, `match (&i.a, &i.b)`
+  in the x86 encoder: a tuple of pointers, so nothing is copied). `x := match o { Some(v) =>
+  v  None => return .. }` and `c, t, e := match term { Br(a, b, c) => (a, b, c)  _ =>
+  continue }` are the forms for "take it or leave". `&name` bindings change a payload in
+  place (`Br(_, &t, &e)`). What still needs an inner `match`: looking into a struct behind a
+  payload (`Field(b, n) => match b.k { Ident(q) => ..`), and a scrutinee computed from an
+  outer binding (`Some(t) => match self.types.k(t) { .. }`). A predicate on an enum with
+  data is a small function (`tk_nl`, `term_is_none`, `is_r`, `eq(a: Term, b: Term)`): such
+  enums have no `==`.
+- **Copies.** `clone(x)` is the builtin deep copy everywhere (functions leaving the work
+  region, instruction and operand lists). Note that `clone(p)` of a pointer is the pointer:
+  write `clone(*p)` / `clone(v)`, never `clone(&v)`. A plain assignment of a `Vec` shares its
+  buffer, which is what the read-only uses of type tables want (`fields :=
+  self.types.structs[sid].fields`).
+- **Embedded files** are constants: `priv const PRELUDE = embed("prelude.al")` and the table
+  `STD_MODULES` in `src/main.al` (its length is written out: add a module and raise it).
+- **Loops.** `for x in v` over a `Vec`; `v.items()` only where a slice is needed (`join`,
+  `sort`, `extend`, `==`). Labelled `continue` / `break` instead of flags for leaving two
+  loops (`continue blocks` in simplify.al).
 
 ## Memory
 
@@ -72,7 +118,7 @@ reference; `src/base.al`):
   of the next round discards them; used in `src/opt/simplify.al`). Nothing reachable from
   the function may be allocated between `scratch_on()` and `scratch_off()`.
 
-Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
+Compiling the compiler (about 25,400 lines and the 2,200 of the prelude) takes about 3.4 s and 0.4 GB.
 `ALC_DEBUG=mem` prints memory and time after each phase.
 
 ## Notes on language features
@@ -87,10 +133,10 @@ Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
   `fn_candidates` (`src/lower.al`: plain names for output, public candidates appended to the
   private ones), `call_overloaded` (`src/lower_call.al`: drops public candidates when a
   private one fits), and `priv_hint` (the "is declared `priv` in ..." hint). A new kind of
-  declaration becomes private-capable with one case in `parser_set_priv` and one in
-  `priv_decl_info` / `priv_rewrite`.
+  declaration becomes private-capable with one case in `set_priv` (`src/parser.al`) and one
+  in `priv_decl_info` / `rewrite` (`src/priv.al`).
 - **Nested and anonymous functions** (`src/lower_nested.al`). `fn name(..) { }` inside a
-  block is the statement `SKFn`, `fn(..) { }` the expression `EKFn` (a `FnDecl` with an empty
+  block is the statement `SK.Fn`, `fn(..) { }` the expression `EK.Fn` (a `FnDecl` with an empty
   name). Both become ordinary IR functions `outer.name` / `outer.fn@line:col`, lowered where
   they are written by `lower_fn_lower_body` with the type environment of the enclosing
   function (so once per instantiation of it); `Fx.nested_done` makes a declaration that is
@@ -100,7 +146,7 @@ Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
   continues there, finds nested functions, and reports a variable as `LOWER_NESTED_OUTER`,
   which is the "does not see the variables of the function around it" error. There is no
   capture and no environment: calls go through `call_fn` like calls of top-level functions,
-  and the value is `OpFAddr`.
+  and the value is `Op.FAddr`.
 - **Copy-write check** (`src/lint.al`). `lint_copy_writes` runs per `:=` statement while a
   function is lowered (it needs the type of the initialiser) and counts, in the rest of the
   block, direct field assignments to the new name against every other occurrence of it.
