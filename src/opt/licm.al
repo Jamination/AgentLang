@@ -117,7 +117,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
 }
 
 // exiting.iter().all(|e| cfg.dom(b, *e)) && l.latches.iter().all(|t| cfg.dom(b, *t))
-fn licm_run_guaranteed(cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> bool {
+priv fn run_guaranteed(cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> bool {
     for e in exiting {
         if !cfg.dom(b, e) {
             return false
@@ -221,7 +221,7 @@ fn licm_run(f: *Func) -> bool {
                                 Some(k) => safe_const = k != 0 && !(k == -1 && (i.op == SDiv || i.op == SRem))
                                 None => {}
                             }
-                            ok = safe_const || licm_run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
+                            ok = safe_const || run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
                         } else if i.op == Load {
                             m := alias_memref(f, v)
                             private := false
@@ -242,7 +242,7 @@ fn licm_run(f: *Func) -> bool {
                                         break
                                     }
                                 }
-                                if !aliased && (safe_addr || licm_run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)) {
+                                if !aliased && (safe_addr || run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)) {
                                     ok = true
                                 }
                             }

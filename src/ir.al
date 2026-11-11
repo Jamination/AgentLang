@@ -45,7 +45,7 @@ fn is_vec(self: T) -> bool {
     return self == V2 || self == V3 || self == V4
 }
 
-fn name(self: T) -> str {
+priv fn name(self: T) -> str {
     match self {
         Void => "void"
         I8 => "i8"
@@ -378,7 +378,7 @@ fn func_new(name: str) -> Func {
 }
 
 // n empty lists (each with its own buffer)
-fn ir_lists(n: i64) -> Vec[Vec[i64]] {
+priv fn lists(n: i64) -> Vec[Vec[i64]] {
     p := vec[Vec[i64]]()
     for i in 0..n {
         p.push(vec[i64]())
@@ -431,7 +431,7 @@ fn succs(self: *Func, b: i64) -> Vec[i64] {
 }
 
 fn preds(self: *Func) -> Vec[Vec[i64]] {
-    p := ir_lists(self.blocks.len)
+    p := lists(self.blocks.len)
     for b in 0..self.blocks.len {
         ss := self.succs(b)
         for s in ss.items() {
@@ -502,7 +502,7 @@ fn use_counts(self: *Func) -> Vec[i64] {
     return c
 }
 
-fn ir_apply_repl_find(map: *Vec[i64], v: i64) -> i64 {
+priv fn apply_repl_find(map: *Vec[i64], v: i64) -> i64 {
     r := v
     while map[r] != NOV {
         r = map[r]
@@ -527,21 +527,21 @@ fn apply_repl(self: *Func, map: *Vec[i64]) {
             for ai in 0..self.insts[v].args.len {
                 a := self.insts[v].args[ai]
                 if map[a] != NOV {
-                    self.insts[v].args[ai] = ir_apply_repl_find(map, a)
+                    self.insts[v].args[ai] = apply_repl_find(map, a)
                 }
             }
         }
         match self.blocks[bi].term {
             Br(c, t, e) => {
                 if map[c] != NOV {
-                    self.blocks[bi].term = Br(ir_apply_repl_find(map, c), t, e)
+                    self.blocks[bi].term = Br(apply_repl_find(map, c), t, e)
                 }
             }
             Ret(vs) => {
                 // vs shares its buffer with the terminator: updated in place
                 for i in 0..vs.len {
                     if map[vs[i]] != NOV {
-                        vs[i] = ir_apply_repl_find(map, vs[i])
+                        vs[i] = apply_repl_find(map, vs[i])
                     }
                 }
             }
@@ -586,7 +586,7 @@ fn cfg_new(f: *Func) -> Cfg {
     for i in 0..rpo.len {
         rpo_idx[rpo[i]] = i
     }
-    preds := ir_lists(n)
+    preds := lists(n)
     for b in rpo.items() {
         ss := f.succs(b)
         for s in ss.items() {
@@ -627,7 +627,7 @@ fn cfg_new(f: *Func) -> Cfg {
             }
         }
     }
-    children := ir_lists(n)
+    children := lists(n)
     for bi in 1..rpo.len {
         b := rpo[bi]
         children[idom[b]].push(b)
@@ -666,7 +666,7 @@ fn dom(self: *Cfg, a: i64, b: i64) -> bool {
     return self.pre[a] <= self.pre[b] && self.post[b] <= self.post[a]
 }
 
-struct Loop {
+priv struct Loop {
     header: i64
     blocks: Vec[i64]
     latches: Vec[i64]
@@ -788,7 +788,7 @@ fn contains(self: *Loops, li: i64, b: i64) -> bool {
 // ---------- printer ----------
 // The text Rust's `{:?}` gives for a float, from AL's shortest round-trip text `s`
 // (`fmt(x)`): same digits, but exponent notation below 1e-4 and from 1e16 on, and `NaN`.
-fn ir_float_debug(s: str) -> str {
+priv fn float_debug(s: str) -> str {
     if s == "nan" || s == "-nan" {
         return "NaN"
     }
@@ -884,9 +884,9 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
                 }
                 FConst => {
                     if i.ty == F32 {
-                        s.push(concat(" ", ir_float_debug(fmt(cast[f32](u32(i.k))))))
+                        s.push(concat(" ", float_debug(fmt(cast[f32](u32(i.k))))))
                     } else {
-                        s.push(concat(" ", ir_float_debug(fmt(cast[f64](u64(i.k))))))
+                        s.push(concat(" ", float_debug(fmt(cast[f64](u64(i.k))))))
                     }
                 }
                 Param, Proj, VExt, VIns, VShuf => {

@@ -15,7 +15,7 @@ fn lower_mem_is_builtin(name: str) -> bool {
 }
 
 // builtins that can be called as a method: `x.f(a)` means `f(x, a)`
-fn lower_mem_is_method_builtin(name: str) -> bool {
+priv fn is_method_builtin(name: str) -> bool {
     match name {
         "len", "clone", "hash", "ptr", "sqrt", "fabs", "fmin", "fmax" => return true
         "popcnt", "ctz", "clz", "bswap", "rotl", "rotr" => return true
@@ -26,7 +26,7 @@ fn lower_mem_is_method_builtin(name: str) -> bool {
 
 // Would `call_decl` accept these arguments for declaration `d`? `tys[i]` is the type of
 // argument i, or -1 for an untyped literal (which is not evaluated).
-fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], args: []Expr, tys: []i64) -> bool {
+priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], args: []Expr, tys: []i64) -> bool {
     nrecv := if is_some(recv) { 1 } else { 0 }
     if d.params.len != len(args) + nrecv {
         return false
@@ -114,7 +114,7 @@ fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], 
         a := &args[i]
         if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
             // a literal binds a type parameter to its default type, when it has one
-            dt := lower_mem_literal_type(self, a)
+            dt := literal_type(self, a)
             if dt < 0 || !self.unify(pt, dt, d.tparams.items(), &env) {
                 return false
             }
@@ -123,7 +123,7 @@ fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], 
         saved := self.cx.errs.len
         t := self.cx.resolve(pt, &env)
         self.cx.errs.truncate(saved)
-        if !lower_mem_literal_ok(self, a, t) {
+        if !literal_ok(self, a, t) {
             return false
         }
     }
@@ -131,7 +131,7 @@ fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], 
 }
 
 // can the untyped literal (or constant) `a` be a value of type `t`?
-fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
+priv fn literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     k := s.cx.types.k(t)
     match a.k {
         Nil => {
@@ -170,7 +170,7 @@ fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
 }
 
 // the type an untyped literal (or constant) takes without context; -1 if it has none
-fn lower_mem_literal_type(s: *Fx, a: *Expr) -> i64 {
+priv fn literal_type(s: *Fx, a: *Expr) -> i64 {
     match a.k {
         Nil => {
             return -1
@@ -321,7 +321,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
         usable := true
         match recv {
             Some(rv) => {
-                if lower_mem_is_method_builtin(ast_plain(name)) {
+                if is_method_builtin(ast_plain(name)) {
                     self.memo.push((&all[0], rv))
                     bargs = all
                 } else {
@@ -373,7 +373,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
 
 // ---------- the library's Vec and Map ----------
 // the element type of the library's `Vec[T]` (a user struct that is also named Vec is not one)
-fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
+priv fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
     match self.types.k(t) {
         Struct(sid) => {
             di, has := self.p_struct_names.get("Vec")
@@ -388,7 +388,7 @@ fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
 }
 
 // the key and value types of the library's `Map[K, V]`
-fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
+priv fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
     match self.types.k(t) {
         Struct(sid) => {
             di, has := self.p_struct_names.get("Map")
@@ -443,7 +443,7 @@ fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
 // ---------- clone ----------
 // Does a value of type `t` own storage outside itself (a slice, and so a str, Vec or Map,
 // anywhere inside)? Pointers are not followed: `clone` shares what they point to.
-fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
+priv fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
     // a type that contains itself by value is reported by the layout; do not recurse forever
     if depth > 40 {
         return false
@@ -498,7 +498,7 @@ fn clone_builtin(self: *Fx, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
 }
 
 // a copy of the bytes of `v` in a fresh temporary
-fn clone_copy(self: *Fx, v: Val) -> Val {
+priv fn clone_copy(self: *Fx, v: Val) -> Val {
     if !v.mem {
         return v
     }
@@ -509,7 +509,7 @@ fn clone_copy(self: *Fx, v: Val) -> Val {
 }
 
 // the members `names` of the struct or tuple copy `tv` that own storage are replaced by clones
-fn lower_mem_clone_fields(s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i64], pos: Pos, depth: i64) {
+priv fn clone_fields(s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i64], pos: Pos, depth: i64) {
     for i in 0..names.len {
         if !s.cx.has_heap(tys[i], 0) {
             continue
@@ -539,7 +539,7 @@ fn lower_mem_clone_fields(s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i64
 
 // An independent copy of `v`, allocated from the current arena: slices (and so str, Vec and
 // Map) get new storage, recursively; pointers and function values are copied as they are.
-fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
+priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
     ty := v.ty
     if ty == T_ERR || ty == T_NEVER || ty == T_UNIT {
         return v
@@ -596,7 +596,7 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 tys.push(self.cx.types.structs[sid].fields[i].1)
             }
             tv := self.clone_copy(v)
-            lower_mem_clone_fields(self, v, tv, names, tys, pos, depth)
+            clone_fields(self, v, tv, names, tys, pos, depth)
             return tv
         }
         Tuple(ts) => {
@@ -607,7 +607,7 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 tys.push(ts[i])
             }
             tv := self.clone_copy(v)
-            lower_mem_clone_fields(self, v, tv, names, tys, pos, depth)
+            clone_fields(self, v, tv, names, tys, pos, depth)
             return tv
         }
         Enum(eid) => {

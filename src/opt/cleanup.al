@@ -9,7 +9,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
     }
     changed := false
     for b in 0..f.blocks.len {
-        if !reach[b] && (!f.blocks[b].insts.is_empty() || !cleanup_term_is_none(f.blocks[b].term)) {
+        if !reach[b] && (!f.blocks[b].insts.is_empty() || !term_is_none(f.blocks[b].term)) {
             f.blocks[b].insts.clear()
             f.blocks[b].term = Term.None
             changed = true
@@ -39,7 +39,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
 }
 
 // `term != Term::None`
-fn cleanup_term_is_none(t: Term) -> bool {
+priv fn term_is_none(t: Term) -> bool {
     match t {
         Term.None => { return true }
         _ => {}
@@ -112,7 +112,7 @@ fn cleanup_dce(f: *Func) -> bool {
     return changed
 }
 
-fn cleanup_trivial_phis_res(repl: *Vec[i64], v0: i64) -> i64 {
+priv fn trivial_phis_res(repl: *Vec[i64], v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -135,7 +135,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
                 same := NOV
                 trivial := true
                 for a0 in f.insts[v].args.items() {
-                    a := cleanup_trivial_phis_res(&repl, a0)
+                    a := trivial_phis_res(&repl, a0)
                     if a == v || a == same {
                         continue
                     }

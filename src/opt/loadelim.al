@@ -1,6 +1,6 @@
 // Redundant load elimination, store-to-load forwarding and local dead store elimination.
 
-struct LoadelimAvail {
+priv struct Avail {
     ptr: i64,
     mref_addr: Addr,
     size: i64,
@@ -10,11 +10,11 @@ struct LoadelimAvail {
     pending_store: Opt[i64], // a store not yet observed by any possible reader
 }
 
-fn loadelim_mr(a: *LoadelimAvail) -> MemRef {
+priv fn mr(a: *Avail) -> MemRef {
     return MemRef{addr: a.mref_addr, size: a.size, class: a.class, ptr: a.ptr}
 }
 
-fn loadelim_run_find(repl: []i64, v0: i64) -> i64 {
+priv fn run_find(repl: []i64, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -29,10 +29,10 @@ fn loadelim_run(f: *Func) -> bool {
     dead := vec_fill(f.insts.len, false)
     changed := false
     // state at the end of each block, reused by a child that has that block as its only predecessor
-    no_state: Opt[Vec[LoadelimAvail]] = None
+    no_state: Opt[Vec[Avail]] = None
     out_state := vec_fill(f.blocks.len, no_state)
     for b in cfg.rpo.items() {
-        st := vec[LoadelimAvail]()
+        st := vec[Avail]()
         if cfg.preds[b].len == 1 {
             p := cfg.preds[b][0]
             match out_state[p] {
@@ -49,7 +49,7 @@ fn loadelim_run(f: *Func) -> bool {
             v := f.blocks[b].insts[ii]
             for ai in 0..f.insts[v].args.len {
                 a := f.insts[v].args[ai]
-                r := loadelim_run_find(repl.items(), a)
+                r := run_find(repl.items(), a)
                 if r != a {
                     f.insts[v].args[ai] = r
                 }
@@ -62,7 +62,7 @@ fn loadelim_run(f: *Func) -> bool {
                 for k in 0..st.len {
                     a := &st[k]
                     if a.ty == ty {
-                        am := loadelim_mr(a)
+                        am := mr(a)
                         if alias_must_alias(&am, &m) {
                             hit = Some(a.val)
                             break
@@ -80,13 +80,13 @@ fn loadelim_run(f: *Func) -> bool {
                         for k in 0..st.len {
                             a := &st[k]
                             if is_some(a.pending_store) {
-                                am := loadelim_mr(a)
+                                am := mr(a)
                                 if alias_may_alias(&am, &m, esc.items()) {
                                     a.pending_store = None
                                 }
                             }
                         }
-                        st.push(LoadelimAvail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: v, pending_store: None})
+                        st.push(Avail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: v, pending_store: None})
                     }
                 }
             } else if op == Store {
@@ -98,7 +98,7 @@ fn loadelim_run(f: *Func) -> bool {
                     a := &st[k]
                     match a.pending_store {
                         Some(s) => {
-                            am := loadelim_mr(a)
+                            am := mr(a)
                             if alias_must_alias(&am, &m) {
                                 dead[s] = true
                                 changed = true
@@ -110,14 +110,14 @@ fn loadelim_run(f: *Func) -> bool {
                 // st.retain(|a| !may_alias(&mr(a), &m, &esc))
                 n := 0
                 for k in 0..st.len {
-                    am := loadelim_mr(&st[k])
+                    am := mr(&st[k])
                     if !alias_may_alias(&am, &m, esc.items()) {
                         st[n] = st[k]
                         n += 1
                     }
                 }
                 st.len = n
-                st.push(LoadelimAvail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: val, pending_store: Some(v)})
+                st.push(Avail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: val, pending_store: Some(v)})
             } else if op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet {
                 // may read or write anything reachable: only non-escaped stack slots survive
                 n := 0

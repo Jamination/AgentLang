@@ -1,6 +1,6 @@
 // Promote non-escaping stack slots to SSA values (with scalar replacement of aggregates).
 
-struct Mem2regCtx {
+priv struct Ctx {
     f: *Func,
     cfg: *Cfg,
     var_ty: Vec[T],
@@ -11,7 +11,7 @@ struct Mem2regCtx {
     zero: Map[T, i64],
 }
 
-fn zero_of(self: *Mem2regCtx, t: T) -> i64 {
+priv fn zero_of(self: *Ctx, t: T) -> i64 {
     z0, found := self.zero.get(t)
     if found {
         return z0
@@ -27,7 +27,7 @@ fn zero_of(self: *Mem2regCtx, t: T) -> i64 {
     return z
 }
 
-fn read_out(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
+priv fn read_out(self: *Ctx, var_: i64, b: i64) -> i64 {
     v, found := self.last_store.get((var_, b))
     if found {
         return v
@@ -35,7 +35,7 @@ fn read_out(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
     return self.read_in(var_, b)
 }
 
-fn read_in(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
+priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
     v0, found := self.def_in.get((var_, b))
     if found {
         return v0
@@ -72,7 +72,7 @@ fn read_in(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
 fn mem2reg_run(f: *Func) -> bool {
     any := false
     for it in 0..8 {
-        if !mem2reg_run_once(f) {
+        if !run_once(f) {
             break
         }
         any = true
@@ -80,7 +80,7 @@ fn mem2reg_run(f: *Func) -> bool {
     return any
 }
 
-fn mem2reg_run_once(f: *Func) -> bool {
+priv fn run_once(f: *Func) -> bool {
     cfg := cfg_new(f)
     n := f.insts.len
     // users of each value (instruction users only) + escape through terminators
@@ -229,7 +229,7 @@ fn mem2reg_run_once(f: *Func) -> bool {
     }
     repl := vec_fill(n, NOV)
     rpo := clone(&cfg.rpo)
-    cx := Mem2regCtx{f: f, cfg: &cfg, var_ty: var_ty, last_store: last_store, def_in: map[(i64, i64), i64](), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: map[T, i64]()}
+    cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, last_store: last_store, def_in: map[(i64, i64), i64](), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: map[T, i64]()}
     for b in rpo.items() {
         insts := clone(&cx.f.blocks[b].insts)
         cur := map[i64, i64]()

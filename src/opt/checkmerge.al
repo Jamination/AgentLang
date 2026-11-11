@@ -3,7 +3,7 @@
 // becomes a single check of the largest index at the position of the first one. A failing
 // later check would end the program anyway and nothing observable happens in between.
 
-fn checkmerge_is_trap_block(f: *Func, b: i64) -> bool {
+priv fn is_trap_block(f: *Func, b: i64) -> bool {
     if !eq(f.blocks[b].term, Trap) {
         return false
     }
@@ -16,7 +16,7 @@ fn checkmerge_is_trap_block(f: *Func, b: i64) -> bool {
 }
 
 // (len value, constant index) of a check condition `len >u k` / `k <u len`
-fn checkmerge_const_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
+priv fn const_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
     i := &f.insts[c]
     if i.op == Ugt {
         match f.is_const(i.args[1]) {
@@ -49,12 +49,12 @@ fn checkmerge_run(f: *Func) -> bool {
             }
             _ => continue
         }
-        if !checkmerge_is_trap_block(f, trap) {
+        if !is_trap_block(f, trap) {
             continue
         }
         ln := 0
         k0 := 0
-        match checkmerge_const_check(f, c) {
+        match const_check(f, c) {
             Some(x) => {
                 ln = x.0
                 k0 = x.1
@@ -86,10 +86,10 @@ fn checkmerge_run(f: *Func) -> bool {
             match f.blocks[cur].term {
                 Jmp(t) => cur = t
                 Br(c2, t2, e2) => {
-                    if !checkmerge_is_trap_block(f, e2) {
+                    if !is_trap_block(f, e2) {
                         break
                     }
-                    match checkmerge_const_check(f, c2) {
+                    match const_check(f, c2) {
                         Some(x) => {
                             if x.0 == ln && x.1 >= 0 {
                                 kmax = max(kmax, x.1)

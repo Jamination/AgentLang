@@ -23,12 +23,12 @@ fn val_never() -> Val {
     return Val{ty: T_NEVER, v: NOV, mem: false, alias: 0, lane: None}
 }
 
-struct Scope {
+priv struct Scope {
     vars: Map[str, (i64, i64)]
     defers: Vec[*Block]
 }
 
-struct LoopCtx {
+priv struct LoopCtx {
     brk: i64
     cont: i64
     scope_depth: i64
@@ -61,7 +61,7 @@ struct Fx {
     nested_done: Vec[(*FnDecl, i64)]
 }
 
-fn lower_fn_str_less(a: str, b: str) -> bool {
+priv fn str_less(a: str, b: str) -> bool {
     return cmp(a, b) < 0
 }
 
@@ -79,7 +79,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
     loop {
         while cx.work.len > 0 {
             w := cx.work.pop()
-            lower_fn_lower_fn(cx, w.0, w.1, w.2)
+            lower_fn(cx, w.0, w.1, w.2)
         }
         if checked_all {
             break
@@ -99,7 +99,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         // two definitions of a name whose parameter types are the same once type aliases
         // are resolved (the texts differ, so the declaration pass did not see it)
         okeys := cx.fn_over.keys()
-        sort_by(okeys, lower_fn_str_less)
+        sort_by(okeys, str_less)
         for n in okeys {
             l, _ := cx.fn_over.get(n)
             if l.len < 2 || !cx.fn_names.has(n) {
@@ -132,7 +132,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         // (the names are visited in sorted order: the Rust source iterates a HashMap, whose
         // order is arbitrary)
         ckeys := cx.const_decls.keys()
-        sort_by(ckeys, lower_fn_str_less)
+        sort_by(ckeys, str_less)
         cnames := vec[str]()
         for n in ckeys {
             d, _ := cx.const_decls.get(n)
@@ -144,7 +144,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             cx.const_named(cnames[i])
         }
         gkeys := cx.global_decls.keys()
-        sort_by(gkeys, lower_fn_str_less)
+        sort_by(gkeys, str_less)
         gnames := vec[str]()
         for n in gkeys {
             d, _ := cx.global_decls.get(n)
@@ -170,7 +170,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
     }
 }
 
-fn lower_fn_lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
+priv fn lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
     d := cx.fn_decls[di]
     cx.scope_prelude = cx.internal_file(d.pos.file)
     tenv := map[str, i64]()
@@ -501,7 +501,7 @@ fn pop_scope(self: *Fx) {
     self.scopes.pop()
 }
 
-fn run_defers_down_to(self: *Fx, depth: i64) {
+priv fn run_defers_down_to(self: *Fx, depth: i64) {
     // emit defers of scopes [depth..] innermost first, without popping
     all := vec[*Block]()
     for si in self.scopes.len - 1..=depth by -1 {
@@ -543,7 +543,7 @@ fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
     return None
 }
 
-fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
+priv fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
     addr := self.temp(ty)
     if name == "_" {
         return addr
@@ -561,7 +561,7 @@ fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
 }
 
 // ---------- blocks / statements ----------
-fn block(self: *Fx, b: *Block) {
+priv fn block(self: *Fx, b: *Block) {
     self.push_scope()
     self.blocks.push(b)
     for i in 0..b.stmts.len {
@@ -625,7 +625,7 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
 
 // how an expression statement is treated: 0 = `match`, 1 = an expression without effect,
 // 2 = `&&` / `||` (may have effects through its operands), 3 = anything else
-fn lower_fn_stmt_expr_kind(e: *Expr) -> i64 {
+priv fn stmt_expr_kind(e: *Expr) -> i64 {
     match e.k {
         Match(_, _) => return 0
         Int(_) => return 1
@@ -646,7 +646,7 @@ fn lower_fn_stmt_expr_kind(e: *Expr) -> i64 {
 }
 
 // `break` / `continue`
-fn lower_fn_break_continue(fx: *Fx, pos: Pos, is_break: bool) {
+priv fn break_continue(fx: *Fx, pos: Pos, is_break: bool) {
     if fx.loops.len == 0 {
         if fx.parent != nil {
             fx.err(pos, fmt("`break`/`continue` outside of a loop (the nested function `", fx.f.name, "` cannot leave a loop of the enclosing function: return a value and test it at the call)"))
@@ -665,7 +665,7 @@ fn lower_fn_break_continue(fx: *Fx, pos: Pos, is_break: bool) {
 }
 
 // `break label` / `continue label`
-fn lower_fn_break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
+priv fn break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
     idx := -1
     for i in fx.labels.len - 1..=0 by -1 {
         if fx.labels[i].0 == label {
@@ -696,10 +696,10 @@ fn lower_fn_break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
     fx.dead = true
 }
 
-fn stmt(self: *Fx, s: *Stmt) {
+priv fn stmt(self: *Fx, s: *Stmt) {
     match s.k {
         ExprStmt(e) => {
-            kind := lower_fn_stmt_expr_kind(&e)
+            kind := stmt_expr_kind(&e)
             if kind == 0 {
                 match e.k {
                     Match(sc, arms) => {
@@ -980,10 +980,10 @@ fn stmt(self: *Fx, s: *Stmt) {
             }
         }
         Break => {
-            lower_fn_break_continue(self, s.pos, true)
+            break_continue(self, s.pos, true)
         }
         Continue => {
-            lower_fn_break_continue(self, s.pos, false)
+            break_continue(self, s.pos, false)
         }
         Assert(c, msg) => {
             ok := self.new_block()
@@ -1028,10 +1028,10 @@ fn stmt(self: *Fx, s: *Stmt) {
             self.labels.pop()
         }
         BreakTo(label) => {
-            lower_fn_break_continue_to(self, s.pos, true, label)
+            break_continue_to(self, s.pos, true, label)
         }
         ContinueTo(label) => {
-            lower_fn_break_continue_to(self, s.pos, false, label)
+            break_continue_to(self, s.pos, false, label)
         }
         Fn(d) => {
             self.nested_fn(d)
@@ -1039,7 +1039,7 @@ fn stmt(self: *Fx, s: *Stmt) {
     }
 }
 
-fn do_return(self: *Fx, v: Opt[Val]) {
+priv fn do_return(self: *Fx, v: Opt[Val]) {
     rets := vec[i64]()
     match v {
         Some(rv) => {
@@ -1142,7 +1142,7 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
     return res
 }
 
-fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], incl: bool, step_o: Opt[*Expr], body: *Block, pos: Pos) {
+priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], incl: bool, step_o: Opt[*Expr], body: *Block, pos: Pos) {
     bb := self.new_block()
     bc := self.new_block()
     bx := self.new_block()
@@ -1420,7 +1420,7 @@ fn slice_parts(self: *Fx, s: Val) -> (i64, i64) {
 }
 
 // kind: 0 = bounds, 1 = division by zero
-fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
+priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     known, found := self.traps.get((kind, pos.line))
     if found {
         return known

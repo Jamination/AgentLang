@@ -1,6 +1,6 @@
 // Function inlining.
 
-fn inline_cost(f: *Func) -> i64 {
+priv fn cost(f: *Func) -> i64 {
     n := 0
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
@@ -18,14 +18,14 @@ fn inline_cost(f: *Func) -> i64 {
 }
 
 // bmap[&b]: the block must be present
-fn inline_bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
+priv fn bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
     nb, found := bmap.get(b)
     assert found, "inline: block not in map"
     return nb
 }
 
 // inline one call site: `call` (in block `cb`) to callee `g`
-fn inline_inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
+priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     pos := index_of(f.blocks[cb].insts.items(), call)
     assert pos >= 0
     call_inst := clone(&f.insts[call])
@@ -75,7 +75,7 @@ fn inline_inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     rets := vec[(i64, Vec[i64])]()
     allocas := vec[i64]()
     for gb in grpo.items() {
-        nb := inline_bmap_at(&bmap, gb)
+        nb := bmap_at(&bmap, gb)
         for gv in g.blocks[gb].insts.items() {
             gi := &g.insts[gv]
             if gi.op == Param {
@@ -113,8 +113,8 @@ fn inline_inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
             }
         }
         match g.blocks[gb].term {
-            Jmp(t) => f.blocks[nb].term = Jmp(inline_bmap_at(&bmap, t))
-            Br(c, t, e) => f.blocks[nb].term = Br(vmap[c], inline_bmap_at(&bmap, t), inline_bmap_at(&bmap, e))
+            Jmp(t) => f.blocks[nb].term = Jmp(bmap_at(&bmap, t))
+            Br(c, t, e) => f.blocks[nb].term = Br(vmap[c], bmap_at(&bmap, t), bmap_at(&bmap, e))
             Ret(vs) => {
                 rv := vec[i64]()
                 for v in vs.items() {
@@ -133,7 +133,7 @@ fn inline_inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
         e.extend(f.blocks[0].insts.items())
         f.blocks[0].insts = e
     }
-    f.blocks[cb].term = Jmp(inline_bmap_at(&bmap, 0))
+    f.blocks[cb].term = Jmp(bmap_at(&bmap, 0))
     // results
     nrets := g.rets.len
     results := vec[i64]()
@@ -212,7 +212,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         if budget == 0 {
             break
         }
-        caller_size := inline_cost(&m.funcs[fid])
+        caller_size := cost(&m.funcs[fid])
         if caller_size > pol.max_caller {
             break
         }
@@ -238,7 +238,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     }
                     size, have := sizes.get(g)
                     if !have {
-                        size = inline_cost(gf)
+                        size = cost(gf)
                         sizes.set(g, size)
                     }
                     limit := 0
@@ -263,7 +263,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         match found {
             Some(x) => {
                 gf := clone(&m.funcs[x.2])
-                inline_inline_call(&m.funcs[fid], x.0, x.1, &gf)
+                inline_call(&m.funcs[fid], x.0, x.1, &gf)
                 any = true
                 budget -= 1
             }

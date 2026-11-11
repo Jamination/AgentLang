@@ -11,13 +11,13 @@ enum CV {
     Str(str),
 }
 
-enum CState {
+priv enum CState {
     Busy,
     Done(Opt[i64], CV),
     Failed,
 }
 
-enum ParamAbi {
+priv enum ParamAbi {
     Scalar(T),
     Flat(Vec[Leaf]),
     ByRef,
@@ -30,7 +30,7 @@ enum RetAbi {
     SRet,
 }
 
-const MAX_FLAT = 4
+priv const MAX_FLAT = 4
 
 struct Cx {
     types: Types
@@ -130,7 +130,7 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
 }
 
 // the value of an optional type, or `d`
-fn lower_opt_or(o: Opt[i64], d: i64) -> i64 {
+priv fn opt_or(o: Opt[i64], d: i64) -> i64 {
     match o {
         Some(t) => return t
         None => return d
@@ -138,7 +138,7 @@ fn lower_opt_or(o: Opt[i64], d: i64) -> i64 {
 }
 
 // `f as i64` of the Rust source: saturating, NaN gives 0
-fn lower_f64_to_i64(f: f64) -> i64 {
+priv fn f64_to_i64(f: f64) -> i64 {
     if f != f {
         return 0
     }
@@ -152,7 +152,7 @@ fn lower_f64_to_i64(f: f64) -> i64 {
 }
 
 // the low `n` bytes of `x`, little-endian, into `data` at `off`
-fn lower_put_le(data: *Vec[u8], off: i64, x: u64, n: i64) {
+priv fn put_le(data: *Vec[u8], off: i64, x: u64, n: i64) {
     for j in 0..n {
         data[off + j] = u8(x >> u64(8 * j))
     }
@@ -433,7 +433,7 @@ fn fn_candidates(self: *Cx, n: str) -> Vec[i64] {
     return v
 }
 
-fn fn_candidates_of(self: *Cx, n: str) -> Vec[i64] {
+priv fn fn_candidates_of(self: *Cx, n: str) -> Vec[i64] {
     v := vec[i64]()
     if self.scope_prelude {
         // prelude code sees its own definitions; the synthesized entry also reaches user code
@@ -624,7 +624,7 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
     return T_ERR
 }
 
-fn inst_name(self: *Cx, base: str, targs: []i64) -> str {
+priv fn inst_name(self: *Cx, base: str, targs: []i64) -> str {
     if len(targs) == 0 {
         return base
     }
@@ -635,7 +635,7 @@ fn inst_name(self: *Cx, base: str, targs: []i64) -> str {
     return fmt(base, "[", join(parts.items(), ", "), "]")
 }
 
-fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
+priv fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
     d := self.struct_decls[si]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("struct `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
@@ -954,7 +954,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
 }
 
 // type of a constant initializer expression (for globals without annotation)
-fn const_type_of(self: *Cx, e: *Expr) -> i64 {
+priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match e.k {
         Int(_) => return T_I64
         Float(_) => return T_F64
@@ -962,7 +962,7 @@ fn const_type_of(self: *Cx, e: *Expr) -> i64 {
         Str(_) => return T_STR
         Lit(t, _) => {
             env := map[str, i64]()
-            return lower_opt_or(self.expr_type(t, &env), T_ERR)
+            return opt_or(self.expr_type(t, &env), T_ERR)
         }
         Call(c, _) => {
             env := map[str, i64]()
@@ -1306,7 +1306,7 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                         Int(bits, signed) => {
                             match v0 {
                                 Int(i) => {
-                                    v = CV.Int(lower_wrap_int(i, bits, signed))
+                                    v = CV.Int(wrap_int(i, bits, signed))
                                     ok = true
                                 }
                                 _ => {}
@@ -1376,7 +1376,7 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
 }
 
 // integer (op) integer
-fn lower_const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
+priv fn const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
     match op {
         Add => return Some(Int(x + y))
         Sub => return Some(Int(x - y))
@@ -1421,7 +1421,7 @@ fn lower_const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] 
 }
 
 // the operand of a mixed / float operation as a float: (value, ok)
-fn lower_const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
+priv fn const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
     match cx.const_eval(e) {
         Some(cv) => {
             match cv {
@@ -1436,12 +1436,12 @@ fn lower_const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
 }
 
 // float (op) float, with integers converted; the operands are evaluated again
-fn lower_const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
-    x, xok := lower_const_float_operand(cx, a)
+priv fn const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
+    x, xok := const_float_operand(cx, a)
     if !xok {
         return None
     }
-    y, yok := lower_const_float_operand(cx, b)
+    y, yok := const_float_operand(cx, b)
     if !yok {
         return None
     }
@@ -1523,15 +1523,15 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
             match x {
                 Int(xi) => {
                     match y {
-                        Int(yi) => return lower_const_bin_int(self, op, xi, yi, e.pos)
-                        Float(_) => return lower_const_bin_float(self, op, a, b)
+                        Int(yi) => return const_bin_int(self, op, xi, yi, e.pos)
+                        Float(_) => return const_bin_float(self, op, a, b)
                         _ => return None
                     }
                 }
                 Float(_) => {
                     match y {
-                        Int(_) => return lower_const_bin_float(self, op, a, b)
-                        Float(_) => return lower_const_bin_float(self, op, a, b)
+                        Int(_) => return const_bin_float(self, op, a, b)
+                        Float(_) => return const_bin_float(self, op, a, b)
                         _ => return None
                     }
                 }
@@ -1585,8 +1585,8 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                 match self.types.k(t) {
                     Int(bits, signed) => {
                         match v {
-                            Int(i) => return Some(CV.Int(lower_wrap_int(i, bits, signed)))
-                            Float(f) => return Some(CV.Int(lower_wrap_int(lower_f64_to_i64(f), bits, signed)))
+                            Int(i) => return Some(CV.Int(wrap_int(i, bits, signed)))
+                            Float(f) => return Some(CV.Int(wrap_int(f64_to_i64(f), bits, signed)))
                             _ => return None
                         }
                     }
@@ -1637,7 +1637,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
 }
 
 // write a constant initializer into `data` at `off`
-fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *Vec[(i64, RelocTarget)]) -> bool {
+priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *Vec[(i64, RelocTarget)]) -> bool {
     k := self.types.k(ty)
     match e.k {
         Lit(te, items) => {
@@ -1756,7 +1756,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                     // a variant of an enum without data
                     vi := self.variant_of(self.types.enums[eid].decl, n)
                     if vi >= 0 && self.types.enums[eid].simple {
-                        lower_put_le(data, off, u64(vi), 8)
+                        put_le(data, off, u64(vi), 8)
                         return true
                     }
                     return false
@@ -1849,7 +1849,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
         Int(bits, _) => {
             match v {
                 Int(i) => {
-                    lower_put_le(data, off, u64(i), bits / 8)
+                    put_le(data, off, u64(i), bits / 8)
                     return true
                 }
                 _ => {}
@@ -1858,11 +1858,11 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
         F32 => {
             match v {
                 Float(f) => {
-                    lower_put_le(data, off, u64(cast[u32](f32(f))), 4)
+                    put_le(data, off, u64(cast[u32](f32(f))), 4)
                     return true
                 }
                 Int(i) => {
-                    lower_put_le(data, off, u64(cast[u32](f32(i))), 4)
+                    put_le(data, off, u64(cast[u32](f32(i))), 4)
                     return true
                 }
                 _ => {}
@@ -1871,11 +1871,11 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
         F64 => {
             match v {
                 Float(f) => {
-                    lower_put_le(data, off, cast[u64](f), 8)
+                    put_le(data, off, cast[u64](f), 8)
                     return true
                 }
                 Int(i) => {
-                    lower_put_le(data, off, cast[u64](f64(i)), 8)
+                    put_le(data, off, cast[u64](f64(i)), 8)
                     return true
                 }
                 _ => {}
@@ -1896,7 +1896,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                     if et == T_U8 {
                         g := self.string_global(s)
                         relocs.push((off, Glob(g, 0)))
-                        lower_put_le(data, off + 8, u64(len(s)), 8)
+                        put_le(data, off + 8, u64(len(s)), 8)
                         return true
                     }
                 }
@@ -1908,7 +1908,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
     return false
 }
 
-fn lower_wrap_int(v: i64, bits: i64, signed: bool) -> i64 {
+priv fn wrap_int(v: i64, bits: i64, signed: bool) -> i64 {
     if signed {
         match bits {
             8 => return i64(i8(v))

@@ -22,7 +22,7 @@
 // The walkers below return a value from a `match` over every variant, which makes the match
 // exhaustive: a new AST variant does not compile until it is handled here.
 
-struct PrivCx {
+priv struct PrivCx {
     // written name -> internal name, for every private declaration of the file
     names: Map[str, str]
     // the same for private functions only (method-call syntax `x.f(..)`)
@@ -102,11 +102,11 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
         }
     }
     for i in 0..decls.len {
-        decls[i] = priv_rewrite(&r, decls[i])
+        decls[i] = rewrite(&r, decls[i])
     }
 }
 
-fn priv_name(r: *PrivCx, n: str) -> str {
+priv fn priv_name(r: *PrivCx, n: str) -> str {
     nn, found := r.names.get(n)
     if found {
         return nn
@@ -114,25 +114,25 @@ fn priv_name(r: *PrivCx, n: str) -> str {
     return n
 }
 
-fn priv_names(r: *PrivCx, v: *Vec[str]) {
+priv fn priv_names(r: *PrivCx, v: *Vec[str]) {
     for i in 0..v.len {
         v[i] = priv_name(r, v[i])
     }
 }
 
 // a function, top-level or nested: its name, parameters, types and body
-fn priv_fn(r: *PrivCx, f: *FnDecl) -> bool {
+priv fn priv_fn(r: *PrivCx, f: *FnDecl) -> bool {
     f.name = priv_name(r, f.name)
     priv_names(r, &f.tparams)
     for i in 0..f.params.len {
         f.params[i].0 = priv_name(r, f.params[i].0)
         priv_type(r, &f.params[i].1)
     }
-    f.ret = priv_opt_type(r, f.ret)
-    return priv_block(r, f.body)
+    f.ret = opt_type(r, f.ret)
+    return block(r, f.body)
 }
 
-fn priv_rewrite(r: *PrivCx, d: Decl) -> Decl {
+priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
     return match d {
         Fn(f) => {
             priv_fn(r, &f)
@@ -150,41 +150,41 @@ fn priv_rewrite(r: *PrivCx, d: Decl) -> Decl {
             e.name = priv_name(r, e.name)
             priv_names(r, &e.tparams)
             for i in 0..e.variants.len {
-                priv_types(r, &e.variants[i].1)
+                types(r, &e.variants[i].1)
             }
             Enum(e)
         }
         Const(c) => {
             c.name = priv_name(r, c.name)
-            c.ty = priv_opt_type(r, c.ty)
-            priv_expr(r, &c.val)
+            c.ty = opt_type(r, c.ty)
+            expr(r, &c.val)
             Const(c)
         }
         Glob(g) => {
             g.name = priv_name(r, g.name)
-            g.ty = priv_opt_type(r, g.ty)
-            g.init = priv_opt_expr(r, g.init)
+            g.ty = opt_type(r, g.ty)
+            g.init = opt_expr(r, g.init)
             Glob(g)
         }
         Test(t) => {
-            priv_block(r, t.body)
+            block(r, t.body)
             Test(t)
         }
         Use(path, pos) => d
     }
 }
 
-fn priv_types(r: *PrivCx, ts: *Vec[TypeAst]) -> bool {
+priv fn types(r: *PrivCx, ts: *Vec[TypeAst]) -> bool {
     for i in 0..ts.len {
         priv_type(r, &ts[i])
     }
     return true
 }
 
-fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
+priv fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
     return match *t {
         Name(n, args, pos) => {
-            priv_types(r, &args)
+            types(r, &args)
             nn, found := r.names.get(n)
             if found {
                 *t = Name(nn, args, pos)
@@ -194,21 +194,21 @@ fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
         Ptr(e) => priv_type(r, e)
         Slice(e) => priv_type(r, e)
         Array(n, e) => {
-            priv_expr(r, n)
+            expr(r, n)
             priv_type(r, e)
         }
         Fn(ps, ret) => {
-            priv_types(r, &ps)
+            types(r, &ps)
             match ret {
                 Some(rt) => priv_type(r, rt)
                 None => true
             }
         }
-        Tuple(ts) => priv_types(r, &ts)
+        Tuple(ts) => types(r, &ts)
     }
 }
 
-fn priv_opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
+priv fn opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
     match o {
         Some(t) => {
             tt: TypeAst = t
@@ -220,11 +220,11 @@ fn priv_opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
     return o
 }
 
-fn priv_opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
+priv fn opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
     match o {
         Some(e) => {
             ee: Expr = e
-            priv_expr(r, &ee)
+            expr(r, &ee)
             return Some(ee)
         }
         None => {}
@@ -232,29 +232,29 @@ fn priv_opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
     return o
 }
 
-fn priv_opt_pexpr(r: *PrivCx, o: Opt[*Expr]) -> bool {
+priv fn opt_pexpr(r: *PrivCx, o: Opt[*Expr]) -> bool {
     match o {
         Some(e) => {
-            return priv_expr(r, e)
+            return expr(r, e)
         }
         None => {}
     }
     return true
 }
 
-fn priv_exprs(r: *PrivCx, es: *Vec[Expr]) -> bool {
+priv fn exprs(r: *PrivCx, es: *Vec[Expr]) -> bool {
     for i in 0..es.len {
-        priv_expr(r, &es[i])
+        expr(r, &es[i])
     }
     return true
 }
 
 // the callee of a call: `x.f(..)` and `x.f[T](..)` name the function `f` if one is private
 // in this file (lowering still prefers a field `f` that holds a function)
-fn priv_callee(r: *PrivCx, c: *Expr) -> bool {
+priv fn callee(r: *PrivCx, c: *Expr) -> bool {
     match c.k {
         Field(recv, name) => {
-            priv_expr(r, recv)
+            expr(r, recv)
             mn, found := r.methods.get(name)
             if found {
                 c.k = Field(recv, mn)
@@ -264,18 +264,18 @@ fn priv_callee(r: *PrivCx, c: *Expr) -> bool {
         Index(b, targs) => {
             match b.k {
                 Field(recv, name) => {
-                    priv_callee(r, b)
-                    return priv_exprs(r, &targs)
+                    callee(r, b)
+                    return exprs(r, &targs)
                 }
                 _ => {}
             }
         }
         _ => {}
     }
-    return priv_expr(r, c)
+    return expr(r, c)
 }
 
-fn priv_expr(r: *PrivCx, e: *Expr) -> bool {
+priv fn expr(r: *PrivCx, e: *Expr) -> bool {
     return match e.k {
         Int(v) => true
         Float(v) => true
@@ -289,31 +289,31 @@ fn priv_expr(r: *PrivCx, e: *Expr) -> bool {
             }
             true
         }
-        Un(op, x) => priv_expr(r, x)
+        Un(op, x) => expr(r, x)
         Bin(op, a, b) => {
-            priv_expr(r, a)
-            priv_expr(r, b)
+            expr(r, a)
+            expr(r, b)
         }
         Call(c, args) => {
-            priv_callee(r, c)
-            priv_exprs(r, &args)
+            callee(r, c)
+            exprs(r, &args)
         }
         Index(b, idx) => {
-            priv_expr(r, b)
-            priv_exprs(r, &idx)
+            expr(r, b)
+            exprs(r, &idx)
         }
         Slice(b, lo, hi) => {
-            priv_expr(r, b)
-            priv_opt_pexpr(r, lo)
-            priv_opt_pexpr(r, hi)
+            expr(r, b)
+            opt_pexpr(r, lo)
+            opt_pexpr(r, hi)
         }
         // a field name is not a top-level name
-        Field(b, name) => priv_expr(r, b)
+        Field(b, name) => expr(r, b)
         Lit(te, items) => {
-            priv_expr(r, te)
+            expr(r, te)
             // field labels stay as written
             for i in 0..items.len {
-                priv_expr(r, &items[i].1)
+                expr(r, &items[i].1)
             }
             true
         }
@@ -324,38 +324,38 @@ fn priv_expr(r: *PrivCx, e: *Expr) -> bool {
             true
         }
         If(c, a, b) => {
-            priv_expr(r, c)
-            priv_block(r, a)
-            priv_block(r, b)
+            expr(r, c)
+            block(r, a)
+            block(r, b)
         }
-        Tuple(es) => priv_exprs(r, &es)
+        Tuple(es) => exprs(r, &es)
         Fn(d) => priv_fn(r, d)
         Match(sc, arms) => {
-            priv_expr(r, sc)
+            expr(r, sc)
             for i in 0..arms.len {
                 arm := &arms[i]
                 for j in 0..arm.pats.len {
-                    priv_pat(r, &arm.pats[j])
+                    pat(r, &arm.pats[j])
                 }
                 match arm.guard {
                     Some(g) => {
-                        priv_expr(r, g)
+                        expr(r, g)
                     }
                     None => {}
                 }
-                priv_block(r, arm.body)
+                block(r, arm.body)
             }
             true
         }
     }
 }
 
-fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
+priv fn pat(r: *PrivCx, p: *Pat) -> bool {
     return match *p {
         Wild => true
         Const(e) => {
             ee: Expr = e
-            priv_expr(r, &ee)
+            expr(r, &ee)
             *p = Const(ee)
             true
         }
@@ -363,7 +363,7 @@ fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
         // (a name inside is a constant, a variant or a binding: renamed like any identifier)
         Variant(name, subs, pos, qual) => {
             for i in 0..subs.len {
-                priv_pat(r, &subs[i])
+                pat(r, &subs[i])
             }
             // the qualifier `Enum` of `Enum.Variant(..)` may be a private enum
             match qual {
@@ -372,13 +372,13 @@ fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
                         Call(c, args) => {
                             match c.k {
                                 Field(b, f) => {
-                                    priv_expr(r, b)
+                                    expr(r, b)
                                 }
                                 _ => {}
                             }
                         }
                         Field(b, f) => {
-                            priv_expr(r, b)
+                            expr(r, b)
                         }
                         _ => {}
                     }
@@ -389,7 +389,7 @@ fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
         }
         Tuple(subs, pos) => {
             for i in 0..subs.len {
-                priv_pat(r, &subs[i])
+                pat(r, &subs[i])
             }
             true
         }
@@ -401,54 +401,54 @@ fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
 }
 
 // the statements are rewritten in place: a Block copy shares their storage
-fn priv_block(r: *PrivCx, b: Block) -> bool {
+priv fn block(r: *PrivCx, b: Block) -> bool {
     for i in 0..b.stmts.len {
-        priv_stmt(r, &b.stmts[i])
+        stmt(r, &b.stmts[i])
     }
     return true
 }
 
-fn priv_stmt(r: *PrivCx, s: *Stmt) -> bool {
+priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
     return match s.k {
         ExprStmt(e) => {
             ee: Expr = e
-            priv_expr(r, &ee)
+            expr(r, &ee)
             s.k = ExprStmt(ee)
             true
         }
         Let(names, e) => {
             priv_names(r, &names)
             ee: Expr = e
-            priv_expr(r, &ee)
+            expr(r, &ee)
             s.k = Let(names, ee)
             true
         }
         MultiAssign(lhs, e) => {
-            priv_exprs(r, &lhs)
+            exprs(r, &lhs)
             ee: Expr = e
-            priv_expr(r, &ee)
+            expr(r, &ee)
             s.k = MultiAssign(lhs, ee)
             true
         }
         Var(name, ty, init) => {
-            s.k = Var(priv_name(r, name), priv_opt_type(r, ty), priv_opt_expr(r, init))
+            s.k = Var(priv_name(r, name), opt_type(r, ty), opt_expr(r, init))
             true
         }
         Assign(a, op, b) => {
             aa: Expr = a
             bb: Expr = b
-            priv_expr(r, &aa)
-            priv_expr(r, &bb)
+            expr(r, &aa)
+            expr(r, &bb)
             s.k = Assign(aa, op, bb)
             true
         }
         If(c, then, els) => {
             cc: Expr = c
-            priv_expr(r, &cc)
-            priv_block(r, then)
+            expr(r, &cc)
+            block(r, then)
             match els {
                 Some(eb) => {
-                    priv_block(r, eb)
+                    block(r, eb)
                 }
                 None => {}
             }
@@ -457,11 +457,11 @@ fn priv_stmt(r: *PrivCx, s: *Stmt) -> bool {
         }
         While(c, body) => {
             cc: Expr = c
-            priv_expr(r, &cc)
+            expr(r, &cc)
             s.k = While(cc, body)
-            priv_block(r, body)
+            block(r, body)
         }
-        LoopStmt(body) => priv_block(r, body)
+        LoopStmt(body) => block(r, body)
         For(v1, v2, lo, hi, incl, step, body) => {
             v2n: Opt[str] = v2
             match v2 {
@@ -471,27 +471,27 @@ fn priv_stmt(r: *PrivCx, s: *Stmt) -> bool {
                 None => {}
             }
             ll: Expr = lo
-            priv_expr(r, &ll)
-            s.k = For(priv_name(r, v1), v2n, ll, priv_opt_expr(r, hi), incl, priv_opt_expr(r, step), body)
-            priv_block(r, body)
+            expr(r, &ll)
+            s.k = For(priv_name(r, v1), v2n, ll, opt_expr(r, hi), incl, opt_expr(r, step), body)
+            block(r, body)
         }
         Return(v) => {
-            s.k = Return(priv_opt_expr(r, v))
+            s.k = Return(opt_expr(r, v))
             true
         }
         Break => true
-        Labeled(label, st) => priv_stmt(r, st)
+        Labeled(label, st) => stmt(r, st)
         BreakTo(label) => true
         ContinueTo(label) => true
         Continue => true
         Assert(c, msg) => {
             cc: Expr = c
-            priv_expr(r, &cc)
-            s.k = Assert(cc, priv_opt_expr(r, msg))
+            expr(r, &cc)
+            s.k = Assert(cc, opt_expr(r, msg))
             true
         }
-        BlockStmt(b) => priv_block(r, b)
-        Defer(b) => priv_block(r, b)
+        BlockStmt(b) => block(r, b)
+        Defer(b) => block(r, b)
         // a nested function is a local name: renamed like the variables of that spelling
         Fn(d) => priv_fn(r, d)
     }

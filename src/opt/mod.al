@@ -2,26 +2,26 @@
 
 // debugging aid: ALC_DISABLE=pass1,pass2 switches optimization passes off
 // the environment switches, read once
-opt_env_read: bool
-opt_env_debug: str
-opt_env_disable: str
-opt_env_has_disable: bool
+priv env_read: bool
+priv env_debug: str
+priv env_disable: str
+priv env_has_disable: bool
 
-fn opt_read_env() {
-    if !opt_env_read {
-        opt_env_read = true
+priv fn read_env() {
+    if !env_read {
+        env_read = true
         d, has_d := env_get("ALC_DEBUG")
-        opt_env_debug = d
+        env_debug = d
         v, found := env_get("ALC_DISABLE")
-        opt_env_disable = v
-        opt_env_has_disable = found
+        env_disable = v
+        env_has_disable = found
     }
 }
 
 fn opt_enabled(name: str) -> bool {
-    opt_read_env()
-    if opt_env_has_disable {
-        for x in split(opt_env_disable, ',') {
+    read_env()
+    if env_has_disable {
+        for x in split(env_disable, ',') {
             if x == name {
                 return false
             }
@@ -31,8 +31,8 @@ fn opt_enabled(name: str) -> bool {
     return true
 }
 fn opt_trace(what: str, f: *Func) {
-    opt_read_env()
-    v := opt_env_debug
+    read_env()
+    v := env_debug
     if v == "trace" {
         eput(fmt("[trace] ", what, " ", f.name, " (size ", f.size(), ")\n"))
     } else if v == "verify" {
@@ -45,7 +45,7 @@ fn opt_trace(what: str, f: *Func) {
     }
 }
 
-fn opt_local_opt(f: *Func, level: i64) {
+priv fn local_opt(f: *Func, level: i64) {
     opt_trace("local_opt", f)
     cleanup_prune_unreachable(f)
     mem2reg_run(f)
@@ -217,10 +217,10 @@ fn opt_optimize(m: *Module, level: i64) {
     for fid in order.items() {
         if m.funcs[fid].lowered {
             work_begin()
-            opt_local_opt(&m.funcs[fid], level)
+            local_opt(&m.funcs[fid], level)
             if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol) {
                 opt_trace("after-inline", &m.funcs[fid])
-                opt_local_opt(&m.funcs[fid], level)
+                local_opt(&m.funcs[fid], level)
             }
             work_end()
             m.funcs[fid] = clone(&m.funcs[fid])

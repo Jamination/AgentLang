@@ -82,12 +82,12 @@ struct Types {
 }
 
 const AK_ANY = 0
-const AK_I16 = 1
-const AK_I32 = 2
+priv const AK_I16 = 1
+priv const AK_I32 = 2
 const AK_I64 = 3
-const AK_F64 = 4
+priv const AK_F64 = 4
 const AK_PTR = 5
-const AK_F32 = 6
+priv const AK_F32 = 6
 const AK_VEC = 7
 
 fn types_may_alias_class(a: i64, b: i64) -> bool {
@@ -105,7 +105,7 @@ fn types_may_alias_class(a: i64, b: i64) -> bool {
 }
 
 // canonical text of a kind: equal kinds have equal keys and different kinds different keys
-fn types_key(k: TyK) -> str {
+priv fn types_key(k: TyK) -> str {
     match k {
         Err => return "E"
         Unit => return "U"
@@ -182,13 +182,13 @@ fn intern(self: *Types, k: TyK) -> i64 {
         return t
     }
     id := self.kinds.len
-    self.kinds.push(types_kind_copy(k))
+    self.kinds.push(kind_copy(k))
     self.map.set(key, id)
     return id
 }
 
 // the kind with its own type lists (the table must not share a buffer with the caller)
-fn types_kind_copy(k: TyK) -> TyK {
+priv fn kind_copy(k: TyK) -> TyK {
     match k {
         Tuple(v) => return Tuple(clone(&v))
         Fn(p, r) => return Fn(clone(&p), r)
@@ -248,7 +248,7 @@ fn is_scalar(self: *Types, t: i64) -> bool {
     }
 }
 
-fn types_names(self: *Types, v: Vec[i64]) -> str {
+priv fn names(self: *Types, v: Vec[i64]) -> str {
     parts := vec[str]()
     for t in v.items() {
         parts.push(self.name(t))
@@ -279,9 +279,9 @@ fn name(self: *Types, t: i64) -> str {
         Array(e, n) => return fmt("[", n, "]", self.name(e))
         Struct(s) => return self.structs[s].name
         Enum(s) => return self.enums[s].name
-        Tuple(v) => return fmt("(", types_names(self, v), ")")
+        Tuple(v) => return fmt("(", names(self, v), ")")
         Fn(p, r) => {
-            ps := types_names(self, p)
+            ps := names(self, p)
             if r == T_UNIT {
                 return fmt("fn(", ps, ")")
             } else {
@@ -291,7 +291,7 @@ fn name(self: *Types, t: i64) -> str {
     }
 }
 
-fn layout_fields(self: *Types, tys: []i64) -> (Vec[i64], i64, i64) {
+priv fn layout_fields(self: *Types, tys: []i64) -> (Vec[i64], i64, i64) {
     off := 0
     align := 1
     offs := vec[i64]()
@@ -340,7 +340,7 @@ fn layout_struct(self: *Types, sid: i64) {
     s.state = 2
 }
 
-fn layout_enum(self: *Types, eid: i64) {
+priv fn layout_enum(self: *Types, eid: i64) {
     st := self.enums[eid].state
     if st == 2 || st == 3 {
         return
@@ -440,7 +440,7 @@ fn align_of(self: *Types, t: i64) -> i64 {
     }
 }
 
-fn field_id(self: *Types, owner: i64, idx: i64) -> i64 {
+priv fn field_id(self: *Types, owner: i64, idx: i64) -> i64 {
     f0, found := self.field_ids.get((owner, idx))
     if found {
         return f0
@@ -496,13 +496,13 @@ fn field_alias(self: *Types, owner: i64, idx: i64, t: i64) -> i64 {
 }
 
 // a scalar type: one leaf at `base`
-fn types_leaves_scalar(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
+priv fn leaves_scalar(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
     it, k := self.scalar_ir(t)
     out.push(Leaf{off: base, t: it, alias: k})
 }
 
 // the fields `tys` (at offsets `offs`) of the struct or tuple `t`
-fn types_leaves_fields(self: *Types, t: i64, tys: []i64, offs: []i64, base: i64, out: *Vec[Leaf]) {
+priv fn leaves_fields(self: *Types, t: i64, tys: []i64, offs: []i64, base: i64, out: *Vec[Leaf]) {
     for i, ft in tys {
         if self.is_scalar(ft) {
             it, k := self.scalar_ir(ft)
@@ -522,11 +522,11 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
                 out.push(Leaf{off: base + 16 * c, t: V4, alias: AK_VEC})
             }
         }
-        Bool, F64, F32, Quat => types_leaves_scalar(self, t, base, out)
-        Int(b, s) => types_leaves_scalar(self, t, base, out)
-        Vec(n) => types_leaves_scalar(self, t, base, out)
-        Ptr(e) => types_leaves_scalar(self, t, base, out)
-        Fn(p, r) => types_leaves_scalar(self, t, base, out)
+        Bool, F64, F32, Quat => leaves_scalar(self, t, base, out)
+        Int(b, s) => leaves_scalar(self, t, base, out)
+        Vec(n) => leaves_scalar(self, t, base, out)
+        Ptr(e) => leaves_scalar(self, t, base, out)
+        Fn(p, r) => leaves_scalar(self, t, base, out)
         Slice(e) => {
             f0 := self.field_id(t, 0)
             f1 := self.field_id(t, 1)
@@ -549,11 +549,11 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
                 tys.push(self.structs[s].fields[i].1)
             }
             offs := clone(&self.structs[s].offsets)
-            types_leaves_fields(self, t, tys.items(), offs.items(), base, out)
+            leaves_fields(self, t, tys.items(), offs.items(), base, out)
         }
         Tuple(v) => {
             offs := self.tuple_offsets(v.items())
-            types_leaves_fields(self, t, v.items(), offs.items(), base, out)
+            leaves_fields(self, t, v.items(), offs.items(), base, out)
         }
         Enum(e) => {
             if self.enums[e].simple {
@@ -570,23 +570,23 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
     }
 }
 
-const TYPES_COUNT_MAX = 0x7FFFFFFFFFFFFFFF
+priv const COUNT_MAX = 0x7FFFFFFFFFFFFFFF
 
 // saturating arithmetic on non-negative counts (u64 saturating_mul / saturating_add in the
 // Rust source; here the ceiling is the largest i64)
-fn types_sat_mul(a: i64, b: i64) -> i64 {
+priv fn sat_mul(a: i64, b: i64) -> i64 {
     if a == 0 || b == 0 {
         return 0
     }
-    if a > TYPES_COUNT_MAX / b {
-        return TYPES_COUNT_MAX
+    if a > COUNT_MAX / b {
+        return COUNT_MAX
     }
     return a * b
 }
 
-fn types_sat_add(a: i64, b: i64) -> i64 {
-    if a > TYPES_COUNT_MAX - b {
-        return TYPES_COUNT_MAX
+priv fn sat_add(a: i64, b: i64) -> i64 {
+    if a > COUNT_MAX - b {
+        return COUNT_MAX
     }
     return a + b
 }
@@ -594,7 +594,7 @@ fn types_sat_add(a: i64, b: i64) -> i64 {
 // number of leaves without materializing huge arrays
 fn leaf_count(self: *Types, t: i64) -> i64 {
     match self.k(t) {
-        Array(e, n) => return types_sat_mul(self.leaf_count(e), n)
+        Array(e, n) => return sat_mul(self.leaf_count(e), n)
         Struct(s) => {
             tys := vec[i64]()
             for i in 0..self.structs[s].fields.len {
@@ -602,14 +602,14 @@ fn leaf_count(self: *Types, t: i64) -> i64 {
             }
             total := 0
             for ft in tys.items() {
-                total = types_sat_add(total, self.leaf_count(ft))
+                total = sat_add(total, self.leaf_count(ft))
             }
             return total
         }
         Tuple(v) => {
             total := 0
             for ft in v.items() {
-                total = types_sat_add(total, self.leaf_count(ft))
+                total = sat_add(total, self.leaf_count(ft))
             }
             return total
         }

@@ -16,20 +16,20 @@ struct Token {
     pos: Pos
 }
 
-LEXER_KEYWORDS := [26]str{
+priv KEYWORDS := [26]str{
     "fn", "struct", "enum", "const", "test", "use", "if", "else", "while", "loop", "for", "in",
     "return", "break", "continue", "assert", "true", "false", "nil", "match", "by", "defer",
     "inline", "noinline", "extern", "priv",
 }
 
-LEXER_PUNCTS := [47]str{
+priv PUNCTS := [47]str{
     "<<=", ">>=", "..=", ":=", "->", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "+=", "-=", "*=",
     "/=", "%=", "&=", "|=", "^=", "..", "=>", "+", "-", "*", "/", "%", "&", "|", "^", "~", "!", "<",
     ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "@",
 }
 
 // Rust's `char::to_digit(radix)` for a byte
-fn lexer_to_digit(c: u8, radix: i64) -> Opt[i64] {
+priv fn to_digit(c: u8, radix: i64) -> Opt[i64] {
     d := -1
     if c >= '0' && c <= '9' {
         d = i64(c - '0')
@@ -45,7 +45,7 @@ fn lexer_to_digit(c: u8, radix: i64) -> Opt[i64] {
 }
 
 // Rust's `c as char` formatted with `{}`: the byte as a Unicode scalar value in UTF-8
-fn lexer_char_str(c: u8) -> str {
+priv fn char_str(c: u8) -> str {
     if c < 0x80 {
         out := alloc[u8](1)
         out[0] = c
@@ -58,7 +58,7 @@ fn lexer_char_str(c: u8) -> str {
 }
 
 // Rust's `parse::<u64>()` for a non-empty text of decimal digits; false on overflow
-fn lexer_parse_u64(text: str) -> (u64, bool) {
+priv fn parse_u64(text: str) -> (u64, bool) {
     if len(text) == 0 {
         return (0, false)
     }
@@ -76,7 +76,7 @@ fn lexer_parse_u64(text: str) -> (u64, bool) {
     return (v, true)
 }
 
-fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
+priv fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
     return Pos{file: file, line: line, col: i64(u16(at - line_start + 1))}
 }
 
@@ -144,7 +144,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             }
             w := src[st..i]
             is_kw := false
-            for k in LEXER_KEYWORDS {
+            for k in KEYWORDS {
                 if k == w {
                     out.push(Token{t: Kw(k), pos: p})
                     is_kw = true
@@ -169,7 +169,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 any := false
                 while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
                     if s[i] != '_' {
-                        match lexer_to_digit(s[i], radix) {
+                        match to_digit(s[i], radix) {
                             Some(d) => {
                                 v = v * u64(radix) + u64(d)
                                 any = true
@@ -230,7 +230,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                     out.push(Token{t: Float(0.0), pos: p})
                 }
             } else {
-                v, ok := lexer_parse_u64(text)
+                v, ok := parse_u64(text)
                 if ok {
                     out.push(Token{t: Int(v), pos: p})
                 } else {
@@ -289,7 +289,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                             v: u32 = 0
                             n := 0
                             while n < 2 && i < len(s) {
-                                match lexer_to_digit(s[i], 16) {
+                                match to_digit(s[i], 16) {
                                     Some(dg) => {
                                         v = v * 16 + u32(dg)
                                         i += 1
@@ -306,7 +306,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                             buf.push(u8(v))
                         }
                         _ => {
-                            errs.push(Diag{pos: p, msg: fmt("unknown escape \\", lexer_char_str(e))})
+                            errs.push(Diag{pos: p, msg: fmt("unknown escape \\", char_str(e))})
                         }
                     }
                     continue
@@ -332,7 +332,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             continue
         }
         matched := false
-        for pp in LEXER_PUNCTS {
+        for pp in PUNCTS {
             if starts_with(s[i..], pp) {
                 if pp == "(" || pp == "[" || pp == "{" {
                     stack.push(c)
@@ -349,7 +349,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             }
         }
         if !matched {
-            errs.push(Diag{pos: p, msg: fmt("unexpected character '", lexer_char_str(c), "'")})
+            errs.push(Diag{pos: p, msg: fmt("unexpected character '", char_str(c), "'")})
             i += 1
         }
     }

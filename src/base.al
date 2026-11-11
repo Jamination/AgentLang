@@ -59,7 +59,7 @@ inline fn at[T](v: *Vec[T], i: i64) -> T {
 
 // ---------- text ----------
 // an independent copy of s
-fn str_copy(s: str) -> str {
+priv fn str_copy(s: str) -> str {
     out := alloc[u8](len(s))
     memcopy(ptr(out), ptr(s), len(s))
     return out
@@ -159,53 +159,53 @@ fn ensure_stack(bytes: i64) {
 //            use counts). scratch_on() / scratch_off() bracket their construction and
 //            scratch_reset() at the top of the next round discards them. Nothing reachable
 //            from the function may be allocated between scratch_on() and scratch_off().
-base_work: Region
-base_scratch: Region
-base_working: bool
-base_scratching: bool
+priv work: Region
+priv scratch: Region
+priv working: bool
+priv scratching: bool
 
 fn work_begin() {
-    assert !base_working, "work_begin: already working"
-    base_working = true
-    enter(&base_work)
+    assert !working, "work_begin: already working"
+    working = true
+    enter(&work)
 }
 
 fn work_end() {
-    assert base_working && !base_scratching, "work_end without work_begin"
-    base_working = false
+    assert working && !scratching, "work_end without work_begin"
+    working = false
     leave()
-    reset(&base_work)
-    reset(&base_scratch)
+    reset(&work)
+    reset(&scratch)
 }
 
 // allocate from the main arena for a moment while working (for results that must stay)
 fn work_pause() {
-    assert base_working && !base_scratching, "work_pause without work_begin"
+    assert working && !scratching, "work_pause without work_begin"
     leave()
 }
 
 fn work_resume() {
-    enter(&base_work)
+    enter(&work)
 }
 
 fn scratch_on() {
-    assert !base_scratching, "scratch_on: already on"
-    base_scratching = true
-    enter(&base_scratch)
+    assert !scratching, "scratch_on: already on"
+    scratching = true
+    enter(&scratch)
 }
 
 fn scratch_off() {
-    assert base_scratching, "scratch_off without scratch_on"
-    base_scratching = false
+    assert scratching, "scratch_off without scratch_on"
+    scratching = false
     leave()
 }
 
 fn scratch_reset() {
-    assert !base_scratching, "scratch_reset while the scratch region is in use"
-    reset(&base_scratch)
+    assert !scratching, "scratch_reset while the scratch region is in use"
+    reset(&scratch)
 }
 
 // the largest size the work region has had, in bytes (not to be called while working)
 fn work_peak() -> i64 {
-    return max(base_work.hwm, base_work.cur) - base_work.base
+    return max(work.hwm, work.cur) - work.base
 }

@@ -1,7 +1,7 @@
 // Lowering of the built-in f32 vector types: vec2 / vec3 / vec4 / quat (one xmm value each)
 // and mat4 (four vec4 columns in memory).
 
-fn lower_vec_lane_of(c: u8) -> Opt[i64] {
+priv fn lane_of(c: u8) -> Opt[i64] {
     match c {
         'x', 'r' => return Some(0)
         'y', 'g' => return Some(1)
@@ -39,7 +39,7 @@ fn fconst_ty(self: *Fx, ty: i64, f: f64) -> Val {
     }
 }
 
-fn fx_vec_ty(n: i64) -> i64 {
+priv fn fx_vec_ty(n: i64) -> i64 {
     match n {
         2 => return T_VEC2
         3 => return T_VEC3
@@ -130,7 +130,7 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
     lanes := vec[i64]()
     good := true
     for c in name {
-        match lower_vec_lane_of(c) {
+        match lane_of(c) {
             Some(k) => {
                 lanes.push(k)
             }
@@ -232,7 +232,7 @@ fn vec_index(self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
     return Some(p)
 }
 
-fn vec_eq(self: *Fx, l: Val, r: Val, n: i64) -> i64 {
+priv fn vec_eq(self: *Fx, l: Val, r: Val, n: i64) -> i64 {
     x := self.scalar(l)
     y := self.scalar(r)
     acc := NOV
@@ -250,7 +250,7 @@ fn vec_eq(self: *Fx, l: Val, r: Val, n: i64) -> i64 {
 }
 
 // the operator is not defined for these operand types
-fn lower_vec_vec_binary_bad(s: *Fx, l: Val, r: Val, pos: Pos) -> Opt[Val] {
+priv fn vec_binary_bad(s: *Fx, l: Val, r: Val, pos: Pos) -> Opt[Val] {
     a := s.tyname(l.ty)
     b := s.tyname(r.ty)
     s.err(pos, fmt("this operator is not defined for ", a, " and ", b))
@@ -292,7 +292,7 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
             }
             return Some(self.sval(T_BOOL, acc))
         }
-        return lower_vec_vec_binary_bad(self, l, r, pos)
+        return vec_binary_bad(self, l, r, pos)
     }
     if op == Mul && l.ty == T_QUAT && r.ty == T_QUAT {
         return Some(self.call_rt("__quat_mul", vec[i64](), vec_of([]Val{l, r}), pos))
@@ -302,7 +302,7 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
     }
     if eq {
         if l.ty != r.ty {
-            return lower_vec_vec_binary_bad(self, l, r, pos)
+            return vec_binary_bad(self, l, r, pos)
         }
         lanes: i64
         match ln {
@@ -332,7 +332,7 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         Div => {
             o = FDiv
         }
-        _ => return lower_vec_vec_binary_bad(self, l, r, pos)
+        _ => return vec_binary_bad(self, l, r, pos)
     }
     // vector op vector, vector op f32, f32 op vector
     ty: i64

@@ -1,6 +1,6 @@
 // Simple alias analysis: identified objects (allocas, globals), constant offsets, type-based classes.
 
-enum Base {
+priv enum Base {
     Alloca(i64),
     Glob(i64),
     Unknown(i64),
@@ -12,7 +12,7 @@ struct Addr {
 }
 
 // `==` of two bases (derive(PartialEq))
-fn eq(a: Base, b: Base) -> bool {
+priv fn eq(a: Base, b: Base) -> bool {
     match a {
         Alloca(x) => {
             match b {
@@ -37,7 +37,7 @@ fn eq(a: Base, b: Base) -> bool {
 }
 
 // off.map(|o| o.wrapping_add(k))
-fn alias_off_add(off: Opt[i64], k: i64) -> Opt[i64] {
+priv fn off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     match off {
         Some(o) => return Some(o + k)
         None => {}
@@ -46,7 +46,7 @@ fn alias_off_add(off: Opt[i64], k: i64) -> Opt[i64] {
 }
 
 // a.is_some() && a == b
-fn alias_off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
+priv fn off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
     match a {
         Some(x) => {
             match b {
@@ -59,7 +59,7 @@ fn alias_off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
     return false
 }
 
-fn alias_decompose(f: *Func, addr: i64) -> Addr {
+priv fn decompose(f: *Func, addr: i64) -> Addr {
     v := addr
     off: Opt[i64] = Some(0)
     depth := 0
@@ -77,7 +77,7 @@ fn alias_decompose(f: *Func, addr: i64) -> Addr {
             b := i.args[1]
             match f.is_const(b) {
                 Some(k) => {
-                    off = alias_off_add(off, k)
+                    off = off_add(off, k)
                     v = a
                     continue
                 }
@@ -85,19 +85,19 @@ fn alias_decompose(f: *Func, addr: i64) -> Addr {
             }
             match f.is_const(a) {
                 Some(k) => {
-                    off = alias_off_add(off, k)
+                    off = off_add(off, k)
                     v = b
                     continue
                 }
                 None => {}
             }
             // variable index: look for an identified object on either side
-            da := alias_decompose_obj(f, a, depth)
+            da := decompose_obj(f, a, depth)
             match da {
                 Some(base) => return Addr{base: base, off: None}
                 None => {}
             }
-            db := alias_decompose_obj(f, b, depth)
+            db := decompose_obj(f, b, depth)
             match db {
                 Some(base) => return Addr{base: base, off: None}
                 None => {}
@@ -108,7 +108,7 @@ fn alias_decompose(f: *Func, addr: i64) -> Addr {
     }
 }
 
-fn alias_decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
+priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     if depth > 32 {
         return None
     }
@@ -120,12 +120,12 @@ fn alias_decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
         return Some(Glob(i.k))
     }
     if i.op == Add {
-        r := alias_decompose_obj(f, i.args[0], depth + 1)
+        r := decompose_obj(f, i.args[0], depth + 1)
         match r {
             Some(x) => return r
             None => {}
         }
-        return alias_decompose_obj(f, i.args[1], depth + 1)
+        return decompose_obj(f, i.args[1], depth + 1)
     }
     return None
 }
@@ -201,7 +201,7 @@ struct MemRef {
 
 fn alias_memref(f: *Func, v: i64) -> MemRef {
     i := &f.insts[v]
-    return MemRef{addr: alias_decompose(f, i.args[0]), size: i.ty.size(), class: i.aux, ptr: i.args[0]}
+    return MemRef{addr: decompose(f, i.args[0]), size: i.ty.size(), class: i.aux, ptr: i.args[0]}
 }
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
@@ -264,5 +264,5 @@ fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
     if a.size != b.size {
         return false
     }
-    return (a.ptr == b.ptr && a.ptr != NOV) || (eq(a.addr.base, b.addr.base) && alias_off_some_eq(a.addr.off, b.addr.off))
+    return (a.ptr == b.ptr && a.ptr != NOV) || (eq(a.addr.base, b.addr.base) && off_some_eq(a.addr.off, b.addr.off))
 }

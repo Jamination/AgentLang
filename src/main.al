@@ -36,14 +36,14 @@ use "priv.al"
 use "lower_mem.al"
 
 // `embed` is only accepted inside a function: PRELUDE and STD_MODULES are globals that
-// main_load_embedded fills once, first thing in main.
-PRELUDE: str
+// load_embedded fills once, first thing in main.
+priv PRELUDE: str
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
-STD_MODULES: Vec[(str, str)]
+priv STD_MODULES: Vec[(str, str)]
 
-fn main_load_embedded() {
+priv fn load_embedded() {
     PRELUDE = embed("prelude.al")
     STD_MODULES = vec[(str, str)]()
     STD_MODULES.push(("math", embed("../std/math.al")))
@@ -64,11 +64,11 @@ fn main_load_embedded() {
 }
 
 // modules that are loaded into every program
-CORE_MODULES := [4]str{"math", "rand", "time", "mem"}
+priv CORE_MODULES := [4]str{"math", "rand", "time", "mem"}
 
 // ---------- paths (std::path in the Rust source) ----------
 // Path::join
-fn main_path_join(dir: str, p: str) -> str {
+priv fn path_join(dir: str, p: str) -> str {
     if starts_with(p, "/") || len(dir) == 0 {
         return p
     }
@@ -80,7 +80,7 @@ fn main_path_join(dir: str, p: str) -> str {
 
 // the components of a path as Rust's Path compares them: a leading "/" is a component,
 // empty components and "." are dropped, except a "." at the start of a relative path
-fn main_path_comps(p: str) -> Vec[str] {
+priv fn path_comps(p: str) -> Vec[str] {
     out := vec[str]()
     if starts_with(p, "/") {
         out.push("/")
@@ -101,7 +101,7 @@ fn main_path_comps(p: str) -> Vec[str] {
 }
 
 // the path without trailing separators and trailing "." components
-fn main_path_trim(p: str) -> str {
+priv fn path_trim(p: str) -> str {
     n := len(p)
     loop {
         if n > 1 && p[n - 1] == '/' {
@@ -116,8 +116,8 @@ fn main_path_trim(p: str) -> str {
 }
 
 // Path::file_name: the last component, unless the path ends in ".." or has none
-fn main_path_file_name(p: str) -> Opt[str] {
-    t := main_path_trim(p)
+priv fn path_file_name(p: str) -> Opt[str] {
+    t := path_trim(p)
     k := len(t)
     while k > 0 && t[k - 1] != '/' {
         k -= 1
@@ -130,8 +130,8 @@ fn main_path_file_name(p: str) -> Opt[str] {
 }
 
 // Path::parent: the path without its last component
-fn main_path_parent(p: str) -> Opt[str] {
-    t := main_path_trim(p)
+priv fn path_parent(p: str) -> Opt[str] {
+    t := path_trim(p)
     if len(t) == 0 || t == "/" {
         return None
     }
@@ -147,8 +147,8 @@ fn main_path_parent(p: str) -> Opt[str] {
 }
 
 // Path::file_stem: the file name without its last extension
-fn main_path_file_stem(p: str) -> Opt[str] {
-    match main_path_file_name(p) {
+priv fn path_file_stem(p: str) -> Opt[str] {
+    match path_file_name(p) {
         Some(name) => {
             k := len(name) - 1
             while k > 0 && name[k] != '.' {
@@ -167,7 +167,7 @@ fn main_path_file_stem(p: str) -> Opt[str] {
 
 // std::fs::canonicalize, as far as the driver needs it (to recognise a file that is included
 // twice): the absolute path with "." and ".." resolved textually; symbolic links are kept
-fn main_canonical(path: str) -> str {
+priv fn canonical(path: str) -> str {
     full := path
     if !starts_with(path, "/") {
         buf := alloc[u8](4096)
@@ -194,7 +194,7 @@ fn main_canonical(path: str) -> str {
 }
 
 // the text of std::io::Error for an errno
-fn main_os_error(errno: i64) -> str {
+priv fn os_error(errno: i64) -> str {
     text := match errno {
         1 => "Operation not permitted"
         2 => "No such file or directory"
@@ -219,26 +219,26 @@ fn main_os_error(errno: i64) -> str {
 }
 
 // std::fs::read_to_string: (text, error); the error text is empty on success
-fn main_read_to_string(path: str) -> (str, str) {
+priv fn read_to_string(path: str) -> (str, str) {
     // read_file does not say why it failed: look at the file first
     fd := syscall(2, cstr(path), 0, 0)
     if fd < 0 {
-        return ("", main_os_error(-fd))
+        return ("", os_error(-fd))
     }
     probe: [1]u8
     r := syscall(0, fd, ptr(probe), 0)
     syscall(3, fd)
     if r < 0 && r != -4 {
-        return ("", main_os_error(-r))
+        return ("", os_error(-r))
     }
     text, ok := read_file(path)
     if !ok {
-        return ("", main_os_error(5))
+        return ("", os_error(5))
     }
     return (text, "")
 }
 
-fn main_std_text(name: str) -> Opt[str] {
+priv fn std_text(name: str) -> Opt[str] {
     mi := -1
     for i in 0..STD_MODULES.len {
         if STD_MODULES[i].0 == name {
@@ -251,7 +251,7 @@ fn main_std_text(name: str) -> Opt[str] {
     }
     dir, have_dir := env_get("ALC_STD_DIR")
     if have_dir {
-        t, err := main_read_to_string(main_path_join(dir, fmt(name, ".al")))
+        t, err := read_to_string(path_join(dir, fmt(name, ".al")))
         if len(err) == 0 {
             return Some(t)
         }
@@ -259,7 +259,7 @@ fn main_std_text(name: str) -> Opt[str] {
     return Some(STD_MODULES[mi].1)
 }
 
-struct Args {
+priv struct Args {
     cmd: str
     input: str
     output: Opt[str]
@@ -270,21 +270,21 @@ struct Args {
     rest: Vec[str]
 }
 
-fn main_usage() -> never {
+priv fn usage() -> never {
     eput(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
         "options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
 }
 
-fn main_parse_args() -> Args {
+priv fn parse_args() -> Args {
     all := args()
     av := vec[str]()
     for i in 1..len(all) {
         av.push(all[i])
     }
     if av.len < 2 {
-        main_usage()
+        usage()
     }
     a := Args{cmd: av[0], input: "", output: None, emit_ir: false, emit_asm: false, unchecked: false, opt: 2, rest: vec[str]()}
     i := 1
@@ -293,11 +293,11 @@ fn main_parse_args() -> Args {
         if s == "-o" {
             i += 1
             if i >= av.len {
-                main_usage()
+                usage()
             }
             a.output = Some(av[i])
         } else if s == "--json" {
-            main_json = true
+            json = true
         } else if s == "--emit-ir" {
             a.emit_ir = true
         } else if s == "--emit-asm" {
@@ -315,24 +315,24 @@ fn main_parse_args() -> Args {
             break
         } else if starts_with(s, "-") {
             eput(fmt("unknown option ", s, "\n"))
-            main_usage()
+            usage()
         } else {
             if len(a.input) == 0 {
                 a.input = s
             } else {
                 eput(fmt("unexpected argument ", s, "\n"))
-                main_usage()
+                usage()
             }
         }
         i += 1
     }
     if len(a.input) == 0 {
-        main_usage()
+        usage()
     }
     return a
 }
 
-struct Sources {
+priv struct Sources {
     names: Vec[str]
     decls: Vec[Decl]
     errs: Vec[Diag]
@@ -340,7 +340,7 @@ struct Sources {
     std_files: Vec[i64]
 }
 
-fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
+priv fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
     file := self.names.len
     self.names.push(name)
     toks := lexer_lex(text, file, &self.errs)
@@ -353,7 +353,7 @@ fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
             Use(path, pos) => {
                 if starts_with(path, "std:") {
                     mname := path[4..]
-                    match main_std_text(mname) {
+                    match std_text(mname) {
                         Some(mtext) => {
                             key := fmt("<std/", mname, ".al>")
                             if !self.seen.has(key) {
@@ -373,7 +373,7 @@ fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
                     continue
                 }
                 fp := match dir {
-                    Some(dr) => main_path_join(dr, path)
+                    Some(dr) => path_join(dr, path)
                     None => path
                 }
                 self.add_file(fp, Some(pos))
@@ -385,19 +385,19 @@ fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
     }
 }
 
-fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
+priv fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
     // canonicalize fails for a file that does not exist: the path is then used as it is
     canon := path
     if syscall(21, cstr(path), 0) == 0 {
-        canon = main_canonical(path)
+        canon = canonical(path)
     }
     if self.seen.has(canon) {
         return
     }
     self.seen.set(canon, true)
-    text, err := main_read_to_string(path)
+    text, err := read_to_string(path)
     if len(err) == 0 {
-        self.add_text(path, text, main_path_parent(path))
+        self.add_text(path, text, path_parent(path))
     } else {
         msg := fmt("cannot read `", path, "`: ", err)
         match from {
@@ -410,9 +410,9 @@ fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
     }
 }
 
-main_json: bool
+priv json: bool
 
-fn main_json_str(s: str) -> str {
+priv fn json_str(s: str) -> str {
     o := vec[u8]()
     o.push('"')
     for c in s {
@@ -433,7 +433,7 @@ fn main_json_str(s: str) -> str {
 }
 
 // sort key (file, line, col)
-fn main_report_less(a: Diag, b: Diag) -> bool {
+priv fn report_less(a: Diag, b: Diag) -> bool {
     if a.pos.file != b.pos.file {
         return a.pos.file < b.pos.file
     }
@@ -444,25 +444,25 @@ fn main_report_less(a: Diag, b: Diag) -> bool {
 }
 
 // names.get(file) or "?"
-fn main_file_name(names: *Vec[str], file: i64) -> str {
+priv fn file_name(names: *Vec[str], file: i64) -> str {
     if file >= 0 && file < names.len {
         return names[file]
     }
     return "?"
 }
 
-fn main_report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
+priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     if errs.is_empty() {
         return false
     }
-    sort_by(errs.items(), main_report_less)
-    if main_json {
+    sort_by(errs.items(), report_less)
+    if json {
         // machine-readable diagnostics: one JSON array on stdout
         items := vec[str]()
         last := ""
         for d in errs.items() {
-            file := main_file_name(names, d.pos.file)
-            item := fmt("{\"file\":", main_json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", main_json_str(ast_plain_text(d.msg)), "}")
+            file := file_name(names, d.pos.file)
+            item := fmt("{\"file\":", json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", json_str(ast_plain_text(d.msg)), "}")
             if item != last {
                 items.push(item)
                 last = item
@@ -474,7 +474,7 @@ fn main_report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     last := ""
     n := 0
     for d in errs.items() {
-        line := fmt(main_file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", ast_plain_text(d.msg))
+        line := fmt(file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", ast_plain_text(d.msg))
         if line != last {
             eput(fmt(line, "\n"))
             n += 1
@@ -486,7 +486,7 @@ fn main_report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
 }
 
 // "priv " in front of the signature of a private declaration
-fn main_sigs_priv(name: str) -> str {
+priv fn sigs_priv(name: str) -> str {
     if ast_is_private(name) {
         return "priv "
     }
@@ -494,36 +494,36 @@ fn main_sigs_priv(name: str) -> str {
 }
 
 // `alc sigs`: one line per declaration, for a quick overview of a file
-fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
+priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
     for d in decls {
         pos: Pos
         text := ""
         match d {
             Fn(f) => {
                 pos = f.pos
-                text = fmt(main_sigs_priv(f.name), ast_sig_str(&f))
+                text = fmt(sigs_priv(f.name), ast_sig_str(&f))
             }
             Struct(s) => {
                 pos = s.pos
-                text = fmt(main_sigs_priv(s.name), ast_struct_str(&s))
+                text = fmt(sigs_priv(s.name), ast_struct_str(&s))
             }
             Enum(e) => {
                 pos = e.pos
-                text = fmt(main_sigs_priv(e.name), ast_enum_str(&e))
+                text = fmt(sigs_priv(e.name), ast_enum_str(&e))
             }
             // (the value of a constant or a global is not shown: `...`)
             Const(c) => {
                 pos = c.pos
                 text = match c.ty {
-                    Some(ty) => fmt(main_sigs_priv(c.name), "const ", c.name, ": ", ast_type_str(&ty), " = ...")
-                    None => fmt(main_sigs_priv(c.name), "const ", c.name, " = ...")
+                    Some(ty) => fmt(sigs_priv(c.name), "const ", c.name, ": ", ast_type_str(&ty), " = ...")
+                    None => fmt(sigs_priv(c.name), "const ", c.name, " = ...")
                 }
             }
             Glob(g) => {
                 pos = g.pos
                 text = match g.ty {
-                    Some(ty) => fmt(main_sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
-                    None => fmt(main_sigs_priv(g.name), g.name, " := ...")
+                    Some(ty) => fmt(sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
+                    None => fmt(sigs_priv(g.name), g.name, " := ...")
                 }
             }
             Test(t) => {
@@ -537,12 +537,12 @@ fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
         if pos.file < from_file {
             continue
         }
-        print(fmt(main_file_name(names, pos.file), ":", pos.line, ": ", ast_plain_text(text)))
+        print(fmt(file_name(names, pos.file), ":", pos.line, ": ", ast_plain_text(text)))
     }
 }
 
 // is a declaration shown by `alc sigs <file> -- std`?
-fn main_sigs_visible(d: *Decl) -> bool {
+priv fn sigs_visible(d: *Decl) -> bool {
     match *d {
         Fn(f) => {
             return !starts_with(f.name, "__")
@@ -555,17 +555,17 @@ fn main_sigs_visible(d: *Decl) -> bool {
     return true
 }
 
-fn main_real_main() -> i64 {
-    ar := main_parse_args()
+priv fn real_main() -> i64 {
+    ar := parse_args()
     test_mode := ar.cmd == "test"
     if !(ar.cmd == "build" || ar.cmd == "run" || ar.cmd == "test" || ar.cmd == "check" || ar.cmd == "sigs") {
-        main_usage()
+        usage()
     }
     src := Sources{names: vec[str](), decls: vec[Decl](), errs: vec[Diag](), seen: map[str, bool](), std_files: vec[i64]()}
     src.add_text("<prelude>", PRELUDE, None)
     // the core library is part of the language: always present, no `use` needed
     for name in CORE_MODULES {
-        text := match main_std_text(name) {
+        text := match std_text(name) {
             Some(t) => t
             None => ""
         }
@@ -576,7 +576,7 @@ fn main_real_main() -> i64 {
     src.add_file(ar.input, None)
     if ar.cmd == "sigs" {
         // `alc sigs <file> --` with "std" as input lists the standard library
-        if main_report(&src.names, &src.errs) {
+        if report(&src.names, &src.errs) {
             return 1
         }
         from := if contains(&ar.rest, "std") { 0 } else { n_prelude }
@@ -586,14 +586,14 @@ fn main_real_main() -> i64 {
                 // private declarations of the library cannot be used from outside
                 info := priv_decl_info(&src.decls[x])
                 lib_private := info.2 && (info.3.file < n_prelude || contains(&src.std_files, info.3.file))
-                if main_sigs_visible(&src.decls[x]) && !lib_private {
+                if sigs_visible(&src.decls[x]) && !lib_private {
                     sdecls.push(src.decls[x])
                 }
             }
         } else {
             sdecls = clone(src.decls)
         }
-        main_print_sigs(&src.names, sdecls.items(), from)
+        print_sigs(&src.names, sdecls.items(), from)
         return 0
     }
     // tests become functions; the entry point is synthesized
@@ -651,10 +651,10 @@ fn main_real_main() -> i64 {
         more := p.file()
         decls.extend(more.items())
     }
-    if main_report(&src.names, &src.errs) {
+    if report(&src.names, &src.errs) {
         return 1
     }
-    main_mem("parsed")
+    mem("parsed")
     cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, n_prelude)
     if ar.cmd != "check" {
         // bundled modules are only compiled as far as the program reaches into them
@@ -663,16 +663,16 @@ fn main_real_main() -> i64 {
         }
     }
     lower_fn_lower_all(&cx, "__entry", n_prelude)
-    if main_report(&src.names, &cx.errs) {
+    if report(&src.names, &cx.errs) {
         return 1
     }
     if ar.cmd == "check" {
         return 0
     }
     module := cx.module
-    main_mem("lowered")
+    mem("lowered")
     opt_optimize(&module, ar.opt)
-    main_mem("optimized")
+    mem("optimized")
     if ar.emit_ir {
         for fi in 0..module.funcs.len {
             if module.funcs[fi].lowered {
@@ -681,7 +681,7 @@ fn main_real_main() -> i64 {
         }
     }
     out := x86_compile(&module, ar.emit_asm)
-    main_mem("compiled")
+    mem("compiled")
     bytes, link_err := elf_link(&module, &out)
     if len(link_err) != 0 {
         eput(fmt("error: ", link_err, "\n"))
@@ -693,16 +693,16 @@ fn main_real_main() -> i64 {
             out_path = op
         }
         None => {
-            stem := match main_path_file_stem(ar.input) {
+            stem := match path_file_stem(ar.input) {
                 Some(s) => s
                 None => "a.out"
             }
-            dir := match main_path_parent(ar.input) {
+            dir := match path_parent(ar.input) {
                 Some(dr) => dr
                 None => ""
             }
-            cand := main_path_join(dir, stem)
-            if main_path_comps(cand).items() == main_path_comps(ar.input).items() {
+            cand := path_join(dir, stem)
+            if path_comps(cand).items() == path_comps(ar.input).items() {
                 out_path = fmt(cand, ".out")
             } else {
                 out_path = cand
@@ -721,14 +721,14 @@ fn main_real_main() -> i64 {
         } else {
             syscall(3, fd)
         }
-        eput(fmt("error: cannot write `", out_path, "`: ", main_os_error(errno), "\n"))
+        eput(fmt("error: cannot write `", out_path, "`: ", os_error(errno), "\n"))
         return 1
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
         code := run_program(out_path, ar.rest.items())
         if code < 0 {
-            eput(fmt("error: cannot run `", out_path, "`: ", main_os_error(11), "\n"))
+            eput(fmt("error: cannot run `", out_path, "`: ", os_error(11), "\n"))
             return 1
         }
         return code
@@ -739,18 +739,18 @@ fn main_real_main() -> i64 {
 fn main() -> i64 {
     // deep recursion in the frontend and SSA construction: use a big stack
     ensure_stack(1 << 30)
-    main_t0 = clock_ns()
-    main_load_embedded()
-    return main_real_main()
+    t0 = clock_ns()
+    load_embedded()
+    return real_main()
 }
 
-main_t0: i64
+priv t0: i64
 
 // ALC_DEBUG=mem: memory in use and time since the start after each phase, and the largest
 // size of the work heap
-fn main_mem(phase: str) {
+priv fn mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
-        eput(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - main_t0) / 1000000, " ms\n"))
+        eput(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
     }
 }

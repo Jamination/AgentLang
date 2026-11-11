@@ -2,18 +2,18 @@
 // branch conditions into dominated blocks (removes repeated checks).
 
 // type Key = (Op, T, Vec<V>, i64); `args` is an independent copy that is never changed
-struct GvnKey { op: Op, ty: T, args: []i64, k: i64 }
+priv struct Key { op: Op, ty: T, args: []i64, k: i64 }
 
-enum GvnStep {
+priv enum Step {
     Enter(i64),
-    Exit(Vec[GvnKey], Vec[(i64, Opt[bool])]),
+    Exit(Vec[Key], Vec[(i64, Opt[bool])]),
 }
 
-fn gvn_numberable(op: Op) -> bool {
+priv fn numberable(op: Op) -> bool {
     return op.is_pure() || op == SDiv || op == UDiv || op == SRem || op == URem || op == Proj
 }
 
-fn gvn_run_find(repl: []i64, v0: i64) -> i64 {
+priv fn run_find(repl: []i64, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -24,11 +24,11 @@ fn gvn_run_find(repl: []i64, v0: i64) -> i64 {
 fn gvn_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     repl := vec_fill(f.insts.len, NOV)
-    table := map[GvnKey, i64]()
+    table := map[Key, i64]()
     known := map[i64, bool]()
     changed := false
     bool_consts := [2]i64{NOV, NOV}
-    stack := vec_of([]GvnStep{Enter(0)})
+    stack := vec_of([]Step{Enter(0)})
     while stack.len > 0 {
         step := stack.pop()
         match step {
@@ -51,7 +51,7 @@ fn gvn_run(f: *Func) -> bool {
                 }
             }
             Enter(b) => {
-                added := vec[GvnKey]()
+                added := vec[Key]()
                 facts := vec[(i64, Opt[bool])]()
                 // a block reached only through one arm of a conditional branch knows the condition
                 if cfg.preds[b].len == 1 {
@@ -59,7 +59,7 @@ fn gvn_run(f: *Func) -> bool {
                     match f.blocks[p].term {
                         Br(c0, t, e) => {
                             if t != e {
-                                c := gvn_run_find(repl.items(), c0)
+                                c := run_find(repl.items(), c0)
                                 val := t == b
                                 old: Opt[bool] = None
                                 ov, had := known.get(c)
@@ -80,7 +80,7 @@ fn gvn_run(f: *Func) -> bool {
                 for v in old.items() {
                     for ai in 0..f.insts[v].args.len {
                         a := f.insts[v].args[ai]
-                        r := gvn_run_find(repl.items(), a)
+                        r := run_find(repl.items(), a)
                         // a condition decided by a dominating branch is a constant here
                         val, is_known := known.get(r)
                         if is_known {
@@ -100,7 +100,7 @@ fn gvn_run(f: *Func) -> bool {
                         }
                     }
                     i := &f.insts[v]
-                    if !gvn_numberable(i.op) {
+                    if !numberable(i.op) {
                         nw.push(v)
                         continue
                     }
@@ -110,7 +110,7 @@ fn gvn_run(f: *Func) -> bool {
                         args[0] = args[1]
                         args[1] = t
                     }
-                    key := GvnKey{op: i.op, ty: i.ty, args: args.items(), k: i.k}
+                    key := Key{op: i.op, ty: i.ty, args: args.items(), k: i.k}
                     w, found := table.get(key)
                     if found {
                         repl[v] = w
@@ -124,7 +124,7 @@ fn gvn_run(f: *Func) -> bool {
                 f.blocks[b].insts = nw
                 match f.blocks[b].term {
                     Br(c0, t, e) => {
-                        c := gvn_run_find(repl.items(), c0)
+                        c := run_find(repl.items(), c0)
                         val, is_known := known.get(c)
                         if is_known {
                             if val {

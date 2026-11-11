@@ -1,6 +1,6 @@
 // The x86-64 backend driver: reachable functions, block layout, float constant pool.
 
-struct Compiled {
+priv struct Compiled {
     fid: i64
     code: Code
 }
@@ -10,7 +10,7 @@ struct Output {
     fpool: Vec[Bits128]
 }
 
-fn x86_reachable_funcs(m: *Module) -> Vec[i64] {
+priv fn reachable_funcs(m: *Module) -> Vec[i64] {
     seen := vec_fill(m.funcs.len, false)
     work := vec_of([]i64{m.entry})
     seen[m.entry] = true
@@ -49,7 +49,7 @@ fn x86_reachable_funcs(m: *Module) -> Vec[i64] {
 }
 
 fn x86_compile(m: *Module, dump_asm: bool) -> Output {
-    fids := x86_reachable_funcs(m)
+    fids := reachable_funcs(m)
     fpool := vec[Bits128]()
     fpool_ix := map[Bits128, i64]()
     funcs := vec[Compiled]()
@@ -69,7 +69,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         }
         opt_trace("isel", f)
         mf := isel_select(f, m, depths.items(), aliases.items())
-        layout := x86_block_layout(f)
+        layout := block_layout(f)
         // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
         // benchmark suite the padding executed on every loop entry cost more than it gained.
         align_v, align_set := env_get("ALC_ALIGN")
@@ -130,7 +130,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
 
 // Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,
 // with blocks that inevitably trap moved to the end.
-fn x86_block_layout(f: *Func) -> Vec[i64] {
+priv fn block_layout(f: *Func) -> Vec[i64] {
     n := f.blocks.len
     seen := vec_fill(n, false)
     post := vec[i64]()

@@ -1,9 +1,9 @@
 // Full unrolling of loops with a small constant trip count.
 
-const MAX_TRIP = 16
-const MAX_UNROLLED_SIZE = 640
+priv const MAX_TRIP = 16
+priv const MAX_UNROLLED_SIZE = 640
 
-struct UnrollPlan {
+priv struct Plan {
     blocks: Vec[i64],
     header: i64,
     latch: i64,
@@ -15,10 +15,10 @@ struct UnrollPlan {
     full: bool,
 }
 
-const MAX_PARTIAL_SIZE = 400
+priv const MAX_PARTIAL_SIZE = 400
 
 // the closure `back_of` of analyze: the back-edge input of a header phi, or NOV
-fn unroll_analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
+priv fn analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
     i := &f.insts[ph]
     n := min(i.pb.len, i.args.len)
     for k in 0..n {
@@ -30,7 +30,7 @@ fn unroll_analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
 }
 
 // the leading phis of block `h`
-fn unroll_header_phis(f: *Func, h: i64) -> Vec[i64] {
+priv fn header_phis(f: *Func, h: i64) -> Vec[i64] {
     hphis := vec[i64]()
     for v in f.blocks[h].insts.items() {
         if f.insts[v].op != Phi {
@@ -41,7 +41,7 @@ fn unroll_header_phis(f: *Func, h: i64) -> Vec[i64] {
     return hphis
 }
 
-fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan] {
+priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -140,13 +140,13 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
         i = nx
     }
     // longest chain of header phis that only shift values along (h = g; g = f; ...)
-    hphis := unroll_header_phis(f, h)
+    hphis := header_phis(f, h)
     chain := 1
     for ph in hphis.items() {
         ln := 1
         cur := ph
         loop {
-            b := unroll_analyze_back_of(f, cur, latch)
+            b := analyze_back_of(f, cur, latch)
             if b == NOV || b == ph || !contains(&hphis, b) || ln > 16 {
                 break
             }
@@ -190,31 +190,31 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
         }
     }
     if trip <= MAX_TRIP && size * trip <= MAX_UNROLLED_SIZE {
-        return Some(UnrollPlan{blocks: clone(&l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: trip, full: true})
+        return Some(Plan{blocks: clone(&l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: trip, full: true})
     }
     // partial: unrolling by the shift-chain length turns the per-iteration register shuffle into
     // plain renaming
     if opt_enabled("partial") && chain >= 2 && chain <= 8 && trip % chain == 0 && trip > chain && size * chain <= MAX_PARTIAL_SIZE {
-        return Some(UnrollPlan{blocks: clone(&l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: chain, full: false})
+        return Some(Plan{blocks: clone(&l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: chain, full: false})
     }
     return None
 }
 
 // phi_in[&ph]
-fn unroll_phi_in_at(phi_in: *Map[i64, (i64, i64)], ph: i64) -> (i64, i64) {
+priv fn phi_in_at(phi_in: *Map[i64, (i64, i64)], ph: i64) -> (i64, i64) {
     x, found := phi_in.get(ph)
     assert found, "unroll: phi not in map"
     return x
 }
 
 // bmap[&b]
-fn unroll_bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
+priv fn bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
     nb, found := bmap.get(b)
     assert found, "unroll: block not in map"
     return nb
 }
 
-fn unroll_apply(f: *Func, p: *UnrollPlan) {
+priv fn apply(f: *Func, p: *Plan) {
     n0 := f.insts.len
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
@@ -235,7 +235,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
         }
         return v
     }
-    hphis := unroll_header_phis(f, p.header)
+    hphis := header_phis(f, p.header)
     // (start value, back-edge value) of each header phi
     phi_in := map[i64, (i64, i64)]()
     for ph in hphis.items() {
@@ -267,7 +267,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
         }
         cur := vec_fill(n0, NOV)
         for ph in hphis.items() {
-            bk := unroll_phi_in_at(&phi_in, ph).1
+            bk := phi_in_at(&phi_in, ph).1
             cur[ph] = look(&prev, bk, n0, def_block, in_loop)
         }
         // allocate ids
@@ -290,7 +290,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
             }
         }
         for b in p.blocks.items() {
-            nb := unroll_bmap_at(&bmap, b)
+            nb := bmap_at(&bmap, b)
             insts := clone(&f.blocks[b].insts)
             for v in insts.items() {
                 if v >= n0 {
@@ -322,9 +322,9 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
             f.blocks[nb].term = term
         }
         // the previous copy's latch falls into this copy
-        f.blocks[prev_latch].term = Jmp(unroll_bmap_at(&bmap, p.header))
-        prev_latch = unroll_bmap_at(&bmap, p.latch)
-        prev_header_of_last = unroll_bmap_at(&bmap, p.header)
+        f.blocks[prev_latch].term = Jmp(bmap_at(&bmap, p.header))
+        prev_latch = bmap_at(&bmap, p.latch)
+        prev_header_of_last = bmap_at(&bmap, p.header)
         prev = cur
     }
     if p.full {
@@ -394,7 +394,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
         // header phis stay: their back-edge inputs now come from the last copy
         if p.trip > 1 {
             for ph in hphis.items() {
-                bk := unroll_phi_in_at(&phi_in, ph).1
+                bk := phi_in_at(&phi_in, ph).1
                 nv := if loop_def(bk, n0, def_block, in_loop) { prev[bk] } else { bk }
                 i := f.im(ph)
                 for k in 0..i.pb.len {
@@ -410,7 +410,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
     // copy 0: header phis take their initial values
     repl := vec_fill(f.insts.len, NOV)
     for ph in hphis.items() {
-        repl[ph] = unroll_phi_in_at(&phi_in, ph).0
+        repl[ph] = phi_in_at(&phi_in, ph).0
     }
     hb := &f.blocks[p.header]
     n := 0
@@ -435,9 +435,9 @@ fn unroll_run(f: *Func) -> bool {
         cfg := cfg_new(f)
         loops := loops_new(f, &cfg)
         order := licm_loop_order(&loops)
-        plan: Opt[UnrollPlan] = None
+        plan: Opt[Plan] = None
         for li in order.items() {
-            match unroll_analyze(f, &cfg, &loops, li) {
+            match analyze(f, &cfg, &loops, li) {
                 Some(p) => {
                     plan = Some(p)
                     break
@@ -447,7 +447,7 @@ fn unroll_run(f: *Func) -> bool {
         }
         match plan {
             Some(p) => {
-                unroll_apply(f, &p)
+                apply(f, &p)
                 cleanup_prune_unreachable(f)
                 changed = true
             }

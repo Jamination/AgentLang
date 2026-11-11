@@ -1,14 +1,14 @@
 // Expression lowering: operators, places, literals, conversions, match.
 
-fn lower_expr_is_arith(op: BinOp) -> bool {
+priv fn is_arith(op: BinOp) -> bool {
     return op == Add || op == Sub || op == Mul || op == Div || op == Rem || op == And || op == Or || op == Xor
 }
-fn lower_expr_is_cmp(op: BinOp) -> bool {
+priv fn is_cmp(op: BinOp) -> bool {
     return op == Eq || op == Ne || op == Lt || op == Le || op == Gt || op == Ge
 }
 
 // `a.or(b)` on optional types
-fn lower_expr_or(a: Opt[i64], b: Opt[i64]) -> Opt[i64] {
+priv fn lower_expr_or(a: Opt[i64], b: Opt[i64]) -> Opt[i64] {
     match a {
         Some(x) => { return a }
         None => { return b }
@@ -17,7 +17,7 @@ fn lower_expr_or(a: Opt[i64], b: Opt[i64]) -> Opt[i64] {
 }
 
 // `o.unwrap()`
-fn lower_expr_unwrap(o: Opt[i64]) -> i64 {
+priv fn lower_expr_unwrap(o: Opt[i64]) -> i64 {
     match o {
         Some(x) => { return x }
         None => {}
@@ -43,7 +43,7 @@ fn lower_expr_is_ptr(k: TyK) -> bool {
 }
 
 // matches!(o, Some(CV::Float(_)))
-fn lower_expr_is_cv_float(o: Opt[CV]) -> bool {
+priv fn is_cv_float(o: Opt[CV]) -> bool {
     match o {
         Some(cv) => {
             match cv {
@@ -69,7 +69,7 @@ fn lower_expr_addressable(x: *Expr) -> bool {
 }
 
 // `name.parse::<usize>()`: decimal digits with an optional leading `+`
-fn lower_expr_parse_usize(s: str) -> (i64, bool) {
+priv fn parse_usize(s: str) -> (i64, bool) {
     i := 0
     if len(s) > 0 && s[0] == '+' {
         i = 1
@@ -105,7 +105,7 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
             return false
         }
         Bin(op, a, b) => {
-            if lower_expr_is_arith(op) || op == Shl || op == Shr {
+            if is_arith(op) || op == Shl || op == Shr {
                 return self.is_untyped(a) && self.is_untyped(b)
             }
             return false
@@ -131,7 +131,7 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
     return false
 }
 
-fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
+priv fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
     match expect {
         Some(ty) => {
             match self.cx.types.k(ty) {
@@ -148,11 +148,11 @@ fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
                     v := self.iconst(it, n)
                     return self.sval(ty, v)
                 }
-                F64 => { return self.lower_expr_int_lit_float(n, expect) }
-                F32 => { return self.lower_expr_int_lit_float(n, expect) }
-                Vec(l) => { return self.lower_expr_int_lit_float(n, expect) }
-                Quat => { return self.lower_expr_int_lit_float(n, expect) }
-                Mat4 => { return self.lower_expr_int_lit_float(n, expect) }
+                F64 => { return self.int_lit_float(n, expect) }
+                F32 => { return self.int_lit_float(n, expect) }
+                Vec(l) => { return self.int_lit_float(n, expect) }
+                Quat => { return self.int_lit_float(n, expect) }
+                Mat4 => { return self.int_lit_float(n, expect) }
                 _ => {}
             }
         }
@@ -163,7 +163,7 @@ fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
 }
 
 // the float arm of `int_lit`
-fn lower_expr_int_lit_float(self: *Fx, n: i64, expect: Opt[i64]) -> Val {
+priv fn int_lit_float(self: *Fx, n: i64, expect: Opt[i64]) -> Val {
     ft := self.float_expect(expect)
     return self.fconst_ty(ft, f64(n))
 }
@@ -434,7 +434,7 @@ fn rvalue(self: *Fx, p: Val) -> Val {
     return p
 }
 
-fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
+priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
     match self.lookup(n) {
         Some(x) => {
             if x.0 < 0 {
@@ -510,7 +510,7 @@ fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
 }
 
 // the name of the constant that the place expression `e` is (a part of), if any
-fn const_root(self: *Fx, e: *Expr) -> Opt[str] {
+priv fn const_root(self: *Fx, e: *Expr) -> Opt[str] {
     match e.k {
         Ident(n) => {
             if !is_some(self.lookup(n)) && self.cx.const_decls.has(n) {
@@ -526,7 +526,7 @@ fn const_root(self: *Fx, e: *Expr) -> Opt[str] {
 
 // "`TABLE` is a constant" for an attempt to modify (a part of) a constant: the constant
 // itself, its fields and elements, and what its strings point to are all read-only
-fn const_place_err(self: *Fx, e: *Expr, what: str) {
+priv fn const_place_err(self: *Fx, e: *Expr, what: str) {
     match self.const_root(e) {
         Some(n) => {
             self.err(e.pos, fmt("`", n, "` is a constant: ", what, " (copy it to a variable, or declare it without `const`, as `", n, " := value` or `", n, ": T = value`, to make it a global variable)"))
@@ -556,7 +556,7 @@ fn place(self: *Fx, e: *Expr) -> Opt[Val] {
     return None
 }
 
-fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
+priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
     match e.k {
         Ident(n) => {
             match self.lookup(n) {
@@ -715,7 +715,7 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
             return None
         }
         Tuple(tys) => {
-            i, ok := lower_expr_parse_usize(name)
+            i, ok := parse_usize(name)
             if ok && i < tys.len {
                 offs := self.cx.types.tuple_offsets(tys.items())
                 a := self.add_off(bv.v, offs[i])
@@ -773,7 +773,7 @@ fn to_i64(self: *Fx, v: Val) -> i64 {
 }
 
 // (ptr, len or NOV, elem type) of an indexable value
-fn indexable(self: *Fx, bv0: Val, pos: Pos) -> Opt[(i64, i64, i64)] {
+priv fn indexable(self: *Fx, bv0: Val, pos: Pos) -> Opt[(i64, i64, i64)] {
     bv := self.auto_deref(bv0)
     match self.vec_parts(bv, true) {
         Some(x) => { return Some(x) }
@@ -881,7 +881,7 @@ fn index_place(self: *Fx, b: *Expr, idx: *Expr, pos: Pos) -> Opt[Val] {
     return Some(ev)
 }
 
-fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos) -> Val {
+priv fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos) -> Val {
     bv := self.expr(b, None)
     ptr_: i64
     len_: i64
@@ -948,7 +948,7 @@ fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos) -> 
     return sv
 }
 
-fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
+priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
     match op {
         Neg => {
             match x.k {
@@ -1080,7 +1080,7 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
     return val_err()
 }
 
-fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: Pos) -> Val {
+priv fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: Pos) -> Val {
     if op == LAnd || op == LOr {
         slot := self.temp(T_BOOL)
         bt := self.new_block()
@@ -1112,7 +1112,7 @@ fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: Pos) 
         return self.binary_vals(op, l, r, pos)
     }
     exp: Opt[i64] = None
-    if !lower_expr_is_cmp(op) {
+    if !is_cmp(op) {
         match expect {
             Some(t) => {
                 if self.cx.types.is_int(t) || self.cx.types.is_float(t) || self.is_vecish(t) {
@@ -1123,7 +1123,7 @@ fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: Pos) 
         }
     }
     both_untyped := self.is_untyped(a) && self.is_untyped(b)
-    if both_untyped && (lower_expr_is_cv_float(self.cx.const_eval(a)) || lower_expr_is_cv_float(self.cx.const_eval(b))) {
+    if both_untyped && (is_cv_float(self.cx.const_eval(a)) || is_cv_float(self.cx.const_eval(b))) {
         exp = Some(self.float_expect(exp))
     }
     l: Val
@@ -1188,7 +1188,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         }
         return val_err()
     }
-    if lower_expr_is_cmp(op) {
+    if is_cmp(op) {
         eq_only := op == Eq || op == Ne
         // which of the guarded arms the type selects
         is_f := false
@@ -1353,7 +1353,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
 }
 
 // structural equality of two values of the same type (as an i8 0/1)
-fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
+priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
     names := vec[str]()
     fieldwise := false
     match self.cx.types.k(l.ty) {
@@ -1428,7 +1428,7 @@ fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
     return Some(self.scalar(v))
 }
 
-fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64, pos: Pos) -> Val {
+priv fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64, pos: Pos) -> Val {
     o := URem
     if is_div && signed {
         o = SDiv
@@ -1606,7 +1606,7 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
                     r := self.ins(FExt, T.F64, vec_of([]i64{s}), 0)
                     return self.sval(to, r)
                 }
-                Int(tb, ts) => { return self.lower_expr_float_to_int(v, to, tt, tb) }
+                Int(tb, ts) => { return self.float_to_int(v, to, tt, tb) }
                 _ => {}
             }
         }
@@ -1617,7 +1617,7 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
                     r := self.ins(FTrunc, T.F32, vec_of([]i64{s}), 0)
                     return self.sval(to, r)
                 }
-                Int(tb, ts) => { return self.lower_expr_float_to_int(v, to, tt, tb) }
+                Int(tb, ts) => { return self.float_to_int(v, to, tt, tb) }
                 _ => {}
             }
         }
@@ -1630,7 +1630,7 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
 }
 
 // the `(TyK::F64 | TyK::F32, TyK::Int(tb, _))` arm of `convert`
-fn lower_expr_float_to_int(self: *Fx, v: Val, to: i64, tt: T, tb: i64) -> Val {
+priv fn float_to_int(self: *Fx, v: Val, to: i64, tt: T, tb: i64) -> Val {
     s := self.scalar(v)
     r := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
     if tb < 64 {
@@ -1640,7 +1640,7 @@ fn lower_expr_float_to_int(self: *Fx, v: Val, to: i64, tt: T, tb: i64) -> Val {
 }
 
 // ---------- composite literals ----------
-fn lit_type(self: *Fx, te: *Expr, expect: Opt[i64]) -> Opt[i64] {
+priv fn lit_type(self: *Fx, te: *Expr, expect: Opt[i64]) -> Opt[i64] {
     env := self.tenv
     match self.cx.expr_type(te, &env) {
         Some(t) => {
@@ -1687,7 +1687,7 @@ fn lit_type(self: *Fx, te: *Expr, expect: Opt[i64]) -> Opt[i64] {
     return None
 }
 
-fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
+priv fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
     match self.cx.types.k(dst.ty) {
         Struct(sid) => {
             self.cx.types.layout_struct(sid)

@@ -2,14 +2,14 @@
 //     return x + f(args)        (also *, &, |, ^ on integers)
 // which becomes a loop that carries the pending operation in an accumulator.
 
-struct TreSite {
+priv struct Site {
     block: i64,
     call: i64,
     // accumulator form: (combining instruction, the other operand)
     acc: Opt[(i64, i64)],
 }
 
-fn tre_identity(op: Op) -> Opt[i64] {
+priv fn identity(op: Op) -> Opt[i64] {
     if op == Add || op == Or || op == Xor {
         return Some(0)
     }
@@ -23,7 +23,7 @@ fn tre_identity(op: Op) -> Opt[i64] {
 }
 
 // acc_op.is_none() || acc_op == Some(op)
-fn tre_none_or_same(acc_op: Opt[Op], op: Op) -> bool {
+priv fn none_or_same(acc_op: Opt[Op], op: Op) -> bool {
     match acc_op {
         Some(o) => return o == op
         None => {}
@@ -43,7 +43,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     }
     uses := f.use_counts()
     rpo := f.rpo()
-    sites := vec[TreSite]()
+    sites := vec[Site]()
     acc_op: Opt[Op] = None
     for b in rpo.items() {
         rv := vec[i64]()
@@ -60,19 +60,19 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         li := &f.insts[last_v]
         // plain tail call: [call; ret call] or [call; ret] for no result
         if li.op == Call && li.k == fid && ((rv.is_empty() && f.rets.is_empty()) || (rv.len == 1 && rv[0] == last_v && uses[last_v] == 1)) {
-            sites.push(TreSite{block: b, call: last_v, acc: None})
+            sites.push(Site{block: b, call: last_v, acc: None})
             continue
         }
         // accumulator form: [call; r = op(x, call); ret r] with the call right before
         if rv.len == 1 && rv[0] == last_v && n >= 2 && uses[last_v] == 1 && li.ty.is_int() {
-            if is_some(tre_identity(li.op)) {
+            if is_some(identity(li.op)) {
                 call := insts[n - 2]
                 ci := &f.insts[call]
                 if ci.op == Call && ci.k == fid && uses[call] == 1 && contains(&li.args, call) {
                     x := if li.args[0] == call { li.args[1] } else { li.args[0] }
-                    if x != call && tre_none_or_same(acc_op, li.op) {
+                    if x != call && none_or_same(acc_op, li.op) {
                         acc_op = Some(li.op)
-                        sites.push(TreSite{block: b, call: call, acc: Some((last_v, x))})
+                        sites.push(Site{block: b, call: call, acc: Some((last_v, x))})
                     }
                 }
             }
@@ -142,7 +142,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     match acc_op {
         Some(op) => {
             idk := 0
-            match tre_identity(op) {
+            match identity(op) {
                 Some(x) => idk = x
                 None => panic("called `Option::unwrap()` on a `None` value")
             }

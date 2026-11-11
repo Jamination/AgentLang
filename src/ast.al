@@ -204,7 +204,7 @@ enum Decl {
 }
 
 // the source forms of a list of types, separated by ", "
-fn ast_type_str_list(ts: *Vec[TypeAst]) -> str {
+priv fn type_str_list(ts: *Vec[TypeAst]) -> str {
     parts := vec[str]()
     for i in 0..ts.len {
         parts.push(ast_type_str(&ts[i]))
@@ -219,7 +219,7 @@ fn ast_type_str(t: *TypeAst) -> str {
             if args.is_empty() {
                 return n
             } else {
-                return fmt(n, "[", ast_type_str_list(&args), "]")
+                return fmt(n, "[", type_str_list(&args), "]")
             }
         }
         Ptr(e) => {
@@ -242,7 +242,7 @@ fn ast_type_str(t: *TypeAst) -> str {
             return fmt("[", len, "]", ast_type_str(e))
         }
         Fn(ps, r) => {
-            p := ast_type_str_list(&ps)
+            p := type_str_list(&ps)
             match r {
                 Some(r2) => {
                     return fmt("fn(", p, ") -> ", ast_type_str(r2))
@@ -253,7 +253,7 @@ fn ast_type_str(t: *TypeAst) -> str {
             }
         }
         Tuple(ts) => {
-            return fmt("(", ast_type_str_list(&ts), ")")
+            return fmt("(", type_str_list(&ts), ")")
         }
     }
     return ""
@@ -273,12 +273,12 @@ fn ast_sig_str(f: *FnDecl) -> str {
         }
         None => {}
     }
-    head := if f.name == "" { "fn" } else { fmt("fn ", f.name, ast_tparams_str(&f.tparams)) }
+    head := if f.name == "" { "fn" } else { fmt("fn ", f.name, tparams_str(&f.tparams)) }
     return fmt(head, "(", join(parts.items(), ", "), ")", r)
 }
 
 // "[T, U]" of a declaration with type parameters, or nothing
-fn ast_tparams_str(t: *Vec[str]) -> str {
+priv fn tparams_str(t: *Vec[str]) -> str {
     if t.is_empty() {
         return ""
     }
@@ -291,7 +291,7 @@ fn ast_struct_str(s: *StructDecl) -> str {
     for i in 0..s.fields.len {
         parts.push(fmt(s.fields[i].0, ": ", ast_type_str(&s.fields[i].1)))
     }
-    return fmt("struct ", s.name, ast_tparams_str(&s.tparams), " { ", join(parts.items(), ", "), " }")
+    return fmt("struct ", s.name, tparams_str(&s.tparams), " { ", join(parts.items(), ", "), " }")
 }
 
 // an enum as it is declared, on one line: `enum Name[T] { A, B(T) }`
@@ -302,10 +302,10 @@ fn ast_enum_str(e: *EnumDecl) -> str {
         if v.1.is_empty() {
             vs.push(v.0)
         } else {
-            vs.push(fmt(v.0, "(", ast_type_str_list(&v.1), ")"))
+            vs.push(fmt(v.0, "(", type_str_list(&v.1), ")"))
         }
     }
-    return fmt("enum ", e.name, ast_tparams_str(&e.tparams), " { ", join(vs.items(), ", "), " }")
+    return fmt("enum ", e.name, tparams_str(&e.tparams), " { ", join(vs.items(), ", "), " }")
 }
 
 // A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte

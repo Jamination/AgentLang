@@ -96,17 +96,17 @@ fn nested_outer_err(self: *Fx, n: str, pos: Pos) {
         }
         fx = fx.parent
     }
-    self.err(pos, fmt("`", n, "` is a variable of the enclosing function `", owner, "`", lower_nested_rule(self, n)))
+    self.err(pos, fmt("`", n, "` is a variable of the enclosing function `", owner, "`", rule(self, n)))
     self.scopes[0].vars.set(n, (T_ERR, self.temp(T_ERR)))
 }
 
 // the rule and the way out, for a nested function that uses the variable `n` of its surroundings
-fn lower_nested_rule(fx: *Fx, n: str) -> str {
+priv fn rule(fx: *Fx, n: str) -> str {
     kind := if find(fx.f.name, ".fn@") >= 0 { "anonymous" } else { "nested" }
     return fmt(": the ", kind, " function `", fx.f.name, "` does not see the variables of the function around it. Pass `", n, "` as a parameter (`&", n, "` if the function must change it); a callback that needs state takes a context argument, like `sort_by(items, ctx, less)`")
 }
 
-fn lower_nested_after(a: Pos, b: Pos) -> bool {
+priv fn after(a: Pos, b: Pos) -> bool {
     return a.line > b.line || (a.line == b.line && a.col > b.col)
 }
 
@@ -145,12 +145,12 @@ fn nested_hint(self: *Fx, n: str, pos: Pos) -> str {
                     continue
                 }
                 if !is_fn {
-                    return fmt(": `", n, "` is a variable of the enclosing function `", fx.f.name, "` (line ", line, ")", lower_nested_rule(self, n))
+                    return fmt(": `", n, "` is a variable of the enclosing function `", fx.f.name, "` (line ", line, ")", rule(self, n))
                 }
                 if fx != self {
                     return fmt(": the nested function `", n, "` is declared at line ", line, ", after `", self.f.name, "` (a nested function is visible from its declaration to the end of its block: declare `", n, "` first)")
                 }
-                if lower_nested_after(s.pos, pos) {
+                if after(s.pos, pos) {
                     return fmt(": the nested function `", n, "` is declared at line ", line, ", after this use (a nested function is visible from its declaration to the end of its block: move it up)")
                 }
             }

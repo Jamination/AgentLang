@@ -25,7 +25,7 @@ fn variant_of(self: *Cx, ei: i64, n: str) -> i64 {
 }
 
 // "A, B, C": the variants of an enum declaration, for diagnostics
-fn lower_match_variant_list(cx: *Cx, ei: i64) -> str {
+priv fn variant_list(cx: *Cx, ei: i64) -> str {
     d := cx.enum_decls[ei]
     parts := vec[str]()
     for i in 0..d.variants.len {
@@ -40,7 +40,7 @@ fn lower_match_variant_list(cx: *Cx, ei: i64) -> str {
 
 // The enum that the name `n` denotes as the qualifier of `n.Variant`, or -1. An enum of the
 // other layer is hidden by a declaration of this layer with the same name.
-fn qual_enum_name(self: *Cx, n: str) -> i64 {
+priv fn qual_enum_name(self: *Cx, n: str) -> i64 {
     match self.find_enum(n) {
         Some(ei) => {
             own := (self.enum_decls[ei].pos.file < self.n_prelude) == self.scope_prelude
@@ -224,7 +224,7 @@ fn qual_variant(self: *Fx, ei: i64, ety: i64, name: str, args: []Expr, expect: O
     vi := self.cx.variant_of(ei, name)
     if vi < 0 {
         en := self.cx.enum_decls[ei].name
-        self.err(pos, fmt("enum `", en, "` has no variant `", name, "` (variants: ", lower_match_variant_list(self.cx, ei), ")"))
+        self.err(pos, fmt("enum `", en, "` has no variant `", name, "` (variants: ", variant_list(self.cx, ei), ")"))
         lower_call_eval_all(self, args)
         return val_err()
     }
@@ -236,18 +236,18 @@ fn qual_variant(self: *Fx, ei: i64, ety: i64, name: str, args: []Expr, expect: O
 }
 
 // ---------- patterns ----------
-const RP_ERR = 0
-const RP_WILD = 1
-const RP_BIND = 2
-const RP_REF = 3
-const RP_CONST = 4
-const RP_VARIANT = 5
-const RP_TUPLE = 6
+priv const RP_ERR = 0
+priv const RP_WILD = 1
+priv const RP_BIND = 2
+priv const RP_REF = 3
+priv const RP_CONST = 4
+priv const RP_VARIANT = 5
+priv const RP_TUPLE = 6
 // a variant or tuple pattern that looks through a pointer: one sub-pattern, for the target
-const RP_DEREF = 7
+priv const RP_DEREF = 7
 
 // A pattern after it was checked against the type of the part of the value it looks at.
-struct RPat {
+priv struct RPat {
     k: i64
     // type of the matched part
     ty: i64
@@ -266,12 +266,12 @@ struct RPat {
     nbinds: i64
 }
 
-fn lower_match_err(ty: i64, pos: Pos) -> RPat {
+priv fn lower_match_err(ty: i64, pos: Pos) -> RPat {
     return RPat{k: RP_ERR, ty: ty, pos: pos}
 }
 
 // is a pattern expression a compile-time constant?
-fn lower_match_is_const(s: *Fx, e: *Expr) -> bool {
+priv fn is_const(s: *Fx, e: *Expr) -> bool {
     match e.k {
         Int(_) => return true
         Float(_) => return true
@@ -287,12 +287,12 @@ fn lower_match_is_const(s: *Fx, e: *Expr) -> bool {
 }
 
 // does the name `n` denote anything in an expression?
-fn lower_match_known(s: *Fx, n: str) -> bool {
+priv fn known(s: *Fx, n: str) -> bool {
     return is_some(s.lookup(n)) || s.cx.const_decls.has(n) || s.cx.global_decls.has(n) || s.cx.fn_names.has(n) || s.bare_variant(n, None).2 != 0
 }
 
 // the enum (index into the type table's enums) of a type, or -1
-fn lower_match_enum_of(s: *Fx, ty: i64) -> i64 {
+priv fn enum_of(s: *Fx, ty: i64) -> i64 {
     match s.cx.types.k(ty) {
         Enum(e) => return e
         _ => {}
@@ -301,7 +301,7 @@ fn lower_match_enum_of(s: *Fx, ty: i64) -> i64 {
 }
 
 // does a variant or tuple pattern have a sub-pattern that can fail?
-fn lower_match_subs_refutable(rp: *RPat) -> bool {
+priv fn subs_refutable(rp: *RPat) -> bool {
     for i in 0..rp.subs.len {
         if rp.subs[i].refutable {
             return true
@@ -311,7 +311,7 @@ fn lower_match_subs_refutable(rp: *RPat) -> bool {
 }
 
 // resolves the sub-patterns `subs` of `r` against the types `tys`
-fn lower_match_subs(s: *Fx, r: RPat, subs: *Vec[Pat], tys: *Vec[i64]) -> RPat {
+priv fn lower_match_subs(s: *Fx, r: RPat, subs: *Vec[Pat], tys: *Vec[i64]) -> RPat {
     out := r
     out.subs = Vec[RPat]{buf: alloc[RPat](subs.len), len: 0}
     bad := false
@@ -333,11 +333,11 @@ fn lower_match_subs(s: *Fx, r: RPat, subs: *Vec[Pat], tys: *Vec[i64]) -> RPat {
 }
 
 // `Variant`, `Variant(subs)`, `Enum.Variant`, `Enum.Variant(subs)` matched against `ty`
-fn pat_variant(self: *Fx, name: str, subs: *Vec[Pat], parens: bool, qual: Opt[*Expr], ty: i64, pos: Pos) -> RPat {
+priv fn pat_variant(self: *Fx, name: str, subs: *Vec[Pat], parens: bool, qual: Opt[*Expr], ty: i64, pos: Pos) -> RPat {
     if ty == T_ERR {
         return lower_match_err(ty, pos)
     }
-    eid := lower_match_enum_of(self, ty)
+    eid := enum_of(self, ty)
     tn := self.tyname(ty)
     if eid < 0 {
         self.err(pos, fmt("`", name, if parens { "(..)" } else { "" }, "` is an enum variant pattern, but the matched value has type ", tn))
@@ -371,7 +371,7 @@ fn pat_variant(self: *Fx, name: str, subs: *Vec[Pat], parens: bool, qual: Opt[*E
         }
     }
     if vi < 0 {
-        self.err(pos, fmt("`", name, "` is not a variant of ", tn, " (variants: ", lower_match_variant_list(self.cx, ed), ")"))
+        self.err(pos, fmt("`", name, "` is not a variant of ", tn, " (variants: ", variant_list(self.cx, ed), ")"))
         return lower_match_err(ty, pos)
     }
     ptys := clone(self.cx.types.enums[eid].variants[vi].1)
@@ -395,7 +395,7 @@ fn pat_variant(self: *Fx, name: str, subs: *Vec[Pat], parens: bool, qual: Opt[*E
 
 // Would the pattern `p` look inside a value of type `ty` (pointers removed): a tuple
 // pattern for a tuple, a variant pattern or the name of a variant for an enum?
-fn lower_match_structural(s: *Fx, p: *Pat, ty: i64) -> bool {
+priv fn structural(s: *Fx, p: *Pat, ty: i64) -> bool {
     t := ty
     loop {
         match s.cx.types.k(t) {
@@ -407,7 +407,7 @@ fn lower_match_structural(s: *Fx, p: *Pat, ty: i64) -> bool {
             }
         }
     }
-    eid := lower_match_enum_of(s, t)
+    eid := enum_of(s, t)
     match *p {
         Tuple(_, _) => {
             match s.cx.types.k(t) {
@@ -457,12 +457,12 @@ fn lower_match_structural(s: *Fx, p: *Pat, ty: i64) -> bool {
 
 // Checks the pattern `p` against the type `ty` of the part it matches. `top`: the pattern
 // is an alternative of an arm (not inside a variant or tuple pattern).
-fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
+priv fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
     // a variant or tuple pattern matches through a pointer: the pointer must not be nil
     // and its target must match
     match self.cx.types.k(ty) {
         Ptr(inner) => {
-            if lower_match_structural(self, p, inner) {
+            if structural(self, p, inner) {
                 sub := self.pat_resolve(p, inner, top)
                 if sub.k == RP_ERR {
                     return lower_match_err(ty, sub.pos)
@@ -544,7 +544,7 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
             return self.pat_variant(name, &subs, true, qual, ty, pos)
         }
         Const(e) => {
-            eid := lower_match_enum_of(self, ty)
+            eid := enum_of(self, ty)
             const_name := false
             none: Vec[Pat]
             no_qual: Opt[*Expr] = None
@@ -571,7 +571,7 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
                     } else if eid >= 0 && !is_some(self.lookup(n)) && !self.cx.global_decls.has(n) {
                         // reports that `n` is not a variant
                         return self.pat_variant(n, &none, false, no_qual, ty, e.pos)
-                    } else if !lower_match_known(self, n) {
+                    } else if !known(self, n) {
                         self.err(e.pos, fmt("unknown identifier `", n, "`: the pattern of an arm is a constant, not a new name for the matched value (write `_` and use the matched value itself, also in a guard)"))
                         return lower_match_err(ty, e.pos)
                     }
@@ -586,7 +586,7 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
             if ty == T_ERR {
                 return lower_match_err(ty, e.pos)
             }
-            if !top && !const_name && !lower_match_is_const(self, &e) {
+            if !top && !const_name && !is_const(self, &e) {
                 self.err(e.pos, "this part of the pattern is not a constant; inside a pattern write a literal, a named constant, a variant, `_` or a name to bind (compare with other values in a guard: `pattern if cond => ...`)")
                 return lower_match_err(ty, e.pos)
             }
@@ -608,7 +608,7 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
 }
 
 // the variables a pattern binds, in source order: (name, type, position)
-fn lower_match_collect(s: *Fx, rp: *RPat, out: *Vec[(str, i64, Pos)]) {
+priv fn collect(s: *Fx, rp: *RPat, out: *Vec[(str, i64, Pos)]) {
     if rp.nbinds == 0 {
         return
     }
@@ -627,13 +627,13 @@ fn lower_match_collect(s: *Fx, rp: *RPat, out: *Vec[(str, i64, Pos)]) {
         return
     }
     for i in 0..rp.subs.len {
-        lower_match_collect(s, &rp.subs[i], out)
+        collect(s, &rp.subs[i], out)
     }
 }
 
 // the names a pattern may bind, read off its source form (used after an error in the
 // pattern, so that the arm's body does not report them as unknown)
-fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
+priv fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
     match *p {
         Ref(n, _) => {
             out.push(n)
@@ -652,7 +652,7 @@ fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
             match e.k {
                 Ident(n) => {
                     if top {
-                        if !lower_match_known(s, n) {
+                        if !known(s, n) {
                             out.push(n)
                         }
                     } else if !s.cx.const_decls.has(n) && s.bare_variant(n, None).2 == 0 {
@@ -667,7 +667,7 @@ fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
 }
 
 // does a pattern contain `&name`?
-fn lower_match_has_ref(p: *Pat) -> bool {
+priv fn lower_match_has_ref(p: *Pat) -> bool {
     match *p {
         Ref(_, _) => return true
         Tuple(subs, _) => {
@@ -690,9 +690,9 @@ fn lower_match_has_ref(p: *Pat) -> bool {
 }
 
 // offsets of the parts that the sub-patterns of a variant or tuple pattern look at
-fn pat_offsets(self: *Fx, rp: *RPat) -> Vec[i64] {
+priv fn pat_offsets(self: *Fx, rp: *RPat) -> Vec[i64] {
     if rp.k == RP_VARIANT {
-        return self.cx.types.variant_offsets(lower_match_enum_of(self, rp.ty), rp.vi)
+        return self.cx.types.variant_offsets(enum_of(self, rp.ty), rp.vi)
     }
     match self.cx.types.k(rp.ty) {
         Tuple(ts) => {
@@ -705,7 +705,7 @@ fn pat_offsets(self: *Fx, rp: *RPat) -> Vec[i64] {
 
 // The part of `part` that sub-pattern `i` of `rp` looks at, and whether it lies in the
 // payload of an enum (payload memory is read with the "any" alias class).
-fn pat_part(self: *Fx, rp: *RPat, offs: *Vec[i64], part: Val, payload: bool, i: i64) -> (Val, bool) {
+priv fn pat_part(self: *Fx, rp: *RPat, offs: *Vec[i64], part: Val, payload: bool, i: i64) -> (Val, bool) {
     sty := rp.subs[i].ty
     a := self.add_off(part.v, offs[i])
     v := self.mval(sty, a)
@@ -721,7 +721,7 @@ fn pat_part(self: *Fx, rp: *RPat, offs: *Vec[i64], part: Val, payload: bool, i: 
 }
 
 // the value of a constant pattern, with the type of the part it is compared with
-fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
+priv fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
     pv: Val
     is_nil := false
     match rp.e.k {
@@ -758,7 +758,7 @@ fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
 }
 
 // Emits the tests of the refutable sub-patterns of a variant or tuple pattern.
-fn pat_test_subs(self: *Fx, rp: *RPat, part: Val, payload: bool, ok_b: i64, fail_b: i64) {
+priv fn pat_test_subs(self: *Fx, rp: *RPat, part: Val, payload: bool, ok_b: i64, fail_b: i64) {
     last := -1
     for i in 0..rp.subs.len {
         if rp.subs[i].refutable {
@@ -782,7 +782,7 @@ fn pat_test_subs(self: *Fx, rp: *RPat, part: Val, payload: bool, ok_b: i64, fail
 // Emits the test of pattern `rp` against `part` and ends the current block: control goes to
 // `ok_b` if the pattern matches and to `fail_b` if not. `key`: the tag or scalar value of
 // the part if it is already loaded (the scrutinee), else NOV.
-fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool, ok_b: i64, fail_b: i64) {
+priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool, ok_b: i64, fail_b: i64) {
     if rp.k == RP_ERR {
         self.jmp(fail_b)
         return
@@ -822,7 +822,7 @@ fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool,
         }
         c := self.iconst(I64, rp.vi)
         eq := self.ins(Op.Eq, I8, vec_of([]i64{tag, c}), 0)
-        if !lower_match_subs_refutable(rp) {
+        if !subs_refutable(rp) {
             self.br(eq, ok_b, fail_b)
             return
         }
@@ -854,7 +854,7 @@ fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool,
 }
 
 // copies `ty` out of enum payload memory at `src` to `dst`
-fn copy_any(self: *Fx, dst: i64, src: i64, ty: i64) {
+priv fn copy_any(self: *Fx, dst: i64, src: i64, ty: i64) {
     lvs := vec[Leaf]()
     self.cx.types.leaves(ty, 0, &lvs)
     if lvs.len > 64 {
@@ -873,7 +873,7 @@ fn copy_any(self: *Fx, dst: i64, src: i64, ty: i64) {
 }
 
 // the variable of an arm with several alternatives that holds the binding `name`
-fn lower_match_slot(slots: *Vec[(str, i64, i64)], name: str) -> i64 {
+priv fn lower_match_slot(slots: *Vec[(str, i64, i64)], name: str) -> i64 {
     for i in 0..slots.len {
         if slots[i].0 == name {
             return slots[i].2
@@ -885,7 +885,7 @@ fn lower_match_slot(slots: *Vec[(str, i64, i64)], name: str) -> i64 {
 // Creates the variables of the bindings of `rp` after it matched `part`: `name` is a copy
 // of its part, `&name` a pointer to it. With `use_slots` the variables exist already (the
 // arm has several alternatives) and only receive their values.
-fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(str, i64, i64)], use_slots: bool) {
+priv fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(str, i64, i64)], use_slots: bool) {
     if rp.nbinds == 0 || rp.k == RP_ERR {
         return
     }
@@ -951,7 +951,7 @@ fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(str, i6
 }
 
 // is a pattern the constant `nil`?
-fn lower_match_is_nil(rp: *RPat) -> bool {
+priv fn lower_match_is_nil(rp: *RPat) -> bool {
     if rp.k != RP_CONST {
         return false
     }
@@ -963,7 +963,7 @@ fn lower_match_is_nil(rp: *RPat) -> bool {
 }
 
 // the value of a `true` / `false` pattern: 1 / 0, or -1 for anything else
-fn lower_match_bool_pat(s: *Fx, rp: *RPat) -> i64 {
+priv fn bool_pat(s: *Fx, rp: *RPat) -> i64 {
     if rp.k != RP_CONST {
         return -1
     }
@@ -987,16 +987,16 @@ fn lower_match_bool_pat(s: *Fx, rp: *RPat) -> i64 {
 // ---------- exhaustiveness ----------
 // Patterns that always match the part they look at (a pattern with an error counts as one,
 // so that it does not cause a second diagnostic).
-fn lower_match_is_wild(p: *RPat) -> bool {
+priv fn is_wild(p: *RPat) -> bool {
     return p.k == RP_WILD || p.k == RP_BIND || p.k == RP_REF || p.k == RP_ERR
 }
 
 // the row `r` with its first pattern replaced by that pattern's sub-patterns (`n` wildcards
 // if it is a wildcard)
-fn lower_match_expand(r: *Vec[*RPat], n: i64, wild: *RPat) -> Vec[*RPat] {
+priv fn expand(r: *Vec[*RPat], n: i64, wild: *RPat) -> Vec[*RPat] {
     p := r[0]
     out := vec[*RPat]()
-    if lower_match_is_wild(p) {
+    if is_wild(p) {
         for i in 0..n {
             out.push(wild)
         }
@@ -1012,7 +1012,7 @@ fn lower_match_expand(r: *Vec[*RPat], n: i64, wild: *RPat) -> Vec[*RPat] {
 }
 
 // the witness `head(w[0], .., w[n-1])` followed by the rest of `w`
-fn lower_match_witness(head: str, w: *Vec[str], n: i64, parens: bool) -> Vec[str] {
+priv fn witness(head: str, w: *Vec[str], n: i64, parens: bool) -> Vec[str] {
     out := vec[str]()
     if parens {
         out.push(fmt(head, "(", join(w[..n], ", "), ")"))
@@ -1027,40 +1027,40 @@ fn lower_match_witness(head: str, w: *Vec[str], n: i64, parens: bool) -> Vec[str
 
 // The rows of `rows` that can match a value whose first part is variant `vi` of enum `eid`,
 // checked against that variant's fields and the remaining columns.
-fn lower_match_uncovered_variant(s: *Fx, rows: *Vec[Vec[*RPat]], rest: *Vec[i64], eid: i64, vi: i64, wild: *RPat) -> (Vec[str], bool) {
+priv fn uncovered_variant(s: *Fx, rows: *Vec[Vec[*RPat]], rest: *Vec[i64], eid: i64, vi: i64, wild: *RPat) -> (Vec[str], bool) {
     ptys := clone(s.cx.types.enums[eid].variants[vi].1)
     sub := vec[Vec[*RPat]]()
     for i in 0..rows.len {
         r := &rows[i]
         p := r[0]
-        if lower_match_is_wild(p) || (p.k == RP_VARIANT && p.vi == vi) {
-            sub.push(lower_match_expand(r, ptys.len, wild))
+        if is_wild(p) || (p.k == RP_VARIANT && p.vi == vi) {
+            sub.push(expand(r, ptys.len, wild))
         }
     }
     sub_tys := clone(ptys)
     sub_tys.extend(rest.items())
-    w, unc := lower_match_uncovered(s, &sub, &sub_tys, wild)
+    w, unc := uncovered(s, &sub, &sub_tys, wild)
     if !unc {
         return (w, false)
     }
     name := s.cx.types.enums[eid].variants[vi].0
-    return (lower_match_witness(name, &w, ptys.len, ptys.len != 0), true)
+    return (witness(name, &w, ptys.len, ptys.len != 0), true)
 }
 
 // Is there a value (one part per column, of the types `tys`) that no row of patterns
 // matches? If so, such a value is returned in pattern form, one text per column.
 // (The usual algorithm: split on the constructors of the first column.)
-fn lower_match_uncovered(s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *RPat) -> (Vec[str], bool) {
+priv fn uncovered(s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *RPat) -> (Vec[str], bool) {
     if tys.len == 0 {
         return (vec[str](), rows.len == 0)
     }
     t := tys[0]
     rest := vec_of(tys[1..tys.len])
-    eid := lower_match_enum_of(s, t)
+    eid := enum_of(s, t)
     if eid >= 0 {
         nv := s.cx.types.enums[eid].variants.len
         for vi in 0..nv {
-            w, unc := lower_match_uncovered_variant(s, rows, &rest, eid, vi, wild)
+            w, unc := uncovered_variant(s, rows, &rest, eid, vi, wild)
             if unc {
                 return (w, true)
             }
@@ -1080,30 +1080,30 @@ fn lower_match_uncovered(s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *
         sub := vec[Vec[*RPat]]()
         for i in 0..rows.len {
             r := &rows[i]
-            if lower_match_is_wild(r[0]) || r[0].k == RP_TUPLE {
-                sub.push(lower_match_expand(r, elems.len, wild))
+            if is_wild(r[0]) || r[0].k == RP_TUPLE {
+                sub.push(expand(r, elems.len, wild))
             }
         }
         sub_tys := clone(elems)
         sub_tys.extend(rest.items())
-        w, unc := lower_match_uncovered(s, &sub, &sub_tys, wild)
+        w, unc := uncovered(s, &sub, &sub_tys, wild)
         if !unc {
             return (w, false)
         }
-        return (lower_match_witness("", &w, elems.len, true), true)
+        return (witness("", &w, elems.len, true), true)
     }
     if t == T_BOOL {
         for bv in 1..=0 by -1 {
             sub := vec[Vec[*RPat]]()
             for i in 0..rows.len {
                 r := &rows[i]
-                if lower_match_is_wild(r[0]) || lower_match_bool_pat(s, r[0]) == bv {
-                    sub.push(lower_match_expand(r, 0, wild))
+                if is_wild(r[0]) || bool_pat(s, r[0]) == bv {
+                    sub.push(expand(r, 0, wild))
                 }
             }
-            w, unc := lower_match_uncovered(s, &sub, &rest, wild)
+            w, unc := uncovered(s, &sub, &rest, wild)
             if unc {
-                return (lower_match_witness(if bv == 1 { "true" } else { "false" }, &w, 0, false), true)
+                return (witness(if bv == 1 { "true" } else { "false" }, &w, 0, false), true)
             }
         }
         return (vec[str](), false)
@@ -1128,49 +1128,49 @@ fn lower_match_uncovered(s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *
         for i in 0..rows.len {
             r := &rows[i]
             p := r[0]
-            if lower_match_is_wild(p) || lower_match_is_nil(p) {
-                nil_rows.push(lower_match_expand(r, 0, wild))
+            if is_wild(p) || lower_match_is_nil(p) {
+                nil_rows.push(expand(r, 0, wild))
             }
-            if lower_match_is_wild(p) || p.k == RP_DEREF {
-                sub.push(lower_match_expand(r, 1, wild))
+            if is_wild(p) || p.k == RP_DEREF {
+                sub.push(expand(r, 1, wild))
             }
         }
-        w0, unc0 := lower_match_uncovered(s, &nil_rows, &rest, wild)
+        w0, unc0 := uncovered(s, &nil_rows, &rest, wild)
         if unc0 {
-            return (lower_match_witness("nil", &w0, 0, false), true)
+            return (witness("nil", &w0, 0, false), true)
         }
         sub_tys := vec_one(target)
         sub_tys.extend(rest.items())
-        w1, unc1 := lower_match_uncovered(s, &sub, &sub_tys, wild)
+        w1, unc1 := uncovered(s, &sub, &sub_tys, wild)
         return (w1, unc1)
     }
     // integers, strings, ...: constants never cover the type; only wildcards count
     sub := vec[Vec[*RPat]]()
     for i in 0..rows.len {
         r := &rows[i]
-        if lower_match_is_wild(r[0]) {
-            sub.push(lower_match_expand(r, 0, wild))
+        if is_wild(r[0]) {
+            sub.push(expand(r, 0, wild))
         }
     }
-    w, unc := lower_match_uncovered(s, &sub, &rest, wild)
+    w, unc := uncovered(s, &sub, &rest, wild)
     if !unc {
         return (w, false)
     }
-    return (lower_match_witness("_", &w, 0, false), true)
+    return (witness("_", &w, 0, false), true)
 }
 
 // What a match on a value of type `ty` with the pattern rows `rows` (one pattern each) does
 // not cover, in pattern form: for an enum one entry per variant that is not fully covered.
-fn lower_match_missing(s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str] {
+priv fn lower_match_missing(s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str] {
     out := vec[str]()
     wild := new[RPat]()
     wild.k = RP_WILD
-    eid := lower_match_enum_of(s, ty)
+    eid := enum_of(s, ty)
     if eid >= 0 {
         none := vec[i64]()
         nv := s.cx.types.enums[eid].variants.len
         for vi in 0..nv {
-            w, unc := lower_match_uncovered_variant(s, rows, &none, eid, vi, wild)
+            w, unc := uncovered_variant(s, rows, &none, eid, vi, wild)
             if unc {
                 out.push(w[0])
             }
@@ -1189,11 +1189,11 @@ fn lower_match_missing(s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str] {
                 if p.k == RP_DEREF {
                     any = true
                 }
-                if lower_match_is_wild(p) || lower_match_is_nil(p) {
-                    nil_rows.push(lower_match_expand(r, 0, wild))
+                if is_wild(p) || lower_match_is_nil(p) {
+                    nil_rows.push(expand(r, 0, wild))
                 }
-                if lower_match_is_wild(p) || p.k == RP_DEREF {
-                    sub.push(lower_match_expand(r, 1, wild))
+                if is_wild(p) || p.k == RP_DEREF {
+                    sub.push(expand(r, 1, wild))
                 }
             }
             if any {
@@ -1207,7 +1207,7 @@ fn lower_match_missing(s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str] {
         _ => {}
     }
     tys := vec_one(ty)
-    w, unc := lower_match_uncovered(s, rows, &tys, wild)
+    w, unc := uncovered(s, rows, &tys, wild)
     if unc {
         out.push(w[0])
     }
@@ -1319,10 +1319,10 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
             if rp.k == RP_ERR {
                 pat_err = true
             } else if pi == 0 {
-                lower_match_collect(self, &rp, &binds)
+                collect(self, &rp, &binds)
             } else if !pat_err {
                 others := vec[(str, i64, Pos)]()
-                lower_match_collect(self, &rp, &others)
+                collect(self, &rp, &others)
                 for i in 0..binds.len {
                     found := false
                     for j in 0..others.len {
@@ -1374,13 +1374,13 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
             } else if guarded {
                 any_guard = true
             } else if rp.k == RP_VARIANT {
-                if !lower_match_subs_refutable(rp) {
+                if !subs_refutable(rp) {
                     covered[rp.vi] = true
                 }
             } else if !rp.refutable {
                 has_wild = true
             } else if sv.ty == T_BOOL {
-                bp := lower_match_bool_pat(self, rp)
+                bp := bool_pat(self, rp)
                 if bp == 1 {
                     seen_true = true
                 } else if bp == 0 {
