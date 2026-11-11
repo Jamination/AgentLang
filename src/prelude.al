@@ -1268,7 +1268,119 @@ fn parse_i64(s str) (i64, bool) {
     return (i64(v), true)
 }
 
-// decimal floating point: digits, optional fraction and exponent (nearest for up to 19 digits)
+// ---- exact decimal to binary conversion: big integers as little-endian u32 limbs ----
+const __BIG_LIMBS = 224
+
+fn __big_mul_small(a []u32, n i64, k u32) i64 {
+    var carry u64 = 0
+    for i in 0..n {
+        t := u64(a[i]) * u64(k) + carry
+        a[i] = u32(t)
+        carry = t >> 32
+    }
+    if carry != 0 {
+        a[n] = u32(carry)
+        n += 1
+    }
+    return n
+}
+
+fn __big_add_small(a []u32, n i64, k u32) i64 {
+    var carry u64 = u64(k)
+    i := 0
+    while carry != 0 {
+        if i == n {
+            a[n] = 0
+            n += 1
+        }
+        t := u64(a[i]) + carry
+        a[i] = u32(t)
+        carry = t >> 32
+        i += 1
+    }
+    return n
+}
+
+fn __big_mul_pow10(a []u32, n i64, e i64) i64 {
+    while e >= 9 {
+        n = __big_mul_small(a, n, 1000000000)
+        e -= 9
+    }
+    var k u32 = 1
+    while e > 0 {
+        k = k * 10
+        e -= 1
+    }
+    if k != 1 {
+        n = __big_mul_small(a, n, k)
+    }
+    return n
+}
+
+fn __big_shl(a []u32, n i64, bits i64) i64 {
+    if n == 0 || bits == 0 {
+        return n
+    }
+    words := bits >> 5
+    sh := u32(bits & 31)
+    i := n - 1
+    if sh != 0 {
+        a[n + words] = a[n - 1] >> (32 - sh)
+    }
+    while i >= 0 {
+        lo := if i > 0 && sh != 0 { a[i - 1] >> (32 - sh) } else { u32(0) }
+        a[i + words] = (a[i] << sh) | lo
+        i -= 1
+    }
+    for j in 0..words {
+        a[j] = 0
+    }
+    n += words
+    if sh != 0 && a[n] != 0 {
+        n += 1
+    }
+    return n
+}
+
+fn __big_cmp(a []u32, an i64, b []u32, bn i64) i64 {
+    if an != bn {
+        return if an < bn { -1 } else { 1 }
+    }
+    i := an - 1
+    while i >= 0 {
+        if a[i] != b[i] {
+            return if a[i] < b[i] { -1 } else { 1 }
+        }
+        i -= 1
+    }
+    return 0
+}
+
+// compares the decimal value num * 10^e10 (num: n limbs, already multiplied by 10^e10 when
+// e10 > 0) with mm * 2^q
+fn __dec_cmp_bin(num []u32, n i64, e10 i64, mm u64, q i64) i64 {
+    var a [__BIG_LIMBS]u32
+    var b [__BIG_LIMBS]u32
+    for i in 0..n {
+        a[i] = num[i]
+    }
+    an := n
+    b[0] = u32(mm)
+    b[1] = u32(mm >> 32)
+    bn := if b[1] != 0 { 2 } else { if b[0] != 0 { 1 } else { 0 } }
+    if e10 < 0 {
+        bn = __big_mul_pow10(b[..], bn, -e10)
+    }
+    if q >= 0 {
+        bn = __big_shl(b[..], bn, q)
+    } else {
+        an = __big_shl(a[..], an, -q)
+    }
+    return __big_cmp(a[..], an, b[..], bn)
+}
+
+// decimal text to the nearest f64 (ties to even), exactly as a C compiler reads a literal:
+// [+-] digits [. digits] [e [+-] digits]; (0, false) if s is not a number
 fn parse_f64(s str) (f64, bool) {
     n := len(s)
     i := 0
@@ -1277,35 +1389,55 @@ fn parse_f64(s str) (f64, bool) {
         neg = s[0] == '-'
         i = 1
     }
+    // significant digits as a big integer (at most 800 are kept; more only set a sticky digit)
+    var num [__BIG_LIMBS]u32
+    nn := 0
     var mant u64 = 0
     digits := 0
+    mdigits := 0
     exp10 := 0
+    mexp := 0
     seen := false
-    while i < n && s[i] >= '0' && s[i] <= '9' {
-        if digits < 19 {
-            mant = mant * 10 + u64(s[i] - '0')
-            if mant != 0 {
+    sticky := false
+    frac := false
+    loop {
+        if i < n && s[i] == '.' && !frac {
+            frac = true
+            i += 1
+            continue
+        }
+        if i >= n || s[i] < '0' || s[i] > '9' {
+            break
+        }
+        d := u32(s[i] - '0')
+        seen = true
+        if digits < 800 {
+            if digits > 0 || d != 0 {
+                nn = __big_mul_small(num[..], nn, 10)
+                nn = __big_add_small(num[..], nn, d)
                 digits += 1
             }
-        } else {
-            exp10 += 1
-        }
-        seen = true
-        i += 1
-    }
-    if i < n && s[i] == '.' {
-        i += 1
-        while i < n && s[i] >= '0' && s[i] <= '9' {
-            if digits < 19 {
-                mant = mant * 10 + u64(s[i] - '0')
-                if mant != 0 {
-                    digits += 1
-                }
+            if frac {
                 exp10 -= 1
             }
-            seen = true
-            i += 1
+        } else {
+            sticky = sticky || d != 0
+            if !frac {
+                exp10 += 1
+            }
         }
+        if mdigits < 19 {
+            mant = mant * 10 + u64(d)
+            if mant != 0 {
+                mdigits += 1
+            }
+            if frac {
+                mexp -= 1
+            }
+        } else if !frac {
+            mexp += 1
+        }
+        i += 1
     }
     if !seen {
         return (0.0, false)
@@ -1328,23 +1460,90 @@ fn parse_f64(s str) (f64, bool) {
             i += 1
         }
         exp10 += if eneg { -e } else { e }
+        mexp += if eneg { -e } else { e }
     }
     if i != n {
         return (0.0, false)
     }
-    x := f64(mant)
-    p := 10.0
-    e := if exp10 < 0 { -exp10 } else { exp10 }
-    scale := 1.0
-    while e > 0 {
-        if e & 1 == 1 {
-            scale = scale * p
-        }
-        p = p * p
-        e = e >> 1
+    inf := cast[f64](u64(0x7FF0000000000000))
+    if nn == 0 {
+        return (if neg { -0.0 } else { 0.0 }, true)
     }
-    x = if exp10 < 0 { x / scale } else { x * scale }
-    return (if neg { -x } else { x }, true)
+    if digits + exp10 > 310 {
+        return (if neg { -inf } else { inf }, true)
+    }
+    if digits + exp10 < -326 {
+        return (if neg { -0.0 } else { 0.0 }, true)
+    }
+    if sticky {
+        // the dropped digits only matter as "a little more": one extra non-zero digit
+        nn = __big_mul_small(num[..], nn, 10)
+        nn = __big_add_small(num[..], nn, 1)
+        exp10 -= 1
+    }
+    if exp10 > 0 {
+        nn = __big_mul_pow10(num[..], nn, exp10)
+    }
+    // a first guess in floating point (within a few units in the last place)
+    x := f64(mant)
+    e := if mexp < 0 { -mexp } else { mexp }
+    while e > 0 {
+        step := if e > 300 { 300 } else { e }
+        scale := 1.0
+        p := 10.0
+        k := step
+        while k > 0 {
+            if k & 1 == 1 {
+                scale = scale * p
+            }
+            p = p * p
+            k = k >> 1
+        }
+        x = if mexp < 0 { x / scale } else { x * scale }
+        e -= step
+    }
+    var bits u64 = cast[u64](x)
+    if bits >= 0x7FF0000000000000 {
+        bits = 0x7FEFFFFFFFFFFFFF
+    }
+    // correct the guess: move while the exact value lies beyond the midpoint to a neighbour
+    loop {
+        ex := i64(bits >> 52)
+        fr := bits & 0xFFFFFFFFFFFFF
+        m := if ex == 0 { fr } else { fr | (u64(1) << 52) }
+        q := if ex == 0 { -1074 } else { ex - 1075 }
+        hi := __dec_cmp_bin(num[..], nn, exp10, 2 * m + 1, q - 1)
+        if hi > 0 || (hi == 0 && m & 1 == 1) {
+            bits += 1
+            if bits >= 0x7FF0000000000000 {
+                break
+            }
+            if hi == 0 {
+                break
+            }
+            continue
+        }
+        if hi == 0 || m == 0 {
+            break
+        }
+        lo := 0
+        if fr == 0 && ex > 1 {
+            // the double below a power of two is only half as far away
+            lo = __dec_cmp_bin(num[..], nn, exp10, 4 * m - 1, q - 2)
+        } else {
+            lo = __dec_cmp_bin(num[..], nn, exp10, 2 * m - 1, q - 1)
+        }
+        if lo < 0 || (lo == 0 && m & 1 == 1) {
+            bits -= 1
+            if lo == 0 {
+                break
+            }
+            continue
+        }
+        break
+    }
+    r := cast[f64](bits)
+    return (if neg { -r } else { r }, true)
 }
 
 // ---------- files and arguments ----------
