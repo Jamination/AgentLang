@@ -30,6 +30,15 @@ fn squares(n i64) Vec[i64] {
     v
 }
 
+fn find_first[T](v *Vec[T], x T) i64 {
+    for i, y in v {
+        if y == x {
+            return i
+        }
+    }
+    return -1
+}
+
 fn bump(p *i64) {
     *p += 1
 }
@@ -155,4 +164,25 @@ fn main() {
     got, _ := m.get("sq")
     pair := (got, 5)
     print(got[3], pair.0[2], m.get("sq").0[1..])
+    // vector and matrix elements: components of an element are places too
+    vs := vec[vec3]()
+    vs.push(vec3(1.0, 2.0, 3.0))
+    vs.push(vec3(4.0))
+    vs[0].y = 20.0
+    vs[1] = vs[1] * 2.0 + vs[0]
+    vs[1][2] = -1.0
+    acc := vec3(0.0)
+    for q in vs {
+        acc = acc + q
+    }
+    ms := vec[mat4]()
+    ms.push(mat4(1.0))
+    ms[0][3] = vec4(1.0, 2.0, 3.0, 1.0)
+    ms[0][3].x = 9.0
+    print(vs[0], vs[1], acc, ms[0][3], ms[0][1][1], len(vs[..1]))
+    // sorting and searching through the slice view
+    us := squares(6)
+    us[0] = 100
+    sort(us[..])
+    print(us[..], us[5], find_first(&us, 9), find_first(&us, 10))
 }
