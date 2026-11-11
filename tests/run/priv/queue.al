@@ -20,6 +20,8 @@ priv fn state(c *Ctx) Mode {
     if c.n == 0 { QueueEmpty } else { QueueFull(c.n) }
 }
 priv fn show(m Mode) str { fmt("queue-mode:", m) }
+// the same parameter types as the public `show` of the main file: this one is called here
+priv fn show(x i64) str { fmt("queue-int:", x) }
 
 fn queue_make() Ctx { Ctx{} }
 

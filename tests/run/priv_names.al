@@ -129,6 +129,63 @@ fn main() {
     pn.val = 40
     pn.next = n1
     print(sum(pn), origin)
+    statements()
+}
+
+priv var depth i64
+priv fn enter() i64 {
+    depth += 1
+    depth
+}
+priv fn leave() { depth -= 1 }
+priv fn pair() (i64, str) { (N, NAME) }
+
+// private names in every kind of statement and expression
+priv fn statements() {
+    xs := []i64{10, 20, 30, 40, 50, 60}
+    print(xs[1..N], xs[..N - 2], xs[N..], -N, !even(N), ~N, (N, NAME).0)
+    {
+        enter()
+        defer { leave() }
+        print("depth", depth)
+    }
+    print("depth", depth)
+    assert N == 4, NAME
+    assert even(N)
+    var a i64
+    var s str
+    a, s = pair()
+    c, d := pair()
+    print(a, s, c, d)
+    i := 0
+    while i < N {
+        i += twice2(1)
+    }
+    loop {
+        i -= 1
+        if i < N {
+            break
+        }
+    }
+    for k, x in xs[..N / 2] {
+        put(k, ":", x + N, " ")
+    }
+    for j in N..=N + 4 by N / 2 {
+        put(j, " ")
+    }
+    e := if even(i) { NAME } else { "odd" }
+    var w Vec2i = origin
+    w.x += N
+    *(&w.y) = area(w)
+    pw := &w
+    grid[i] = pw.x
+    print(e, w, grid[i], i)
+    t := Leaf(N)
+    r := match t {
+        Leaf(N) => N + 1
+        Fork(l, r) => 0
+    }
+    print(r, N)
 }
 
 priv fn twice2(x i64) i64 { twice(twice(x)) }

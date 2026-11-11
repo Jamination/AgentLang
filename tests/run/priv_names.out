@@ -13,3 +13,9 @@ Box[str]{v: <21>, count: 3} 10.5 <21> 21
 [Vec2i{x: 1, y: 0}, Vec2i{x: 2, y: 0}, Vec2i{x: 3, y: 0}]
 3 true false Vec2i{x: 3, y: 4} Box[str]{v: w, count: 1} found true true
 43 Vec2i{x: 1, y: 2}
+[20, 30, 40] [10, 20] [50, 60] -4 false -5 4
+depth 1
+depth 0
+4 names 4 names
+0:14 1:24 4 6 8 odd Vec2i{x: 5, y: 10} 5 3
+5 4
