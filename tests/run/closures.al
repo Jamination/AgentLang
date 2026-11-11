@@ -140,6 +140,10 @@ fn main() {
     print(call_fn(|x i64| i64 { x + 1 }, 41), call_fn(double, 4))
     var thin fn(i64) i64 = |x i64| i64 { x * 7 }
     print(thin(6), double.twice(5), twice(|x i64| i64 { x * n }, 1))
+    var tp (|i64| i64, i64) = (fv, 1)
+    tg := tp.0
+    mk := |x i64| P { P{x, 0} }
+    print(tg(tp.1), mk(4))
     cl := |x i64| i64 { x - n }
     print(cl.twice(100))
     q := if n > 0 { double } else { triple }

@@ -751,10 +751,10 @@ fn closure_header(p *Parser, params *Vec[(str, TypeAst)], ret *Opt[*TypeAst]) bo
 fn closure_expr(p *Parser, pos Pos) (Expr, bool) {
     start := p.i
     nerr := p.errs.len
+    save := p.bars
     params := vec[(str, TypeAst)]()
     var ret Opt[*TypeAst] = None
     if p.closure_header(&params, &ret) {
-        save := p.bars
         p.bars = 0
         body, ok := p.block()
         p.bars = save
@@ -764,8 +764,10 @@ fn closure_expr(p *Parser, pos Pos) (Expr, bool) {
         return (Expr{k: EKClosure(params, ret, parser_box(body)), pos: pos}, true)
     }
     p.i = start
+    p.bars = save
     p.errs.truncate(nerr)
     t, ok := p.ty()
+    p.bars = save
     if ok && !p.is_p("{") {
         return (Expr{k: EKTypeE(t), pos: pos}, true)
     }

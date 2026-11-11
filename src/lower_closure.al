@@ -353,7 +353,7 @@ fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *B
     }
     // the function of the literal, lowered now with the type arguments of this function
     fid := self.cx.module.funcs.len
-    f := func_new(fmt(self.f.name, ".closure@", pos.line))
+    f := func_new(fmt(self.f.name, ".closure@", pos.line, ":", pos.col))
     f.noreturn = rty == T_NEVER
     self.cx.fn_abi(&f, ptys.items(), rty)
     if caps.len != 0 {

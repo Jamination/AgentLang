@@ -379,6 +379,15 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
                     None => {}
                 }
                 v0 := self.expr(x, xe)
+                match exp_tys {
+                    Some(t) => {
+                        if self.cx.types.fn_to_closure(v0.ty, t.buf[i]) {
+                            // a function value for an element of a closure type
+                            v0 = self.fn_as_closure(v0, t.buf[i])
+                        }
+                    }
+                    None => {}
+                }
                 // stabilize scalars now; aggregates are copied below
                 if v0.ty == T_ERR {
                     return val_err()
