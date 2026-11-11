@@ -1,0 +1,19 @@
+42 2.5 true true vec3(1.0, 2.0, 3.0) 7 97
+hello jello [1, 2, 3] [100, 2, 3] [ab, cd] [Xb, zz] [[1, 2], [3]] [[1, 20], [3]] 0 0
+[1, 2, 3] [1, 0, 3] [p, q] [P, q] (1, one, [1.5]) (1, One, [9.5])
+P{x: 1, y: 2.0} P{x: 10, y: 2.0} Named{name: n, tags: [t1, t2], pos: P{x: 3, y: 4.0}} Named{name: N, tags: [t1, t9], pos: P{x: 30, y: 4.0}}
+[Dot, Circle(P{x: 1, y: 1.0}, 2.0), Poly([P{x: 1, y: 1.0}, P{x: 2, y: 2.0}]), Label(lbl, 5)]
+[Label(new, 1), Circle(P{x: 1, y: 1.0}, 2.0), Poly([P{x: 111, y: 1.0}, P{x: 2, y: 2.0}]), Label(Lbl, 5)]
+Some([5, 6]) Some([50, 6]) None
+4 4 5 500 0 1
+6 105
+2 3 [t1, t2] [T1, t2] second 2nd true
+[0, 1, 2, 3, 4, 50] [-1, 1, 2, 3, 4, 5]
+0 1
+[1] [10] 1 2 false true false
+49 0 100 99 9801
+0 1
+n # 0 9 [[1], [2, 3]] [[1], [20, 3]]
+Wrap[str]{item: it, list: [l0, l1]} Wrap[str]{item: It, list: [L0, l1]} Wrap[i64]{item: 1, list: [2]} 3 s [true]
+1 20 10 8 77
+[1, 2, 3] tmp [t1, t2] 3 9

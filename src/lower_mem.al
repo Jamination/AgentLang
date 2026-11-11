@@ -221,9 +221,9 @@ fn call_shared(self *Fx, name str, cands0 Vec[i64], explicit Opt[Vec[i64]], recv
                     tn := self.tyname(rv.ty)
                     if cands.len != 0 {
                         s := lower_call_call_overloaded_sigs(self, cands.items())
-                        self.err(pos, fmt("no definition of `", name, "` can be called on ", tn, "; candidates: ", s, " (the builtin `", name, "` has no method form: write `", name, "(...)`)"))
+                        self.err(pos, fmt("no definition of `", name, "` can be called on ", tn, "; candidates: ", s, " (the builtin `", name, "` has no method form: call it as a plain function)"))
                     } else {
-                        self.err(pos, fmt("no function `", name, "` to call on ", tn, " (the builtin `", name, "` has no method form: write `", name, "(...)`)"))
+                        self.err(pos, fmt("no function `", name, "` to call on ", tn, " (the builtin `", name, "` has no method form: call it as a plain function)"))
                     }
                     lower_call_eval_all(self, args)
                 }

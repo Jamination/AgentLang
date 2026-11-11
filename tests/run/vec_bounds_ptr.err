@@ -1,0 +1,1 @@
+panic: index out of bounds at tests/run/vec_bounds_ptr.al:8

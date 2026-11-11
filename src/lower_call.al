@@ -877,7 +877,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 _ => {}
             }
             cands := self.cx.fn_candidates(name)
-            if lower_mem_is_builtin(name) && (cands.len != 0 || lower_mem_is_method_builtin(name)) {
+            if lower_mem_is_builtin(name) {
                 return self.call_shared(name, cands, None, Some(rv), recv, args, expect, pos)
             }
             if cands.len == 1 {
