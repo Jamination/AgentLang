@@ -374,6 +374,8 @@ class Parser:
             self.decl()
         else:
             self.stmt()
+        if is_decl and self.tok().kind == "kw" and self.tok().text in ("struct", "enum", "fn", "const", "var"):
+            return      # documentation: several declarations on one line
         if not self.end_of_stmt():
             self.err("expected end of statement")
 
@@ -526,10 +528,14 @@ class Parser:
             self.replace(self.bump(), ":=")
             self.expr()
 
+    def elided(self):
+        """documentation: `...` or `..` for parameters that are not shown"""
+        return self.is_dots() or (self.fragment and self.is_p(".."))
+
     def old_params(self):
         """`(a A, b B)` after the `(`, through the `)`"""
         while not self.is_p(")"):
-            if self.is_dots():
+            if self.elided():
                 self.bump()
             elif self.fragment and self.is_id() and (self.is_p(")", 1) or self.is_p(",", 1)):
                 self.bump()               # documentation: `fn name(params) R`
@@ -649,8 +655,10 @@ class Parser:
         """`(a: A, b: B) [-> R]` of the new syntax"""
         self.expect_p("(")
         while not self.is_p(")"):
-            if self.is_dots():
+            if self.elided():
                 self.bump()
+            elif self.fragment and self.is_id() and (self.is_p(")", 1) or self.is_p(",", 1)):
+                self.bump()               # documentation: `name :: (params) -> R`
             else:
                 self.ident()
                 self.expect_p(":")
@@ -815,6 +823,8 @@ class Parser:
     def lit_in_header(self, kind):
         if kind == "type":
             return True
+        if self.fragment and self.is_dots(1) and self.is_p("}", 2):
+            return False        # documentation: `match value { ... }`
         j = self.i
         depth = 0
         arrow = False
@@ -1140,11 +1150,16 @@ class Parser:
             return False
         self.delete_word(t)
         while not self.is_p(")"):
-            if not self.is_id():
+            if self.elided():
+                self.bump()
+            elif self.fragment and self.is_id() and self.is_p(")", 1) and self.is_p("(", -1):
+                self.bump()               # documentation: `fn(params) R { body }`
+            elif not self.is_id():
                 return False
-            pn = self.bump()
-            self.insert(pn.end, ":")
-            self.ty()
+            else:
+                pn = self.bump()
+                self.insert(pn.end, ":")
+                self.ty()
             if not self.eat_p(","):
                 break
         if not self.eat_p(")"):

@@ -30,7 +30,7 @@ extern "/usr/lib/libobjc.A.dylib" objc_autoreleasePoolPush :: () -> *u8
 extern "/usr/lib/libobjc.A.dylib" objc_autoreleasePoolPop :: (pool: *u8)
 // Starts the definition of a new class (for delegates implemented in AL); nil if the name is taken.
 extern "/usr/lib/libobjc.A.dylib" objc_allocateClassPair :: (superclass: *u8, name: *u8, extra_bytes: u64) -> *u8
-// Adds a method: `imp` is an AL function `fn(self *u8, cmd *u8, ...)` cast to *u8, `types` its type encoding ("v@:@").
+// Adds a method: `imp` is an AL function `name :: (self: *u8, cmd: *u8, ...)` cast to *u8, `types` its type encoding ("v@:@").
 extern "/usr/lib/libobjc.A.dylib" class_addMethod :: (class: *u8, selector: *u8, imp: *u8, types: *u8) -> bool
 // Finishes a class started with objc_allocateClassPair.
 extern "/usr/lib/libobjc.A.dylib" objc_registerClassPair :: (class: *u8)
