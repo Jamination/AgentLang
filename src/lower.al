@@ -72,6 +72,12 @@ struct Cx {
     // files whose declarations are only checked when something uses them
     lazy_files Map[i64, bool]
     n_prelude i64
+    // type aliases (`type Name = T`): visible declarations, the prelude's own, resolved
+    // targets, and how many resolutions of an alias are in progress
+    alias_decls Map[str, *TypeDecl]
+    p_alias_decls Map[str, *TypeDecl]
+    alias_tys Map[*TypeDecl, i64]
+    alias_depth Map[*TypeDecl, i64]
 }
 
 fn lower_builtin_type(name str) Opt[i64] {
@@ -174,6 +180,10 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         scope_prelude: false,
         entry_file: 0xFFFF,
         lazy_files: map[i64, bool](),
+        alias_decls: map[str, *TypeDecl](),
+        p_alias_decls: map[str, *TypeDecl](),
+        alias_tys: map[*TypeDecl, i64](),
+        alias_depth: map[*TypeDecl, i64](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
@@ -181,7 +191,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
     for i in 0..len(decls) {
         var name str
         var pos Pos
-        // 1 = fn, 2 = struct, 3 = enum, 4 = const, 5 = global
+        // 1 = fn, 2 = struct, 3 = enum, 4 = const, 5 = global, 6 = type alias
         kind := 0
         // the declarations are copied to the heap once: the context keeps pointers to them
         var fp *FnDecl
@@ -189,6 +199,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         var ep *EnumDecl
         var cp *ConstDecl
         var gp *GlobalDecl
+        var tp *TypeDecl
         match decls[i] {
             DeclFn(f) => {
                 fp = new[FnDecl]()
@@ -224,6 +235,13 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
                 name = g.name
                 pos = g.pos
                 kind = 5
+            }
+            DeclType(t) => {
+                tp = new[TypeDecl]()
+                *tp = t
+                name = t.name
+                pos = t.pos
+                kind = 6
             }
             _ => {}
         }
@@ -263,9 +281,10 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
             } else if prev.file < np && pos.file >= np {
                 // a user declaration shadows a prelude declaration of the same name; types
                 // and values are looked up separately, so a function does not hide a type
-                if kind == 2 || kind == 3 {
+                if kind == 2 || kind == 3 || kind == 6 {
                     cx.struct_names.del(name)
                     cx.enum_names.del(name)
+                    cx.alias_decls.del(name)
                 } else {
                     cx.fn_names.del(name)
                     cx.const_decls.del(name)
@@ -321,6 +340,11 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
             cx.enum_decls.push(ep)
         } else if kind == 4 {
             cx.const_decls.set(name, cp)
+        } else if kind == 6 {
+            if pos.file < np {
+                cx.p_alias_decls.set(name, tp)
+            }
+            cx.alias_decls.set(name, tp)
         } else {
             cx.global_decls.set(name, gp)
         }
@@ -411,6 +435,50 @@ fn find_enum(self *Cx, n str) Opt[i64] {
     return None
 }
 
+// the type alias that `n` names
+fn find_alias(self *Cx, n str) Opt[*TypeDecl] {
+    if self.scope_prelude {
+        d, ok := self.p_alias_decls.get(n)
+        if ok {
+            return Some(d)
+        }
+        // the prelude's own structs and enums come before a user alias of the same name
+        if self.p_struct_names.has(n) || self.p_enum_names.has(n) {
+            return None
+        }
+    }
+    d, ok := self.alias_decls.get(n)
+    if ok {
+        return Some(d)
+    }
+    return None
+}
+
+// The type a type alias stands for. An alias may be reached again while its own target is
+// being resolved, through the fields of a struct or enum (`type List = *Node` with
+// `struct Node { next List }`): that second resolution ends at the struct, which is
+// registered by then. A third one means that the alias is defined in terms of itself.
+fn alias_type(self *Cx, d *TypeDecl) i64 {
+    known, found := self.alias_tys.get(d)
+    if found {
+        return known
+    }
+    depth := self.alias_depth.get_or(d, 0)
+    if depth >= 2 {
+        self.err(d.pos, fmt("type alias `", d.name, "` refers to itself (a recursive type needs a struct or enum: `struct ", d.name, " { ... }`)"))
+        return T_ERR
+    }
+    self.alias_depth.set(d, depth + 1)
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    env := map[str, i64]()
+    ty := self.resolve(&d.ty, &env)
+    self.scope_prelude = save_scope
+    self.alias_depth.set(d, depth)
+    self.alias_tys.set(d, ty)
+    return ty
+}
+
 fn internal_file(self *Cx, file i64) bool {
     return file < self.n_prelude || file == self.entry_file
 }
@@ -440,6 +508,16 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
                     Some(bt) => return bt
                     None => {}
                 }
+            }
+            match self.find_alias(n) {
+                Some(ad) => {
+                    if !args.is_empty() {
+                        self.err(pos, fmt("type alias `", n, "` takes no type arguments (it stands for ", ast_type_str(&ad.ty), ")"))
+                        return T_ERR
+                    }
+                    return self.alias_type(ad)
+                }
+                None => {}
             }
             targs := vec[i64]()
             for i in 0..args.len {
@@ -577,7 +655,7 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
         offsets: vec[i64](),
         size: 0,
         align: 1,
-        state: 0,
+        state: 3,
     })
     ty := self.types.intern(TyKStruct(sid))
     self.struct_insts.set((si, clone(targs).items()), ty)
@@ -601,6 +679,7 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
     }
     self.scope_prelude = save_scope
     self.types.structs.buf[sid].fields = fields
+    self.types.structs.buf[sid].state = 0
     return ty
 }
 
@@ -630,7 +709,7 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
         variants: vec[(str, Vec[i64])](),
         simple: simple,
         size: 8,
-        state: if simple { 2 } else { 0 },
+        state: if simple { 2 } else { 3 },
     })
     ty := self.types.intern(TyKEnum(eid))
     self.enum_insts.set((ei, clone(targs).items()), ty)
@@ -651,6 +730,9 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
     }
     self.scope_prelude = save_scope
     self.types.enums.buf[eid].variants = vars
+    if !simple {
+        self.types.enums.buf[eid].state = 0
+    }
     return ty
 }
 
@@ -907,6 +989,10 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
             }
             match lower_builtin_type(n) {
                 Some(bt) => return Some(bt)
+                None => {}
+            }
+            match self.find_alias(n) {
+                Some(ad) => return Some(self.alias_type(ad))
                 None => {}
             }
             match self.find_struct(n) {

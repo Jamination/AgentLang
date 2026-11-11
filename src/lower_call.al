@@ -1035,6 +1035,18 @@ fn lower_call_param_accepts_adjust(s *Fx, is_recv bool, ty i64, t i64) bool {
     return is_recv && (lower_call_is_ptr_to(s.cx.types.k(t), ty) || lower_call_is_ptr_to(s.cx.types.k(ty), t))
 }
 
+// a type written in declaration `d`, resolved as `d`'s own file sees it (a prelude function
+// keeps meaning the prelude's types where the user shadows their names); errors are dropped
+fn lower_call_resolve_in(s *Fx, d *FnDecl, pt *TypeAst, env *Map[str, i64]) i64 {
+    saved := s.cx.errs.len
+    save_scope := s.cx.scope_prelude
+    s.cx.scope_prelude = s.cx.internal_file(d.pos.file)
+    t := s.cx.resolve(pt, env)
+    s.cx.scope_prelude = save_scope
+    s.cx.errs.truncate(saved)
+    return t
+}
+
 // unification binds the type parameters; the concrete parts are compared after resolution
 fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *TypeAst, ty i64) bool {
     env := lower_call_clone_env(base)
@@ -1044,9 +1056,7 @@ fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *Type
     if lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
         return true
     }
-    saved := s.cx.errs.len
-    t := s.cx.resolve(pt, &env)
-    s.cx.errs.truncate(saved)
+    t := lower_call_resolve_in(s, d, pt, &env)
     return t == ty
 }
 
@@ -1054,10 +1064,8 @@ fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *Type
 // (`explicit`: type arguments written at the call)
 fn param_accepts(self *Fx, d *FnDecl, pt *TypeAst, ty i64, is_recv bool, explicit Opt[[]i64]) bool {
     if d.tparams.len == 0 {
-        saved := self.cx.errs.len
         empty := map[str, i64]()
-        t := self.cx.resolve(pt, &empty)
-        self.cx.errs.truncate(saved)
+        t := lower_call_resolve_in(self, d, pt, &empty)
         return t == ty || lower_call_param_accepts_adjust(self, is_recv, ty, t)
     }
     base := map[str, i64]()
@@ -1100,10 +1108,8 @@ fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
     if lower_call_mentions_unbound(pt, d.tparams.items(), &empty) {
         return Some(2)
     }
-    saved := self.cx.errs.len
     empty2 := map[str, i64]()
-    t := self.cx.resolve(pt, &empty2)
-    self.cx.errs.truncate(saved)
+    t := lower_call_resolve_in(self, d, pt, &empty2)
     k := self.cx.types.k(t)
     is_i := self.cx.types.is_int(t)
     is_f := self.cx.types.is_float(t)
@@ -1281,10 +1287,8 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                     if d.tparams.len == 0 {
                         match d.ret {
                             Some(rt) => {
-                                saved := self.cx.errs.len
                                 empty := map[str, i64]()
-                                t := self.cx.resolve(&rt, &empty)
-                                self.cx.errs.truncate(saved)
+                                t := lower_call_resolve_in(self, d, &rt, &empty)
                                 if t == et {
                                     pick = di
                                     break
@@ -1419,7 +1423,8 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
                 exp = None
             } else {
-                t := self.cx.resolve(pt, &env)
+                // (errors in the parameter type are reported where the function is declared)
+                t := lower_call_resolve_in(self, d, pt, &env)
                 exp = Some(t)
             }
             v := self.expr(a, exp)

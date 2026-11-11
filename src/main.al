@@ -555,6 +555,10 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
             DeclUse(path, upos) => {
                 continue
             }
+            DeclType(t) => {
+                pos = t.pos
+                text = fmt("type ", t.name, " = ", ast_type_str(&t.ty))
+            }
         }
         if pos.file < from_file {
             continue

@@ -74,6 +74,17 @@ fn parser_tk_id(t Tk) bool {
     return false
 }
 
+// is `t` the identifier `w`?
+fn parser_tk_word(t Tk, w str) bool {
+    match t {
+        TkId(s) => {
+            return s == w
+        }
+        _ => {}
+    }
+    return false
+}
+
 fn parser_cont(s str, i i64, lo u8, hi u8) bool {
     return i < len(s) && s[i] >= lo && s[i] <= hi
 }
@@ -337,6 +348,11 @@ fn sync_decl(p *Parser) {
                     if p.i > 0 && parser_tk_nl(p.toks.buf[p.i - 1].t) {
                         return
                     }
+                }
+            }
+            TkId(s) => {
+                if depth <= 0 && s == "type" && p.i > 0 && parser_tk_nl(p.toks.buf[p.i - 1].t) {
+                    return
                 }
             }
             _ => {}
@@ -635,7 +651,26 @@ fn decl(p *Parser) (Decl, bool) {
             }
         }
     }
-    return p.err[Decl]("expected declaration (fn, struct, enum, const, var, test, use, extern)")
+    // `type Name = T` (`type` is only special at the start of a declaration)
+    if parser_tk_word(p.peek(), "type") {
+        p.bump()
+        name, ok1 := p.ident()
+        if !ok1 {
+            return parser_fail[Decl]()
+        }
+        if p.is_p("[") {
+            return p.err[Decl]("a type alias cannot have type parameters: expected `=`")
+        }
+        if !p.expect_p("=") {
+            return parser_fail[Decl]()
+        }
+        at, ok2 := p.ty()
+        if !ok2 {
+            return parser_fail[Decl]()
+        }
+        return (DeclType(TypeDecl{name: name, ty: at, pos: pos}), true)
+    }
+    return p.err[Decl]("expected declaration (fn, struct, enum, type, const, var, test, use, extern)")
 }
 
 // ---------- types ----------

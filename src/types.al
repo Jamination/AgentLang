@@ -49,7 +49,9 @@ struct StructInfo {
     offsets Vec[i64]
     size i64
     align i64
-    state i64 // 0 = layout pending, 1 = in progress, 2 = done
+    // 0 = layout pending, 1 = in progress, 2 = done, 3 = the fields are not known yet
+    // (the type is being instantiated; its size reads as 0 until then)
+    state i64
 }
 
 struct EnumInfo {
@@ -307,7 +309,7 @@ fn layout_fields(self *Types, tys []i64) (Vec[i64], i64, i64) {
 
 fn layout_struct(self *Types, sid i64) {
     st := self.structs.buf[sid].state
-    if st == 2 {
+    if st == 2 || st == 3 {
         return
     }
     if st == 1 {
@@ -338,7 +340,7 @@ fn layout_struct(self *Types, sid i64) {
 
 fn layout_enum(self *Types, eid i64) {
     st := self.enums.buf[eid].state
-    if st == 2 {
+    if st == 2 || st == 3 {
         return
     }
     if st == 1 {
