@@ -1,0 +1,5 @@
+1:6: error: a declaration that starts with a name declares a variable
+(functions are declared `fn name(a: A) -> R { ... }`)
+4:9: error: expected end of statement, found identifier `x` (declare variables with `name := value` or `name: T = value`)
+5:9: error: expected end of statement, found identifier `y` (declare variables with
+9:5: error: a declaration that starts with a name declares a variable

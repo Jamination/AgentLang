@@ -241,20 +241,32 @@ fn tok_desc(p: *Parser) -> str {
     return ""
 }
 
+// declaration words of other languages
+fn parser_decl_habit(s: str) -> str {
+    return match s {
+        "let", "var", "mut", "auto", "val" => " (declare variables with `name := value` or `name: T = value`)"
+        "func", "def", "function", "pub" => " (functions are declared `fn name(a: A) -> R { ... }`)"
+        _ => ""
+    }
+}
+
 fn err[T](p: *Parser, msg: str) -> (T, bool) {
     d := p.tok_desc()
     // habits from other languages get a direct pointer to the AL spelling
     hint := ""
     match p.peek() {
         TkId(s) => {
-            hint = match s {
-                "and" => " (use `&&`)"
-                "or" => " (use `||`)"
-                "not" => " (use `!`)"
-                "import" => " (use `use \"file.al\"`)"
-                "switch" => " (use `match`)"
-                "elif", "elsif" => " (use `else if`)"
-                _ => ""
+            hint = parser_decl_habit(s)
+            if hint == "" {
+                hint = match s {
+                    "and" => " (use `&&`)"
+                    "or" => " (use `||`)"
+                    "not" => " (use `!`)"
+                    "import" => " (use `use \"file.al\"`)"
+                    "switch" => " (use `match`)"
+                    "elif", "elsif" => " (use `else if`)"
+                    _ => ""
+                }
             }
         }
         TkP(q) => {
@@ -263,6 +275,15 @@ fn err[T](p: *Parser, msg: str) -> (T, bool) {
             }
         }
         _ => {}
+    }
+    // (`let x = 5`, `func main()`: the error is at the token after the foreign word)
+    if hint == "" && p.i >= 1 {
+        match p.toks[p.i - 1].t {
+            TkId(prev) => {
+                hint = parser_decl_habit(prev)
+            }
+            _ => {}
+        }
     }
     p.errs.push(Diag{pos: p.pos(), msg: fmt(msg, ", found ", d, hint)})
     z: T
