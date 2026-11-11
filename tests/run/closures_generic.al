@@ -46,6 +46,15 @@ fn over(f fn(f64) f64) str { fmt("fn ", f(1.5)) }
 fn run(f ||) { f() }
 fn run(f |i64|, x i64) { f(x) }
 fn by_len(a str, b str) bool { len(a) < len(b) }
+enum Maybe[T] { Just(T), Nope }
+fn ident[T](x T) T { x }
+fn first[T](a T, b T) T { a }
+fn use_it(f |i64| i64) i64 { f(7) }
+fn lookup(m *Map[str, |i64| i64], k str) Maybe[|i64| i64] {
+    f, ok := m.get(k)
+    if ok { return Just(f) }
+    Nope
+}
 fn pair() (i64, |i64| i64) { (3, inc) }
 
 fn main() {
@@ -68,6 +77,26 @@ fn main() {
     bx := Box[i64]{v: 4, f: |x i64| i64 { x * k }}
     bs := Box[str]{v: "a", f: |s str| str { concat(s, s) }}
     print(bx.f(bx.v), bs.f(bs.v))
+
+    // generic functions as closures: the type arguments come from the closure type
+    var c |i64| i64 = ident
+    var d |i64, i64| i64 = first
+    var e |str| str = ident[str]
+    print(c(4), d(5, 6), e("x"), use_it(ident), use_it(ident[i64]))
+    // closures as map values and enum payloads
+    base := 100
+    m := map[str, |i64| i64]()
+    m.set("add", |x i64| i64 { x + base })
+    m.set("id", ident)
+    for key in ([]str{"add", "id", "zz"}) {
+        match lookup(&m, key) {
+            Just(g) => print(key, g(1))
+            Nope => print(key, "missing")
+        }
+    }
+    f2 := m.get_or("id", |x i64| i64 { -x })
+    f3 := m.get_or("none", |x i64| i64 { -x })
+    print(f2(9), f3(9), m.len)
 
     // overloads: a literal has the closure type of its written types
     print(over(|x i64| i64 { x + k }), over(|s str| str { s }), over(|x f64| f64 { x * 2.0 }))

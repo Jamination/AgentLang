@@ -1,0 +1,2 @@
+2:19: error: a global cannot be initialized with a closure literal; name a function
+3:19: error: function `two` does not have the parameter and result types of |i64| i64

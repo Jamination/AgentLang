@@ -879,7 +879,18 @@ fn global(self *Cx, name str) Opt[(i64, i64)] {
                         g.relocs = relocs
                     }
                 } else {
-                    self.err(init.pos, "global initializer must be a compile-time constant")
+                    is_closure_lit := false
+                    match init.k {
+                        EKClosure(_, _, _) => {
+                            is_closure_lit = true
+                        }
+                        _ => {}
+                    }
+                    if is_closure_lit {
+                        self.err(init.pos, "a global cannot be initialized with a closure literal; name a function (`var g |i64| i64 = double`) or assign the literal inside a function")
+                    } else {
+                        self.err(init.pos, "global initializer must be a compile-time constant")
+                    }
                 }
             }
         }

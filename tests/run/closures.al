@@ -252,6 +252,20 @@ fn main() {
     mut()
     print(b8, flag, i3)
 
+    // closures made in a loop share the variables of the function; a copy shares the environment
+    made := vec[|| i64]()
+    for i in 0..3 {
+        j := i * 10
+        made.push(|| i64 { i + j })
+    }
+    for mk in made.items() {
+        put(mk(), " ")
+    }
+    nn := 0
+    bump2 := || i64 { nn += 1; nn }
+    copy2 := bump2
+    print(bump2(), copy2(), bump2(), nn)
+
     // names declared inside the literal shadow outer ones
     x := 5
     shadow := |x i64| i64 {

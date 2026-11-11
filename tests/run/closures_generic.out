@@ -8,6 +8,11 @@
 9 cccc
 Acc{total: 9, calls: 2}
 12 aa
+4 5 x 7 7
+add 101
+id 1
+zz missing
+9 -9 2
 int 4 str s fn 3.0
 11 3 4
 [1, 3, 4, 2, 0]
