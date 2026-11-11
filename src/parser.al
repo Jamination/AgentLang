@@ -723,13 +723,35 @@ old_decl :: (p: *Parser, pos: Pos) -> (Decl, bool) {
             p.errs.push(Diag{pos: kpos, msg: general})
             return parser_fail[Decl]()
         }
-        tp := if tparams.is_empty() { "" } else { fmt("[", join(tparams.items(), ", "), "]") }
+        // the error stands at the keyword; its text is completed when the body is known
+        k := p.errs.len
+        tp := ast_tparams_str(&tparams)
         if is_struct {
             p.errs.push(Diag{pos: kpos, msg: fmt("structs are declared `", name, tp, " :: struct { field: Type, ... }` (the name comes first)")})
-            return p.struct_rest(name, tparams, pos, true)
+            d, ok := p.struct_rest(name, tparams, pos, true)
+            match d {
+                DeclStruct(s) => {
+                    text := ast_struct_str(&s)
+                    if ok && len(text) <= 100 {
+                        p.errs.items()[k].msg = fmt("structs are declared `", text, "` (the name comes first)")
+                    }
+                }
+                _ => {}
+            }
+            return (d, ok)
         }
         p.errs.push(Diag{pos: kpos, msg: fmt("enums are declared `", name, tp, " :: enum { A, B(Type), ... }` (the name comes first)")})
-        return p.enum_rest(name, tparams, pos)
+        d, ok := p.enum_rest(name, tparams, pos)
+        match d {
+            DeclEnum(e) => {
+                text := ast_enum_str(&e)
+                if ok && len(text) <= 100 {
+                    p.errs.items()[k].msg = fmt("enums are declared `", text, "` (the name comes first)")
+                }
+            }
+            _ => {}
+        }
+        return (d, ok)
     }
     // `type Name = T`
     p.bump()

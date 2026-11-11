@@ -485,22 +485,6 @@ main_report :: (names: *Vec[str], errs: *Vec[Diag]) -> bool {
     return true
 }
 
-main_print_sigs_tp :: (t: *Vec[str]) -> str {
-    if t.is_empty() {
-        return ""
-    }
-    return fmt("[", join(t.items(), ", "), "]")
-}
-
-// "name: type, name: type"
-main_print_sigs_fields :: (fs: *Vec[(str, TypeAst)]) -> str {
-    parts := vec[str]()
-    for x in 0..fs.len {
-        parts.push(fmt(fs[x].0, ": ", ast_type_str(&fs[x].1)))
-    }
-    return join(parts.items(), ", ")
-}
-
 // "priv " in front of the signature of a private declaration
 main_sigs_priv :: (name: str) -> str {
     if ast_is_private(name) {
@@ -520,26 +504,12 @@ main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
                 text = fmt(main_sigs_priv(f.name), ast_sig_str(&f))
             }
             DeclStruct(s) => {
-                fs := main_print_sigs_fields(&s.fields)
                 pos = s.pos
-                text = fmt(main_sigs_priv(s.name), s.name, main_print_sigs_tp(&s.tparams), " :: struct { ", fs, " }")
+                text = fmt(main_sigs_priv(s.name), ast_struct_str(&s))
             }
             DeclEnum(e) => {
-                vs := vec[str]()
-                for x in 0..e.variants.len {
-                    v := &e.variants[x]
-                    if v.1.is_empty() {
-                        vs.push(v.0)
-                    } else {
-                        ts := vec[str]()
-                        for y in 0..v.1.len {
-                            ts.push(ast_type_str(&v.1[y]))
-                        }
-                        vs.push(fmt(v.0, "(", join(ts.items(), ", "), ")"))
-                    }
-                }
                 pos = e.pos
-                text = fmt(main_sigs_priv(e.name), e.name, main_print_sigs_tp(&e.tparams), " :: enum { ", join(vs.items(), ", "), " }")
+                text = fmt(main_sigs_priv(e.name), ast_enum_str(&e))
             }
             // (the value of a constant or a global is not shown: `...`)
             DeclConst(c) => {

@@ -290,6 +290,37 @@ ast_sig_str :: (f: *FnDecl) -> str {
     return fmt(head, "(", join(parts.items(), ", "), ")", r)
 }
 
+// "[T, U]" of a declaration with type parameters, or nothing
+ast_tparams_str :: (t: *Vec[str]) -> str {
+    if t.is_empty() {
+        return ""
+    }
+    return fmt("[", join(t.items(), ", "), "]")
+}
+
+// a struct as it is declared, on one line: `Name[T] :: struct { a: A, b: B }`
+ast_struct_str :: (s: *StructDecl) -> str {
+    parts := vec[str]()
+    for i in 0..s.fields.len {
+        parts.push(fmt(s.fields[i].0, ": ", ast_type_str(&s.fields[i].1)))
+    }
+    return fmt(s.name, ast_tparams_str(&s.tparams), " :: struct { ", join(parts.items(), ", "), " }")
+}
+
+// an enum as it is declared, on one line: `Name[T] :: enum { A, B(T) }`
+ast_enum_str :: (e: *EnumDecl) -> str {
+    vs := vec[str]()
+    for i in 0..e.variants.len {
+        v := &e.variants[i]
+        if v.1.is_empty() {
+            vs.push(v.0)
+        } else {
+            vs.push(fmt(v.0, "(", ast_type_str_list(&v.1), ")"))
+        }
+    }
+    return fmt(e.name, ast_tparams_str(&e.tparams), " :: enum { ", join(vs.items(), ", "), " }")
+}
+
 // A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte
 // 1 and `k` in decimal (see priv.al). ast_plain gives the name as it was written.
 ast_plain :: (name: str) -> str {
