@@ -1761,6 +1761,15 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                 }
             }
             match k {
+                TyKEnum(eid) => {
+                    // a variant of an enum without data
+                    vv, is_variant := self.variants.get(n)
+                    if is_variant && self.types.enums.buf[eid].simple && self.types.enums.buf[eid].decl == vv.0 {
+                        lower_put_le(data, off, u64(vv.1), 8)
+                        return true
+                    }
+                    return false
+                }
                 TyKFn(ptys, rty) => {
                     // address of a (non-generic) function
                     di := -1

@@ -1,0 +1,7 @@
+receiver_ref.al:10:11: error: argument `p` of `incr`: expected *i64, found f64
+receiver_ref.al:12:14: error: cannot pass a vector component by pointer to `scale` (copy it to a variable first)
+receiver_ref.al:13:15: error: cannot pass a vector component by pointer to `scale` (copy it to a variable first)
+receiver_ref.al:15:12: error: no definition of `reset` can be called on str; candidates: reset(*i64); reset(*f64)
+receiver_ref.al:17:11: error: argument `p` of `deep`: expected **i64, found i64
+receiver_ref.al:19:10: error: argument `p` of `incr`: expected *i64, found i64 (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)
+6 error(s)
