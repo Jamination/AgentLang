@@ -9,11 +9,11 @@ fn local() {
     priv x := 1
 }
 
-S :: struct {
+struct S {
     priv a: i64
 }
 
-E :: enum {
+enum E {
     priv A
 }
 

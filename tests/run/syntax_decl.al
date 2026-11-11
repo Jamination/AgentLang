@@ -1,5 +1,6 @@
-// every declaration form of the language, and the places where the parser has to look ahead
-// to tell a function from an expression or a type
+// every declaration form of the language: keyword declarations (`fn`, `struct`, `enum`,
+// `type`, `const`), variables (`name: T`, `name := value`), and `fn` as declaration, nested
+// function, anonymous function and function type in every position
 
 // constants
 const N = 5
@@ -263,6 +264,26 @@ fn more() {
     }
     for k in 0..apply(2, fn(v: i64) -> i64 { v + 1 }) { put(k, " ") }
     print(n, len([]fn(){w.f, noresult}))
+
+    // `fn` with and without parameters and result: type, anonymous function, call
+    cb: fn() = fn() { counter += 1 }
+    cb()
+    back: fn() -> fn() = fn() -> fn() { noresult }
+    back()()
+    seven := fn() -> i64 { 7 }()
+    arr := [2]fn(){cb, noresult}
+    for q in arr { q() }
+    if fn(v: i64) -> bool { v > 0 }(seven) { put("anon in a header ") }
+    while fn() -> bool { false }() { }
+    one: fn(fn(i64) -> i64, i64) -> i64 = fn(f: fn(i64) -> i64, v: i64) -> i64 { f(v) }
+    print(counter, seven, one(double, 4), len(arr))
+
+    // `var` and `type` are ordinary names
+    var := 1
+    type: i64 = 2
+    var += type
+    let := var * 2
+    print(var, type, let)
 }
 
 fn show(a: Item, b: Item) {

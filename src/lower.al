@@ -76,7 +76,7 @@ struct Cx {
     // written name -> position of a `priv` declaration of it in some file (for the hint of
     // "unknown name" diagnostics)
     priv_decls: Map[str, Pos]
-    // type aliases (`Name :: type T`): visible declarations, the prelude's own, resolved
+    // type aliases (`type Name = T`): visible declarations, the prelude's own, resolved
     // targets, and how many resolutions of an alias are in progress
     alias_decls: Map[str, *TypeDecl]
     p_alias_decls: Map[str, *TypeDecl]
@@ -533,8 +533,8 @@ fn find_alias(self: *Cx, n: str) -> Opt[*TypeDecl] {
 }
 
 // The type a type alias stands for. An alias may be reached again while its own target is
-// being resolved, through the fields of a struct or enum (`List :: type *Node` with
-// `Node :: struct { next: List }`): that second resolution ends at the struct, which is
+// being resolved, through the fields of a struct or enum (`type List = *Node` with
+// `struct Node { next: List }`): that second resolution ends at the struct, which is
 // registered by then. A third one means that the alias is defined in terms of itself.
 fn alias_type(self: *Cx, d: *TypeDecl) -> i64 {
     known, found := self.alias_tys.get(d)
@@ -543,7 +543,7 @@ fn alias_type(self: *Cx, d: *TypeDecl) -> i64 {
     }
     depth := self.alias_depth.get_or(d, 0)
     if depth >= 2 {
-        self.err(d.pos, fmt("type alias `", d.name, "` refers to itself (a recursive type needs a struct or enum: `", d.name, " :: struct { ... }`)"))
+        self.err(d.pos, fmt("type alias `", d.name, "` refers to itself (a recursive type needs a struct or enum: `struct ", d.name, " { ... }`)"))
         return T_ERR
     }
     self.alias_depth.set(d, depth + 1)

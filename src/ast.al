@@ -72,7 +72,7 @@ enum EK {
     EKIf(*Expr, Block, Block),
     EKTuple(Vec[Expr]),
     EKMatch(*Expr, Vec[MatchArm]),
-    // anonymous function `(a: A, b: B) -> R { body }` (the declaration has an empty name)
+    // anonymous function `fn(a: A, b: B) -> R { body }` (the declaration has an empty name)
     EKFn(*FnDecl),
 }
 
@@ -132,7 +132,7 @@ enum SK {
     // `break name` / `continue name`
     SKBreakTo(str),
     SKContinueTo(str),
-    // `name :: (params) -> R { body }` inside a block: a nested function
+    // `fn name(params) -> R { body }` inside a block: a nested function
     SKFn(*FnDecl),
 }
 
@@ -145,7 +145,7 @@ struct FnDecl {
     pos: Pos
     // `inline` in the Rust source (a keyword in AL)
     inl: i64 // 1 = always inline, -1 = never, 0 = auto
-    // `extern "lib" name :: (params) -> R`: a C function in the named shared library (no body)
+    // `extern "lib" fn name(params) -> R`: a C function in the named shared library (no body)
     ext: Opt[str]
     // declared with `priv`: visible only in its own file (see priv.al)
     is_priv: bool
@@ -193,7 +193,7 @@ struct TestDecl {
     pos: Pos
 }
 
-// `Name :: type T`: another name for the type `T`
+// `type Name = T`: another name for the type `T`
 struct TypeDecl {
     name: str
     ty: TypeAst
@@ -254,10 +254,10 @@ fn ast_type_str(t: *TypeAst) -> str {
             p := ast_type_str_list(&ps)
             match r {
                 Some(r2) => {
-                    return fmt("(", p, ") -> ", ast_type_str(r2))
+                    return fmt("fn(", p, ") -> ", ast_type_str(r2))
                 }
                 None => {
-                    return fmt("(", p, ") -> ()")
+                    return fmt("fn(", p, ")")
                 }
             }
         }
@@ -268,17 +268,12 @@ fn ast_type_str(t: *TypeAst) -> str {
     return ""
 }
 
-// the header of a function as it is declared: `name[T] :: (a: A, b: B) -> R`; for an
-// anonymous function `(a: A, b: B) -> R` (for diagnostics and `alc sigs`)
+// the header of a function as it is declared: `fn name[T](a: A, b: B) -> R`; for an
+// anonymous function `fn(a: A, b: B) -> R` (for diagnostics and `alc sigs`)
 fn ast_sig_str(f: *FnDecl) -> str {
     parts := vec[str]()
     for i in 0..f.params.len {
         parts.push(fmt(f.params[i].0, ": ", ast_type_str(&f.params[i].1)))
-    }
-    head := ""
-    if f.name != "" {
-        tp := if f.tparams.is_empty() { "" } else { fmt("[", join(f.tparams.items(), ", "), "]") }
-        head = fmt(f.name, tp, " :: ")
     }
     r := ""
     match f.ret {
@@ -287,6 +282,7 @@ fn ast_sig_str(f: *FnDecl) -> str {
         }
         None => {}
     }
+    head := if f.name == "" { "fn" } else { fmt("fn ", f.name, ast_tparams_str(&f.tparams)) }
     return fmt(head, "(", join(parts.items(), ", "), ")", r)
 }
 
@@ -298,16 +294,16 @@ fn ast_tparams_str(t: *Vec[str]) -> str {
     return fmt("[", join(t.items(), ", "), "]")
 }
 
-// a struct as it is declared, on one line: `Name[T] :: struct { a: A, b: B }`
+// a struct as it is declared, on one line: `struct Name[T] { a: A, b: B }`
 fn ast_struct_str(s: *StructDecl) -> str {
     parts := vec[str]()
     for i in 0..s.fields.len {
         parts.push(fmt(s.fields[i].0, ": ", ast_type_str(&s.fields[i].1)))
     }
-    return fmt(s.name, ast_tparams_str(&s.tparams), " :: struct { ", join(parts.items(), ", "), " }")
+    return fmt("struct ", s.name, ast_tparams_str(&s.tparams), " { ", join(parts.items(), ", "), " }")
 }
 
-// an enum as it is declared, on one line: `Name[T] :: enum { A, B(T) }`
+// an enum as it is declared, on one line: `enum Name[T] { A, B(T) }`
 fn ast_enum_str(e: *EnumDecl) -> str {
     vs := vec[str]()
     for i in 0..e.variants.len {
@@ -318,7 +314,7 @@ fn ast_enum_str(e: *EnumDecl) -> str {
             vs.push(fmt(v.0, "(", ast_type_str_list(&v.1), ")"))
         }
     }
-    return fmt(e.name, ast_tparams_str(&e.tparams), " :: enum { ", join(vs.items(), ", "), " }")
+    return fmt("enum ", e.name, ast_tparams_str(&e.tparams), " { ", join(vs.items(), ", "), " }")
 }
 
 // A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte

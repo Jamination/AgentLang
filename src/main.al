@@ -515,8 +515,8 @@ fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
             DeclConst(c) => {
                 pos = c.pos
                 text = match c.ty {
-                    Some(ty) => fmt(main_sigs_priv(c.name), c.name, " : ", ast_type_str(&ty), " : ...")
-                    None => fmt(main_sigs_priv(c.name), c.name, " :: ...")
+                    Some(ty) => fmt(main_sigs_priv(c.name), "const ", c.name, ": ", ast_type_str(&ty), " = ...")
+                    None => fmt(main_sigs_priv(c.name), "const ", c.name, " = ...")
                 }
             }
             DeclGlobal(g) => {
@@ -535,7 +535,7 @@ fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
             }
             DeclType(t) => {
                 pos = t.pos
-                text = fmt(main_sigs_priv(t.name), t.name, " :: type ", ast_type_str(&t.ty))
+                text = fmt(main_sigs_priv(t.name), "type ", t.name, " = ", ast_type_str(&t.ty))
             }
         }
         if pos.file < from_file {
@@ -628,7 +628,7 @@ fn main_real_main() -> i64 {
         }
     }
     entry := vec[str]()
-    entry.push("__entry :: (sp: i64) -> never {\n __rt_init(sp)\n")
+    entry.push("fn __entry(sp: i64) -> never {\n __rt_init(sp)\n")
     if test_mode {
         for i in 0..tests.len {
             name := tests[i]
@@ -640,7 +640,7 @@ fn main_real_main() -> i64 {
         }
         entry.push(" exit(__tests_done())\n}\n")
     } else if !has_main {
-        src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `main :: () { ... }`, the function where the program starts"})
+        src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `fn main() { ... }`, the function where the program starts"})
         entry.push(" exit(0)\n}\n")
     } else if main_ret {
         entry.push(" exit(main())\n}\n")

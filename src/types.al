@@ -283,9 +283,9 @@ fn name(self: *Types, t: i64) -> str {
         TyKFn(p, r) => {
             ps := types_names(self, p)
             if r == T_UNIT {
-                return fmt("(", ps, ") -> ()")
+                return fmt("fn(", ps, ")")
             } else {
-                return fmt("(", ps, ") -> ", self.name(r))
+                return fmt("fn(", ps, ") -> ", self.name(r))
             }
         }
     }

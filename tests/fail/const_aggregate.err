@@ -7,7 +7,7 @@ const_aggregate.al:19:20: error: cannot embed `tests/fail/data/no_such_file.txt`
 const_aggregate.al:20:20: error: `embed` takes a string literal path
 const_aggregate.al:21:1: error: cannot infer the type of constant `BAD7`: its value must be a compile-time constant of a known type
 const_aggregate.al:22:1: error: cannot infer the type of constant `BAD8`: its value must be a compile-time constant of a known type
-const_aggregate.al:27:5: error: `TABLE` is a constant: it cannot be assigned to (copy it to a variable, or declare it as `TABLE := value` or `TABLE: T = value` instead of `::` to make it a global variable)
+const_aggregate.al:27:5: error: `TABLE` is a constant: it cannot be assigned to (copy it to a variable, or declare it without `const`, as `TABLE := value` or `TABLE: T = value`, to make it a global variable)
 const_aggregate.al:28:10: error: `TABLE` is a constant: it cannot be assigned to
 const_aggregate.al:29:11: error: `ORIGIN` is a constant: it cannot be assigned to
 const_aggregate.al:30:12: error: `GRID` is a constant: it cannot be assigned to
@@ -16,7 +16,7 @@ const_aggregate.al:32:13: error: `BODY` is a constant: it cannot be assigned to
 const_aggregate.al:33:9: error: `BODY` is a constant: it cannot be assigned to
 const_aggregate.al:34:5: error: `LIMIT` is a constant: it cannot be assigned to
 const_aggregate.al:35:9: error: `PAIR` is a constant: it cannot be assigned to
-const_aggregate.al:36:11: error: `ORIGIN` is a constant: its address cannot be taken (copy it to a variable, or declare it as `ORIGIN := value` or `ORIGIN: T = value` instead of `::` to make it a global variable)
+const_aggregate.al:36:11: error: `ORIGIN` is a constant: its address cannot be taken (copy it to a variable, or declare it without `const`, as `ORIGIN := value` or `ORIGIN: T = value`, to make it a global variable)
 const_aggregate.al:37:16: error: `TABLE` is a constant: its address cannot be taken
 const_aggregate.al:38:15: error: `GRID` is a constant: its address cannot be taken
 const_aggregate.al:39:11: error: `ORIGIN` is a constant: its address cannot be taken

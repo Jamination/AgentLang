@@ -1,0 +1,39 @@
+old_syntax.al:5:1: error: a constant is declared `const N = value`
+old_syntax.al:6:1: error: a constant is declared `const LIMIT: i64 = value`
+old_syntax.al:7:1: error: a constant is declared `const TABLE = value`
+old_syntax.al:8:1: error: a constant is declared `const GROUPED = value`
+old_syntax.al:9:1: error: a declaration starts with its keyword: `struct Item { ... }`
+old_syntax.al:10:1: error: a declaration starts with its keyword: `struct Stack[T] { ... }`
+old_syntax.al:14:1: error: a declaration starts with its keyword: `enum Shape { ... }`
+old_syntax.al:15:1: error: a declaration starts with its keyword: `enum Maybe[T] { ... }`
+old_syntax.al:16:1: error: a type alias is declared `type Reg = i64`
+old_syntax.al:17:1: error: a type alias is declared `type Cb = fn(i64) -> bool`
+old_syntax.al:18:1: error: a function is declared `fn area(s: Shape) -> f64 { ... }`
+old_syntax.al:19:1: error: a function is declared `fn apply[T, U](x: T, f: fn(T) -> U) -> U { ... }`
+old_syntax.al:19:26: error: a function type is written `fn(T) -> U`
+old_syntax.al:20:1: error: a function is declared `fn nothing() { ... }`
+old_syntax.al:21:13: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `helper`
+old_syntax.al:22:20: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `getpid`
+old_syntax.al:23:7: error: a function type is written `fn(i64)`
+old_syntax.al:24:11: error: a function type is written `fn(i64, i64) -> bool`
+old_syntax.al:27:1: error: variables are declared `counter := value` or `counter: Type = value`
+old_syntax.al:28:1: error: variables are declared `ratio := value` or `ratio: Type = value`
+old_syntax.al:29:1: error: variables are declared `table := value` or `table: Type = value`
+old_syntax.al:30:1: error: a typed constant is written `const MASK: u32 = value`
+old_syntax.al:31:15: error: a parameter is written `s: Type`: expected `:` after the name, found identifier `Shape`
+old_syntax.al:32:25: error: the result type follows an arrow: `-> f64`
+old_syntax.al:33:24: error: the result type follows an arrow: `-> i64`
+old_syntax.al:34:16: error: a field is written `a: Type`: expected `:` after the name, found identifier `i64`
+old_syntax.al:37:5: error: variables are declared `x := value` or `x: Type = value`
+old_syntax.al:38:5: error: variables are declared `y := value` or `y: Type = value`
+old_syntax.al:39:5: error: a nested function is declared `fn name(a: A) -> R { ... }`; constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level
+old_syntax.al:40:5: error: a nested function is declared `fn name(a: A) -> R { ... }`; constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level
+old_syntax.al:41:10: error: an anonymous function is written `fn(a: A) -> R { ... }`, a function type `fn(A) -> R`: `fn` is missing in front of `(`
+old_syntax.al:42:10: error: an anonymous function is written `fn(a: A) -> R { ... }`, a function type `fn(A) -> R`: `fn` is missing in front of `(`
+old_syntax.al:43:10: error: an anonymous function is written `fn(a: A) -> R { ... }`, a function type `fn(A) -> R`: `fn` is missing in front of `(`
+old_syntax.al:44:13: error: a function type is written `fn(i64) -> i64`
+old_syntax.al:45:15: error: a function type is written `fn(A, B) -> R`: `fn` is missing in front of `(`
+old_syntax.al:46:15: error: a function type is written `fn(A, B) -> R`: `fn` is missing in front of `(`
+old_syntax.al:47:8: error: a function type is written `fn(i64) -> i64`
+old_syntax.al:48:21: error: the result type follows an arrow: `-> i64`
+old_syntax.al:51:6: error: a declaration that starts with a name declares a variable, `func: T` or `func := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found identifier `other` (functions are declared `fn name(a: A) -> R { ... }`)

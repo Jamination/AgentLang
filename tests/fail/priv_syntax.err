@@ -1,6 +1,6 @@
 priv_syntax.al:2:6: error: `priv` is written once in front of a declaration, found keyword `priv`
-priv_syntax.al:4:6: error: expected a declaration: `name :: ...` (a function, struct, enum, type alias or constant), `name: T` or `name := value` (a variable), `test`, `use`, `extern` or `priv`, found number
+priv_syntax.al:4:6: error: expected a declaration: `fn`, `struct`, `enum`, `type`, `const`, a variable (`name: T`, `name := value`), `test`, `use`, `extern` or `priv`, found number
 priv_syntax.al:9:5: error: `priv` applies to top-level declarations only; a local declaration is visible only in its block anyway, found keyword `priv`
-priv_syntax.al:13:5: error: a struct field cannot be `priv` (only top-level declarations can): write `priv` in front of the declaration to make the whole struct private, found keyword `priv`
-priv_syntax.al:17:5: error: an enum variant cannot be `priv` (only top-level declarations can): write `priv` in front of the declaration to make the enum type private, found keyword `priv`
-priv_syntax.al:20:8: error: `priv` is written first: `priv inline name :: ...`, found keyword `priv`
+priv_syntax.al:13:5: error: a struct field cannot be `priv` (only top-level declarations can): write `priv struct` to make the whole struct private, found keyword `priv`
+priv_syntax.al:17:5: error: an enum variant cannot be `priv` (only top-level declarations can): write `priv enum` to make the enum type private, found keyword `priv`
+priv_syntax.al:20:8: error: `priv` is written first: `priv inline fn name(...)`, found keyword `priv`
