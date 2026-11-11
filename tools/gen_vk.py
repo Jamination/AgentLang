@@ -37,7 +37,7 @@ ALC = os.path.join(ROOT, "build", "alc")
 
 # the words src/lexer.al reserves (LEXER_KEYWORDS): a C name equal to one of them gets a trailing `_`
 AL_KEYWORDS = set(
-    "fn struct enum const var test use if else while loop for in by return break continue "
+    "fn struct enum const test use if else while loop for in by return break continue "
     "assert match defer inline noinline true false nil extern priv".split()
 )
 
