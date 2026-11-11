@@ -94,6 +94,9 @@ struct Cx {
     p_variants: Map[str, Vec[(i64, i64)]]
     // which layers declare a function, type, constant or global of a name: 1 = prelude, 2 = user
     decl_layers: Map[str, i64]
+    // library functions that have a twin `__at_f` with the caller's "file:line" as an extra
+    // last parameter: declaration -> twin
+    located: Map[i64, i64]
     // the nested and anonymous functions (lower_nested.al)
     nested: Vec[NestedFn]
 }
@@ -218,6 +221,7 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
         embeds: map[str, str](),
         p_variants: map[str, Vec[(i64, i64)]](),
         decl_layers: map[str, i64](),
+        located: map[i64, i64](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
@@ -376,6 +380,21 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
             cx.const_decls.set(name, cp)
         } else {
             cx.global_decls.set(name, gp)
+        }
+    }
+    // library functions with a twin that takes the place of the call (see `call_fn`)
+    for di in 0..cx.fn_decls.len {
+        d := cx.fn_decls[di]
+        if d.pos.file >= np || !starts_with(d.name, "__at_") {
+            continue
+        }
+        l, has := cx.p_fn_over.get(d.name[5..])
+        if has {
+            for c in l {
+                if lower_new_sig(d) == fmt(lower_new_sig(cx.fn_decls[c]), ",str") {
+                    cx.located.set(c, di)
+                }
+            }
         }
     }
     // enum variants: two enums may use the same variant name, and a variant may have the

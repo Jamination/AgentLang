@@ -357,6 +357,17 @@ priv fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
     return None
 }
 
+// `len(m)` of a `Map`: its field `len`
+fn map_len(self: *Fx, v: Val) -> Opt[Val] {
+    if !is_some(self.cx.map_kv(v.ty)) {
+        return None
+    }
+    match self.field_of(v, "len", Pos{file: 0, line: 0, col: 0}) {
+        Some(p) => Some(self.rvalue(p))
+        None => None
+    }
+}
+
 // (pointer to the elements, length, element type) of a `Vec` in memory: what indexing,
 // slicing and iteration use. The pointer is only loaded when `want_ptr` (NOV otherwise).
 fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {

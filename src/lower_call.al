@@ -1265,7 +1265,18 @@ fn call_decl(self: *Fx, di: i64, explicit: Opt[Vec[i64]], recv: Opt[Val], args: 
 // the addresses of the variables it uses as extra arguments.
 fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], recv: Opt[Val], args: []Expr, expect: Opt[i64], pos: Pos, pre: [](i64, Val)) -> Val {
     nrecv := if is_some(recv) { 1 } else { 0 }
-    if d.params.len != len(args) + nrecv {
+    // a library function `f` with a twin `__at_f` that takes the place of the call as a last
+    // `str` parameter: the twin is called, so that its failure names the caller's line
+    nloc := 0
+    if nest < 0 && d.pos.file < self.cx.n_prelude {
+        twin, has := self.cx.located.get(di)
+        if has && d.params.len == len(args) + nrecv {
+            d = self.cx.fn_decls[twin]
+            di = twin
+            nloc = 1
+        }
+    }
+    if d.params.len != len(args) + nrecv + nloc {
         sig := vec[str]()
         for j in 0..d.params.len {
             sig.push(d.params[j].0)
@@ -1411,6 +1422,9 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
     if failed {
         return val_err()
     }
+    if nloc != 0 {
+        vals[d.params.len - 1] = Some(self.loc_str(pos))
+    }
     targs := vec[i64]()
     if generic {
         // the expected result type can bind remaining parameters
@@ -1498,7 +1512,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             }
         }
         apos := pos
-        if i >= nrecv {
+        if i >= nrecv && i - nrecv < len(args) {
             apos = args[i - nrecv].pos
         }
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
@@ -1546,7 +1560,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 }
                 None => {
                     tn := self.tyname(v.ty)
-                    self.err(pos, fmt("`len` needs a slice, array, str or Vec, found ", tn))
+                    self.err(pos, fmt("`len` needs a slice, array, str, Vec or Map, found ", tn))
                     return Some(val_err())
                 }
             }

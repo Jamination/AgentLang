@@ -664,7 +664,7 @@ fn len_of(self: *Fx, v0: Val) -> Opt[Val] {
         }
         Struct(_) => match self.vec_parts(v, false) {
             Some(x) => Some(self.sval(T_I64, x.1))
-            None => None
+            None => self.map_len(v)
         }
         _ => None
     }

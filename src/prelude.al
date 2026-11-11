@@ -962,6 +962,15 @@ fn max[T](a: T, b: T) -> T {
     if b > a { b } else { a }
 }
 
+// strings are ordered bytewise, like `cmp`
+fn min(a: str, b: str) -> str {
+    if cmp(b, a) < 0 { b } else { a }
+}
+
+fn max(a: str, b: str) -> str {
+    if cmp(b, a) > 0 { b } else { a }
+}
+
 fn abs[T](x: T) -> T {
     if x < 0 { -x } else { x }
 }
@@ -1013,6 +1022,23 @@ fn vec[T]() -> Vec[T] {
     return Vec[T]{buf: mkslice[T](__heap_cur, 0), len: 0}
 }
 
+// a Vec holding a copy of the elements of s
+fn vec_of[T](s: []T) -> Vec[T] {
+    n := len(s)
+    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    memcopy(ptr(buf), ptr(s), n * sizeof[T]())
+    return Vec[T]{buf: buf, len: n}
+}
+
+// a Vec of n copies of x
+fn vec_fill[T](n: i64, x: T) -> Vec[T] {
+    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    for i in 0..n {
+        buf[i] = x
+    }
+    return Vec[T]{buf: buf, len: n}
+}
+
 fn reserve[T](v: *Vec[T], n: i64) {
     if n > len(v.buf) {
         cap := max(len(v.buf) * 2, max(n, 8))
@@ -1031,9 +1057,16 @@ fn push[T](v: *Vec[T], x: T) {
     v.len += 1
 }
 
+// A function `f` with a twin `__at_f`: the compiler turns every call `f(args)` into
+// `__at_f(args, "file:line" of the call)`, so that a failure names the caller's line. The
+// plain function is what `f` denotes as a function value.
 fn pop[T](v: *Vec[T]) -> T {
+    return __at_pop(v, "?")
+}
+
+fn __at_pop[T](v: *Vec[T], at: str) -> T {
     if v.len == 0 {
-        __die("panic: pop from an empty Vec", "", "")
+        __die("panic: pop from an empty Vec at ", at, "")
     }
     v.len -= 1
     return v.buf[v.len]
@@ -1045,7 +1078,13 @@ fn items[T](v: *Vec[T]) -> []T {
 }
 
 fn last[T](v: *Vec[T]) -> T {
-    assert v.len > 0, "last of an empty Vec"
+    return __at_last(v, "?")
+}
+
+fn __at_last[T](v: *Vec[T], at: str) -> T {
+    if v.len <= 0 {
+        __assert_fail(at, "last of an empty Vec")
+    }
     return v.buf[v.len - 1]
 }
 
@@ -1058,6 +1097,13 @@ fn clear[T](v: *Vec[T]) {
 }
 
 fn truncate[T](v: *Vec[T], n: i64) {
+    __at_truncate(v, n, "?")
+}
+
+fn __at_truncate[T](v: *Vec[T], n: i64, at: str) {
+    if n < 0 {
+        __assert_fail(at, "Vec truncate to a negative length")
+    }
     if n < v.len {
         v.len = n
     }
@@ -1080,7 +1126,13 @@ fn extend[T](v: *Vec[T], s: []T) {
 
 // inserts x before position i
 fn insert[T](v: *Vec[T], i: i64, x: T) {
-    assert i >= 0 && i <= v.len, "Vec insert position out of range"
+    __at_insert(v, i, x, "?")
+}
+
+fn __at_insert[T](v: *Vec[T], i: i64, x: T, at: str) {
+    if i < 0 || i > v.len {
+        __assert_fail(at, "Vec insert position out of range")
+    }
     push(v, x)
     k := v.len - 1
     while k > i {
@@ -1092,7 +1144,13 @@ fn insert[T](v: *Vec[T], i: i64, x: T) {
 
 // removes and returns element i, keeping the order of the rest
 fn remove[T](v: *Vec[T], i: i64) -> T {
-    assert i >= 0 && i < v.len, "Vec remove position out of range"
+    return __at_remove(v, i, "?")
+}
+
+fn __at_remove[T](v: *Vec[T], i: i64, at: str) -> T {
+    if i < 0 || i >= v.len {
+        __assert_fail(at, "Vec remove position out of range")
+    }
     x := v.buf[i]
     for k in i..v.len - 1 {
         v.buf[k] = v.buf[k + 1]
@@ -1103,7 +1161,13 @@ fn remove[T](v: *Vec[T], i: i64) -> T {
 
 // removes and returns element i, moving the last element into its place
 fn swap_remove[T](v: *Vec[T], i: i64) -> T {
-    assert i >= 0 && i < v.len, "Vec swap_remove position out of range"
+    return __at_swap_remove(v, i, "?")
+}
+
+fn __at_swap_remove[T](v: *Vec[T], i: i64, at: str) -> T {
+    if i < 0 || i >= v.len {
+        __assert_fail(at, "Vec swap_remove position out of range")
+    }
     x := v.buf[i]
     v.len -= 1
     v.buf[i] = v.buf[v.len]
@@ -1401,6 +1465,10 @@ fn sort[T](a: []T) {
     __sort_range(a, 0, len(a) - 1)
 }
 
+fn sort(a: []str) {
+    sort_by(a, fn(x: str, y: str) -> bool { cmp(x, y) < 0 })
+}
+
 // stable merge sort with a user-supplied "less than"
 fn sort_by[T](a: []T, less: fn(T, T) -> bool) {
     n := len(a)
@@ -1607,12 +1675,18 @@ fn parse_i64(s: str) -> (i64, bool) {
         return (0, false)
     }
     v: u64 = 0
+    // the largest magnitude: 2^63 - 1, or 2^63 after a minus sign
+    limit: u64 = if neg { 0x8000_0000_0000_0000 } else { 0x7FFF_FFFF_FFFF_FFFF }
     while i < n {
         c := s[i]
         if c < '0' || c > '9' {
             return (0, false)
         }
-        v = v * 10 + u64(c - '0')
+        d := u64(c - '0')
+        if v > (limit - d) / 10 {
+            return (0, false)
+        }
+        v = v * 10 + d
         i += 1
     }
     if neg {

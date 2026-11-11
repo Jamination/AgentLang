@@ -1,10 +1,10 @@
-9:13: error: `len` needs a slice, array, str or Vec, found i64 (the declared functions do not accept these arguments either: len(*T))
+9:13: error: `len` needs a slice, array, str, Vec or Map, found i64 (the declared functions do not accept these arguments either: len(*T))
 10:15: error: `clone` takes 1 argument(s), got 0
 11:15: error: `clone` takes 1 argument(s), got 2 (the declared functions do not accept these arguments either: clone(T, i64))
 12:17: error: no function `print` to call on T (the builtin `print` has no method form: call it as a plain function)
 13:20: error: the builtin `clone` takes no type arguments, and no declared `clone` accepts these
 14:13: error: `len` takes 1 argument(s), got 2
-16:15: error: `len` needs a slice, array, str or Vec, found i64
+16:15: error: `len` needs a slice, array, str, Vec or Map, found i64
 17:15: error: `ptr` takes 1 argument(s), got 2 (the declared functions do not accept these arguments either: ptr(*T)
 18:12: error: index must be an integer, found str
 19:18: error: no function `sizeof` to call on Vec[i64] (the builtin `sizeof` has no method form: call it as a plain function)

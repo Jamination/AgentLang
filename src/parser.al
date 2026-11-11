@@ -231,14 +231,15 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
             hint = " (there is no `++`/`--`: use `x += 1`)"
         }
         Kw(k) => {
-            // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`
+            // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`,
+            // `fn f(in: i64)`, `for match in ..`
+            named := starts_with(msg, "expected identifier") || starts_with(msg, "expected field name")
             match p.peek_at(1) {
-                P(q) => {
-                    if q == ":=" || q == "=" || q == ":" || q == "," || q == ")" || q == "." || q == "+=" || q == "-=" {
-                        hint = fmt(" (`", k, "` is a keyword and cannot be used as a name)")
-                    }
-                }
+                P(q) if q == ":=" || q == "=" || q == ":" || q == "," || q == ")" || q == "." || q == "+=" || q == "-=" => { named = true }
                 _ => {}
+            }
+            if named {
+                hint = fmt(" (`", k, "` is a keyword and cannot be used as a name)")
             }
         }
         _ => {}
