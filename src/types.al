@@ -374,7 +374,9 @@ fn layout_struct(self *Types, sid i64) {
         self.layout_errors.push(fmt("struct `", n, "` contains itself by value (use a pointer)"))
         s := &self.structs.buf[sid]
         s.state = 2
-        s.offsets = vec_fill(s.fields.len, 0)
+        // the fields are dropped: everything that walks a type by its fields would not end
+        s.fields.truncate(0)
+        s.offsets = vec_fill(0, 0)
         s.size = 8
         s.align = 8
         return

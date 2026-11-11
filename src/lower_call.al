@@ -1400,8 +1400,9 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             alive = keep
             continue
         }
-        v := self.expr(a, None)
+        var v Val = self.expr(a, None)
         if v.ty != T_ERR {
+            v = self.stabilize(v, args[i + 1..])
             pre.push((i, v))
             for ai in 0..alive.len {
                 di := alive.buf[ai]
