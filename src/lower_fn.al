@@ -7,6 +7,8 @@ struct Val {
     alias i64
     // for a place that is one f32 lane of a vector in memory: (lane, vector IR type)
     lane Opt[(i64, T)]
+    // a place inside a constant (read-only memory): not assignable, no address
+    ro bool
 }
 
 fn val_unit() Val {

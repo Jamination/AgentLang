@@ -1911,40 +1911,14 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
         }
         "embed" => {
             // the bytes of a file, read at compile time (path relative to the source file)
-            if nargs != 1 {
-                self.err(pos, fmt("`", name, "` takes ", 1, " argument(s), got ", nargs))
-                return Some(val_err())
-            }
-            var rel str
-            match args[0].k {
-                EKStr(s) => {
-                    rel = s
+            match self.cx.embed_bytes(args, pos) {
+                Some(bytes) => {
+                    return Some(self.str_val(bytes))
                 }
-                _ => {
-                    self.err(args[0].pos, "`embed` takes a string literal path")
+                None => {
                     return Some(val_err())
                 }
             }
-            src := ""
-            if pos.file >= 0 && pos.file < self.cx.file_names.len {
-                src = self.cx.file_names.buf[pos.file]
-            }
-            dir := ""
-            if starts_with(src, "<") {
-                std_dir, have := env_get("ALC_STD_DIR")
-                if have {
-                    dir = std_dir
-                }
-            } else {
-                dir = lower_call_parent_dir(src)
-            }
-            path := lower_call_path_join(dir, rel)
-            bytes, ok := read_file(path)
-            if ok {
-                return Some(self.str_val(bytes))
-            }
-            self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(path)))
-            return Some(val_err())
         }
         "panic" => {
             if nargs != 1 {

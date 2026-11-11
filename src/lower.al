@@ -78,6 +78,13 @@ struct Cx {
     p_alias_decls Map[str, *TypeDecl]
     alias_tys Map[*TypeDecl, i64]
     alias_depth Map[*TypeDecl, i64]
+    // constants: 1 = a scalar value (`const_vals`), 2 = an aggregate or vector in read-only
+    // memory (`const_mems`: type and global; type -1 while the initializer is evaluated),
+    // 0 = being classified
+    const_kind Map[str, i64]
+    const_mems Map[str, (i64, i64)]
+    // files read by `embed`, by path
+    embeds Map[str, str]
 }
 
 fn lower_builtin_type(name str) Opt[i64] {
@@ -184,6 +191,9 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         p_alias_decls: map[str, *TypeDecl](),
         alias_tys: map[*TypeDecl, i64](),
         alias_depth: map[*TypeDecl, i64](),
+        const_kind: map[str, i64](),
+        const_mems: map[str, (i64, i64)](),
+        embeds: map[str, str](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
@@ -961,7 +971,29 @@ fn const_type_of(self *Cx, e *Expr) i64 {
         }
         EKCall(c, _) => {
             env := map[str, i64]()
-            return lower_opt_or(self.expr_type(c, &env), T_ERR)
+            match self.expr_type(c, &env) {
+                Some(t) => return t
+                None => {}
+            }
+        }
+        EKTuple(es) => {
+            ts := vec[i64]()
+            for i in 0..es.len {
+                t := self.const_type_of(&es.buf[i])
+                if t == T_ERR {
+                    return T_ERR
+                }
+                ts.push(t)
+            }
+            return self.types.intern(TyKTuple(ts))
+        }
+        EKIdent(n) => {
+            if self.const_is_mem(n) {
+                match self.const_global(n) {
+                    Some(g) => return g.0
+                    None => return T_ERR
+                }
+            }
         }
         _ => {}
     }
@@ -1077,7 +1109,175 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
 }
 
 // ---------- constant evaluation ----------
+// Is constant `name` an aggregate or a vector, kept in read-only memory, rather than a
+// scalar value? Decided by the form of its initializer: a `T{...}` literal, a tuple, a
+// vector constructor, or the name of another such constant.
+fn const_is_mem(self *Cx, name str) bool {
+    k, known := self.const_kind.get(name)
+    if known {
+        return k == 2
+    }
+    d, has := self.const_decls.get(name)
+    if !has {
+        return false
+    }
+    self.const_kind.set(name, 0)
+    mem := false
+    match d.val.k {
+        EKLit(_, _) => {
+            mem = true
+        }
+        EKTuple(_) => {
+            mem = true
+        }
+        EKCall(c, _) => {
+            saved := self.errs.len
+            save_scope := self.scope_prelude
+            self.scope_prelude = self.internal_file(d.pos.file)
+            env := map[str, i64]()
+            match self.expr_type(c, &env) {
+                Some(t) => {
+                    match self.types.k(t) {
+                        TyKVec(_) => {
+                            mem = true
+                        }
+                        TyKQuat => {
+                            mem = true
+                        }
+                        TyKMat4 => {
+                            mem = true
+                        }
+                        _ => {}
+                    }
+                }
+                None => {}
+            }
+            self.scope_prelude = save_scope
+            self.errs.truncate(saved)
+        }
+        EKIdent(n) => {
+            mem = n != name && self.const_is_mem(n)
+        }
+        _ => {}
+    }
+    self.const_kind.set(name, if mem { 2 } else { 1 })
+    return mem
+}
+
+// the (type, global) of a constant that lives in read-only memory (see `const_is_mem`)
+fn const_global(self *Cx, name str) Opt[(i64, i64)] {
+    d, has_decl := self.const_decls.get(name)
+    if !has_decl {
+        return None
+    }
+    known, found := self.const_mems.get(name)
+    if found {
+        if known.0 == -1 {
+            self.err(d.pos, fmt("constant `", name, "` depends on itself"))
+            return None
+        }
+        if known.0 == T_ERR {
+            return None
+        }
+        return Some(known)
+    }
+    self.const_mems.set(name, (-1, 0))
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    ty := T_ERR
+    match d.ty {
+        Some(t) => {
+            env := map[str, i64]()
+            ty = self.resolve(&t, &env)
+        }
+        None => {
+            nerr := self.errs.len
+            ty = self.const_type_of(&d.val)
+            if ty == T_ERR && self.errs.len == nerr {
+                self.err(d.pos, fmt("cannot infer the type of constant `", name, "`: its value must be a compile-time constant of a known type (literals, other constants, function names, `T{...}` literals, tuples and vector constructors made of them)"))
+            }
+        }
+    }
+    self.flush_layout_errors(d.pos)
+    res := (T_ERR, 0)
+    if ty != T_ERR {
+        size := self.types.size_of(ty)
+        align := max(self.types.align_of(ty), 8)
+        data := vec_fill(size, u8(0))
+        relocs := vec[(i64, RelocTarget)]()
+        nerr := self.errs.len
+        if self.const_init(&d.val, ty, 0, &data, &relocs) {
+            gid := self.module.globals.len
+            self.module.globals.push(Global{name: d.name, size: size, align: align, data: Some(data), relocs: relocs, readonly: true})
+            res = (ty, gid)
+        } else if self.errs.len == nerr {
+            vt := self.const_type_of(&d.val)
+            self.errs.truncate(nerr)
+            if vt != T_ERR && vt != ty {
+                self.err(d.val.pos, fmt("constant `", name, "` is declared as ", self.types.name(ty), ", but its value has type ", self.types.name(vt)))
+            } else {
+                self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant of type ", self.types.name(ty), " (allowed: literals, other constants, function names, and `T{...}` literals, tuples and vector constructors made of them)"))
+            }
+        }
+    }
+    self.scope_prelude = save_scope
+    self.const_mems.set(name, res)
+    if res.0 == T_ERR {
+        return None
+    }
+    return Some(res)
+}
+
+// The bytes of the file that `embed(args)` at `pos` names (relative to the source file),
+// read once per path; None after reporting why not.
+fn embed_bytes(self *Cx, args []Expr, pos Pos) Opt[str] {
+    if len(args) != 1 {
+        self.err(pos, fmt("`embed` takes 1 argument(s), got ", len(args)))
+        return None
+    }
+    var rel str
+    match args[0].k {
+        EKStr(s) => {
+            rel = s
+        }
+        _ => {
+            self.err(args[0].pos, "`embed` takes a string literal path")
+            return None
+        }
+    }
+    src := ""
+    if pos.file >= 0 && pos.file < self.file_names.len {
+        src = self.file_names.buf[pos.file]
+    }
+    dir := ""
+    if starts_with(src, "<") {
+        std_dir, have := env_get("ALC_STD_DIR")
+        if have {
+            dir = std_dir
+        }
+    } else {
+        dir = lower_call_parent_dir(src)
+    }
+    path := lower_call_path_join(dir, rel)
+    cached, hit := self.embeds.get(path)
+    if hit {
+        return Some(cached)
+    }
+    bytes, ok := read_file(path)
+    if ok {
+        self.embeds.set(path, bytes)
+        return Some(bytes)
+    }
+    self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(path)))
+    return None
+}
+
 fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
+    if self.const_is_mem(name) {
+        // not a scalar value; evaluated here so that its errors are reported
+        self.const_global(name)
+        return None
+    }
     st, has_st := self.const_vals.get(name)
     if has_st {
         match st {
@@ -1103,6 +1303,7 @@ fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
         }
         None => {}
     }
+    nerr0 := self.errs.len
     match self.const_eval(&d.val) {
         Some(v0) => {
             v := v0
@@ -1173,7 +1374,9 @@ fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
             return Some((ty, v))
         }
         None => {
-            self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant"))
+            if self.errs.len == nerr0 {
+                self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant"))
+            }
             self.const_vals.set(d.name, CStateFailed)
             return None
         }
@@ -1359,6 +1562,18 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
             }
         }
         EKCall(c, args) => {
+            match c.k {
+                EKIdent(fname) => {
+                    // embed("file"): the content of a file as a string constant
+                    if fname == "embed" && !self.fn_names.has(fname) {
+                        match self.embed_bytes(args.items(), e.pos) {
+                            Some(bytes) => return Some(CVStr(bytes))
+                            None => return None
+                        }
+                    }
+                }
+                _ => {}
+            }
             if args.len == 1 {
                 // numeric conversion of a constant: T(x); sizeof[T]()
                 env := map[str, i64]()
@@ -1503,7 +1718,48 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                 _ => {}
             }
         }
+        EKTuple(es) => {
+            match k {
+                TyKTuple(tys) => {
+                    if es.len != tys.len {
+                        return false
+                    }
+                    offs := self.types.tuple_offsets(tys.items())
+                    for i in 0..es.len {
+                        if !self.const_init(&es.buf[i], tys.buf[i], off + offs.buf[i], data, relocs) {
+                            return false
+                        }
+                    }
+                    return true
+                }
+                _ => {}
+            }
+        }
         EKIdent(n) => {
+            if self.const_is_mem(n) {
+                // another constant in read-only memory: copy its bytes
+                match self.const_global(n) {
+                    Some(g) => {
+                        if g.0 != ty {
+                            return false
+                        }
+                        match self.module.globals.buf[g.1].data {
+                            Some(src) => {
+                                for i in 0..src.len {
+                                    data.buf[off + i] = src.buf[i]
+                                }
+                            }
+                            None => {}
+                        }
+                        srel := self.module.globals.buf[g.1].relocs
+                        for i in 0..srel.len {
+                            relocs.push((off + srel.buf[i].0, srel.buf[i].1))
+                        }
+                        return true
+                    }
+                    None => return false
+                }
+            }
             match k {
                 TyKFn(ptys, rty) => {
                     // address of a (non-generic) function
