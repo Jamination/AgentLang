@@ -1,8 +1,8 @@
-eval_a :: (i: i64, j: i64) -> f64 {
+fn eval_a(i: i64, j: i64) -> f64 {
     1.0 / f64((i + j) * (i + j + 1) / 2 + i + 1)
 }
 
-eval_a_times_u :: (u: []f64, au: []f64) {
+fn eval_a_times_u(u: []f64, au: []f64) {
     n := len(u)
     for i in 0..n {
         s := 0.0
@@ -13,7 +13,7 @@ eval_a_times_u :: (u: []f64, au: []f64) {
     }
 }
 
-eval_at_times_u :: (u: []f64, au: []f64) {
+fn eval_at_times_u(u: []f64, au: []f64) {
     n := len(u)
     for i in 0..n {
         s := 0.0
@@ -24,12 +24,12 @@ eval_at_times_u :: (u: []f64, au: []f64) {
     }
 }
 
-eval_ata_times_u :: (u: []f64, atau: []f64, v: []f64) {
+fn eval_ata_times_u(u: []f64, atau: []f64, v: []f64) {
     eval_a_times_u(u, v)
     eval_at_times_u(v, atau)
 }
 
-main :: () {
+fn main() {
     n := 2000
     u := alloc[f64](n)
     v := alloc[f64](n)

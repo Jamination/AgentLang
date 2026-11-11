@@ -1,17 +1,17 @@
 // AST for AL.
 
-Pos :: struct {
+struct Pos {
     file: i64
     line: i64
     col: i64
 }
 
-Diag :: struct {
+struct Diag {
     pos: Pos
     msg: str
 }
 
-TypeAst :: enum {
+enum TypeAst {
     TypeAstName(str, Vec[TypeAst], Pos),
     TypeAstPtr(*TypeAst),
     TypeAstSlice(*TypeAst),
@@ -20,7 +20,7 @@ TypeAst :: enum {
     TypeAstTuple(Vec[TypeAst]),
 }
 
-UnOp :: enum {
+enum UnOp {
     UnOpNeg,
     UnOpNot,
     UnOpBitNot,
@@ -28,7 +28,7 @@ UnOp :: enum {
     UnOpDeref,
 }
 
-BinOp :: enum {
+enum BinOp {
     BinOpAdd,
     BinOpSub,
     BinOpMul,
@@ -49,12 +49,12 @@ BinOp :: enum {
     BinOpLOr,
 }
 
-Expr :: struct {
+struct Expr {
     k: EK
     pos: Pos
 }
 
-EK :: enum {
+enum EK {
     EKInt(u64),
     EKFloat(f64),
     EKStr(str),
@@ -76,7 +76,7 @@ EK :: enum {
     EKFn(*FnDecl),
 }
 
-MatchArm :: struct {
+struct MatchArm {
     pats: Vec[Pat]
     body: Block
     pos: Pos
@@ -84,7 +84,7 @@ MatchArm :: struct {
     guard: Opt[*Expr]
 }
 
-Pat :: enum {
+enum Pat {
     PatWild,
     // an expression: a constant (int, string, named constant, ...). A bare name or
     // `Enum.Variant` is resolved when the match is lowered: a data-less variant of the
@@ -100,17 +100,17 @@ Pat :: enum {
     PatRef(str, Pos),
 }
 
-Block :: struct {
+struct Block {
     stmts: Vec[Stmt]
     end: Pos
 }
 
-Stmt :: struct {
+struct Stmt {
     k: SK
     pos: Pos
 }
 
-SK :: enum {
+enum SK {
     SKExpr(Expr),
     SKLet(Vec[str], Expr),
     SKMultiAssign(Vec[Expr], Expr),
@@ -136,7 +136,7 @@ SK :: enum {
     SKFn(*FnDecl),
 }
 
-FnDecl :: struct {
+struct FnDecl {
     name: str
     tparams: Vec[str]
     params: Vec[(str, TypeAst)]
@@ -151,7 +151,7 @@ FnDecl :: struct {
     is_priv: bool
 }
 
-StructDecl :: struct {
+struct StructDecl {
     name: str
     tparams: Vec[str]
     fields: Vec[(str, TypeAst)]
@@ -160,7 +160,7 @@ StructDecl :: struct {
     is_priv: bool
 }
 
-EnumDecl :: struct {
+struct EnumDecl {
     name: str
     tparams: Vec[str]
     variants: Vec[(str, Vec[TypeAst])]
@@ -169,7 +169,7 @@ EnumDecl :: struct {
     is_priv: bool
 }
 
-ConstDecl :: struct {
+struct ConstDecl {
     name: str
     ty: Opt[TypeAst]
     val: Expr
@@ -178,7 +178,7 @@ ConstDecl :: struct {
     is_priv: bool
 }
 
-GlobalDecl :: struct {
+struct GlobalDecl {
     name: str
     ty: Opt[TypeAst]
     init: Opt[Expr]
@@ -187,21 +187,21 @@ GlobalDecl :: struct {
     is_priv: bool
 }
 
-TestDecl :: struct {
+struct TestDecl {
     name: str
     body: Block
     pos: Pos
 }
 
 // `Name :: type T`: another name for the type `T`
-TypeDecl :: struct {
+struct TypeDecl {
     name: str
     ty: TypeAst
     pos: Pos
     is_priv: bool
 }
 
-Decl :: enum {
+enum Decl {
     DeclFn(FnDecl),
     DeclStruct(StructDecl),
     DeclEnum(EnumDecl),
@@ -213,7 +213,7 @@ Decl :: enum {
 }
 
 // the source forms of a list of types, separated by ", "
-ast_type_str_list :: (ts: *Vec[TypeAst]) -> str {
+fn ast_type_str_list(ts: *Vec[TypeAst]) -> str {
     parts := vec[str]()
     for i in 0..ts.len {
         parts.push(ast_type_str(&ts[i]))
@@ -222,7 +222,7 @@ ast_type_str_list :: (ts: *Vec[TypeAst]) -> str {
 }
 
 // source form of a type (for signatures in diagnostics and `alc sigs`)
-ast_type_str :: (t: *TypeAst) -> str {
+fn ast_type_str(t: *TypeAst) -> str {
     match *t {
         TypeAstName(n, args, _) => {
             if args.is_empty() {
@@ -270,7 +270,7 @@ ast_type_str :: (t: *TypeAst) -> str {
 
 // the header of a function as it is declared: `name[T] :: (a: A, b: B) -> R`; for an
 // anonymous function `(a: A, b: B) -> R` (for diagnostics and `alc sigs`)
-ast_sig_str :: (f: *FnDecl) -> str {
+fn ast_sig_str(f: *FnDecl) -> str {
     parts := vec[str]()
     for i in 0..f.params.len {
         parts.push(fmt(f.params[i].0, ": ", ast_type_str(&f.params[i].1)))
@@ -291,7 +291,7 @@ ast_sig_str :: (f: *FnDecl) -> str {
 }
 
 // "[T, U]" of a declaration with type parameters, or nothing
-ast_tparams_str :: (t: *Vec[str]) -> str {
+fn ast_tparams_str(t: *Vec[str]) -> str {
     if t.is_empty() {
         return ""
     }
@@ -299,7 +299,7 @@ ast_tparams_str :: (t: *Vec[str]) -> str {
 }
 
 // a struct as it is declared, on one line: `Name[T] :: struct { a: A, b: B }`
-ast_struct_str :: (s: *StructDecl) -> str {
+fn ast_struct_str(s: *StructDecl) -> str {
     parts := vec[str]()
     for i in 0..s.fields.len {
         parts.push(fmt(s.fields[i].0, ": ", ast_type_str(&s.fields[i].1)))
@@ -308,7 +308,7 @@ ast_struct_str :: (s: *StructDecl) -> str {
 }
 
 // an enum as it is declared, on one line: `Name[T] :: enum { A, B(T) }`
-ast_enum_str :: (e: *EnumDecl) -> str {
+fn ast_enum_str(e: *EnumDecl) -> str {
     vs := vec[str]()
     for i in 0..e.variants.len {
         v := &e.variants[i]
@@ -323,7 +323,7 @@ ast_enum_str :: (e: *EnumDecl) -> str {
 
 // A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte
 // 1 and `k` in decimal (see priv.al). ast_plain gives the name as it was written.
-ast_plain :: (name: str) -> str {
+fn ast_plain(name: str) -> str {
     i := len(name)
     while i > 0 && name[i - 1] >= '0' && name[i - 1] <= '9' {
         i -= 1
@@ -335,12 +335,12 @@ ast_plain :: (name: str) -> str {
 }
 
 // is this the internal name of a `priv` declaration?
-ast_is_private :: (name: str) -> bool {
+fn ast_is_private(name: str) -> bool {
     return len(ast_plain(name)) != len(name)
 }
 
 // a text for the user (a diagnostic, a signature): every internal name in it as it was written
-ast_plain_text :: (s: str) -> str {
+fn ast_plain_text(s: str) -> str {
     first := -1
     for i in 0..len(s) {
         if s[i] == 1 {

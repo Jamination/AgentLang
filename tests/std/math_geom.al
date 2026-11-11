@@ -1,14 +1,14 @@
 // geometry tests, easing curves and colour helpers of the math library
 fails: i64
 
-ok :: (name: str, c: bool) {
+fn ok(name: str, c: bool) {
     if !c {
         fails += 1
         print("FAILED:", name)
     }
 }
 
-main :: () {
+fn main() {
     box := Aabb{min: vec3(-1.0), max: vec3(1.0)}
     far := Aabb{min: vec3(2.0, 0.0, 0.0), max: vec3(5.0, 1.0, 1.0)}
     touch := Aabb{min: vec3(1.0, -1.0, -1.0), max: vec3(3.0, 0.0, 0.0)}
@@ -44,7 +44,7 @@ main :: () {
     ok("ray plane", hitp && tp == 5.0 && !hitp2 && !hitp3)
 
     // ---- easing: every curve starts at 0 and ends at 1 ----
-    curves := [9](f32) -> f32{ease_in_quad, ease_out_quad, ease_in_out_quad, ease_in_cubic, ease_out_cubic, ease_in_out_cubic, ease_out_elastic, ease_out_bounce, ease_out_back}
+    curves := [9]fn(f32) -> f32{ease_in_quad, ease_out_quad, ease_in_out_quad, ease_in_cubic, ease_out_cubic, ease_in_out_cubic, ease_out_elastic, ease_out_bounce, ease_out_back}
     for i, f in curves {
         ok(fmt("ease ends ", i), approx_eq(f(0.0), 0.0) && approx_eq(f(1.0), 1.0))
     }

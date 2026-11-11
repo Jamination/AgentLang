@@ -1,10 +1,10 @@
-Pt :: struct { x: i64, y: i64 }
+struct Pt { x: i64, y: i64 }
 
-by_len :: (a: str, b: str) -> bool {
+fn by_len(a: str, b: str) -> bool {
     len(a) < len(b)
 }
 
-main :: () {
+fn main() {
     // Vec
     v := vec[i64]()
     for i in 0..20 {

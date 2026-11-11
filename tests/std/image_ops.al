@@ -3,7 +3,7 @@ use std.image
 
 fails: i64
 
-ok :: (name: str, c: bool) {
+fn ok(name: str, c: bool) {
     if !c {
         fails += 1
         print("FAILED:", name)
@@ -11,7 +11,7 @@ ok :: (name: str, c: bool) {
 }
 
 // a picture with smooth and noisy parts, deterministic
-picture :: (w: i64, h: i64, channels: i64) -> Image {
+fn picture(w: i64, h: i64, channels: i64) -> Image {
     img := image_new(w, h, channels)
     r := rng(99)
     for y in 0..h {
@@ -28,11 +28,11 @@ picture :: (w: i64, h: i64, channels: i64) -> Image {
     return img
 }
 
-same :: (a: Image, b: Image) -> bool {
+fn same(a: Image, b: Image) -> bool {
     return a.w == b.w && a.h == b.h && a.channels == b.channels && a.pix == b.pix
 }
 
-main :: () {
+fn main() {
     // PNG round trip for every channel count and awkward sizes
     sizes := [4]i64{1, 7, 64, 131}
     for ch in 1..=4 {

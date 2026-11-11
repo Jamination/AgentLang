@@ -1,16 +1,16 @@
 // T{...} literals in the header of for / if / while / match without parentheses
-Point :: struct { x: i64, y: i64 }
-Box[T] :: struct { items: []T, n: i64 }
-Range :: struct { lo: i64, hi: i64 }
-Names :: type [3]str
+struct Point { x: i64, y: i64 }
+struct Box[T] { items: []T, n: i64 }
+struct Range { lo: i64, hi: i64 }
+type Names = [3]str
 
-sum :: (xs: []i64) -> i64 {
+fn sum(xs: []i64) -> i64 {
     t := 0
     for x in xs { t += x }
     t
 }
 
-main :: () {
+fn main() {
     // a literal that starts with `[`
     for s in []i64{1, 2, 3} {
         put(s, " ")

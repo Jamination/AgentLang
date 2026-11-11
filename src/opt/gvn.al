@@ -2,18 +2,18 @@
 // branch conditions into dominated blocks (removes repeated checks).
 
 // type Key = (Op, T, Vec<V>, i64); `args` is an independent copy that is never changed
-GvnKey :: struct { op: Op, ty: T, args: []i64, k: i64 }
+struct GvnKey { op: Op, ty: T, args: []i64, k: i64 }
 
-GvnStep :: enum {
+enum GvnStep {
     GvnStepEnter(i64),
     GvnStepExit(Vec[GvnKey], Vec[(i64, Opt[bool])]),
 }
 
-gvn_numberable :: (op: Op) -> bool {
+fn gvn_numberable(op: Op) -> bool {
     return op.is_pure() || op == OpSDiv || op == OpUDiv || op == OpSRem || op == OpURem || op == OpProj
 }
 
-gvn_run_find :: (repl: []i64, v0: i64) -> i64 {
+fn gvn_run_find(repl: []i64, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -21,7 +21,7 @@ gvn_run_find :: (repl: []i64, v0: i64) -> i64 {
     return v
 }
 
-gvn_run :: (f: *Func) -> bool {
+fn gvn_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     repl := vec_fill(f.insts.len, NOV)
     table := map[GvnKey, i64]()

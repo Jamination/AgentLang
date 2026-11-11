@@ -1,18 +1,18 @@
 // match: nested patterns, guards, alternatives with bindings, tuple patterns, `&name`.
-Shape :: enum { Circle(f64), Rect(f64, f64), Empty }
-Color :: enum { Red, Green, Blue }
-Tree :: enum { Leaf(i64), Node(*Tree, *Tree), Nil }
-Pair :: enum { Two(i64, i64), Single(i64) }
-Tok :: enum { Num(i64), Word(str), Flag(bool), Ratio(f64), Byte(u8), Ptr(*i64), Sym(Color) }
-Wrap :: enum { W(P, Opt[Color]), Z }
-Big :: enum { Arr([100]i64), Small(i64) }
-Cell :: enum { Full(P, str), Free }
-P :: struct { x: i64, y: i64 }
-Holder :: struct { name: str, slot: Opt[P] }
-LIMIT :: 10
-NAME :: "ada"
+enum Shape { Circle(f64), Rect(f64, f64), Empty }
+enum Color { Red, Green, Blue }
+enum Tree { Leaf(i64), Node(*Tree, *Tree), Nil }
+enum Pair { Two(i64, i64), Single(i64) }
+enum Tok { Num(i64), Word(str), Flag(bool), Ratio(f64), Byte(u8), Ptr(*i64), Sym(Color) }
+enum Wrap { W(P, Opt[Color]), Z }
+enum Big { Arr([100]i64), Small(i64) }
+enum Cell { Full(P, str), Free }
+struct P { x: i64, y: i64 }
+struct Holder { name: str, slot: Opt[P] }
+const LIMIT = 10
+const NAME = "ada"
 
-describe :: (o: Opt[Shape]) -> str {
+fn describe(o: Opt[Shape]) -> str {
     // nested variant patterns cover Opt[Shape] together: no `_` arm is needed
     match o {
         Some(Circle(r)) if r > 10.0 => fmt("big circle ", r)
@@ -24,7 +24,7 @@ describe :: (o: Opt[Shape]) -> str {
     }
 }
 
-pair :: (p: Pair) -> str {
+fn pair(p: Pair) -> str {
     match p {
         Two(0, _) => "zero first"
         Two(_, 0) => "zero second"
@@ -36,7 +36,7 @@ pair :: (p: Pair) -> str {
     }
 }
 
-both :: (a: Opt[i64], b: Opt[i64]) -> i64 {
+fn both(a: Opt[i64], b: Opt[i64]) -> i64 {
     match (a, b) {
         (Some(x), Some(y)) => x + y
         (Some(x), None), (None, Some(x)) => x
@@ -44,7 +44,7 @@ both :: (a: Opt[i64], b: Opt[i64]) -> i64 {
     }
 }
 
-classify :: (t: (i64, str, bool)) -> str {
+fn classify(t: (i64, str, bool)) -> str {
     match t {
         (0, _, _) => "zero"
         (_, "hi", true) => "greeting"
@@ -53,7 +53,7 @@ classify :: (t: (i64, str, bool)) -> str {
     }
 }
 
-tok :: (t: Tok) -> str {
+fn tok(t: Tok) -> str {
     match t {
         Num(0) => "zero"
         Num(-1) => "minus one"
@@ -77,7 +77,7 @@ tok :: (t: Tok) -> str {
     }
 }
 
-depth :: (t: *Tree) -> i64 {
+fn depth(t: *Tree) -> i64 {
     match *t {
         Nil => 0
         Leaf(_) => 1
@@ -86,7 +86,7 @@ depth :: (t: *Tree) -> i64 {
 }
 
 // adds `d` to every leaf, in place
-add :: (t: *Tree, d: i64) {
+fn add(t: *Tree, d: i64) {
     match *t {
         Leaf(&n) => { *n += d }
         Node(l, r) => {
@@ -97,7 +97,7 @@ add :: (t: *Tree, d: i64) {
     }
 }
 
-sum :: (t: *Tree) -> i64 {
+fn sum(t: *Tree) -> i64 {
     match *t {
         Leaf(n) => n
         Node(l, r) => sum(l) + sum(r)
@@ -105,7 +105,7 @@ sum :: (t: *Tree) -> i64 {
     }
 }
 
-wrap :: (w: Wrap) -> str {
+fn wrap(w: Wrap) -> str {
     match w {
         W(p, Some(Red)) => fmt("red at ", p.x, ",", p.y)
         W(p, Some(c)) => fmt(c, " at ", p)
@@ -114,24 +114,24 @@ wrap :: (w: Wrap) -> str {
     }
 }
 
-pick[T] :: (o: Opt[T], d: T) -> T {
+fn pick[T](o: Opt[T], d: T) -> T {
     match o {
         Some(x) => x
         None => d
     }
 }
 
-first_or[T] :: (o: Opt[(T, T)], d: T) -> T {
+fn first_or[T](o: Opt[(T, T)], d: T) -> T {
     match o {
         Some((a, _)) => a
         None => d
     }
 }
 
-mk :: () -> Opt[P] { Some(P{1, 2}) }
-scaled :: (p: P, k: i64) -> i64 { p.x * k }
+fn mk() -> Opt[P] { Some(P{1, 2}) }
+fn scaled(p: P, k: i64) -> i64 { p.x * k }
 
-colour_pair :: (p: (Color, Color)) -> i64 {
+fn colour_pair(p: (Color, Color)) -> i64 {
     match p {
         (Red, _) => 1
         (_, Red) => 2
@@ -140,7 +140,7 @@ colour_pair :: (p: (Color, Color)) -> i64 {
     }
 }
 
-bools :: (t: (bool, bool)) -> str {
+fn bools(t: (bool, bool)) -> str {
     match t {
         (true, true) => "both"
         (true, false), (false, true) => "one"
@@ -149,18 +149,18 @@ bools :: (t: (bool, bool)) -> str {
 }
 
 state: Opt[P]
-clobber :: () -> bool {
+fn clobber() -> bool {
     state = None
     false
 }
 
 calls: i64
-tick :: () -> bool {
+fn tick() -> bool {
     calls += 1
     calls % 2 == 0
 }
 
-main :: () {
+fn main() {
     print(describe(Some(Circle(11.0))), describe(Some(Circle(1.0))), describe(Some(Rect(2.0, 2.0))), describe(Some(Rect(2.0, 3.0))), describe(Some(Shape.Empty)), describe(None))
     print(pair(Two(0, 5)), pair(Two(5, 0)), pair(Two(10, 7)), pair(Two(4, 4)), pair(Two(-3, 2)), pair(Single(-1)), pair(Two(1, 2)), pair(Single(9)))
     print(both(Some(1), Some(2)), both(Some(5), None), both(None, Some(7)), both(None, None))

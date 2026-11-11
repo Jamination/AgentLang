@@ -1,10 +1,10 @@
 // std.mem: sizes, byte views, frame scopes, Arena
-Particle :: struct { pos: vec3, vel: vec3, life: f32 }
-Header :: struct { magic: u32, count: u16, flags: u16 }
+struct Particle { pos: vec3, vel: vec3, life: f32 }
+struct Header { magic: u32, count: u16, flags: u16 }
 
 static_buf: [1000]u8
 
-main :: () {
+fn main() {
     print(kb(4), mb(2), kb(0))
 
     // byte views

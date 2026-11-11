@@ -1,9 +1,9 @@
 // slices of a Vec end at its length; the check also works through a pointer and in a loop
-tail :: (v: *Vec[i64], from: i64) -> []i64 {
+fn tail(v: *Vec[i64], from: i64) -> []i64 {
     return v[from..]
 }
 
-main :: () {
+fn main() {
     v := vec[i64]()
     for i in 0..5 {
         v.push(i * 10)

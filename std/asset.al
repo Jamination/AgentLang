@@ -6,7 +6,7 @@
 
 // ---------- files and directories ----------
 // writes a, a '/' if both parts are non-empty and a does not end in one, b and a NUL into buf
-__asset_cpath :: (buf: []u8, a: str, b: str) -> bool {
+fn __asset_cpath(buf: []u8, a: str, b: str) -> bool {
     sep := if len(a) > 0 && len(b) > 0 && a[len(a) - 1] != '/' { 1 } else { 0 }
     if len(a) + sep + len(b) >= len(buf) {
         return false
@@ -20,13 +20,13 @@ __asset_cpath :: (buf: []u8, a: str, b: str) -> bool {
 
 // stat(dir/name) into st (struct stat as 18 i64: [3] low half = mode, [6] = size,
 // [11] = mtime seconds, [12] = mtime nanoseconds)
-__asset_stat :: (dir: str, name: str, st: []i64) -> bool {
+fn __asset_stat(dir: str, name: str, st: []i64) -> bool {
     buf: [4096]u8
     return __asset_cpath(buf[..], dir, name) && syscall(4, ptr(buf), ptr(st)) == 0
 }
 
 // a system call whose first argument is the path dir/name (open, mkdir, unlink, rmdir)
-__asset_call :: (nr: i64, dir: str, name: str, a: i64, b: i64) -> i64 {
+fn __asset_call(nr: i64, dir: str, name: str, a: i64, b: i64) -> i64 {
     buf: [4096]u8
     if !__asset_cpath(buf[..], dir, name) {
         return -36
@@ -35,35 +35,35 @@ __asset_call :: (nr: i64, dir: str, name: str, a: i64, b: i64) -> i64 {
 }
 
 // true if path names an existing file or directory
-file_exists :: (path: str) -> bool {
+fn file_exists(path: str) -> bool {
     st: [18]i64
     return __asset_stat(path, "", st[..])
 }
 
 // true if path names a directory
-is_dir :: (path: str) -> bool {
+fn is_dir(path: str) -> bool {
     st: [18]i64
     return __asset_stat(path, "", st[..]) && st[3] & 0xF000 == 0x4000
 }
 
 // size of the file in bytes, or -1 if it does not exist
-file_size :: (path: str) -> i64 {
+fn file_size(path: str) -> i64 {
     st: [18]i64
     return if __asset_stat(path, "", st[..]) { st[6] } else { -1 }
 }
 
-__asset_mtime :: (dir: str, name: str) -> i64 {
+fn __asset_mtime(dir: str, name: str) -> i64 {
     st: [18]i64
     return if __asset_stat(dir, name, st[..]) { st[11] * 1000000000 + st[12] } else { 0 }
 }
 
 // time of the last modification in nanoseconds since 1970 (0 if the file does not exist);
 // compare two readings to detect a change
-modified_time :: (path: str) -> i64 {
+fn modified_time(path: str) -> i64 {
     return __asset_mtime(path, "")
 }
 
-__asset_read :: (dir: str, name: str) -> ([]u8, bool) {
+fn __asset_read(dir: str, name: str) -> ([]u8, bool) {
     fd := __io_result(__asset_call(2, dir, name, 0, 0))
     if fd < 0 {
         return ("", false)
@@ -98,12 +98,12 @@ __asset_read :: (dir: str, name: str) -> ([]u8, bool) {
 
 // the whole content of a file; (empty, false) if it cannot be opened or read (`io_error()`
 // is then the OS error number, `error_text(io_error())` its text). Allocates the result.
-read_bytes :: (path: str) -> ([]u8, bool) {
+fn read_bytes(path: str) -> ([]u8, bool) {
     return __asset_read(path, "")
 }
 
 // creates or replaces a file with the given content; false on failure (see `io_error()`)
-write_bytes :: (path: str, data: []u8) -> bool {
+fn write_bytes(path: str, data: []u8) -> bool {
     m := mark()
     ok := write_file(path, data)
     release(m)
@@ -111,17 +111,17 @@ write_bytes :: (path: str, data: []u8) -> bool {
 }
 
 // deletes a file; false if that failed
-remove_file :: (path: str) -> bool {
+fn remove_file(path: str) -> bool {
     return __io_result(__asset_call(87, path, "", 0, 0)) == 0
 }
 
 // deletes an empty directory; false if that failed
-remove_dir :: (path: str) -> bool {
+fn remove_dir(path: str) -> bool {
     return __io_result(__asset_call(84, path, "", 0, 0)) == 0
 }
 
 // creates a directory and any missing parents; true if the directory exists afterwards
-make_dir :: (path: str) -> bool {
+fn make_dir(path: str) -> bool {
     for i in 1..len(path) {
         if path[i] == '/' {
             __asset_call(83, path[..i], "", 493, 0)
@@ -137,13 +137,13 @@ make_dir :: (path: str) -> bool {
     return false
 }
 
-__asset_name_less :: (a: str, b: str) -> bool {
+fn __asset_name_less(a: str, b: str) -> bool {
     return cmp(a, b) < 0
 }
 
 // names of the entries of a directory (without "." and ".."), sorted by byte value; empty if
 // the directory cannot be read. Allocates the names and the list.
-list_dir :: (path: str) -> []str {
+fn list_dir(path: str) -> []str {
     names := vec[str]()
     // O_RDONLY | O_DIRECTORY
     fd := __io_result(__asset_call(2, path, "", 0x10000, 0))
@@ -173,7 +173,7 @@ list_dir :: (path: str) -> []str {
 }
 
 // ---------- paths ----------
-__path_slash :: (p: str) -> i64 {
+fn __path_slash(p: str) -> i64 {
     for i in len(p) - 1..=0 by -1 {
         if p[i] == '/' {
             return i
@@ -184,7 +184,7 @@ __path_slash :: (p: str) -> i64 {
 
 // a and b joined with exactly one '/' between them; b alone if a is empty or b is absolute.
 // Allocates the result.
-path_join :: (a: str, b: str) -> str {
+fn path_join(a: str, b: str) -> str {
     if len(a) == 0 || (len(b) > 0 && b[0] == '/') {
         return b
     }
@@ -198,19 +198,19 @@ path_join :: (a: str, b: str) -> str {
 }
 
 // the directory part: "a/b/c.png" -> "a/b", "c.png" -> "", "/c" -> "/" (a view of p)
-path_dir :: (p: str) -> str {
+fn path_dir(p: str) -> str {
     i := __path_slash(p)
     return if i < 0 { "" } else if i == 0 { p[..1] } else { p[..i] }
 }
 
 // the last component: "a/b/c.png" -> "c.png" (a view of p)
-path_base :: (p: str) -> str {
+fn path_base(p: str) -> str {
     return p[__path_slash(p) + 1..]
 }
 
 // the extension of the last component without the dot: "a/b/c.png" -> "png", "x.tar.gz" ->
 // "gz", "Makefile" and ".hidden" -> "" (a view of p)
-path_ext :: (p: str) -> str {
+fn path_ext(p: str) -> str {
     b := path_base(p)
     for i in len(b) - 1..=1 by -1 {
         if b[i] == '.' {
@@ -221,7 +221,7 @@ path_ext :: (p: str) -> str {
 }
 
 // the last component without its extension: "a/b/c.png" -> "c" (a view of p)
-path_stem :: (p: str) -> str {
+fn path_stem(p: str) -> str {
     b := path_base(p)
     e := path_ext(p)
     return if len(e) == 0 && !ends_with(b, ".") { b } else { b[..len(b) - len(e) - 1] }
@@ -229,20 +229,20 @@ path_stem :: (p: str) -> str {
 
 // ---------- asset loader ----------
 // A loaded file: its bytes and the modification time it had when it was read.
-Asset :: struct { data: []u8, mtime: i64 }
+struct Asset { data: []u8, mtime: i64 }
 
 // Loads files by name relative to a root directory and keeps them in a cache, so every asset
 // is read once. Loaded data is shared: treat it as read-only.
-Assets :: struct { root: str, cache: Map[str, Asset] }
+struct Assets { root: str, cache: Map[str, Asset] }
 
 // a loader for the files under `root` ("" = the working directory)
-assets_new :: (root: str) -> Assets {
+fn assets_new(root: str) -> Assets {
     return Assets{root: root, cache: map[str, Asset]()}
 }
 
 // reads `name` from disk (again), replacing the cached copy; (empty, false) if it cannot be
 // read, in which case a cached copy stays. The previous data stays in the arena.
-reload :: (a: *Assets, name: str) -> ([]u8, bool) {
+fn reload(a: *Assets, name: str) -> ([]u8, bool) {
     mtime := __asset_mtime(a.root, name)
     data, ok := __asset_read(a.root, name)
     if !ok {
@@ -257,7 +257,7 @@ reload :: (a: *Assets, name: str) -> ([]u8, bool) {
 
 // the content of the file `name` under the root: from the cache if it was loaded before,
 // otherwise read from disk (allocates); (empty, false) if it cannot be read
-load :: (a: *Assets, name: str) -> ([]u8, bool) {
+fn load(a: *Assets, name: str) -> ([]u8, bool) {
     e, ok := a.cache.get(name)
     if ok {
         return (e.data, true)
@@ -267,7 +267,7 @@ load :: (a: *Assets, name: str) -> ([]u8, bool) {
 
 // true if `name` was loaded and its file has been modified since. Cheap enough to poll every
 // frame or every few frames for hot reloading: one stat call, no allocation.
-changed :: (a: *Assets, name: str) -> bool {
+fn changed(a: *Assets, name: str) -> bool {
     e, ok := a.cache.get(name)
     return ok && __asset_mtime(a.root, name) != e.mtime
 }
@@ -278,10 +278,10 @@ changed :: (a: *Assets, name: str) -> bool {
 // are ignored. A value in double quotes is taken literally (spaces, '#', ';'). A key that
 // occurs twice keeps its last value.
 //   keys  all keys in file order (use keys.items())
-Config :: struct { values: Map[str, str], keys: Vec[str] }
+struct Config { values: Map[str, str], keys: Vec[str] }
 
 // parses config text. Values are views into `text`, which must stay alive. Allocates.
-config_parse :: (text: str) -> Config {
+fn config_parse(text: str) -> Config {
     c := Config{values: map[str, str](), keys: vec[str]()}
     section := ""
     for raw in lines(text) {
@@ -324,35 +324,35 @@ config_parse :: (text: str) -> Config {
 }
 
 // reads and parses a config file; false if the file cannot be read
-config_load :: (path: str) -> (Config, bool) {
+fn config_load(path: str) -> (Config, bool) {
     text, ok := read_bytes(path)
     return (config_parse(text), ok)
 }
 
 // true if the key is present
-has :: (c: *Config, key: str) -> bool {
+fn has(c: *Config, key: str) -> bool {
     return c.values.has(key)
 }
 
 // the value of key as text, or `default` if the key is missing
-get_str :: (c: *Config, key: str, default: str) -> str {
+fn get_str(c: *Config, key: str, default: str) -> str {
     return c.values.get_or(key, default)
 }
 
 // the value of key as an integer, or `default` if the key is missing or not an integer
-get_i64 :: (c: *Config, key: str, default: i64) -> i64 {
+fn get_i64(c: *Config, key: str, default: i64) -> i64 {
     x, ok := parse_i64(c.values.get_or(key, ""))
     return if ok { x } else { default }
 }
 
 // the value of key as a number, or `default` if the key is missing or not a number
-get_f64 :: (c: *Config, key: str, default: f64) -> f64 {
+fn get_f64(c: *Config, key: str, default: f64) -> f64 {
     x, ok := parse_f64(c.values.get_or(key, ""))
     return if ok { x } else { default }
 }
 
 // the value of key as a boolean (true/yes/on/1 or false/no/off/0, lower case), or `default`
-get_bool :: (c: *Config, key: str, default: bool) -> bool {
+fn get_bool(c: *Config, key: str, default: bool) -> bool {
     match c.values.get_or(key, "") {
         "true", "yes", "on", "1" => true
         "false", "no", "off", "0" => false
@@ -362,7 +362,7 @@ get_bool :: (c: *Config, key: str, default: bool) -> bool {
 
 // ---------- JSON ----------
 // the kind of a JSON value
-JsonKind :: enum { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }
+enum JsonKind { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }
 
 // One value of a parsed JSON document.
 //   kind   what the value is
@@ -370,12 +370,12 @@ JsonKind :: enum { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonOb
 //   text   the string (JsonString) or the number as written (JsonNumber)
 //   key    the member name if this value is a member of an object
 //   items  the elements (JsonArray) or members (JsonObject) in document order
-Json :: struct { kind: JsonKind, num: f64, text: str, key: str, items: []Json }
+struct Json { kind: JsonKind, num: f64, text: str, key: str, items: []Json }
 
-__JsonReader :: struct { s: str, i: i64, ok: bool, depth: i64 }
+struct __JsonReader { s: str, i: i64, ok: bool, depth: i64 }
 
 // skips white space and returns the next byte without consuming it (0 at the end)
-__json_peek :: (p: *__JsonReader) -> u8 {
+fn __json_peek(p: *__JsonReader) -> u8 {
     while p.i < len(p.s) {
         c := p.s[p.i]
         if c != ' ' && c != '\n' && c != '\t' && c != '\r' {
@@ -387,7 +387,7 @@ __json_peek :: (p: *__JsonReader) -> u8 {
 }
 
 // the value of 4 hex digits at s[i..], or -1
-__json_hex4 :: (s: str, i: i64) -> i64 {
+fn __json_hex4(s: str, i: i64) -> i64 {
     if i + 4 > len(s) {
         return -1
     }
@@ -406,7 +406,7 @@ __json_hex4 :: (s: str, i: i64) -> i64 {
 }
 
 // decodes the escapes of a string body; returns false on an invalid escape
-__json_unescape :: (raw: str) -> (str, bool) {
+fn __json_unescape(raw: str) -> (str, bool) {
     out := alloc[u8](len(raw))
     k := 0
     i := 0
@@ -476,7 +476,7 @@ __json_unescape :: (raw: str) -> (str, bool) {
 }
 
 // reads a string starting at the opening quote; a view of the source unless it has escapes
-__json_string :: (p: *__JsonReader) -> str {
+fn __json_string(p: *__JsonReader) -> str {
     start := p.i + 1
     i := start
     escaped := false
@@ -503,7 +503,7 @@ __json_string :: (p: *__JsonReader) -> str {
     return text
 }
 
-__json_word :: (p: *__JsonReader, word: str) {
+fn __json_word(p: *__JsonReader, word: str) {
     if starts_with(p.s[p.i..], word) {
         p.i += len(word)
     } else {
@@ -512,7 +512,7 @@ __json_word :: (p: *__JsonReader, word: str) {
 }
 
 // reads the elements of an array (close = ']') or the members of an object (close = '}')
-__json_items :: (p: *__JsonReader, close: u8) -> []Json {
+fn __json_items(p: *__JsonReader, close: u8) -> []Json {
     items := vec[Json]()
     p.i += 1
     if __json_peek(p) == close {
@@ -552,11 +552,11 @@ __json_items :: (p: *__JsonReader, close: u8) -> []Json {
     return items.items()
 }
 
-__json_in_number :: (c: u8) -> bool {
+fn __json_in_number(c: u8) -> bool {
     return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
 }
 
-__json_value :: (p: *__JsonReader, out: *Json) {
+fn __json_value(p: *__JsonReader, out: *Json) {
     c := __json_peek(p)
     if c == '{' {
         out.kind = JsonObject
@@ -592,7 +592,7 @@ __json_value :: (p: *__JsonReader, out: *Json) {
     }
 }
 
-__json_read :: (p: *__JsonReader) -> *Json {
+fn __json_read(p: *__JsonReader) -> *Json {
     root := new[Json]()
     __json_value(p, root)
     if p.ok && __json_peek(p) != 0 {
@@ -604,7 +604,7 @@ __json_read :: (p: *__JsonReader) -> *Json {
 // parses a JSON document into a tree; (nil, false) if the text is not valid JSON. Strings
 // without escapes and number texts are views into `text`, which must stay alive. Allocates
 // the tree; wrap in mark()/release() to discard it.
-json_parse :: (text: str) -> (*Json, bool) {
+fn json_parse(text: str) -> (*Json, bool) {
     p := __JsonReader{s: text, i: 0, ok: true, depth: 0}
     root := __json_read(&p)
     if !p.ok {
@@ -614,7 +614,7 @@ json_parse :: (text: str) -> (*Json, bool) {
 }
 
 // 1-based line of the first syntax error in JSON text, or 0 if it is valid (for diagnostics)
-json_error_line :: (text: str) -> i64 {
+fn json_error_line(text: str) -> i64 {
     m := mark()
     p := __JsonReader{s: text, i: 0, ok: true, depth: 0}
     __json_read(&p)
@@ -635,7 +635,7 @@ json_error_line :: (text: str) -> i64 {
 // without checks: root.get("window").get("size").at(0).as_i64(800)
 
 // the member `key` of an object, or nil if v is not an object or has no such member
-get :: (v: *Json, key: str) -> *Json {
+fn get(v: *Json, key: str) -> *Json {
     if v != nil && v.kind == JsonObject {
         for i in 0..len(v.items) {
             if v.items[i].key == key {
@@ -647,7 +647,7 @@ get :: (v: *Json, key: str) -> *Json {
 }
 
 // element i of an array (or member i of an object), or nil if there is none
-at :: (v: *Json, i: i64) -> *Json {
+fn at(v: *Json, i: i64) -> *Json {
     if v == nil || i < 0 || i >= len(v.items) {
         return nil
     }
@@ -655,23 +655,23 @@ at :: (v: *Json, i: i64) -> *Json {
 }
 
 // number of elements of an array or members of an object; 0 for anything else
-count :: (v: *Json) -> i64 {
+fn count(v: *Json) -> i64 {
     return if v == nil { 0 } else { len(v.items) }
 }
 
 // the string, or `default` if v is nil or not a string
-as_str :: (v: *Json, default: str) -> str {
+fn as_str(v: *Json, default: str) -> str {
     return if v != nil && v.kind == JsonString { v.text } else { default }
 }
 
 // the number, or `default` if v is nil or not a number
-as_f64 :: (v: *Json, default: f64) -> f64 {
+fn as_f64(v: *Json, default: f64) -> f64 {
     return if v != nil && v.kind == JsonNumber { v.num } else { default }
 }
 
 // the number as an integer (exact for integers written without fraction or exponent,
 // otherwise truncated), or `default` if v is nil or not a number
-as_i64 :: (v: *Json, default: i64) -> i64 {
+fn as_i64(v: *Json, default: i64) -> i64 {
     if v == nil || v.kind != JsonNumber {
         return default
     }
@@ -680,11 +680,11 @@ as_i64 :: (v: *Json, default: i64) -> i64 {
 }
 
 // the boolean, or `default` if v is nil or not a boolean
-as_bool :: (v: *Json, default: bool) -> bool {
+fn as_bool(v: *Json, default: bool) -> bool {
     return if v != nil && v.kind == JsonBool { v.num != 0.0 } else { default }
 }
 
 // true if v is a JSON null (false for nil, i.e. a missing value)
-is_null :: (v: *Json) -> bool {
+fn is_null(v: *Json) -> bool {
     return v != nil && v.kind == JsonNull
 }

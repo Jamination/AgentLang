@@ -9,11 +9,11 @@
 // tri.frag, compiled to SPIR-V ahead of time and embedded into the executable.
 use std.vk
 
-SIZE : u32 : 256
-FORMAT : i32 : VK_FORMAT_R8G8B8A8_UNORM
+const SIZE: u32 = 256
+const FORMAT: i32 = VK_FORMAT_R8G8B8A8_UNORM
 
 // The device and what is needed to allocate from it and submit to it.
-Gpu :: struct {
+struct Gpu {
     instance: *u8
     physical: *u8
     device: *u8
@@ -23,7 +23,7 @@ Gpu :: struct {
 }
 
 // The offscreen colour attachment.
-Target :: struct {
+struct Target {
     image: u64
     memory: u64
     view: u64
@@ -33,7 +33,7 @@ Target :: struct {
 
 // Creates an instance and a device on the first GPU that has a graphics queue. The text result
 // is empty on success and says what is missing otherwise.
-open_gpu :: () -> (Gpu, str) {
+fn open_gpu() -> (Gpu, str) {
     g: Gpu
     app := vk_application_info()
     app.pApplicationName = ptr("vk_triangle")
@@ -83,7 +83,7 @@ open_gpu :: () -> (Gpu, str) {
 }
 
 // Allocates device memory that satisfies `req` and has the property `flags`.
-allocate :: (g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
+fn allocate(g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
     index, ok := vk_find_memory_type(&g.memory, req.memoryTypeBits, flags)
     assert ok, "no suitable memory type"
     info := vk_memory_allocate_info()
@@ -95,7 +95,7 @@ allocate :: (g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
 }
 
 // Creates a buffer backed by host-visible memory; returns (buffer, memory).
-create_buffer :: (g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
+fn create_buffer(g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
     info := vk_buffer_create_info()
     info.size = size
     info.usage = usage
@@ -111,7 +111,7 @@ create_buffer :: (g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
 
 // Creates the colour image, its view, a render pass that clears it and leaves it ready to be
 // copied from, and the framebuffer.
-create_target :: (g: *Gpu) -> Target {
+fn create_target(g: *Gpu) -> Target {
     t: Target
     image_info := vk_image_create_info()
     image_info.imageType = VK_IMAGE_TYPE_2D
@@ -183,7 +183,7 @@ create_target :: (g: *Gpu) -> Target {
 
 // Creates the graphics pipeline: two shader stages, vertices of (vec2 position, vec3 colour),
 // a fixed viewport covering the image, no culling, no blending. Returns (pipeline, layout).
-create_pipeline :: (g: *Gpu, render_pass: u64) -> (u64, u64) {
+fn create_pipeline(g: *Gpu, render_pass: u64) -> (u64, u64) {
     vert, vert_ok := vk_create_shader_module(g.device, embed("../tests/sys/data/tri.vert.spv"))
     frag, frag_ok := vk_create_shader_module(g.device, embed("../tests/sys/data/tri.frag.spv"))
     assert vert_ok && frag_ok, "shader module creation failed"
@@ -259,7 +259,7 @@ create_pipeline :: (g: *Gpu, render_pass: u64) -> (u64, u64) {
 }
 
 // Writes tightly packed RGBA pixels (row 0 = top) as a 24-bit BMP file.
-write_bmp :: (path: str, rgba: []u8, width: i64, height: i64) -> bool {
+fn write_bmp(path: str, rgba: []u8, width: i64, height: i64) -> bool {
     row := (width * 3 + 3) / 4 * 4
     data := alloc[u8](54 + row * height)
     header := [6]i64{54 + row * height, 0, 54, 40, width, height}
@@ -282,7 +282,7 @@ write_bmp :: (path: str, rgba: []u8, width: i64, height: i64) -> bool {
     write_file(path, data)
 }
 
-main :: () -> i64 {
+fn main() -> i64 {
     g, problem := open_gpu()
     if problem.len != 0 {
         print("cannot use Vulkan:", problem)

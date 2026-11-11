@@ -1,26 +1,26 @@
 // loops whose bounds checks are hoisted or folded must still compute the right thing
-sum_fwd :: (a: []i64) -> i64 {
+fn sum_fwd(a: []i64) -> i64 {
     s := 0
     for i in 0..len(a) {
         s += a[i]
     }
     s
 }
-sum_rev :: (a: []i64) -> i64 {
+fn sum_rev(a: []i64) -> i64 {
     s := 0
     for i in len(a) - 1..=0 by -1 {
         s = s * 3 + a[i]
     }
     s
 }
-sum_off :: (a: []i64, k: i64) -> i64 {
+fn sum_off(a: []i64, k: i64) -> i64 {
     s := 0
     for i in 0..len(a) - k {
         s += a[i + k] - a[i]
     }
     s
 }
-mirror :: (a: []i64) {
+fn mirror(a: []i64) {
     n := len(a)
     for i in 0..n / 2 {
         t := a[i]
@@ -28,7 +28,7 @@ mirror :: (a: []i64) {
         a[n - 1 - i] = t
     }
 }
-sum2d :: (m: []i64, rows: i64, cols: i64) -> i64 {
+fn sum2d(m: []i64, rows: i64, cols: i64) -> i64 {
     s := 0
     for r in 0..rows {
         for c in 0..cols {
@@ -37,21 +37,21 @@ sum2d :: (m: []i64, rows: i64, cols: i64) -> i64 {
     }
     s
 }
-stride :: (a: []i64) -> i64 {
+fn stride(a: []i64) -> i64 {
     s := 0
     for i in 0..16 by 4 {
         s += a[i] + a[i + 1] * 2 + a[i + 2] * 3 + a[i + 3] * 4
     }
     s
 }
-sum32 :: (a: []i64, n: i32) -> i64 {
+fn sum32(a: []i64, n: i32) -> i64 {
     s := 0
     for i in 0..n {
         s += a[i] + a[n - 1 - i]
     }
     s
 }
-fib_shift :: () -> i64 {
+fn fib_shift() -> i64 {
     a := 0
     b := 1
     c := 1
@@ -63,7 +63,7 @@ fib_shift :: () -> i64 {
     }
     a + b + c
 }
-main :: () {
+fn main() {
     a := alloc[i64](16)
     for i in 0..16 {
         a[i] = i * i + 1

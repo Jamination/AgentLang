@@ -1,13 +1,13 @@
-noinline id8 :: (x: i8) -> i8 { x }
-noinline idu8 :: (x: u8) -> u8 { x }
-noinline id16 :: (x: i16) -> i16 { x }
-noinline idu16 :: (x: u16) -> u16 { x }
-noinline id32 :: (x: i32) -> i32 { x }
-noinline idu32 :: (x: u32) -> u32 { x }
-noinline id64 :: (x: i64) -> i64 { x }
-noinline idu64 :: (x: u64) -> u64 { x }
+noinline fn id8(x: i8) -> i8 { x }
+noinline fn idu8(x: u8) -> u8 { x }
+noinline fn id16(x: i16) -> i16 { x }
+noinline fn idu16(x: u16) -> u16 { x }
+noinline fn id32(x: i32) -> i32 { x }
+noinline fn idu32(x: u32) -> u32 { x }
+noinline fn id64(x: i64) -> i64 { x }
+noinline fn idu64(x: u64) -> u64 { x }
 
-main :: () {
+fn main() {
     // wrap-around in every width (values pass through calls so nothing is folded)
     a8 := id8(100)
     b8 := id8(50)

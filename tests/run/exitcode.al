@@ -1,4 +1,4 @@
-main :: () -> i64 {
+fn main() -> i64 {
     put("bye\n")
     return 42
 }

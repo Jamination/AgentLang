@@ -1,13 +1,13 @@
 // std.input: key / mouse state machine, text queue, event queue, key names, gamepad events.
 use std.input
 
-key :: (kind: EventKind, k: i64) -> Event { Event{kind: kind, key: k} }
+fn key(kind: EventKind, k: i64) -> Event { Event{kind: kind, key: k} }
 
-show :: (i: *Input, k: i64) {
+fn show(i: *Input, k: i64) {
     print(key_name(k), i.key_down(k), i.key_pressed(k), i.key_released(k), i.key_repeated(k))
 }
 
-main :: () {
+fn main() {
     i: Input
     // frame 1: press A, tap B (down and up within the frame)
     i.begin_frame()

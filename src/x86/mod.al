@@ -1,16 +1,16 @@
 // The x86-64 backend driver: reachable functions, block layout, float constant pool.
 
-Compiled :: struct {
+struct Compiled {
     fid: i64
     code: Code
 }
 
-Output :: struct {
+struct Output {
     funcs: Vec[Compiled]
     fpool: Vec[Bits128]
 }
 
-x86_reachable_funcs :: (m: *Module) -> Vec[i64] {
+fn x86_reachable_funcs(m: *Module) -> Vec[i64] {
     seen := vec_fill(m.funcs.len, false)
     work := vec_of([]i64{m.entry})
     seen[m.entry] = true
@@ -48,7 +48,7 @@ x86_reachable_funcs :: (m: *Module) -> Vec[i64] {
     return out
 }
 
-x86_compile :: (m: *Module, dump_asm: bool) -> Output {
+fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     fids := x86_reachable_funcs(m)
     fpool := vec[Bits128]()
     fpool_ix := map[Bits128, i64]()
@@ -130,7 +130,7 @@ x86_compile :: (m: *Module, dump_asm: bool) -> Output {
 
 // Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,
 // with blocks that inevitably trap moved to the end.
-x86_block_layout :: (f: *Func) -> Vec[i64] {
+fn x86_block_layout(f: *Func) -> Vec[i64] {
     n := f.blocks.len
     seen := vec_fill(n, false)
     post := vec[i64]()

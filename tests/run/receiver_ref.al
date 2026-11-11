@@ -1,74 +1,74 @@
 // x.f(...) takes &x automatically when f's first parameter is a pointer, for every
 // addressable x (variables, fields, elements; scalars as well as aggregates)
-Op :: enum { Add, Sub, Jmp }
-Shape :: enum { Circle(f64), Square(f64) }
-MFunc :: struct { n: i64, regs: Vec[u8] }
-Sel :: struct { mf: MFunc, count: i64, ops: [2]Op, pos: vec3, cur: Op, pair: (i64, Op) }
-Wrap[T] :: struct { v: T }
-IntPtr :: type *i64
+enum Op { Add, Sub, Jmp }
+enum Shape { Circle(f64), Square(f64) }
+struct MFunc { n: i64, regs: Vec[u8] }
+struct Sel { mf: MFunc, count: i64, ops: [2]Op, pos: vec3, cur: Op, pair: (i64, Op) }
+struct Wrap[T] { v: T }
+type IntPtr = *i64
 
-is_pure :: (self: *Op) -> bool { *self != Jmp }
-next :: (self: *Op) {
+fn is_pure(self: *Op) -> bool { *self != Jmp }
+fn next(self: *Op) {
     *self = match *self {
         Add => Sub
         Sub => Jmp
         Jmp => Add
     }
 }
-incr :: (p: *i64) { *p += 1 }
-add :: (p: *i64, k: i64) -> i64 {
+fn incr(p: *i64) { *p += 1 }
+fn add(p: *i64, k: i64) -> i64 {
     *p += k
     return *p
 }
-bump :: (p: IntPtr) { *p += 100 }
-flip :: (v: *vec3) { v.x = -v.x }
-halve :: (x: *f64) { *x /= 2.0 }
-toggle :: (b: *bool) { *b = !*b }
-grow :: (s: *Shape) {
+fn bump(p: IntPtr) { *p += 100 }
+fn flip(v: *vec3) { v.x = -v.x }
+fn halve(x: *f64) { *x /= 2.0 }
+fn toggle(b: *bool) { *b = !*b }
+fn grow(s: *Shape) {
     match *s {
         Circle(r) => { *s = Circle(r * 2.0) }
         Square(a) => { *s = Square(a + 1.0) }
     }
 }
-new_vreg :: (f: *MFunc, c: u8) -> i64 {
+fn new_vreg(f: *MFunc, c: u8) -> i64 {
     f.regs.push(c)
     f.n += 1
     return f.n
 }
-retarget :: (pp: **i64, to: *i64) { *pp = to }
-first_op :: (s: *[2]Op) -> Op { s[0] }
-set_len :: (xs: *[]i64, n: i64) { *xs = (*xs)[..n] }
+fn retarget(pp: **i64, to: *i64) { *pp = to }
+fn first_op(s: *[2]Op) -> Op { s[0] }
+fn set_len(xs: *[]i64, n: i64) { *xs = (*xs)[..n] }
 
 // overloads: the receiver's type picks the definition
-reset :: (p: *i64) { *p = 0 }
-reset :: (p: *f64) { *p = 0.5 }
-reset :: (p: *Op) { *p = Add }
-reset :: (f: *MFunc) { f.n = 0 }
-reset :: (v: *vec3) { *v = vec3(0.0) }
-describe :: (x: i64) -> str { "value" }
-describe :: (x: f64) -> str { "float" }
+fn reset(p: *i64) { *p = 0 }
+fn reset(p: *f64) { *p = 0.5 }
+fn reset(p: *Op) { *p = Add }
+fn reset(f: *MFunc) { f.n = 0 }
+fn reset(v: *vec3) { *v = vec3(0.0) }
+fn describe(x: i64) -> str { "value" }
+fn describe(x: f64) -> str { "float" }
 
 // generics
-set_to[T] :: (p: *T, x: T) { *p = x }
-take[T] :: (p: *T) -> T {
+fn set_to[T](p: *T, x: T) { *p = x }
+fn take[T](p: *T) -> T {
     zero: T
     old := *p
     *p = zero
     return old
 }
-put_in[T] :: (w: *Wrap[T], x: T) { w.v = x }
-twice[T] :: (x: T) -> (T, T) { (x, x) }
+fn put_in[T](w: *Wrap[T], x: T) { w.v = x }
+fn twice[T](x: T) -> (T, T) { (x, x) }
 
 // by value: the reverse direction and plain values keep working
-double :: (x: i64) -> i64 { x * 2 }
-name :: (o: Op) -> str { fmt(o) }
-total :: (m: MFunc) -> i64 { m.n + m.regs.len }
+fn double(x: i64) -> i64 { x * 2 }
+fn name(o: Op) -> str { fmt(o) }
+fn total(m: MFunc) -> i64 { m.n + m.regs.len }
 
 counter: i64
 g_op: Op
 g_sel: Sel
 
-go :: (self: *Sel) -> i64 {
+fn go(self: *Sel) -> i64 {
     a := self.mf.new_vreg(0)
     self.count.incr()
     self.ops[1].next()
@@ -79,17 +79,17 @@ go :: (self: *Sel) -> i64 {
     return a
 }
 
-side :: (p: *i64) -> i64 {
+fn side(p: *i64) -> i64 {
     *p = 1000
     return 1
 }
 
-make :: () -> i64 { 41 }
+fn make() -> i64 { 41 }
 
-LIMIT :: 7
-TABLE :: [2]Op{Sub, Jmp}
+const LIMIT = 7
+const TABLE = [2]Op{Sub, Jmp}
 
-main :: () {
+fn main() {
     // locals of scalar type
     op := Add
     print(op.is_pure())

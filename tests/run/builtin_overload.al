@@ -1,47 +1,47 @@
 // Functions named like builtins live next to the builtins: a call uses a declared function
 // when one accepts the arguments, and the builtin otherwise. Arguments are evaluated once.
-P :: struct { x: i64, y: i64 }
-Types :: struct { n: i64 }
-Stack :: struct { items: Vec[i64] }
+struct P { x: i64, y: i64 }
+struct Types { n: i64 }
+struct Stack { items: Vec[i64] }
 
 count: i64
 
-mk :: () -> []i64 {
+fn mk() -> []i64 {
     count += 1
     return []i64{1, 2, 3}
 }
 
-mkp :: () -> P {
+fn mkp() -> P {
     count += 1
     return P{1, 2}
 }
 
-tick :: (x: i64) -> i64 {
+fn tick(x: i64) -> i64 {
     count += 1
     x
 }
 
-bump :: (p: *P) -> i64 {
+fn bump(p: *P) -> i64 {
     p.x += 10
     p.x
 }
 
-ptr :: (self: *Types, t: i64) -> i64 { t + self.n }
-len :: (t: *Types) -> i64 { t.n }
-len :: (s: *Stack) -> i64 { s.items.len * 100 }
-len :: (t: Types, extra: i64) -> i64 { t.n + extra }
-clone :: (t: Types) -> Types { Types{t.n + 1} }
-clone[T] :: (s: *Stack, x: T) -> T { x }
-hash :: (a: P, b: i64) -> i64 { a.x * 1000 + b }
-print :: (p: P) { put("P<", p.x, ",", p.y, ">\n") }
-sqrt :: (t: Types) -> i64 { t.n * t.n }
-fmt :: (t: Types) -> str { "Types!" }
-rotl :: (s: str, n: i64) -> str { concat(s[n..], s[..n]) }
-panic :: (t: Types) -> i64 { -t.n }
-cast[T] :: (t: Types) -> T { T(t.n) }
-sizeof[T] :: (t: Types) -> i64 { t.n + sizeof[T]() }
+fn ptr(self: *Types, t: i64) -> i64 { t + self.n }
+fn len(t: *Types) -> i64 { t.n }
+fn len(s: *Stack) -> i64 { s.items.len * 100 }
+fn len(t: Types, extra: i64) -> i64 { t.n + extra }
+fn clone(t: Types) -> Types { Types{t.n + 1} }
+fn clone[T](s: *Stack, x: T) -> T { x }
+fn hash(a: P, b: i64) -> i64 { a.x * 1000 + b }
+fn print(p: P) { put("P<", p.x, ",", p.y, ">\n") }
+fn sqrt(t: Types) -> i64 { t.n * t.n }
+fn fmt(t: Types) -> str { "Types!" }
+fn rotl(s: str, n: i64) -> str { concat(s[n..], s[..n]) }
+fn panic(t: Types) -> i64 { -t.n }
+fn cast[T](t: Types) -> T { T(t.n) }
+fn sizeof[T](t: Types) -> i64 { t.n + sizeof[T]() }
 
-main :: () {
+fn main() {
     ty := Types{3}
     st := Stack{vec[i64]()}
     st.items.push(5)

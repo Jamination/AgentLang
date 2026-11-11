@@ -1,22 +1,22 @@
 4:5: error: the nested function `gen[i64].id` cannot have type parameters of its own (`[U]`): it may use the t
-9:35: error: `k` is a variable of the enclosing function `main`: the nested function `main.addk` does not see
-10:39: error: `k` is a variable of the enclosing function `main`: the anonymous function `main.fn@10:17` does
-11:18: error: `k` is a variable of the enclosing function `main`: the nested function `main.setk` does not see
+9:34: error: `k` is a variable of the enclosing function `main`: the nested function `main.addk` does not see
+10:41: error: `k` is a variable of the enclosing function `main`: the anonymous function `main.fn@10:17` does
+11:17: error: `k` is a variable of the enclosing function `main`: the nested function `main.setk` does not see
 12:5: error: `addk` is already declared in this scope: a nested function needs a name that no variable or othe
 13:5: error: `k` is already declared in this scope: a nested function needs a name that no variable or other n
 14:10: error: unknown function `early`: the nested function `early` is declared at line 15, after this use (a
-16:31: error: unknown identifier `later_var`: `later_var` is a variable of the enclosing function `main` (line
-19:21: error: `break`/`continue` outside of a loop (the nested function `main.brk` cannot leave a loop of the
-20:26: error: `i` is a variable of the enclosing function `main`: the anonymous function `main.fn@20:14` does
-23:22: error: `continue lab`: there is no loop labelled `lab` around this statement in the nested function `ma
+16:30: error: unknown identifier `later_var`: `later_var` is a variable of the enclosing function `main` (line
+19:20: error: `break`/`continue` outside of a loop (the nested function `main.brk` cannot leave a loop of the
+20:28: error: `i` is a variable of the enclosing function `main`: the anonymous function `main.fn@20:14` does
+23:21: error: `continue lab`: there is no loop labelled `lab` around this statement in the nested function `ma
 26:8: error: function `two(a, b)` expects 2 argument(s), got 1
 27:12: error: argument `b` of `two`: expected i64, found str
 28:5: error: `two` is a nested function: it is not assignable
 29:13: error: the nested function `two` takes no type arguments (a nested function has no type parameters of i
-30:26: error: function `main.noret` must return a value of type i64
+30:25: error: function `main.noret` must return a value of type i64
 31:5: error: `i64` is a builtin type name
-32:33: error: unknown function `later_fn`: the nested function `later_fn` is declared at line 33, after `main.
+32:32: error: unknown function `later_fn`: the nested function `later_fn` is declared at line 33, after `main.
 37:10: error: unknown function `local`
-38:24: error: type mismatch: expected (i64) -> i64, found (i64, i64) -> i64
+38:26: error: type mismatch: expected (i64) -> i64, found (i64, i64) -> i64
 39:11: error: argument `f` of `apply`: expected (i64) -> i64, found (str) -> i64
-43:24: error: `p` is a variable of the enclosing function `param`: the anonymous function `param.fn@43:12` doe
+43:26: error: `p` is a variable of the enclosing function `param`: the anonymous function `param.fn@43:12` doe

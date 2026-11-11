@@ -1,6 +1,6 @@
 // Redundant load elimination, store-to-load forwarding and local dead store elimination.
 
-LoadelimAvail :: struct {
+struct LoadelimAvail {
     ptr: i64,
     mref_addr: Addr,
     size: i64,
@@ -10,11 +10,11 @@ LoadelimAvail :: struct {
     pending_store: Opt[i64], // a store not yet observed by any possible reader
 }
 
-loadelim_mr :: (a: *LoadelimAvail) -> MemRef {
+fn loadelim_mr(a: *LoadelimAvail) -> MemRef {
     return MemRef{addr: a.mref_addr, size: a.size, class: a.class, ptr: a.ptr}
 }
 
-loadelim_run_find :: (repl: []i64, v0: i64) -> i64 {
+fn loadelim_run_find(repl: []i64, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -22,7 +22,7 @@ loadelim_run_find :: (repl: []i64, v0: i64) -> i64 {
     return v
 }
 
-loadelim_run :: (f: *Func) -> bool {
+fn loadelim_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     esc := alias_escaped_allocas(f)
     repl := vec_fill(f.insts.len, NOV)

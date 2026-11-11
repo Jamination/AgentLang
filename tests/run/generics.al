@@ -1,18 +1,18 @@
-Pair[A, B] :: struct { a: A, b: B }
-Stack[T] :: struct { items: []T, n: i64 }
+struct Pair[A, B] { a: A, b: B }
+struct Stack[T] { items: []T, n: i64 }
 
-max2[T] :: (a: T, b: T) -> T {
+fn max2[T](a: T, b: T) -> T {
     if a > b { a } else { b }
 }
-swap2[T] :: (p: *T, q: *T) {
+fn swap2[T](p: *T, q: *T) {
     t := *p
     *p = *q
     *q = t
 }
-mk[T] :: () -> Stack[T] {
+fn mk[T]() -> Stack[T] {
     Stack[T]{items: alloc[T](4), n: 0}
 }
-spush[T] :: (s: *Stack[T], x: T) {
+fn spush[T](s: *Stack[T], x: T) {
     if s.n == len(s.items) {
         bigger := alloc[T](s.n * 2)
         for i in 0..s.n {
@@ -23,21 +23,21 @@ spush[T] :: (s: *Stack[T], x: T) {
     s.items[s.n] = x
     s.n += 1
 }
-spop[T] :: (s: *Stack[T]) -> T {
+fn spop[T](s: *Stack[T]) -> T {
     s.n -= 1; s.items[s.n]
 }
-map[T, U] :: (a: []T, f: (T) -> U) -> []U {
+fn map[T, U](a: []T, f: fn(T) -> U) -> []U {
     out := alloc[U](len(a))
     for i, x in a {
         out[i] = f(x)
     }
     out
 }
-sq :: (x: i64) -> i64 { x * x }
-half :: (x: i64) -> f64 { f64(x) / 2.0 }
-first[A, B] :: (p: Pair[A, B]) -> A { p.a }
+fn sq(x: i64) -> i64 { x * x }
+fn half(x: i64) -> f64 { f64(x) / 2.0 }
+fn first[A, B](p: Pair[A, B]) -> A { p.a }
 
-main :: () {
+fn main() {
     print(max2(3, 9), max2(2.5, 1.5), max2(u8(200), 100))
     x := 1; y := 2
     swap2(&x, &y)

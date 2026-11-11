@@ -2,9 +2,9 @@
 // XEvent accessors and the framebuffer fit + conversion used by `present`.
 use std.window
 
-px :: (v: u32) -> str { pad_left(hex(u64(v)), 6, '0') }
+fn px(v: u32) -> str { pad_left(hex(u64(v)), 6, '0') }
 
-dump :: (dst: []u32, w: i64, h: i64) {
+fn dump(dst: []u32, w: i64, h: i64) {
     for y in 0..h {
         for x in 0..w {
             put(px(dst[y * w + x]), " ")
@@ -13,7 +13,7 @@ dump :: (dst: []u32, w: i64, h: i64) {
     }
 }
 
-main :: () {
+fn main() {
     // keysyms -> key codes
     print(key_name(key_from_keysym('a')), key_name(key_from_keysym('Z')), key_name(key_from_keysym('0')), key_name(key_from_keysym('9')))
     syms := []u64{0x20, 0xFF1B, 0xFF0D, 0xFF09, 0xFF08, 0xFF51, 0xFF52, 0xFF53, 0xFF54, 0xFFE1, 0xFFE2, 0xFFE3, 0xFFE4,

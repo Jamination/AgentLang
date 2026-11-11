@@ -1,34 +1,34 @@
 // Untyped literals and constants in calls of names shared by a builtin and declared functions,
 // and a library whose functions are named like builtins of the program.
-NAME :: "name"
-YES :: true
-N :: 3
-F :: 1.5
-Opt[T] :: enum { Some(T), None }
-Dir :: enum { Left, Right }
+const NAME = "name"
+const YES = true
+const N = 3
+const F = 1.5
+enum Opt[T] { Some(T), None }
+enum Dir { Left, Right }
 
-print :: (s: str) { put("<", s, ">\n") }
-len :: (n: i64) -> i64 { n * 2 }
-len :: (b: bool) -> i64 { 1 }
-hash :: (x: f64) -> i64 { 7 }
-hash :: (d: Dir) -> i64 { 8 }
-clone :: (o: Opt[i64]) -> i64 {
+fn print(s: str) { put("<", s, ">\n") }
+fn len(n: i64) -> i64 { n * 2 }
+fn len(b: bool) -> i64 { 1 }
+fn hash(x: f64) -> i64 { 7 }
+fn hash(d: Dir) -> i64 { 8 }
+fn clone(o: Opt[i64]) -> i64 {
     match o {
         Some(v) => v
         None => -1
     }
 }
-clone :: (p: *i64) -> i64 { 0 }
-fmt[T] :: (x: T, y: T) -> T { y }
-ptr :: (k: i64) -> i64 { k + 1 }
-put :: (d: Dir) { put("dir ") }
+fn clone(p: *i64) -> i64 { 0 }
+fn fmt[T](x: T, y: T) -> T { y }
+fn ptr(k: i64) -> i64 { k + 1 }
+fn put(d: Dir) { put("dir ") }
 
-show[T] :: (x: T) -> str {
+fn show[T](x: T) -> str {
     // generic code: the choice is made per instantiation
     return fmt(len(x), "/", hash(x) == 7)
 }
 
-main :: () {
+fn main() {
     print(NAME)                      // declared: a text constant
     print(N)                         // builtin
     print("lit")

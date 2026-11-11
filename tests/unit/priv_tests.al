@@ -1,12 +1,12 @@
 // `test` blocks see the private declarations of their file.
-priv Acc :: struct { total: i64 }
-priv STEP :: 3
+priv struct Acc { total: i64 }
+priv const STEP = 3
 priv runs: i64
-priv add :: (a: *Acc, x: i64) {
+priv fn add(a: *Acc, x: i64) {
     a.total += x
     runs += 1
 }
-priv twice[T] :: (x: T) -> T { x + x }
+priv fn twice[T](x: T) -> T { x + x }
 
 test "private function and struct" {
     a: Acc
@@ -33,11 +33,11 @@ test "failing with a private call" {
     assert a.total == STEP, fmt("got ", a)
 }
 
-main :: () {}
+fn main() {}
 
 // a private function named like a builtin: the builtin still takes what it does not accept
-Wrapped :: struct { n: i64 }
-priv len :: (w: Wrapped) -> i64 { w.n }
+struct Wrapped { n: i64 }
+priv fn len(w: Wrapped) -> i64 { w.n }
 test "priv builtin name" {
     assert len(Wrapped{n: 7}) == 7
     assert len("abc") == 3

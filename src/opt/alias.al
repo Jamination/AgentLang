@@ -1,18 +1,18 @@
 // Simple alias analysis: identified objects (allocas, globals), constant offsets, type-based classes.
 
-Base :: enum {
+enum Base {
     BaseAlloca(i64),
     BaseGlobal(i64),
     BaseUnknown(i64),
 }
 
-Addr :: struct {
+struct Addr {
     base: Base,
     off: Opt[i64],
 }
 
 // `==` of two bases (derive(PartialEq))
-eq :: (a: Base, b: Base) -> bool {
+fn eq(a: Base, b: Base) -> bool {
     match a {
         BaseAlloca(x) => {
             match b {
@@ -37,7 +37,7 @@ eq :: (a: Base, b: Base) -> bool {
 }
 
 // off.map(|o| o.wrapping_add(k))
-alias_off_add :: (off: Opt[i64], k: i64) -> Opt[i64] {
+fn alias_off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     match off {
         Some(o) => return Some(o + k)
         None => {}
@@ -46,7 +46,7 @@ alias_off_add :: (off: Opt[i64], k: i64) -> Opt[i64] {
 }
 
 // a.is_some() && a == b
-alias_off_some_eq :: (a: Opt[i64], b: Opt[i64]) -> bool {
+fn alias_off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
     match a {
         Some(x) => {
             match b {
@@ -59,7 +59,7 @@ alias_off_some_eq :: (a: Opt[i64], b: Opt[i64]) -> bool {
     return false
 }
 
-alias_decompose :: (f: *Func, addr: i64) -> Addr {
+fn alias_decompose(f: *Func, addr: i64) -> Addr {
     v := addr
     off: Opt[i64] = Some(0)
     depth := 0
@@ -108,7 +108,7 @@ alias_decompose :: (f: *Func, addr: i64) -> Addr {
     }
 }
 
-alias_decompose_obj :: (f: *Func, v: i64, depth: i64) -> Opt[Base] {
+fn alias_decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     if depth > 32 {
         return None
     }
@@ -131,7 +131,7 @@ alias_decompose_obj :: (f: *Func, v: i64, depth: i64) -> Opt[Base] {
 }
 
 // allocas whose address may be observed by something other than direct loads/stores
-alias_escaped_allocas :: (f: *Func) -> Vec[bool] {
+fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     n := f.insts.len
     esc := vec_fill(n, false)
     // derived[v] = alloca this pointer value is derived from
@@ -192,19 +192,19 @@ alias_escaped_allocas :: (f: *Func) -> Vec[bool] {
     return esc
 }
 
-MemRef :: struct {
+struct MemRef {
     addr: Addr,
     size: i64,
     class: i64,
     ptr: i64, // the address value itself
 }
 
-alias_memref :: (f: *Func, v: i64) -> MemRef {
+fn alias_memref(f: *Func, v: i64) -> MemRef {
     i := &f.insts[v]
     return MemRef{addr: alias_decompose(f, i.args[0]), size: i.ty.size(), class: i.aux, ptr: i.args[0]}
 }
 
-alias_may_alias :: (a: *MemRef, b: *MemRef, esc: []bool) -> bool {
+fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
     match a.addr.base {
         BaseAlloca(x) => {
             match b.addr.base {
@@ -260,7 +260,7 @@ alias_may_alias :: (a: *MemRef, b: *MemRef, esc: []bool) -> bool {
     return types_may_alias_class(a.class, b.class)
 }
 
-alias_must_alias :: (a: *MemRef, b: *MemRef) -> bool {
+fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
     if a.size != b.size {
         return false
     }

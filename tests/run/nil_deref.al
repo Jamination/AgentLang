@@ -1,11 +1,11 @@
-N :: struct { v: i64, next: *N }
-last :: (n: *N) -> i64 {
+struct N { v: i64, next: *N }
+fn last(n: *N) -> i64 {
     while n.next != nil {
         n = n.next
     }
     n.v
 }
-main :: () {
+fn main() {
     a := &N{1, &N{2, nil}}
     print(last(a))
     p: *N = nil

@@ -1,6 +1,6 @@
 // Function inlining.
 
-inline_cost :: (f: *Func) -> i64 {
+fn inline_cost(f: *Func) -> i64 {
     n := 0
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
@@ -18,14 +18,14 @@ inline_cost :: (f: *Func) -> i64 {
 }
 
 // bmap[&b]: the block must be present
-inline_bmap_at :: (bmap: *Map[i64, i64], b: i64) -> i64 {
+fn inline_bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
     nb, found := bmap.get(b)
     assert found, "inline: block not in map"
     return nb
 }
 
 // inline one call site: `call` (in block `cb`) to callee `g`
-inline_inline_call :: (f: *Func, cb: i64, call: i64, g: *Func) {
+fn inline_inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     pos := index_of(f.blocks[cb].insts.items(), call)
     assert pos >= 0
     call_inst := clone(&f.insts[call])
@@ -196,7 +196,7 @@ inline_inline_call :: (f: *Func, cb: i64, call: i64, g: *Func) {
     f.apply_repl(&repl)
 }
 
-Policy :: struct {
+struct Policy {
     small: i64,
     hinted: i64,
     single_site: i64,
@@ -204,7 +204,7 @@ Policy :: struct {
 }
 
 // inline eligible calls in function `fid`; `done[g]` marks callees that are final
-inline_run :: (m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken: []bool, pol: *Policy) -> bool {
+fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken: []bool, pol: *Policy) -> bool {
     any := false
     budget := 400
     sizes := map[i64, i64]()

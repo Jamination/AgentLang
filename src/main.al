@@ -43,7 +43,7 @@ PRELUDE: str
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
 STD_MODULES: Vec[(str, str)]
 
-main_load_embedded :: () {
+fn main_load_embedded() {
     PRELUDE = embed("prelude.al")
     STD_MODULES = vec[(str, str)]()
     STD_MODULES.push(("math", embed("../std/math.al")))
@@ -68,7 +68,7 @@ CORE_MODULES := [4]str{"math", "rand", "time", "mem"}
 
 // ---------- paths (std::path in the Rust source) ----------
 // Path::join
-main_path_join :: (dir: str, p: str) -> str {
+fn main_path_join(dir: str, p: str) -> str {
     if starts_with(p, "/") || len(dir) == 0 {
         return p
     }
@@ -80,7 +80,7 @@ main_path_join :: (dir: str, p: str) -> str {
 
 // the components of a path as Rust's Path compares them: a leading "/" is a component,
 // empty components and "." are dropped, except a "." at the start of a relative path
-main_path_comps :: (p: str) -> Vec[str] {
+fn main_path_comps(p: str) -> Vec[str] {
     out := vec[str]()
     if starts_with(p, "/") {
         out.push("/")
@@ -101,7 +101,7 @@ main_path_comps :: (p: str) -> Vec[str] {
 }
 
 // the path without trailing separators and trailing "." components
-main_path_trim :: (p: str) -> str {
+fn main_path_trim(p: str) -> str {
     n := len(p)
     loop {
         if n > 1 && p[n - 1] == '/' {
@@ -116,7 +116,7 @@ main_path_trim :: (p: str) -> str {
 }
 
 // Path::file_name: the last component, unless the path ends in ".." or has none
-main_path_file_name :: (p: str) -> Opt[str] {
+fn main_path_file_name(p: str) -> Opt[str] {
     t := main_path_trim(p)
     k := len(t)
     while k > 0 && t[k - 1] != '/' {
@@ -130,7 +130,7 @@ main_path_file_name :: (p: str) -> Opt[str] {
 }
 
 // Path::parent: the path without its last component
-main_path_parent :: (p: str) -> Opt[str] {
+fn main_path_parent(p: str) -> Opt[str] {
     t := main_path_trim(p)
     if len(t) == 0 || t == "/" {
         return None
@@ -147,7 +147,7 @@ main_path_parent :: (p: str) -> Opt[str] {
 }
 
 // Path::file_stem: the file name without its last extension
-main_path_file_stem :: (p: str) -> Opt[str] {
+fn main_path_file_stem(p: str) -> Opt[str] {
     match main_path_file_name(p) {
         Some(name) => {
             k := len(name) - 1
@@ -167,7 +167,7 @@ main_path_file_stem :: (p: str) -> Opt[str] {
 
 // std::fs::canonicalize, as far as the driver needs it (to recognise a file that is included
 // twice): the absolute path with "." and ".." resolved textually; symbolic links are kept
-main_canonical :: (path: str) -> str {
+fn main_canonical(path: str) -> str {
     full := path
     if !starts_with(path, "/") {
         buf := alloc[u8](4096)
@@ -194,7 +194,7 @@ main_canonical :: (path: str) -> str {
 }
 
 // the text of std::io::Error for an errno
-main_os_error :: (errno: i64) -> str {
+fn main_os_error(errno: i64) -> str {
     text := match errno {
         1 => "Operation not permitted"
         2 => "No such file or directory"
@@ -219,7 +219,7 @@ main_os_error :: (errno: i64) -> str {
 }
 
 // std::fs::read_to_string: (text, error); the error text is empty on success
-main_read_to_string :: (path: str) -> (str, str) {
+fn main_read_to_string(path: str) -> (str, str) {
     // read_file does not say why it failed: look at the file first
     fd := syscall(2, cstr(path), 0, 0)
     if fd < 0 {
@@ -238,7 +238,7 @@ main_read_to_string :: (path: str) -> (str, str) {
     return (text, "")
 }
 
-main_std_text :: (name: str) -> Opt[str] {
+fn main_std_text(name: str) -> Opt[str] {
     mi := -1
     for i in 0..STD_MODULES.len {
         if STD_MODULES[i].0 == name {
@@ -259,7 +259,7 @@ main_std_text :: (name: str) -> Opt[str] {
     return Some(STD_MODULES[mi].1)
 }
 
-Args :: struct {
+struct Args {
     cmd: str
     input: str
     output: Opt[str]
@@ -270,14 +270,14 @@ Args :: struct {
     rest: Vec[str]
 }
 
-main_usage :: () -> never {
+fn main_usage() -> never {
     eprint(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
         "options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
 }
 
-main_parse_args :: () -> Args {
+fn main_parse_args() -> Args {
     all := args()
     av := vec[str]()
     for i in 1..len(all) {
@@ -332,7 +332,7 @@ main_parse_args :: () -> Args {
     return a
 }
 
-Sources :: struct {
+struct Sources {
     names: Vec[str]
     decls: Vec[Decl]
     errs: Vec[Diag]
@@ -340,7 +340,7 @@ Sources :: struct {
     std_files: Vec[i64]
 }
 
-add_text :: (self: *Sources, name: str, text: str, dir: Opt[str]) {
+fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
     file := self.names.len
     self.names.push(name)
     toks := lexer_lex(text, file, &self.errs)
@@ -385,7 +385,7 @@ add_text :: (self: *Sources, name: str, text: str, dir: Opt[str]) {
     }
 }
 
-add_file :: (self: *Sources, path: str, from: Opt[Pos]) {
+fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
     // canonicalize fails for a file that does not exist: the path is then used as it is
     canon := path
     if syscall(21, cstr(path), 0) == 0 {
@@ -412,7 +412,7 @@ add_file :: (self: *Sources, path: str, from: Opt[Pos]) {
 
 main_json: bool
 
-main_json_str :: (s: str) -> str {
+fn main_json_str(s: str) -> str {
     o := vec[u8]()
     o.push('"')
     for c in s {
@@ -433,7 +433,7 @@ main_json_str :: (s: str) -> str {
 }
 
 // sort key (file, line, col)
-main_report_less :: (a: Diag, b: Diag) -> bool {
+fn main_report_less(a: Diag, b: Diag) -> bool {
     if a.pos.file != b.pos.file {
         return a.pos.file < b.pos.file
     }
@@ -444,14 +444,14 @@ main_report_less :: (a: Diag, b: Diag) -> bool {
 }
 
 // names.get(file) or "?"
-main_file_name :: (names: *Vec[str], file: i64) -> str {
+fn main_file_name(names: *Vec[str], file: i64) -> str {
     if file >= 0 && file < names.len {
         return names[file]
     }
     return "?"
 }
 
-main_report :: (names: *Vec[str], errs: *Vec[Diag]) -> bool {
+fn main_report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     if errs.is_empty() {
         return false
     }
@@ -486,7 +486,7 @@ main_report :: (names: *Vec[str], errs: *Vec[Diag]) -> bool {
 }
 
 // "priv " in front of the signature of a private declaration
-main_sigs_priv :: (name: str) -> str {
+fn main_sigs_priv(name: str) -> str {
     if ast_is_private(name) {
         return "priv "
     }
@@ -494,7 +494,7 @@ main_sigs_priv :: (name: str) -> str {
 }
 
 // `alc sigs`: one line per declaration, for a quick overview of a file
-main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
+fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
     for d in decls {
         pos: Pos
         text := ""
@@ -546,7 +546,7 @@ main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
 }
 
 // is a declaration shown by `alc sigs <file> -- std`?
-main_sigs_visible :: (d: *Decl) -> bool {
+fn main_sigs_visible(d: *Decl) -> bool {
     match *d {
         DeclFn(f) => {
             return !starts_with(f.name, "__")
@@ -559,7 +559,7 @@ main_sigs_visible :: (d: *Decl) -> bool {
     return true
 }
 
-main_real_main :: () -> i64 {
+fn main_real_main() -> i64 {
     ar := main_parse_args()
     test_mode := ar.cmd == "test"
     if !(ar.cmd == "build" || ar.cmd == "run" || ar.cmd == "test" || ar.cmd == "check" || ar.cmd == "sigs") {
@@ -740,7 +740,7 @@ main_real_main :: () -> i64 {
     return 0
 }
 
-main :: () -> i64 {
+fn main() -> i64 {
     // deep recursion in the frontend and SSA construction: use a big stack
     ensure_stack(1 << 30)
     main_t0 = clock_ns()
@@ -752,7 +752,7 @@ main_t0: i64
 
 // ALC_DEBUG=mem: memory in use and time since the start after each phase, and the largest
 // size of the work heap
-main_mem :: (phase: str) {
+fn main_mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
         eprint(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - main_t0) / 1000000, " ms\n"))

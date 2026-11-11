@@ -1,5 +1,5 @@
 // values derived from loop counters and used after the loop
-main :: () {
+fn main() {
     x := 0
     y := 100
     for i in 0..64 {

@@ -1,5 +1,5 @@
-f :: (a: i64, b: f64) -> i64 { a }
-main :: () {
+fn f(a: i64, b: f64) -> i64 { a }
+fn main() {
     x := 5
     y := 2.5
     z := x + y
@@ -10,4 +10,4 @@ main :: () {
     s := "str" + 1
     return 5
 }
-g :: () -> i64 { }
+fn g() -> i64 { }

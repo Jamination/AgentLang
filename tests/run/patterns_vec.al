@@ -1,15 +1,15 @@
 // Patterns over payloads with vectors, structs and Vecs.
-Body :: enum { Ball(vec3, f32), Box(vec3, vec3), Ghost }
-Hit :: struct { at: vec3, t: f32 }
-Ray :: enum { Miss, At(Hit), Many(Vec[Hit]) }
-size :: (b: Body) -> f32 {
+enum Body { Ball(vec3, f32), Box(vec3, vec3), Ghost }
+struct Hit { at: vec3, t: f32 }
+enum Ray { Miss, At(Hit), Many(Vec[Hit]) }
+fn size(b: Body) -> f32 {
     match b {
         Ball(_, r) => r * 2.0
         Box(lo, hi) => length(hi - lo)
         Ghost => 0.0
     }
 }
-nudge :: (b: *Body, d: vec3) {
+fn nudge(b: *Body, d: vec3) {
     match *b {
         Ball(&c, _) => { *c = *c + d }
         Box(&lo, &hi) => {
@@ -19,7 +19,7 @@ nudge :: (b: *Body, d: vec3) {
         Ghost => {}
     }
 }
-nearest :: (r: Ray) -> f32 {
+fn nearest(r: Ray) -> f32 {
     match r {
         Miss => -1.0
         At(h) => h.t
@@ -27,7 +27,7 @@ nearest :: (r: Ray) -> f32 {
         Many(hs) => hs.buf[0].t
     }
 }
-main :: () {
+fn main() {
     b := Ball(vec3(1.0, 2.0, 3.0), 0.5)
     bx := Box(vec3(0.0), vec3(3.0, 4.0, 0.0))
     nudge(&b, vec3(1.0, 0.0, 0.0))

@@ -1,6 +1,6 @@
 // Lexer for AL: source text to tokens.
 
-Tk :: enum {
+enum Tk {
     TkId(str),
     TkInt(u64),
     TkFloat(f64),
@@ -11,7 +11,7 @@ Tk :: enum {
     TkEof,
 }
 
-Token :: struct {
+struct Token {
     t: Tk
     pos: Pos
 }
@@ -31,7 +31,7 @@ LEXER_PUNCTS := [48]str{
 }
 
 // Rust's `char::to_digit(radix)` for a byte
-lexer_to_digit :: (c: u8, radix: i64) -> Opt[i64] {
+fn lexer_to_digit(c: u8, radix: i64) -> Opt[i64] {
     d := -1
     if c >= '0' && c <= '9' {
         d = i64(c - '0')
@@ -47,7 +47,7 @@ lexer_to_digit :: (c: u8, radix: i64) -> Opt[i64] {
 }
 
 // Rust's `c as char` formatted with `{}`: the byte as a Unicode scalar value in UTF-8
-lexer_char_str :: (c: u8) -> str {
+fn lexer_char_str(c: u8) -> str {
     if c < 0x80 {
         out := alloc[u8](1)
         out[0] = c
@@ -60,7 +60,7 @@ lexer_char_str :: (c: u8) -> str {
 }
 
 // Rust's `parse::<u64>()` for a non-empty text of decimal digits; false on overflow
-lexer_parse_u64 :: (text: str) -> (u64, bool) {
+fn lexer_parse_u64(text: str) -> (u64, bool) {
     if len(text) == 0 {
         return (0, false)
     }
@@ -78,11 +78,11 @@ lexer_parse_u64 :: (text: str) -> (u64, bool) {
     return (v, true)
 }
 
-lexer_pos :: (file: i64, line: i64, at: i64, line_start: i64) -> Pos {
+fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
     return Pos{file: file, line: line, col: i64(u16(at - line_start + 1))}
 }
 
-lexer_lex :: (src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
+fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     s := src
     i := 0
     line := 1

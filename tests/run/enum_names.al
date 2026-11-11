@@ -1,32 +1,32 @@
 // Variant names are per enum: bare names resolve by the expected type, qualified names always work.
-Color :: enum { Red, Green, Blue }
-Light :: enum { Red, Amber, Green }
-Shape :: enum { Circle(f64), Rect(f64, f64), Empty }
-Tree :: enum { Leaf(i64), Node(*Tree, *Tree), Empty }
-G[T] :: enum { Full(T, T), Half(T), Zero }
+enum Color { Red, Green, Blue }
+enum Light { Red, Amber, Green }
+enum Shape { Circle(f64), Rect(f64, f64), Empty }
+enum Tree { Leaf(i64), Node(*Tree, *Tree), Empty }
+enum G[T] { Full(T, T), Half(T), Zero }
 // variants with the names of library declarations: they win in this program
-Cmd :: enum { push, pop, Vec(i64), Map, min }
+enum Cmd { push, pop, Vec(i64), Map, min }
 // an enum with the variant names of the library's Opt
-Maybe :: enum { Some(i64), None }
-Pix :: struct { c: Color, l: Light }
-S :: struct { B: i64 }
-E :: enum { A, B }
+enum Maybe { Some(i64), None }
+struct Pix { c: Color, l: Light }
+struct S { B: i64 }
+enum E { A, B }
 
-name :: (c: Color) -> str {
+fn name(c: Color) -> str {
     match c {
         Red => "red"
         Color.Green => "green"
         Blue => "blue"
     }
 }
-name :: (l: Light) -> str {
+fn name(l: Light) -> str {
     match l {
         Light.Red => "RED"
         Amber => "AMBER"
         Green => "GREEN"
     }
 }
-show :: (c: Cmd) -> str {
+fn show(c: Cmd) -> str {
     match c {
         push => "push"
         Cmd.pop => "pop"
@@ -35,27 +35,27 @@ show :: (c: Cmd) -> str {
         min => "min"
     }
 }
-take :: (c: Color) -> str { name(c) }
-pass :: (l: Light) -> Light { l }
-ret :: () -> Light { return Green }
-tail :: () -> Light { Red }
-conv :: (c: Color) -> Color { c }
-conv :: (l: Light) -> Light { l }
-rank :: (c: Color) -> i64 { i64(c) + 10 }
-sum :: (t: Tree) -> i64 {
+fn take(c: Color) -> str { name(c) }
+fn pass(l: Light) -> Light { l }
+fn ret() -> Light { return Green }
+fn tail() -> Light { Red }
+fn conv(c: Color) -> Color { c }
+fn conv(l: Light) -> Light { l }
+fn rank(c: Color) -> i64 { i64(c) + 10 }
+fn sum(t: Tree) -> i64 {
     match t {
         Leaf(n) => n
         Node(a, b) => sum(*a) + sum(*b)
         Tree.Empty => 0
     }
 }
-opt_of :: (m: Maybe) -> Opt[i64] {
+fn opt_of(m: Maybe) -> Opt[i64] {
     match m {
         Some(n) => Opt.Some(n)
         None => Opt.None
     }
 }
-width[T] :: (g: G[T]) -> i64 {
+fn width[T](g: G[T]) -> i64 {
     match g {
         G.Full(_, _) => 2
         Half(_) => 1
@@ -63,7 +63,7 @@ width[T] :: (g: G[T]) -> i64 {
     }
 }
 
-main :: () {
+fn main() {
     // the expected type decides: typed variables, assignments, arguments, returns
     c: Color = Red
     l: Light = Red

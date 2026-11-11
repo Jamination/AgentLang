@@ -1,7 +1,7 @@
 // Draws a picture, saves it as PNG and BMP, loads it back and makes a thumbnail.
 use std.image
 
-main :: () {
+fn main() {
     img := image_new(256, 128, 4)
     for y in 0..img.h {
         for x in 0..img.w {

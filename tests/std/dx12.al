@@ -7,7 +7,7 @@ use std.dx12
 checked: i64
 wrong: i64
 
-chk :: (got: i64, want: i64, what: str) {
+fn chk(got: i64, want: i64, what: str) {
     checked += 1
     if got != want {
         wrong += 1
@@ -16,9 +16,9 @@ chk :: (got: i64, want: i64, what: str) {
 }
 
 // A COM object implemented in AL: the vtable layout of ID3DBlob with a reference count.
-FakeBlob :: struct { vt: *ID3DBlobVtbl, refs: u32, data: str }
+struct FakeBlob { vt: *ID3DBlobVtbl, refs: u32, data: str }
 
-fake_query :: (self: *ID3DBlob, riid: *GUID, out: **u8) -> i32 {
+fn fake_query(self: *ID3DBlob, riid: *GUID, out: **u8) -> i32 {
     if *riid == IID_ID3DBlob || *riid == IID_IUnknown {
         *out = cast[*u8](self)
         cast[*FakeBlob](self).refs += 1
@@ -28,23 +28,23 @@ fake_query :: (self: *ID3DBlob, riid: *GUID, out: **u8) -> i32 {
     E_NOINTERFACE
 }
 
-fake_addref :: (self: *ID3DBlob) -> u32 {
+fn fake_addref(self: *ID3DBlob) -> u32 {
     b := cast[*FakeBlob](self)
     b.refs += 1
     b.refs
 }
 
-fake_release :: (self: *ID3DBlob) -> u32 {
+fn fake_release(self: *ID3DBlob) -> u32 {
     b := cast[*FakeBlob](self)
     b.refs -= 1
     b.refs
 }
 
-fake_pointer :: (self: *ID3DBlob) -> *u8 { ptr(cast[*FakeBlob](self).data) }
+fn fake_pointer(self: *ID3DBlob) -> *u8 { ptr(cast[*FakeBlob](self).data) }
 
-fake_size :: (self: *ID3DBlob) -> u64 { u64(len(cast[*FakeBlob](self).data)) }
+fn fake_size(self: *ID3DBlob) -> u64 { u64(len(cast[*FakeBlob](self).data)) }
 
-helpers :: () {
+fn helpers() {
     print("S_OK", SUCCEEDED(S_OK), FAILED(S_OK), "S_FALSE", SUCCEEDED(S_FALSE), "E_FAIL", SUCCEEDED(E_FAIL), FAILED(E_FAIL))
     print("DXGI_ERROR_DEVICE_REMOVED", hex(u64(u32(DXGI_ERROR_DEVICE_REMOVED))), FAILED(DXGI_ERROR_DEVICE_REMOVED))
     dx_check(S_OK, "nothing")
@@ -85,7 +85,7 @@ helpers :: () {
     print("release", unknown == nil, fake.refs)
 }
 
-layouts_0 :: (b: *u8) {
+fn layouts_0(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[GUID](), 16, "GUID")
     chk(cast[i64](&cast[*GUID](b).Data1) - a, 0, "GUID.Data1")
@@ -221,7 +221,7 @@ layouts_0 :: (b: *u8) {
     chk(cast[i64](&cast[*DXGI_ADAPTER_DESC1](b).Flags) - a, 304, "DXGI_ADAPTER_DESC1.Flags")
 }
 
-layouts_1 :: (b: *u8) {
+fn layouts_1(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[DXGI_DISPLAY_COLOR_SPACE](), 192, "DXGI_DISPLAY_COLOR_SPACE")
     chk(cast[i64](&cast[*DXGI_DISPLAY_COLOR_SPACE](b).PrimaryCoordinates) - a, 0, "DXGI_DISPLAY_COLOR_SPACE.PrimaryCoordinates")
@@ -382,7 +382,7 @@ layouts_1 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_RECT](b).bottom) - a, 12, "D3D12_RECT.bottom")
 }
 
-layouts_2 :: (b: *u8) {
+fn layouts_2(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_BOX](), 24, "D3D12_BOX")
     chk(cast[i64](&cast[*D3D12_BOX](b).left) - a, 0, "D3D12_BOX.left")
@@ -505,7 +505,7 @@ layouts_2 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_PACKED_MIP_INFO](b).StartTileIndexInOverallResource) - a, 8, "D3D12_PACKED_MIP_INFO.StartTileIndexInOverallResource")
 }
 
-layouts_3 :: (b: *u8) {
+fn layouts_3(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_RESOURCE_TRANSITION_BARRIER](), 24, "D3D12_RESOURCE_TRANSITION_BARRIER")
     chk(cast[i64](&cast[*D3D12_RESOURCE_TRANSITION_BARRIER](b).pResource) - a, 0, "D3D12_RESOURCE_TRANSITION_BARRIER.pResource")
@@ -633,7 +633,7 @@ layouts_3 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_VERSIONED_ROOT_SIGNATURE_DESC](b).u) - a, 8, "D3D12_VERSIONED_ROOT_SIGNATURE_DESC.u")
 }
 
-layouts_4 :: (b: *u8) {
+fn layouts_4(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_DESCRIPTOR_HEAP_DESC](), 16, "D3D12_DESCRIPTOR_HEAP_DESC")
     chk(cast[i64](&cast[*D3D12_DESCRIPTOR_HEAP_DESC](b).Type) - a, 0, "D3D12_DESCRIPTOR_HEAP_DESC.Type")
@@ -735,7 +735,7 @@ layouts_4 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_TEX1D_ARRAY_RTV](b).ArraySize) - a, 8, "D3D12_TEX1D_ARRAY_RTV.ArraySize")
 }
 
-layouts_5 :: (b: *u8) {
+fn layouts_5(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_TEX2D_RTV](), 8, "D3D12_TEX2D_RTV")
     chk(cast[i64](&cast[*D3D12_TEX2D_RTV](b).MipSlice) - a, 0, "D3D12_TEX2D_RTV.MipSlice")
@@ -861,7 +861,7 @@ layouts_5 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_STREAM_OUTPUT_DESC](b).RasterizedStream) - a, 28, "D3D12_STREAM_OUTPUT_DESC.RasterizedStream")
 }
 
-layouts_6 :: (b: *u8) {
+fn layouts_6(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_INPUT_ELEMENT_DESC](), 32, "D3D12_INPUT_ELEMENT_DESC")
     chk(cast[i64](&cast[*D3D12_INPUT_ELEMENT_DESC](b).SemanticName) - a, 0, "D3D12_INPUT_ELEMENT_DESC.SemanticName")
@@ -978,7 +978,7 @@ layouts_6 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_FEATURE_DATA_SERIALIZATION](b).HeapSerializationTier) - a, 4, "D3D12_FEATURE_DATA_SERIALIZATION.HeapSerializationTier")
 }
 
-layouts_7 :: (b: *u8) {
+fn layouts_7(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_FEATURE_DATA_CROSS_NODE](), 8, "D3D12_FEATURE_DATA_CROSS_NODE")
     chk(cast[i64](&cast[*D3D12_FEATURE_DATA_CROSS_NODE](b).SharingTier) - a, 0, "D3D12_FEATURE_DATA_CROSS_NODE.SharingTier")
@@ -1076,7 +1076,7 @@ layouts_7 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_DISCARD_REGION](b).NumSubresources) - a, 20, "D3D12_DISCARD_REGION.NumSubresources")
 }
 
-layouts_8 :: (b: *u8) {
+fn layouts_8(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_QUERY_DATA_PIPELINE_STATISTICS](), 88, "D3D12_QUERY_DATA_PIPELINE_STATISTICS")
     chk(cast[i64](&cast[*D3D12_QUERY_DATA_PIPELINE_STATISTICS](b).IAVertices) - a, 0, "D3D12_QUERY_DATA_PIPELINE_STATISTICS.IAVertices")
@@ -1179,7 +1179,7 @@ layouts_8 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_DXIL_SUBOBJECT_TO_EXPORTS_ASSOCIATION](b).pExports) - a, 16, "D3D12_DXIL_SUBOBJECT_TO_EXPORTS_ASSOCIATION.pExports")
 }
 
-layouts_9 :: (b: *u8) {
+fn layouts_9(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_HIT_GROUP_DESC](), 40, "D3D12_HIT_GROUP_DESC")
     chk(cast[i64](&cast[*D3D12_HIT_GROUP_DESC](b).HitGroupExport) - a, 0, "D3D12_HIT_GROUP_DESC.HitGroupExport")
@@ -1282,7 +1282,7 @@ layouts_9 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_AUTO_BREADCRUMB_NODE](b).pNext) - a, 72, "D3D12_AUTO_BREADCRUMB_NODE.pNext")
 }
 
-layouts_10 :: (b: *u8) {
+fn layouts_10(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_DRED_BREADCRUMB_CONTEXT](), 16, "D3D12_DRED_BREADCRUMB_CONTEXT")
     chk(cast[i64](&cast[*D3D12_DRED_BREADCRUMB_CONTEXT](b).BreadcrumbIndex) - a, 0, "D3D12_DRED_BREADCRUMB_CONTEXT.BreadcrumbIndex")
@@ -1392,7 +1392,7 @@ layouts_10 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_RENDER_PASS_DEPTH_STENCIL_DESC](b).StencilEndingAccess) - a, 112, "D3D12_RENDER_PASS_DEPTH_STENCIL_DESC.StencilEndingAccess")
 }
 
-layouts_11 :: (b: *u8) {
+fn layouts_11(b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_DISPATCH_RAYS_DESC](), 104, "D3D12_DISPATCH_RAYS_DESC")
     chk(cast[i64](&cast[*D3D12_DISPATCH_RAYS_DESC](b).RayGenerationShaderRecord) - a, 0, "D3D12_DISPATCH_RAYS_DESC.RayGenerationShaderRecord")
@@ -1477,7 +1477,7 @@ layouts_11 :: (b: *u8) {
     chk(cast[i64](&cast[*D3D12_INFO_QUEUE_FILTER](b).DenyList) - a, 48, "D3D12_INFO_QUEUE_FILTER.DenyList")
 }
 
-vtables :: () {
+fn vtables() {
     chk(sizeof[IUnknownVtbl](), 24, "IUnknownVtbl")
     chk(sizeof[ID3DBlobVtbl](), 40, "ID3DBlobVtbl")
     chk(sizeof[ID3DDestructionNotifierVtbl](), 40, "ID3DDestructionNotifierVtbl")
@@ -1604,7 +1604,7 @@ vtables :: () {
     chk(sizeof[ID3D12InfoQueue1Vtbl](), 320, "ID3D12InfoQueue1Vtbl")
 }
 
-instantiate :: (o: **IUnknown) {
+fn instantiate(o: **IUnknown) {
     {
         x: *IUnknown
         x.QueryInterface(nil, o)
@@ -2495,7 +2495,7 @@ instantiate :: (o: **IUnknown) {
     }
 }
 
-main :: () {
+fn main() {
     helpers()
     scratch := alloc[u8](8192)
     layouts_0(ptr(scratch))

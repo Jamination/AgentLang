@@ -1,10 +1,10 @@
-P :: struct { x: i64, y: i64 }
-W :: struct { ps: Vec[P], one: P, ptrs: Vec[*P] }
-top :: (w: *W) {
+struct P { x: i64, y: i64 }
+struct W { ps: Vec[P], one: P, ptrs: Vec[*P] }
+fn top(w: *W) {
     a := w.ps[0]
     a.x = 1
 }
-nested :: (w: *W, n: i64) -> i64 {
+fn nested(w: *W, n: i64) -> i64 {
     s := 0
     for i in 0..n {
         p := w.ps.buf[i]
@@ -16,7 +16,7 @@ nested :: (w: *W, n: i64) -> i64 {
     }
     return s
 }
-fine :: (w: *W) -> i64 {
+fn fine(w: *W) -> i64 {
     a := w.ps[0]
     a.x = 1
     b := w.ptrs[0]
@@ -28,7 +28,7 @@ fine :: (w: *W) -> i64 {
     w.ps.push(d)
     return a.x
 }
-main :: () {
+fn main() {
     w := W{ps: vec[P](), one: P{x: 0, y: 0}, ptrs: vec[*P]()}
     w.ps.push(P{x: 1, y: 1})
     w.ps.push(P{x: 1, y: 1})

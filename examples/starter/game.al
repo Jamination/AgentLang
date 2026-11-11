@@ -10,15 +10,15 @@
 use std.input
 use std.window
 
-FB_W :: 320
-FB_H :: 180
-HZ :: 120.0
+const FB_W = 320
+const FB_H = 180
+const HZ = 120.0
 
-Kind :: enum { Player, Rock, Shot, Spark }
+enum Kind { Player, Rock, Shot, Spark }
 
 // One struct for every kind of entity: unused fields cost a few bytes, and every system is a
 // plain loop over the pool with no indirection.
-Entity :: struct {
+struct Entity {
     kind: Kind
     pos: vec2
     vel: vec2
@@ -28,9 +28,9 @@ Entity :: struct {
     color: u32      // 0xAABBGGRR, the byte order of the RGBA framebuffer
 }
 
-Actions :: struct { left: i64, right: i64, up: i64, down: i64, fire: i64, quit: i64 }
+struct Actions { left: i64, right: i64, up: i64, down: i64, fire: i64, quit: i64 }
 
-Game :: struct {
+struct Game {
     ents: Pool[Entity]
     player: Handle
     rng: Rng
@@ -43,7 +43,7 @@ Game :: struct {
     over: bool
 }
 
-game_new :: (seed: u64) -> Game {
+fn game_new(seed: u64) -> Game {
     g: Game
     g.ents = pool_new[Entity](512)
     g.rng = rng(seed)
@@ -67,20 +67,20 @@ game_new :: (seed: u64) -> Game {
     return g
 }
 
-spawn_rock :: (g: *Game) {
+fn spawn_rock(g: *Game) {
     x := g.rng.range(10.0, f32(FB_W) - 10.0)
     speed := g.rng.range(20.0, 70.0)
     g.ents.insert(Entity{kind: Rock, pos: vec2(x, -8.0), vel: vec2(g.rng.range(-15.0, 15.0), speed), radius: g.rng.range(4.0, 9.0), hp: 2, color: 0xFF8090A0})
 }
 
-burst :: (g: *Game, at: vec2, n: i64, color: u32) {
+fn burst(g: *Game, at: vec2, n: i64, color: u32) {
     for i in 0..n {
         g.ents.insert(Entity{kind: Spark, pos: at, vel: g.rng.unit_vec2() * g.rng.range(20.0, 90.0), radius: 1.0, life: g.rng.range(0.15, 0.5), color: color})
     }
 }
 
 // One fixed simulation step. Everything that changes the game happens here.
-update :: (g: *Game, inp: *Input, dt: f32) {
+fn update(g: *Game, inp: *Input, dt: f32) {
     g.step_no += 1
     if g.over {
         return
@@ -159,7 +159,7 @@ update :: (g: *Game, inp: *Input, dt: f32) {
     }
 }
 
-disc :: (fb: []u32, at: vec2, r: f32, color: u32) {
+fn disc(fb: []u32, at: vec2, r: f32, color: u32) {
     x0 := max(i64(floor(at.x - r)), 0)
     x1 := min(i64(ceil(at.x + r)), FB_W - 1)
     y0 := max(i64(floor(at.y - r)), 0)
@@ -174,7 +174,7 @@ disc :: (fb: []u32, at: vec2, r: f32, color: u32) {
 }
 
 // Drawing only reads the game. `alpha` is how far the display is between two simulation steps.
-render :: (g: *Game, fb: []u32, alpha: f32) {
+fn render(g: *Game, fb: []u32, alpha: f32) {
     fill(fb, 0xFF201810)
     for i in 0..g.ents.len {
         if g.ents.is_live(i) {
@@ -187,7 +187,7 @@ render :: (g: *Game, fb: []u32, alpha: f32) {
     }
 }
 
-checksum :: (fb: []u32) -> u64 {
+fn checksum(fb: []u32) -> u64 {
     h: u64 = 1469598103934665603
     for p in fb {
         h = (h ^ u64(p)) * 1099511628211
@@ -196,7 +196,7 @@ checksum :: (fb: []u32) -> u64 {
 }
 
 // Headless run: the same update/render driven by scripted input instead of a window.
-run_headless :: () {
+fn run_headless() {
     g := game_new(2024)
     inp: Input
     fb := alloc[u32](FB_W * FB_H)
@@ -221,7 +221,7 @@ run_headless :: () {
     print("frame", hex(checksum(fb)))
 }
 
-run_window :: () {
+fn run_window() {
     w, ok := window_open(WindowDesc{title: "AL starter", width: FB_W * 3, height: FB_H * 3, resizable: true})
     if !ok {
         print("no display: run without --window")
@@ -247,7 +247,7 @@ run_window :: () {
     print("score", g.score)
 }
 
-main :: () {
+fn main() {
     for a in args() {
         if a == "--window" {
             run_window()

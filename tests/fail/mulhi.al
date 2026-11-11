@@ -1,5 +1,5 @@
 // mulhi needs two integers of the same type
-main :: () {
+fn main() {
     a := 5
     b: u32 = 7
     print(mulhi(a, b))

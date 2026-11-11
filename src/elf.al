@@ -1,20 +1,20 @@
 // Static ELF64 executable writer and linker.
 
-ELF_BASE :: 0x400000
+const ELF_BASE = 0x400000
 
-elf_align_up :: (x: i64, a: i64) -> i64 {
+fn elf_align_up(x: i64, a: i64) -> i64 {
     return (x + a - 1) / a * a
 }
 
 // x as u16, little endian
-elf_put16 :: (v: *Vec[u8], x: i64) {
+fn elf_put16(v: *Vec[u8], x: i64) {
     u := u64(x)
     v.push(u8(u))
     v.push(u8(u >> 8))
 }
 
 // x as u32, little endian
-elf_put32 :: (v: *Vec[u8], x: i64) {
+fn elf_put32(v: *Vec[u8], x: i64) {
     u := u64(x)
     for k in 0..4 {
         v.push(u8(u >> u64(8 * k)))
@@ -22,7 +22,7 @@ elf_put32 :: (v: *Vec[u8], x: i64) {
 }
 
 // x as u64, little endian
-elf_put64 :: (v: *Vec[u8], x: i64) {
+fn elf_put64(v: *Vec[u8], x: i64) {
     u := u64(x)
     for k in 0..8 {
         v.push(u8(u >> u64(8 * k)))
@@ -30,7 +30,7 @@ elf_put64 :: (v: *Vec[u8], x: i64) {
 }
 
 // Imported C functions that the emitted code refers to, in a stable order.
-elf_used_externs :: (m: *Module, out: *Output) -> Vec[i64] {
+fn elf_used_externs(m: *Module, out: *Output) -> Vec[i64] {
     used := vec_fill(m.externs.len, false)
     by_got := map[i64, i64]()
     for i in 0..m.externs.len {
@@ -59,7 +59,7 @@ elf_used_externs :: (m: *Module, out: *Output) -> Vec[i64] {
     return res
 }
 
-elf_link_patch_data :: (buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr: *Vec[i64], func_addr: *Vec[i64]) {
+fn elf_link_patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr: *Vec[i64], func_addr: *Vec[i64]) {
     for rl in g.relocs.items() {
         off := rl.0
         val := match rl.1 {
@@ -76,7 +76,7 @@ elf_link_patch_data :: (buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gadd
 }
 
 // offset of a section name in the section header string table
-elf_link_name_of :: (shstr: str, s: str) -> i64 {
+fn elf_link_name_of(shstr: str, s: str) -> i64 {
     pat := fmt("\0", s, "\0")
     p := find(shstr, pat)
     assert p >= 0, "unknown section name"
@@ -86,7 +86,7 @@ elf_link_name_of :: (shstr: str, s: str) -> i64 {
 // A program that calls no C function is a static executable. Otherwise the output is a
 // dynamically linked executable: the system loader maps the libraries and fills the import slots.
 // Result: (file bytes, error text); the error text is empty on success.
-elf_link :: (m: *Module, out: *Output) -> (str, str) {
+fn elf_link(m: *Module, out: *Output) -> (str, str) {
     externs := elf_used_externs(m, out)
     dynamic := !externs.is_empty()
     for x in externs.items() {
@@ -358,7 +358,7 @@ elf_link :: (m: *Module, out: *Output) -> (str, str) {
     file.resize(sh_off, 0)
     sh := vec[u8]()
     // one section header (the name is looked up in the section name table `names`)
-    section :: (sh: *Vec[u8], names: str, name: str, ty: i64, flags: i64, addr: i64, off: i64, size: i64, link: i64, info: i64, align: i64, entsize: i64) {
+    fn section(sh: *Vec[u8], names: str, name: str, ty: i64, flags: i64, addr: i64, off: i64, size: i64, link: i64, info: i64, align: i64, entsize: i64) {
         elf_put32(sh, if name == "" { 0 } else { elf_link_name_of(names, name) })
         elf_put32(sh, ty)
         elf_put64(sh, flags)
@@ -401,7 +401,7 @@ elf_link :: (m: *Module, out: *Output) -> (str, str) {
     elf_put16(&h, if dynamic { 11 } else { 8 })
     elf_put16(&h, 7)
     // program headers
-    segment :: (h: *Vec[u8], ty: i64, flags: i64, off: i64, vaddr: i64, filesz: i64, memsz: i64, align: i64) {
+    fn segment(h: *Vec[u8], ty: i64, flags: i64, off: i64, vaddr: i64, filesz: i64, memsz: i64, align: i64) {
         elf_put32(h, ty)
         elf_put32(h, flags)
         elf_put64(h, off)

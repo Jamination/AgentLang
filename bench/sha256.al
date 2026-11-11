@@ -9,11 +9,11 @@ K := [64]u32{
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 }
 
-rotr :: (x: u32, n: u32) -> u32 {
+fn rotr(x: u32, n: u32) -> u32 {
     (x >> n) | (x << (32 - n))
 }
 
-sha256_block :: (st: []u32, p: []u8) {
+fn sha256_block(st: []u32, p: []u8) {
     w: [64]u32
     for i in 0..16 {
         w[i] = (u32(p[4 * i]) << 24) | (u32(p[4 * i + 1]) << 16) | (u32(p[4 * i + 2]) << 8) | u32(p[4 * i + 3])
@@ -58,7 +58,7 @@ sha256_block :: (st: []u32, p: []u8) {
 }
 
 // hash of a message whose length is a multiple of 64 bytes
-sha256 :: (data: []u8, out: []u8) {
+fn sha256(data: []u8, out: []u8) {
     st := [8]u32{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
     n := len(data)
     for off in 0..n by 64 {
@@ -79,11 +79,11 @@ sha256 :: (data: []u8, out: []u8) {
     }
 }
 
-hex :: (d: u8) -> u8 {
+fn hex(d: u8) -> u8 {
     if d < 10 { d + '0' } else { d - 10 + 'a' }
 }
 
-main :: () {
+fn main() {
     n := 1 << 20
     buf := alloc[u8](n)
     seed: u32 = 12345

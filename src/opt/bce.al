@@ -6,7 +6,7 @@
 // check that fails at some iteration would end the program anyway, so failing early is not
 // observable (apart from which of several failing accesses is reported).
 
-BceIv :: struct {
+struct BceIv {
     phi: i64,
     start: i64,
     step: i64,
@@ -18,7 +18,7 @@ BceIv :: struct {
 }
 
 // index expression: ext(inner(iv)) where inner is iv +/- invariants
-BceAffine :: struct {
+struct BceAffine {
     ext: Opt[Op],
     // root of the inner expression (the value below the extension)
     inner: i64,
@@ -26,12 +26,12 @@ BceAffine :: struct {
     coef: i64,
 }
 
-BceKind :: enum {
+enum BceKind {
     BceKindInvariant,
     BceKindAffine(BceAffine),
 }
 
-bce_is_trap_block :: (f: *Func, b: i64) -> bool {
+fn bce_is_trap_block(f: *Func, b: i64) -> bool {
     if !eq(f.blocks[b].term, TermTrap) {
         return false
     }
@@ -44,11 +44,11 @@ bce_is_trap_block :: (f: *Func, b: i64) -> bool {
 }
 
 // the closure `invariant` of find_iv, match_affine and hoist_in_loop
-bce_invariant :: (v: i64, in_loop: []bool, def_block: []i64) -> bool {
+fn bce_invariant(v: i64, in_loop: []bool, def_block: []i64) -> bool {
     return def_block[v] == 0xFFFFFFFF || !in_loop[def_block[v]]
 }
 
-bce_signum :: (x: i64) -> i64 {
+fn bce_signum(x: i64) -> i64 {
     if x > 0 {
         return 1
     }
@@ -58,7 +58,7 @@ bce_signum :: (x: i64) -> i64 {
     return 0
 }
 
-bce_find_iv :: (f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i64) -> Opt[BceIv] {
+fn bce_find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i64) -> Opt[BceIv] {
     c := 0
     t := 0
     e := 0
@@ -184,7 +184,7 @@ bce_find_iv :: (f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
 }
 
 // match idx as ext(inner) with inner = iv, inner + inv, inner - inv or inv - inner
-bce_match_affine :: (f: *Func, idx: i64, iv: *BceIv, in_loop: []bool, def_block: []i64) -> Opt[BceAffine] {
+fn bce_match_affine(f: *Func, idx: i64, iv: *BceIv, in_loop: []bool, def_block: []i64) -> Opt[BceAffine] {
     ext: Opt[Op] = None
     inner := idx
     {
@@ -260,7 +260,7 @@ bce_match_affine :: (f: *Func, idx: i64, iv: *BceIv, in_loop: []bool, def_block:
 }
 
 // rebuild the index expression in block `pre` with the induction variable replaced by `at`
-bce_clone_at :: (f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bool, def_block: []i64) -> i64 {
+fn bce_clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bool, def_block: []i64) -> i64 {
     if v == iv_phi {
         return at
     }
@@ -279,7 +279,7 @@ bce_clone_at :: (f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bo
     return f.push(pre, i.op, i.ty, args, i.k)
 }
 
-bce_hoist_in_loop :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
+fn bce_hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -411,7 +411,7 @@ bce_hoist_in_loop :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     // build the chain of hoisted checks: pre -> n1 -> ... -> header
     cur := pre
     // one more check at the end of the chain `*cur`, which ends at the loop header `h`
-    add_check :: (f: *Func, cur: *i64, cond: i64, trap: i64, h: i64) {
+    fn add_check(f: *Func, cur: *i64, cond: i64, trap: i64, h: i64) {
         nb := f.new_block()
         f.blocks[nb].term = TermJmp(h)
         f.blocks[*cur].term = TermBr(cond, nb, trap)
@@ -419,7 +419,7 @@ bce_hoist_in_loop :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     }
     // the index expression `a` for the value `at` of the induction variable; the
     // computations go into `pre` (it dominates the whole chain)
-    index_at :: (f: *Func, at: i64, pre: i64, a: *BceAffine, iv: *BceIv, in_loop: []bool, def_block: []i64) -> i64 {
+    fn index_at(f: *Func, at: i64, pre: i64, a: *BceAffine, iv: *BceIv, in_loop: []bool, def_block: []i64) -> i64 {
         inner := bce_clone_at(f, pre, a.inner, iv.phi, at, in_loop, def_block)
         match a.ext {
             Some(op) => return f.push(pre, op, TI64, vec_of([]i64{inner}), 0)
@@ -491,7 +491,7 @@ bce_hoist_in_loop :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
 
 // ---------- elimination ----------
 // `a` and `b` are the same value: one instruction, or two equal constants
-bce_same :: (f: *Func, a: i64, b: i64) -> bool {
+fn bce_same(f: *Func, a: i64, b: i64) -> bool {
     if a == b {
         return true
     }
@@ -510,7 +510,7 @@ bce_same :: (f: *Func, a: i64, b: i64) -> bool {
 // Is `start < end` (in the sense of the loop's own test `iv.cmp`) known whenever the loop is
 // entered? Either both are constants, or a block that is the only way to the preheader
 // branches on that comparison.
-bce_entry_guard :: (f: *Func, cfg: *Cfg, pre: i64, iv: *BceIv) -> bool {
+fn bce_entry_guard(f: *Func, cfg: *Cfg, pre: i64, iv: *BceIv) -> bool {
     match f.is_const(iv.start) {
         Some(s) => {
             match f.is_const(iv.end) {
@@ -564,7 +564,7 @@ bce_entry_guard :: (f: *Func, cfg: *Cfg, pre: i64, iv: *BceIv) -> bool {
 // the loop is entered only when k < n and continued only when i + 1 < n. The check is
 // removed. Unlike hoisting this puts no condition on the loop body (calls, other exits).
 // `def_block`: the block of every instruction, computed when the first loop needs it.
-bce_eliminate_in_loop :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block_v: *Vec[i64]) -> bool {
+fn bce_eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block_v: *Vec[i64]) -> bool {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -663,7 +663,7 @@ bce_eliminate_in_loop :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
 }
 
 // removes the checks that can never fail, in every loop (nothing here changes the loops)
-bce_eliminate :: (f: *Func) -> bool {
+fn bce_eliminate(f: *Func) -> bool {
     licm_make_preheaders(f)
     cfg := cfg_new(f)
     loops := loops_new(f, &cfg)
@@ -677,7 +677,7 @@ bce_eliminate :: (f: *Func) -> bool {
     return did
 }
 
-bce_run :: (f: *Func) -> bool {
+fn bce_run(f: *Func) -> bool {
     changed := false
     if bce_eliminate(f) {
         changed = true

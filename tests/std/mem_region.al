@@ -1,7 +1,7 @@
 // std.mem next to regions: frame scopes, Arena and mem_used follow the arena in use
 r: Region
 
-main :: () {
+fn main() {
     keep := alloc[i64](4)
     main_used := mem_used()
 

@@ -2,23 +2,23 @@
 
 regalloc_gpr_order := [15]i64{0, 1, 2, 6, 7, 8, 9, 10, 11, 3, 5, 12, 13, 14, 15}
 
-RegallocBitSet :: struct {
+struct RegallocBitSet {
     w: Vec[u64]
 }
 
-regalloc_bit_set_new :: (n: i64) -> RegallocBitSet {
+fn regalloc_bit_set_new(n: i64) -> RegallocBitSet {
     return RegallocBitSet{w: vec_fill((n + 63) / 64, u64(0))}
 }
 
-set :: (self: *RegallocBitSet, i: i64) {
+fn set(self: *RegallocBitSet, i: i64) {
     self.w[i / 64] |= u64(1) << u64(i % 64)
 }
 
-clear :: (self: *RegallocBitSet, i: i64) {
+fn clear(self: *RegallocBitSet, i: i64) {
     self.w[i / 64] &= ~(u64(1) << u64(i % 64))
 }
 
-union_with :: (self: *RegallocBitSet, o: *RegallocBitSet) -> bool {
+fn union_with(self: *RegallocBitSet, o: *RegallocBitSet) -> bool {
     ch := false
     for wi in 0..min(self.w.len, o.w.len) {
         n := self.w[wi] | o.w[wi]
@@ -32,7 +32,7 @@ union_with :: (self: *RegallocBitSet, o: *RegallocBitSet) -> bool {
 
 // the members in ascending order (Rust: a lazy iterator; its one use, in the build loop of
 // regalloc_allocate, walks the words in place instead of collecting)
-iter :: (self: *RegallocBitSet) -> Vec[i64] {
+fn iter(self: *RegallocBitSet) -> Vec[i64] {
     out := vec[i64]()
     for wi in 0..self.w.len {
         bits := self.w[wi]
@@ -45,7 +45,7 @@ iter :: (self: *RegallocBitSet) -> Vec[i64] {
     return out
 }
 
-regalloc_liveness :: (mf: *MFunc, order: []i64) -> Vec[RegallocBitSet] {
+fn regalloc_liveness(mf: *MFunc, order: []i64) -> Vec[RegallocBitSet] {
     nreg := 32 + mf.vclass.len
     nb := mf.blocks.len
     gen := vec[RegallocBitSet]()
@@ -105,7 +105,7 @@ regalloc_liveness :: (mf: *MFunc, order: []i64) -> Vec[RegallocBitSet] {
     return live_out
 }
 
-RegallocNS :: enum {
+enum RegallocNS {
     RegallocNSPre,
     RegallocNSInitial,
     RegallocNSSimplify,
@@ -118,7 +118,7 @@ RegallocNS :: enum {
     RegallocNSOther, // different class
 }
 
-RegallocMS :: enum {
+enum RegallocMS {
     RegallocMSWorklist,
     RegallocMSActive,
     RegallocMSCoalesced,
@@ -126,7 +126,7 @@ RegallocMS :: enum {
     RegallocMSFrozen,
 }
 
-RegallocIrc :: struct {
+struct RegallocIrc {
     k: i64
     n: i64
     state: Vec[RegallocNS]
@@ -146,11 +146,11 @@ RegallocIrc :: struct {
     cost: Vec[f64]
 }
 
-pre :: (self: *RegallocIrc, n: i64) -> bool {
+fn pre(self: *RegallocIrc, n: i64) -> bool {
     return n < 32
 }
 
-add_edge :: (self: *RegallocIrc, u: i64, v: i64) {
+fn add_edge(self: *RegallocIrc, u: i64, v: i64) {
     if u == v {
         return
     }
@@ -168,12 +168,12 @@ add_edge :: (self: *RegallocIrc, u: i64, v: i64) {
     }
 }
 
-has_edge :: (self: *RegallocIrc, u: i64, v: i64) -> bool {
+fn has_edge(self: *RegallocIrc, u: i64, v: i64) -> bool {
     key := (u64(min(u, v)) << 32) | u64(max(u, v))
     return self.adj_set.has(key)
 }
 
-adjacent :: (self: *RegallocIrc, n: i64) -> Vec[i64] {
+fn adjacent(self: *RegallocIrc, n: i64) -> Vec[i64] {
     out := vec[i64]()
     for m in self.adj[n].items() {
         st := self.state[m]
@@ -184,7 +184,7 @@ adjacent :: (self: *RegallocIrc, n: i64) -> Vec[i64] {
     return out
 }
 
-node_moves :: (self: *RegallocIrc, n: i64) -> Vec[i64] {
+fn node_moves(self: *RegallocIrc, n: i64) -> Vec[i64] {
     out := vec[i64]()
     for m in self.move_list[n].items() {
         ms := self.mstate[m]
@@ -195,7 +195,7 @@ node_moves :: (self: *RegallocIrc, n: i64) -> Vec[i64] {
     return out
 }
 
-move_related :: (self: *RegallocIrc, n: i64) -> bool {
+fn move_related(self: *RegallocIrc, n: i64) -> bool {
     for m in self.move_list[n].items() {
         ms := self.mstate[m]
         if ms == RegallocMSActive || ms == RegallocMSWorklist {
@@ -205,7 +205,7 @@ move_related :: (self: *RegallocIrc, n: i64) -> bool {
     return false
 }
 
-get_alias :: (self: *RegallocIrc, n0: i64) -> i64 {
+fn get_alias(self: *RegallocIrc, n0: i64) -> i64 {
     n := n0
     while self.state[n] == RegallocNSCoalesced {
         n = self.alias[n]
@@ -213,7 +213,7 @@ get_alias :: (self: *RegallocIrc, n0: i64) -> i64 {
     return n
 }
 
-enable_moves :: (self: *RegallocIrc, n: i64) {
+fn enable_moves(self: *RegallocIrc, n: i64) {
     nm := self.node_moves(n)
     for m in nm.items() {
         if self.mstate[m] == RegallocMSActive {
@@ -223,7 +223,7 @@ enable_moves :: (self: *RegallocIrc, n: i64) {
     }
 }
 
-decrement_degree :: (self: *RegallocIrc, m: i64) {
+fn decrement_degree(self: *RegallocIrc, m: i64) {
     if self.pre(m) {
         return
     }
@@ -248,7 +248,7 @@ decrement_degree :: (self: *RegallocIrc, m: i64) {
     }
 }
 
-simplify :: (self: *RegallocIrc, n: i64) {
+fn simplify(self: *RegallocIrc, n: i64) {
     self.state[n] = RegallocNSStack
     self.stack.push(n)
     adj := self.adjacent(n)
@@ -257,18 +257,18 @@ simplify :: (self: *RegallocIrc, n: i64) {
     }
 }
 
-add_worklist :: (self: *RegallocIrc, u: i64) {
+fn add_worklist(self: *RegallocIrc, u: i64) {
     if !self.pre(u) && self.state[u] == RegallocNSFreeze && !self.move_related(u) && self.degree[u] < self.k {
         self.state[u] = RegallocNSSimplify
         self.simplify_wl.push(u)
     }
 }
 
-ok :: (self: *RegallocIrc, t: i64, r: i64) -> bool {
+fn ok(self: *RegallocIrc, t: i64, r: i64) -> bool {
     return self.pre(t) || self.degree[t] < self.k || self.has_edge(t, r)
 }
 
-conservative :: (self: *RegallocIrc, u: i64, v: i64) -> bool {
+fn conservative(self: *RegallocIrc, u: i64, v: i64) -> bool {
     seen := map[i64, bool]()
     k := 0
     au := self.adjacent(u)
@@ -292,7 +292,7 @@ conservative :: (self: *RegallocIrc, u: i64, v: i64) -> bool {
     return k < self.k
 }
 
-combine :: (self: *RegallocIrc, u: i64, v: i64) {
+fn combine(self: *RegallocIrc, u: i64, v: i64) {
     // v is merged into u
     self.state[v] = RegallocNSCoalesced
     self.alias[v] = u
@@ -317,7 +317,7 @@ combine :: (self: *RegallocIrc, u: i64, v: i64) {
     }
 }
 
-coalesce :: (self: *RegallocIrc, m: i64) {
+fn coalesce(self: *RegallocIrc, m: i64) {
     d, s := self.moves[m]
     x := self.get_alias(d)
     y := self.get_alias(s)
@@ -358,7 +358,7 @@ coalesce :: (self: *RegallocIrc, m: i64) {
     }
 }
 
-freeze_moves :: (self: *RegallocIrc, u: i64) {
+fn freeze_moves(self: *RegallocIrc, u: i64) {
     nm := self.node_moves(u)
     for m in nm.items() {
         x, y := self.moves[m]
@@ -371,7 +371,7 @@ freeze_moves :: (self: *RegallocIrc, u: i64) {
     }
 }
 
-run :: (self: *RegallocIrc) {
+fn run(self: *RegallocIrc) {
     loop {
         if self.simplify_wl.len > 0 {
             n := self.simplify_wl.pop()
@@ -422,11 +422,11 @@ run :: (self: *RegallocIrc) {
     }
 }
 
-Alloc :: struct {
+struct Alloc {
     used_callee_saved: Vec[i64]
 }
 
-regalloc_spill_slot :: (o: Opnd, first_spill: i64) -> Opt[i64] {
+fn regalloc_spill_slot(o: Opnd, first_spill: i64) -> Opt[i64] {
     match o {
         OpndM(m) => {
             if m.kind == MemKindSlot && i64(m.id) >= first_spill && i64(m.base) == NOREG && i64(m.idx) == NOREG && i64(m.disp) == 0 {
@@ -438,7 +438,7 @@ regalloc_spill_slot :: (o: Opnd, first_spill: i64) -> Opt[i64] {
     return None
 }
 
-regalloc_is_r :: (o: Opnd) -> bool {
+fn regalloc_is_r(o: Opnd) -> bool {
     match o {
         OpndR(r) => true
         _ => false
@@ -446,7 +446,7 @@ regalloc_is_r :: (o: Opnd) -> bool {
 }
 
 // index of the first entry of `st` for slot `s`, or -1
-regalloc_find_slot :: (st: *Vec[(i64, i64)], s: i64) -> i64 {
+fn regalloc_find_slot(st: *Vec[(i64, i64)], s: i64) -> i64 {
     for x in 0..st.len {
         if st[x].0 == s {
             return x
@@ -456,7 +456,7 @@ regalloc_find_slot :: (st: *Vec[(i64, i64)], s: i64) -> i64 {
 }
 
 // index of the first entry of `st` held in register `r`, or -1
-regalloc_find_reg :: (st: *Vec[(i64, i64)], r: i64) -> i64 {
+fn regalloc_find_reg(st: *Vec[(i64, i64)], r: i64) -> i64 {
     for x in 0..st.len {
         if st[x].1 == r {
             return x
@@ -466,7 +466,7 @@ regalloc_find_reg :: (st: *Vec[(i64, i64)], r: i64) -> i64 {
 }
 
 // st.retain(|e| e.1 != d)
-regalloc_retain_reg_ne :: (st: *Vec[(i64, i64)], d: i64) {
+fn regalloc_retain_reg_ne(st: *Vec[(i64, i64)], d: i64) {
     n := 0
     for x in 0..st.len {
         if st[x].1 != d {
@@ -478,7 +478,7 @@ regalloc_retain_reg_ne :: (st: *Vec[(i64, i64)], d: i64) {
 }
 
 // st.retain(|e| e.0 != s)
-regalloc_retain_slot_ne :: (st: *Vec[(i64, i64)], s: i64) {
+fn regalloc_retain_slot_ne(st: *Vec[(i64, i64)], s: i64) {
     n := 0
     for x in 0..st.len {
         if st[x].0 != s {
@@ -491,7 +491,7 @@ regalloc_retain_slot_ne :: (st: *Vec[(i64, i64)], s: i64) {
 
 // After allocation: reuse registers that still hold the value of a spill slot instead of
 // reloading it, and drop stores to slots that are never read.
-regalloc_spill_forward :: (mf: *MFunc, order: []i64, first_spill: i64) {
+fn regalloc_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
     nb := mf.blocks.len
     npreds := vec_fill(nb, 0)
     the_pred := vec_fill(nb, 0xFFFFFFFF)
@@ -639,7 +639,7 @@ regalloc_spill_forward :: (mf: *MFunc, order: []i64, first_spill: i64) {
 }
 
 // spill weight helper
-regalloc_depth_weight :: (d: i64) -> f64 {
+fn regalloc_depth_weight(d: i64) -> f64 {
     // 10f64.powi(min(d, 6))
     w := 1.0
     for x in 0..min(d, 6) {
@@ -648,11 +648,11 @@ regalloc_depth_weight :: (d: i64) -> f64 {
     return w
 }
 
-regalloc_allocate_in_class :: (r: i64, mf: *MFunc, class: u8) -> bool {
+fn regalloc_allocate_in_class(r: i64, mf: *MFunc, class: u8) -> bool {
     return mf.class(r) == class
 }
 
-regalloc_allocate :: (mf: *MFunc, order: []i64) -> Alloc {
+fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
     first_spill := mf.slots.len
     unspillable := vec_fill(mf.vclass.len, false)
     round := 0
@@ -922,7 +922,7 @@ regalloc_allocate :: (mf: *MFunc, order: []i64) -> Alloc {
 }
 
 // can operand `b` of this instruction be a memory operand?
-regalloc_b_can_be_mem :: (i: *MInst) -> bool {
+fn regalloc_b_can_be_mem(i: *MInst) -> bool {
     match i.a {
         OpndM(m) => {
             return false
@@ -948,7 +948,7 @@ regalloc_b_can_be_mem :: (i: *MInst) -> bool {
     return false
 }
 
-regalloc_spill :: (mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool]) {
+fn regalloc_spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool]) {
     slot_of := map[i64, i64]()
     for v in spilled {
         s := if mf.wide_xmm && mf.class(v) == 1 { mf.new_slot(16, 16) } else { mf.new_slot(8, 8) }

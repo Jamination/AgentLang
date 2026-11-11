@@ -3,7 +3,7 @@
 // expected output is written by tests/gen/images.py from its own model of the images.
 use std.image
 
-main :: () {
+fn main() {
     list, ok := read_file("tests/std/data/img_bmp.txt")
     assert ok, "fixture list missing"
     for name in lines(list) {

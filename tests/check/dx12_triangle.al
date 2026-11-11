@@ -6,16 +6,16 @@
 // for the GPU with a fence, and a clean-up that releases every COM object.
 use std.dx12
 
-WIDTH :: 1280
-HEIGHT :: 720
-FRAME_COUNT :: 2
+const WIDTH = 1280
+const HEIGHT = 720
+const FRAME_COUNT = 2
 
-Vertex :: struct {
+struct Vertex {
     position: vec3
     color: vec4
 }
 
-App :: struct {
+struct App {
     hwnd: *u8
     factory: *IDXGIFactory4
     device: *ID3D12Device
@@ -39,7 +39,7 @@ App :: struct {
 }
 
 // HLSL for both stages; the angle and the aspect ratio arrive as root constants.
-SHADER :: `
+const SHADER = `
 cbuffer Params : register(b0) { float angle; float aspect; };
 struct PSInput { float4 position : SV_POSITION; float4 color : COLOR; };
 
@@ -54,7 +54,7 @@ PSInput VSMain(float3 position : POSITION, float4 color : COLOR) {
 float4 PSMain(PSInput input) : SV_TARGET { return input.color; }
 `
 
-window_proc :: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64 {
+fn window_proc(hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64 {
     if msg == WM_DESTROY {
         PostQuitMessage(0)
         return 0
@@ -66,7 +66,7 @@ window_proc :: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64 {
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
-create_window :: (title: str) -> *u8 {
+fn create_window(title: str) -> *u8 {
     instance := GetModuleHandleW(nil)
     class_name := utf16("ALTriangleWindow")
     class := WNDCLASSEXW{
@@ -88,7 +88,7 @@ create_window :: (title: str) -> *u8 {
 }
 
 // The first hardware adapter that supports Direct3D 12 (nil: let D3D12CreateDevice choose).
-pick_adapter :: (factory: *IDXGIFactory4) -> *IDXGIAdapter1 {
+fn pick_adapter(factory: *IDXGIFactory4) -> *IDXGIAdapter1 {
     index: u32
     loop {
         adapter: *IDXGIAdapter1
@@ -106,7 +106,7 @@ pick_adapter :: (factory: *IDXGIFactory4) -> *IDXGIAdapter1 {
     }
 }
 
-create_device :: (app: *App, debug: bool) {
+fn create_device(app: *App, debug: bool) {
     factory_flags: u32
     if debug {
         layer: *ID3D12Debug
@@ -127,7 +127,7 @@ create_device :: (app: *App, debug: bool) {
     dx_check(app.device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, &IID_ID3D12CommandAllocator, &app.allocator), "CreateCommandAllocator")
 }
 
-create_swap_chain :: (app: *App) {
+fn create_swap_chain(app: *App) {
     desc := DXGI_SWAP_CHAIN_DESC1{
         Width: WIDTH,
         Height: HEIGHT,
@@ -158,7 +158,7 @@ create_swap_chain :: (app: *App) {
 }
 
 // Compiles one entry point of the HLSL source; the compiler's messages are printed on failure.
-compile_shader :: (source: str, entry: str, target: str) -> *ID3DBlob {
+fn compile_shader(source: str, entry: str, target: str) -> *ID3DBlob {
     code: *ID3DBlob
     errors: *ID3DBlob
     hr := D3DCompile(ptr(source), u64(len(source)), ptr("triangle.hlsl"), nil, nil, cstr(entry), cstr(target),
@@ -173,7 +173,7 @@ compile_shader :: (source: str, entry: str, target: str) -> *ID3DBlob {
     code
 }
 
-create_pipeline :: (app: *App) {
+fn create_pipeline(app: *App) {
     // root signature: two 32-bit constants (angle, aspect) for the vertex shader
     param: D3D12_ROOT_PARAMETER
     param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
@@ -225,7 +225,7 @@ create_pipeline :: (app: *App) {
     dx_check(app.list.Close(), "Close")
 }
 
-create_vertex_buffer :: (app: *App) {
+fn create_vertex_buffer(app: *App) {
     vertices := [3]Vertex{
         Vertex{vec3(0.0, 0.5, 0.0), vec4(1.0, 0.0, 0.0, 1.0)},
         Vertex{vec3(0.45, -0.5, 0.0), vec4(0.0, 1.0, 0.0, 1.0)},
@@ -254,7 +254,7 @@ create_vertex_buffer :: (app: *App) {
 }
 
 // Blocks until the GPU has finished everything submitted so far.
-wait_for_gpu :: (app: *App) {
+fn wait_for_gpu(app: *App) {
     app.fence_value += 1
     dx_check(app.queue.Signal(app.fence, app.fence_value), "Signal")
     if app.fence.GetCompletedValue() < app.fence_value {
@@ -263,7 +263,7 @@ wait_for_gpu :: (app: *App) {
     }
 }
 
-transition :: (resource: *ID3D12Resource, before: u32, after: u32) -> D3D12_RESOURCE_BARRIER {
+fn transition(resource: *ID3D12Resource, before: u32, after: u32) -> D3D12_RESOURCE_BARRIER {
     barrier: D3D12_RESOURCE_BARRIER
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
     t := barrier.u_Transition()
@@ -274,13 +274,13 @@ transition :: (resource: *ID3D12Resource, before: u32, after: u32) -> D3D12_RESO
     barrier
 }
 
-seconds :: (app: *App) -> f32 {
+fn seconds(app: *App) -> f32 {
     now: i64
     QueryPerformanceCounter(&now)
     f32(f64(now - app.start_ticks) / f64(app.ticks_per_second))
 }
 
-render :: (app: *App) {
+fn render(app: *App) {
     dx_check(app.allocator.Reset(), "allocator Reset")
     dx_check(app.list.Reset(app.allocator, app.pipeline), "list Reset")
     list := app.list
@@ -315,7 +315,7 @@ render :: (app: *App) {
     app.frame_index = app.swap_chain.GetCurrentBackBufferIndex()
 }
 
-destroy :: (app: *App) {
+fn destroy(app: *App) {
     wait_for_gpu(app)
     CloseHandle(app.fence_event)
     com_release(&app.fence)
@@ -334,7 +334,7 @@ destroy :: (app: *App) {
     com_release(&app.factory)
 }
 
-main :: () {
+fn main() {
     app: App
     app.hwnd = create_window("AL Direct3D 12 triangle")
     create_device(&app, true)

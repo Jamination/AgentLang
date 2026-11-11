@@ -1,19 +1,19 @@
 // clone(x): an independent deep copy of any value. Every copy below is changed afterwards and
 // the original is printed to show that nothing is shared.
-P :: struct { x: i64, y: f64 }
-Named :: struct { name: str, tags: []str, pos: P }
-Node :: struct { val: i64, kids: []Node }
-Wrap[T] :: struct { item: T, list: []T }
-Table :: struct { rows: Vec[Named], index: Map[str, i64], grid: [2][]i64 }
-Link :: struct { val: i64, next: *Link }
-Color :: enum { Red, Green, Blue }
-Shape :: enum { Dot, Circle(P, f64), Poly([]P), Label(str, i64) }
-Tree :: enum { Leaf(i64), Fork([]Tree) }
-Opt[T] :: enum { Some(T), None }
+struct P { x: i64, y: f64 }
+struct Named { name: str, tags: []str, pos: P }
+struct Node { val: i64, kids: []Node }
+struct Wrap[T] { item: T, list: []T }
+struct Table { rows: Vec[Named], index: Map[str, i64], grid: [2][]i64 }
+struct Link { val: i64, next: *Link }
+enum Color { Red, Green, Blue }
+enum Shape { Dot, Circle(P, f64), Poly([]P), Label(str, i64) }
+enum Tree { Leaf(i64), Fork([]Tree) }
+enum Opt[T] { Some(T), None }
 
-twice :: (x: i64) -> i64 { x * 2 }
+fn twice(x: i64) -> i64 { x * 2 }
 
-depth :: (n: *Node) -> i64 {
+fn depth(n: *Node) -> i64 {
     d := 0
     for k in n.kids {
         d = max(d, depth(&k))
@@ -21,7 +21,7 @@ depth :: (n: *Node) -> i64 {
     d + 1
 }
 
-sum :: (t: Tree) -> i64 {
+fn sum(t: Tree) -> i64 {
     match t {
         Leaf(v) => v
         Fork(ks) => {
@@ -34,11 +34,11 @@ sum :: (t: Tree) -> i64 {
     }
 }
 
-copy_of[T] :: (x: T) -> T {
+fn copy_of[T](x: T) -> T {
     return clone(x)
 }
 
-main :: () {
+fn main() {
     // scalars: the value itself
     i := 42
     f := 2.5

@@ -1,5 +1,5 @@
 // type aliases: `Name :: type T` is another name for T, usable before its declaration
-total :: (l: List) -> Reg {
+fn total(l: List) -> Reg {
     s := 0
     p := l
     while p != nil {
@@ -9,43 +9,43 @@ total :: (l: List) -> Reg {
     s
 }
 
-Reg :: type i64
-Callback :: type (*u8, i64) -> i32
-Grid :: type [8][8]u8
-Names :: type Vec[str]
-List :: type *Node
-Node :: struct { v: Reg, next: List, arr: *Arr }
-Arr :: type [4]Node
-P :: type Point
-Point :: struct { x: i64, y: i64 }
-Pair :: type (Reg, str)
-Bytes :: type []u8
-Chain :: type Reg2
-Reg2 :: type Reg
-MaybeReg :: type Maybe[Reg]
-Maybe[T] :: enum { Just(T), Nothing }
-Tree :: enum { Leaf(Reg), Fork(Kids) }
-Kids :: type []Tree
+type Reg = i64
+type Callback = fn(*u8, i64) -> i32
+type Grid = [8][8]u8
+type Names = Vec[str]
+type List = *Node
+struct Node { v: Reg, next: List, arr: *Arr }
+type Arr = [4]Node
+type P = Point
+struct Point { x: i64, y: i64 }
+type Pair = (Reg, str)
+type Bytes = []u8
+type Chain = Reg2
+type Reg2 = Reg
+type MaybeReg = Maybe[Reg]
+enum Maybe[T] { Just(T), Nothing }
+enum Tree { Leaf(Reg), Fork(Kids) }
+type Kids = []Tree
 
 // a user alias may reuse a library type name; the library keeps its own type
-Ring :: type [4]i64
+type Ring = [4]i64
 
-cb :: (p: *u8, n: i64) -> i32 { return i32(n) + 1 }
-add :: (a: Reg, b: i64) -> Reg { a + b }
-first[T] :: (xs: []T, d: Reg) -> T { xs[d] }
-wrap[T] :: (x: T) -> Maybe[T] { Just(x) }
-sum :: (n: Names) -> i64 {
+fn cb(p: *u8, n: i64) -> i32 { return i32(n) + 1 }
+fn add(a: Reg, b: i64) -> Reg { a + b }
+fn first[T](xs: []T, d: Reg) -> T { xs[d] }
+fn wrap[T](x: T) -> Maybe[T] { Just(x) }
+fn sum(n: Names) -> i64 {
     t := 0
     for s in n.items() {
         t += len(s)
     }
     t
 }
-sum :: (r: Reg) -> i64 { r * 2 }
-sum :: (b: Bytes) -> i64 { len(b) }
-norm1 :: (p: P) -> Reg { p.x + p.y }
-bump :: (p: *P) { p.x += 10 }
-weight :: (t: Tree) -> Reg {
+fn sum(r: Reg) -> i64 { r * 2 }
+fn sum(b: Bytes) -> i64 { len(b) }
+fn norm1(p: P) -> Reg { p.x + p.y }
+fn bump(p: *P) { p.x += 10 }
+fn weight(t: Tree) -> Reg {
     match t {
         Leaf(n) => n
         Fork(kids) => {
@@ -57,12 +57,12 @@ weight :: (t: Tree) -> Reg {
         }
     }
 }
-apply :: (f: Callback, n: i64) -> i32 { f(nil, n) }
+fn apply(f: Callback, n: i64) -> i32 { f(nil, n) }
 
 counter: Reg
-LIMIT : Reg : 40
+const LIMIT: Reg = 40
 
-main :: () {
+fn main() {
     r: Reg = 5
     c: Callback = cb
     g: Grid

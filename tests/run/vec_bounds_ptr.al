@@ -1,15 +1,15 @@
 // reading past the length through a pointer to a Vec, inside a loop with a call
-show :: (x: i64) {
+fn show(x: i64) {
     print(x)
 }
 
-dump :: (v: *Vec[i64], n: i64) {
+fn dump(v: *Vec[i64], n: i64) {
     for i in 0..n {
         show(v[i])
     }
 }
 
-main :: () {
+fn main() {
     v := vec[i64]()
     v.push(7)
     v.push(8)

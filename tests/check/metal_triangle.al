@@ -5,12 +5,12 @@
 // reports that its libraries are not Linux libraries. See docs/std/metal.md.
 use std.metal
 
-WIDTH :: 800.0
-HEIGHT :: 600.0
+const WIDTH = 800.0
+const HEIGHT = 600.0
 
-Vertex :: struct { pos: vec2, color: vec3 }
+struct Vertex { pos: vec2, color: vec3 }
 
-SHADERS :: `
+const SHADERS = `
 #include <metal_stdlib>
 using namespace metal;
 
@@ -36,7 +36,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]]) {
 }
 `
 
-App :: struct {
+struct App {
     app: *NSApplication
     window: *NSWindow
     layer: *CAMetalLayer
@@ -47,11 +47,11 @@ App :: struct {
     frames: i64
 }
 
-fail :: (what: str, err: *NSError) -> never {
+fn fail(what: str, err: *NSError) -> never {
     panic(fmt(what, ": ", ns_error_text(err)))
 }
 
-open_window :: (a: *App) {
+fn open_window(a: *App) {
     a.app = ns_app()
     a.app.ns_set_activation_policy(NSApplicationActivationPolicyRegular)
     style := NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
@@ -70,7 +70,7 @@ open_window :: (a: *App) {
     a.app.ns_activate()
 }
 
-make_pipeline :: (a: *App) {
+fn make_pipeline(a: *App) {
     err: *NSError
     library := a.device.mtl_new_library_with_source(SHADERS, &err)
     if library == nil {
@@ -100,7 +100,7 @@ make_pipeline :: (a: *App) {
     objc_release(library)
 }
 
-make_vertices :: (a: *App) {
+fn make_vertices(a: *App) {
     tri := [3]Vertex{
         Vertex{pos: vec2(0.0, 0.6), color: vec3(1.0, 0.0, 0.0)},
         Vertex{pos: vec2(-0.6, -0.6), color: vec3(0.0, 1.0, 0.0)},
@@ -111,7 +111,7 @@ make_vertices :: (a: *App) {
 }
 
 // Handles pending events; false when the window was closed or Escape was pressed.
-pump_events :: (a: *App) -> bool {
+fn pump_events(a: *App) -> bool {
     loop {
         e := a.app.ns_next_event(false)
         if e == nil {
@@ -125,7 +125,7 @@ pump_events :: (a: *App) -> bool {
     return a.window.ns_is_visible()
 }
 
-draw :: (a: *App) {
+fn draw(a: *App) {
     drawable := a.layer.ca_next_drawable()
     if drawable == nil {
         return
@@ -151,7 +151,7 @@ draw :: (a: *App) {
     a.frames += 1
 }
 
-main :: () {
+fn main() {
     NSApplicationLoad()
     a: App
     a.device = mtl_create_system_default_device()

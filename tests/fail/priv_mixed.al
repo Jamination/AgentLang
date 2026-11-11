@@ -1,25 +1,25 @@
 // Within one file a name is private or public, not both.
-priv area :: (x: i64) -> i64 { x }
-area :: (x: f64) -> f64 { x }
+priv fn area(x: i64) -> i64 { x }
+fn area(x: f64) -> f64 { x }
 
-scale :: (x: i64) -> i64 { x }
-priv scale :: (x: f64) -> f64 { x }
-priv scale :: (x: str) -> str { x }
+fn scale(x: i64) -> i64 { x }
+priv fn scale(x: f64) -> f64 { x }
+priv fn scale(x: str) -> str { x }
 
-priv LIMIT :: 1
+priv const LIMIT = 1
 LIMIT: i64
 
-Point :: struct { x: i64 }
-priv Point :: (x: i64) -> i64 { x }
+struct Point { x: i64 }
+priv fn Point(x: i64) -> i64 { x }
 
 // a private name hides a variant of the same file
-priv Red :: () -> i64 { 0 }
-Color :: enum { Red, Green }
+priv fn Red() -> i64 { 0 }
+enum Color { Red, Green }
 
 // all private, different parameter types: fine
-priv ok :: (x: i64) -> i64 { x }
-priv ok :: (x: str) -> str { x }
+priv fn ok(x: i64) -> i64 { x }
+priv fn ok(x: str) -> str { x }
 
-main :: () {
+fn main() {
     print(ok(1), ok("s"))
 }

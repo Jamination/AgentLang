@@ -3,7 +3,7 @@
 
 // ---------- names that are builtins ----------
 // every name `builtin` (lower_call.al) answers to
-lower_mem_is_builtin :: (name: str) -> bool {
+fn lower_mem_is_builtin(name: str) -> bool {
     // (a `priv` function named like a builtin shares the name in its file as well)
     match ast_plain(name) {
         "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => return true
@@ -15,7 +15,7 @@ lower_mem_is_builtin :: (name: str) -> bool {
 }
 
 // builtins that can be called as a method: `x.f(a)` means `f(x, a)`
-lower_mem_is_method_builtin :: (name: str) -> bool {
+fn lower_mem_is_method_builtin(name: str) -> bool {
     match name {
         "len", "clone", "hash", "ptr", "sqrt", "fabs", "fmin", "fmax" => return true
         "popcnt", "ctz", "clz", "bswap", "rotl", "rotr" => return true
@@ -26,7 +26,7 @@ lower_mem_is_method_builtin :: (name: str) -> bool {
 
 // Would `call_decl` accept these arguments for declaration `d`? `tys[i]` is the type of
 // argument i, or -1 for an untyped literal (which is not evaluated).
-decl_accepts :: (self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], args: []Expr, tys: []i64) -> bool {
+fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], args: []Expr, tys: []i64) -> bool {
     nrecv := if is_some(recv) { 1 } else { 0 }
     if d.params.len != len(args) + nrecv {
         return false
@@ -131,7 +131,7 @@ decl_accepts :: (self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val],
 }
 
 // can the untyped literal (or constant) `a` be a value of type `t`?
-lower_mem_literal_ok :: (s: *Fx, a: *Expr, t: i64) -> bool {
+fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     k := s.cx.types.k(t)
     match a.k {
         EKNil => {
@@ -170,7 +170,7 @@ lower_mem_literal_ok :: (s: *Fx, a: *Expr, t: i64) -> bool {
 }
 
 // the type an untyped literal (or constant) takes without context; -1 if it has none
-lower_mem_literal_type :: (s: *Fx, a: *Expr) -> i64 {
+fn lower_mem_literal_type(s: *Fx, a: *Expr) -> i64 {
     match a.k {
         EKNil => {
             return -1
@@ -222,7 +222,7 @@ lower_mem_literal_type :: (s: *Fx, a: *Expr) -> i64 {
 // The typed arguments must be evaluated to know their types, and they must be evaluated only
 // once: their values are remembered in `memo`, where the code that finally lowers the call
 // (`call_decl`, `call_overloaded` or `builtin`) finds them.
-call_shared :: (self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], recv: Opt[Val], recv_e: *Expr, args0: []Expr, expect: Opt[i64], pos: Pos) -> Val {
+fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], recv: Opt[Val], recv_e: *Expr, args0: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     cands := cands0
     if self.cx.scope_prelude && !self.cx.p_fn_over.has(name) {
         // library code means the builtin, whatever the program declares under this name
@@ -373,7 +373,7 @@ call_shared :: (self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]],
 
 // ---------- the library's Vec and Map ----------
 // the element type of the library's `Vec[T]` (a user struct that is also named Vec is not one)
-vec_elem :: (self: *Cx, t: i64) -> Opt[i64] {
+fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
     match self.types.k(t) {
         TyKStruct(sid) => {
             di, has := self.p_struct_names.get("Vec")
@@ -388,7 +388,7 @@ vec_elem :: (self: *Cx, t: i64) -> Opt[i64] {
 }
 
 // the key and value types of the library's `Map[K, V]`
-map_kv :: (self: *Cx, t: i64) -> Opt[(i64, i64)] {
+fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
     match self.types.k(t) {
         TyKStruct(sid) => {
             di, has := self.p_struct_names.get("Map")
@@ -404,7 +404,7 @@ map_kv :: (self: *Cx, t: i64) -> Opt[(i64, i64)] {
 
 // (pointer to the elements, length, element type) of a `Vec` in memory: what indexing,
 // slicing and iteration use. The pointer is only loaded when `want_ptr` (NOV otherwise).
-vec_parts :: (self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
+fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
     et := 0
     match self.cx.vec_elem(v.ty) {
         Some(t) => {
@@ -443,7 +443,7 @@ vec_parts :: (self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
 // ---------- clone ----------
 // Does a value of type `t` own storage outside itself (a slice, and so a str, Vec or Map,
 // anywhere inside)? Pointers are not followed: `clone` shares what they point to.
-has_heap :: (self: *Cx, t: i64, depth: i64) -> bool {
+fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
     // a type that contains itself by value is reported by the layout; do not recurse forever
     if depth > 40 {
         return false
@@ -483,7 +483,7 @@ has_heap :: (self: *Cx, t: i64, depth: i64) -> bool {
 }
 
 // the builtin `clone(x)`
-clone_builtin :: (self: *Fx, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
+fn clone_builtin(self: *Fx, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     if len(args) != 1 {
         self.err(pos, fmt("`clone` takes 1 argument(s), got ", len(args)))
         lower_call_eval_all(self, args)
@@ -498,7 +498,7 @@ clone_builtin :: (self: *Fx, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
 }
 
 // a copy of the bytes of `v` in a fresh temporary
-clone_copy :: (self: *Fx, v: Val) -> Val {
+fn clone_copy(self: *Fx, v: Val) -> Val {
     if !v.mem {
         return v
     }
@@ -509,7 +509,7 @@ clone_copy :: (self: *Fx, v: Val) -> Val {
 }
 
 // the members `names` of the struct or tuple copy `tv` that own storage are replaced by clones
-lower_mem_clone_fields :: (s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i64], pos: Pos, depth: i64) {
+fn lower_mem_clone_fields(s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i64], pos: Pos, depth: i64) {
     for i in 0..names.len {
         if !s.cx.has_heap(tys[i], 0) {
             continue
@@ -539,7 +539,7 @@ lower_mem_clone_fields :: (s: *Fx, v: Val, tv: Val, names: Vec[str], tys: Vec[i6
 
 // An independent copy of `v`, allocated from the current arena: slices (and so str, Vec and
 // Map) get new storage, recursively; pointers and function values are copied as they are.
-clone_val :: (self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
+fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
     ty := v.ty
     if ty == T_ERR || ty == T_NEVER || ty == T_UNIT {
         return v

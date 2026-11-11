@@ -1,4 +1,4 @@
-main :: () {
+fn main() {
     w := 3000
     h := 3000
     bit_num := 0

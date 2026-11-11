@@ -1,15 +1,15 @@
-Color :: enum { Red, Green, Blue }
-Light :: enum { Red, Amber, Green }
-Maybe[T] :: enum { Some(T), None }
-f :: (c: Color) -> str { "color" }
-f :: (l: Light) -> str { "light" }
-Blue2 :: () -> i64 { 1 }
-Bad :: enum { Blue2, f }
-Dup :: enum { X, Y, X }
-Red2 :: struct { x: i64 }
-Bad2 :: enum { Red2 }
-Node :: struct { next: *Node }
-main :: () {
+enum Color { Red, Green, Blue }
+enum Light { Red, Amber, Green }
+enum Maybe[T] { Some(T), None }
+fn f(c: Color) -> str { "color" }
+fn f(l: Light) -> str { "light" }
+fn Blue2() -> i64 { 1 }
+enum Bad { Blue2, f }
+enum Dup { X, Y, X }
+struct Red2 { x: i64 }
+enum Bad2 { Red2 }
+struct Node { next: *Node }
+fn main() {
     print(f(Red))
     a := Red
     b := Color.Purple

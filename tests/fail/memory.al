@@ -1,9 +1,9 @@
-T :: struct { n: i64 }
-len :: (t: *T) -> i64 { t.n }
-clone :: (t: T, k: i64) -> T { T{t.n + k} }
-ptr :: (t: *T) -> i64 { 7 }
-nothing :: () { }
-main :: () {
+struct T { n: i64 }
+fn len(t: *T) -> i64 { t.n }
+fn clone(t: T, k: i64) -> T { T{t.n + k} }
+fn ptr(t: *T) -> i64 { 7 }
+fn nothing() { }
+fn main() {
     t := T{3}
     v := vec[i64]()
     a := len(3)
@@ -26,9 +26,9 @@ main :: () {
     v[0] = "s"
     r := &v[..]
 }
-Opt[T] :: enum { Some(T), None }
-hash :: (o: Opt[i64]) -> i64 { 1 }
-later :: () {
+enum Opt[T] { Some(T), None }
+fn hash(o: Opt[i64]) -> i64 { 1 }
+fn later() {
     a := hash(Some("s"))
     b := hash(None, 1)
 }

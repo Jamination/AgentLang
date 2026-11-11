@@ -1,16 +1,16 @@
-Entry :: struct { key: u64, val: u64 }
-Map :: struct { e: []Entry, len: u64 }
+struct Entry { key: u64, val: u64 }
+struct Map { e: []Entry, len: u64 }
 
-hash :: (k: u64) -> u64 {
+fn hash(k: u64) -> u64 {
     (k * 0x9E3779B97F4A7C15) >> 32
 }
 
-map_init :: (m: *Map, cap: u64) {
+fn map_init(m: *Map, cap: u64) {
     m.e = alloc[Entry](i64(cap))
     m.len = 0
 }
 
-map_grow :: (m: *Map) {
+fn map_grow(m: *Map) {
     old := m.e
     map_init(m, u64(len(old)) * 2)
     for en in old {
@@ -21,7 +21,7 @@ map_grow :: (m: *Map) {
 }
 
 // find the value slot of key, inserting it if missing
-map_slot :: (m: *Map, key: u64) -> *u64 {
+fn map_slot(m: *Map, key: u64) -> *u64 {
     if (m.len + 1) * 4 > u64(len(m.e)) * 3 {
         map_grow(m)
     }
@@ -41,7 +41,7 @@ map_slot :: (m: *Map, key: u64) -> *u64 {
     }
 }
 
-map_get :: (m: *Map, key: u64) -> (u64, bool) {
+fn map_get(m: *Map, key: u64) -> (u64, bool) {
     mask := u64(len(m.e) - 1)
     i := hash(key) & mask
     loop {
@@ -56,7 +56,7 @@ map_get :: (m: *Map, key: u64) -> (u64, bool) {
     }
 }
 
-main :: () {
+fn main() {
     m: Map
     map_init(&m, 16)
     seed: u64 = 42

@@ -14,21 +14,21 @@
 // run single-precision kernels (trig argument reduction and tan/pow go through f64).
 // Zero, negative, huge, infinite and NaN arguments follow IEEE 754 / C99.
 
-PI :: 3.14159265358979323846
-TAU :: 6.28318530717958647692
-HALF_PI :: 1.57079632679489661923
-E :: 2.71828182845904523536
-DEG2RAD :: 0.017453292519943295769
-RAD2DEG :: 57.295779513082320877
+const PI = 3.14159265358979323846
+const TAU = 6.28318530717958647692
+const HALF_PI = 1.57079632679489661923
+const E = 2.71828182845904523536
+const DEG2RAD = 0.017453292519943295769
+const RAD2DEG = 57.295779513082320877
 // default tolerance of approx_eq
-EPSILON :: 1e-6
-INF :: 1e999
-NAN :: 0.0 / 0.0
+const EPSILON = 1e-6
+const INF = 1e999
+const NAN = 0.0 / 0.0
 
 // ---------- rounding ----------
 
 // x rounded toward zero
-trunc :: (x: f32) -> f32 {
+fn trunc(x: f32) -> f32 {
     if !(fabs(x) < 8388608.0) {
         return x
     }
@@ -36,7 +36,7 @@ trunc :: (x: f32) -> f32 {
 }
 
 // x rounded toward zero
-trunc :: (x: f64) -> f64 {
+fn trunc(x: f64) -> f64 {
     if !(fabs(x) < 4503599627370496.0) {
         return x
     }
@@ -44,187 +44,187 @@ trunc :: (x: f64) -> f64 {
 }
 
 // largest whole number <= x
-floor :: (x: f32) -> f32 {
+fn floor(x: f32) -> f32 {
     t := trunc(x)
     if t > x { t - 1.0 } else { t }
 }
 
 // smallest whole number >= x
-ceil :: (x: f32) -> f32 {
+fn ceil(x: f32) -> f32 {
     t := trunc(x)
     if t < x { t + 1.0 } else { t }
 }
 
 // x rounded to the nearest whole number, halves away from zero
-round :: (x: f32) -> f32 {
+fn round(x: f32) -> f32 {
     t := trunc(x)
     d := x - t
     if d >= 0.5 { t + 1.0 } else if d <= -0.5 { t - 1.0 } else { t }
 }
 
 // x rounded to the nearest whole number, halves away from zero
-round :: (x: f64) -> f64 {
+fn round(x: f64) -> f64 {
     t := trunc(x)
     d := x - t
     if d >= 0.5 { t + 1.0 } else if d <= -0.5 { t - 1.0 } else { t }
 }
 
 // x - floor(x), in [0, 1]
-fract :: (x: f32) -> f32 {
+fn fract(x: f32) -> f32 {
     x - floor(x)
 }
 
 // x - floor(x), in [0, 1]
-fract :: (x: f64) -> f64 {
+fn fract(x: f64) -> f64 {
     x - floor(x)
 }
 
 // ---------- scalar helpers ----------
 
 // -1, 0 or 1 with the sign of x
-sign :: (x: f32) -> f32 {
+fn sign(x: f32) -> f32 {
     if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x }
 }
 
 // -1, 0 or 1 with the sign of x
-sign :: (x: f64) -> f64 {
+fn sign(x: f64) -> f64 {
     if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x }
 }
 
 // x limited to [lo, hi]
-clamp :: (x: f32, lo: f32, hi: f32) -> f32 {
+fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
     fmin(fmax(x, lo), hi)
 }
 
 // x limited to [lo, hi]
-clamp :: (x: f64, lo: f64, hi: f64) -> f64 {
+fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
     fmin(fmax(x, lo), hi)
 }
 
 // x limited to [lo, hi]
-clamp :: (x: i64, lo: i64, hi: i64) -> i64 {
+fn clamp(x: i64, lo: i64, hi: i64) -> i64 {
     if x < lo { lo } else if x > hi { hi } else { x }
 }
 
 // x limited to [0, 1]
-saturate :: (x: f32) -> f32 {
+fn saturate(x: f32) -> f32 {
     fmin(fmax(x, 0.0), 1.0)
 }
 
 // x limited to [0, 1]
-saturate :: (x: f64) -> f64 {
+fn saturate(x: f64) -> f64 {
     fmin(fmax(x, 0.0), 1.0)
 }
 
 // a at t = 0, b at t = 1, linear in between (t is not clamped)
-lerp :: (a: f32, b: f32, t: f32) -> f32 {
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
 // a at t = 0, b at t = 1, linear in between (t is not clamped)
-lerp :: (a: f64, b: f64, t: f64) -> f64 {
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
 // the t for which lerp(a, b, t) == v
-inv_lerp :: (a: f32, b: f32, v: f32) -> f32 {
+fn inv_lerp(a: f32, b: f32, v: f32) -> f32 {
     (v - a) / (b - a)
 }
 
 // the t for which lerp(a, b, t) == v
-inv_lerp :: (a: f64, b: f64, v: f64) -> f64 {
+fn inv_lerp(a: f64, b: f64, v: f64) -> f64 {
     (v - a) / (b - a)
 }
 
 // x moved from the range [in_lo, in_hi] to [out_lo, out_hi] (not clamped)
-remap :: (x: f32, in_lo: f32, in_hi: f32, out_lo: f32, out_hi: f32) -> f32 {
+fn remap(x: f32, in_lo: f32, in_hi: f32, out_lo: f32, out_hi: f32) -> f32 {
     out_lo + (x - in_lo) * (out_hi - out_lo) / (in_hi - in_lo)
 }
 
 // x moved from the range [in_lo, in_hi] to [out_lo, out_hi] (not clamped)
-remap :: (x: f64, in_lo: f64, in_hi: f64, out_lo: f64, out_hi: f64) -> f64 {
+fn remap(x: f64, in_lo: f64, in_hi: f64, out_lo: f64, out_hi: f64) -> f64 {
     out_lo + (x - in_lo) * (out_hi - out_lo) / (in_hi - in_lo)
 }
 
 // 0 below edge0, 1 above edge1, smooth (3t^2 - 2t^3) in between
-smoothstep :: (edge0: f32, edge1: f32, x: f32) -> f32 {
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     t := saturate((x - edge0) / (edge1 - edge0))
     t * t * (3.0 - 2.0 * t)
 }
 
 // 0 below edge0, 1 above edge1, smooth (3t^2 - 2t^3) in between
-smoothstep :: (edge0: f64, edge1: f64, x: f64) -> f64 {
+fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
     t := saturate((x - edge0) / (edge1 - edge0))
     t * t * (3.0 - 2.0 * t)
 }
 
 // 0 if x < edge, else 1
-step :: (edge: f32, x: f32) -> f32 {
+fn step(edge: f32, x: f32) -> f32 {
     if x < edge { 0.0 } else { 1.0 }
 }
 
 // 0 if x < edge, else 1
-step :: (edge: f64, x: f64) -> f64 {
+fn step(edge: f64, x: f64) -> f64 {
     if x < edge { 0.0 } else { 1.0 }
 }
 
 // degrees to radians
-radians :: (deg: f32) -> f32 {
+fn radians(deg: f32) -> f32 {
     deg * DEG2RAD
 }
 
 // degrees to radians
-radians :: (deg: f64) -> f64 {
+fn radians(deg: f64) -> f64 {
     deg * DEG2RAD
 }
 
 // radians to degrees
-degrees :: (rad: f32) -> f32 {
+fn degrees(rad: f32) -> f32 {
     rad * RAD2DEG
 }
 
 // radians to degrees
-degrees :: (rad: f64) -> f64 {
+fn degrees(rad: f64) -> f64 {
     rad * RAD2DEG
 }
 
 // the angle a brought into [-PI, PI] by adding a multiple of TAU; angles already inside are returned unchanged
-wrap_angle :: (a: f32) -> f32 {
+fn wrap_angle(a: f32) -> f32 {
     a - TAU * floor((a + PI) / TAU)
 }
 
 // the angle a brought into [-PI, PI] by adding a multiple of TAU; angles already inside are returned unchanged
-wrap_angle :: (a: f64) -> f64 {
+fn wrap_angle(a: f64) -> f64 {
     a - TAU * floor((a + PI) / TAU)
 }
 
 // |a - b| <= EPSILON * max(1, |a|, |b|)
-approx_eq :: (a: f32, b: f32) -> bool {
+fn approx_eq(a: f32, b: f32) -> bool {
     fabs(a - b) <= EPSILON * fmax(1.0, fmax(fabs(a), fabs(b)))
 }
 
 // |a - b| <= EPSILON * max(1, |a|, |b|)
-approx_eq :: (a: f64, b: f64) -> bool {
+fn approx_eq(a: f64, b: f64) -> bool {
     fabs(a - b) <= EPSILON * fmax(1.0, fmax(fabs(a), fabs(b)))
 }
 
 // |a - b| <= eps
-approx_eq :: (a: f32, b: f32, eps: f32) -> bool {
+fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
     fabs(a - b) <= eps
 }
 
 // |a - b| <= eps
-approx_eq :: (a: f64, b: f64, eps: f64) -> bool {
+fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
     fabs(a - b) <= eps
 }
 
 // is x a power of two (1, 2, 4, ...)?
-is_pow2 :: (x: i64) -> bool {
+fn is_pow2(x: i64) -> bool {
     x > 0 && x & (x - 1) == 0
 }
 
 // smallest power of two >= x (1 for x <= 1); x must not exceed 2^62
-next_pow2 :: (x: i64) -> i64 {
+fn next_pow2(x: i64) -> i64 {
     if x <= 1 {
         return 1
     }
@@ -232,38 +232,38 @@ next_pow2 :: (x: i64) -> i64 {
 }
 
 // x rounded up to a multiple of align, which must be a power of two
-align_up :: (x: i64, align: i64) -> i64 {
+fn align_up(x: i64, align: i64) -> i64 {
     (x + align - 1) & ~(align - 1)
 }
 
 // ---------- f64 kernels ----------
 
-__PIO4 :: 0.7853981633974483
-__INV_PIO2 :: 0.6366197723675814
+const __PIO4 = 0.7853981633974483
+const __INV_PIO2 = 0.6366197723675814
 // pi/2 in 33-bit pieces (n * piece is exact for n < 2^20) and the tail after each
-__PIO2_1 :: 1.5707963267341256
-__PIO2_1T :: 6.077100506506192e-11
-__PIO2_2 :: 6.077100506303966e-11
-__PIO2_2T :: 2.0222662487959506e-21
-__PIO2_3 :: 2.0222662487111665e-21
-__PIO2_3T :: 8.4784276603689e-32
+const __PIO2_1 = 1.5707963267341256
+const __PIO2_1T = 6.077100506506192e-11
+const __PIO2_2 = 6.077100506303966e-11
+const __PIO2_2T = 2.0222662487959506e-21
+const __PIO2_3 = 2.0222662487111665e-21
+const __PIO2_3T = 8.4784276603689e-32
 // pi/2 in 27-bit pieces
-__PIO2_A :: 1.570796325802803
-__PIO2_B :: 9.920935739593517e-10
-__PIO2_C :: 5.721188726109832e-18
-__PIO2_HI :: 1.5707963267948966
-__PIO2_LO :: 6.123233995736766e-17
-__PI_LO :: 1.2246467991473532e-16
+const __PIO2_A = 1.570796325802803
+const __PIO2_B = 9.920935739593517e-10
+const __PIO2_C = 5.721188726109832e-18
+const __PIO2_HI = 1.5707963267948966
+const __PIO2_LO = 6.123233995736766e-17
+const __PI_LO = 1.2246467991473532e-16
 // ln 2: 32 bits (k * hi is exact) and the rest
-__LN2_HI :: 0.6931471803691238
-__LN2_LO :: 1.9082149292705877e-10
-__INV_LN2 :: 1.4426950408889634
-__IVLN2_HI :: 1.4426946640014648
-__IVLN2_LO :: 3.768874985636099e-07
+const __LN2_HI = 0.6931471803691238
+const __LN2_LO = 1.9082149292705877e-10
+const __INV_LN2 = 1.4426950408889634
+const __IVLN2_HI = 1.4426946640014648
+const __IVLN2_LO = 3.768874985636099e-07
 // 2/3, and split into 27 bits + rest
-__CP :: 0.6666666666666666
-__CP_H :: 0.6666666641831398
-__CP_L :: 2.483526865641276e-09
+const __CP = 0.6666666666666666
+const __CP_H = 0.6666666641831398
+const __CP_L = 2.483526865641276e-09
 // atan(0.5), atan(1), atan(1.5), atan(inf) and what rounding them lost
 __ATAN_HI := [4]f64{0.4636476090008061, 0.7853981633974483, 0.982793723247329, 1.5707963267948966}
 __ATAN_LO := [4]f64{2.2698777452961687e-17, 3.061616997868383e-17, 1.3903311031230998e-17, 6.123233995736766e-17}
@@ -277,69 +277,69 @@ __TWO_OVER_PI := [20]u64{
 
 // Polynomial coefficients: weighted minimax fits (Remez), each coefficient rounded in turn.
 // sin(x) = x + x^3 * S(x^2), cos(x) = 1 - x^2/2 + x^4 * C(x^2) on |x| <= pi/4
-__S1 :: -0.1666666666666663
-__S2 :: 0.00833333333332184
-__S3 :: -0.0001984126982935853
-__S4 :: 2.7557313538516135e-06
-__S5 :: -2.5050734389685003e-08
-__S6 :: 1.5895433320308664e-10
-__C1 :: 0.041666666666666595
-__C2 :: -0.001388888888887332
-__C3 :: 2.480158728897899e-05
-__C4 :: -2.755731420827496e-07
-__C5 :: 2.087570397724136e-09
-__C6 :: -1.1358665991733492e-11
+const __S1 = -0.1666666666666663
+const __S2 = 0.00833333333332184
+const __S3 = -0.0001984126982935853
+const __S4 = 2.7557313538516135e-06
+const __S5 = -2.5050734389685003e-08
+const __S6 = 1.5895433320308664e-10
+const __C1 = 0.041666666666666595
+const __C2 = -0.001388888888887332
+const __C3 = 2.480158728897899e-05
+const __C4 = -2.755731420827496e-07
+const __C5 = 2.087570397724136e-09
+const __C6 = -1.1358665991733492e-11
 // atan(x) = x + x^3 * AT(x^2) on |x| <= 7/16
-__AT1 :: -0.3333333333333292
-__AT2 :: 0.19999999999873752
-__AT3 :: -0.14285714272267236
-__AT4 :: 0.11111110395279333
-__AT5 :: -0.09090886880408829
-__AT6 :: 0.0769187230949943
-__AT7 :: -0.06661034759264373
-__AT8 :: 0.05833327807696977
-__AT9 :: -0.049759293742917814
-__AT10 :: 0.03651061024238453
-__AT11 :: -0.01626583284553897
+const __AT1 = -0.3333333333333292
+const __AT2 = 0.19999999999873752
+const __AT3 = -0.14285714272267236
+const __AT4 = 0.11111110395279333
+const __AT5 = -0.09090886880408829
+const __AT6 = 0.0769187230949943
+const __AT7 = -0.06661034759264373
+const __AT8 = 0.05833327807696977
+const __AT9 = -0.049759293742917814
+const __AT10 = 0.03651061024238453
+const __AT11 = -0.01626583284553897
 // asin(x) = x + x^3 * P(x^2) / Q(x^2) on |x| <= 1/2
-__ASP1 :: 0.1666666666666666
-__ASP2 :: -0.3267454420501004
-__ASP3 :: 0.20288901827397887
-__ASP4 :: -0.04065065492845929
-__ASP5 :: 0.0008135001313251829
-__ASP6 :: 3.6252883250344145e-05
-__ASQ1 :: -2.4104726523006743
-__ASQ2 :: 2.0341896603264984
-__ASQ3 :: -0.6959186259385266
-__ASQ4 :: 0.07834827700176485
+const __ASP1 = 0.1666666666666666
+const __ASP2 = -0.3267454420501004
+const __ASP3 = 0.20288901827397887
+const __ASP4 = -0.04065065492845929
+const __ASP5 = 0.0008135001313251829
+const __ASP6 = 3.6252883250344145e-05
+const __ASQ1 = -2.4104726523006743
+const __ASQ2 = 2.0341896603264984
+const __ASQ3 = -0.6959186259385266
+const __ASQ4 = 0.07834827700176485
 // r * (e^r + 1) / (e^r - 1) = 2 + r^2 * EP(r^2) on |r| <= ln(2)/2
-__EP1 :: 0.16666666666666555
-__EP2 :: -0.002777777777669617
-__EP3 :: 6.613756250019724e-05
-__EP4 :: -1.6533837004080303e-06
-__EP5 :: 4.136040517913001e-08
+const __EP1 = 0.16666666666666555
+const __EP2 = -0.002777777777669617
+const __EP3 = 6.613756250019724e-05
+const __EP4 = -1.6533837004080303e-06
+const __EP5 = 4.136040517913001e-08
 // 3 * atanh(s) / s = 3 + s^2 + s^4 * LG(s^2) on |s| <= 0.1716
-__LG1 :: 0.6000000000000341
-__LG2 :: 0.42857142855137703
-__LG3 :: 0.3333333378212167
-__LG4 :: 0.27272676343163443
-__LG5 :: 0.23080146034642535
-__LG6 :: 0.19884982858732675
-__LG7 :: 0.1979684027464579
+const __LG1 = 0.6000000000000341
+const __LG2 = 0.42857142855137703
+const __LG3 = 0.3333333378212167
+const __LG4 = 0.27272676343163443
+const __LG5 = 0.23080146034642535
+const __LG6 = 0.19884982858732675
+const __LG7 = 0.1979684027464579
 
 // 2^e for -1022 <= e <= 1023
-inline __pow2 :: (e: i64) -> f64 {
+inline fn __pow2(e: i64) -> f64 {
     cast[f64](u64(e + 1023) << 52)
 }
 
 // x with the low 32 bits of its representation cleared (21 significant bits remain)
-inline __trunc32 :: (x: f64) -> f64 {
+inline fn __trunc32(x: f64) -> f64 {
     cast[f64](cast[u64](x) & 0xFFFFFFFF00000000)
 }
 
 // Payne-Hanek reduction for finite |x| >= 2^20: x = n * pi/2 + (hi + lo), |hi| <= pi/4;
 // returns (n mod 4, hi, lo). Exact integer arithmetic on the 192 digits of 2/pi that matter.
-__rem_pio2_big :: (x: f64) -> (i64, f64, f64) {
+fn __rem_pio2_big(x: f64) -> (i64, f64, f64) {
     bits := cast[u64](x) & 0x7FFFFFFFFFFFFFFF
     e := i64(bits >> 52) - 1075
     m := (bits & 0x000FFFFFFFFFFFFF) | 0x0010000000000000
@@ -415,7 +415,7 @@ __rem_pio2_big :: (x: f64) -> (i64, f64, f64) {
 }
 
 // x = n * pi/2 + (hi + lo) with |hi| <= pi/4, for finite x; returns (n, hi, lo), n exact mod 4
-__rem_pio2 :: (x: f64) -> (i64, f64, f64) {
+fn __rem_pio2(x: f64) -> (i64, f64, f64) {
     if fabs(x) >= 1048576.0 {
         return __rem_pio2_big(x)
     }
@@ -442,7 +442,7 @@ __rem_pio2 :: (x: f64) -> (i64, f64, f64) {
 }
 
 // sin(x + y) for |x| <= pi/4, y the tail of x
-__sin_k :: (x: f64, y: f64) -> f64 {
+fn __sin_k(x: f64, y: f64) -> f64 {
     z := x * x
     v := z * x
     r := __S2 + z * (__S3 + z * (__S4 + z * (__S5 + z * __S6)))
@@ -450,7 +450,7 @@ __sin_k :: (x: f64, y: f64) -> f64 {
 }
 
 // cos(x + y) for |x| <= pi/4, y the tail of x
-__cos_k :: (x: f64, y: f64) -> f64 {
+fn __cos_k(x: f64, y: f64) -> f64 {
     z := x * x
     hz := 0.5 * z
     w := 1.0 - hz
@@ -459,19 +459,19 @@ __cos_k :: (x: f64, y: f64) -> f64 {
 }
 
 // (asin(x) - x) / x^3 as a function of z = x^2 <= 1/4, times z
-__asin_r :: (z: f64) -> f64 {
+fn __asin_r(z: f64) -> f64 {
     p := z * (__ASP1 + z * (__ASP2 + z * (__ASP3 + z * (__ASP4 + z * (__ASP5 + z * __ASP6)))))
     q := 1.0 + z * (__ASQ1 + z * (__ASQ2 + z * (__ASQ3 + z * __ASQ4)))
     p / q
 }
 
 // (atan(x) - x) / x as a function of z = x^2
-__atan_r :: (z: f64) -> f64 {
+fn __atan_r(z: f64) -> f64 {
     z * (__AT1 + z * (__AT2 + z * (__AT3 + z * (__AT4 + z * (__AT5 + z * (__AT6 + z * (__AT7 + z * (__AT8 + z * (__AT9 + z * (__AT10 + z * __AT11))))))))))
 }
 
 // finite x > 0 as 2^k * (1 + f) with sqrt(2)/2 <= 1 + f < sqrt(2); returns (k, f)
-__log_split :: (x: f64) -> (i64, f64) {
+fn __log_split(x: f64) -> (i64, f64) {
     bits := cast[u64](x)
     k := 0
     if bits < 0x0010000000000000 {
@@ -484,12 +484,12 @@ __log_split :: (x: f64) -> (i64, f64) {
     (k, cast[f64](bits) - 1.0)
 }
 
-inline __lg :: (z: f64) -> f64 {
+inline fn __lg(z: f64) -> f64 {
     __LG1 + z * (__LG2 + z * (__LG3 + z * (__LG4 + z * (__LG5 + z * (__LG6 + z * __LG7)))))
 }
 
 // log(1 + f) = f - h + r for the f of __log_split; returns (h, r) with h = f^2 / 2
-__log1p_k :: (f: f64) -> (f64, f64) {
+fn __log1p_k(f: f64) -> (f64, f64) {
     s := f / (2.0 + f)
     z := s * s
     h := 0.5 * f * f
@@ -497,7 +497,7 @@ __log1p_k :: (f: f64) -> (f64, f64) {
 }
 
 // log(x) for finite x > 0 as hi + lo, about 70 bits; the low 32 bits of hi are clear
-__log_dd :: (x: f64) -> (f64, f64) {
+fn __log_dd(x: f64) -> (f64, f64) {
     k, f := __log_split(x)
     // s = f / (2 + f) as sh + sl
     m := f + 1.0
@@ -527,7 +527,7 @@ __log_dd :: (x: f64) -> (f64, f64) {
 }
 
 // e^(x + xlo) where xlo is a small correction to x
-__exp_k :: (x: f64, xlo: f64) -> f64 {
+fn __exp_k(x: f64, xlo: f64) -> f64 {
     if x != x {
         return x
     }
@@ -556,7 +556,7 @@ __exp_k :: (x: f64, xlo: f64) -> f64 {
 
 // The special cases of pow(x, y). Returns (result, true) when x, y are one of them,
 // otherwise (sign of the result, false).
-__pow_special[T] :: (x: T, y: T) -> (T, bool) {
+fn __pow_special[T](x: T, y: T) -> (T, bool) {
     one: T = 1.0
     zero: T
     if y == 0.0 || x == 1.0 {
@@ -590,7 +590,7 @@ __pow_special[T] :: (x: T, y: T) -> (T, bool) {
 // ---------- f64 functions ----------
 
 // sine of x (radians)
-sin :: (x: f64) -> f64 {
+fn sin(x: f64) -> f64 {
     if fabs(x) <= __PIO4 {
         return __sin_k(x, 0.0)
     }
@@ -607,7 +607,7 @@ sin :: (x: f64) -> f64 {
 }
 
 // cosine of x (radians)
-cos :: (x: f64) -> f64 {
+fn cos(x: f64) -> f64 {
     if fabs(x) <= __PIO4 {
         return __cos_k(x, 0.0)
     }
@@ -624,7 +624,7 @@ cos :: (x: f64) -> f64 {
 }
 
 // (sin(x), cos(x)) with one argument reduction
-sin_cos :: (x: f64) -> (f64, f64) {
+fn sin_cos(x: f64) -> (f64, f64) {
     if !(fabs(x) < INF) {
         return (x - x, x - x)
     }
@@ -645,13 +645,13 @@ sin_cos :: (x: f64) -> (f64, f64) {
 }
 
 // tangent of x (radians)
-tan :: (x: f64) -> f64 {
+fn tan(x: f64) -> f64 {
     s, c := sin_cos(x)
     s / c
 }
 
 // arc sine in [-PI/2, PI/2]; NaN outside [-1, 1]
-asin :: (x: f64) -> f64 {
+fn asin(x: f64) -> f64 {
     a := fabs(x)
     if a < 0.5 {
         return x + x * __asin_r(x * x)
@@ -675,7 +675,7 @@ asin :: (x: f64) -> f64 {
 }
 
 // arc cosine in [0, PI]; NaN outside [-1, 1]
-acos :: (x: f64) -> f64 {
+fn acos(x: f64) -> f64 {
     a := fabs(x)
     if a < 0.5 {
         return __PIO2_HI - (x - (__PIO2_LO - x * __asin_r(x * x)))
@@ -698,7 +698,7 @@ acos :: (x: f64) -> f64 {
 }
 
 // arc tangent in [-PI/2, PI/2]
-atan :: (x: f64) -> f64 {
+fn atan(x: f64) -> f64 {
     a := fabs(x)
     if a < 0.4375 {
         return x + x * __atan_r(x * x)
@@ -724,7 +724,7 @@ atan :: (x: f64) -> f64 {
 }
 
 // angle of the point (x, y) in [-PI, PI] (note the argument order: y first)
-atan2 :: (y: f64, x: f64) -> f64 {
+fn atan2(y: f64, x: f64) -> f64 {
     if x != x || y != y {
         return x + y
     }
@@ -741,12 +741,12 @@ atan2 :: (y: f64, x: f64) -> f64 {
 }
 
 // e^x
-exp :: (x: f64) -> f64 {
+fn exp(x: f64) -> f64 {
     __exp_k(x, 0.0)
 }
 
 // natural logarithm; -INF for 0, NaN for x < 0
-log :: (x: f64) -> f64 {
+fn log(x: f64) -> f64 {
     if !(x > 0.0) {
         return if x == 0.0 { -INF } else { NAN }
     }
@@ -759,7 +759,7 @@ log :: (x: f64) -> f64 {
 }
 
 // base 2 logarithm (exact for powers of two); -INF for 0, NaN for x < 0
-log2 :: (x: f64) -> f64 {
+fn log2(x: f64) -> f64 {
     if !(x > 0.0) {
         return if x == 0.0 { -INF } else { NAN }
     }
@@ -777,7 +777,7 @@ log2 :: (x: f64) -> f64 {
 }
 
 // x raised to the power y (C99 rules: pow(x, 0) = 1, negative x needs a whole y, ...)
-pow :: (x: f64, y: f64) -> f64 {
+fn pow(x: f64, y: f64) -> f64 {
     s, done := __pow_special(x, y)
     if done {
         return s
@@ -788,7 +788,7 @@ pow :: (x: f64, y: f64) -> f64 {
 }
 
 // finite a > 0 as m * 2^e with 2^52 <= m < 2^53; returns (m, e)
-__mant_exp :: (a: f64) -> (u64, i64) {
+fn __mant_exp(a: f64) -> (u64, i64) {
     bits := cast[u64](a)
     e := i64(bits >> 52)
     m := bits & 0x000FFFFFFFFFFFFF
@@ -800,7 +800,7 @@ __mant_exp :: (a: f64) -> (u64, i64) {
 }
 
 // remainder of x / y with the sign of x (exact); NaN if y is 0 or x is infinite
-fmod :: (x: f64, y: f64) -> f64 {
+fn fmod(x: f64, y: f64) -> f64 {
     ax := fabs(x)
     ay := fabs(y)
     if !(ax < INF) || !(ay > 0.0) {
@@ -827,65 +827,65 @@ fmod :: (x: f64, y: f64) -> f64 {
 // ---------- f32 kernels ----------
 
 // 25 bits of pi/2 (n * piece is exact in f64 for n < 2^28) and the rest
-__PIO2F_1 :: 1.5707963109016418
-__PIO2F_1T :: 1.5893254773528196e-08
-__PIO2F_HI :: 1.5707963705062866
-__PIO2F_LO :: -4.371138828673793e-08
-__PIO4F :: 0.7853981852531433
-__PIF_LO :: -8.742277657347586e-08
+const __PIO2F_1 = 1.5707963109016418
+const __PIO2F_1T = 1.5893254773528196e-08
+const __PIO2F_HI = 1.5707963705062866
+const __PIO2F_LO = -4.371138828673793e-08
+const __PIO4F = 0.7853981852531433
+const __PIF_LO = -8.742277657347586e-08
 // ln 2: 16 bits (k * hi is exact) and the rest
-__LN2F_HI :: 0.693145751953125
-__LN2F_LO :: 1.428606765330187e-06
-__IVLN2F_HI :: 1.4423828125
-__IVLN2F_LO :: 0.00031222839606925845
+const __LN2F_HI = 0.693145751953125
+const __LN2F_LO = 1.428606765330187e-06
+const __IVLN2F_HI = 1.4423828125
+const __IVLN2F_LO = 0.00031222839606925845
 __ATANF_HI := [4]f32{0.46364760398864746, 0.7853981852531433, 0.9827937483787537, 1.5707963705062866}
 __ATANF_LO := [4]f32{5.01215868808913e-09, -2.1855694143368964e-08, -2.5131424052915463e-08, -4.371138828673793e-08}
 
 // the single-precision counterparts of the fits above (coefficients are exact f32 values)
-__SF1 :: -0.1666666716337204
-__SF2 :: 0.008333379402756691
-__SF3 :: -0.00019853064441122115
-__SF4 :: 2.8325100629444933e-06
-__CF1 :: 0.04166664555668831
-__CF2 :: -0.0013887309469282627
-__CF3 :: 2.4432327336398885e-05
-__ATF1 :: -0.3333330452442169
-__ATF2 :: 0.1999778151512146
-__ATF3 :: -0.14230172336101532
-__ATF4 :: 0.10494108498096466
-__ATF5 :: -0.05825638398528099
-__ASFP1 :: 0.1666666716337204
-__ASFP2 :: -0.1203669011592865
-__ASFP3 :: 0.0056250994093716145
-__ASFQ1 :: -1.1721992492675781
-__ASFQ2 :: 0.29334113001823425
-__EPF1 :: 0.166666179895401
-__EPF2 :: -0.0027660115156322718
+const __SF1 = -0.1666666716337204
+const __SF2 = 0.008333379402756691
+const __SF3 = -0.00019853064441122115
+const __SF4 = 2.8325100629444933e-06
+const __CF1 = 0.04166664555668831
+const __CF2 = -0.0013887309469282627
+const __CF3 = 2.4432327336398885e-05
+const __ATF1 = -0.3333330452442169
+const __ATF2 = 0.1999778151512146
+const __ATF3 = -0.14230172336101532
+const __ATF4 = 0.10494108498096466
+const __ATF5 = -0.05825638398528099
+const __ASFP1 = 0.1666666716337204
+const __ASFP2 = -0.1203669011592865
+const __ASFP3 = 0.0056250994093716145
+const __ASFQ1 = -1.1721992492675781
+const __ASFQ2 = 0.29334113001823425
+const __EPF1 = 0.166666179895401
+const __EPF2 = -0.0027660115156322718
 // 2 * atanh(s) = 2s + s^3 * LGF(s^2)
-__LGF1 :: 0.6666677594184875
-__LGF2 :: 0.3997756540775299
-__LGF3 :: 0.2987159490585327
+const __LGF1 = 0.6666677594184875
+const __LGF2 = 0.3997756540775299
+const __LGF3 = 0.2987159490585327
 // tan(x) = x + x^3 * TF(x^2) on |x| <= pi/4, to f32 accuracy, evaluated in f64
-__TF1 :: 0.3333334992996423
-__TF2 :: 0.13332657089350944
-__TF3 :: 0.054060649034842846
-__TF4 :: 0.021278282810232724
-__TF5 :: 0.010846238569136477
-__TF6 :: 7.594712900399639e-05
-__TF7 :: 0.004383155848503015
+const __TF1 = 0.3333334992996423
+const __TF2 = 0.13332657089350944
+const __TF3 = 0.054060649034842846
+const __TF4 = 0.021278282810232724
+const __TF5 = 0.010846238569136477
+const __TF6 = 7.594712900399639e-05
+const __TF7 = 0.004383155848503015
 
 // 2^e for -126 <= e <= 127
-inline __pow2f :: (e: i64) -> f32 {
+inline fn __pow2f(e: i64) -> f32 {
     cast[f32](u32(e + 127) << 23)
 }
 
 // x with the low 12 bits of its representation cleared (12 significant bits remain)
-inline __trunc12 :: (x: f32) -> f32 {
+inline fn __trunc12(x: f32) -> f32 {
     cast[f32](cast[u32](x) & 0xFFFFF000)
 }
 
 // finite x = n * pi/2 + r with |r| <= pi/4; returns (n, r), n exact mod 4, r in double precision
-__rem_pio2f :: (x: f32) -> (i64, f64) {
+fn __rem_pio2f(x: f32) -> (i64, f64) {
     d := f64(x)
     if fabs(x) >= 4.0e8 {
         q, hi, _ := __rem_pio2_big(d)
@@ -896,7 +896,7 @@ __rem_pio2f :: (x: f32) -> (i64, f64) {
 }
 
 // sin(x + y) for |x| <= pi/4, y the tail of x
-__sin_kf :: (x: f32, y: f32) -> f32 {
+fn __sin_kf(x: f32, y: f32) -> f32 {
     z := x * x
     v := z * x
     r := __SF2 + z * (__SF3 + z * __SF4)
@@ -904,7 +904,7 @@ __sin_kf :: (x: f32, y: f32) -> f32 {
 }
 
 // cos(x + y) for |x| <= pi/4, y the tail of x
-__cos_kf :: (x: f32, y: f32) -> f32 {
+fn __cos_kf(x: f32, y: f32) -> f32 {
     z := x * x
     hz := 0.5 * z
     w := 1.0 - hz
@@ -913,17 +913,17 @@ __cos_kf :: (x: f32, y: f32) -> f32 {
 }
 
 // (asin(x) - x) / x^3 as a function of z = x^2 <= 1/4, times z
-__asin_rf :: (z: f32) -> f32 {
+fn __asin_rf(z: f32) -> f32 {
     z * (__ASFP1 + z * (__ASFP2 + z * __ASFP3)) / (1.0 + z * (__ASFQ1 + z * __ASFQ2))
 }
 
 // (atan(x) - x) / x as a function of z = x^2
-__atan_rf :: (z: f32) -> f32 {
+fn __atan_rf(z: f32) -> f32 {
     z * (__ATF1 + z * (__ATF2 + z * (__ATF3 + z * (__ATF4 + z * __ATF5))))
 }
 
 // finite x > 0 as 2^k * (1 + f) with sqrt(2)/2 <= 1 + f < sqrt(2); returns (k, f)
-__log_splitf :: (x: f32) -> (i64, f32) {
+fn __log_splitf(x: f32) -> (i64, f32) {
     bits := cast[u32](x)
     k := 0
     if bits < 0x00800000 {
@@ -937,7 +937,7 @@ __log_splitf :: (x: f32) -> (i64, f32) {
 }
 
 // log(1 + f) = f - h + r for the f of __log_splitf; returns (h, r) with h = f^2 / 2
-__log1p_kf :: (f: f32) -> (f32, f32) {
+fn __log1p_kf(f: f32) -> (f32, f32) {
     s := f / (2.0 + f)
     z := s * s
     h := 0.5 * f * f
@@ -947,7 +947,7 @@ __log1p_kf :: (f: f32) -> (f32, f32) {
 // ---------- f32 functions ----------
 
 // sine of x (radians)
-sin :: (x: f32) -> f32 {
+fn sin(x: f32) -> f32 {
     if fabs(x) <= __PIO4F {
         return __sin_kf(x, 0.0)
     }
@@ -966,7 +966,7 @@ sin :: (x: f32) -> f32 {
 }
 
 // cosine of x (radians)
-cos :: (x: f32) -> f32 {
+fn cos(x: f32) -> f32 {
     if fabs(x) <= __PIO4F {
         return __cos_kf(x, 0.0)
     }
@@ -985,7 +985,7 @@ cos :: (x: f32) -> f32 {
 }
 
 // (sin(x), cos(x)) with one argument reduction
-sin_cos :: (x: f32) -> (f32, f32) {
+fn sin_cos(x: f32) -> (f32, f32) {
     if !(fabs(x) < INF) {
         return (x - x, x - x)
     }
@@ -1009,7 +1009,7 @@ sin_cos :: (x: f32) -> (f32, f32) {
 }
 
 // tangent of x (radians)
-tan :: (x: f32) -> f32 {
+fn tan(x: f32) -> f32 {
     if !(fabs(x) < INF) {
         return x - x
     }
@@ -1024,7 +1024,7 @@ tan :: (x: f32) -> f32 {
 }
 
 // arc sine in [-PI/2, PI/2]; NaN outside [-1, 1]
-asin :: (x: f32) -> f32 {
+fn asin(x: f32) -> f32 {
     a := fabs(x)
     if a < 0.5 {
         return x + x * __asin_rf(x * x)
@@ -1047,7 +1047,7 @@ asin :: (x: f32) -> f32 {
 }
 
 // arc cosine in [0, PI]; NaN outside [-1, 1]
-acos :: (x: f32) -> f32 {
+fn acos(x: f32) -> f32 {
     a := fabs(x)
     if a < 0.5 {
         return __PIO2F_HI - (x - (__PIO2F_LO - x * __asin_rf(x * x)))
@@ -1070,7 +1070,7 @@ acos :: (x: f32) -> f32 {
 }
 
 // arc tangent in [-PI/2, PI/2]
-atan :: (x: f32) -> f32 {
+fn atan(x: f32) -> f32 {
     a := fabs(x)
     if a < 0.4375 {
         return x + x * __atan_rf(x * x)
@@ -1095,7 +1095,7 @@ atan :: (x: f32) -> f32 {
 }
 
 // angle of the point (x, y) in [-PI, PI] (note the argument order: y first)
-atan2 :: (y: f32, x: f32) -> f32 {
+fn atan2(y: f32, x: f32) -> f32 {
     if x != x || y != y {
         return x + y
     }
@@ -1112,7 +1112,7 @@ atan2 :: (y: f32, x: f32) -> f32 {
 }
 
 // e^x
-exp :: (x: f32) -> f32 {
+fn exp(x: f32) -> f32 {
     if x != x {
         return x
     }
@@ -1139,7 +1139,7 @@ exp :: (x: f32) -> f32 {
 }
 
 // natural logarithm; -INF for 0, NaN for x < 0
-log :: (x: f32) -> f32 {
+fn log(x: f32) -> f32 {
     if !(x > 0.0) {
         return if x == 0.0 { -INF } else { NAN }
     }
@@ -1152,7 +1152,7 @@ log :: (x: f32) -> f32 {
 }
 
 // base 2 logarithm (exact for powers of two); -INF for 0, NaN for x < 0
-log2 :: (x: f32) -> f32 {
+fn log2(x: f32) -> f32 {
     if !(x > 0.0) {
         return if x == 0.0 { -INF } else { NAN }
     }
@@ -1167,7 +1167,7 @@ log2 :: (x: f32) -> f32 {
 }
 
 // x raised to the power y (C99 rules: pow(x, 0) = 1, negative x needs a whole y, ...)
-pow :: (x: f32, y: f32) -> f32 {
+fn pow(x: f32, y: f32) -> f32 {
     s, done := __pow_special(x, y)
     if done {
         return s
@@ -1176,357 +1176,357 @@ pow :: (x: f32, y: f32) -> f32 {
 }
 
 // remainder of x / y with the sign of x (exact); NaN if y is 0 or x is infinite
-fmod :: (x: f32, y: f32) -> f32 {
+fn fmod(x: f32, y: f32) -> f32 {
     f32(fmod(f64(x), f64(y)))
 }
 
 // ---------- vectors ----------
 
 // dot product
-dot :: (a: vec2, b: vec2) -> f32 {
+fn dot(a: vec2, b: vec2) -> f32 {
     m := a * b
     m.x + m.y
 }
 
 // dot product
-dot :: (a: vec3, b: vec3) -> f32 {
+fn dot(a: vec3, b: vec3) -> f32 {
     m := a * b
     m.x + m.y + m.z
 }
 
 // dot product
-dot :: (a: vec4, b: vec4) -> f32 {
+fn dot(a: vec4, b: vec4) -> f32 {
     m := a * b
     (m.x + m.y) + (m.z + m.w)
 }
 
 // cross product (right-handed)
-cross :: (a: vec3, b: vec3) -> vec3 {
+fn cross(a: vec3, b: vec3) -> vec3 {
     a.yzx * b.zxy - a.zxy * b.yzx
 }
 
 // z of the 3D cross product: > 0 when b is counter-clockwise from a
-cross :: (a: vec2, b: vec2) -> f32 {
+fn cross(a: vec2, b: vec2) -> f32 {
     a.x * b.y - a.y * b.x
 }
 
 // squared length
-length_sq :: (v: vec2) -> f32 {
+fn length_sq(v: vec2) -> f32 {
     dot(v, v)
 }
 
 // squared length
-length_sq :: (v: vec3) -> f32 {
+fn length_sq(v: vec3) -> f32 {
     dot(v, v)
 }
 
 // squared length
-length_sq :: (v: vec4) -> f32 {
+fn length_sq(v: vec4) -> f32 {
     dot(v, v)
 }
 
 // Euclidean length
-length :: (v: vec2) -> f32 {
+fn length(v: vec2) -> f32 {
     sqrt(dot(v, v))
 }
 
 // Euclidean length
-length :: (v: vec3) -> f32 {
+fn length(v: vec3) -> f32 {
     sqrt(dot(v, v))
 }
 
 // Euclidean length
-length :: (v: vec4) -> f32 {
+fn length(v: vec4) -> f32 {
     sqrt(dot(v, v))
 }
 
 // distance between two points
-distance :: (a: vec2, b: vec2) -> f32 {
+fn distance(a: vec2, b: vec2) -> f32 {
     length(a - b)
 }
 
 // distance between two points
-distance :: (a: vec3, b: vec3) -> f32 {
+fn distance(a: vec3, b: vec3) -> f32 {
     length(a - b)
 }
 
 // distance between two points
-distance :: (a: vec4, b: vec4) -> f32 {
+fn distance(a: vec4, b: vec4) -> f32 {
     length(a - b)
 }
 
 // v scaled to length 1; the zero vector stays zero
-normalize :: (v: vec2) -> vec2 {
+fn normalize(v: vec2) -> vec2 {
     l := dot(v, v)
     if l > 0.0 { v / sqrt(l) } else { vec2(0.0) }
 }
 
 // v scaled to length 1; the zero vector stays zero
-normalize :: (v: vec3) -> vec3 {
+fn normalize(v: vec3) -> vec3 {
     l := dot(v, v)
     if l > 0.0 { v / sqrt(l) } else { vec3(0.0) }
 }
 
 // v scaled to length 1; the zero vector stays zero
-normalize :: (v: vec4) -> vec4 {
+fn normalize(v: vec4) -> vec4 {
     l := dot(v, v)
     if l > 0.0 { v / sqrt(l) } else { vec4(0.0) }
 }
 
 // a at t = 0, b at t = 1
-lerp :: (a: vec2, b: vec2, t: f32) -> vec2 {
+fn lerp(a: vec2, b: vec2, t: f32) -> vec2 {
     a + (b - a) * t
 }
 
 // a at t = 0, b at t = 1
-lerp :: (a: vec3, b: vec3, t: f32) -> vec3 {
+fn lerp(a: vec3, b: vec3, t: f32) -> vec3 {
     a + (b - a) * t
 }
 
 // a at t = 0, b at t = 1
-lerp :: (a: vec4, b: vec4, t: f32) -> vec4 {
+fn lerp(a: vec4, b: vec4, t: f32) -> vec4 {
     a + (b - a) * t
 }
 
 // lane-wise minimum
-min :: (a: vec2, b: vec2) -> vec2 {
+fn min(a: vec2, b: vec2) -> vec2 {
     fmin(a, b)
 }
 
 // lane-wise minimum
-min :: (a: vec3, b: vec3) -> vec3 {
+fn min(a: vec3, b: vec3) -> vec3 {
     fmin(a, b)
 }
 
 // lane-wise minimum
-min :: (a: vec4, b: vec4) -> vec4 {
+fn min(a: vec4, b: vec4) -> vec4 {
     fmin(a, b)
 }
 
 // lane-wise maximum
-max :: (a: vec2, b: vec2) -> vec2 {
+fn max(a: vec2, b: vec2) -> vec2 {
     fmax(a, b)
 }
 
 // lane-wise maximum
-max :: (a: vec3, b: vec3) -> vec3 {
+fn max(a: vec3, b: vec3) -> vec3 {
     fmax(a, b)
 }
 
 // lane-wise maximum
-max :: (a: vec4, b: vec4) -> vec4 {
+fn max(a: vec4, b: vec4) -> vec4 {
     fmax(a, b)
 }
 
 // every lane limited to [lo, hi]
-clamp :: (v: vec2, lo: vec2, hi: vec2) -> vec2 {
+fn clamp(v: vec2, lo: vec2, hi: vec2) -> vec2 {
     fmin(fmax(v, lo), hi)
 }
 
 // every lane limited to [lo, hi]
-clamp :: (v: vec3, lo: vec3, hi: vec3) -> vec3 {
+fn clamp(v: vec3, lo: vec3, hi: vec3) -> vec3 {
     fmin(fmax(v, lo), hi)
 }
 
 // every lane limited to [lo, hi]
-clamp :: (v: vec4, lo: vec4, hi: vec4) -> vec4 {
+fn clamp(v: vec4, lo: vec4, hi: vec4) -> vec4 {
     fmin(fmax(v, lo), hi)
 }
 
 // lane-wise absolute value
-abs :: (v: vec2) -> vec2 {
+fn abs(v: vec2) -> vec2 {
     fabs(v)
 }
 
 // lane-wise absolute value
-abs :: (v: vec3) -> vec3 {
+fn abs(v: vec3) -> vec3 {
     fabs(v)
 }
 
 // lane-wise absolute value
-abs :: (v: vec4) -> vec4 {
+fn abs(v: vec4) -> vec4 {
     fabs(v)
 }
 
 // lane-wise floor
-floor :: (v: vec2) -> vec2 {
+fn floor(v: vec2) -> vec2 {
     vec2(floor(v.x), floor(v.y))
 }
 
 // lane-wise floor
-floor :: (v: vec3) -> vec3 {
+fn floor(v: vec3) -> vec3 {
     vec3(floor(v.x), floor(v.y), floor(v.z))
 }
 
 // lane-wise floor
-floor :: (v: vec4) -> vec4 {
+fn floor(v: vec4) -> vec4 {
     vec4(floor(v.x), floor(v.y), floor(v.z), floor(v.w))
 }
 
 // lane-wise ceil
-ceil :: (v: vec2) -> vec2 {
+fn ceil(v: vec2) -> vec2 {
     vec2(ceil(v.x), ceil(v.y))
 }
 
 // lane-wise ceil
-ceil :: (v: vec3) -> vec3 {
+fn ceil(v: vec3) -> vec3 {
     vec3(ceil(v.x), ceil(v.y), ceil(v.z))
 }
 
 // lane-wise ceil
-ceil :: (v: vec4) -> vec4 {
+fn ceil(v: vec4) -> vec4 {
     vec4(ceil(v.x), ceil(v.y), ceil(v.z), ceil(v.w))
 }
 
 // lane-wise v - floor(v)
-fract :: (v: vec2) -> vec2 {
+fn fract(v: vec2) -> vec2 {
     v - floor(v)
 }
 
 // lane-wise v - floor(v)
-fract :: (v: vec3) -> vec3 {
+fn fract(v: vec3) -> vec3 {
     v - floor(v)
 }
 
 // lane-wise v - floor(v)
-fract :: (v: vec4) -> vec4 {
+fn fract(v: vec4) -> vec4 {
     v - floor(v)
 }
 
 // smallest lane
-min_component :: (v: vec2) -> f32 {
+fn min_component(v: vec2) -> f32 {
     fmin(v.x, v.y)
 }
 
 // smallest lane
-min_component :: (v: vec3) -> f32 {
+fn min_component(v: vec3) -> f32 {
     fmin(fmin(v.x, v.y), v.z)
 }
 
 // smallest lane
-min_component :: (v: vec4) -> f32 {
+fn min_component(v: vec4) -> f32 {
     m := fmin(v.xy, v.zw)
     fmin(m.x, m.y)
 }
 
 // largest lane
-max_component :: (v: vec2) -> f32 {
+fn max_component(v: vec2) -> f32 {
     fmax(v.x, v.y)
 }
 
 // largest lane
-max_component :: (v: vec3) -> f32 {
+fn max_component(v: vec3) -> f32 {
     fmax(fmax(v.x, v.y), v.z)
 }
 
 // largest lane
-max_component :: (v: vec4) -> f32 {
+fn max_component(v: vec4) -> f32 {
     m := fmax(v.xy, v.zw)
     fmax(m.x, m.y)
 }
 
 // v mirrored at the plane with unit normal n
-reflect :: (v: vec2, n: vec2) -> vec2 {
+fn reflect(v: vec2, n: vec2) -> vec2 {
     v - n * (2.0 * dot(v, n))
 }
 
 // v mirrored at the plane with unit normal n
-reflect :: (v: vec3, n: vec3) -> vec3 {
+fn reflect(v: vec3, n: vec3) -> vec3 {
     v - n * (2.0 * dot(v, n))
 }
 
 // unit v refracted at the surface with unit normal n, eta = ratio of refraction indices; zero on total internal reflection
-refract :: (v: vec2, n: vec2, eta: f32) -> vec2 {
+fn refract(v: vec2, n: vec2, eta: f32) -> vec2 {
     d := dot(n, v)
     k := 1.0 - eta * eta * (1.0 - d * d)
     if k < 0.0 { vec2(0.0) } else { v * eta - n * (eta * d + sqrt(k)) }
 }
 
 // unit v refracted at the surface with unit normal n, eta = ratio of refraction indices; zero on total internal reflection
-refract :: (v: vec3, n: vec3, eta: f32) -> vec3 {
+fn refract(v: vec3, n: vec3, eta: f32) -> vec3 {
     d := dot(n, v)
     k := 1.0 - eta * eta * (1.0 - d * d)
     if k < 0.0 { vec3(0.0) } else { v * eta - n * (eta * d + sqrt(k)) }
 }
 
 // the part of a that points along b (zero if b is zero)
-project :: (a: vec2, b: vec2) -> vec2 {
+fn project(a: vec2, b: vec2) -> vec2 {
     l := dot(b, b)
     if l > 0.0 { b * (dot(a, b) / l) } else { vec2(0.0) }
 }
 
 // the part of a that points along b (zero if b is zero)
-project :: (a: vec3, b: vec3) -> vec3 {
+fn project(a: vec3, b: vec3) -> vec3 {
     l := dot(b, b)
     if l > 0.0 { b * (dot(a, b) / l) } else { vec3(0.0) }
 }
 
 // unsigned angle between a and b in [0, PI]
-angle_between :: (a: vec2, b: vec2) -> f32 {
+fn angle_between(a: vec2, b: vec2) -> f32 {
     atan2(fabs(cross(a, b)), dot(a, b))
 }
 
 // unsigned angle between a and b in [0, PI]
-angle_between :: (a: vec3, b: vec3) -> f32 {
+fn angle_between(a: vec3, b: vec3) -> f32 {
     atan2(length(cross(a, b)), dot(a, b))
 }
 
 // v turned 90 degrees counter-clockwise
-perp :: (v: vec2) -> vec2 {
+fn perp(v: vec2) -> vec2 {
     vec2(-v.y, v.x)
 }
 
 // v turned counter-clockwise by angle
-rotate :: (v: vec2, angle: f32) -> vec2 {
+fn rotate(v: vec2, angle: f32) -> vec2 {
     s, c := sin_cos(angle)
     v * c + perp(v) * s
 }
 
 // every lane within EPSILON * max(1, largest magnitude)
-approx_eq :: (a: vec2, b: vec2) -> bool {
+fn approx_eq(a: vec2, b: vec2) -> bool {
     max_component(fabs(a - b)) <= EPSILON * fmax(1.0, max_component(fmax(fabs(a), fabs(b))))
 }
 
 // every lane within EPSILON * max(1, largest magnitude)
-approx_eq :: (a: vec3, b: vec3) -> bool {
+fn approx_eq(a: vec3, b: vec3) -> bool {
     max_component(fabs(a - b)) <= EPSILON * fmax(1.0, max_component(fmax(fabs(a), fabs(b))))
 }
 
 // every lane within EPSILON * max(1, largest magnitude)
-approx_eq :: (a: vec4, b: vec4) -> bool {
+fn approx_eq(a: vec4, b: vec4) -> bool {
     max_component(fabs(a - b)) <= EPSILON * fmax(1.0, max_component(fmax(fabs(a), fabs(b))))
 }
 
 // every lane within eps
-approx_eq :: (a: vec2, b: vec2, eps: f32) -> bool {
+fn approx_eq(a: vec2, b: vec2, eps: f32) -> bool {
     max_component(fabs(a - b)) <= eps
 }
 
 // every lane within eps
-approx_eq :: (a: vec3, b: vec3, eps: f32) -> bool {
+fn approx_eq(a: vec3, b: vec3, eps: f32) -> bool {
     max_component(fabs(a - b)) <= eps
 }
 
 // every lane within eps
-approx_eq :: (a: vec4, b: vec4, eps: f32) -> bool {
+fn approx_eq(a: vec4, b: vec4, eps: f32) -> bool {
     max_component(fabs(a - b)) <= eps
 }
 
 // ---------- quaternions (rotate a vector with q * v, compose with a * b: b first) ----------
 
 // the rotation that does nothing
-quat_identity :: () -> quat {
+fn quat_identity() -> quat {
     quat(0.0, 0.0, 0.0, 1.0)
 }
 
 // rotation by angle around axis (right-hand rule; axis need not be normalised)
-quat_axis_angle :: (axis: vec3, angle: f32) -> quat {
+fn quat_axis_angle(axis: vec3, angle: f32) -> quat {
     s, c := sin_cos(angle * 0.5)
     quat(normalize(axis) * s, c)
 }
 
 // rotation from Euler angles: roll around Z first, then pitch around X, then yaw around Y
-quat_euler :: (pitch: f32, yaw: f32, roll: f32) -> quat {
+fn quat_euler(pitch: f32, yaw: f32, roll: f32) -> quat {
     sx, cx := sin_cos(pitch * 0.5)
     sy, cy := sin_cos(yaw * 0.5)
     sz, cz := sin_cos(roll * 0.5)
@@ -1534,28 +1534,28 @@ quat_euler :: (pitch: f32, yaw: f32, roll: f32) -> quat {
 }
 
 // four-component dot product
-dot :: (a: quat, b: quat) -> f32 {
+fn dot(a: quat, b: quat) -> f32 {
     dot(vec4(a), vec4(b))
 }
 
 // q scaled to unit length; the zero quaternion becomes the identity
-normalize :: (q: quat) -> quat {
+fn normalize(q: quat) -> quat {
     l := dot(q, q)
     if l > 0.0 { quat(vec4(q) / sqrt(l)) } else { quat_identity() }
 }
 
 // the opposite rotation of a unit quaternion
-conjugate :: (q: quat) -> quat {
+fn conjugate(q: quat) -> quat {
     quat(-q.xyz, q.w)
 }
 
 // the opposite rotation (q need not be normalised)
-inverse :: (q: quat) -> quat {
+fn inverse(q: quat) -> quat {
     quat(vec4(-q.xyz, q.w) / dot(q, q))
 }
 
 // normalised linear interpolation along the shorter arc: cheap, not constant speed
-nlerp :: (a: quat, b: quat, t: f32) -> quat {
+fn nlerp(a: quat, b: quat, t: f32) -> quat {
     va := vec4(a)
     vb := vec4(b)
     if dot(va, vb) < 0.0 {
@@ -1565,7 +1565,7 @@ nlerp :: (a: quat, b: quat, t: f32) -> quat {
 }
 
 // spherical interpolation along the shorter arc at constant angular speed
-slerp :: (a: quat, b: quat, t: f32) -> quat {
+fn slerp(a: quat, b: quat, t: f32) -> quat {
     va := vec4(a)
     vb := vec4(b)
     d := dot(va, vb)
@@ -1581,7 +1581,7 @@ slerp :: (a: quat, b: quat, t: f32) -> quat {
 }
 
 // the rotation whose matrix has the orthonormal columns x, y, z
-__quat_from_axes :: (x: vec3, y: vec3, z: vec3) -> quat {
+fn __quat_from_axes(x: vec3, y: vec3, z: vec3) -> quat {
     tr := x.x + y.y + z.z
     if tr > 0.0 {
         s := sqrt(tr + 1.0) * 2.0
@@ -1600,7 +1600,7 @@ __quat_from_axes :: (x: vec3, y: vec3, z: vec3) -> quat {
 }
 
 // the rotation that turns -Z into forward and keeps +Y as close to up as possible
-quat_look_rotation :: (forward: vec3, up: vec3) -> quat {
+fn quat_look_rotation(forward: vec3, up: vec3) -> quat {
     f := normalize(forward)
     r := cross(f, up)
     if length_sq(r) < 1e-12 {
@@ -1612,7 +1612,7 @@ quat_look_rotation :: (forward: vec3, up: vec3) -> quat {
 }
 
 // (pitch, yaw, roll) of a unit quaternion, the inverse of quat_euler; pitch is in [-PI/2, PI/2]
-to_euler :: (q: quat) -> vec3 {
+fn to_euler(q: quat) -> vec3 {
     sp := 2.0 * (q.w * q.x - q.y * q.z)
     if fabs(sp) > 0.99999 {
         // looking straight up or down: yaw and roll turn around the same axis, report it as yaw
@@ -1622,7 +1622,7 @@ to_euler :: (q: quat) -> vec3 {
 }
 
 // (axis, angle) of a unit quaternion, angle in [0, TAU]; the identity gives the X axis and 0
-axis_angle :: (q: quat) -> (vec3, f32) {
+fn axis_angle(q: quat) -> (vec3, f32) {
     l := length(q.xyz)
     if l == 0.0 {
         return (vec3(1.0, 0.0, 0.0), 0.0)
@@ -1631,54 +1631,54 @@ axis_angle :: (q: quat) -> (vec3, f32) {
 }
 
 // every component within EPSILON (q and -q, the same rotation, are not considered equal)
-approx_eq :: (a: quat, b: quat) -> bool {
+fn approx_eq(a: quat, b: quat) -> bool {
     approx_eq(vec4(a), vec4(b))
 }
 
 // every component within eps
-approx_eq :: (a: quat, b: quat, eps: f32) -> bool {
+fn approx_eq(a: quat, b: quat, eps: f32) -> bool {
     approx_eq(vec4(a), vec4(b), eps)
 }
 
 // ---------- matrices ----------
 
 // the matrix that changes nothing
-mat4_identity :: () -> mat4 {
+fn mat4_identity() -> mat4 {
     mat4(1.0)
 }
 
 // translation by v
-translate :: (v: vec3) -> mat4 {
+fn translate(v: vec3) -> mat4 {
     m := mat4(1.0)
     m[3] = vec4(v, 1.0)
     m
 }
 
 // scaling by v.x, v.y, v.z along the axes
-scale :: (v: vec3) -> mat4 {
+fn scale(v: vec3) -> mat4 {
     mat4(vec4(v.x, 0.0, 0.0, 0.0), vec4(0.0, v.y, 0.0, 0.0), vec4(0.0, 0.0, v.z, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
 }
 
 // rotation around the X axis
-rotate_x :: (angle: f32) -> mat4 {
+fn rotate_x(angle: f32) -> mat4 {
     s, c := sin_cos(angle)
     mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, c, s, 0.0), vec4(0.0, -s, c, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
 }
 
 // rotation around the Y axis
-rotate_y :: (angle: f32) -> mat4 {
+fn rotate_y(angle: f32) -> mat4 {
     s, c := sin_cos(angle)
     mat4(vec4(c, 0.0, -s, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(s, 0.0, c, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
 }
 
 // rotation around the Z axis
-rotate_z :: (angle: f32) -> mat4 {
+fn rotate_z(angle: f32) -> mat4 {
     s, c := sin_cos(angle)
     mat4(vec4(c, s, 0.0, 0.0), vec4(-s, c, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
 }
 
 // rotation matrix of a unit quaternion
-mat4_from_quat :: (q: quat) -> mat4 {
+fn mat4_from_quat(q: quat) -> mat4 {
     d := q.xyz * 2.0
     a := d * q.x
     b := d * q.y
@@ -1688,18 +1688,18 @@ mat4_from_quat :: (q: quat) -> mat4 {
 }
 
 // rotation by angle around axis
-rotate_axis :: (axis: vec3, angle: f32) -> mat4 {
+fn rotate_axis(axis: vec3, angle: f32) -> mat4 {
     mat4_from_quat(quat_axis_angle(axis, angle))
 }
 
 // translation * rotation * scale: the usual object-to-world matrix
-mat4_trs :: (t: vec3, r: quat, s: vec3) -> mat4 {
+fn mat4_trs(t: vec3, r: quat, s: vec3) -> mat4 {
     m := mat4_from_quat(r)
     mat4(m[0] * s.x, m[1] * s.y, m[2] * s.z, vec4(t, 1.0))
 }
 
 // rows and columns exchanged
-transpose :: (m: mat4) -> mat4 {
+fn transpose(m: mat4) -> mat4 {
     a := m[0]
     b := m[1]
     c := m[2]
@@ -1708,24 +1708,24 @@ transpose :: (m: mat4) -> mat4 {
 }
 
 // 2x2 minors of the rows (x, y) of the columns a, b, c, d: ab ac ad in the first vector, bc bd cd in the second
-__minors :: (a: vec2, b: vec2, c: vec2, d: vec2) -> (vec3, vec3) {
+fn __minors(a: vec2, b: vec2, c: vec2, d: vec2) -> (vec3, vec3) {
     (vec3(cross(a, b), cross(a, c), cross(a, d)), vec3(cross(b, c), cross(b, d), cross(c, d)))
 }
 
 // determinant
-determinant :: (m: mat4) -> f32 {
+fn determinant(m: mat4) -> f32 {
     s, t := __minors(m[0].xy, m[1].xy, m[2].xy, m[3].xy)
     c, e := __minors(m[0].zw, m[1].zw, m[2].zw, m[3].zw)
     dot(s, e.zyx) - 2.0 * s.y * e.y + dot(t, c.zyx) - 2.0 * t.y * c.y
 }
 
 // one column of the adjugate from a row of the matrix and the minors of the two rows that are neither it nor its partner
-__adj_col :: (r: vec4, k0: vec4, k1: vec4, k2: vec4) -> vec4 {
+fn __adj_col(r: vec4, k0: vec4, k1: vec4, k2: vec4) -> vec4 {
     r.yxxx * k0 + r.zzyy * k1 + r.wwwz * k2
 }
 
 // inverse of any invertible matrix; a singular matrix (determinant 0) gives the zero matrix
-inverse :: (m: mat4) -> mat4 {
+fn inverse(m: mat4) -> mat4 {
     s, t := __minors(m[0].xy, m[1].xy, m[2].xy, m[3].xy)
     c, e := __minors(m[0].zw, m[1].zw, m[2].zw, m[3].zw)
     det := dot(s, e.zyx) - 2.0 * s.y * e.y + dot(t, c.zyx) - 2.0 * t.y * c.y
@@ -1744,7 +1744,7 @@ inverse :: (m: mat4) -> mat4 {
 }
 
 // inverse of an affine matrix (last row 0 0 0 1: any mix of rotation, scale, shear and translation); cheaper than inverse
-inverse_affine :: (m: mat4) -> mat4 {
+fn inverse_affine(m: mat4) -> mat4 {
     a := m[0].xyz
     b := m[1].xyz
     c := m[2].xyz
@@ -1757,7 +1757,7 @@ inverse_affine :: (m: mat4) -> mat4 {
 }
 
 // view matrix of a camera at eye looking at target (view space: +X right, +Y up, -Z forward)
-look_at :: (eye: vec3, target: vec3, up: vec3) -> mat4 {
+fn look_at(eye: vec3, target: vec3, up: vec3) -> mat4 {
     f := normalize(target - eye)
     s := normalize(cross(f, up))
     u := cross(s, f)
@@ -1765,110 +1765,110 @@ look_at :: (eye: vec3, target: vec3, up: vec3) -> mat4 {
 }
 
 // perspective projection: vertical field of view fovy (radians), aspect = width / height, clip depth 0 at near and 1 at far, +Y up (D3D, Metal)
-perspective :: (fovy: f32, aspect: f32, near: f32, far: f32) -> mat4 {
+fn perspective(fovy: f32, aspect: f32, near: f32, far: f32) -> mat4 {
     f := 1.0 / tan(fovy * 0.5)
     mat4(vec4(f / aspect, 0.0, 0.0, 0.0), vec4(0.0, f, 0.0, 0.0), vec4(0.0, 0.0, far / (near - far), -1.0), vec4(0.0, 0.0, near * far / (near - far), 0.0))
 }
 
 // perspective with Y flipped, for Vulkan (whose clip space has +Y pointing down)
-perspective_vk :: (fovy: f32, aspect: f32, near: f32, far: f32) -> mat4 {
+fn perspective_vk(fovy: f32, aspect: f32, near: f32, far: f32) -> mat4 {
     m := perspective(fovy, aspect, near, far)
     m[1] = -m[1]
     m
 }
 
 // orthographic projection of the box left..right, bottom..top, near..far (distances along -Z), clip depth 0..1
-ortho :: (left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> mat4 {
+fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> mat4 {
     mat4(vec4(2.0 / (right - left), 0.0, 0.0, 0.0), vec4(0.0, 2.0 / (top - bottom), 0.0, 0.0), vec4(0.0, 0.0, 1.0 / (near - far), 0.0), vec4((left + right) / (left - right), (bottom + top) / (bottom - top), near / (near - far), 1.0))
 }
 
 // m applied to the point p (w = 1, no perspective divide)
-transform_point :: (m: mat4, p: vec3) -> vec3 {
+fn transform_point(m: mat4, p: vec3) -> vec3 {
     (m * vec4(p, 1.0)).xyz
 }
 
 // m applied to the point p followed by the perspective divide (world to clip-space coordinates)
-project_point :: (m: mat4, p: vec3) -> vec3 {
+fn project_point(m: mat4, p: vec3) -> vec3 {
     c := m * vec4(p, 1.0)
     c.xyz / c.w
 }
 
 // m applied to the direction d (w = 0: translation is ignored)
-transform_dir :: (m: mat4, d: vec3) -> vec3 {
+fn transform_dir(m: mat4, d: vec3) -> vec3 {
     (m * vec4(d, 0.0)).xyz
 }
 
 // every element within EPSILON * max(1, largest magnitude of its column)
-approx_eq :: (a: mat4, b: mat4) -> bool {
+fn approx_eq(a: mat4, b: mat4) -> bool {
     approx_eq(a[0], b[0]) && approx_eq(a[1], b[1]) && approx_eq(a[2], b[2]) && approx_eq(a[3], b[3])
 }
 
 // every element within eps
-approx_eq :: (a: mat4, b: mat4, eps: f32) -> bool {
+fn approx_eq(a: mat4, b: mat4, eps: f32) -> bool {
     approx_eq(a[0], b[0], eps) && approx_eq(a[1], b[1], eps) && approx_eq(a[2], b[2], eps) && approx_eq(a[3], b[3], eps)
 }
 
 // ---------- geometry ----------
 
 // axis-aligned box
-Aabb :: struct { min: vec3, max: vec3 }
+struct Aabb { min: vec3, max: vec3 }
 
 // half-line: the points origin + dir * t for t >= 0
-Ray :: struct { origin: vec3, dir: vec3 }
+struct Ray { origin: vec3, dir: vec3 }
 
 // the points p with dot(normal, p) == d; normal has unit length
-Plane :: struct { normal: vec3, d: f32 }
+struct Plane { normal: vec3, d: f32 }
 
-Sphere :: struct { center: vec3, radius: f32 }
+struct Sphere { center: vec3, radius: f32 }
 
 // smallest box around both
-aabb_union :: (a: Aabb, b: Aabb) -> Aabb {
+fn aabb_union(a: Aabb, b: Aabb) -> Aabb {
     Aabb{fmin(a.min, b.min), fmax(a.max, b.max)}
 }
 
 // is p inside or on the box?
-contains :: (b: Aabb, p: vec3) -> bool {
+fn contains(b: Aabb, p: vec3) -> bool {
     min_component(fmin(p - b.min, b.max - p)) >= 0.0
 }
 
 // is p inside or on the sphere?
-contains :: (s: Sphere, p: vec3) -> bool {
+fn contains(s: Sphere, p: vec3) -> bool {
     length_sq(p - s.center) <= s.radius * s.radius
 }
 
 // do the boxes overlap or touch?
-intersects :: (a: Aabb, b: Aabb) -> bool {
+fn intersects(a: Aabb, b: Aabb) -> bool {
     min_component(fmin(a.max - b.min, b.max - a.min)) >= 0.0
 }
 
 // do the spheres overlap or touch?
-intersects :: (a: Sphere, b: Sphere) -> bool {
+fn intersects(a: Sphere, b: Sphere) -> bool {
     r := a.radius + b.radius
     length_sq(a.center - b.center) <= r * r
 }
 
 // the point of the box nearest to p (p itself when inside)
-closest_point :: (b: Aabb, p: vec3) -> vec3 {
+fn closest_point(b: Aabb, p: vec3) -> vec3 {
     fmin(fmax(p, b.min), b.max)
 }
 
 // the point of the sphere's surface nearest to p (the center when p is the center)
-closest_point :: (s: Sphere, p: vec3) -> vec3 {
+fn closest_point(s: Sphere, p: vec3) -> vec3 {
     s.center + normalize(p - s.center) * s.radius
 }
 
 // the point of the plane nearest to p
-closest_point :: (pl: Plane, p: vec3) -> vec3 {
+fn closest_point(pl: Plane, p: vec3) -> vec3 {
     p - pl.normal * (dot(pl.normal, p) - pl.d)
 }
 
 // the point of the ray nearest to p
-closest_point :: (r: Ray, p: vec3) -> vec3 {
+fn closest_point(r: Ray, p: vec3) -> vec3 {
     r.origin + r.dir * fmax(dot(p - r.origin, r.dir) / dot(r.dir, r.dir), 0.0)
 }
 
 // where the ray enters the box: (t, true) with the hit at origin + dir * t, t = 0 if it starts inside; (_, false) on a miss
-ray_hit :: (r: Ray, b: Aabb) -> (f32, bool) {
+fn ray_hit(r: Ray, b: Aabb) -> (f32, bool) {
     inv := vec3(1.0) / r.dir
     t0 := (b.min - r.origin) * inv
     t1 := (b.max - r.origin) * inv
@@ -1877,7 +1877,7 @@ ray_hit :: (r: Ray, b: Aabb) -> (f32, bool) {
 }
 
 // first point where the ray meets the sphere's surface: (t, true) with the hit at origin + dir * t; (_, false) on a miss
-ray_hit :: (r: Ray, s: Sphere) -> (f32, bool) {
+fn ray_hit(r: Ray, s: Sphere) -> (f32, bool) {
     oc := r.origin - s.center
     a := dot(r.dir, r.dir)
     b := dot(oc, r.dir)
@@ -1895,7 +1895,7 @@ ray_hit :: (r: Ray, s: Sphere) -> (f32, bool) {
 }
 
 // where the ray crosses the plane: (t, true) with the hit at origin + dir * t; (_, false) if it is parallel or points away
-ray_hit :: (r: Ray, pl: Plane) -> (f32, bool) {
+fn ray_hit(r: Ray, pl: Plane) -> (f32, bool) {
     dn := dot(pl.normal, r.dir)
     if dn == 0.0 {
         return (0.0, false)
@@ -1907,17 +1907,17 @@ ray_hit :: (r: Ray, pl: Plane) -> (f32, bool) {
 // ---------- easing: t in [0, 1] -> [0, 1], f(0) = 0, f(1) = 1 ----------
 
 // slow start
-ease_in_quad :: (t: f32) -> f32 {
+fn ease_in_quad(t: f32) -> f32 {
     t * t
 }
 
 // slow end
-ease_out_quad :: (t: f32) -> f32 {
+fn ease_out_quad(t: f32) -> f32 {
     t * (2.0 - t)
 }
 
 // slow start and end
-ease_in_out_quad :: (t: f32) -> f32 {
+fn ease_in_out_quad(t: f32) -> f32 {
     if t < 0.5 {
         return 2.0 * t * t
     }
@@ -1926,18 +1926,18 @@ ease_in_out_quad :: (t: f32) -> f32 {
 }
 
 // slower start
-ease_in_cubic :: (t: f32) -> f32 {
+fn ease_in_cubic(t: f32) -> f32 {
     t * t * t
 }
 
 // slower end
-ease_out_cubic :: (t: f32) -> f32 {
+fn ease_out_cubic(t: f32) -> f32 {
     u := 1.0 - t
     1.0 - u * u * u
 }
 
 // slower start and end
-ease_in_out_cubic :: (t: f32) -> f32 {
+fn ease_in_out_cubic(t: f32) -> f32 {
     if t < 0.5 {
         return 4.0 * t * t * t
     }
@@ -1946,7 +1946,7 @@ ease_in_out_cubic :: (t: f32) -> f32 {
 }
 
 // overshoots and oscillates around 1 before settling
-ease_out_elastic :: (t: f32) -> f32 {
+fn ease_out_elastic(t: f32) -> f32 {
     if t <= 0.0 || t >= 1.0 {
         return saturate(t)
     }
@@ -1954,7 +1954,7 @@ ease_out_elastic :: (t: f32) -> f32 {
 }
 
 // bounces off 1 three times, like a dropped ball
-ease_out_bounce :: (t: f32) -> f32 {
+fn ease_out_bounce(t: f32) -> f32 {
     if t < 0.36363637 {
         return 7.5625 * t * t
     }
@@ -1971,7 +1971,7 @@ ease_out_bounce :: (t: f32) -> f32 {
 }
 
 // overshoots 1 by about 10% and comes back
-ease_out_back :: (t: f32) -> f32 {
+fn ease_out_back(t: f32) -> f32 {
     u := t - 1.0
     1.0 + u * u * (2.70158 * u + 1.70158)
 }
@@ -1979,7 +1979,7 @@ ease_out_back :: (t: f32) -> f32 {
 // ---------- colour (rgb / rgba lanes in 0..1) ----------
 
 // rgb to (hue, saturation, value), all in 0..1 (hue 0 = red, 1/3 = green, 2/3 = blue)
-rgb_to_hsv :: (c: vec3) -> vec3 {
+fn rgb_to_hsv(c: vec3) -> vec3 {
     v := max_component(c)
     d := v - min_component(c)
     if d <= 0.0 {
@@ -1998,39 +1998,39 @@ rgb_to_hsv :: (c: vec3) -> vec3 {
 }
 
 // (hue, saturation, value) to rgb; hue wraps around
-hsv_to_rgb :: (c: vec3) -> vec3 {
+fn hsv_to_rgb(c: vec3) -> vec3 {
     p := fabs(fract(vec3(c.x) + vec3(1.0, 0.6666667, 0.33333334)) * 6.0 - 3.0)
     k := fmin(fmax(p - 1.0, vec3(0.0)), vec3(1.0))
     (vec3(1.0) + (k - 1.0) * c.y) * c.z
 }
 
 // one sRGB-encoded channel to linear light
-srgb_to_linear :: (x: f32) -> f32 {
+fn srgb_to_linear(x: f32) -> f32 {
     if x <= 0.04045 { x / 12.92 } else { pow((x + 0.055) / 1.055, 2.4) }
 }
 
 // one linear-light channel to sRGB encoding
-linear_to_srgb :: (x: f32) -> f32 {
+fn linear_to_srgb(x: f32) -> f32 {
     if x <= 0.0031308 { x * 12.92 } else { 1.055 * pow(x, 0.41666666) - 0.055 }
 }
 
 // sRGB-encoded colour to linear light (do lighting and blending in linear)
-srgb_to_linear :: (c: vec3) -> vec3 {
+fn srgb_to_linear(c: vec3) -> vec3 {
     vec3(srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z))
 }
 
 // linear-light colour to sRGB encoding (for display or 8-bit storage)
-linear_to_srgb :: (c: vec3) -> vec3 {
+fn linear_to_srgb(c: vec3) -> vec3 {
     vec3(linear_to_srgb(c.x), linear_to_srgb(c.y), linear_to_srgb(c.z))
 }
 
 // rgba packed as RGBA8 with red in the lowest byte (R8G8B8A8 in memory); lanes are clamped to 0..1 and rounded
-color_u32 :: (c: vec4) -> u32 {
+fn color_u32(c: vec4) -> u32 {
     b := fmin(fmax(c, vec4(0.0)), vec4(1.0)) * 255.0 + 0.5
     u32(b.x) | u32(b.y) << 8 | u32(b.z) << 16 | u32(b.w) << 24
 }
 
 // the inverse of color_u32
-color_vec4 :: (c: u32) -> vec4 {
+fn color_vec4(c: u32) -> vec4 {
     vec4(f32(c & 0xFF), f32((c >> 8) & 0xFF), f32((c >> 16) & 0xFF), f32(c >> 24)) * 0.003921569
 }

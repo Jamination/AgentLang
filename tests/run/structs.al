@@ -1,21 +1,21 @@
-Vec2 :: struct { x: f64, y: f64 }
-Rect :: struct { min: Vec2, max: Vec2, tag: i32 }
-Node :: struct { val: i64, next: *Node }
+struct Vec2 { x: f64, y: f64 }
+struct Rect { min: Vec2, max: Vec2, tag: i32 }
+struct Node { val: i64, next: *Node }
 
-add :: (a: Vec2, b: Vec2) -> Vec2 {
+fn add(a: Vec2, b: Vec2) -> Vec2 {
     Vec2{x: a.x + b.x, y: a.y + b.y}
 }
 
-area :: (r: Rect) -> f64 {
+fn area(r: Rect) -> f64 {
     (r.max.x - r.min.x) * (r.max.y - r.min.y)
 }
 
-grow :: (r: *Rect, d: f64) {
+fn grow(r: *Rect, d: f64) {
     r.max.x += d
     r.max.y += d
 }
 
-sum_list :: (n: *Node) -> i64 {
+fn sum_list(n: *Node) -> i64 {
     s := 0
     while n != nil {
         s += n.val
@@ -24,7 +24,7 @@ sum_list :: (n: *Node) -> i64 {
     s
 }
 
-main :: () {
+fn main() {
     a := Vec2{1.0, 2.0}
     b := Vec2{x: 0.5, y: 0.25}
     c := add(a, b)

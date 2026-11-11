@@ -1,38 +1,38 @@
 // Semantic analysis + lowering context: declarations, type resolution, constants, globals, instances.
 
-Opts :: struct {
+struct Opts {
     checks: bool
 }
 
-CV :: enum {
+enum CV {
     CVInt(i64),
     CVFloat(f64),
     CVBool(bool),
     CVStr(str),
 }
 
-CState :: enum {
+enum CState {
     CStateBusy,
     CStateDone(Opt[i64], CV),
     CStateFailed,
 }
 
-ParamAbi :: enum {
+enum ParamAbi {
     ParamAbiScalar(T),
     ParamAbiFlat(Vec[Leaf]),
     ParamAbiByRef,
 }
 
-RetAbi :: enum {
+enum RetAbi {
     RetAbiNone,
     RetAbiScalar(T),
     RetAbiFlat(Vec[Leaf]),
     RetAbiSRet,
 }
 
-MAX_FLAT :: 4
+const MAX_FLAT = 4
 
-Cx :: struct {
+struct Cx {
     types: Types
     module: Module
     errs: Vec[Diag]
@@ -98,7 +98,7 @@ Cx :: struct {
 }
 
 // for "unknown name" diagnostics: says that `n` exists as a private declaration of another file
-priv_hint :: (self: *Cx, n: str) -> str {
+fn priv_hint(self: *Cx, n: str) -> str {
     pos, found := self.priv_decls.get(n)
     if !found {
         return ""
@@ -110,7 +110,7 @@ priv_hint :: (self: *Cx, n: str) -> str {
     return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
 
-lower_builtin_type :: (name: str) -> Opt[i64] {
+fn lower_builtin_type(name: str) -> Opt[i64] {
     match name {
         "i8" => return Some(T_I8)
         "i16" => return Some(T_I16)
@@ -136,7 +136,7 @@ lower_builtin_type :: (name: str) -> Opt[i64] {
 }
 
 // the value of an optional type, or `d`
-lower_opt_or :: (o: Opt[i64], d: i64) -> i64 {
+fn lower_opt_or(o: Opt[i64], d: i64) -> i64 {
     match o {
         Some(t) => return t
         None => return d
@@ -144,7 +144,7 @@ lower_opt_or :: (o: Opt[i64], d: i64) -> i64 {
 }
 
 // `f as i64` of the Rust source: saturating, NaN gives 0
-lower_f64_to_i64 :: (f: f64) -> i64 {
+fn lower_f64_to_i64(f: f64) -> i64 {
     if f != f {
         return 0
     }
@@ -158,14 +158,14 @@ lower_f64_to_i64 :: (f: f64) -> i64 {
 }
 
 // the low `n` bytes of `x`, little-endian, into `data` at `off`
-lower_put_le :: (data: *Vec[u8], off: i64, x: u64, n: i64) {
+fn lower_put_le(data: *Vec[u8], off: i64, x: u64, n: i64) {
     for j in 0..n {
         data[off + j] = u8(x >> u64(8 * j))
     }
 }
 
 // parameter types of a function declaration as text (to detect duplicate overloads)
-lower_new_sig :: (g: *FnDecl) -> str {
+fn lower_new_sig(g: *FnDecl) -> str {
     parts := vec[str]()
     for i in 0..g.params.len {
         parts.push(ast_type_str(&g.params[i].1))
@@ -174,7 +174,7 @@ lower_new_sig :: (g: *FnDecl) -> str {
 }
 
 // files with an index below `n_prelude` form the always-present core library
-cx_new :: (decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx {
+fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx {
     np := n_prelude
     cx := Cx{
         n_prelude: n_prelude,
@@ -432,7 +432,7 @@ cx_new :: (decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> C
     return cx
 }
 
-find_fn :: (self: *Cx, n: str) -> Opt[i64] {
+fn find_fn(self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude {
         i, ok := self.p_fn_names.get(n)
         if ok {
@@ -447,7 +447,7 @@ find_fn :: (self: *Cx, n: str) -> Opt[i64] {
 }
 
 // all definitions a call to `n` may resolve to: user definitions first, then the prelude's
-fn_candidates :: (self: *Cx, n: str) -> Vec[i64] {
+fn fn_candidates(self: *Cx, n: str) -> Vec[i64] {
     v := self.fn_candidates_of(n)
     // a private function (see priv.al): the public definitions of the written name follow
     if v.len != 0 && ast_is_private(n) {
@@ -457,7 +457,7 @@ fn_candidates :: (self: *Cx, n: str) -> Vec[i64] {
     return v
 }
 
-fn_candidates_of :: (self: *Cx, n: str) -> Vec[i64] {
+fn fn_candidates_of(self: *Cx, n: str) -> Vec[i64] {
     v := vec[i64]()
     if self.scope_prelude {
         // prelude code sees its own definitions; the synthesized entry also reaches user code
@@ -485,7 +485,7 @@ fn_candidates_of :: (self: *Cx, n: str) -> Vec[i64] {
     return v
 }
 
-find_struct :: (self: *Cx, n: str) -> Opt[i64] {
+fn find_struct(self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude {
         i, ok := self.p_struct_names.get(n)
         if ok {
@@ -499,7 +499,7 @@ find_struct :: (self: *Cx, n: str) -> Opt[i64] {
     return None
 }
 
-find_enum :: (self: *Cx, n: str) -> Opt[i64] {
+fn find_enum(self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude {
         i, ok := self.p_enum_names.get(n)
         if ok {
@@ -514,7 +514,7 @@ find_enum :: (self: *Cx, n: str) -> Opt[i64] {
 }
 
 // the type alias that `n` names
-find_alias :: (self: *Cx, n: str) -> Opt[*TypeDecl] {
+fn find_alias(self: *Cx, n: str) -> Opt[*TypeDecl] {
     if self.scope_prelude {
         d, ok := self.p_alias_decls.get(n)
         if ok {
@@ -536,7 +536,7 @@ find_alias :: (self: *Cx, n: str) -> Opt[*TypeDecl] {
 // being resolved, through the fields of a struct or enum (`List :: type *Node` with
 // `Node :: struct { next: List }`): that second resolution ends at the struct, which is
 // registered by then. A third one means that the alias is defined in terms of itself.
-alias_type :: (self: *Cx, d: *TypeDecl) -> i64 {
+fn alias_type(self: *Cx, d: *TypeDecl) -> i64 {
     known, found := self.alias_tys.get(d)
     if found {
         return known
@@ -557,11 +557,11 @@ alias_type :: (self: *Cx, d: *TypeDecl) -> i64 {
     return ty
 }
 
-internal_file :: (self: *Cx, file: i64) -> bool {
+fn internal_file(self: *Cx, file: i64) -> bool {
     return file < self.n_prelude || file == self.entry_file
 }
 
-pos_str :: (self: *Cx, p: Pos) -> str {
+fn pos_str(self: *Cx, p: Pos) -> str {
     fname: str = "?"
     if p.file >= 0 && p.file < self.file_names.len {
         fname = self.file_names[p.file]
@@ -569,12 +569,12 @@ pos_str :: (self: *Cx, p: Pos) -> str {
     return fmt(fname, ":", p.line, ":", p.col)
 }
 
-err :: (self: *Cx, pos: Pos, msg: str) {
+fn err(self: *Cx, pos: Pos, msg: str) {
     self.errs.push(Diag{pos: pos, msg: msg})
 }
 
 // ---------- types ----------
-resolve :: (self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
+fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
     match *t {
         TypeAstName(n, args, pos) => {
             if args.is_empty() {
@@ -702,7 +702,7 @@ resolve :: (self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
     return T_ERR
 }
 
-inst_name :: (self: *Cx, base: str, targs: []i64) -> str {
+fn inst_name(self: *Cx, base: str, targs: []i64) -> str {
     if len(targs) == 0 {
         return base
     }
@@ -713,7 +713,7 @@ inst_name :: (self: *Cx, base: str, targs: []i64) -> str {
     return fmt(base, "[", join(parts.items(), ", "), "]")
 }
 
-inst_struct :: (self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
+fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
     d := self.struct_decls[si]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("struct `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
@@ -761,7 +761,7 @@ inst_struct :: (self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
     return ty
 }
 
-inst_enum :: (self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
+fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     d := self.enum_decls[ei]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("enum `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
@@ -814,7 +814,7 @@ inst_enum :: (self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     return ty
 }
 
-flush_layout_errors :: (self: *Cx, pos: Pos) {
+fn flush_layout_errors(self: *Cx, pos: Pos) {
     errs := self.types.layout_errors
     self.types.layout_errors = vec[str]()
     for i in 0..errs.len {
@@ -823,7 +823,7 @@ flush_layout_errors :: (self: *Cx, pos: Pos) {
 }
 
 // ---------- ABI ----------
-abi_param :: (self: *Cx, t: i64) -> ParamAbi {
+fn abi_param(self: *Cx, t: i64) -> ParamAbi {
     if self.types.is_scalar(t) {
         return ParamAbiScalar(self.types.scalar_ir(t).0)
     }
@@ -835,7 +835,7 @@ abi_param :: (self: *Cx, t: i64) -> ParamAbi {
     return ParamAbiByRef
 }
 
-abi_ret :: (self: *Cx, t: i64) -> RetAbi {
+fn abi_ret(self: *Cx, t: i64) -> RetAbi {
     if t == T_UNIT || t == T_NEVER || t == T_ERR {
         return RetAbiNone
     }
@@ -854,7 +854,7 @@ abi_ret :: (self: *Cx, t: i64) -> RetAbi {
 }
 
 // the IR parameters and results of a function with parameter types `ptys` and result `rty`
-fn_abi :: (self: *Cx, f: *Func, ptys: []i64, rty: i64) {
+fn fn_abi(self: *Cx, f: *Func, ptys: []i64, rty: i64) {
     match self.abi_ret(rty) {
         RetAbiNone => {}
         RetAbiScalar(t) => {
@@ -888,7 +888,7 @@ fn_abi :: (self: *Cx, f: *Func, ptys: []i64, rty: i64) {
 }
 
 // ---------- function instances ----------
-inst_fn :: (self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
+fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     known, found := self.fn_insts.get((di, targs.items()))
     if found {
         return known
@@ -951,7 +951,7 @@ inst_fn :: (self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
 }
 
 // ---------- strings / globals ----------
-string_global :: (self: *Cx, s: str) -> i64 {
+fn string_global(self: *Cx, s: str) -> i64 {
     known, found := self.strings.get(s)
     if found {
         return known
@@ -969,7 +969,7 @@ string_global :: (self: *Cx, s: str) -> i64 {
     return gid
 }
 
-global :: (self: *Cx, name: str) -> Opt[(i64, i64)] {
+fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
     known, found := self.globals.get(name)
     if found {
         return Some(known)
@@ -1032,7 +1032,7 @@ global :: (self: *Cx, name: str) -> Opt[(i64, i64)] {
 }
 
 // type of a constant initializer expression (for globals without annotation)
-const_type_of :: (self: *Cx, e: *Expr) -> i64 {
+fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match e.k {
         EKInt(_) => return T_I64
         EKFloat(_) => return T_F64
@@ -1085,7 +1085,7 @@ const_type_of :: (self: *Cx, e: *Expr) -> i64 {
 }
 
 // interpret an expression as a type (for literals, casts, generic args)
-expr_type :: (self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
+fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
     match e.k {
         EKIdent(n) => {
             et, eok := env.get(n)
@@ -1185,7 +1185,7 @@ expr_type :: (self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
 // Is constant `name` an aggregate or a vector, kept in read-only memory, rather than a
 // scalar value? Decided by the form of its initializer: a `T{...}` literal, a tuple, a
 // vector constructor, or the name of another such constant.
-const_is_mem :: (self: *Cx, name: str) -> bool {
+fn const_is_mem(self: *Cx, name: str) -> bool {
     k, known := self.const_kind.get(name)
     if known {
         return k == 2
@@ -1238,7 +1238,7 @@ const_is_mem :: (self: *Cx, name: str) -> bool {
 }
 
 // the (type, global) of a constant that lives in read-only memory (see `const_is_mem`)
-const_global :: (self: *Cx, name: str) -> Opt[(i64, i64)] {
+fn const_global(self: *Cx, name: str) -> Opt[(i64, i64)] {
     d, has_decl := self.const_decls.get(name)
     if !has_decl {
         return None
@@ -1303,7 +1303,7 @@ const_global :: (self: *Cx, name: str) -> Opt[(i64, i64)] {
 
 // The bytes of the file that `embed(args)` at `pos` names (relative to the source file),
 // read once per path; None after reporting why not.
-embed_bytes :: (self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
+fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
     if len(args) != 1 {
         self.err(pos, fmt("`embed` takes 1 argument(s), got ", len(args)))
         return None
@@ -1345,7 +1345,7 @@ embed_bytes :: (self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
     return None
 }
 
-const_named :: (self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
+fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
     if self.const_is_mem(name) {
         // not a scalar value; evaluated here so that its errors are reported
         self.const_global(name)
@@ -1458,7 +1458,7 @@ const_named :: (self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
 }
 
 // integer (op) integer
-lower_const_bin_int :: (cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
+fn lower_const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
     match op {
         BinOpAdd => return Some(CVInt(x + y))
         BinOpSub => return Some(CVInt(x - y))
@@ -1503,7 +1503,7 @@ lower_const_bin_int :: (cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV]
 }
 
 // the operand of a mixed / float operation as a float: (value, ok)
-lower_const_float_operand :: (cx: *Cx, e: *Expr) -> (f64, bool) {
+fn lower_const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
     match cx.const_eval(e) {
         Some(cv) => {
             match cv {
@@ -1518,7 +1518,7 @@ lower_const_float_operand :: (cx: *Cx, e: *Expr) -> (f64, bool) {
 }
 
 // float (op) float, with integers converted; the operands are evaluated again
-lower_const_bin_float :: (cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
+fn lower_const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
     x, xok := lower_const_float_operand(cx, a)
     if !xok {
         return None
@@ -1543,7 +1543,7 @@ lower_const_bin_float :: (cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
     return None
 }
 
-const_eval :: (self: *Cx, e: *Expr) -> Opt[CV] {
+fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
     match e.k {
         EKInt(n) => return Some(CVInt(i64(n)))
         EKFloat(f) => return Some(CVFloat(f))
@@ -1719,7 +1719,7 @@ const_eval :: (self: *Cx, e: *Expr) -> Opt[CV] {
 }
 
 // write a constant initializer into `data` at `off`
-const_init :: (self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *Vec[(i64, RelocTarget)]) -> bool {
+fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *Vec[(i64, RelocTarget)]) -> bool {
     k := self.types.k(ty)
     match e.k {
         EKLit(te, items) => {
@@ -1990,7 +1990,7 @@ const_init :: (self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *
     return false
 }
 
-lower_wrap_int :: (v: i64, bits: i64, signed: bool) -> i64 {
+fn lower_wrap_int(v: i64, bits: i64, signed: bool) -> i64 {
     if signed {
         match bits {
             8 => return i64(i8(v))

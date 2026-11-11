@@ -1,66 +1,66 @@
 // constants that are not scalars: aggregates in read-only memory, embed() in const / var
-Point :: struct { x: i64, y: i64 }
-Named :: struct { name: str, at: Point, tags: [2]str, f: (i64) -> i64, scale: f32 }
-Row :: type [3]u8
+struct Point { x: i64, y: i64 }
+struct Named { name: str, at: Point, tags: [2]str, f: fn(i64) -> i64, scale: f32 }
+type Row = [3]u8
 
-TABLE :: [4]i64{1, 2, 4, 8}
-ORIGIN :: Point{x: 0, y: 0}
-UNIT : Point : Point{1, 1}
-NAMES :: [2]str{"a", "bb"}
-N :: 3
-GRID :: [2]Row{Row{1, 2, 3}, Row{4, 5, 6}}
-PARTIAL : [8]i32 : [8]i32{-1, N, N * 2}
-THING :: Named{name: "thing", at: UNIT, tags: NAMES, f: double, scale: 2.5}
-PAIR :: (N, "three", 3.5)
-COPY :: TABLE
-CORNERS :: [3]Point{ORIGIN, UNIT, Point{y: N}}
-UP :: vec3(0.0, 1.0, 0.0)
-IDENT :: mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
-OPS :: [2](i64) -> i64{double, negate}
-TEXT :: embed("data/const_embed.txt")
-TEXT_LEN :: 21
-EMPTY :: [0]i64{}
-BYTES :: [4]u8{'a', 'b', 0xFF, 0}
-FLAGS :: [3]bool{true, false, true}
-FLOATS :: [3]f64{1, 2.5, -N}
+const TABLE = [4]i64{1, 2, 4, 8}
+const ORIGIN = Point{x: 0, y: 0}
+const UNIT: Point = Point{1, 1}
+const NAMES = [2]str{"a", "bb"}
+const N = 3
+const GRID = [2]Row{Row{1, 2, 3}, Row{4, 5, 6}}
+const PARTIAL: [8]i32 = [8]i32{-1, N, N * 2}
+const THING = Named{name: "thing", at: UNIT, tags: NAMES, f: double, scale: 2.5}
+const PAIR = (N, "three", 3.5)
+const COPY = TABLE
+const CORNERS = [3]Point{ORIGIN, UNIT, Point{y: N}}
+const UP = vec3(0.0, 1.0, 0.0)
+const IDENT = mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))
+const OPS = [2]fn(i64) -> i64{double, negate}
+const TEXT = embed("data/const_embed.txt")
+const TEXT_LEN = 21
+const EMPTY = [0]i64{}
+const BYTES = [4]u8{'a', 'b', 0xFF, 0}
+const FLAGS = [3]bool{true, false, true}
+const FLOATS = [3]f64{1, 2.5, -N}
 
 blob := embed("data/const_embed.txt")
 blob2: str = embed("data/const_embed.txt")
 table_copy := TABLE
 corner := UNIT
 
-double :: (x: i64) -> i64 { x * 2 }
-negate :: (x: i64) -> i64 { -x }
-sum :: (xs: []i64) -> i64 {
+fn double(x: i64) -> i64 { x * 2 }
+fn negate(x: i64) -> i64 { -x }
+fn sum(xs: []i64) -> i64 {
     t := 0
     for x in xs {
         t += x
     }
     t
 }
-sum4 :: (a: [4]i64) -> i64 { a[0] + a[1] + a[2] + a[3] }
-norm1 :: (p: Point) -> i64 { p.x + p.y }
-shifted :: (p: Point) -> Point {
+fn sum4(a: [4]i64) -> i64 { a[0] + a[1] + a[2] + a[3] }
+fn norm1(p: Point) -> i64 { p.x + p.y }
+fn shifted(p: Point) -> Point {
     p.x += 100
     return p
 }
-total[T] :: (xs: []T) -> T {
+fn total[T](xs: []T) -> T {
     t: T
     for x in xs {
         t += x
     }
     t
 }
-first[T] :: (a: [4]T) -> T { a[0] }
-mutate :: (a: [4]i64) -> i64 {
+fn first[T](a: [4]T) -> T { a[0] }
+fn mutate(a: [4]i64) -> i64 {
     a[0] = 50
     return a[0] + a[1]
 }
-get :: () -> [4]i64 { TABLE }
-pick :: (c: bool) -> Point { if c { UNIT } else { ORIGIN } }
-lookup :: (i: i64) -> i64 { TABLE[i] }
+fn get() -> [4]i64 { TABLE }
+fn pick(c: bool) -> Point { if c { UNIT } else { ORIGIN } }
+fn lookup(i: i64) -> i64 { TABLE[i] }
 
-main :: () {
+fn main() {
     // reading, indexing, iterating, len
     print(TABLE, TABLE[2], len(TABLE), TABLE.len, ORIGIN, UNIT.y, NAMES, NAMES[1], len(NAMES[1]))
     t := 0

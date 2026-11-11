@@ -2,7 +2,7 @@
 // The display name below has no ":number" part, so Xlib rejects it without connecting anywhere.
 use std.window
 
-main :: () {
+fn main() {
     w, ok := window_open(WindowDesc{title: "never shown", width: 320, height: 200, display: "al-test-not-a-display"})
     print(ok, w == nil)
 }

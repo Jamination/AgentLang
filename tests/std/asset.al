@@ -1,7 +1,7 @@
 // std.asset: files, directories, paths, cached loader (works in tmp/asset_test_<pid>)
 use std.asset
 
-main :: () {
+fn main() {
     // a directory of its own per process, so that concurrent test runs do not collide
     d := fmt("tmp/asset_test_", syscall(39))
     // leftovers of an interrupted run

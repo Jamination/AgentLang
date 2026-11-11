@@ -1,4 +1,4 @@
-sum :: (a: []i64) -> i64 {
+fn sum(a: []i64) -> i64 {
     s := 0
     for x in a {
         s += x
@@ -6,13 +6,13 @@ sum :: (a: []i64) -> i64 {
     s
 }
 
-fill :: (a: []i64, v: i64) {
+fn fill(a: []i64, v: i64) {
     for i in 0..len(a) {
         a[i] = v
     }
 }
 
-main :: () {
+fn main() {
     a := alloc[i64](8)
     for i in 0..8 {
         a[i] = i + 1

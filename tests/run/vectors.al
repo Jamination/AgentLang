@@ -1,10 +1,10 @@
-Vert :: struct { pos: vec3, uv: vec2, col: vec4 }
+struct Vert { pos: vec3, uv: vec2, col: vec4 }
 up := vec3(0.0, 1.0, 0.0)
-dot3 :: (a: vec3, b: vec3) -> f32 {
+fn dot3(a: vec3, b: vec3) -> f32 {
     m := a * b
     return m.x + m.y + m.z
 }
-main :: () {
+fn main() {
     x: f32 = 1.5
     y := x * 2.0 + 0.25
     print(x, y, f64(y), i64(y), f32(7), sqrt(y), -y, fabs(-y))

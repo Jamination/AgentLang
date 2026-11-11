@@ -4,7 +4,7 @@
 // and `x` is never used in any other way, the writes are lost; almost always the element
 // itself was meant. `lint_copy_writes` finds that pattern for one `:=` statement.
 
-LintUse :: struct {
+struct LintUse {
     name: str
     // direct field assignments `name.f = e` / `name.f op= e`
     writes: i64
@@ -15,7 +15,7 @@ LintUse :: struct {
 }
 
 // is `e` a place that is copied when read: a field or element of something (not a call)
-lint_is_place :: (e: *Expr) -> bool {
+fn lint_is_place(e: *Expr) -> bool {
     match e.k {
         EKIndex(b, idx) => return lint_is_root(b)
         EKField(b, f) => return lint_is_root(b)
@@ -23,7 +23,7 @@ lint_is_place :: (e: *Expr) -> bool {
     }
 }
 
-lint_is_root :: (e: *Expr) -> bool {
+fn lint_is_root(e: *Expr) -> bool {
     match e.k {
         EKIdent(n) => return true
         EKIndex(b, idx) => return lint_is_root(b)
@@ -39,7 +39,7 @@ lint_is_root :: (e: *Expr) -> bool {
 }
 
 // source text of a place expression (an index that is not a name or number is shown as `..`)
-lint_place_str :: (e: *Expr) -> str {
+fn lint_place_str(e: *Expr) -> str {
     match e.k {
         EKIdent(n) => return ast_plain(n)
         EKInt(v) => return fmt(v)
@@ -61,28 +61,28 @@ lint_place_str :: (e: *Expr) -> str {
     }
 }
 
-lint_exprs :: (u: *LintUse, es: *Vec[Expr]) -> bool {
+fn lint_exprs(u: *LintUse, es: *Vec[Expr]) -> bool {
     for i in 0..es.len {
         lint_expr(u, &es[i])
     }
     return true
 }
 
-lint_opt :: (u: *LintUse, e: Opt[*Expr]) -> bool {
+fn lint_opt(u: *LintUse, e: Opt[*Expr]) -> bool {
     match e {
         Some(x) => return lint_expr(u, x)
         None => return true
     }
 }
 
-lint_block :: (u: *LintUse, b: *Block) -> bool {
+fn lint_block(u: *LintUse, b: *Block) -> bool {
     for i in 0..b.stmts.len {
         lint_stmt(u, &b.stmts[i])
     }
     return true
 }
 
-lint_expr :: (u: *LintUse, e: *Expr) -> bool {
+fn lint_expr(u: *LintUse, e: *Expr) -> bool {
     return match e.k {
         EKInt(v) => true
         EKFloat(v) => true
@@ -140,7 +140,7 @@ lint_expr :: (u: *LintUse, e: *Expr) -> bool {
     }
 }
 
-lint_stmt :: (u: *LintUse, s: *Stmt) -> bool {
+fn lint_stmt(u: *LintUse, s: *Stmt) -> bool {
     return match s.k {
         SKExpr(e) => lint_expr(u, &e)
         SKLet(names, e) => lint_expr(u, &e)
@@ -237,7 +237,7 @@ lint_stmt :: (u: *LintUse, s: *Stmt) -> bool {
 
 // Statement `i` of `b` has just been lowered. If it is `x := <field or element>` of a struct
 // type and the rest of the block only assigns fields of `x`, that is reported.
-lint_copy_writes :: (self: *Fx, b: *Block, i: i64) {
+fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
     s := &b.stmts[i]
     match s.k {
         SKLet(names, e) => {

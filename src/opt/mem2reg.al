@@ -1,6 +1,6 @@
 // Promote non-escaping stack slots to SSA values (with scalar replacement of aggregates).
 
-Mem2regCtx :: struct {
+struct Mem2regCtx {
     f: *Func,
     cfg: *Cfg,
     var_ty: Vec[T],
@@ -11,7 +11,7 @@ Mem2regCtx :: struct {
     zero: Map[T, i64],
 }
 
-zero_of :: (self: *Mem2regCtx, t: T) -> i64 {
+fn zero_of(self: *Mem2regCtx, t: T) -> i64 {
     z0, found := self.zero.get(t)
     if found {
         return z0
@@ -27,7 +27,7 @@ zero_of :: (self: *Mem2regCtx, t: T) -> i64 {
     return z
 }
 
-read_out :: (self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
+fn read_out(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
     v, found := self.last_store.get((var_, b))
     if found {
         return v
@@ -35,7 +35,7 @@ read_out :: (self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
     return self.read_in(var_, b)
 }
 
-read_in :: (self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
+fn read_in(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
     v0, found := self.def_in.get((var_, b))
     if found {
         return v0
@@ -69,7 +69,7 @@ read_in :: (self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
     return v
 }
 
-mem2reg_run :: (f: *Func) -> bool {
+fn mem2reg_run(f: *Func) -> bool {
     any := false
     for it in 0..8 {
         if !mem2reg_run_once(f) {
@@ -80,7 +80,7 @@ mem2reg_run :: (f: *Func) -> bool {
     return any
 }
 
-mem2reg_run_once :: (f: *Func) -> bool {
+fn mem2reg_run_once(f: *Func) -> bool {
     cfg := cfg_new(f)
     n := f.insts.len
     // users of each value (instruction users only) + escape through terminators

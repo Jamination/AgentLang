@@ -1,10 +1,10 @@
 // C interop and module errors
-P :: struct { x: i64, y: i64 }
-extern "libc.so.6" takes_struct :: (p: P) -> i32
-extern "libc.so.6" returns_vec :: () -> vec3
-area :: (a: vec2) -> f32 { a.x * a.y }
-area :: (a: vec2) -> f32 { a.y }
-main :: () {
+struct P { x: i64, y: i64 }
+extern "libc.so.6" fn takes_struct(p: P) -> i32
+extern "libc.so.6" fn returns_vec() -> vec3
+fn area(a: vec2) -> f32 { a.x * a.y }
+fn area(a: vec2) -> f32 { a.y }
+fn main() {
     p: P
     takes_struct(p)
     v := returns_vec()

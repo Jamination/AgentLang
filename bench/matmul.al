@@ -1,4 +1,4 @@
-mm_init :: (n: i64) -> [][]f64 {
+fn mm_init(n: i64) -> [][]f64 {
     m := alloc[[]f64](n)
     for i in 0..n {
         m[i] = alloc[f64](n)
@@ -6,7 +6,7 @@ mm_init :: (n: i64) -> [][]f64 {
     m
 }
 
-mm_gen :: (n: i64, seed: f64) -> [][]f64 {
+fn mm_gen(n: i64, seed: f64) -> [][]f64 {
     a := mm_init(n)
     tmp := seed / f64(n) / f64(n)
     for i in 0..n {
@@ -17,7 +17,7 @@ mm_gen :: (n: i64, seed: f64) -> [][]f64 {
     a
 }
 
-mm_mul :: (n: i64, a: [][]f64, b: [][]f64) -> [][]f64 {
+fn mm_mul(n: i64, a: [][]f64, b: [][]f64) -> [][]f64 {
     m := mm_init(n)
     c := mm_init(n)
     for i in 0..n {
@@ -40,7 +40,7 @@ mm_mul :: (n: i64, a: [][]f64, b: [][]f64) -> [][]f64 {
     m
 }
 
-main :: () {
+fn main() {
     n := 800
     a := mm_gen(n, 1.0)
     b := mm_gen(n, 2.0)

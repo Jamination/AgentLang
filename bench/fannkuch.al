@@ -1,4 +1,4 @@
-fannkuch :: (n: i32) -> i32 {
+fn fannkuch(n: i32) -> i32 {
     perm: [16]i32
     perm1: [16]i32
     count: [16]i32
@@ -55,6 +55,6 @@ fannkuch :: (n: i32) -> i32 {
     }
 }
 
-main :: () {
+fn main() {
     fannkuch(10)
 }

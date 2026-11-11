@@ -1,7 +1,7 @@
 // Opt[T] and Res[T] of the standard library.
-Account :: struct { id: i64, owner: str }
+struct Account { id: i64, owner: str }
 
-find :: (a: []i64, x: i64) -> Opt[i64] {
+fn find(a: []i64, x: i64) -> Opt[i64] {
     for i, v in a {
         if v == x {
             return Some(i)
@@ -10,7 +10,7 @@ find :: (a: []i64, x: i64) -> Opt[i64] {
     None
 }
 
-parse :: (s: str) -> Res[i64] {
+fn parse(s: str) -> Res[i64] {
     v, ok := parse_i64(s)
     if !ok {
         return Err(fmt("not a number: ", s))
@@ -18,14 +18,14 @@ parse :: (s: str) -> Res[i64] {
     Ok(v)
 }
 
-half :: (n: i64) -> Res[i64] {
+fn half(n: i64) -> Res[i64] {
     if n % 2 != 0 {
         return Err("odd")
     }
     return Ok(n / 2)
 }
 
-quarter :: (s: str) -> Res[i64] {
+fn quarter(s: str) -> Res[i64] {
     match parse(s) {
         Ok(n) => {
             match half(n) {
@@ -37,7 +37,7 @@ quarter :: (s: str) -> Res[i64] {
     }
 }
 
-lookup :: (accounts: []Account, id: i64) -> Opt[*Account] {
+fn lookup(accounts: []Account, id: i64) -> Opt[*Account] {
     for i in 0..len(accounts) {
         if accounts[i].id == id {
             return Some(&accounts[i])
@@ -46,14 +46,14 @@ lookup :: (accounts: []Account, id: i64) -> Opt[*Account] {
     return None
 }
 
-first[T] :: (xs: []T) -> Opt[T] {
+fn first[T](xs: []T) -> Opt[T] {
     if len(xs) == 0 {
         return None
     }
     Some(xs[0])
 }
 
-describe :: (o: Opt[Res[i64]]) -> str {
+fn describe(o: Opt[Res[i64]]) -> str {
     match o {
         Some(Ok(0)) => "zero"
         Some(Ok(n)) => fmt("ok ", n)
@@ -62,7 +62,7 @@ describe :: (o: Opt[Res[i64]]) -> str {
     }
 }
 
-main :: () {
+fn main() {
     a := []i64{5, 8, 13}
     r := find(a, 8)
     q := find(a, 9)

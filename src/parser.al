@@ -1,6 +1,6 @@
 // Parser for AL: tokens to AST. Results are (value, ok) pairs; ok = false after an error.
 
-Parser :: struct {
+struct Parser {
     toks: Vec[Token]
     i: i64
     errs: *Vec[Diag]
@@ -9,24 +9,24 @@ Parser :: struct {
     hdr_stmt: bool
 }
 
-parser_new :: (toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
+fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
     return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_stmt: false}
 }
 
 // the failure result of a parsing function: (zero value, false)
-parser_fail[T] :: () -> (T, bool) {
+fn parser_fail[T]() -> (T, bool) {
     z: T
     return (z, false)
 }
 
 // Box::new
-parser_box[T] :: (x: T) -> *T {
+fn parser_box[T](x: T) -> *T {
     b := new[T]()
     *b = x
     return b
 }
 
-parser_tk_p :: (t: Tk, p: str) -> bool {
+fn parser_tk_p(t: Tk, p: str) -> bool {
     match t {
         TkP(q) => {
             return q == p
@@ -36,7 +36,7 @@ parser_tk_p :: (t: Tk, p: str) -> bool {
     return false
 }
 
-parser_tk_kw :: (t: Tk, k: str) -> bool {
+fn parser_tk_kw(t: Tk, k: str) -> bool {
     match t {
         TkKw(q) => {
             return q == k
@@ -46,7 +46,7 @@ parser_tk_kw :: (t: Tk, k: str) -> bool {
     return false
 }
 
-parser_tk_nl :: (t: Tk) -> bool {
+fn parser_tk_nl(t: Tk) -> bool {
     match t {
         TkNl => {
             return true
@@ -56,7 +56,7 @@ parser_tk_nl :: (t: Tk) -> bool {
     return false
 }
 
-parser_tk_eof :: (t: Tk) -> bool {
+fn parser_tk_eof(t: Tk) -> bool {
     match t {
         TkEof => {
             return true
@@ -66,7 +66,7 @@ parser_tk_eof :: (t: Tk) -> bool {
     return false
 }
 
-parser_tk_id :: (t: Tk) -> bool {
+fn parser_tk_id(t: Tk) -> bool {
     match t {
         TkId(s) => {
             return true
@@ -77,7 +77,7 @@ parser_tk_id :: (t: Tk) -> bool {
 }
 
 // is `t` the identifier `w`?
-parser_tk_word :: (t: Tk, w: str) -> bool {
+fn parser_tk_word(t: Tk, w: str) -> bool {
     match t {
         TkId(s) => {
             return s == w
@@ -87,12 +87,12 @@ parser_tk_word :: (t: Tk, w: str) -> bool {
     return false
 }
 
-parser_cont :: (s: str, i: i64, lo: u8, hi: u8) -> bool {
+fn parser_cont(s: str, i: i64, lo: u8, hi: u8) -> bool {
     return i < len(s) && s[i] >= lo && s[i] <= hi
 }
 
 // String::from_utf8_lossy: every maximal invalid part becomes U+FFFD
-parser_utf8_lossy :: (s: str) -> str {
+fn parser_utf8_lossy(s: str) -> str {
     valid := true
     for c in s {
         if c >= 0x80 {
@@ -164,20 +164,20 @@ parser_utf8_lossy :: (s: str) -> str {
     return out[..out.len]
 }
 
-peek :: (p: *Parser) -> Tk {
+fn peek(p: *Parser) -> Tk {
     return p.toks[p.i].t
 }
 
-peek_at :: (p: *Parser, n: i64) -> Tk {
+fn peek_at(p: *Parser, n: i64) -> Tk {
     j := min(p.i + n, p.toks.len - 1)
     return p.toks[j].t
 }
 
-pos :: (p: *Parser) -> Pos {
+fn pos(p: *Parser) -> Pos {
     return p.toks[p.i].pos
 }
 
-bump :: (p: *Parser) -> Tk {
+fn bump(p: *Parser) -> Tk {
     t := p.toks[p.i].t
     if p.i < p.toks.len - 1 {
         p.i += 1
@@ -185,15 +185,15 @@ bump :: (p: *Parser) -> Tk {
     return t
 }
 
-is_p :: (p: *Parser, s: str) -> bool {
+fn is_p(p: *Parser, s: str) -> bool {
     return parser_tk_p(p.peek(), s)
 }
 
-is_kw :: (p: *Parser, k: str) -> bool {
+fn is_kw(p: *Parser, k: str) -> bool {
     return parser_tk_kw(p.peek(), k)
 }
 
-eat_p :: (p: *Parser, s: str) -> bool {
+fn eat_p(p: *Parser, s: str) -> bool {
     if p.is_p(s) {
         p.bump()
         return true
@@ -202,7 +202,7 @@ eat_p :: (p: *Parser, s: str) -> bool {
     }
 }
 
-eat_kw :: (p: *Parser, k: str) -> bool {
+fn eat_kw(p: *Parser, k: str) -> bool {
     if p.is_kw(k) {
         p.bump()
         return true
@@ -211,7 +211,7 @@ eat_kw :: (p: *Parser, k: str) -> bool {
     }
 }
 
-tok_desc :: (p: *Parser) -> str {
+fn tok_desc(p: *Parser) -> str {
     match p.peek() {
         TkId(s) => {
             return fmt("identifier `", s, "`")
@@ -241,7 +241,7 @@ tok_desc :: (p: *Parser) -> str {
     return ""
 }
 
-err[T] :: (p: *Parser, msg: str) -> (T, bool) {
+fn err[T](p: *Parser, msg: str) -> (T, bool) {
     d := p.tok_desc()
     // habits from other languages get a direct pointer to the AL spelling
     hint := ""
@@ -284,7 +284,7 @@ err[T] :: (p: *Parser, msg: str) -> (T, bool) {
 }
 
 // (R<()> in the Rust source: only the ok flag)
-expect_p :: (p: *Parser, s: str) -> bool {
+fn expect_p(p: *Parser, s: str) -> bool {
     if p.eat_p(s) {
         return true
     } else {
@@ -293,7 +293,7 @@ expect_p :: (p: *Parser, s: str) -> bool {
     }
 }
 
-ident :: (p: *Parser) -> (str, bool) {
+fn ident(p: *Parser) -> (str, bool) {
     match p.peek() {
         TkId(s) => {
             p.bump()
@@ -304,14 +304,14 @@ ident :: (p: *Parser) -> (str, bool) {
     return p.err[str]("expected identifier")
 }
 
-skip_nl :: (p: *Parser) {
+fn skip_nl(p: *Parser) {
     while parser_tk_nl(p.peek()) || p.is_p(";") {
         p.bump()
     }
 }
 
 // ---------- declarations ----------
-file :: (p: *Parser) -> Vec[Decl] {
+fn file(p: *Parser) -> Vec[Decl] {
     out := vec[Decl]()
     loop {
         p.skip_nl()
@@ -333,7 +333,7 @@ file :: (p: *Parser) -> Vec[Decl] {
 // top-level declaration, a line that starts outside all braces with a name followed by
 // `::`, `:` or `:=` or with a declaration keyword (also inside braces if it is at column 1:
 // the declaration in error may lack a `}`)
-sync_decl :: (p: *Parser, from: i64) {
+fn sync_decl(p: *Parser, from: i64) {
     depth := 0
     for j in from..p.i {
         if parser_tk_p(p.toks[j].t, "{") {
@@ -383,7 +383,7 @@ sync_decl :: (p: *Parser, from: i64) {
 }
 
 // With the parser at a name: do type parameters and `::` follow (`name[T, U] ::`)?
-tparams_ahead :: (p: *Parser) -> bool {
+fn tparams_ahead(p: *Parser) -> bool {
     if !parser_tk_p(p.peek_at(1), "[") {
         return false
     }
@@ -401,7 +401,7 @@ tparams_ahead :: (p: *Parser) -> bool {
     return parser_tk_p(p.toks[j].t, "]") && parser_tk_p(p.toks[min(j + 1, p.toks.len - 1)].t, "::")
 }
 
-tparams :: (p: *Parser) -> (Vec[str], bool) {
+fn tparams(p: *Parser) -> (Vec[str], bool) {
     v := vec[str]()
     if p.eat_p("[") {
         loop {
@@ -422,7 +422,7 @@ tparams :: (p: *Parser) -> (Vec[str], bool) {
 }
 
 // `priv` in front of a declaration: the declaration is visible only in its own file
-priv_decl :: (p: *Parser) -> (Decl, bool) {
+fn priv_decl(p: *Parser) -> (Decl, bool) {
     ppos := p.pos()
     p.bump()
     if p.is_kw("priv") {
@@ -445,7 +445,7 @@ priv_decl :: (p: *Parser) -> (Decl, bool) {
 
 // the declaration marked as private. Every kind of declaration is listed: a new kind must
 // decide here whether it can be private.
-parser_set_priv :: (d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
+fn parser_set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
     return match d {
         DeclFn(f) => {
             if f.name == "main" {
@@ -490,7 +490,7 @@ parser_set_priv :: (d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
 
 // At `fn` where a declaration starts (top level, after `extern "lib"`, or a statement):
 // `fn name[T](a: A, b: B) -> R { ... }`; a C function (`ext`) has no body
-fn_decl :: (p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (FnDecl, bool) {
+fn fn_decl(p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (FnDecl, bool) {
     p.bump()
     name, ok1 := p.ident()
     if !ok1 {
@@ -526,7 +526,7 @@ fn_decl :: (p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (FnDecl, bool) {
 // At `fn` where an expression starts: an anonymous function `fn(a: A, b: B) -> R { ... }`
 // (its parameters have names; without parameters a body follows), or a function type
 // `fn(A, B) -> R` (a type argument, the type of a literal)
-fn_expr :: (p: *Parser, pos: Pos) -> (Expr, bool) {
+fn fn_expr(p: *Parser, pos: Pos) -> (Expr, bool) {
     if parser_tk_p(p.peek_at(1), "[") {
         p.errs.push(Diag{pos: pos, msg: "an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level"})
         return parser_fail[Expr]()
@@ -573,7 +573,7 @@ fn_expr :: (p: *Parser, pos: Pos) -> (Expr, bool) {
 // At `const`, `struct`, `enum`, or `type` followed by a name, where a declaration starts:
 //   const NAME = value      const NAME: T = value      type Name = T
 //   struct Name[T] { a: A, b: B }                      enum Name[T] { A, B(T) }
-kw_decl :: (p: *Parser, pos: Pos) -> (Decl, bool) {
+fn kw_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
     if p.eat_kw("const") {
         name, ok1 := p.ident()
         if !ok1 {
@@ -633,7 +633,7 @@ kw_decl :: (p: *Parser, pos: Pos) -> (Decl, bool) {
 
 // With the parser at `(`: do the parameters of a function start here (in a declaration after
 // `::`, or an anonymous function)? `(` `)` followed by `->` or `{`, or `(` name `:`.
-at_fn :: (p: *Parser) -> bool {
+fn at_fn(p: *Parser) -> bool {
     if !p.is_p("(") {
         return false
     }
@@ -645,7 +645,7 @@ at_fn :: (p: *Parser) -> bool {
 }
 
 // With the parser at `(`: is the matching `)` followed by `what`? (`->`: a function type)
-parens_then :: (p: *Parser, what: str) -> bool {
+fn parens_then(p: *Parser, what: str) -> bool {
     if !p.is_p("(") {
         return false
     }
@@ -673,18 +673,18 @@ parens_then :: (p: *Parser, what: str) -> bool {
 // With the parser after the `::` of a declaration: is a function declared? The parameters
 // start as `at_fn` says; a `(...)` followed by `->` or `{` and a first parameter without
 // its colon are taken as a function too, for the error message.
-fn_ahead :: (p: *Parser) -> bool {
+fn fn_ahead(p: *Parser) -> bool {
     return p.at_fn() || p.parens_then("->") || p.parens_then("{") || p.at_old_params()
 }
 
 // With the parser after a `->`: is `()` written for "no result"? (`() -> R` is a function type)
-at_no_result :: (p: *Parser) -> bool {
+fn at_no_result(p: *Parser) -> bool {
     return p.is_p("(") && parser_tk_p(p.peek_at(1), ")") && !parser_tk_p(p.peek_at(2), "->")
 }
 
 // `(a: A, b: B) [-> R]`: the parameters and the result of a function declaration or of an
 // anonymous function
-fn_sig :: (p: *Parser, params: *Vec[(str, TypeAst)], ret: *Opt[TypeAst]) -> bool {
+fn fn_sig(p: *Parser, params: *Vec[(str, TypeAst)], ret: *Opt[TypeAst]) -> bool {
     if !p.expect_p("(") {
         return false
     }
@@ -733,7 +733,7 @@ fn_sig :: (p: *Parser, params: *Vec[(str, TypeAst)], ret: *Opt[TypeAst]) -> bool
 
 // At `(` where `at_fn` holds and an expression starts: an anonymous function
 // `(a: A, b: B) -> R { ... }`, or the function type `() -> R` (no body follows)
-anon_fn :: (p: *Parser, pos: Pos) -> (Expr, bool) {
+fn anon_fn(p: *Parser, pos: Pos) -> (Expr, bool) {
     if parser_tk_p(p.peek_at(1), ")") && parser_tk_p(p.peek_at(2), "->") {
         start := p.i
         nerr := p.errs.len
@@ -763,7 +763,7 @@ anon_fn :: (p: *Parser, pos: Pos) -> (Expr, bool) {
 // the body of a struct after `struct`: `{ name: Type, ... }` (fields separated by `,` or
 // newlines). `old`: after `struct Name` of the old syntax, which has been reported: fields
 // are read with or without their colon.
-struct_rest :: (p: *Parser, name: str, tparams: Vec[str], pos: Pos, old: bool) -> (Decl, bool) {
+fn struct_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos, old: bool) -> (Decl, bool) {
     if !p.expect_p("{") {
         return parser_fail[Decl]()
     }
@@ -794,7 +794,7 @@ struct_rest :: (p: *Parser, name: str, tparams: Vec[str], pos: Pos, old: bool) -
 }
 
 // the body of an enum after `enum`: `{ Variant, Variant(Type, ...), ... }`
-enum_rest :: (p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, bool) {
+fn enum_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, bool) {
     if !p.expect_p("{") {
         return parser_fail[Decl]()
     }
@@ -834,7 +834,7 @@ enum_rest :: (p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, bool
 }
 
 // `inline` / `noinline` / `extern` in front of a declaration that is not a function
-not_fn :: (p: *Parser, pos: Pos, inl: i64, ext: *Opt[str], what: str) -> bool {
+fn not_fn(p: *Parser, pos: Pos, inl: i64, ext: *Opt[str], what: str) -> bool {
     word := ""
     if is_some(*ext) {
         word = "extern"
@@ -855,7 +855,7 @@ not_fn :: (p: *Parser, pos: Pos, inl: i64, ext: *Opt[str], what: str) -> bool {
 //   name[T] :: (a: A) -> R { ... }    name[T] :: struct { ... }    name[T] :: enum { ... }
 //   name :: type T                    name :: value                name : T : value
 //   name : T                          name : T = value             name := value
-name_decl :: (p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (Decl, bool) {
+fn name_decl(p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (Decl, bool) {
     name, ok1 := p.ident()
     if !ok1 {
         return parser_fail[Decl]()
@@ -992,13 +992,13 @@ name_decl :: (p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (Decl, bool) {
 }
 
 // With the parser at `(`: a parameter written without its colon (`(name Type`)?
-at_old_params :: (p: *Parser) -> bool {
+fn at_old_params(p: *Parser) -> bool {
     return p.is_p("(") && parser_tk_id(p.peek_at(1)) && (parser_tk_id(p.peek_at(2)) || parser_tk_kw(p.peek_at(2), "fn"))
 }
 
 // With the parser at `[`: type parameters in front of an anonymous function
 // (`[T](a: T) -> T { ... }`)?
-at_anon_tparams :: (p: *Parser) -> bool {
+fn at_anon_tparams(p: *Parser) -> bool {
     j := p.i + 1
     loop {
         if !parser_tk_id(p.toks[j].t) {
@@ -1015,7 +1015,7 @@ at_anon_tparams :: (p: *Parser) -> bool {
 }
 
 // A function declared inside a block: `name :: (a: A) -> R { ... }`
-nested_fn :: (p: *Parser) -> (SK, bool) {
+fn nested_fn(p: *Parser) -> (SK, bool) {
     pos := p.pos()
     name, ok1 := p.ident()
     if !ok1 {
@@ -1049,7 +1049,7 @@ nested_fn :: (p: *Parser) -> (SK, bool) {
     return (SKFn(parser_box(FnDecl{name: name, tparams: tparams, params: params, ret: ret, body: body, pos: pos, inl: 0, ext: None})), true)
 }
 
-decl :: (p: *Parser) -> (Decl, bool) {
+fn decl(p: *Parser) -> (Decl, bool) {
     if p.is_kw("priv") {
         return p.priv_decl()
     }
@@ -1144,7 +1144,7 @@ decl :: (p: *Parser) -> (Decl, bool) {
 }
 
 // ---------- types ----------
-starts_type :: (p: *Parser) -> bool {
+fn starts_type(p: *Parser) -> bool {
     match p.peek() {
         TkId(s) => {
             return true
@@ -1160,7 +1160,7 @@ starts_type :: (p: *Parser) -> bool {
     return false
 }
 
-ty :: (p: *Parser) -> (TypeAst, bool) {
+fn ty(p: *Parser) -> (TypeAst, bool) {
     pos := p.pos()
     if p.eat_p("*") {
         t, ok := p.ty()
@@ -1293,7 +1293,7 @@ ty :: (p: *Parser) -> (TypeAst, bool) {
 }
 
 // ---------- statements ----------
-block :: (p: *Parser) -> (Block, bool) {
+fn block(p: *Parser) -> (Block, bool) {
     if !p.expect_p("{") {
         return parser_fail[Block]()
     }
@@ -1324,7 +1324,7 @@ block :: (p: *Parser) -> (Block, bool) {
     return (Block{stmts: stmts, end: end}, true)
 }
 
-sync_stmt :: (p: *Parser) {
+fn sync_stmt(p: *Parser) {
     depth := 0
     loop {
         match p.peek() {
@@ -1353,7 +1353,7 @@ sync_stmt :: (p: *Parser) {
 }
 
 // the scrutinee of a `match`
-header_expr :: (p: *Parser) -> (Expr, bool) {
+fn header_expr(p: *Parser) -> (Expr, bool) {
     save := p.no_lit
     save_stmt := p.hdr_stmt
     p.no_lit = true
@@ -1365,7 +1365,7 @@ header_expr :: (p: *Parser) -> (Expr, bool) {
 }
 
 // the condition of an `if` or `while`, or an expression of a `for` header
-stmt_header_expr :: (p: *Parser) -> (Expr, bool) {
+fn stmt_header_expr(p: *Parser) -> (Expr, bool) {
     save := p.no_lit
     save_stmt := p.hdr_stmt
     p.no_lit = true
@@ -1376,7 +1376,7 @@ stmt_header_expr :: (p: *Parser) -> (Expr, bool) {
     return (e, ok)
 }
 
-parser_tk_binop :: (t: Tk) -> bool {
+fn parser_tk_binop(t: Tk) -> bool {
     match t {
         TkP(q) => {
             match q {
@@ -1399,7 +1399,7 @@ parser_tk_binop :: (t: Tk) -> bool {
 //    follow the body of such a statement;
 //  - after the scrutinee of a `match`: yes if the braces hold something but no `=>` of
 //    their own, which every match arm has.
-lit_in_header :: (p: *Parser, e: *Expr) -> bool {
+fn lit_in_header(p: *Parser, e: *Expr) -> bool {
     match e.k {
         EKTypeE(t) => {
             return true
@@ -1437,7 +1437,7 @@ lit_in_header :: (p: *Parser, e: *Expr) -> bool {
     return parser_tk_p(after, "{") || parser_tk_p(after, ".") || parser_tk_p(after, "[") || parser_tk_binop(after)
 }
 
-if_stmt :: (p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
+fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
     // `if` already consumed
     c, ok1 := p.stmt_header_expr()
     if !ok1 {
@@ -1476,7 +1476,7 @@ if_stmt :: (p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
     return ((c, t, none), true)
 }
 
-stmt :: (p: *Parser) -> (Stmt, bool) {
+fn stmt(p: *Parser) -> (Stmt, bool) {
     pos := p.pos()
     k, ok := p.stmt_k()
     if !ok {
@@ -1485,7 +1485,7 @@ stmt :: (p: *Parser) -> (Stmt, bool) {
     return (Stmt{k: k, pos: pos}, true)
 }
 
-stmt_k :: (p: *Parser) -> (SK, bool) {
+fn stmt_k(p: *Parser) -> (SK, bool) {
     if p.is_kw("priv") {
         return p.err[SK]("`priv` applies to top-level declarations only; a local declaration is visible only in its block anyway")
     }
@@ -1817,11 +1817,11 @@ stmt_k :: (p: *Parser) -> (SK, bool) {
 }
 
 // ---------- expressions ----------
-expr :: (p: *Parser) -> (Expr, bool) {
+fn expr(p: *Parser) -> (Expr, bool) {
     return p.bin(1)
 }
 
-binop :: (p: *Parser) -> Opt[(BinOp, i64)] {
+fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
     q := ""
     match p.peek() {
         TkP(s) => {
@@ -1892,7 +1892,7 @@ binop :: (p: *Parser) -> Opt[(BinOp, i64)] {
     return None
 }
 
-bin :: (p: *Parser, min_prec: i64) -> (Expr, bool) {
+fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
     lhs, ok1 := p.unary()
     if !ok1 {
         return parser_fail[Expr]()
@@ -1924,7 +1924,7 @@ bin :: (p: *Parser, min_prec: i64) -> (Expr, bool) {
     return (lhs, true)
 }
 
-unary :: (p: *Parser) -> (Expr, bool) {
+fn unary(p: *Parser) -> (Expr, bool) {
     pos := p.pos()
     op: Opt[UnOp] = None
     match p.peek() {
@@ -1964,7 +1964,7 @@ unary :: (p: *Parser) -> (Expr, bool) {
     return p.postfix()
 }
 
-parser_typeish :: (e: *Expr) -> bool {
+fn parser_typeish(e: *Expr) -> bool {
     match e.k {
         EKIdent(n) => {
             return true
@@ -1987,7 +1987,7 @@ parser_typeish :: (e: *Expr) -> bool {
 }
 
 // the closure in `args`
-parser_args_r :: (p: *Parser, close: str, v: *Vec[Expr]) -> bool {
+fn parser_args_r(p: *Parser, close: str, v: *Vec[Expr]) -> bool {
     while !p.is_p(close) {
         e, ok := p.expr()
         if !ok {
@@ -2001,7 +2001,7 @@ parser_args_r :: (p: *Parser, close: str, v: *Vec[Expr]) -> bool {
     return p.expect_p(close)
 }
 
-args :: (p: *Parser, close: str) -> (Vec[Expr], bool) {
+fn args(p: *Parser, close: str) -> (Vec[Expr], bool) {
     save := p.no_lit
     p.no_lit = false
     v := vec[Expr]()
@@ -2013,7 +2013,7 @@ args :: (p: *Parser, close: str) -> (Vec[Expr], bool) {
     return (v, true)
 }
 
-postfix :: (p: *Parser) -> (Expr, bool) {
+fn postfix(p: *Parser) -> (Expr, bool) {
     e, ok1 := p.primary()
     if !ok1 {
         return parser_fail[Expr]()
@@ -2065,7 +2065,7 @@ postfix :: (p: *Parser) -> (Expr, bool) {
     return (e, true)
 }
 
-index_tail :: (p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
+fn index_tail(p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
     if p.eat_p("..") {
         hi: Opt[*Expr] = None
         if !p.is_p("]") {
@@ -2112,7 +2112,7 @@ index_tail :: (p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
     return (Expr{k: EKIndex(parser_box(base), v), pos: pos}, true)
 }
 
-lit_body :: (p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
+fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
     v := vec[(Opt[str], Expr)]()
     loop {
         while parser_tk_nl(p.peek()) {
@@ -2162,7 +2162,7 @@ lit_body :: (p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
 }
 
 // the closure in `primary` for a parenthesized expression or tuple
-parser_primary_r :: (p: *Parser, pos: Pos) -> (Expr, bool) {
+fn parser_primary_r(p: *Parser, pos: Pos) -> (Expr, bool) {
     first, ok1 := p.expr()
     if !ok1 {
         return parser_fail[Expr]()
@@ -2190,7 +2190,7 @@ parser_primary_r :: (p: *Parser, pos: Pos) -> (Expr, bool) {
     return (first, true)
 }
 
-primary :: (p: *Parser) -> (Expr, bool) {
+fn primary(p: *Parser) -> (Expr, bool) {
     pos := p.pos()
     match p.peek() {
         TkInt(n) => {
@@ -2307,7 +2307,7 @@ primary :: (p: *Parser) -> (Expr, bool) {
 }
 
 // where an expression starts in the source (its `pos` may be that of an operator)
-parser_expr_start :: (e: *Expr) -> Pos {
+fn parser_expr_start(e: *Expr) -> Pos {
     match e.k {
         EKCall(c, _) => {
             return parser_expr_start(c)
@@ -2329,7 +2329,7 @@ parser_expr_start :: (e: *Expr) -> Pos {
 // A pattern is parsed as an expression and then read as a pattern: `_`, `Variant(p, ..)`,
 // `Enum.Variant(p, ..)`, `Enum[T].Variant(p, ..)`, `(p, p)`, `&name`; anything else stays
 // an expression (a constant, or a name that lowering resolves).
-parser_pat :: (e: Expr) -> Pat {
+fn parser_pat(e: Expr) -> Pat {
     match e.k {
         EKIdent(n) => {
             if n == "_" {
@@ -2391,7 +2391,7 @@ parser_pat :: (e: Expr) -> Pat {
     return PatConst(e)
 }
 
-match_arms :: (p: *Parser) -> (Vec[MatchArm], bool) {
+fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
     arms := vec[MatchArm]()
     loop {
         p.skip_nl()

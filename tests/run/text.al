@@ -1,9 +1,9 @@
-handlers := [3](i64) -> i64{dbl, neg, dbl}
+handlers := [3]fn(i64) -> i64{dbl, neg, dbl}
 
-dbl :: (x: i64) -> i64 { x * 2 }
-neg :: (x: i64) -> i64 { -x }
+fn dbl(x: i64) -> i64 { x * 2 }
+fn neg(x: i64) -> i64 { -x }
 
-main :: () {
+fn main() {
     print(pad_left("42", 6, ' '), "|", pad_right("ab", 5, '.'), "|", pad_left("toolong", 3, '0'))
     print(hex(255), hex(0), hex(0xDEADBEEF), to_upper("Mixed Case 1"), to_lower("Mixed Case 1"))
     print(join(split("a-b-c", '-'), ", "), "|", join([]str{"solo"}, "+"), "|", len(join([]str{}, "+")))

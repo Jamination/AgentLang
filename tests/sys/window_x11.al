@@ -3,7 +3,7 @@
 // presents frames, polls events and closes again.
 use std.window
 
-main :: () {
+fn main() {
     display := from_cstr(getenv(ptr("AL_TEST_DISPLAY")))
     if len(display) == 0 {
         print("AL_TEST_DISPLAY is not set")

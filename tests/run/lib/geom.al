@@ -1,8 +1,8 @@
 use "more.al"
 
-Circle :: struct { r: f64 }
-TAU :: 6.283185307179586
+struct Circle { r: f64 }
+const TAU = 6.283185307179586
 
-circumference :: (c: Circle) -> f64 {
+fn circumference(c: Circle) -> f64 {
     TAU * c.r
 }

@@ -2,14 +2,14 @@
 //     return x + f(args)        (also *, &, |, ^ on integers)
 // which becomes a loop that carries the pending operation in an accumulator.
 
-TreSite :: struct {
+struct TreSite {
     block: i64,
     call: i64,
     // accumulator form: (combining instruction, the other operand)
     acc: Opt[(i64, i64)],
 }
 
-tre_identity :: (op: Op) -> Opt[i64] {
+fn tre_identity(op: Op) -> Opt[i64] {
     if op == OpAdd || op == OpOr || op == OpXor {
         return Some(0)
     }
@@ -23,7 +23,7 @@ tre_identity :: (op: Op) -> Opt[i64] {
 }
 
 // acc_op.is_none() || acc_op == Some(op)
-tre_none_or_same :: (acc_op: Opt[Op], op: Op) -> bool {
+fn tre_none_or_same(acc_op: Opt[Op], op: Op) -> bool {
     match acc_op {
         Some(o) => return o == op
         None => {}
@@ -31,7 +31,7 @@ tre_none_or_same :: (acc_op: Opt[Op], op: Op) -> bool {
     return true
 }
 
-tre_run :: (f: *Func, fid: i64) -> bool {
+fn tre_run(f: *Func, fid: i64) -> bool {
     if f.rets.len > 1 {
         return false
     }

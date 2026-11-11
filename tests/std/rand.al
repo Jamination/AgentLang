@@ -1,9 +1,9 @@
 // std.rand: generator, distributions, default generator
-near :: (x: f64, target: f64, tol: f64) -> bool {
+fn near(x: f64, target: f64, tol: f64) -> bool {
     return fabs(x - target) <= tol
 }
 
-main :: () {
+fn main() {
     // exact sequence of xoshiro256** seeded through splitmix64
     r := rng(0)
     print(r.next_u64(), r.next_u64(), r.next_u64())

@@ -2,17 +2,17 @@
 // the checks are removed, also when the body calls functions or leaves the loop early.
 log: Vec[i64]
 
-note :: (x: i64) {
+fn note(x: i64) {
     log.push(x)
 }
 
-each :: (s: []i64) {
+fn each(s: []i64) {
     for i in 0..len(s) {
         note(s[i])
     }
 }
 
-each_from :: (s: []i64, skip: bool) -> i64 {
+fn each_from(s: []i64, skip: bool) -> i64 {
     n := 0
     for i in 2..len(s) {
         if skip && s[i] == 40 {
@@ -27,7 +27,7 @@ each_from :: (s: []i64, skip: bool) -> i64 {
     n
 }
 
-find :: (s: []str, w: str) -> i64 {
+fn find(s: []str, w: str) -> i64 {
     for i in 0..len(s) {
         if s[i] == w {
             return i
@@ -36,7 +36,7 @@ find :: (s: []str, w: str) -> i64 {
     return -1
 }
 
-total :: (v: *Vec[i64]) -> i64 {
+fn total(v: *Vec[i64]) -> i64 {
     t := 0
     for i in 0..v.len {
         t += v[i]
@@ -44,13 +44,13 @@ total :: (v: *Vec[i64]) -> i64 {
     t
 }
 
-scale :: (v: *Vec[f64], k: f64) {
+fn scale(v: *Vec[f64], k: f64) {
     for i in 0..len(v) {
         v[i] *= k
     }
 }
 
-pairs :: (s: []i64) -> i64 {
+fn pairs(s: []i64) -> i64 {
     t := 0
     for i in 0..len(s) {
         for j in 0..len(s) {
@@ -62,7 +62,7 @@ pairs :: (s: []i64) -> i64 {
 }
 
 // the loop bound is not the length: the check stays (and passes here)
-first :: (s: []i64, n: i64) -> i64 {
+fn first(s: []i64, n: i64) -> i64 {
     t := 0
     for i in 0..n {
         t += s[i]
@@ -71,7 +71,7 @@ first :: (s: []i64, n: i64) -> i64 {
     t
 }
 
-main :: () {
+fn main() {
     s := []i64{10, 20, 30, 40, 50, 60, 70}
     each(s)
     print(log[..])

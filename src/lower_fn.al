@@ -1,6 +1,6 @@
 // Per-function lowering: statements, places, control flow. Type checking is fused with IR generation.
 
-Val :: struct {
+struct Val {
     ty: i64
     v: i64
     mem: bool
@@ -11,30 +11,30 @@ Val :: struct {
     ro: bool
 }
 
-val_unit :: () -> Val {
+fn val_unit() -> Val {
     return Val{ty: T_UNIT, v: NOV, mem: false, alias: 0, lane: None}
 }
 
-val_err :: () -> Val {
+fn val_err() -> Val {
     return Val{ty: T_ERR, v: NOV, mem: false, alias: 0, lane: None}
 }
 
-val_never :: () -> Val {
+fn val_never() -> Val {
     return Val{ty: T_NEVER, v: NOV, mem: false, alias: 0, lane: None}
 }
 
-Scope :: struct {
+struct Scope {
     vars: Map[str, (i64, i64)]
     defers: Vec[*Block]
 }
 
-LoopCtx :: struct {
+struct LoopCtx {
     brk: i64
     cont: i64
     scope_depth: i64
 }
 
-Fx :: struct {
+struct Fx {
     cx: *Cx
     f: Func
     cur: i64
@@ -61,11 +61,11 @@ Fx :: struct {
     nested_done: Vec[(*FnDecl, i64)]
 }
 
-lower_fn_str_less :: (a: str, b: str) -> bool {
+fn lower_fn_str_less(a: str, b: str) -> bool {
     return cmp(a, b) < 0
 }
 
-lower_fn_lower_all :: (cx: *Cx, entry: str, check_from_file: i64) {
+fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
     edi, has_entry := cx.fn_names.get(entry)
     if has_entry {
         cx.entry_file = cx.fn_decls[edi].pos.file
@@ -180,7 +180,7 @@ lower_fn_lower_all :: (cx: *Cx, entry: str, check_from_file: i64) {
     }
 }
 
-lower_fn_lower_fn :: (cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
+fn lower_fn_lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
     d := cx.fn_decls[di]
     cx.scope_prelude = cx.internal_file(d.pos.file)
     tenv := map[str, i64]()
@@ -193,7 +193,7 @@ lower_fn_lower_fn :: (cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
 // top-level function (`parent` is nil), or a nested or anonymous function written in the
 // function that `parent` is lowering.
-lower_fn_lower_body :: (cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *Block, tenv: Map[str, i64], name: str, pos: Pos, parent: *Fx) {
+fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *Block, tenv: Map[str, i64], name: str, pos: Pos, parent: *Fx) {
     sig := cx.fn_sigs[fid]
     ptys := sig.0
     rty := sig.1
@@ -295,50 +295,50 @@ lower_fn_lower_body :: (cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *
 }
 
 // ---------- builder primitives ----------
-ins :: (self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
+fn ins(self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     return self.f.push(self.cur, op, ty, args, k)
 }
 
-iconst :: (self: *Fx, ty: T, k: i64) -> i64 {
+fn iconst(self: *Fx, ty: T, k: i64) -> i64 {
     return self.ins(OpConst, ty, vec[i64](), ir_canon(ty, k))
 }
 
-new_block :: (self: *Fx) -> i64 {
+fn new_block(self: *Fx) -> i64 {
     return self.f.new_block()
 }
 
-switch_to :: (self: *Fx, b: i64) {
+fn switch_to(self: *Fx, b: i64) {
     self.cur = b
     self.dead = false
 }
 
-terminate :: (self: *Fx, t: Term) {
+fn terminate(self: *Fx, t: Term) {
     self.f.blocks[self.cur].term = t
     self.cur = self.f.new_block()
     self.dead = true
 }
 
-jmp :: (self: *Fx, b: i64) {
+fn jmp(self: *Fx, b: i64) {
     d := self.dead
     self.f.blocks[self.cur].term = TermJmp(b)
     self.cur = self.f.new_block()
     self.dead = d
 }
 
-br :: (self: *Fx, c: i64, t: i64, e: i64) {
+fn br(self: *Fx, c: i64, t: i64, e: i64) {
     self.f.blocks[self.cur].term = TermBr(c, t, e)
     self.cur = self.f.new_block()
 }
 
-err :: (self: *Fx, pos: Pos, msg: str) {
+fn err(self: *Fx, pos: Pos, msg: str) {
     self.cx.err(pos, msg)
 }
 
-tyname :: (self: *Fx, t: i64) -> str {
+fn tyname(self: *Fx, t: i64) -> str {
     return self.cx.types.name(t)
 }
 
-alloca :: (self: *Fx, size: i64, align: i64) -> i64 {
+fn alloca(self: *Fx, size: i64, align: i64) -> i64 {
     v := self.f.mk(OpAlloca, TI64, vec[i64](), max(size, 1))
     i := self.f.im(v)
     i.aux = max(align, 1)
@@ -346,13 +346,13 @@ alloca :: (self: *Fx, size: i64, align: i64) -> i64 {
     return v
 }
 
-temp :: (self: *Fx, ty: i64) -> i64 {
+fn temp(self: *Fx, ty: i64) -> i64 {
     s := self.cx.types.size_of(ty)
     a := self.cx.types.align_of(ty)
     return self.alloca(s, a)
 }
 
-add_off :: (self: *Fx, addr: i64, off: i64) -> i64 {
+fn add_off(self: *Fx, addr: i64, off: i64) -> i64 {
     if off == 0 {
         return addr
     }
@@ -360,25 +360,25 @@ add_off :: (self: *Fx, addr: i64, off: i64) -> i64 {
     return self.ins(OpAdd, TI64, vec_of([]i64{addr, c}), 0)
 }
 
-load_raw :: (self: *Fx, addr: i64, t: T, alias: i64) -> i64 {
+fn load_raw(self: *Fx, addr: i64, t: T, alias: i64) -> i64 {
     v := self.ins(OpLoad, t, vec_of([]i64{addr}), 0)
     i := self.f.im(v)
     i.aux = alias
     return v
 }
 
-store_raw :: (self: *Fx, addr: i64, val: i64, t: T, alias: i64) {
+fn store_raw(self: *Fx, addr: i64, val: i64, t: T, alias: i64) {
     v := self.ins(OpStore, t, vec_of([]i64{addr, val}), 0)
     i := self.f.im(v)
     i.aux = alias
 }
 
-sval :: (self: *Fx, ty: i64, v: i64) -> Val {
+fn sval(self: *Fx, ty: i64, v: i64) -> Val {
     return Val{ty: ty, v: v, mem: false, alias: 0, lane: None}
 }
 
 // a memory value; alias class is the generic class of scalar types
-mval :: (self: *Fx, ty: i64, addr: i64) -> Val {
+fn mval(self: *Fx, ty: i64, addr: i64) -> Val {
     alias := 0
     if self.cx.types.is_scalar(ty) {
         alias = self.cx.types.scalar_ir(ty).1
@@ -386,12 +386,12 @@ mval :: (self: *Fx, ty: i64, addr: i64) -> Val {
     return Val{ty: ty, v: addr, mem: true, alias: alias, lane: None}
 }
 
-irt :: (self: *Fx, ty: i64) -> T {
+fn irt(self: *Fx, ty: i64) -> T {
     return self.cx.types.scalar_ir(ty).0
 }
 
 // scalar SSA value of a Val
-scalar :: (self: *Fx, v: Val) -> i64 {
+fn scalar(self: *Fx, v: Val) -> i64 {
     if v.ty == T_ERR || v.ty == T_NEVER || v.ty == T_UNIT {
         return self.iconst(TI64, 0)
     }
@@ -411,7 +411,7 @@ scalar :: (self: *Fx, v: Val) -> i64 {
 }
 
 // store `src` into the place `dst`
-store :: (self: *Fx, dst: Val, src: Val) {
+fn store(self: *Fx, dst: Val, src: Val) {
     if dst.ty == T_ERR || src.ty == T_ERR || src.ty == T_NEVER || dst.ty == T_UNIT {
         return
     }
@@ -458,7 +458,7 @@ store :: (self: *Fx, dst: Val, src: Val) {
     }
 }
 
-zero :: (self: *Fx, dst: Val) {
+fn zero(self: *Fx, dst: Val) {
     if dst.ty == T_ERR {
         return
     }
@@ -480,7 +480,7 @@ zero :: (self: *Fx, dst: Val) {
     }
 }
 
-coerce :: (self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
+fn coerce(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
     if v.ty == to {
         return v
     }
@@ -497,11 +497,11 @@ coerce :: (self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
 }
 
 // ---------- scopes ----------
-push_scope :: (self: *Fx) {
+fn push_scope(self: *Fx) {
     self.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
 }
 
-pop_scope :: (self: *Fx) {
+fn pop_scope(self: *Fx) {
     if !self.dead {
         defers := clone(self.scopes[self.scopes.len - 1].defers)
         for i in defers.len - 1..=0 by -1 {
@@ -511,7 +511,7 @@ pop_scope :: (self: *Fx) {
     self.scopes.pop()
 }
 
-run_defers_down_to :: (self: *Fx, depth: i64) {
+fn run_defers_down_to(self: *Fx, depth: i64) {
     // emit defers of scopes [depth..] innermost first, without popping
     all := vec[*Block]()
     for si in self.scopes.len - 1..=depth by -1 {
@@ -540,7 +540,7 @@ run_defers_down_to :: (self: *Fx, depth: i64) {
 // A local name: (type, address) of a variable. A negative type slot is not a variable: a
 // nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
 // enclosing function, which a nested function cannot use.
-lookup :: (self: *Fx, name: str) -> Opt[(i64, i64)] {
+fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
     for si in self.scopes.len - 1..=0 by -1 {
         x, ok := self.scopes[si].vars.get(name)
         if ok {
@@ -553,7 +553,7 @@ lookup :: (self: *Fx, name: str) -> Opt[(i64, i64)] {
     return None
 }
 
-declare :: (self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
+fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
     addr := self.temp(ty)
     if name == "_" {
         return addr
@@ -571,7 +571,7 @@ declare :: (self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
 }
 
 // ---------- blocks / statements ----------
-block :: (self: *Fx, b: *Block) {
+fn block(self: *Fx, b: *Block) {
     self.push_scope()
     self.blocks.push(b)
     for i in 0..b.stmts.len {
@@ -582,7 +582,7 @@ block :: (self: *Fx, b: *Block) {
     self.pop_scope()
 }
 
-block_value :: (self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
+fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
     if !want {
         self.block(b)
         return val_unit()
@@ -635,7 +635,7 @@ block_value :: (self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
 
 // how an expression statement is treated: 0 = `match`, 1 = an expression without effect,
 // 2 = `&&` / `||` (may have effects through its operands), 3 = anything else
-lower_fn_stmt_expr_kind :: (e: *Expr) -> i64 {
+fn lower_fn_stmt_expr_kind(e: *Expr) -> i64 {
     match e.k {
         EKMatch(_, _) => return 0
         EKInt(_) => return 1
@@ -656,7 +656,7 @@ lower_fn_stmt_expr_kind :: (e: *Expr) -> i64 {
 }
 
 // `break` / `continue`
-lower_fn_break_continue :: (fx: *Fx, pos: Pos, is_break: bool) {
+fn lower_fn_break_continue(fx: *Fx, pos: Pos, is_break: bool) {
     if fx.loops.len == 0 {
         if fx.parent != nil {
             fx.err(pos, fmt("`break`/`continue` outside of a loop (the nested function `", fx.f.name, "` cannot leave a loop of the enclosing function: return a value and test it at the call)"))
@@ -675,7 +675,7 @@ lower_fn_break_continue :: (fx: *Fx, pos: Pos, is_break: bool) {
 }
 
 // `break label` / `continue label`
-lower_fn_break_continue_to :: (fx: *Fx, pos: Pos, is_break: bool, label: str) {
+fn lower_fn_break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
     idx := -1
     for i in fx.labels.len - 1..=0 by -1 {
         if fx.labels[i].0 == label {
@@ -706,7 +706,7 @@ lower_fn_break_continue_to :: (fx: *Fx, pos: Pos, is_break: bool, label: str) {
     fx.dead = true
 }
 
-stmt :: (self: *Fx, s: *Stmt) {
+fn stmt(self: *Fx, s: *Stmt) {
     match s.k {
         SKExpr(e) => {
             kind := lower_fn_stmt_expr_kind(&e)
@@ -1049,7 +1049,7 @@ stmt :: (self: *Fx, s: *Stmt) {
     }
 }
 
-do_return :: (self: *Fx, v: Opt[Val]) {
+fn do_return(self: *Fx, v: Opt[Val]) {
     rets := vec[i64]()
     match v {
         Some(rv) => {
@@ -1090,7 +1090,7 @@ do_return :: (self: *Fx, v: Opt[Val]) {
     self.terminate(TermRet(rets))
 }
 
-if_value :: (self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i64]) -> Val {
+fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i64]) -> Val {
     bt := self.new_block()
     be := self.new_block()
     bj := self.new_block()
@@ -1152,7 +1152,7 @@ if_value :: (self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[
     return res
 }
 
-for_stmt :: (self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], incl: bool, step_o: Opt[*Expr], body: *Block, pos: Pos) {
+fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], incl: bool, step_o: Opt[*Expr], body: *Block, pos: Pos) {
     bb := self.new_block()
     bc := self.new_block()
     bx := self.new_block()
@@ -1358,7 +1358,7 @@ for_stmt :: (self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], 
 }
 
 // ---------- conditions ----------
-cond_br :: (self: *Fx, e: *Expr, t: i64, f: i64) {
+fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
     match e.k {
         EKBin(op, a, b) => {
             if op == BinOpLAnd {
@@ -1393,7 +1393,7 @@ cond_br :: (self: *Fx, e: *Expr, t: i64, f: i64) {
 }
 
 // ---------- runtime failure blocks ----------
-loc_str :: (self: *Fx, pos: Pos) -> Val {
+fn loc_str(self: *Fx, pos: Pos) -> Val {
     fname: str = ""
     if pos.file >= 0 && pos.file < self.cx.file_names.len {
         fname = self.cx.file_names[pos.file]
@@ -1402,7 +1402,7 @@ loc_str :: (self: *Fx, pos: Pos) -> Val {
     return self.str_val(s)
 }
 
-str_val :: (self: *Fx, s: str) -> Val {
+fn str_val(self: *Fx, s: str) -> Val {
     g := self.cx.string_global(s)
     t := self.temp(T_STR)
     p := self.ins(OpGAddr, TI64, vec[i64](), g)
@@ -1412,7 +1412,7 @@ str_val :: (self: *Fx, s: str) -> Val {
     return v
 }
 
-store_slice :: (self: *Fx, dst: Val, p: i64, n: i64) {
+fn store_slice(self: *Fx, dst: Val, p: i64, n: i64) {
     leaves := vec[Leaf]()
     self.cx.types.leaves(dst.ty, 0, &leaves)
     self.store_raw(dst.v, p, TI64, leaves.at(0).alias)
@@ -1420,7 +1420,7 @@ store_slice :: (self: *Fx, dst: Val, p: i64, n: i64) {
     self.store_raw(a, n, TI64, leaves.at(1).alias)
 }
 
-slice_parts :: (self: *Fx, s: Val) -> (i64, i64) {
+fn slice_parts(self: *Fx, s: Val) -> (i64, i64) {
     leaves := vec[Leaf]()
     self.cx.types.leaves(s.ty, 0, &leaves)
     p := self.load_raw(s.v, TI64, leaves.at(0).alias)
@@ -1430,7 +1430,7 @@ slice_parts :: (self: *Fx, s: Val) -> (i64, i64) {
 }
 
 // kind: 0 = bounds, 1 = division by zero
-trap_block :: (self: *Fx, kind: i64, pos: Pos) -> i64 {
+fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     known, found := self.traps.get((kind, pos.line))
     if found {
         return known
@@ -1455,7 +1455,7 @@ trap_block :: (self: *Fx, kind: i64, pos: Pos) -> i64 {
     return b
 }
 
-check :: (self: *Fx, cond: i64, kind: i64, pos: Pos) {
+fn check(self: *Fx, cond: i64, kind: i64, pos: Pos) {
     tb := self.trap_block(kind, pos)
     ok := self.new_block()
     d := self.dead

@@ -1,37 +1,37 @@
 // Machine IR for x86-64.
 
-NOREG :: 0xFFFFFFFF
-RAX :: 0
-RCX :: 1
-RDX :: 2
-RSP :: 4
-RSI :: 6
-RDI :: 7
-R8 :: 8
-R9 :: 9
-R10 :: 10
-R11 :: 11
-XMM0 :: 16
-VREG0 :: 32
+const NOREG = 0xFFFFFFFF
+const RAX = 0
+const RCX = 1
+const RDX = 2
+const RSP = 4
+const RSI = 6
+const RDI = 7
+const R8 = 8
+const R9 = 9
+const R10 = 10
+const R11 = 11
+const XMM0 = 16
+const VREG0 = 32
 
 INT_ARGS := [6]i64{RDI, RSI, RDX, RCX, R8, R9}
 INT_RETS := [4]i64{RAX, RDX, RCX, RSI}
-NUM_FLOAT_ARGS :: 8
+const NUM_FLOAT_ARGS = 8
 
 // rbx, rbp, r12-r15
-mir_callee_saved :: (r: i64) -> bool {
+fn mir_callee_saved(r: i64) -> bool {
     return r == 3 || r == 5 || r == 12 || r == 13 || r == 14 || r == 15
 }
 
 CALLER_SAVED_GPR := [9]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11}
 
 // the u128 of the float constant pool
-Bits128 :: struct {
+struct Bits128 {
     lo: u64
     hi: u64
 }
 
-MemKind :: enum {
+enum MemKind {
     MemKindNormal,
     MemKindGlobal,   // disp is relative to global `id`
     MemKindSlot,     // disp is relative to frame slot `id` (base is rsp)
@@ -40,7 +40,7 @@ MemKind :: enum {
     MemKindFConst,   // float constant pool entry `id`
 }
 
-Mem :: struct {
+struct Mem {
     base: i64
     idx: i64
     scale: u8
@@ -49,15 +49,15 @@ Mem :: struct {
     id: i64
 }
 
-mem_new :: () -> Mem {
+fn mem_new() -> Mem {
     return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MemKindNormal, id: 0}
 }
 
-mem_slot :: (id: i64, disp: i32) -> Mem {
+fn mem_slot(id: i64, disp: i32) -> Mem {
     return Mem{base: NOREG, idx: NOREG, scale: 1, disp: disp, kind: MemKindSlot, id: id}
 }
 
-Opnd :: enum {
+enum Opnd {
     OpndNone,
     OpndR(i64),
     OpndI(i64),
@@ -68,7 +68,7 @@ Opnd :: enum {
 }
 
 // Opnd equality (PartialEq in the Rust source)
-eq :: (a: Opnd, b: Opnd) -> bool {
+fn eq(a: Opnd, b: Opnd) -> bool {
     match a {
         OpndNone => {
             match b {
@@ -109,7 +109,7 @@ eq :: (a: Opnd, b: Opnd) -> bool {
     }
 }
 
-MOp :: enum {
+enum MOp {
     MOpMov,
     MOpMovzx, // sz = source size, 32-bit destination
     MOpMovsx, // sz = source size, sz2 = destination size
@@ -175,20 +175,20 @@ MOp :: enum {
     MOpZero, // xor r32, r32 (clobbers flags)
 }
 
-CC_B : u8 : 2
-CC_AE : u8 : 3
-CC_E : u8 : 4
-CC_NE : u8 : 5
-CC_BE : u8 : 6
-CC_A : u8 : 7
-CC_P : u8 : 10
-CC_NP : u8 : 11
-CC_L : u8 : 12
-CC_GE : u8 : 13
-CC_LE : u8 : 14
-CC_G : u8 : 15
+const CC_B: u8 = 2
+const CC_AE: u8 = 3
+const CC_E: u8 = 4
+const CC_NE: u8 = 5
+const CC_BE: u8 = 6
+const CC_A: u8 = 7
+const CC_P: u8 = 10
+const CC_NP: u8 = 11
+const CC_L: u8 = 12
+const CC_GE: u8 = 13
+const CC_LE: u8 = 14
+const CC_G: u8 = 15
 
-MInst :: struct {
+struct MInst {
     op: MOp
     sz: u8
     sz2: u8
@@ -201,17 +201,17 @@ MInst :: struct {
     defs: Vec[i64]
 }
 
-minst_new :: (op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
+fn minst_new(op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
     return MInst{op: op, sz: sz, sz2: 0, cc: 0, a: a, b: b, c: OpndNone, tgt: 0, uses: vec[i64](), defs: vec[i64]()}
 }
 
 // an independent copy (uses and defs are not shared)
-clone :: (i: *MInst) -> MInst {
+fn clone(i: *MInst) -> MInst {
     return MInst{op: i.op, sz: i.sz, sz2: i.sz2, cc: i.cc, a: i.a, b: i.b, c: i.c, tgt: i.tgt, uses: clone(&i.uses), defs: clone(&i.defs)}
 }
 
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
-is_copy :: (self: *MInst) -> (i64, i64, bool) {
+fn is_copy(self: *MInst) -> (i64, i64, bool) {
     if self.op == MOpMov || self.op == MOpMovSd {
         match self.a {
             OpndR(d) => {
@@ -230,14 +230,14 @@ is_copy :: (self: *MInst) -> (i64, i64, bool) {
     return (0, 0, false)
 }
 
-MBlock :: struct {
+struct MBlock {
     insts: Vec[MInst]
     succs: Vec[i64]
     depth: i64
     align: bool
 }
 
-MFunc :: struct {
+struct MFunc {
     name: str
     blocks: Vec[MBlock] // in layout order
     vclass: Vec[u8]    // class of each vreg (index = reg - VREG0): 0 = gpr, 1 = xmm
@@ -248,12 +248,12 @@ MFunc :: struct {
     wide_xmm: bool // some xmm value is a vector: spill slots hold 16 bytes
 }
 
-new_vreg :: (self: *MFunc, class: u8) -> i64 {
+fn new_vreg(self: *MFunc, class: u8) -> i64 {
     self.vclass.push(class)
     return VREG0 + (self.vclass.len - 1)
 }
 
-class :: (self: *MFunc, r: i64) -> u8 {
+fn class(self: *MFunc, r: i64) -> u8 {
     if r < 16 {
         return 0
     } else if r < 32 {
@@ -263,12 +263,12 @@ class :: (self: *MFunc, r: i64) -> u8 {
     }
 }
 
-new_slot :: (self: *MFunc, size: i64, align: i64) -> i64 {
+fn new_slot(self: *MFunc, size: i64, align: i64) -> i64 {
     self.slots.push((size, align))
     return self.slots.len - 1
 }
 
-mir_mem_regs :: (m: Mem, uses: *Vec[i64]) {
+fn mir_mem_regs(m: Mem, uses: *Vec[i64]) {
     if m.base != NOREG {
         uses.push(m.base)
     }
@@ -277,7 +277,7 @@ mir_mem_regs :: (m: Mem, uses: *Vec[i64]) {
     }
 }
 
-mir_opnd_uses :: (o: Opnd, uses: *Vec[i64]) {
+fn mir_opnd_uses(o: Opnd, uses: *Vec[i64]) {
     match o {
         OpndR(r) => uses.push(r)
         OpndM(m) => mir_mem_regs(m, uses)
@@ -286,7 +286,7 @@ mir_opnd_uses :: (o: Opnd, uses: *Vec[i64]) {
 }
 
 // registers defined and used by an instruction (including implicit ones)
-mir_defs_uses :: (i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
+fn mir_defs_uses(i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
     defs.clear()
     uses.clear()
     match i.op {
@@ -394,14 +394,14 @@ mir_defs_uses :: (i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
 // The Rust `map_regs(i, f)` takes a closure; its callers either apply a lookup table or
 // substitute one register, so there is one function for each use.
 
-mir_map_regs_lookup :: (r: i64, table: []i64) -> i64 {
+fn mir_map_regs_lookup(r: i64, table: []i64) -> i64 {
     if r < len(table) {
         return table[r]
     }
     return r
 }
 
-mir_map_regs_mo :: (o: Opnd, table: []i64) -> Opnd {
+fn mir_map_regs_mo(o: Opnd, table: []i64) -> Opnd {
     match o {
         OpndR(r) => return OpndR(mir_map_regs_lookup(r, table))
         OpndM(m) => {
@@ -420,13 +420,13 @@ mir_map_regs_mo :: (o: Opnd, table: []i64) -> Opnd {
 
 // apply a register mapping to all register operands: register r becomes table[r] when
 // r < len(table) and stays unchanged otherwise
-mir_map_regs :: (i: *MInst, table: []i64) {
+fn mir_map_regs(i: *MInst, table: []i64) {
     i.a = mir_map_regs_mo(i.a, table)
     i.b = mir_map_regs_mo(i.b, table)
     i.c = mir_map_regs_mo(i.c, table)
 }
 
-mir_replace_reg_mo :: (o: Opnd, from: i64, to: i64) -> Opnd {
+fn mir_replace_reg_mo(o: Opnd, from: i64, to: i64) -> Opnd {
     match o {
         OpndR(r) => {
             if r == from {
@@ -449,13 +449,13 @@ mir_replace_reg_mo :: (o: Opnd, from: i64, to: i64) -> Opnd {
 }
 
 // map_regs with `|r| if r == from { to } else { r }`
-mir_replace_reg :: (i: *MInst, from: i64, to: i64) {
+fn mir_replace_reg(i: *MInst, from: i64, to: i64) {
     i.a = mir_replace_reg_mo(i.a, from, to)
     i.b = mir_replace_reg_mo(i.b, from, to)
     i.c = mir_replace_reg_mo(i.c, from, to)
 }
 
-mir_count_reg_mo :: (o: Opnd, r: i64) -> i64 {
+fn mir_count_reg_mo(o: Opnd, r: i64) -> i64 {
     match o {
         OpndR(x) => {
             if x == r {
@@ -478,7 +478,7 @@ mir_count_reg_mo :: (o: Opnd, r: i64) -> i64 {
 }
 
 // number of register operand occurrences of r (the positions map_regs visits)
-mir_count_reg :: (i: *MInst, r: i64) -> i64 {
+fn mir_count_reg(i: *MInst, r: i64) -> i64 {
     return mir_count_reg_mo(i.a, r) + mir_count_reg_mo(i.b, r) + mir_count_reg_mo(i.c, r)
 }
 
@@ -487,7 +487,7 @@ MIR_N32 := [16]str{"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi", "r8d"
 MIR_N16 := [16]str{"ax", "cx", "dx", "bx", "sp", "bp", "si", "di", "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w"}
 MIR_N8 := [16]str{"al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil", "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b"}
 
-mir_reg_name :: (r: i64, sz: u8) -> str {
+fn mir_reg_name(r: i64, sz: u8) -> str {
     if r == NOREG {
         return "noreg"
     }
@@ -505,7 +505,7 @@ mir_reg_name :: (r: i64, sz: u8) -> str {
     }
 }
 
-mir_opnd_str :: (o: Opnd, sz: u8) -> str {
+fn mir_opnd_str(o: Opnd, sz: u8) -> str {
     match o {
         OpndNone => return ""
         OpndR(r) => return mir_reg_name(r, sz)
@@ -550,7 +550,7 @@ mir_opnd_str :: (o: Opnd, sz: u8) -> str {
     }
 }
 
-mir_print_mfunc :: (f: *MFunc) -> str {
+fn mir_print_mfunc(f: *MFunc) -> str {
     s := vec[str]()
     s.push(fmt(f.name, ":\n"))
     for bi in 0..f.blocks.len {

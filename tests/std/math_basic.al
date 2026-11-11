@@ -1,14 +1,14 @@
 // scalar helpers of the math library: exact rounding, interpolation, angles, integer helpers
 fails: i64
 
-ok :: (name: str, c: bool) {
+fn ok(name: str, c: bool) {
     if !c {
         fails += 1
         print("FAILED:", name)
     }
 }
 
-main :: () {
+fn main() {
     // rounding of f32 is exact, including halves, negatives, large values and specials
     xs := [14]f32{0.0, 0.5, -0.5, 1.5, -1.5, 2.4999998, -2.5000002, 0.99999994, -0.99999994, 8388607.5, -8388607.5, 16777216.0, 1e30, -7.0}
     fl := [14]f32{0.0, 0.0, -1.0, 1.0, -2.0, 2.0, -3.0, 0.0, -1.0, 8388607.0, -8388608.0, 16777216.0, 1e30, -7.0}

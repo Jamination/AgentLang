@@ -1,5 +1,5 @@
 // v[i] is checked against the length, not the capacity
-main :: () {
+fn main() {
     v := vec[i64]()
     for i in 0..3 {
         v.push(i)

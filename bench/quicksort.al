@@ -1,4 +1,4 @@
-quicksort :: (a: []i64, lo: i64, hi: i64) {
+fn quicksort(a: []i64, lo: i64, hi: i64) {
     p := a[(lo + hi) / 2]
     i := lo
     j := hi
@@ -25,7 +25,7 @@ quicksort :: (a: []i64, lo: i64, hi: i64) {
     }
 }
 
-main :: () -> i64 {
+fn main() -> i64 {
     n := 5000000
     a := alloc[i64](n)
     seed: u64 = 88172645463325252

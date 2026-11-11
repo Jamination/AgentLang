@@ -4,11 +4,11 @@
 // Exit code 77: no usable driver (the .need file should have skipped the test).
 use std.vk
 
-SIZE : u32 : 256
-FORMAT : i32 : VK_FORMAT_R8G8B8A8_UNORM
+const SIZE: u32 = 256
+const FORMAT: i32 = VK_FORMAT_R8G8B8A8_UNORM
 
 // The device and what is needed to allocate from it and submit to it.
-Gpu :: struct {
+struct Gpu {
     instance: *u8
     physical: *u8
     device: *u8
@@ -18,7 +18,7 @@ Gpu :: struct {
 }
 
 // The offscreen colour attachment.
-Target :: struct {
+struct Target {
     image: u64
     memory: u64
     view: u64
@@ -28,7 +28,7 @@ Target :: struct {
 
 // Creates an instance and a device on the first GPU that has a graphics queue. The text result
 // is empty on success and says what is missing otherwise.
-open_gpu :: () -> (Gpu, str) {
+fn open_gpu() -> (Gpu, str) {
     g: Gpu
     app := vk_application_info()
     app.pApplicationName = ptr("vk_triangle")
@@ -78,7 +78,7 @@ open_gpu :: () -> (Gpu, str) {
 }
 
 // Allocates device memory that satisfies `req` and has the property `flags`.
-allocate :: (g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
+fn allocate(g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
     index, ok := vk_find_memory_type(&g.memory, req.memoryTypeBits, flags)
     assert ok, "no suitable memory type"
     info := vk_memory_allocate_info()
@@ -90,7 +90,7 @@ allocate :: (g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
 }
 
 // Creates a buffer backed by host-visible memory; returns (buffer, memory).
-create_buffer :: (g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
+fn create_buffer(g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
     info := vk_buffer_create_info()
     info.size = size
     info.usage = usage
@@ -106,7 +106,7 @@ create_buffer :: (g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
 
 // Creates the colour image, its view, a render pass that clears it and leaves it ready to be
 // copied from, and the framebuffer.
-create_target :: (g: *Gpu) -> Target {
+fn create_target(g: *Gpu) -> Target {
     t: Target
     image_info := vk_image_create_info()
     image_info.imageType = VK_IMAGE_TYPE_2D
@@ -178,7 +178,7 @@ create_target :: (g: *Gpu) -> Target {
 
 // Creates the graphics pipeline: two shader stages, vertices of (vec2 position, vec3 colour),
 // a fixed viewport covering the image, no culling, no blending. Returns (pipeline, layout).
-create_pipeline :: (g: *Gpu, render_pass: u64) -> (u64, u64) {
+fn create_pipeline(g: *Gpu, render_pass: u64) -> (u64, u64) {
     vert, vert_ok := vk_create_shader_module(g.device, embed("data/tri.vert.spv"))
     frag, frag_ok := vk_create_shader_module(g.device, embed("data/tri.frag.spv"))
     assert vert_ok && frag_ok, "shader module creation failed"
@@ -254,7 +254,7 @@ create_pipeline :: (g: *Gpu, render_pass: u64) -> (u64, u64) {
 }
 
 // Largest channel difference between two RGBA pixels starting at byte `at`.
-pixel_diff :: (a: []u8, b: []u8, at: i64) -> i64 {
+fn pixel_diff(a: []u8, b: []u8, at: i64) -> i64 {
     worst := 0
     for c in 0..4 {
         worst = max(worst, abs(i64(a[at + c]) - i64(b[at + c])))
@@ -263,7 +263,7 @@ pixel_diff :: (a: []u8, b: []u8, at: i64) -> i64 {
 }
 
 // Compares the rendered pixels with the reference and prints the report; true if they agree.
-report :: (pixels: []u8, reference: []u8) -> bool {
+fn report(pixels: []u8, reference: []u8) -> bool {
     count := i64(SIZE) * i64(SIZE)
     if reference.len != count * 4 {
         print("reference image has the wrong size:", reference.len)
@@ -294,7 +294,7 @@ report :: (pixels: []u8, reference: []u8) -> bool {
     true
 }
 
-main :: () -> i64 {
+fn main() -> i64 {
     g, problem := open_gpu()
     if problem.len != 0 {
         print("no usable Vulkan driver:", problem)

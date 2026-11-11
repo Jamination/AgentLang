@@ -1,21 +1,21 @@
 // std.input: ActionMap (named / numbered actions bound to keys, mouse and gamepad buttons).
 use std.input
 
-ACT_LEFT :: 0
-ACT_RIGHT :: 1
-ACT_DOWN :: 2
-ACT_UP :: 3
-ACT_JUMP :: 4
-ACT_FIRE :: 5
+const ACT_LEFT = 0
+const ACT_RIGHT = 1
+const ACT_DOWN = 2
+const ACT_UP = 3
+const ACT_JUMP = 4
+const ACT_FIRE = 5
 
-down :: (i: *Input, k: i64) { i.feed(Event{kind: EventKeyDown, key: k}) }
-up :: (i: *Input, k: i64) { i.feed(Event{kind: EventKeyUp, key: k}) }
+fn down(i: *Input, k: i64) { i.feed(Event{kind: EventKeyDown, key: k}) }
+fn up(i: *Input, k: i64) { i.feed(Event{kind: EventKeyUp, key: k}) }
 
-show :: (m: *ActionMap, i: *Input, a: i64) {
+fn show(m: *ActionMap, i: *Input, a: i64) {
     print(m.action_name(a), m.action_down(i, a), m.action_pressed(i, a), m.action_released(i, a))
 }
 
-main :: () {
+fn main() {
     i: Input
     m := action_map()
     // names get ids in registration order, so they can match constants

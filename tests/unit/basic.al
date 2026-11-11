@@ -1,6 +1,6 @@
-add :: (a: i64, b: i64) -> i64 { a + b }
+fn add(a: i64, b: i64) -> i64 { a + b }
 
-clamp :: (x: i64, lo: i64, hi: i64) -> i64 {
+fn clamp(x: i64, lo: i64, hi: i64) -> i64 {
     if x < lo { lo } else if x > hi { hi } else { x }
 }
 
@@ -25,6 +25,6 @@ test "strings" {
     assert find("hello", "ll") == 2
 }
 
-main :: () {
+fn main() {
     print("main is not run by `alc test`")
 }

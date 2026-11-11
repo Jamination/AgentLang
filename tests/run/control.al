@@ -1,4 +1,4 @@
-classify :: (n: i64) -> str {
+fn classify(n: i64) -> str {
     if n < 0 {
         return "neg"
     } else if n == 0 {
@@ -9,7 +9,7 @@ classify :: (n: i64) -> str {
     "big"
 }
 
-collatz :: (n: i64) -> i64 {
+fn collatz(n: i64) -> i64 {
     steps := 0
     while n != 1 {
         if n % 2 == 0 {
@@ -22,7 +22,7 @@ collatz :: (n: i64) -> i64 {
     steps
 }
 
-main :: () {
+fn main() {
     print(classify(-5), classify(0), classify(7), classify(70))
     print(collatz(27))
     s := 0

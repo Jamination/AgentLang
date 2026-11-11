@@ -1,10 +1,10 @@
-const_aggregate.al:13:15: error: value of constant `BAD1` is not a compile-time constant of type [2]i64 (allowed: literals, other constants, function names, and `T{...}` literals, tuples and vector constructors made of them)
-const_aggregate.al:14:14: error: value of constant `BAD2` is not a compile-time constant of type Point
-const_aggregate.al:15:23: error: constant `BAD3` is declared as [3]i64, but its value has type [4]i64
-const_aggregate.al:16:15: error: too many elements in array literal (max 2)
+const_aggregate.al:13:20: error: value of constant `BAD1` is not a compile-time constant of type [2]i64 (allowed: literals, other constants, function names, and `T{...}` literals, tuples and vector constructors made of them)
+const_aggregate.al:14:19: error: value of constant `BAD2` is not a compile-time constant of type Point
+const_aggregate.al:15:28: error: constant `BAD3` is declared as [3]i64, but its value has type [4]i64
+const_aggregate.al:16:20: error: too many elements in array literal (max 2)
 const_aggregate.al:17:1: error: constant `SELF` depends on itself
-const_aggregate.al:19:15: error: cannot embed `tests/fail/data/no_such_file.txt`: No such file or directory (os error 2)
-const_aggregate.al:20:15: error: `embed` takes a string literal path
+const_aggregate.al:19:20: error: cannot embed `tests/fail/data/no_such_file.txt`: No such file or directory (os error 2)
+const_aggregate.al:20:20: error: `embed` takes a string literal path
 const_aggregate.al:21:1: error: cannot infer the type of constant `BAD7`: its value must be a compile-time constant of a known type
 const_aggregate.al:22:1: error: cannot infer the type of constant `BAD8`: its value must be a compile-time constant of a known type
 const_aggregate.al:27:5: error: `TABLE` is a constant: it cannot be assigned to (copy it to a variable, or declare it as `TABLE := value` or `TABLE: T = value` instead of `::` to make it a global variable)

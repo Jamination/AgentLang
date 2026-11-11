@@ -1,5 +1,5 @@
 // labelled loops: `name: for/while/loop`, `break name`, `continue name`
-find :: (grid: [][]i64, want: i64) -> (i64, i64) {
+fn find(grid: [][]i64, want: i64) -> (i64, i64) {
     r := -1
     c := -1
     rows: for i, row in grid {
@@ -14,7 +14,7 @@ find :: (grid: [][]i64, want: i64) -> (i64, i64) {
     return (r, c)
 }
 
-primes :: (n: i64) -> []i64 {
+fn primes(n: i64) -> []i64 {
     out := vec[i64]()
     next: for i in 2..n {
         for d in 2..i {
@@ -30,7 +30,7 @@ primes :: (n: i64) -> []i64 {
     return out.items()
 }
 
-defers :: () {
+fn defers() {
     outer: for i in 0..3 {
         defer { print("  leave outer body", i) }
         j := 0
@@ -55,7 +55,7 @@ defers :: () {
     print("  done")
 }
 
-three :: () -> i64 {
+fn three() -> i64 {
     n := 0
     a: loop {
         b: loop {
@@ -73,9 +73,9 @@ three :: () -> i64 {
     return n
 }
 
-Step :: enum { Go, Skip, Stop }
+enum Step { Go, Skip, Stop }
 
-steps :: (s: []Step) -> i64 {
+fn steps(s: []Step) -> i64 {
     n := 0
     all: for round in 0..3 {
         for x in s {
@@ -90,7 +90,7 @@ steps :: (s: []Step) -> i64 {
     return n
 }
 
-generic[T] :: (rows: [][]T, stop: T) -> i64 {
+fn generic[T](rows: [][]T, stop: T) -> i64 {
     n := 0
     rows: for row in rows {
         for x in row {
@@ -104,7 +104,7 @@ generic[T] :: (rows: [][]T, stop: T) -> i64 {
 }
 
 // a label is only a label directly before a loop; names stay usable as variables
-names :: () -> i64 {
+fn names() -> i64 {
     outer := 5
     outer: for i in 0..3 {
         outer += i
@@ -139,7 +139,7 @@ names :: () -> i64 {
     return outer * 100 + x
 }
 
-main :: () {
+fn main() {
     g := [][]i64{[]i64{1, 2, 3}, []i64{4, 5, 6}, []i64{7, 8, 9}}
     print(find(g, 6), find(g, 10))
     print(primes(40))

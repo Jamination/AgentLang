@@ -1,20 +1,20 @@
 // f32 semantics checked against C: prints the same bytes as tests/c/f32.c built with clang -O2.
 state: u32 = 12345
 
-next :: () -> u32 {
+fn next() -> u32 {
     state = state * 1664525 + 1013904223
     return state
 }
 
-bits :: (x: f32) -> str {
+fn bits(x: f32) -> str {
     return hex(u64(cast[u32](x)))
 }
 
-b01 :: (c: bool) -> i64 {
+fn b01(c: bool) -> i64 {
     if c { 1 } else { 0 }
 }
 
-main :: () {
+fn main() {
     vals := [12]f32{0.0, 1.0, -1.0, 0.1, 3.14159274, 1e-20, 1e20, 16777216.0, 16777217.0, 0.333333343, -2.5, 123456.789}
     for i in 0..12 {
         for j in 0..12 {

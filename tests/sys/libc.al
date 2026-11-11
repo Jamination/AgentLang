@@ -1,12 +1,12 @@
 use std.libc
-cmp_i32 :: (a: *u8, b: *u8) -> i32 {
+fn cmp_i32(a: *u8, b: *u8) -> i32 {
     x := cast[*i32](a)[0]
     y := cast[*i32](b)[0]
     if x < y { return -1 }
     if x > y { return 1 }
     return 0
 }
-main :: () {
+fn main() {
     print(getpid() > 0, strlen(cast[*u8](ptr("hello\0"))))
     a: [6]i32
     for i in 0..6 { a[i] = i32((i * 7 + 3) % 6) }

@@ -1,10 +1,10 @@
 // Private declarations of another file are unknown names here.
 use "priv/lib.al"
 
-priv owner_secret :: () -> i64 { 1 }
-priv OWNER_LIMIT :: 2
+priv fn owner_secret() -> i64 { 1 }
+priv const OWNER_LIMIT = 2
 
-main :: () {
+fn main() {
     c := Ctx{"x"}
     d: Ctx
     m: Mode

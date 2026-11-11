@@ -1,7 +1,7 @@
 // std.audio: the software mixer on known waveforms (no device involved).
 use std.audio
 
-show :: (label: str, out: []f32) {
+fn show(label: str, out: []f32) {
     put(label, ":")
     for x in out {
         put(" ")
@@ -11,7 +11,7 @@ show :: (label: str, out: []f32) {
 }
 
 // a mono ramp 0.1, 0.2, ... (n frames) at the given rate
-ramp :: (rate: i64, n: i64) -> Sound {
+fn ramp(rate: i64, n: i64) -> Sound {
     s := sound_new(rate, 1, n)
     for i in 0..n {
         s.samples[i] = f32(i + 1) / 10.0
@@ -19,7 +19,7 @@ ramp :: (rate: i64, n: i64) -> Sound {
     s
 }
 
-checksum :: (a: []i16) -> u64 {
+fn checksum(a: []i16) -> u64 {
     h: u64 = 1469598103934665603
     for x in a {
         h = (h ^ u64(u16(x))) * 1099511628211
@@ -27,7 +27,7 @@ checksum :: (a: []i16) -> u64 {
     h
 }
 
-main :: () {
+fn main() {
     r := ramp(8000, 5)
     out := alloc[f32](16)
 

@@ -1,7 +1,7 @@
-show :: (x: f64) {
+fn show(x: f64) {
     put(x, " ")
 }
-main :: () {
+fn main() {
     nan := 0.0 / zero()
     inf := 1.0 / zero()
     print(nan == nan, nan != nan, nan < 1.0, nan > 1.0, nan <= nan, nan >= nan, 1.0 < inf, -inf < inf)
@@ -32,4 +32,4 @@ main :: () {
     print(cast[u64](1.0), cast[f64](u64(0x4000000000000000)), cast[i64](-0.0))
     print(max(1.5, 2.5) * min(-1.0, 1.0), 3.0 > 2.0 && 2.0 > 1.0, 1.0 > 2.0 || 2.0 > 1.0)
 }
-noinline zero :: () -> f64 { 0.0 }
+noinline fn zero() -> f64 { 0.0 }

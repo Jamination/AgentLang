@@ -3,9 +3,9 @@ priv priv twice :: (x: i64) -> i64 { x * 2 }
 
 priv 5
 
-priv ok :: () -> i64 { 1 }
+priv fn ok() -> i64 { 1 }
 
-local :: () {
+fn local() {
     priv x := 1
 }
 
@@ -19,4 +19,4 @@ E :: enum {
 
 inline priv late :: () {}
 
-main :: () {}
+fn main() {}

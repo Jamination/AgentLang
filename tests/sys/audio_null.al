@@ -1,7 +1,7 @@
 // std.audio device layer against ALSA's "null" PCM (discards the samples, needs no sound card).
 use std.audio
 
-main :: () {
+fn main() {
     _, missing := audio_open("al-test-no-such-pcm-device", 48000, 2, 50)
     print("unknown device opens:", missing)
     dev, ok := audio_open("null", 48000, 2, 50)

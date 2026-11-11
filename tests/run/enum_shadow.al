@@ -1,14 +1,14 @@
 // Names shared between variants, builtins, and declarations of the program and the library.
 // declarations of the program hide the bare names of the library's variants
-Some :: (x: i64) -> i64 { x * 2 }
-None :: 7
-Ok :: struct { v: i64 }
+fn Some(x: i64) -> i64 { x * 2 }
+const None = 7
+struct Ok { v: i64 }
 // variants with the names of builtin functions and types
-Ty :: enum { i64, f64, str, bool, len, print, hash(i64), vec3 }
-Color :: enum { Red, Green }
-W :: enum { A(i64), B(Color) }
+enum Ty { i64, f64, str, bool, len, print, hash(i64), vec3 }
+enum Color { Red, Green }
+enum W { A(i64), B(Color) }
 
-name :: (t: Ty) -> str {
+fn name(t: Ty) -> str {
     match t {
         i64 => "i64"
         f64 => "f64"
@@ -21,7 +21,7 @@ name :: (t: Ty) -> str {
     }
 }
 
-main :: () {
+fn main() {
     print(Some(4), None, Ok{v: 1})
     o: Opt[i64] = Opt.Some(3)
     print(o, Opt[i64].None, Res[i64].Ok(5), Res[i64].Err("e").error())

@@ -1,7 +1,7 @@
 // std.asset: config files and JSON
 use std.asset
 
-show :: (v: *Json, depth: i64) {
+fn show(v: *Json, depth: i64) {
     for i in 0..depth {
         put("  ")
     }
@@ -21,7 +21,7 @@ show :: (v: *Json, depth: i64) {
     }
 }
 
-main :: () {
+fn main() {
     // ---- config ----
     text := "# game settings\nname = Space Game\nfullscreen = yes\nvolume=0.75\n\n[video]\nwidth = 1280\n  height=720  \ntitle = \"  padded  \"\n; comment\nthis line has no equals sign\nwidth = 1920\n[ input ]\nsensitivity = 2.5e-1  # inline comment\ninvert = off ; another\nempty =\nurl = http://x/?a=b#frag\ncolor = #ff8800\nquoted = \"a # b ; c\" # comment\n"
     c := config_parse(text)

@@ -1,5 +1,5 @@
 // std.rand: hash-based gradient noise
-main :: () {
+fn main() {
     print(noise_hash(0, 0, 0, 0), noise_hash(1, 0, 0, 0), noise_hash(0, 1, 0, 0), noise_hash(0, 0, 1, 0), noise_hash(0, 0, 0, 1), noise_hash(-1, -1, -1, 0))
 
     // zero on the lattice, bounded, deterministic, uses a good part of its range

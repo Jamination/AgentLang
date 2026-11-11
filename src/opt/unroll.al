@@ -1,9 +1,9 @@
 // Full unrolling of loops with a small constant trip count.
 
-MAX_TRIP :: 16
-MAX_UNROLLED_SIZE :: 640
+const MAX_TRIP = 16
+const MAX_UNROLLED_SIZE = 640
 
-UnrollPlan :: struct {
+struct UnrollPlan {
     blocks: Vec[i64],
     header: i64,
     latch: i64,
@@ -15,10 +15,10 @@ UnrollPlan :: struct {
     full: bool,
 }
 
-MAX_PARTIAL_SIZE :: 400
+const MAX_PARTIAL_SIZE = 400
 
 // the closure `back_of` of analyze: the back-edge input of a header phi, or NOV
-unroll_analyze_back_of :: (f: *Func, ph: i64, latch: i64) -> i64 {
+fn unroll_analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
     i := &f.insts[ph]
     n := min(i.pb.len, i.args.len)
     for k in 0..n {
@@ -30,7 +30,7 @@ unroll_analyze_back_of :: (f: *Func, ph: i64, latch: i64) -> i64 {
 }
 
 // the leading phis of block `h`
-unroll_header_phis :: (f: *Func, h: i64) -> Vec[i64] {
+fn unroll_header_phis(f: *Func, h: i64) -> Vec[i64] {
     hphis := vec[i64]()
     for v in f.blocks[h].insts.items() {
         if f.insts[v].op != OpPhi {
@@ -41,7 +41,7 @@ unroll_header_phis :: (f: *Func, h: i64) -> Vec[i64] {
     return hphis
 }
 
-unroll_analyze :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan] {
+fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan] {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -201,20 +201,20 @@ unroll_analyze :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPla
 }
 
 // phi_in[&ph]
-unroll_phi_in_at :: (phi_in: *Map[i64, (i64, i64)], ph: i64) -> (i64, i64) {
+fn unroll_phi_in_at(phi_in: *Map[i64, (i64, i64)], ph: i64) -> (i64, i64) {
     x, found := phi_in.get(ph)
     assert found, "unroll: phi not in map"
     return x
 }
 
 // bmap[&b]
-unroll_bmap_at :: (bmap: *Map[i64, i64], b: i64) -> i64 {
+fn unroll_bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
     nb, found := bmap.get(b)
     assert found, "unroll: block not in map"
     return nb
 }
 
-unroll_apply :: (f: *Func, p: *UnrollPlan) {
+fn unroll_apply(f: *Func, p: *UnrollPlan) {
     n0 := f.insts.len
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
@@ -225,11 +225,11 @@ unroll_apply :: (f: *Func, p: *UnrollPlan) {
     def_block_v := f.block_of()
     def_block := def_block_v.items()
     // is v an original value (below n0) defined inside the loop?
-    loop_def :: (v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> bool {
+    fn loop_def(v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> bool {
         v < n0 && def_block[v] != 0xFFFFFFFF && in_loop[def_block[v]]
     }
     // the copy of v in the iteration that `m` describes
-    look :: (m: *Vec[i64], v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> i64 {
+    fn look(m: *Vec[i64], v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> i64 {
         if loop_def(v, n0, def_block, in_loop) {
             return m[v]
         }
@@ -425,7 +425,7 @@ unroll_apply :: (f: *Func, p: *UnrollPlan) {
     f.apply_repl(&repl)
 }
 
-unroll_run :: (f: *Func) -> bool {
+fn unroll_run(f: *Func) -> bool {
     changed := false
     for it in 0..64 {
         if f.size() > 8000 {

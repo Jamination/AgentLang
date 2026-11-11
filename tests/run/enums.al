@@ -1,18 +1,18 @@
-Color :: enum { Red, Green, Blue }
-Shape :: enum { Circle(f64), Rect(f64, f64), Empty }
-Opt[T] :: enum { Some(T), None }
+enum Color { Red, Green, Blue }
+enum Shape { Circle(f64), Rect(f64, f64), Empty }
+enum Opt[T] { Some(T), None }
 
-divmod :: (a: i64, b: i64) -> (i64, i64) {
+fn divmod(a: i64, b: i64) -> (i64, i64) {
     (a / b, a % b)
 }
-area :: (s: Shape) -> f64 {
+fn area(s: Shape) -> f64 {
     match s {
         Circle(r) => 3.0 * r * r
         Rect(w, h) => w * h
         Empty => 0.0
     }
 }
-find :: (a: []i64, x: i64) -> Opt[i64] {
+fn find(a: []i64, x: i64) -> Opt[i64] {
     for i, v in a {
         if v == x {
             return Some(i)
@@ -20,10 +20,10 @@ find :: (a: []i64, x: i64) -> Opt[i64] {
     }
     None
 }
-name :: (c: Color) -> str {
+fn name(c: Color) -> str {
     match c { Red => "red"; Green => "green"; _ => "other" }
 }
-main :: () {
+fn main() {
     q, r := divmod(17, 5)
     print(q, r, divmod(9, 4))
     t := (1, "two", 3.0)

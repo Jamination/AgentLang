@@ -1,11 +1,11 @@
 // automatic & on receivers: what is still an error
-incr :: (p: *i64) { *p += 1 }
-scale :: (p: *f32) { *p *= 2.0 }
-reset :: (p: *i64) { *p = 0 }
-reset :: (p: *f64) { *p = 0.0 }
-deep :: (p: **i64) {}
+fn incr(p: *i64) { *p += 1 }
+fn scale(p: *f32) { *p *= 2.0 }
+fn reset(p: *i64) { *p = 0 }
+fn reset(p: *f64) { *p = 0.0 }
+fn deep(p: **i64) {}
 
-main :: () {
+fn main() {
     f := 1.5
     f.incr()
     v := vec3(1.0, 2.0, 3.0)

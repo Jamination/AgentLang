@@ -1,10 +1,10 @@
-check :: (x: i64) -> i64 {
+fn check(x: i64) -> i64 {
     if x > 2 {
         panic("too big")
     }
     x
 }
-main :: () -> i64 {
+fn main() -> i64 {
     print(check(1))
     print(check(3))
     return 0
