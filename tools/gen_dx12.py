@@ -85,7 +85,7 @@ VOID = ('void',)
 PVOID = ('ptr', VOID)
 POINTER_NAMES = {n: PVOID for n in 'HANDLE HWND HDC HMONITOR HMODULE HINSTANCE HICON HCURSOR HBRUSH HMENU LPVOID PVOID '
                  'LPCVOID'.split()}
-POINTER_NAMES['WNDPROC'] = ('fn', 'fn(*u8, u32, u64, i64) i64')
+POINTER_NAMES['WNDPROC'] = ('fn', '(*u8, u32, u64, i64) -> i64')
 POINTER_NAMES.update({n: ('ptr', ('prim', 'u8')) for n in ('LPCSTR', 'LPSTR')})
 POINTER_NAMES.update({n: ('ptr', ('prim', 'u16')) for n in ('LPCWSTR', 'LPWSTR')})
 POINTER_NAMES.update({n: ('ptr', ('struct', 'GUID')) for n in ('REFIID', 'REFGUID', 'REFCLSID')})
@@ -480,7 +480,7 @@ def scalar_pack(db, ty, expr):
 
 def signature(db, m, self_ty):
     """(vtable field types, wrapper params, call arguments, wrapper result, struct result, type params)."""
-    vt_types, params, args, tparams = ['*' + self_ty], ['self *' + self_ty], ['self'], []
+    vt_types, params, args, tparams = ['*' + self_ty], ['self: *' + self_ty], ['self'], []
     sret = None
     prev_c = ''
     for name, raw, cdecl in m.params:
@@ -499,16 +499,16 @@ def signature(db, m, self_ty):
             else:
                 vt_types.append('*' + db.al(ty))
                 args.append('&' + name)
-            params.append('%s %s' % (name, db.al(ty)))
+            params.append('%s: %s' % (name, db.al(ty)))
         elif ty == ('ptr', PVOID) and re.match(r'REFIID\b', prev_c):
             t = 'T%s' % (len(tparams) + 1 if tparams else '')
             tparams.append(t)
             vt_types.append('**u8')
-            params.append('%s **%s' % (name, t))
+            params.append('%s: **%s' % (name, t))
             args.append('cast[**u8](%s)' % name)
         else:
             vt_types.append(db.al(ty))
-            params.append('%s %s' % (name, db.al(ty)))
+            params.append('%s: %s' % (name, db.al(ty)))
             args.append(name)
         prev_c = cdecl
     ret = db.resolve(m.ret)
@@ -519,11 +519,11 @@ def emit_constants(db, out):
     out.append('// ---- constants (#define) ' + '-' * 70)
     for name, literal, value, typed in db.defines:
         if typed:
-            out.append('const %s i32 = 0x%08x' % (name, value & 0xffffffff))
+            out.append('%s : i32 : 0x%08x' % (name, value & 0xffffffff))
         elif isinstance(value, float):
-            out.append('const %s = %r' % (name, value))
+            out.append('%s :: %r' % (name, value))
         else:
-            out.append('const %s = %s' % (name, literal or value))
+            out.append('%s :: %s' % (name, literal or value))
     out.append('')
     out.append('// ---- enums: typed constants; struct fields and parameters use the enum\'s integer type ' + '-' * 8)
     for name, (al, items) in db.enums.items():
@@ -532,7 +532,7 @@ def emit_constants(db, out):
             continue
         out.append('// enum %s' % name)
         for item, value, hexa in items:
-            out.append('const %s %s = %s' % (item, al, int_literal(value if al == 'i32' else value & 0xffffffff, hexa)))
+            out.append('%s : %s : %s' % (item, al, int_literal(value if al == 'i32' else value & 0xffffffff, hexa)))
     out.append('')
 
 
@@ -546,7 +546,7 @@ def emit_structs(db, out):
             continue
         size, align = db.layout(('struct', s.name))
         out.append('// %d bytes, alignment %d' % (size, align))
-        out.append('struct %s {' % s.name)
+        out.append('%s :: struct {' % s.name)
         accessors = []
         for f in s.fields:
             if f.ty[0] == 'struct' and db.structs[f.ty[1]].union:
@@ -555,15 +555,15 @@ def emit_structs(db, out):
                 block = 'u%d' % (ualign * 8)
                 count = usize // ualign
                 names = ', '.join('u_' + m.name for m in u.fields)
-                out.append('    %s %s // union: %s' % (ident(f.name), block if count == 1 else '[%d]%s' % (count, block), names))
+                out.append('    %s: %s // union: %s' % (ident(f.name), block if count == 1 else '[%d]%s' % (count, block), names))
                 for m in u.fields:
                     accessors.append('// The `%s` member of the union in %s.' % (m.name, s.name))
-                    accessors.append('inline fn u_%s(s *%s) *%s { cast[*%s](&s.%s) }' % (
+                    accessors.append('inline u_%s :: (s: *%s) -> *%s { cast[*%s](&s.%s) }' % (
                         m.name, s.name, db.al(m.ty), db.al(m.ty), ident(f.name)))
             else:
                 # an enum or a typedef of a number loses its name in AL: keep it as a remark
                 lost = f.ctype in db.enums or f.ctype in db.aliases
-                out.append('    %s %s%s' % (ident(f.name), db.al(f.ty), ' // ' + f.ctype if lost else ''))
+                out.append('    %s: %s%s' % (ident(f.name), db.al(f.ty), ' // ' + f.ctype if lost else ''))
         out.append('}')
         out.extend(accessors)
     out.append('')
@@ -577,7 +577,7 @@ def emit_guids(db, out):
         if name in seen:
             continue
         seen.add(name)
-        out.append('var %s = GUID{0x%08x, 0x%04x, 0x%04x, [8]u8{%s}}' % (
+        out.append('%s := GUID{0x%08x, 0x%04x, 0x%04x, [8]u8{%s}}' % (
             name, v[0], v[1], v[2], ', '.join('0x%02x' % b for b in v[3:])))
     out.append('')
 
@@ -585,22 +585,22 @@ def emit_guids(db, out):
 def emit_interfaces(db, out):
     out.append('// ---- COM interfaces: object = { vt }, vtable = function pointers in header order ' + '-' * 14)
     for name, methods in db.ifaces.items():
-        out.append('struct %s { vt *%sVtbl }' % (name, name))
+        out.append('%s :: struct { vt: *%sVtbl }' % (name, name))
         sigs = [signature(db, m, name) for m in methods]
-        out.append('struct %sVtbl {' % name)
+        out.append('%sVtbl :: struct {' % name)
         for m, (vt_types, _, _, ret, sret, _) in zip(methods, sigs):
-            out.append('    %s fn(%s)%s' % (m.name, ', '.join(vt_types), ' ' + ret if ret else ''))
+            out.append('    %s: (%s) -> %s' % (m.name, ', '.join(vt_types), ret or '()'))
         out.append('}')
         for slot, (m, (_, params, args, ret, sret, tparams)) in enumerate(zip(methods, sigs)):
             out.append('// [%d] %s' % (slot, m.cdecl))
             call = 'self.vt.%s(%s)' % (m.name, ', '.join(args))
             generic = '[%s]' % ', '.join(tparams) if tparams else ''
             if sret:
-                out.append('inline fn %s%s(%s) %s { var r %s; %s; r }' % (
+                out.append('inline %s%s :: (%s) -> %s { r: %s; %s; r }' % (
                     m.name, generic, ', '.join(params), sret, sret, call))
             else:
-                out.append('inline fn %s%s(%s)%s { %s }' % (
-                    m.name, generic, ', '.join(params), ' ' + ret if ret else '', call))
+                out.append('inline %s%s :: (%s)%s { %s }' % (
+                    m.name, generic, ', '.join(params), ' -> ' + ret if ret else '', call))
         out.append('')
 
 
@@ -613,8 +613,8 @@ def emit_functions(db, out):
             continue
         r = db.resolve(ret)
         out.append('// %s' % cdecl)
-        out.append('extern "%s" fn %s(%s)%s' % (dll, name, ', '.join('%s %s' % (ident(n), db.al(t)) for (n, _, _), t in zip(params, tys)),
-                                                 '' if r == VOID else ' ' + db.al(r)))
+        out.append('extern "%s" %s :: (%s)%s' % (dll, name, ', '.join('%s: %s' % (ident(n), db.al(t)) for (n, _, _), t in zip(params, tys)),
+                                                  '' if r == VOID else ' -> ' + db.al(r)))
     out.append('')
 
 
@@ -624,22 +624,22 @@ PROLOGUE = r'''// std.dx12: Direct3D 12 and DXGI for AL. GENERATED by tools/gen_
 // AL has no Windows backend yet: programs using this module type-check (`alc check`) but
 // cannot be built. See docs/std/dx12.md for the mapping rules and a walk-through.
 //
-//   var device *ID3D12Device
+//   device: *ID3D12Device
 //   dx_check(D3D12CreateDevice(nil, D3D_FEATURE_LEVEL_11_0, &IID_ID3D12Device, ppv(&device)), "D3D12CreateDevice")
-//   var queue *ID3D12CommandQueue
+//   queue: *ID3D12CommandQueue
 //   desc := D3D12_COMMAND_QUEUE_DESC{Type: D3D12_COMMAND_LIST_TYPE_DIRECT}
 //   dx_check(device.CreateCommandQueue(&desc, &IID_ID3D12CommandQueue, &queue), "CreateCommandQueue")
 
 // ---- helpers -------------------------------------------------------------------------------
 
 // True if an HRESULT signals success (S_OK, S_FALSE, ...).
-inline fn SUCCEEDED(hr i32) bool { hr >= 0 }
+inline SUCCEEDED :: (hr: i32) -> bool { hr >= 0 }
 
 // True if an HRESULT signals failure.
-inline fn FAILED(hr i32) bool { hr < 0 }
+inline FAILED :: (hr: i32) -> bool { hr < 0 }
 
 // Stops the program with `what` and the HRESULT in hexadecimal if `hr` is a failure code.
-fn dx_check(hr i32, what str) {
+dx_check :: (hr: i32, what: str) {
     if hr < 0 {
         panic(fmt(what, " failed: HRESULT 0x", pad_left(hex(u64(u32(hr))), 8, '0')))
     }
@@ -647,10 +647,10 @@ fn dx_check(hr i32, what str) {
 
 // An interface pointer variable as the `void **` out-argument of an exported function:
 // `CreateDXGIFactory2(0, &IID_IDXGIFactory4, ppv(&factory))`. Methods take `&factory` directly.
-inline fn ppv[T](p **T) **u8 { cast[**u8](p) }
+inline ppv[T] :: (p: **T) -> **u8 { cast[**u8](p) }
 
 // Releases the COM object in `*pp` (if any) and sets the variable to nil.
-fn com_release[T](pp **T) {
+com_release[T] :: (pp: **T) {
     if *pp != nil {
         cast[*IUnknown](*pp).Release()
         *pp = nil
@@ -658,7 +658,7 @@ fn com_release[T](pp **T) {
 }
 
 // NUL-terminated UTF-16 copy of UTF-8 text, for the `*u16` (LPCWSTR) parameters. Allocates from the arena.
-fn utf16(s str) *u16 {
+utf16 :: (s: str) -> *u16 {
     w := alloc[u16](len(s) + 1)
     n := 0
     i := 0
@@ -695,74 +695,74 @@ fn utf16(s str) *u16 {
 }
 
 // The contents of a blob (compiled shader, serialized root signature, error text) as bytes; no copy.
-fn blob_bytes(b *ID3DBlob) str { mkslice[u8](b.GetBufferPointer(), i64(b.GetBufferSize())) }
+blob_bytes :: (b: *ID3DBlob) -> str { mkslice[u8](b.GetBufferPointer(), i64(b.GetBufferSize())) }
 
 // ---- Win32: just enough to open a window, pump messages and wait on a fence ----------------
-const WS_OVERLAPPEDWINDOW u32 = 0x00cf0000
-const WS_VISIBLE u32 = 0x10000000
-const CW_USEDEFAULT i32 = 0x80000000
-const CS_VREDRAW u32 = 0x1
-const CS_HREDRAW u32 = 0x2
-const WM_DESTROY u32 = 0x2
-const WM_SIZE u32 = 0x5
-const WM_PAINT u32 = 0xf
-const WM_CLOSE u32 = 0x10
-const WM_QUIT u32 = 0x12
-const WM_KEYDOWN u32 = 0x100
-const WM_KEYUP u32 = 0x101
-const PM_REMOVE u32 = 0x1
-const SW_SHOW i32 = 5
-const VK_ESCAPE u64 = 0x1b
-const IDC_ARROW u64 = 32512
-const INFINITE u32 = 0xffffffff
-const WAIT_OBJECT_0 u32 = 0
+WS_OVERLAPPEDWINDOW : u32 : 0x00cf0000
+WS_VISIBLE : u32 : 0x10000000
+CW_USEDEFAULT : i32 : 0x80000000
+CS_VREDRAW : u32 : 0x1
+CS_HREDRAW : u32 : 0x2
+WM_DESTROY : u32 : 0x2
+WM_SIZE : u32 : 0x5
+WM_PAINT : u32 : 0xf
+WM_CLOSE : u32 : 0x10
+WM_QUIT : u32 : 0x12
+WM_KEYDOWN : u32 : 0x100
+WM_KEYUP : u32 : 0x101
+PM_REMOVE : u32 : 0x1
+SW_SHOW : i32 : 5
+VK_ESCAPE : u64 : 0x1b
+IDC_ARROW : u64 : 32512
+INFINITE : u32 : 0xffffffff
+WAIT_OBJECT_0 : u32 : 0
 
-// A window procedure is a plain AL function: fn(hwnd *u8, msg u32, wparam u64, lparam i64) i64.
+// A window procedure is a plain AL function: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64.
 
 // Handle of a loaded module; nil names the executable itself.
-extern "kernel32.dll" fn GetModuleHandleW(name *u16) *u8
+extern "kernel32.dll" GetModuleHandleW :: (name: *u16) -> *u8
 // Creates an event object (for ID3D12Fence.SetEventOnCompletion); nil on failure.
-extern "kernel32.dll" fn CreateEventW(attributes *SECURITY_ATTRIBUTES, manual_reset i32, initial_state i32, name *u16) *u8
+extern "kernel32.dll" CreateEventW :: (attributes: *SECURITY_ATTRIBUTES, manual_reset: i32, initial_state: i32, name: *u16) -> *u8
 // Blocks until the object is signalled or the time-out (INFINITE: none) passes.
-extern "kernel32.dll" fn WaitForSingleObject(handle *u8, milliseconds u32) u32
+extern "kernel32.dll" WaitForSingleObject :: (handle: *u8, milliseconds: u32) -> u32
 // Closes a kernel object handle.
-extern "kernel32.dll" fn CloseHandle(handle *u8) i32
+extern "kernel32.dll" CloseHandle :: (handle: *u8) -> i32
 // Suspends the calling thread.
-extern "kernel32.dll" fn Sleep(milliseconds u32)
+extern "kernel32.dll" Sleep :: (milliseconds: u32)
 // Error code of the last failed Win32 call on this thread.
-extern "kernel32.dll" fn GetLastError() u32
+extern "kernel32.dll" GetLastError :: () -> u32
 // Sends a NUL-terminated string to the debugger output.
-extern "kernel32.dll" fn OutputDebugStringA(text *u8)
+extern "kernel32.dll" OutputDebugStringA :: (text: *u8)
 // Reads the high-resolution counter.
-extern "kernel32.dll" fn QueryPerformanceCounter(count *i64) i32
+extern "kernel32.dll" QueryPerformanceCounter :: (count: *i64) -> i32
 // Ticks per second of the high-resolution counter.
-extern "kernel32.dll" fn QueryPerformanceFrequency(frequency *i64) i32
+extern "kernel32.dll" QueryPerformanceFrequency :: (frequency: *i64) -> i32
 // Registers a window class; 0 on failure.
-extern "user32.dll" fn RegisterClassExW(class *WNDCLASSEXW) u16
+extern "user32.dll" RegisterClassExW :: (class: *WNDCLASSEXW) -> u16
 // Creates a window; nil on failure.
-extern "user32.dll" fn CreateWindowExW(ex_style u32, class_name *u16, window_name *u16, style u32, x i32, y i32, width i32, height i32, parent *u8, menu *u8, instance *u8, param *u8) *u8
+extern "user32.dll" CreateWindowExW :: (ex_style: u32, class_name: *u16, window_name: *u16, style: u32, x: i32, y: i32, width: i32, height: i32, parent: *u8, menu: *u8, instance: *u8, param: *u8) -> *u8
 // Default handling for the messages a window procedure does not process.
-extern "user32.dll" fn DefWindowProcW(hwnd *u8, msg u32, wparam u64, lparam i64) i64
+extern "user32.dll" DefWindowProcW :: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64
 // Shows or hides a window (SW_SHOW).
-extern "user32.dll" fn ShowWindow(hwnd *u8, cmd i32) i32
+extern "user32.dll" ShowWindow :: (hwnd: *u8, cmd: i32) -> i32
 // Destroys a window.
-extern "user32.dll" fn DestroyWindow(hwnd *u8) i32
+extern "user32.dll" DestroyWindow :: (hwnd: *u8) -> i32
 // Fetches the next queued message without blocking; 0 if there is none.
-extern "user32.dll" fn PeekMessageW(msg *MSG, hwnd *u8, filter_min u32, filter_max u32, remove u32) i32
+extern "user32.dll" PeekMessageW :: (msg: *MSG, hwnd: *u8, filter_min: u32, filter_max: u32, remove: u32) -> i32
 // Turns key messages into character messages.
-extern "user32.dll" fn TranslateMessage(msg *MSG) i32
+extern "user32.dll" TranslateMessage :: (msg: *MSG) -> i32
 // Hands a message to the window procedure.
-extern "user32.dll" fn DispatchMessageW(msg *MSG) i64
+extern "user32.dll" DispatchMessageW :: (msg: *MSG) -> i64
 // Queues WM_QUIT, which ends the message loop.
-extern "user32.dll" fn PostQuitMessage(exit_code i32)
+extern "user32.dll" PostQuitMessage :: (exit_code: i32)
 // Loads a cursor; system cursors use a nil instance and `cast[*u16](IDC_ARROW)`.
-extern "user32.dll" fn LoadCursorW(instance *u8, name *u16) *u8
+extern "user32.dll" LoadCursorW :: (instance: *u8, name: *u16) -> *u8
 // Grows a client rectangle to the window rectangle of a style.
-extern "user32.dll" fn AdjustWindowRect(rect *RECT, style u32, menu i32) i32
+extern "user32.dll" AdjustWindowRect :: (rect: *RECT, style: u32, menu: i32) -> i32
 // Client-area size of a window.
-extern "user32.dll" fn GetClientRect(hwnd *u8, rect *RECT) i32
+extern "user32.dll" GetClientRect :: (hwnd: *u8, rect: *RECT) -> i32
 // Shows a modal message box.
-extern "user32.dll" fn MessageBoxW(hwnd *u8, text *u16, caption *u16, kind u32) i32
+extern "user32.dll" MessageBoxW :: (hwnd: *u8, text: *u16, caption: *u16, kind: u32) -> i32
 '''
 
 WIN32_CONSTANTS = ['WS_OVERLAPPEDWINDOW', 'WS_VISIBLE', 'CW_USEDEFAULT', 'CS_VREDRAW', 'CS_HREDRAW', 'WM_DESTROY', 'WM_SIZE',
@@ -788,10 +788,10 @@ TEST_HEAD = r'''// GENERATED by tools/gen_dx12.py together with std/dx12.al.
 // compiler), vtable sizes, the helpers, and calls through a COM vtable built in AL.
 use std.dx12
 
-var checked i64
-var wrong i64
+checked: i64
+wrong: i64
 
-fn chk(got i64, want i64, what str) {
+chk :: (got: i64, want: i64, what: str) {
     checked += 1
     if got != want {
         wrong += 1
@@ -800,9 +800,9 @@ fn chk(got i64, want i64, what str) {
 }
 
 // A COM object implemented in AL: the vtable layout of ID3DBlob with a reference count.
-struct FakeBlob { vt *ID3DBlobVtbl, refs u32, data str }
+FakeBlob :: struct { vt: *ID3DBlobVtbl, refs: u32, data: str }
 
-fn fake_query(self *ID3DBlob, riid *GUID, out **u8) i32 {
+fake_query :: (self: *ID3DBlob, riid: *GUID, out: **u8) -> i32 {
     if *riid == IID_ID3DBlob || *riid == IID_IUnknown {
         *out = cast[*u8](self)
         cast[*FakeBlob](self).refs += 1
@@ -812,23 +812,23 @@ fn fake_query(self *ID3DBlob, riid *GUID, out **u8) i32 {
     E_NOINTERFACE
 }
 
-fn fake_addref(self *ID3DBlob) u32 {
+fake_addref :: (self: *ID3DBlob) -> u32 {
     b := cast[*FakeBlob](self)
     b.refs += 1
     b.refs
 }
 
-fn fake_release(self *ID3DBlob) u32 {
+fake_release :: (self: *ID3DBlob) -> u32 {
     b := cast[*FakeBlob](self)
     b.refs -= 1
     b.refs
 }
 
-fn fake_pointer(self *ID3DBlob) *u8 { ptr(cast[*FakeBlob](self).data) }
+fake_pointer :: (self: *ID3DBlob) -> *u8 { ptr(cast[*FakeBlob](self).data) }
 
-fn fake_size(self *ID3DBlob) u64 { u64(len(cast[*FakeBlob](self).data)) }
+fake_size :: (self: *ID3DBlob) -> u64 { u64(len(cast[*FakeBlob](self).data)) }
 
-fn helpers() {
+helpers :: () {
     print("S_OK", SUCCEEDED(S_OK), FAILED(S_OK), "S_FALSE", SUCCEEDED(S_FALSE), "E_FAIL", SUCCEEDED(E_FAIL), FAILED(E_FAIL))
     print("DXGI_ERROR_DEVICE_REMOVED", hex(u64(u32(DXGI_ERROR_DEVICE_REMOVED))), FAILED(DXGI_ERROR_DEVICE_REMOVED))
     dx_check(S_OK, "nothing")
@@ -838,20 +838,20 @@ fn helpers() {
     print("consts", D3D12_COMMAND_LIST_TYPE_DIRECT, D3D_FEATURE_LEVEL_12_0, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING, DXGI_USAGE_RENDER_TARGET_OUTPUT)
 
     // unions: the accessors view the same bytes
-    var barrier D3D12_RESOURCE_BARRIER
+    barrier: D3D12_RESOURCE_BARRIER
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
     t := barrier.u_Transition()
     t.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
     t.StateBefore = D3D12_RESOURCE_STATE_PRESENT
     t.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET
     print("barrier", cast[i64](barrier.u_Aliasing()) - cast[i64](&barrier), barrier.u_Transition().Subresource, barrier.u_Transition().StateAfter)
-    var clear D3D12_CLEAR_VALUE
+    clear: D3D12_CLEAR_VALUE
     color := clear.u_Color()
     color[2] = 0.5
     print("clear", clear.u_Color()[2], clear.u_DepthStencil().Depth)
 
     // calls through a vtable
-    var vt ID3DBlobVtbl
+    vt: ID3DBlobVtbl
     vt.QueryInterface = fake_query
     vt.AddRef = fake_addref
     vt.Release = fake_release
@@ -860,8 +860,8 @@ fn helpers() {
     fake := FakeBlob{&vt, 1, "shader bytes"}
     blob := cast[*ID3DBlob](&fake)
     print("blob", blob.GetBufferSize(), blob_bytes(blob), blob.AddRef(), blob.Release())
-    var unknown *IUnknown
-    var device *ID3D12Device
+    unknown: *IUnknown
+    device: *ID3D12Device
     print("query", blob.QueryInterface(&IID_IUnknown, &unknown) == S_OK, unknown == cast[*IUnknown](blob), fake.refs,
         blob.QueryInterface(&IID_ID3D12Device, &device) == E_NOINTERFACE, device == nil)
     com_release(&unknown)
@@ -876,7 +876,7 @@ def emit_test(db):
     structs = [s for s in db.structs.values() if not s.union and not s.bitfield]
     chunk = 24
     for k in range(0, len(structs), chunk):
-        out.append('fn layouts_%d(b *u8) {' % (k // chunk))
+        out.append('layouts_%d :: (b: *u8) {' % (k // chunk))
         out.append('    a := cast[i64](b)')
         for s in structs[k:k + chunk]:
             size, _ = db.layout(('struct', s.name))
@@ -885,24 +885,24 @@ def emit_test(db):
                 out.append('    chk(cast[i64](&cast[*%s](b).%s) - a, %d, "%s.%s")' % (s.name, ident(f.name), off, s.name, f.name))
         out.append('}')
         out.append('')
-    out.append('fn vtables() {')
+    out.append('vtables :: () {')
     for name, methods in db.ifaces.items():
         out.append('    chk(sizeof[%sVtbl](), %d, "%sVtbl")' % (name, 8 * len(methods), name))
     out.append('}')
     out.append('')
     # every generic wrapper (COM out-parameters) instantiated once; never called, only compiled
-    out.append('fn instantiate(o **IUnknown) {')
+    out.append('instantiate :: (o: **IUnknown) {')
     for name, methods in db.ifaces.items():
         generic = [(m, signature(db, m, name)) for m in methods]
         generic = [(m, s) for m, s in generic if s[5]]
         if not generic:
             continue
         out.append('    {')
-        out.append('        var x *%s' % name)
+        out.append('        x: *%s' % name)
         for m, (_, params, _, _, _, tparams) in generic:
             args = []
             for p in params[1:]:
-                pname, pty = p.split(' ', 1)
+                pname, pty = p.split(': ', 1)
                 if pty.startswith('**T'):
                     args.append('o')
                 elif pty[0] == '*':
@@ -915,7 +915,7 @@ def emit_test(db):
         out.append('    }')
     out.append('}')
     out.append('')
-    out.append('fn main() {')
+    out.append('main :: () {')
     out.append('    helpers()')
     out.append('    scratch := alloc[u8](8192)')
     for k in range(0, len(structs), chunk):
@@ -992,7 +992,7 @@ def emit_c(db):
             c.append('CHECK((long long)%s == %dLL);' % (name, value))
         counts['constants'] += 1
     for name in WIN32_CONSTANTS:
-        m = re.search(r'^const %s (\w+) = (\w+)$' % name, PROLOGUE, re.M)
+        m = re.search(r'^%s : (\w+) : (\w+)$' % name, PROLOGUE, re.M)
         c.append('CHECK((unsigned long long)(%s)%s == %sull);' % ({'u32': 'unsigned', 'i32': 'unsigned', 'u64': 'unsigned long long'}[m.group(1)], name, m.group(2)))
         counts['constants'] += 1
     c.append('CHECK((ULONG_PTR)IDC_ARROW == 32512);')

@@ -1315,11 +1315,11 @@ VK_DRIVER_ID_RESERVED_31 : i32 : 31
 
 // ---- structs ----
 VkBaseOutStructure :: struct {
-    sType: i32   // VkStructureType
+    sType: i32    // VkStructureType
     pNext: *VkBaseOutStructure
 }
 VkBaseInStructure :: struct {
-    sType: i32   // VkStructureType
+    sType: i32    // VkStructureType
     pNext: *VkBaseInStructure
 }
 VkOffset2D :: struct {
@@ -1358,17 +1358,17 @@ VkClearRect :: struct {
     layerCount: u32
 }
 VkComponentMapping :: struct {
-    r: i32   // VkComponentSwizzle
-    g: i32   // VkComponentSwizzle
-    b: i32   // VkComponentSwizzle
-    a: i32   // VkComponentSwizzle
+    r: i32    // VkComponentSwizzle
+    g: i32    // VkComponentSwizzle
+    b: i32    // VkComponentSwizzle
+    a: i32    // VkComponentSwizzle
 }
 VkPhysicalDeviceProperties :: struct {
     apiVersion: u32
     driverVersion: u32
     vendorID: u32
     deviceID: u32
-    deviceType: i32   // VkPhysicalDeviceType
+    deviceType: i32    // VkPhysicalDeviceType
     deviceName: [VK_MAX_PHYSICAL_DEVICE_NAME_SIZE]u8
     pipelineCacheUUID: [VK_UUID_SIZE]u8
     limits: VkPhysicalDeviceLimits
@@ -1385,54 +1385,54 @@ VkLayerProperties :: struct {
     description: [VK_MAX_DESCRIPTION_SIZE]u8
 }
 VkApplicationInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    pApplicationName: *u8   // char*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    pApplicationName: *u8    // char*
     applicationVersion: u32
-    pEngineName: *u8   // char*
+    pEngineName: *u8    // char*
     engineVersion: u32
     apiVersion: u32
 }
 VkAllocationCallbacks :: struct {
-    pUserData: *u8   // void*
-    pfnAllocation: *u8   // PFN_vkAllocationFunction
-    pfnReallocation: *u8   // PFN_vkReallocationFunction
-    pfnFree: *u8   // PFN_vkFreeFunction
-    pfnInternalAllocation: *u8   // PFN_vkInternalAllocationNotification
-    pfnInternalFree: *u8   // PFN_vkInternalFreeNotification
+    pUserData: *u8    // void*
+    pfnAllocation: *u8    // PFN_vkAllocationFunction
+    pfnReallocation: *u8    // PFN_vkReallocationFunction
+    pfnFree: *u8    // PFN_vkFreeFunction
+    pfnInternalAllocation: *u8    // PFN_vkInternalAllocationNotification
+    pfnInternalFree: *u8    // PFN_vkInternalFreeNotification
 }
 VkDeviceQueueCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDeviceQueueCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDeviceQueueCreateFlags
     queueFamilyIndex: u32
     queueCount: u32
     pQueuePriorities: *f32
 }
 VkDeviceCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDeviceCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDeviceCreateFlags
     queueCreateInfoCount: u32
     pQueueCreateInfos: *VkDeviceQueueCreateInfo
     enabledLayerCount: u32
-    ppEnabledLayerNames: **u8   // char**
+    ppEnabledLayerNames: **u8    // char**
     enabledExtensionCount: u32
-    ppEnabledExtensionNames: **u8   // char**
+    ppEnabledExtensionNames: **u8    // char**
     pEnabledFeatures: *VkPhysicalDeviceFeatures
 }
 VkInstanceCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkInstanceCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkInstanceCreateFlags
     pApplicationInfo: *VkApplicationInfo
     enabledLayerCount: u32
-    ppEnabledLayerNames: **u8   // char**
+    ppEnabledLayerNames: **u8    // char**
     enabledExtensionCount: u32
-    ppEnabledExtensionNames: **u8   // char**
+    ppEnabledExtensionNames: **u8    // char**
 }
 VkQueueFamilyProperties :: struct {
-    queueFlags: u32   // VkQueueFlags
+    queueFlags: u32    // VkQueueFlags
     queueCount: u32
     timestampValidBits: u32
     minImageTransferGranularity: VkExtent3D
@@ -1444,228 +1444,228 @@ VkPhysicalDeviceMemoryProperties :: struct {
     memoryHeaps: [VK_MAX_MEMORY_HEAPS]VkMemoryHeap
 }
 VkMemoryAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    allocationSize: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    allocationSize: u64    // VkDeviceSize
     memoryTypeIndex: u32
 }
 VkMemoryRequirements :: struct {
-    size: u64   // VkDeviceSize
-    alignment: u64   // VkDeviceSize
+    size: u64    // VkDeviceSize
+    alignment: u64    // VkDeviceSize
     memoryTypeBits: u32
 }
 VkSparseImageFormatProperties :: struct {
-    aspectMask: u32   // VkImageAspectFlags
+    aspectMask: u32    // VkImageAspectFlags
     imageGranularity: VkExtent3D
-    flags: u32   // VkSparseImageFormatFlags
+    flags: u32    // VkSparseImageFormatFlags
 }
 VkSparseImageMemoryRequirements :: struct {
     formatProperties: VkSparseImageFormatProperties
     imageMipTailFirstLod: u32
-    imageMipTailSize: u64   // VkDeviceSize
-    imageMipTailOffset: u64   // VkDeviceSize
-    imageMipTailStride: u64   // VkDeviceSize
+    imageMipTailSize: u64    // VkDeviceSize
+    imageMipTailOffset: u64    // VkDeviceSize
+    imageMipTailStride: u64    // VkDeviceSize
 }
 VkMemoryType :: struct {
-    propertyFlags: u32   // VkMemoryPropertyFlags
+    propertyFlags: u32    // VkMemoryPropertyFlags
     heapIndex: u32
 }
 VkMemoryHeap :: struct {
-    size: u64   // VkDeviceSize
-    flags: u32   // VkMemoryHeapFlags
+    size: u64    // VkDeviceSize
+    flags: u32    // VkMemoryHeapFlags
 }
 VkMappedMemoryRange :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    memory: u64   // VkDeviceMemory
-    offset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    memory: u64    // VkDeviceMemory
+    offset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
 }
 VkFormatProperties :: struct {
-    linearTilingFeatures: u32   // VkFormatFeatureFlags
-    optimalTilingFeatures: u32   // VkFormatFeatureFlags
-    bufferFeatures: u32   // VkFormatFeatureFlags
+    linearTilingFeatures: u32    // VkFormatFeatureFlags
+    optimalTilingFeatures: u32    // VkFormatFeatureFlags
+    bufferFeatures: u32    // VkFormatFeatureFlags
 }
 VkImageFormatProperties :: struct {
     maxExtent: VkExtent3D
     maxMipLevels: u32
     maxArrayLayers: u32
-    sampleCounts: u32   // VkSampleCountFlags
-    maxResourceSize: u64   // VkDeviceSize
+    sampleCounts: u32    // VkSampleCountFlags
+    maxResourceSize: u64    // VkDeviceSize
 }
 VkDescriptorBufferInfo :: struct {
-    buffer: u64   // VkBuffer
-    offset: u64   // VkDeviceSize
-    range: u64   // VkDeviceSize
+    buffer: u64    // VkBuffer
+    offset: u64    // VkDeviceSize
+    range: u64    // VkDeviceSize
 }
 VkDescriptorImageInfo :: struct {
-    sampler: u64   // VkSampler
-    imageView: u64   // VkImageView
-    imageLayout: i32   // VkImageLayout
+    sampler: u64    // VkSampler
+    imageView: u64    // VkImageView
+    imageLayout: i32    // VkImageLayout
 }
 VkWriteDescriptorSet :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    dstSet: u64   // VkDescriptorSet
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    dstSet: u64    // VkDescriptorSet
     dstBinding: u32
     dstArrayElement: u32
     descriptorCount: u32
-    descriptorType: i32   // VkDescriptorType
+    descriptorType: i32    // VkDescriptorType
     pImageInfo: *VkDescriptorImageInfo
     pBufferInfo: *VkDescriptorBufferInfo
-    pTexelBufferView: *u64   // VkBufferView*
+    pTexelBufferView: *u64    // VkBufferView*
 }
 VkCopyDescriptorSet :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcSet: u64   // VkDescriptorSet
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcSet: u64    // VkDescriptorSet
     srcBinding: u32
     srcArrayElement: u32
-    dstSet: u64   // VkDescriptorSet
+    dstSet: u64    // VkDescriptorSet
     dstBinding: u32
     dstArrayElement: u32
     descriptorCount: u32
 }
 VkBufferCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkBufferCreateFlags
-    size: u64   // VkDeviceSize
-    usage: u32   // VkBufferUsageFlags
-    sharingMode: i32   // VkSharingMode
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkBufferCreateFlags
+    size: u64    // VkDeviceSize
+    usage: u32    // VkBufferUsageFlags
+    sharingMode: i32    // VkSharingMode
     queueFamilyIndexCount: u32
     pQueueFamilyIndices: *u32
 }
 VkBufferViewCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkBufferViewCreateFlags
-    buffer: u64   // VkBuffer
-    format: i32   // VkFormat
-    offset: u64   // VkDeviceSize
-    range: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkBufferViewCreateFlags
+    buffer: u64    // VkBuffer
+    format: i32    // VkFormat
+    offset: u64    // VkDeviceSize
+    range: u64    // VkDeviceSize
 }
 VkImageSubresource :: struct {
-    aspectMask: u32   // VkImageAspectFlags
+    aspectMask: u32    // VkImageAspectFlags
     mipLevel: u32
     arrayLayer: u32
 }
 VkImageSubresourceLayers :: struct {
-    aspectMask: u32   // VkImageAspectFlags
+    aspectMask: u32    // VkImageAspectFlags
     mipLevel: u32
     baseArrayLayer: u32
     layerCount: u32
 }
 VkImageSubresourceRange :: struct {
-    aspectMask: u32   // VkImageAspectFlags
+    aspectMask: u32    // VkImageAspectFlags
     baseMipLevel: u32
     levelCount: u32
     baseArrayLayer: u32
     layerCount: u32
 }
 VkMemoryBarrier :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcAccessMask: u32   // VkAccessFlags
-    dstAccessMask: u32   // VkAccessFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcAccessMask: u32    // VkAccessFlags
+    dstAccessMask: u32    // VkAccessFlags
 }
 VkBufferMemoryBarrier :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcAccessMask: u32   // VkAccessFlags
-    dstAccessMask: u32   // VkAccessFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcAccessMask: u32    // VkAccessFlags
+    dstAccessMask: u32    // VkAccessFlags
     srcQueueFamilyIndex: u32
     dstQueueFamilyIndex: u32
-    buffer: u64   // VkBuffer
-    offset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
+    buffer: u64    // VkBuffer
+    offset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
 }
 VkImageMemoryBarrier :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcAccessMask: u32   // VkAccessFlags
-    dstAccessMask: u32   // VkAccessFlags
-    oldLayout: i32   // VkImageLayout
-    newLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcAccessMask: u32    // VkAccessFlags
+    dstAccessMask: u32    // VkAccessFlags
+    oldLayout: i32    // VkImageLayout
+    newLayout: i32    // VkImageLayout
     srcQueueFamilyIndex: u32
     dstQueueFamilyIndex: u32
-    image: u64   // VkImage
+    image: u64    // VkImage
     subresourceRange: VkImageSubresourceRange
 }
 VkImageCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkImageCreateFlags
-    imageType: i32   // VkImageType
-    format: i32   // VkFormat
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkImageCreateFlags
+    imageType: i32    // VkImageType
+    format: i32    // VkFormat
     extent: VkExtent3D
     mipLevels: u32
     arrayLayers: u32
-    samples: u32   // VkSampleCountFlagBits
-    tiling: i32   // VkImageTiling
-    usage: u32   // VkImageUsageFlags
-    sharingMode: i32   // VkSharingMode
+    samples: u32    // VkSampleCountFlagBits
+    tiling: i32    // VkImageTiling
+    usage: u32    // VkImageUsageFlags
+    sharingMode: i32    // VkSharingMode
     queueFamilyIndexCount: u32
     pQueueFamilyIndices: *u32
-    initialLayout: i32   // VkImageLayout
+    initialLayout: i32    // VkImageLayout
 }
 VkSubresourceLayout :: struct {
-    offset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
-    rowPitch: u64   // VkDeviceSize
-    arrayPitch: u64   // VkDeviceSize
-    depthPitch: u64   // VkDeviceSize
+    offset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
+    rowPitch: u64    // VkDeviceSize
+    arrayPitch: u64    // VkDeviceSize
+    depthPitch: u64    // VkDeviceSize
 }
 VkImageViewCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkImageViewCreateFlags
-    image: u64   // VkImage
-    viewType: i32   // VkImageViewType
-    format: i32   // VkFormat
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkImageViewCreateFlags
+    image: u64    // VkImage
+    viewType: i32    // VkImageViewType
+    format: i32    // VkFormat
     components: VkComponentMapping
     subresourceRange: VkImageSubresourceRange
 }
 VkBufferCopy :: struct {
-    srcOffset: u64   // VkDeviceSize
-    dstOffset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
+    srcOffset: u64    // VkDeviceSize
+    dstOffset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
 }
 VkSparseMemoryBind :: struct {
-    resourceOffset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
-    memory: u64   // VkDeviceMemory
-    memoryOffset: u64   // VkDeviceSize
-    flags: u32   // VkSparseMemoryBindFlags
+    resourceOffset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
+    memory: u64    // VkDeviceMemory
+    memoryOffset: u64    // VkDeviceSize
+    flags: u32    // VkSparseMemoryBindFlags
 }
 VkSparseImageMemoryBind :: struct {
     subresource: VkImageSubresource
     offset: VkOffset3D
     extent: VkExtent3D
-    memory: u64   // VkDeviceMemory
-    memoryOffset: u64   // VkDeviceSize
-    flags: u32   // VkSparseMemoryBindFlags
+    memory: u64    // VkDeviceMemory
+    memoryOffset: u64    // VkDeviceSize
+    flags: u32    // VkSparseMemoryBindFlags
 }
 VkSparseBufferMemoryBindInfo :: struct {
-    buffer: u64   // VkBuffer
+    buffer: u64    // VkBuffer
     bindCount: u32
     pBinds: *VkSparseMemoryBind
 }
 VkSparseImageOpaqueMemoryBindInfo :: struct {
-    image: u64   // VkImage
+    image: u64    // VkImage
     bindCount: u32
     pBinds: *VkSparseMemoryBind
 }
 VkSparseImageMemoryBindInfo :: struct {
-    image: u64   // VkImage
+    image: u64    // VkImage
     bindCount: u32
     pBinds: *VkSparseImageMemoryBind
 }
 VkBindSparseInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     waitSemaphoreCount: u32
-    pWaitSemaphores: *u64   // VkSemaphore*
+    pWaitSemaphores: *u64    // VkSemaphore*
     bufferBindCount: u32
     pBufferBinds: *VkSparseBufferMemoryBindInfo
     imageOpaqueBindCount: u32
@@ -1673,7 +1673,7 @@ VkBindSparseInfo :: struct {
     imageBindCount: u32
     pImageBinds: *VkSparseImageMemoryBindInfo
     signalSemaphoreCount: u32
-    pSignalSemaphores: *u64   // VkSemaphore*
+    pSignalSemaphores: *u64    // VkSemaphore*
 }
 VkImageCopy :: struct {
     srcSubresource: VkImageSubresourceLayers
@@ -1689,7 +1689,7 @@ VkImageBlit :: struct {
     dstOffsets: [2]VkOffset3D
 }
 VkBufferImageCopy :: struct {
-    bufferOffset: u64   // VkDeviceSize
+    bufferOffset: u64    // VkDeviceSize
     bufferRowLength: u32
     bufferImageHeight: u32
     imageSubresource: VkImageSubresourceLayers
@@ -1704,44 +1704,44 @@ VkImageResolve :: struct {
     extent: VkExtent3D
 }
 VkShaderModuleCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkShaderModuleCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkShaderModuleCreateFlags
     codeSize: u64
     pCode: *u32
 }
 VkDescriptorSetLayoutBinding :: struct {
     binding: u32
-    descriptorType: i32   // VkDescriptorType
+    descriptorType: i32    // VkDescriptorType
     descriptorCount: u32
-    stageFlags: u32   // VkShaderStageFlags
-    pImmutableSamplers: *u64   // VkSampler*
+    stageFlags: u32    // VkShaderStageFlags
+    pImmutableSamplers: *u64    // VkSampler*
 }
 VkDescriptorSetLayoutCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDescriptorSetLayoutCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDescriptorSetLayoutCreateFlags
     bindingCount: u32
     pBindings: *VkDescriptorSetLayoutBinding
 }
 VkDescriptorPoolSize :: struct {
-    type: i32   // VkDescriptorType
+    type: i32    // VkDescriptorType
     descriptorCount: u32
 }
 VkDescriptorPoolCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDescriptorPoolCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDescriptorPoolCreateFlags
     maxSets: u32
     poolSizeCount: u32
     pPoolSizes: *VkDescriptorPoolSize
 }
 VkDescriptorSetAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    descriptorPool: u64   // VkDescriptorPool
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    descriptorPool: u64    // VkDescriptorPool
     descriptorSetCount: u32
-    pSetLayouts: *u64   // VkDescriptorSetLayout*
+    pSetLayouts: *u64    // VkDescriptorSetLayout*
 }
 VkSpecializationMapEntry :: struct {
     constantID: u32
@@ -1752,148 +1752,148 @@ VkSpecializationInfo :: struct {
     mapEntryCount: u32
     pMapEntries: *VkSpecializationMapEntry
     dataSize: u64
-    pData: *u8   // void*
+    pData: *u8    // void*
 }
 VkPipelineShaderStageCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineShaderStageCreateFlags
-    stage: u32   // VkShaderStageFlagBits
-    module: u64   // VkShaderModule
-    pName: *u8   // char*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineShaderStageCreateFlags
+    stage: u32    // VkShaderStageFlagBits
+    module: u64    // VkShaderModule
+    pName: *u8    // char*
     pSpecializationInfo: *VkSpecializationInfo
 }
 VkComputePipelineCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineCreateFlags
     stage: VkPipelineShaderStageCreateInfo
-    layout: u64   // VkPipelineLayout
-    basePipelineHandle: u64   // VkPipeline
+    layout: u64    // VkPipelineLayout
+    basePipelineHandle: u64    // VkPipeline
     basePipelineIndex: i32
 }
 VkVertexInputBindingDescription :: struct {
     binding: u32
     stride: u32
-    inputRate: i32   // VkVertexInputRate
+    inputRate: i32    // VkVertexInputRate
 }
 VkVertexInputAttributeDescription :: struct {
     location: u32
     binding: u32
-    format: i32   // VkFormat
+    format: i32    // VkFormat
     offset: u32
 }
 VkPipelineVertexInputStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineVertexInputStateCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineVertexInputStateCreateFlags
     vertexBindingDescriptionCount: u32
     pVertexBindingDescriptions: *VkVertexInputBindingDescription
     vertexAttributeDescriptionCount: u32
     pVertexAttributeDescriptions: *VkVertexInputAttributeDescription
 }
 VkPipelineInputAssemblyStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineInputAssemblyStateCreateFlags
-    topology: i32   // VkPrimitiveTopology
-    primitiveRestartEnable: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineInputAssemblyStateCreateFlags
+    topology: i32    // VkPrimitiveTopology
+    primitiveRestartEnable: u32    // VkBool32
 }
 VkPipelineTessellationStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineTessellationStateCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineTessellationStateCreateFlags
     patchControlPoints: u32
 }
 VkPipelineViewportStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineViewportStateCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineViewportStateCreateFlags
     viewportCount: u32
     pViewports: *VkViewport
     scissorCount: u32
     pScissors: *VkRect2D
 }
 VkPipelineRasterizationStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineRasterizationStateCreateFlags
-    depthClampEnable: u32   // VkBool32
-    rasterizerDiscardEnable: u32   // VkBool32
-    polygonMode: i32   // VkPolygonMode
-    cullMode: u32   // VkCullModeFlags
-    frontFace: i32   // VkFrontFace
-    depthBiasEnable: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineRasterizationStateCreateFlags
+    depthClampEnable: u32    // VkBool32
+    rasterizerDiscardEnable: u32    // VkBool32
+    polygonMode: i32    // VkPolygonMode
+    cullMode: u32    // VkCullModeFlags
+    frontFace: i32    // VkFrontFace
+    depthBiasEnable: u32    // VkBool32
     depthBiasConstantFactor: f32
     depthBiasClamp: f32
     depthBiasSlopeFactor: f32
     lineWidth: f32
 }
 VkPipelineMultisampleStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineMultisampleStateCreateFlags
-    rasterizationSamples: u32   // VkSampleCountFlagBits
-    sampleShadingEnable: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineMultisampleStateCreateFlags
+    rasterizationSamples: u32    // VkSampleCountFlagBits
+    sampleShadingEnable: u32    // VkBool32
     minSampleShading: f32
-    pSampleMask: *u32   // VkSampleMask*
-    alphaToCoverageEnable: u32   // VkBool32
-    alphaToOneEnable: u32   // VkBool32
+    pSampleMask: *u32    // VkSampleMask*
+    alphaToCoverageEnable: u32    // VkBool32
+    alphaToOneEnable: u32    // VkBool32
 }
 VkPipelineColorBlendAttachmentState :: struct {
-    blendEnable: u32   // VkBool32
-    srcColorBlendFactor: i32   // VkBlendFactor
-    dstColorBlendFactor: i32   // VkBlendFactor
-    colorBlendOp: i32   // VkBlendOp
-    srcAlphaBlendFactor: i32   // VkBlendFactor
-    dstAlphaBlendFactor: i32   // VkBlendFactor
-    alphaBlendOp: i32   // VkBlendOp
-    colorWriteMask: u32   // VkColorComponentFlags
+    blendEnable: u32    // VkBool32
+    srcColorBlendFactor: i32    // VkBlendFactor
+    dstColorBlendFactor: i32    // VkBlendFactor
+    colorBlendOp: i32    // VkBlendOp
+    srcAlphaBlendFactor: i32    // VkBlendFactor
+    dstAlphaBlendFactor: i32    // VkBlendFactor
+    alphaBlendOp: i32    // VkBlendOp
+    colorWriteMask: u32    // VkColorComponentFlags
 }
 VkPipelineColorBlendStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineColorBlendStateCreateFlags
-    logicOpEnable: u32   // VkBool32
-    logicOp: i32   // VkLogicOp
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineColorBlendStateCreateFlags
+    logicOpEnable: u32    // VkBool32
+    logicOp: i32    // VkLogicOp
     attachmentCount: u32
     pAttachments: *VkPipelineColorBlendAttachmentState
     blendConstants: [4]f32
 }
 VkPipelineDynamicStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineDynamicStateCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineDynamicStateCreateFlags
     dynamicStateCount: u32
-    pDynamicStates: *i32   // VkDynamicState*
+    pDynamicStates: *i32    // VkDynamicState*
 }
 VkStencilOpState :: struct {
-    failOp: i32   // VkStencilOp
-    passOp: i32   // VkStencilOp
-    depthFailOp: i32   // VkStencilOp
-    compareOp: i32   // VkCompareOp
+    failOp: i32    // VkStencilOp
+    passOp: i32    // VkStencilOp
+    depthFailOp: i32    // VkStencilOp
+    compareOp: i32    // VkCompareOp
     compareMask: u32
     writeMask: u32
     reference: u32
 }
 VkPipelineDepthStencilStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineDepthStencilStateCreateFlags
-    depthTestEnable: u32   // VkBool32
-    depthWriteEnable: u32   // VkBool32
-    depthCompareOp: i32   // VkCompareOp
-    depthBoundsTestEnable: u32   // VkBool32
-    stencilTestEnable: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineDepthStencilStateCreateFlags
+    depthTestEnable: u32    // VkBool32
+    depthWriteEnable: u32    // VkBool32
+    depthCompareOp: i32    // VkCompareOp
+    depthBoundsTestEnable: u32    // VkBool32
+    stencilTestEnable: u32    // VkBool32
     front: VkStencilOpState
     back: VkStencilOpState
     minDepthBounds: f32
     maxDepthBounds: f32
 }
 VkGraphicsPipelineCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineCreateFlags
     stageCount: u32
     pStages: *VkPipelineShaderStageCreateInfo
     pVertexInputState: *VkPipelineVertexInputStateCreateInfo
@@ -1905,94 +1905,94 @@ VkGraphicsPipelineCreateInfo :: struct {
     pDepthStencilState: *VkPipelineDepthStencilStateCreateInfo
     pColorBlendState: *VkPipelineColorBlendStateCreateInfo
     pDynamicState: *VkPipelineDynamicStateCreateInfo
-    layout: u64   // VkPipelineLayout
-    renderPass: u64   // VkRenderPass
+    layout: u64    // VkPipelineLayout
+    renderPass: u64    // VkRenderPass
     subpass: u32
-    basePipelineHandle: u64   // VkPipeline
+    basePipelineHandle: u64    // VkPipeline
     basePipelineIndex: i32
 }
 VkPipelineCacheCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineCacheCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineCacheCreateFlags
     initialDataSize: u64
-    pInitialData: *u8   // void*
+    pInitialData: *u8    // void*
 }
 VkPipelineCacheHeaderVersionOne :: struct {
     headerSize: u32
-    headerVersion: i32   // VkPipelineCacheHeaderVersion
+    headerVersion: i32    // VkPipelineCacheHeaderVersion
     vendorID: u32
     deviceID: u32
     pipelineCacheUUID: [VK_UUID_SIZE]u8
 }
 VkPushConstantRange :: struct {
-    stageFlags: u32   // VkShaderStageFlags
+    stageFlags: u32    // VkShaderStageFlags
     offset: u32
     size: u32
 }
 VkPipelineLayoutCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPipelineLayoutCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPipelineLayoutCreateFlags
     setLayoutCount: u32
-    pSetLayouts: *u64   // VkDescriptorSetLayout*
+    pSetLayouts: *u64    // VkDescriptorSetLayout*
     pushConstantRangeCount: u32
     pPushConstantRanges: *VkPushConstantRange
 }
 VkSamplerCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkSamplerCreateFlags
-    magFilter: i32   // VkFilter
-    minFilter: i32   // VkFilter
-    mipmapMode: i32   // VkSamplerMipmapMode
-    addressModeU: i32   // VkSamplerAddressMode
-    addressModeV: i32   // VkSamplerAddressMode
-    addressModeW: i32   // VkSamplerAddressMode
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkSamplerCreateFlags
+    magFilter: i32    // VkFilter
+    minFilter: i32    // VkFilter
+    mipmapMode: i32    // VkSamplerMipmapMode
+    addressModeU: i32    // VkSamplerAddressMode
+    addressModeV: i32    // VkSamplerAddressMode
+    addressModeW: i32    // VkSamplerAddressMode
     mipLodBias: f32
-    anisotropyEnable: u32   // VkBool32
+    anisotropyEnable: u32    // VkBool32
     maxAnisotropy: f32
-    compareEnable: u32   // VkBool32
-    compareOp: i32   // VkCompareOp
+    compareEnable: u32    // VkBool32
+    compareOp: i32    // VkCompareOp
     minLod: f32
     maxLod: f32
-    borderColor: i32   // VkBorderColor
-    unnormalizedCoordinates: u32   // VkBool32
+    borderColor: i32    // VkBorderColor
+    unnormalizedCoordinates: u32    // VkBool32
 }
 VkCommandPoolCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkCommandPoolCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkCommandPoolCreateFlags
     queueFamilyIndex: u32
 }
 VkCommandBufferAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    commandPool: u64   // VkCommandPool
-    level: i32   // VkCommandBufferLevel
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    commandPool: u64    // VkCommandPool
+    level: i32    // VkCommandBufferLevel
     commandBufferCount: u32
 }
 VkCommandBufferInheritanceInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    renderPass: u64   // VkRenderPass
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    renderPass: u64    // VkRenderPass
     subpass: u32
-    framebuffer: u64   // VkFramebuffer
-    occlusionQueryEnable: u32   // VkBool32
-    queryFlags: u32   // VkQueryControlFlags
-    pipelineStatistics: u32   // VkQueryPipelineStatisticFlags
+    framebuffer: u64    // VkFramebuffer
+    occlusionQueryEnable: u32    // VkBool32
+    queryFlags: u32    // VkQueryControlFlags
+    pipelineStatistics: u32    // VkQueryPipelineStatisticFlags
 }
 VkCommandBufferBeginInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkCommandBufferUsageFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkCommandBufferUsageFlags
     pInheritanceInfo: *VkCommandBufferInheritanceInfo
 }
 VkRenderPassBeginInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    renderPass: u64   // VkRenderPass
-    framebuffer: u64   // VkFramebuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    renderPass: u64    // VkRenderPass
+    framebuffer: u64    // VkFramebuffer
     renderArea: VkRect2D
     clearValueCount: u32
     pClearValues: *VkClearValue
@@ -2006,28 +2006,28 @@ VkClearDepthStencilValue :: struct {
 // union VkClearValue { VkClearColorValue color; VkClearDepthStencilValue depthStencil }
 VkClearValue :: struct { data: [4]u32 }
 VkClearAttachment :: struct {
-    aspectMask: u32   // VkImageAspectFlags
+    aspectMask: u32    // VkImageAspectFlags
     colorAttachment: u32
     clearValue: VkClearValue
 }
 VkAttachmentDescription :: struct {
-    flags: u32   // VkAttachmentDescriptionFlags
-    format: i32   // VkFormat
-    samples: u32   // VkSampleCountFlagBits
-    loadOp: i32   // VkAttachmentLoadOp
-    storeOp: i32   // VkAttachmentStoreOp
-    stencilLoadOp: i32   // VkAttachmentLoadOp
-    stencilStoreOp: i32   // VkAttachmentStoreOp
-    initialLayout: i32   // VkImageLayout
-    finalLayout: i32   // VkImageLayout
+    flags: u32    // VkAttachmentDescriptionFlags
+    format: i32    // VkFormat
+    samples: u32    // VkSampleCountFlagBits
+    loadOp: i32    // VkAttachmentLoadOp
+    storeOp: i32    // VkAttachmentStoreOp
+    stencilLoadOp: i32    // VkAttachmentLoadOp
+    stencilStoreOp: i32    // VkAttachmentStoreOp
+    initialLayout: i32    // VkImageLayout
+    finalLayout: i32    // VkImageLayout
 }
 VkAttachmentReference :: struct {
     attachment: u32
-    layout: i32   // VkImageLayout
+    layout: i32    // VkImageLayout
 }
 VkSubpassDescription :: struct {
-    flags: u32   // VkSubpassDescriptionFlags
-    pipelineBindPoint: i32   // VkPipelineBindPoint
+    flags: u32    // VkSubpassDescriptionFlags
+    pipelineBindPoint: i32    // VkPipelineBindPoint
     inputAttachmentCount: u32
     pInputAttachments: *VkAttachmentReference
     colorAttachmentCount: u32
@@ -2040,16 +2040,16 @@ VkSubpassDescription :: struct {
 VkSubpassDependency :: struct {
     srcSubpass: u32
     dstSubpass: u32
-    srcStageMask: u32   // VkPipelineStageFlags
-    dstStageMask: u32   // VkPipelineStageFlags
-    srcAccessMask: u32   // VkAccessFlags
-    dstAccessMask: u32   // VkAccessFlags
-    dependencyFlags: u32   // VkDependencyFlags
+    srcStageMask: u32    // VkPipelineStageFlags
+    dstStageMask: u32    // VkPipelineStageFlags
+    srcAccessMask: u32    // VkAccessFlags
+    dstAccessMask: u32    // VkAccessFlags
+    dependencyFlags: u32    // VkDependencyFlags
 }
 VkRenderPassCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkRenderPassCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkRenderPassCreateFlags
     attachmentCount: u32
     pAttachments: *VkAttachmentDescription
     subpassCount: u32
@@ -2058,78 +2058,78 @@ VkRenderPassCreateInfo :: struct {
     pDependencies: *VkSubpassDependency
 }
 VkEventCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkEventCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkEventCreateFlags
 }
 VkFenceCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkFenceCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkFenceCreateFlags
 }
 VkPhysicalDeviceFeatures :: struct {
-    robustBufferAccess: u32   // VkBool32
-    fullDrawIndexUint32: u32   // VkBool32
-    imageCubeArray: u32   // VkBool32
-    independentBlend: u32   // VkBool32
-    geometryShader: u32   // VkBool32
-    tessellationShader: u32   // VkBool32
-    sampleRateShading: u32   // VkBool32
-    dualSrcBlend: u32   // VkBool32
-    logicOp: u32   // VkBool32
-    multiDrawIndirect: u32   // VkBool32
-    drawIndirectFirstInstance: u32   // VkBool32
-    depthClamp: u32   // VkBool32
-    depthBiasClamp: u32   // VkBool32
-    fillModeNonSolid: u32   // VkBool32
-    depthBounds: u32   // VkBool32
-    wideLines: u32   // VkBool32
-    largePoints: u32   // VkBool32
-    alphaToOne: u32   // VkBool32
-    multiViewport: u32   // VkBool32
-    samplerAnisotropy: u32   // VkBool32
-    textureCompressionETC2: u32   // VkBool32
-    textureCompressionASTC_LDR: u32   // VkBool32
-    textureCompressionBC: u32   // VkBool32
-    occlusionQueryPrecise: u32   // VkBool32
-    pipelineStatisticsQuery: u32   // VkBool32
-    vertexPipelineStoresAndAtomics: u32   // VkBool32
-    fragmentStoresAndAtomics: u32   // VkBool32
-    shaderTessellationAndGeometryPointSize: u32   // VkBool32
-    shaderImageGatherExtended: u32   // VkBool32
-    shaderStorageImageExtendedFormats: u32   // VkBool32
-    shaderStorageImageMultisample: u32   // VkBool32
-    shaderStorageImageReadWithoutFormat: u32   // VkBool32
-    shaderStorageImageWriteWithoutFormat: u32   // VkBool32
-    shaderUniformBufferArrayDynamicIndexing: u32   // VkBool32
-    shaderSampledImageArrayDynamicIndexing: u32   // VkBool32
-    shaderStorageBufferArrayDynamicIndexing: u32   // VkBool32
-    shaderStorageImageArrayDynamicIndexing: u32   // VkBool32
-    shaderClipDistance: u32   // VkBool32
-    shaderCullDistance: u32   // VkBool32
-    shaderFloat64: u32   // VkBool32
-    shaderInt64: u32   // VkBool32
-    shaderInt16: u32   // VkBool32
-    shaderResourceResidency: u32   // VkBool32
-    shaderResourceMinLod: u32   // VkBool32
-    sparseBinding: u32   // VkBool32
-    sparseResidencyBuffer: u32   // VkBool32
-    sparseResidencyImage2D: u32   // VkBool32
-    sparseResidencyImage3D: u32   // VkBool32
-    sparseResidency2Samples: u32   // VkBool32
-    sparseResidency4Samples: u32   // VkBool32
-    sparseResidency8Samples: u32   // VkBool32
-    sparseResidency16Samples: u32   // VkBool32
-    sparseResidencyAliased: u32   // VkBool32
-    variableMultisampleRate: u32   // VkBool32
-    inheritedQueries: u32   // VkBool32
+    robustBufferAccess: u32    // VkBool32
+    fullDrawIndexUint32: u32    // VkBool32
+    imageCubeArray: u32    // VkBool32
+    independentBlend: u32    // VkBool32
+    geometryShader: u32    // VkBool32
+    tessellationShader: u32    // VkBool32
+    sampleRateShading: u32    // VkBool32
+    dualSrcBlend: u32    // VkBool32
+    logicOp: u32    // VkBool32
+    multiDrawIndirect: u32    // VkBool32
+    drawIndirectFirstInstance: u32    // VkBool32
+    depthClamp: u32    // VkBool32
+    depthBiasClamp: u32    // VkBool32
+    fillModeNonSolid: u32    // VkBool32
+    depthBounds: u32    // VkBool32
+    wideLines: u32    // VkBool32
+    largePoints: u32    // VkBool32
+    alphaToOne: u32    // VkBool32
+    multiViewport: u32    // VkBool32
+    samplerAnisotropy: u32    // VkBool32
+    textureCompressionETC2: u32    // VkBool32
+    textureCompressionASTC_LDR: u32    // VkBool32
+    textureCompressionBC: u32    // VkBool32
+    occlusionQueryPrecise: u32    // VkBool32
+    pipelineStatisticsQuery: u32    // VkBool32
+    vertexPipelineStoresAndAtomics: u32    // VkBool32
+    fragmentStoresAndAtomics: u32    // VkBool32
+    shaderTessellationAndGeometryPointSize: u32    // VkBool32
+    shaderImageGatherExtended: u32    // VkBool32
+    shaderStorageImageExtendedFormats: u32    // VkBool32
+    shaderStorageImageMultisample: u32    // VkBool32
+    shaderStorageImageReadWithoutFormat: u32    // VkBool32
+    shaderStorageImageWriteWithoutFormat: u32    // VkBool32
+    shaderUniformBufferArrayDynamicIndexing: u32    // VkBool32
+    shaderSampledImageArrayDynamicIndexing: u32    // VkBool32
+    shaderStorageBufferArrayDynamicIndexing: u32    // VkBool32
+    shaderStorageImageArrayDynamicIndexing: u32    // VkBool32
+    shaderClipDistance: u32    // VkBool32
+    shaderCullDistance: u32    // VkBool32
+    shaderFloat64: u32    // VkBool32
+    shaderInt64: u32    // VkBool32
+    shaderInt16: u32    // VkBool32
+    shaderResourceResidency: u32    // VkBool32
+    shaderResourceMinLod: u32    // VkBool32
+    sparseBinding: u32    // VkBool32
+    sparseResidencyBuffer: u32    // VkBool32
+    sparseResidencyImage2D: u32    // VkBool32
+    sparseResidencyImage3D: u32    // VkBool32
+    sparseResidency2Samples: u32    // VkBool32
+    sparseResidency4Samples: u32    // VkBool32
+    sparseResidency8Samples: u32    // VkBool32
+    sparseResidency16Samples: u32    // VkBool32
+    sparseResidencyAliased: u32    // VkBool32
+    variableMultisampleRate: u32    // VkBool32
+    inheritedQueries: u32    // VkBool32
 }
 VkPhysicalDeviceSparseProperties :: struct {
-    residencyStandard2DBlockShape: u32   // VkBool32
-    residencyStandard2DMultisampleBlockShape: u32   // VkBool32
-    residencyStandard3DBlockShape: u32   // VkBool32
-    residencyAlignedMipSize: u32   // VkBool32
-    residencyNonResidentStrict: u32   // VkBool32
+    residencyStandard2DBlockShape: u32    // VkBool32
+    residencyStandard2DMultisampleBlockShape: u32    // VkBool32
+    residencyStandard3DBlockShape: u32    // VkBool32
+    residencyAlignedMipSize: u32    // VkBool32
+    residencyNonResidentStrict: u32    // VkBool32
 }
 VkPhysicalDeviceLimits :: struct {
     maxImageDimension1D: u32
@@ -2143,8 +2143,8 @@ VkPhysicalDeviceLimits :: struct {
     maxPushConstantsSize: u32
     maxMemoryAllocationCount: u32
     maxSamplerAllocationCount: u32
-    bufferImageGranularity: u64   // VkDeviceSize
-    sparseAddressSpaceSize: u64   // VkDeviceSize
+    bufferImageGranularity: u64    // VkDeviceSize
+    sparseAddressSpaceSize: u64    // VkDeviceSize
     maxBoundDescriptorSets: u32
     maxPerStageDescriptorSamplers: u32
     maxPerStageDescriptorUniformBuffers: u32
@@ -2199,9 +2199,9 @@ VkPhysicalDeviceLimits :: struct {
     viewportBoundsRange: [2]f32
     viewportSubPixelBits: u32
     minMemoryMapAlignment: u64
-    minTexelBufferOffsetAlignment: u64   // VkDeviceSize
-    minUniformBufferOffsetAlignment: u64   // VkDeviceSize
-    minStorageBufferOffsetAlignment: u64   // VkDeviceSize
+    minTexelBufferOffsetAlignment: u64    // VkDeviceSize
+    minUniformBufferOffsetAlignment: u64    // VkDeviceSize
+    minStorageBufferOffsetAlignment: u64    // VkDeviceSize
     minTexelOffset: i32
     maxTexelOffset: u32
     minTexelGatherOffset: i32
@@ -2212,18 +2212,18 @@ VkPhysicalDeviceLimits :: struct {
     maxFramebufferWidth: u32
     maxFramebufferHeight: u32
     maxFramebufferLayers: u32
-    framebufferColorSampleCounts: u32   // VkSampleCountFlags
-    framebufferDepthSampleCounts: u32   // VkSampleCountFlags
-    framebufferStencilSampleCounts: u32   // VkSampleCountFlags
-    framebufferNoAttachmentsSampleCounts: u32   // VkSampleCountFlags
+    framebufferColorSampleCounts: u32    // VkSampleCountFlags
+    framebufferDepthSampleCounts: u32    // VkSampleCountFlags
+    framebufferStencilSampleCounts: u32    // VkSampleCountFlags
+    framebufferNoAttachmentsSampleCounts: u32    // VkSampleCountFlags
     maxColorAttachments: u32
-    sampledImageColorSampleCounts: u32   // VkSampleCountFlags
-    sampledImageIntegerSampleCounts: u32   // VkSampleCountFlags
-    sampledImageDepthSampleCounts: u32   // VkSampleCountFlags
-    sampledImageStencilSampleCounts: u32   // VkSampleCountFlags
-    storageImageSampleCounts: u32   // VkSampleCountFlags
+    sampledImageColorSampleCounts: u32    // VkSampleCountFlags
+    sampledImageIntegerSampleCounts: u32    // VkSampleCountFlags
+    sampledImageDepthSampleCounts: u32    // VkSampleCountFlags
+    sampledImageStencilSampleCounts: u32    // VkSampleCountFlags
+    storageImageSampleCounts: u32    // VkSampleCountFlags
     maxSampleMaskWords: u32
-    timestampComputeAndGraphics: u32   // VkBool32
+    timestampComputeAndGraphics: u32    // VkBool32
     timestampPeriod: f32
     maxClipDistances: u32
     maxCullDistances: u32
@@ -2233,32 +2233,32 @@ VkPhysicalDeviceLimits :: struct {
     lineWidthRange: [2]f32
     pointSizeGranularity: f32
     lineWidthGranularity: f32
-    strictLines: u32   // VkBool32
-    standardSampleLocations: u32   // VkBool32
-    optimalBufferCopyOffsetAlignment: u64   // VkDeviceSize
-    optimalBufferCopyRowPitchAlignment: u64   // VkDeviceSize
-    nonCoherentAtomSize: u64   // VkDeviceSize
+    strictLines: u32    // VkBool32
+    standardSampleLocations: u32    // VkBool32
+    optimalBufferCopyOffsetAlignment: u64    // VkDeviceSize
+    optimalBufferCopyRowPitchAlignment: u64    // VkDeviceSize
+    nonCoherentAtomSize: u64    // VkDeviceSize
 }
 VkSemaphoreCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkSemaphoreCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkSemaphoreCreateFlags
 }
 VkQueryPoolCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkQueryPoolCreateFlags
-    queryType: i32   // VkQueryType
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkQueryPoolCreateFlags
+    queryType: i32    // VkQueryType
     queryCount: u32
-    pipelineStatistics: u32   // VkQueryPipelineStatisticFlags
+    pipelineStatistics: u32    // VkQueryPipelineStatisticFlags
 }
 VkFramebufferCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkFramebufferCreateFlags
-    renderPass: u64   // VkRenderPass
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkFramebufferCreateFlags
+    renderPass: u64    // VkRenderPass
     attachmentCount: u32
-    pAttachments: *u64   // VkImageView*
+    pAttachments: *u64    // VkImageView*
     width: u32
     height: u32
     layers: u32
@@ -2282,15 +2282,15 @@ VkDispatchIndirectCommand :: struct {
     z: u32
 }
 VkSubmitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     waitSemaphoreCount: u32
-    pWaitSemaphores: *u64   // VkSemaphore*
-    pWaitDstStageMask: *u32   // VkPipelineStageFlags*
+    pWaitSemaphores: *u64    // VkSemaphore*
+    pWaitDstStageMask: *u32    // VkPipelineStageFlags*
     commandBufferCount: u32
-    pCommandBuffers: **u8   // VkCommandBuffer*
+    pCommandBuffers: **u8    // VkCommandBuffer*
     signalSemaphoreCount: u32
-    pSignalSemaphores: *u64   // VkSemaphore*
+    pSignalSemaphores: *u64    // VkSemaphore*
 }
 VkSurfaceCapabilitiesKHR :: struct {
     minImageCount: u32
@@ -2299,133 +2299,133 @@ VkSurfaceCapabilitiesKHR :: struct {
     minImageExtent: VkExtent2D
     maxImageExtent: VkExtent2D
     maxImageArrayLayers: u32
-    supportedTransforms: u32   // VkSurfaceTransformFlagsKHR
-    currentTransform: u32   // VkSurfaceTransformFlagBitsKHR
-    supportedCompositeAlpha: u32   // VkCompositeAlphaFlagsKHR
-    supportedUsageFlags: u32   // VkImageUsageFlags
+    supportedTransforms: u32    // VkSurfaceTransformFlagsKHR
+    currentTransform: u32    // VkSurfaceTransformFlagBitsKHR
+    supportedCompositeAlpha: u32    // VkCompositeAlphaFlagsKHR
+    supportedUsageFlags: u32    // VkImageUsageFlags
 }
 VkWaylandSurfaceCreateInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkWaylandSurfaceCreateFlagsKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkWaylandSurfaceCreateFlagsKHR
     display: *u8
     surface: *u8
 }
 VkXlibSurfaceCreateInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkXlibSurfaceCreateFlagsKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkXlibSurfaceCreateFlagsKHR
     dpy: *u8
     window: u64
 }
 VkXcbSurfaceCreateInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkXcbSurfaceCreateFlagsKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkXcbSurfaceCreateFlagsKHR
     connection: *u8
     window: u32
 }
 VkSurfaceFormatKHR :: struct {
-    format: i32   // VkFormat
-    colorSpace: i32   // VkColorSpaceKHR
+    format: i32    // VkFormat
+    colorSpace: i32    // VkColorSpaceKHR
 }
 VkSwapchainCreateInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkSwapchainCreateFlagsKHR
-    surface: u64   // VkSurfaceKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkSwapchainCreateFlagsKHR
+    surface: u64    // VkSurfaceKHR
     minImageCount: u32
-    imageFormat: i32   // VkFormat
-    imageColorSpace: i32   // VkColorSpaceKHR
+    imageFormat: i32    // VkFormat
+    imageColorSpace: i32    // VkColorSpaceKHR
     imageExtent: VkExtent2D
     imageArrayLayers: u32
-    imageUsage: u32   // VkImageUsageFlags
-    imageSharingMode: i32   // VkSharingMode
+    imageUsage: u32    // VkImageUsageFlags
+    imageSharingMode: i32    // VkSharingMode
     queueFamilyIndexCount: u32
     pQueueFamilyIndices: *u32
-    preTransform: u32   // VkSurfaceTransformFlagBitsKHR
-    compositeAlpha: u32   // VkCompositeAlphaFlagBitsKHR
-    presentMode: i32   // VkPresentModeKHR
-    clipped: u32   // VkBool32
-    oldSwapchain: u64   // VkSwapchainKHR
+    preTransform: u32    // VkSurfaceTransformFlagBitsKHR
+    compositeAlpha: u32    // VkCompositeAlphaFlagBitsKHR
+    presentMode: i32    // VkPresentModeKHR
+    clipped: u32    // VkBool32
+    oldSwapchain: u64    // VkSwapchainKHR
 }
 VkPresentInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     waitSemaphoreCount: u32
-    pWaitSemaphores: *u64   // VkSemaphore*
+    pWaitSemaphores: *u64    // VkSemaphore*
     swapchainCount: u32
-    pSwapchains: *u64   // VkSwapchainKHR*
+    pSwapchains: *u64    // VkSwapchainKHR*
     pImageIndices: *u32
-    pResults: *i32   // VkResult*
+    pResults: *i32    // VkResult*
 }
 VkDevicePrivateDataCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     privateDataSlotRequestCount: u32
 }
 VkPrivateDataSlotCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkPrivateDataSlotCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkPrivateDataSlotCreateFlags
 }
 VkPhysicalDevicePrivateDataFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    privateData: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    privateData: u32    // VkBool32
 }
 VkPhysicalDeviceFeatures2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     features: VkPhysicalDeviceFeatures
 }
 VkPhysicalDeviceProperties2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     properties: VkPhysicalDeviceProperties
 }
 VkFormatProperties2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     formatProperties: VkFormatProperties
 }
 VkImageFormatProperties2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     imageFormatProperties: VkImageFormatProperties
 }
 VkPhysicalDeviceImageFormatInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    format: i32   // VkFormat
-    type: i32   // VkImageType
-    tiling: i32   // VkImageTiling
-    usage: u32   // VkImageUsageFlags
-    flags: u32   // VkImageCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    format: i32    // VkFormat
+    type: i32    // VkImageType
+    tiling: i32    // VkImageTiling
+    usage: u32    // VkImageUsageFlags
+    flags: u32    // VkImageCreateFlags
 }
 VkQueueFamilyProperties2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     queueFamilyProperties: VkQueueFamilyProperties
 }
 VkPhysicalDeviceMemoryProperties2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     memoryProperties: VkPhysicalDeviceMemoryProperties
 }
 VkSparseImageFormatProperties2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     properties: VkSparseImageFormatProperties
 }
 VkPhysicalDeviceSparseImageFormatInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    format: i32   // VkFormat
-    type: i32   // VkImageType
-    samples: u32   // VkSampleCountFlagBits
-    usage: u32   // VkImageUsageFlags
-    tiling: i32   // VkImageTiling
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    format: i32    // VkFormat
+    type: i32    // VkImageType
+    samples: u32    // VkSampleCountFlagBits
+    usage: u32    // VkImageUsageFlags
+    tiling: i32    // VkImageTiling
 }
 VkConformanceVersion :: struct {
     major: u8
@@ -2434,121 +2434,121 @@ VkConformanceVersion :: struct {
     patch: u8
 }
 VkPhysicalDeviceDriverProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    driverID: i32   // VkDriverId
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    driverID: i32    // VkDriverId
     driverName: [VK_MAX_DRIVER_NAME_SIZE]u8
     driverInfo: [VK_MAX_DRIVER_INFO_SIZE]u8
     conformanceVersion: VkConformanceVersion
 }
 VkPhysicalDeviceVariablePointersFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    variablePointersStorageBuffer: u32   // VkBool32
-    variablePointers: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    variablePointersStorageBuffer: u32    // VkBool32
+    variablePointers: u32    // VkBool32
 }
 // VkPhysicalDeviceVariablePointerFeatures is another name of VkPhysicalDeviceVariablePointersFeatures
 VkExternalMemoryProperties :: struct {
-    externalMemoryFeatures: u32   // VkExternalMemoryFeatureFlags
-    exportFromImportedHandleTypes: u32   // VkExternalMemoryHandleTypeFlags
-    compatibleHandleTypes: u32   // VkExternalMemoryHandleTypeFlags
+    externalMemoryFeatures: u32    // VkExternalMemoryFeatureFlags
+    exportFromImportedHandleTypes: u32    // VkExternalMemoryHandleTypeFlags
+    compatibleHandleTypes: u32    // VkExternalMemoryHandleTypeFlags
 }
 VkPhysicalDeviceExternalImageFormatInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleType: u32   // VkExternalMemoryHandleTypeFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleType: u32    // VkExternalMemoryHandleTypeFlagBits
 }
 VkExternalImageFormatProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     externalMemoryProperties: VkExternalMemoryProperties
 }
 VkPhysicalDeviceExternalBufferInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkBufferCreateFlags
-    usage: u32   // VkBufferUsageFlags
-    handleType: u32   // VkExternalMemoryHandleTypeFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkBufferCreateFlags
+    usage: u32    // VkBufferUsageFlags
+    handleType: u32    // VkExternalMemoryHandleTypeFlagBits
 }
 VkExternalBufferProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     externalMemoryProperties: VkExternalMemoryProperties
 }
 VkPhysicalDeviceIDProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     deviceUUID: [VK_UUID_SIZE]u8
     driverUUID: [VK_UUID_SIZE]u8
     deviceLUID: [VK_LUID_SIZE]u8
     deviceNodeMask: u32
-    deviceLUIDValid: u32   // VkBool32
+    deviceLUIDValid: u32    // VkBool32
 }
 VkExternalMemoryImageCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleTypes: u32   // VkExternalMemoryHandleTypeFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleTypes: u32    // VkExternalMemoryHandleTypeFlags
 }
 VkExternalMemoryBufferCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleTypes: u32   // VkExternalMemoryHandleTypeFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleTypes: u32    // VkExternalMemoryHandleTypeFlags
 }
 VkExportMemoryAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleTypes: u32   // VkExternalMemoryHandleTypeFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleTypes: u32    // VkExternalMemoryHandleTypeFlags
 }
 VkPhysicalDeviceExternalSemaphoreInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleType: u32   // VkExternalSemaphoreHandleTypeFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleType: u32    // VkExternalSemaphoreHandleTypeFlagBits
 }
 VkExternalSemaphoreProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    exportFromImportedHandleTypes: u32   // VkExternalSemaphoreHandleTypeFlags
-    compatibleHandleTypes: u32   // VkExternalSemaphoreHandleTypeFlags
-    externalSemaphoreFeatures: u32   // VkExternalSemaphoreFeatureFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    exportFromImportedHandleTypes: u32    // VkExternalSemaphoreHandleTypeFlags
+    compatibleHandleTypes: u32    // VkExternalSemaphoreHandleTypeFlags
+    externalSemaphoreFeatures: u32    // VkExternalSemaphoreFeatureFlags
 }
 VkExportSemaphoreCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleTypes: u32   // VkExternalSemaphoreHandleTypeFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleTypes: u32    // VkExternalSemaphoreHandleTypeFlags
 }
 VkPhysicalDeviceExternalFenceInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleType: u32   // VkExternalFenceHandleTypeFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleType: u32    // VkExternalFenceHandleTypeFlagBits
 }
 VkExternalFenceProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    exportFromImportedHandleTypes: u32   // VkExternalFenceHandleTypeFlags
-    compatibleHandleTypes: u32   // VkExternalFenceHandleTypeFlags
-    externalFenceFeatures: u32   // VkExternalFenceFeatureFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    exportFromImportedHandleTypes: u32    // VkExternalFenceHandleTypeFlags
+    compatibleHandleTypes: u32    // VkExternalFenceHandleTypeFlags
+    externalFenceFeatures: u32    // VkExternalFenceFeatureFlags
 }
 VkExportFenceCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    handleTypes: u32   // VkExternalFenceHandleTypeFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    handleTypes: u32    // VkExternalFenceHandleTypeFlags
 }
 VkPhysicalDeviceMultiviewFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    multiview: u32   // VkBool32
-    multiviewGeometryShader: u32   // VkBool32
-    multiviewTessellationShader: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    multiview: u32    // VkBool32
+    multiviewGeometryShader: u32    // VkBool32
+    multiviewTessellationShader: u32    // VkBool32
 }
 VkPhysicalDeviceMultiviewProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxMultiviewViewCount: u32
     maxMultiviewInstanceIndex: u32
 }
 VkRenderPassMultiviewCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     subpassCount: u32
     pViewMasks: *u32
     dependencyCount: u32
@@ -2557,61 +2557,61 @@ VkRenderPassMultiviewCreateInfo :: struct {
     pCorrelationMasks: *u32
 }
 VkPhysicalDeviceGroupProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     physicalDeviceCount: u32
-    physicalDevices: [VK_MAX_DEVICE_GROUP_SIZE]*u8   // VkPhysicalDevice
-    subsetAllocation: u32   // VkBool32
+    physicalDevices: [VK_MAX_DEVICE_GROUP_SIZE]*u8    // VkPhysicalDevice
+    subsetAllocation: u32    // VkBool32
 }
 VkMemoryAllocateFlagsInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkMemoryAllocateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkMemoryAllocateFlags
     deviceMask: u32
 }
 VkBindBufferMemoryInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    buffer: u64   // VkBuffer
-    memory: u64   // VkDeviceMemory
-    memoryOffset: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    buffer: u64    // VkBuffer
+    memory: u64    // VkDeviceMemory
+    memoryOffset: u64    // VkDeviceSize
 }
 VkBindBufferMemoryDeviceGroupInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     deviceIndexCount: u32
     pDeviceIndices: *u32
 }
 VkBindImageMemoryInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    image: u64   // VkImage
-    memory: u64   // VkDeviceMemory
-    memoryOffset: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    image: u64    // VkImage
+    memory: u64    // VkDeviceMemory
+    memoryOffset: u64    // VkDeviceSize
 }
 VkBindImageMemoryDeviceGroupInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     deviceIndexCount: u32
     pDeviceIndices: *u32
     splitInstanceBindRegionCount: u32
     pSplitInstanceBindRegions: *VkRect2D
 }
 VkDeviceGroupRenderPassBeginInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     deviceMask: u32
     deviceRenderAreaCount: u32
     pDeviceRenderAreas: *VkRect2D
 }
 VkDeviceGroupCommandBufferBeginInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     deviceMask: u32
 }
 VkDeviceGroupSubmitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     waitSemaphoreCount: u32
     pWaitSemaphoreDeviceIndices: *u32
     commandBufferCount: u32
@@ -2620,249 +2620,249 @@ VkDeviceGroupSubmitInfo :: struct {
     pSignalSemaphoreDeviceIndices: *u32
 }
 VkDeviceGroupBindSparseInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     resourceDeviceIndex: u32
     memoryDeviceIndex: u32
 }
 VkDeviceGroupPresentCapabilitiesKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     presentMask: [VK_MAX_DEVICE_GROUP_SIZE]u32
-    modes: u32   // VkDeviceGroupPresentModeFlagsKHR
+    modes: u32    // VkDeviceGroupPresentModeFlagsKHR
 }
 VkImageSwapchainCreateInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    swapchain: u64   // VkSwapchainKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    swapchain: u64    // VkSwapchainKHR
 }
 VkBindImageMemorySwapchainInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    swapchain: u64   // VkSwapchainKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    swapchain: u64    // VkSwapchainKHR
     imageIndex: u32
 }
 VkAcquireNextImageInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    swapchain: u64   // VkSwapchainKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    swapchain: u64    // VkSwapchainKHR
     timeout: u64
-    semaphore: u64   // VkSemaphore
-    fence: u64   // VkFence
+    semaphore: u64    // VkSemaphore
+    fence: u64    // VkFence
     deviceMask: u32
 }
 VkDeviceGroupPresentInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     swapchainCount: u32
     pDeviceMasks: *u32
-    mode: u32   // VkDeviceGroupPresentModeFlagBitsKHR
+    mode: u32    // VkDeviceGroupPresentModeFlagBitsKHR
 }
 VkDeviceGroupDeviceCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     physicalDeviceCount: u32
-    pPhysicalDevices: **u8   // VkPhysicalDevice*
+    pPhysicalDevices: **u8    // VkPhysicalDevice*
 }
 VkDeviceGroupSwapchainCreateInfoKHR :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    modes: u32   // VkDeviceGroupPresentModeFlagsKHR
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    modes: u32    // VkDeviceGroupPresentModeFlagsKHR
 }
 VkDescriptorUpdateTemplateEntry :: struct {
     dstBinding: u32
     dstArrayElement: u32
     descriptorCount: u32
-    descriptorType: i32   // VkDescriptorType
+    descriptorType: i32    // VkDescriptorType
     offset: u64
     stride: u64
 }
 VkDescriptorUpdateTemplateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDescriptorUpdateTemplateCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDescriptorUpdateTemplateCreateFlags
     descriptorUpdateEntryCount: u32
     pDescriptorUpdateEntries: *VkDescriptorUpdateTemplateEntry
-    templateType: i32   // VkDescriptorUpdateTemplateType
-    descriptorSetLayout: u64   // VkDescriptorSetLayout
-    pipelineBindPoint: i32   // VkPipelineBindPoint
-    pipelineLayout: u64   // VkPipelineLayout
+    templateType: i32    // VkDescriptorUpdateTemplateType
+    descriptorSetLayout: u64    // VkDescriptorSetLayout
+    pipelineBindPoint: i32    // VkPipelineBindPoint
+    pipelineLayout: u64    // VkPipelineLayout
     set: u32
 }
 VkInputAttachmentAspectReference :: struct {
     subpass: u32
     inputAttachmentIndex: u32
-    aspectMask: u32   // VkImageAspectFlags
+    aspectMask: u32    // VkImageAspectFlags
 }
 VkRenderPassInputAttachmentAspectCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     aspectReferenceCount: u32
     pAspectReferences: *VkInputAttachmentAspectReference
 }
 VkPhysicalDevice16BitStorageFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    storageBuffer16BitAccess: u32   // VkBool32
-    uniformAndStorageBuffer16BitAccess: u32   // VkBool32
-    storagePushConstant16: u32   // VkBool32
-    storageInputOutput16: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    storageBuffer16BitAccess: u32    // VkBool32
+    uniformAndStorageBuffer16BitAccess: u32    // VkBool32
+    storagePushConstant16: u32    // VkBool32
+    storageInputOutput16: u32    // VkBool32
 }
 VkPhysicalDeviceSubgroupProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     subgroupSize: u32
-    supportedStages: u32   // VkShaderStageFlags
-    supportedOperations: u32   // VkSubgroupFeatureFlags
-    quadOperationsInAllStages: u32   // VkBool32
+    supportedStages: u32    // VkShaderStageFlags
+    supportedOperations: u32    // VkSubgroupFeatureFlags
+    quadOperationsInAllStages: u32    // VkBool32
 }
 VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderSubgroupExtendedTypes: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderSubgroupExtendedTypes: u32    // VkBool32
 }
 VkBufferMemoryRequirementsInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    buffer: u64   // VkBuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    buffer: u64    // VkBuffer
 }
 VkDeviceBufferMemoryRequirements :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     pCreateInfo: *VkBufferCreateInfo
 }
 VkImageMemoryRequirementsInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    image: u64   // VkImage
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    image: u64    // VkImage
 }
 VkImageSparseMemoryRequirementsInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    image: u64   // VkImage
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    image: u64    // VkImage
 }
 VkDeviceImageMemoryRequirements :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     pCreateInfo: *VkImageCreateInfo
-    planeAspect: u32   // VkImageAspectFlagBits
+    planeAspect: u32    // VkImageAspectFlagBits
 }
 VkMemoryRequirements2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     memoryRequirements: VkMemoryRequirements
 }
 VkSparseImageMemoryRequirements2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     memoryRequirements: VkSparseImageMemoryRequirements
 }
 VkPhysicalDevicePointClippingProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    pointClippingBehavior: i32   // VkPointClippingBehavior
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    pointClippingBehavior: i32    // VkPointClippingBehavior
 }
 VkMemoryDedicatedRequirements :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    prefersDedicatedAllocation: u32   // VkBool32
-    requiresDedicatedAllocation: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    prefersDedicatedAllocation: u32    // VkBool32
+    requiresDedicatedAllocation: u32    // VkBool32
 }
 VkMemoryDedicatedAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    image: u64   // VkImage
-    buffer: u64   // VkBuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    image: u64    // VkImage
+    buffer: u64    // VkBuffer
 }
 VkImageViewUsageCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    usage: u32   // VkImageUsageFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    usage: u32    // VkImageUsageFlags
 }
 VkPipelineTessellationDomainOriginStateCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    domainOrigin: i32   // VkTessellationDomainOrigin
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    domainOrigin: i32    // VkTessellationDomainOrigin
 }
 VkSamplerYcbcrConversionInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    conversion: u64   // VkSamplerYcbcrConversion
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    conversion: u64    // VkSamplerYcbcrConversion
 }
 VkSamplerYcbcrConversionCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    format: i32   // VkFormat
-    ycbcrModel: i32   // VkSamplerYcbcrModelConversion
-    ycbcrRange: i32   // VkSamplerYcbcrRange
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    format: i32    // VkFormat
+    ycbcrModel: i32    // VkSamplerYcbcrModelConversion
+    ycbcrRange: i32    // VkSamplerYcbcrRange
     components: VkComponentMapping
-    xChromaOffset: i32   // VkChromaLocation
-    yChromaOffset: i32   // VkChromaLocation
-    chromaFilter: i32   // VkFilter
-    forceExplicitReconstruction: u32   // VkBool32
+    xChromaOffset: i32    // VkChromaLocation
+    yChromaOffset: i32    // VkChromaLocation
+    chromaFilter: i32    // VkFilter
+    forceExplicitReconstruction: u32    // VkBool32
 }
 VkBindImagePlaneMemoryInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    planeAspect: u32   // VkImageAspectFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    planeAspect: u32    // VkImageAspectFlagBits
 }
 VkImagePlaneMemoryRequirementsInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    planeAspect: u32   // VkImageAspectFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    planeAspect: u32    // VkImageAspectFlagBits
 }
 VkPhysicalDeviceSamplerYcbcrConversionFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    samplerYcbcrConversion: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    samplerYcbcrConversion: u32    // VkBool32
 }
 VkSamplerYcbcrConversionImageFormatProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     combinedImageSamplerDescriptorCount: u32
 }
 VkProtectedSubmitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    protectedSubmit: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    protectedSubmit: u32    // VkBool32
 }
 VkPhysicalDeviceProtectedMemoryFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    protectedMemory: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    protectedMemory: u32    // VkBool32
 }
 VkPhysicalDeviceProtectedMemoryProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    protectedNoFault: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    protectedNoFault: u32    // VkBool32
 }
 VkDeviceQueueInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDeviceQueueCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDeviceQueueCreateFlags
     queueFamilyIndex: u32
     queueIndex: u32
 }
 VkPhysicalDeviceSamplerFilterMinmaxProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    filterMinmaxSingleComponentFormats: u32   // VkBool32
-    filterMinmaxImageComponentMapping: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    filterMinmaxSingleComponentFormats: u32    // VkBool32
+    filterMinmaxImageComponentMapping: u32    // VkBool32
 }
 VkSamplerReductionModeCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    reductionMode: i32   // VkSamplerReductionMode
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    reductionMode: i32    // VkSamplerReductionMode
 }
 VkPhysicalDeviceInlineUniformBlockFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    inlineUniformBlock: u32   // VkBool32
-    descriptorBindingInlineUniformBlockUpdateAfterBind: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    inlineUniformBlock: u32    // VkBool32
+    descriptorBindingInlineUniformBlockUpdateAfterBind: u32    // VkBool32
 }
 VkPhysicalDeviceInlineUniformBlockProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxInlineUniformBlockSize: u32
     maxPerStageDescriptorInlineUniformBlocks: u32
     maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks: u32
@@ -2870,119 +2870,119 @@ VkPhysicalDeviceInlineUniformBlockProperties :: struct {
     maxDescriptorSetUpdateAfterBindInlineUniformBlocks: u32
 }
 VkWriteDescriptorSetInlineUniformBlock :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     dataSize: u32
-    pData: *u8   // void*
+    pData: *u8    // void*
 }
 VkDescriptorPoolInlineUniformBlockCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxInlineUniformBlockBindings: u32
 }
 VkImageFormatListCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     viewFormatCount: u32
-    pViewFormats: *i32   // VkFormat*
+    pViewFormats: *i32    // VkFormat*
 }
 VkPhysicalDeviceMaintenance3Properties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxPerSetDescriptors: u32
-    maxMemoryAllocationSize: u64   // VkDeviceSize
+    maxMemoryAllocationSize: u64    // VkDeviceSize
 }
 VkPhysicalDeviceMaintenance4Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    maintenance4: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    maintenance4: u32    // VkBool32
 }
 VkPhysicalDeviceMaintenance4Properties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    maxBufferSize: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    maxBufferSize: u64    // VkDeviceSize
 }
 VkDescriptorSetLayoutSupport :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    supported: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    supported: u32    // VkBool32
 }
 VkPhysicalDeviceShaderDrawParametersFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderDrawParameters: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderDrawParameters: u32    // VkBool32
 }
 // VkPhysicalDeviceShaderDrawParameterFeatures is another name of VkPhysicalDeviceShaderDrawParametersFeatures
 VkPhysicalDeviceShaderFloat16Int8Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderFloat16: u32   // VkBool32
-    shaderInt8: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderFloat16: u32    // VkBool32
+    shaderInt8: u32    // VkBool32
 }
 VkPhysicalDeviceFloatControlsProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    denormBehaviorIndependence: i32   // VkShaderFloatControlsIndependence
-    roundingModeIndependence: i32   // VkShaderFloatControlsIndependence
-    shaderSignedZeroInfNanPreserveFloat16: u32   // VkBool32
-    shaderSignedZeroInfNanPreserveFloat32: u32   // VkBool32
-    shaderSignedZeroInfNanPreserveFloat64: u32   // VkBool32
-    shaderDenormPreserveFloat16: u32   // VkBool32
-    shaderDenormPreserveFloat32: u32   // VkBool32
-    shaderDenormPreserveFloat64: u32   // VkBool32
-    shaderDenormFlushToZeroFloat16: u32   // VkBool32
-    shaderDenormFlushToZeroFloat32: u32   // VkBool32
-    shaderDenormFlushToZeroFloat64: u32   // VkBool32
-    shaderRoundingModeRTEFloat16: u32   // VkBool32
-    shaderRoundingModeRTEFloat32: u32   // VkBool32
-    shaderRoundingModeRTEFloat64: u32   // VkBool32
-    shaderRoundingModeRTZFloat16: u32   // VkBool32
-    shaderRoundingModeRTZFloat32: u32   // VkBool32
-    shaderRoundingModeRTZFloat64: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    denormBehaviorIndependence: i32    // VkShaderFloatControlsIndependence
+    roundingModeIndependence: i32    // VkShaderFloatControlsIndependence
+    shaderSignedZeroInfNanPreserveFloat16: u32    // VkBool32
+    shaderSignedZeroInfNanPreserveFloat32: u32    // VkBool32
+    shaderSignedZeroInfNanPreserveFloat64: u32    // VkBool32
+    shaderDenormPreserveFloat16: u32    // VkBool32
+    shaderDenormPreserveFloat32: u32    // VkBool32
+    shaderDenormPreserveFloat64: u32    // VkBool32
+    shaderDenormFlushToZeroFloat16: u32    // VkBool32
+    shaderDenormFlushToZeroFloat32: u32    // VkBool32
+    shaderDenormFlushToZeroFloat64: u32    // VkBool32
+    shaderRoundingModeRTEFloat16: u32    // VkBool32
+    shaderRoundingModeRTEFloat32: u32    // VkBool32
+    shaderRoundingModeRTEFloat64: u32    // VkBool32
+    shaderRoundingModeRTZFloat16: u32    // VkBool32
+    shaderRoundingModeRTZFloat32: u32    // VkBool32
+    shaderRoundingModeRTZFloat64: u32    // VkBool32
 }
 VkPhysicalDeviceHostQueryResetFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    hostQueryReset: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    hostQueryReset: u32    // VkBool32
 }
 VkDebugUtilsObjectNameInfoEXT :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    objectType: i32   // VkObjectType
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    objectType: i32    // VkObjectType
     objectHandle: u64
-    pObjectName: *u8   // char*
+    pObjectName: *u8    // char*
 }
 VkDebugUtilsObjectTagInfoEXT :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    objectType: i32   // VkObjectType
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    objectType: i32    // VkObjectType
     objectHandle: u64
     tagName: u64
     tagSize: u64
-    pTag: *u8   // void*
+    pTag: *u8    // void*
 }
 VkDebugUtilsLabelEXT :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    pLabelName: *u8   // char*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    pLabelName: *u8    // char*
     color: [4]f32
 }
 VkDebugUtilsMessengerCreateInfoEXT :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDebugUtilsMessengerCreateFlagsEXT
-    messageSeverity: u32   // VkDebugUtilsMessageSeverityFlagsEXT
-    messageType: u32   // VkDebugUtilsMessageTypeFlagsEXT
-    pfnUserCallback: *u8   // PFN_vkDebugUtilsMessengerCallbackEXT
-    pUserData: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDebugUtilsMessengerCreateFlagsEXT
+    messageSeverity: u32    // VkDebugUtilsMessageSeverityFlagsEXT
+    messageType: u32    // VkDebugUtilsMessageTypeFlagsEXT
+    pfnUserCallback: *u8    // PFN_vkDebugUtilsMessengerCallbackEXT
+    pUserData: *u8    // void*
 }
 VkDebugUtilsMessengerCallbackDataEXT :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkDebugUtilsMessengerCallbackDataFlagsEXT
-    pMessageIdName: *u8   // char*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkDebugUtilsMessengerCallbackDataFlagsEXT
+    pMessageIdName: *u8    // char*
     messageIdNumber: i32
-    pMessage: *u8   // char*
+    pMessage: *u8    // char*
     queueLabelCount: u32
     pQueueLabels: *VkDebugUtilsLabelEXT
     cmdBufLabelCount: u32
@@ -2991,40 +2991,40 @@ VkDebugUtilsMessengerCallbackDataEXT :: struct {
     pObjects: *VkDebugUtilsObjectNameInfoEXT
 }
 VkPhysicalDeviceDescriptorIndexingFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderInputAttachmentArrayDynamicIndexing: u32   // VkBool32
-    shaderUniformTexelBufferArrayDynamicIndexing: u32   // VkBool32
-    shaderStorageTexelBufferArrayDynamicIndexing: u32   // VkBool32
-    shaderUniformBufferArrayNonUniformIndexing: u32   // VkBool32
-    shaderSampledImageArrayNonUniformIndexing: u32   // VkBool32
-    shaderStorageBufferArrayNonUniformIndexing: u32   // VkBool32
-    shaderStorageImageArrayNonUniformIndexing: u32   // VkBool32
-    shaderInputAttachmentArrayNonUniformIndexing: u32   // VkBool32
-    shaderUniformTexelBufferArrayNonUniformIndexing: u32   // VkBool32
-    shaderStorageTexelBufferArrayNonUniformIndexing: u32   // VkBool32
-    descriptorBindingUniformBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingSampledImageUpdateAfterBind: u32   // VkBool32
-    descriptorBindingStorageImageUpdateAfterBind: u32   // VkBool32
-    descriptorBindingStorageBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingUniformTexelBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingStorageTexelBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingUpdateUnusedWhilePending: u32   // VkBool32
-    descriptorBindingPartiallyBound: u32   // VkBool32
-    descriptorBindingVariableDescriptorCount: u32   // VkBool32
-    runtimeDescriptorArray: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderInputAttachmentArrayDynamicIndexing: u32    // VkBool32
+    shaderUniformTexelBufferArrayDynamicIndexing: u32    // VkBool32
+    shaderStorageTexelBufferArrayDynamicIndexing: u32    // VkBool32
+    shaderUniformBufferArrayNonUniformIndexing: u32    // VkBool32
+    shaderSampledImageArrayNonUniformIndexing: u32    // VkBool32
+    shaderStorageBufferArrayNonUniformIndexing: u32    // VkBool32
+    shaderStorageImageArrayNonUniformIndexing: u32    // VkBool32
+    shaderInputAttachmentArrayNonUniformIndexing: u32    // VkBool32
+    shaderUniformTexelBufferArrayNonUniformIndexing: u32    // VkBool32
+    shaderStorageTexelBufferArrayNonUniformIndexing: u32    // VkBool32
+    descriptorBindingUniformBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingSampledImageUpdateAfterBind: u32    // VkBool32
+    descriptorBindingStorageImageUpdateAfterBind: u32    // VkBool32
+    descriptorBindingStorageBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingUniformTexelBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingStorageTexelBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingUpdateUnusedWhilePending: u32    // VkBool32
+    descriptorBindingPartiallyBound: u32    // VkBool32
+    descriptorBindingVariableDescriptorCount: u32    // VkBool32
+    runtimeDescriptorArray: u32    // VkBool32
 }
 VkPhysicalDeviceDescriptorIndexingProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxUpdateAfterBindDescriptorsInAllPools: u32
-    shaderUniformBufferArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderSampledImageArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderStorageBufferArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderStorageImageArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderInputAttachmentArrayNonUniformIndexingNative: u32   // VkBool32
-    robustBufferAccessUpdateAfterBind: u32   // VkBool32
-    quadDivergentImplicitLod: u32   // VkBool32
+    shaderUniformBufferArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderSampledImageArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderStorageBufferArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderStorageImageArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderInputAttachmentArrayNonUniformIndexingNative: u32    // VkBool32
+    robustBufferAccessUpdateAfterBind: u32    // VkBool32
+    quadDivergentImplicitLod: u32    // VkBool32
     maxPerStageDescriptorUpdateAfterBindSamplers: u32
     maxPerStageDescriptorUpdateAfterBindUniformBuffers: u32
     maxPerStageDescriptorUpdateAfterBindStorageBuffers: u32
@@ -3042,47 +3042,47 @@ VkPhysicalDeviceDescriptorIndexingProperties :: struct {
     maxDescriptorSetUpdateAfterBindInputAttachments: u32
 }
 VkDescriptorSetLayoutBindingFlagsCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     bindingCount: u32
-    pBindingFlags: *u32   // VkDescriptorBindingFlags*
+    pBindingFlags: *u32    // VkDescriptorBindingFlags*
 }
 VkDescriptorSetVariableDescriptorCountAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     descriptorSetCount: u32
     pDescriptorCounts: *u32
 }
 VkDescriptorSetVariableDescriptorCountLayoutSupport :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxVariableDescriptorCount: u32
 }
 VkAttachmentDescription2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkAttachmentDescriptionFlags
-    format: i32   // VkFormat
-    samples: u32   // VkSampleCountFlagBits
-    loadOp: i32   // VkAttachmentLoadOp
-    storeOp: i32   // VkAttachmentStoreOp
-    stencilLoadOp: i32   // VkAttachmentLoadOp
-    stencilStoreOp: i32   // VkAttachmentStoreOp
-    initialLayout: i32   // VkImageLayout
-    finalLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkAttachmentDescriptionFlags
+    format: i32    // VkFormat
+    samples: u32    // VkSampleCountFlagBits
+    loadOp: i32    // VkAttachmentLoadOp
+    storeOp: i32    // VkAttachmentStoreOp
+    stencilLoadOp: i32    // VkAttachmentLoadOp
+    stencilStoreOp: i32    // VkAttachmentStoreOp
+    initialLayout: i32    // VkImageLayout
+    finalLayout: i32    // VkImageLayout
 }
 VkAttachmentReference2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     attachment: u32
-    layout: i32   // VkImageLayout
-    aspectMask: u32   // VkImageAspectFlags
+    layout: i32    // VkImageLayout
+    aspectMask: u32    // VkImageAspectFlags
 }
 VkSubpassDescription2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkSubpassDescriptionFlags
-    pipelineBindPoint: i32   // VkPipelineBindPoint
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkSubpassDescriptionFlags
+    pipelineBindPoint: i32    // VkPipelineBindPoint
     viewMask: u32
     inputAttachmentCount: u32
     pInputAttachments: *VkAttachmentReference2
@@ -3094,21 +3094,21 @@ VkSubpassDescription2 :: struct {
     pPreserveAttachments: *u32
 }
 VkSubpassDependency2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     srcSubpass: u32
     dstSubpass: u32
-    srcStageMask: u32   // VkPipelineStageFlags
-    dstStageMask: u32   // VkPipelineStageFlags
-    srcAccessMask: u32   // VkAccessFlags
-    dstAccessMask: u32   // VkAccessFlags
-    dependencyFlags: u32   // VkDependencyFlags
+    srcStageMask: u32    // VkPipelineStageFlags
+    dstStageMask: u32    // VkPipelineStageFlags
+    srcAccessMask: u32    // VkAccessFlags
+    dstAccessMask: u32    // VkAccessFlags
+    dependencyFlags: u32    // VkDependencyFlags
     viewOffset: i32
 }
 VkRenderPassCreateInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkRenderPassCreateFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkRenderPassCreateFlags
     attachmentCount: u32
     pAttachments: *VkAttachmentDescription2
     subpassCount: u32
@@ -3119,344 +3119,344 @@ VkRenderPassCreateInfo2 :: struct {
     pCorrelatedViewMasks: *u32
 }
 VkSubpassBeginInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    contents: i32   // VkSubpassContents
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    contents: i32    // VkSubpassContents
 }
 VkSubpassEndInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
 }
 VkPhysicalDeviceTimelineSemaphoreFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    timelineSemaphore: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    timelineSemaphore: u32    // VkBool32
 }
 VkPhysicalDeviceTimelineSemaphoreProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     maxTimelineSemaphoreValueDifference: u64
 }
 VkSemaphoreTypeCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    semaphoreType: i32   // VkSemaphoreType
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    semaphoreType: i32    // VkSemaphoreType
     initialValue: u64
 }
 VkTimelineSemaphoreSubmitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     waitSemaphoreValueCount: u32
     pWaitSemaphoreValues: *u64
     signalSemaphoreValueCount: u32
     pSignalSemaphoreValues: *u64
 }
 VkSemaphoreWaitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkSemaphoreWaitFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkSemaphoreWaitFlags
     semaphoreCount: u32
-    pSemaphores: *u64   // VkSemaphore*
+    pSemaphores: *u64    // VkSemaphore*
     pValues: *u64
 }
 VkSemaphoreSignalInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    semaphore: u64   // VkSemaphore
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    semaphore: u64    // VkSemaphore
     value: u64
 }
 VkPhysicalDevice8BitStorageFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    storageBuffer8BitAccess: u32   // VkBool32
-    uniformAndStorageBuffer8BitAccess: u32   // VkBool32
-    storagePushConstant8: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    storageBuffer8BitAccess: u32    // VkBool32
+    uniformAndStorageBuffer8BitAccess: u32    // VkBool32
+    storagePushConstant8: u32    // VkBool32
 }
 VkPhysicalDeviceVulkanMemoryModelFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    vulkanMemoryModel: u32   // VkBool32
-    vulkanMemoryModelDeviceScope: u32   // VkBool32
-    vulkanMemoryModelAvailabilityVisibilityChains: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    vulkanMemoryModel: u32    // VkBool32
+    vulkanMemoryModelDeviceScope: u32    // VkBool32
+    vulkanMemoryModelAvailabilityVisibilityChains: u32    // VkBool32
 }
 VkPhysicalDeviceShaderAtomicInt64Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderBufferInt64Atomics: u32   // VkBool32
-    shaderSharedInt64Atomics: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderBufferInt64Atomics: u32    // VkBool32
+    shaderSharedInt64Atomics: u32    // VkBool32
 }
 VkPhysicalDeviceDepthStencilResolveProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    supportedDepthResolveModes: u32   // VkResolveModeFlags
-    supportedStencilResolveModes: u32   // VkResolveModeFlags
-    independentResolveNone: u32   // VkBool32
-    independentResolve: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    supportedDepthResolveModes: u32    // VkResolveModeFlags
+    supportedStencilResolveModes: u32    // VkResolveModeFlags
+    independentResolveNone: u32    // VkBool32
+    independentResolve: u32    // VkBool32
 }
 VkSubpassDescriptionDepthStencilResolve :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    depthResolveMode: u32   // VkResolveModeFlagBits
-    stencilResolveMode: u32   // VkResolveModeFlagBits
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    depthResolveMode: u32    // VkResolveModeFlagBits
+    stencilResolveMode: u32    // VkResolveModeFlagBits
     pDepthStencilResolveAttachment: *VkAttachmentReference2
 }
 VkImageStencilUsageCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    stencilUsage: u32   // VkImageUsageFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    stencilUsage: u32    // VkImageUsageFlags
 }
 VkPhysicalDeviceScalarBlockLayoutFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    scalarBlockLayout: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    scalarBlockLayout: u32    // VkBool32
 }
 VkPhysicalDeviceUniformBufferStandardLayoutFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    uniformBufferStandardLayout: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    uniformBufferStandardLayout: u32    // VkBool32
 }
 VkPhysicalDeviceBufferDeviceAddressFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    bufferDeviceAddress: u32   // VkBool32
-    bufferDeviceAddressCaptureReplay: u32   // VkBool32
-    bufferDeviceAddressMultiDevice: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    bufferDeviceAddress: u32    // VkBool32
+    bufferDeviceAddressCaptureReplay: u32    // VkBool32
+    bufferDeviceAddressMultiDevice: u32    // VkBool32
 }
 VkBufferDeviceAddressInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    buffer: u64   // VkBuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    buffer: u64    // VkBuffer
 }
 VkBufferOpaqueCaptureAddressCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     opaqueCaptureAddress: u64
 }
 VkPhysicalDeviceImagelessFramebufferFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    imagelessFramebuffer: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    imagelessFramebuffer: u32    // VkBool32
 }
 VkFramebufferAttachmentsCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     attachmentImageInfoCount: u32
     pAttachmentImageInfos: *VkFramebufferAttachmentImageInfo
 }
 VkFramebufferAttachmentImageInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkImageCreateFlags
-    usage: u32   // VkImageUsageFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkImageCreateFlags
+    usage: u32    // VkImageUsageFlags
     width: u32
     height: u32
     layerCount: u32
     viewFormatCount: u32
-    pViewFormats: *i32   // VkFormat*
+    pViewFormats: *i32    // VkFormat*
 }
 VkRenderPassAttachmentBeginInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     attachmentCount: u32
-    pAttachments: *u64   // VkImageView*
+    pAttachments: *u64    // VkImageView*
 }
 VkPhysicalDeviceTextureCompressionASTCHDRFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    textureCompressionASTC_HDR: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    textureCompressionASTC_HDR: u32    // VkBool32
 }
 VkPipelineCreationFeedback :: struct {
-    flags: u32   // VkPipelineCreationFeedbackFlags
+    flags: u32    // VkPipelineCreationFeedbackFlags
     duration: u64
 }
 VkPipelineCreationFeedbackCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     pPipelineCreationFeedback: *VkPipelineCreationFeedback
     pipelineStageCreationFeedbackCount: u32
     pPipelineStageCreationFeedbacks: *VkPipelineCreationFeedback
 }
 VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    separateDepthStencilLayouts: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    separateDepthStencilLayouts: u32    // VkBool32
 }
 VkAttachmentReferenceStencilLayout :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    stencilLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    stencilLayout: i32    // VkImageLayout
 }
 VkAttachmentDescriptionStencilLayout :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    stencilInitialLayout: i32   // VkImageLayout
-    stencilFinalLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    stencilInitialLayout: i32    // VkImageLayout
+    stencilFinalLayout: i32    // VkImageLayout
 }
 VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderDemoteToHelperInvocation: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderDemoteToHelperInvocation: u32    // VkBool32
 }
 VkPhysicalDeviceTexelBufferAlignmentProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    storageTexelBufferOffsetAlignmentBytes: u64   // VkDeviceSize
-    storageTexelBufferOffsetSingleTexelAlignment: u32   // VkBool32
-    uniformTexelBufferOffsetAlignmentBytes: u64   // VkDeviceSize
-    uniformTexelBufferOffsetSingleTexelAlignment: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    storageTexelBufferOffsetAlignmentBytes: u64    // VkDeviceSize
+    storageTexelBufferOffsetSingleTexelAlignment: u32    // VkBool32
+    uniformTexelBufferOffsetAlignmentBytes: u64    // VkDeviceSize
+    uniformTexelBufferOffsetSingleTexelAlignment: u32    // VkBool32
 }
 VkPhysicalDeviceSubgroupSizeControlFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    subgroupSizeControl: u32   // VkBool32
-    computeFullSubgroups: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    subgroupSizeControl: u32    // VkBool32
+    computeFullSubgroups: u32    // VkBool32
 }
 VkPhysicalDeviceSubgroupSizeControlProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     minSubgroupSize: u32
     maxSubgroupSize: u32
     maxComputeWorkgroupSubgroups: u32
-    requiredSubgroupSizeStages: u32   // VkShaderStageFlags
+    requiredSubgroupSizeStages: u32    // VkShaderStageFlags
 }
 VkPipelineShaderStageRequiredSubgroupSizeCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     requiredSubgroupSize: u32
 }
 VkMemoryOpaqueCaptureAddressAllocateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     opaqueCaptureAddress: u64
 }
 VkDeviceMemoryOpaqueCaptureAddressInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    memory: u64   // VkDeviceMemory
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    memory: u64    // VkDeviceMemory
 }
 VkPhysicalDevicePipelineCreationCacheControlFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    pipelineCreationCacheControl: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    pipelineCreationCacheControl: u32    // VkBool32
 }
 VkPhysicalDeviceVulkan11Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    storageBuffer16BitAccess: u32   // VkBool32
-    uniformAndStorageBuffer16BitAccess: u32   // VkBool32
-    storagePushConstant16: u32   // VkBool32
-    storageInputOutput16: u32   // VkBool32
-    multiview: u32   // VkBool32
-    multiviewGeometryShader: u32   // VkBool32
-    multiviewTessellationShader: u32   // VkBool32
-    variablePointersStorageBuffer: u32   // VkBool32
-    variablePointers: u32   // VkBool32
-    protectedMemory: u32   // VkBool32
-    samplerYcbcrConversion: u32   // VkBool32
-    shaderDrawParameters: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    storageBuffer16BitAccess: u32    // VkBool32
+    uniformAndStorageBuffer16BitAccess: u32    // VkBool32
+    storagePushConstant16: u32    // VkBool32
+    storageInputOutput16: u32    // VkBool32
+    multiview: u32    // VkBool32
+    multiviewGeometryShader: u32    // VkBool32
+    multiviewTessellationShader: u32    // VkBool32
+    variablePointersStorageBuffer: u32    // VkBool32
+    variablePointers: u32    // VkBool32
+    protectedMemory: u32    // VkBool32
+    samplerYcbcrConversion: u32    // VkBool32
+    shaderDrawParameters: u32    // VkBool32
 }
 VkPhysicalDeviceVulkan11Properties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     deviceUUID: [VK_UUID_SIZE]u8
     driverUUID: [VK_UUID_SIZE]u8
     deviceLUID: [VK_LUID_SIZE]u8
     deviceNodeMask: u32
-    deviceLUIDValid: u32   // VkBool32
+    deviceLUIDValid: u32    // VkBool32
     subgroupSize: u32
-    subgroupSupportedStages: u32   // VkShaderStageFlags
-    subgroupSupportedOperations: u32   // VkSubgroupFeatureFlags
-    subgroupQuadOperationsInAllStages: u32   // VkBool32
-    pointClippingBehavior: i32   // VkPointClippingBehavior
+    subgroupSupportedStages: u32    // VkShaderStageFlags
+    subgroupSupportedOperations: u32    // VkSubgroupFeatureFlags
+    subgroupQuadOperationsInAllStages: u32    // VkBool32
+    pointClippingBehavior: i32    // VkPointClippingBehavior
     maxMultiviewViewCount: u32
     maxMultiviewInstanceIndex: u32
-    protectedNoFault: u32   // VkBool32
+    protectedNoFault: u32    // VkBool32
     maxPerSetDescriptors: u32
-    maxMemoryAllocationSize: u64   // VkDeviceSize
+    maxMemoryAllocationSize: u64    // VkDeviceSize
 }
 VkPhysicalDeviceVulkan12Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    samplerMirrorClampToEdge: u32   // VkBool32
-    drawIndirectCount: u32   // VkBool32
-    storageBuffer8BitAccess: u32   // VkBool32
-    uniformAndStorageBuffer8BitAccess: u32   // VkBool32
-    storagePushConstant8: u32   // VkBool32
-    shaderBufferInt64Atomics: u32   // VkBool32
-    shaderSharedInt64Atomics: u32   // VkBool32
-    shaderFloat16: u32   // VkBool32
-    shaderInt8: u32   // VkBool32
-    descriptorIndexing: u32   // VkBool32
-    shaderInputAttachmentArrayDynamicIndexing: u32   // VkBool32
-    shaderUniformTexelBufferArrayDynamicIndexing: u32   // VkBool32
-    shaderStorageTexelBufferArrayDynamicIndexing: u32   // VkBool32
-    shaderUniformBufferArrayNonUniformIndexing: u32   // VkBool32
-    shaderSampledImageArrayNonUniformIndexing: u32   // VkBool32
-    shaderStorageBufferArrayNonUniformIndexing: u32   // VkBool32
-    shaderStorageImageArrayNonUniformIndexing: u32   // VkBool32
-    shaderInputAttachmentArrayNonUniformIndexing: u32   // VkBool32
-    shaderUniformTexelBufferArrayNonUniformIndexing: u32   // VkBool32
-    shaderStorageTexelBufferArrayNonUniformIndexing: u32   // VkBool32
-    descriptorBindingUniformBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingSampledImageUpdateAfterBind: u32   // VkBool32
-    descriptorBindingStorageImageUpdateAfterBind: u32   // VkBool32
-    descriptorBindingStorageBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingUniformTexelBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingStorageTexelBufferUpdateAfterBind: u32   // VkBool32
-    descriptorBindingUpdateUnusedWhilePending: u32   // VkBool32
-    descriptorBindingPartiallyBound: u32   // VkBool32
-    descriptorBindingVariableDescriptorCount: u32   // VkBool32
-    runtimeDescriptorArray: u32   // VkBool32
-    samplerFilterMinmax: u32   // VkBool32
-    scalarBlockLayout: u32   // VkBool32
-    imagelessFramebuffer: u32   // VkBool32
-    uniformBufferStandardLayout: u32   // VkBool32
-    shaderSubgroupExtendedTypes: u32   // VkBool32
-    separateDepthStencilLayouts: u32   // VkBool32
-    hostQueryReset: u32   // VkBool32
-    timelineSemaphore: u32   // VkBool32
-    bufferDeviceAddress: u32   // VkBool32
-    bufferDeviceAddressCaptureReplay: u32   // VkBool32
-    bufferDeviceAddressMultiDevice: u32   // VkBool32
-    vulkanMemoryModel: u32   // VkBool32
-    vulkanMemoryModelDeviceScope: u32   // VkBool32
-    vulkanMemoryModelAvailabilityVisibilityChains: u32   // VkBool32
-    shaderOutputViewportIndex: u32   // VkBool32
-    shaderOutputLayer: u32   // VkBool32
-    subgroupBroadcastDynamicId: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    samplerMirrorClampToEdge: u32    // VkBool32
+    drawIndirectCount: u32    // VkBool32
+    storageBuffer8BitAccess: u32    // VkBool32
+    uniformAndStorageBuffer8BitAccess: u32    // VkBool32
+    storagePushConstant8: u32    // VkBool32
+    shaderBufferInt64Atomics: u32    // VkBool32
+    shaderSharedInt64Atomics: u32    // VkBool32
+    shaderFloat16: u32    // VkBool32
+    shaderInt8: u32    // VkBool32
+    descriptorIndexing: u32    // VkBool32
+    shaderInputAttachmentArrayDynamicIndexing: u32    // VkBool32
+    shaderUniformTexelBufferArrayDynamicIndexing: u32    // VkBool32
+    shaderStorageTexelBufferArrayDynamicIndexing: u32    // VkBool32
+    shaderUniformBufferArrayNonUniformIndexing: u32    // VkBool32
+    shaderSampledImageArrayNonUniformIndexing: u32    // VkBool32
+    shaderStorageBufferArrayNonUniformIndexing: u32    // VkBool32
+    shaderStorageImageArrayNonUniformIndexing: u32    // VkBool32
+    shaderInputAttachmentArrayNonUniformIndexing: u32    // VkBool32
+    shaderUniformTexelBufferArrayNonUniformIndexing: u32    // VkBool32
+    shaderStorageTexelBufferArrayNonUniformIndexing: u32    // VkBool32
+    descriptorBindingUniformBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingSampledImageUpdateAfterBind: u32    // VkBool32
+    descriptorBindingStorageImageUpdateAfterBind: u32    // VkBool32
+    descriptorBindingStorageBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingUniformTexelBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingStorageTexelBufferUpdateAfterBind: u32    // VkBool32
+    descriptorBindingUpdateUnusedWhilePending: u32    // VkBool32
+    descriptorBindingPartiallyBound: u32    // VkBool32
+    descriptorBindingVariableDescriptorCount: u32    // VkBool32
+    runtimeDescriptorArray: u32    // VkBool32
+    samplerFilterMinmax: u32    // VkBool32
+    scalarBlockLayout: u32    // VkBool32
+    imagelessFramebuffer: u32    // VkBool32
+    uniformBufferStandardLayout: u32    // VkBool32
+    shaderSubgroupExtendedTypes: u32    // VkBool32
+    separateDepthStencilLayouts: u32    // VkBool32
+    hostQueryReset: u32    // VkBool32
+    timelineSemaphore: u32    // VkBool32
+    bufferDeviceAddress: u32    // VkBool32
+    bufferDeviceAddressCaptureReplay: u32    // VkBool32
+    bufferDeviceAddressMultiDevice: u32    // VkBool32
+    vulkanMemoryModel: u32    // VkBool32
+    vulkanMemoryModelDeviceScope: u32    // VkBool32
+    vulkanMemoryModelAvailabilityVisibilityChains: u32    // VkBool32
+    shaderOutputViewportIndex: u32    // VkBool32
+    shaderOutputLayer: u32    // VkBool32
+    subgroupBroadcastDynamicId: u32    // VkBool32
 }
 VkPhysicalDeviceVulkan12Properties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    driverID: i32   // VkDriverId
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    driverID: i32    // VkDriverId
     driverName: [VK_MAX_DRIVER_NAME_SIZE]u8
     driverInfo: [VK_MAX_DRIVER_INFO_SIZE]u8
     conformanceVersion: VkConformanceVersion
-    denormBehaviorIndependence: i32   // VkShaderFloatControlsIndependence
-    roundingModeIndependence: i32   // VkShaderFloatControlsIndependence
-    shaderSignedZeroInfNanPreserveFloat16: u32   // VkBool32
-    shaderSignedZeroInfNanPreserveFloat32: u32   // VkBool32
-    shaderSignedZeroInfNanPreserveFloat64: u32   // VkBool32
-    shaderDenormPreserveFloat16: u32   // VkBool32
-    shaderDenormPreserveFloat32: u32   // VkBool32
-    shaderDenormPreserveFloat64: u32   // VkBool32
-    shaderDenormFlushToZeroFloat16: u32   // VkBool32
-    shaderDenormFlushToZeroFloat32: u32   // VkBool32
-    shaderDenormFlushToZeroFloat64: u32   // VkBool32
-    shaderRoundingModeRTEFloat16: u32   // VkBool32
-    shaderRoundingModeRTEFloat32: u32   // VkBool32
-    shaderRoundingModeRTEFloat64: u32   // VkBool32
-    shaderRoundingModeRTZFloat16: u32   // VkBool32
-    shaderRoundingModeRTZFloat32: u32   // VkBool32
-    shaderRoundingModeRTZFloat64: u32   // VkBool32
+    denormBehaviorIndependence: i32    // VkShaderFloatControlsIndependence
+    roundingModeIndependence: i32    // VkShaderFloatControlsIndependence
+    shaderSignedZeroInfNanPreserveFloat16: u32    // VkBool32
+    shaderSignedZeroInfNanPreserveFloat32: u32    // VkBool32
+    shaderSignedZeroInfNanPreserveFloat64: u32    // VkBool32
+    shaderDenormPreserveFloat16: u32    // VkBool32
+    shaderDenormPreserveFloat32: u32    // VkBool32
+    shaderDenormPreserveFloat64: u32    // VkBool32
+    shaderDenormFlushToZeroFloat16: u32    // VkBool32
+    shaderDenormFlushToZeroFloat32: u32    // VkBool32
+    shaderDenormFlushToZeroFloat64: u32    // VkBool32
+    shaderRoundingModeRTEFloat16: u32    // VkBool32
+    shaderRoundingModeRTEFloat32: u32    // VkBool32
+    shaderRoundingModeRTEFloat64: u32    // VkBool32
+    shaderRoundingModeRTZFloat16: u32    // VkBool32
+    shaderRoundingModeRTZFloat32: u32    // VkBool32
+    shaderRoundingModeRTZFloat64: u32    // VkBool32
     maxUpdateAfterBindDescriptorsInAllPools: u32
-    shaderUniformBufferArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderSampledImageArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderStorageBufferArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderStorageImageArrayNonUniformIndexingNative: u32   // VkBool32
-    shaderInputAttachmentArrayNonUniformIndexingNative: u32   // VkBool32
-    robustBufferAccessUpdateAfterBind: u32   // VkBool32
-    quadDivergentImplicitLod: u32   // VkBool32
+    shaderUniformBufferArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderSampledImageArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderStorageBufferArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderStorageImageArrayNonUniformIndexingNative: u32    // VkBool32
+    shaderInputAttachmentArrayNonUniformIndexingNative: u32    // VkBool32
+    robustBufferAccessUpdateAfterBind: u32    // VkBool32
+    quadDivergentImplicitLod: u32    // VkBool32
     maxPerStageDescriptorUpdateAfterBindSamplers: u32
     maxPerStageDescriptorUpdateAfterBindUniformBuffers: u32
     maxPerStageDescriptorUpdateAfterBindStorageBuffers: u32
@@ -3472,112 +3472,112 @@ VkPhysicalDeviceVulkan12Properties :: struct {
     maxDescriptorSetUpdateAfterBindSampledImages: u32
     maxDescriptorSetUpdateAfterBindStorageImages: u32
     maxDescriptorSetUpdateAfterBindInputAttachments: u32
-    supportedDepthResolveModes: u32   // VkResolveModeFlags
-    supportedStencilResolveModes: u32   // VkResolveModeFlags
-    independentResolveNone: u32   // VkBool32
-    independentResolve: u32   // VkBool32
-    filterMinmaxSingleComponentFormats: u32   // VkBool32
-    filterMinmaxImageComponentMapping: u32   // VkBool32
+    supportedDepthResolveModes: u32    // VkResolveModeFlags
+    supportedStencilResolveModes: u32    // VkResolveModeFlags
+    independentResolveNone: u32    // VkBool32
+    independentResolve: u32    // VkBool32
+    filterMinmaxSingleComponentFormats: u32    // VkBool32
+    filterMinmaxImageComponentMapping: u32    // VkBool32
     maxTimelineSemaphoreValueDifference: u64
-    framebufferIntegerColorSampleCounts: u32   // VkSampleCountFlags
+    framebufferIntegerColorSampleCounts: u32    // VkSampleCountFlags
 }
 VkPhysicalDeviceVulkan13Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    robustImageAccess: u32   // VkBool32
-    inlineUniformBlock: u32   // VkBool32
-    descriptorBindingInlineUniformBlockUpdateAfterBind: u32   // VkBool32
-    pipelineCreationCacheControl: u32   // VkBool32
-    privateData: u32   // VkBool32
-    shaderDemoteToHelperInvocation: u32   // VkBool32
-    shaderTerminateInvocation: u32   // VkBool32
-    subgroupSizeControl: u32   // VkBool32
-    computeFullSubgroups: u32   // VkBool32
-    synchronization2: u32   // VkBool32
-    textureCompressionASTC_HDR: u32   // VkBool32
-    shaderZeroInitializeWorkgroupMemory: u32   // VkBool32
-    dynamicRendering: u32   // VkBool32
-    shaderIntegerDotProduct: u32   // VkBool32
-    maintenance4: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    robustImageAccess: u32    // VkBool32
+    inlineUniformBlock: u32    // VkBool32
+    descriptorBindingInlineUniformBlockUpdateAfterBind: u32    // VkBool32
+    pipelineCreationCacheControl: u32    // VkBool32
+    privateData: u32    // VkBool32
+    shaderDemoteToHelperInvocation: u32    // VkBool32
+    shaderTerminateInvocation: u32    // VkBool32
+    subgroupSizeControl: u32    // VkBool32
+    computeFullSubgroups: u32    // VkBool32
+    synchronization2: u32    // VkBool32
+    textureCompressionASTC_HDR: u32    // VkBool32
+    shaderZeroInitializeWorkgroupMemory: u32    // VkBool32
+    dynamicRendering: u32    // VkBool32
+    shaderIntegerDotProduct: u32    // VkBool32
+    maintenance4: u32    // VkBool32
 }
 VkPhysicalDeviceVulkan13Properties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     minSubgroupSize: u32
     maxSubgroupSize: u32
     maxComputeWorkgroupSubgroups: u32
-    requiredSubgroupSizeStages: u32   // VkShaderStageFlags
+    requiredSubgroupSizeStages: u32    // VkShaderStageFlags
     maxInlineUniformBlockSize: u32
     maxPerStageDescriptorInlineUniformBlocks: u32
     maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks: u32
     maxDescriptorSetInlineUniformBlocks: u32
     maxDescriptorSetUpdateAfterBindInlineUniformBlocks: u32
     maxInlineUniformTotalSize: u32
-    integerDotProduct8BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct8BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct8BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct4x8BitPackedUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct4x8BitPackedSignedAccelerated: u32   // VkBool32
-    integerDotProduct4x8BitPackedMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct16BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct16BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct16BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct32BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct32BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct32BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct64BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct64BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct64BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating8BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating8BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating16BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating16BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating32BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating32BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating32BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating64BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating64BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated: u32   // VkBool32
-    storageTexelBufferOffsetAlignmentBytes: u64   // VkDeviceSize
-    storageTexelBufferOffsetSingleTexelAlignment: u32   // VkBool32
-    uniformTexelBufferOffsetAlignmentBytes: u64   // VkDeviceSize
-    uniformTexelBufferOffsetSingleTexelAlignment: u32   // VkBool32
-    maxBufferSize: u64   // VkDeviceSize
+    integerDotProduct8BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct8BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct8BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct4x8BitPackedUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct4x8BitPackedSignedAccelerated: u32    // VkBool32
+    integerDotProduct4x8BitPackedMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct16BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct16BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct16BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct32BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct32BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct32BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct64BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct64BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct64BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating8BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating8BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating16BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating16BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating32BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating32BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating32BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating64BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating64BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated: u32    // VkBool32
+    storageTexelBufferOffsetAlignmentBytes: u64    // VkDeviceSize
+    storageTexelBufferOffsetSingleTexelAlignment: u32    // VkBool32
+    uniformTexelBufferOffsetAlignmentBytes: u64    // VkDeviceSize
+    uniformTexelBufferOffsetSingleTexelAlignment: u32    // VkBool32
+    maxBufferSize: u64    // VkDeviceSize
 }
 VkPhysicalDeviceToolProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     name: [VK_MAX_EXTENSION_NAME_SIZE]u8
     version: [VK_MAX_EXTENSION_NAME_SIZE]u8
-    purposes: u32   // VkToolPurposeFlags
+    purposes: u32    // VkToolPurposeFlags
     description: [VK_MAX_DESCRIPTION_SIZE]u8
     layer: [VK_MAX_EXTENSION_NAME_SIZE]u8
 }
 VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderZeroInitializeWorkgroupMemory: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderZeroInitializeWorkgroupMemory: u32    // VkBool32
 }
 VkPhysicalDeviceImageRobustnessFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    robustImageAccess: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    robustImageAccess: u32    // VkBool32
 }
 VkBufferCopy2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcOffset: u64   // VkDeviceSize
-    dstOffset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcOffset: u64    // VkDeviceSize
+    dstOffset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
 }
 VkImageCopy2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     srcSubresource: VkImageSubresourceLayers
     srcOffset: VkOffset3D
     dstSubresource: VkImageSubresourceLayers
@@ -3585,17 +3585,17 @@ VkImageCopy2 :: struct {
     extent: VkExtent3D
 }
 VkImageBlit2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     srcSubresource: VkImageSubresourceLayers
     srcOffsets: [2]VkOffset3D
     dstSubresource: VkImageSubresourceLayers
     dstOffsets: [2]VkOffset3D
 }
 VkBufferImageCopy2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    bufferOffset: u64   // VkDeviceSize
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    bufferOffset: u64    // VkDeviceSize
     bufferRowLength: u32
     bufferImageHeight: u32
     imageSubresource: VkImageSubresourceLayers
@@ -3603,8 +3603,8 @@ VkBufferImageCopy2 :: struct {
     imageExtent: VkExtent3D
 }
 VkImageResolve2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     srcSubresource: VkImageSubresourceLayers
     srcOffset: VkOffset3D
     dstSubresource: VkImageSubresourceLayers
@@ -3612,106 +3612,106 @@ VkImageResolve2 :: struct {
     extent: VkExtent3D
 }
 VkCopyBufferInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcBuffer: u64   // VkBuffer
-    dstBuffer: u64   // VkBuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcBuffer: u64    // VkBuffer
+    dstBuffer: u64    // VkBuffer
     regionCount: u32
     pRegions: *VkBufferCopy2
 }
 VkCopyImageInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcImage: u64   // VkImage
-    srcImageLayout: i32   // VkImageLayout
-    dstImage: u64   // VkImage
-    dstImageLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcImage: u64    // VkImage
+    srcImageLayout: i32    // VkImageLayout
+    dstImage: u64    // VkImage
+    dstImageLayout: i32    // VkImageLayout
     regionCount: u32
     pRegions: *VkImageCopy2
 }
 VkBlitImageInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcImage: u64   // VkImage
-    srcImageLayout: i32   // VkImageLayout
-    dstImage: u64   // VkImage
-    dstImageLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcImage: u64    // VkImage
+    srcImageLayout: i32    // VkImageLayout
+    dstImage: u64    // VkImage
+    dstImageLayout: i32    // VkImageLayout
     regionCount: u32
     pRegions: *VkImageBlit2
-    filter: i32   // VkFilter
+    filter: i32    // VkFilter
 }
 VkCopyBufferToImageInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcBuffer: u64   // VkBuffer
-    dstImage: u64   // VkImage
-    dstImageLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcBuffer: u64    // VkBuffer
+    dstImage: u64    // VkImage
+    dstImageLayout: i32    // VkImageLayout
     regionCount: u32
     pRegions: *VkBufferImageCopy2
 }
 VkCopyImageToBufferInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcImage: u64   // VkImage
-    srcImageLayout: i32   // VkImageLayout
-    dstBuffer: u64   // VkBuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcImage: u64    // VkImage
+    srcImageLayout: i32    // VkImageLayout
+    dstBuffer: u64    // VkBuffer
     regionCount: u32
     pRegions: *VkBufferImageCopy2
 }
 VkResolveImageInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcImage: u64   // VkImage
-    srcImageLayout: i32   // VkImageLayout
-    dstImage: u64   // VkImage
-    dstImageLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcImage: u64    // VkImage
+    srcImageLayout: i32    // VkImageLayout
+    dstImage: u64    // VkImage
+    dstImageLayout: i32    // VkImageLayout
     regionCount: u32
     pRegions: *VkImageResolve2
 }
 VkPhysicalDeviceShaderTerminateInvocationFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderTerminateInvocation: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderTerminateInvocation: u32    // VkBool32
 }
 VkMemoryBarrier2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcStageMask: u64   // VkPipelineStageFlags2
-    srcAccessMask: u64   // VkAccessFlags2
-    dstStageMask: u64   // VkPipelineStageFlags2
-    dstAccessMask: u64   // VkAccessFlags2
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcStageMask: u64    // VkPipelineStageFlags2
+    srcAccessMask: u64    // VkAccessFlags2
+    dstStageMask: u64    // VkPipelineStageFlags2
+    dstAccessMask: u64    // VkAccessFlags2
 }
 VkImageMemoryBarrier2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcStageMask: u64   // VkPipelineStageFlags2
-    srcAccessMask: u64   // VkAccessFlags2
-    dstStageMask: u64   // VkPipelineStageFlags2
-    dstAccessMask: u64   // VkAccessFlags2
-    oldLayout: i32   // VkImageLayout
-    newLayout: i32   // VkImageLayout
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcStageMask: u64    // VkPipelineStageFlags2
+    srcAccessMask: u64    // VkAccessFlags2
+    dstStageMask: u64    // VkPipelineStageFlags2
+    dstAccessMask: u64    // VkAccessFlags2
+    oldLayout: i32    // VkImageLayout
+    newLayout: i32    // VkImageLayout
     srcQueueFamilyIndex: u32
     dstQueueFamilyIndex: u32
-    image: u64   // VkImage
+    image: u64    // VkImage
     subresourceRange: VkImageSubresourceRange
 }
 VkBufferMemoryBarrier2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    srcStageMask: u64   // VkPipelineStageFlags2
-    srcAccessMask: u64   // VkAccessFlags2
-    dstStageMask: u64   // VkPipelineStageFlags2
-    dstAccessMask: u64   // VkAccessFlags2
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    srcStageMask: u64    // VkPipelineStageFlags2
+    srcAccessMask: u64    // VkAccessFlags2
+    dstStageMask: u64    // VkPipelineStageFlags2
+    dstAccessMask: u64    // VkAccessFlags2
     srcQueueFamilyIndex: u32
     dstQueueFamilyIndex: u32
-    buffer: u64   // VkBuffer
-    offset: u64   // VkDeviceSize
-    size: u64   // VkDeviceSize
+    buffer: u64    // VkBuffer
+    offset: u64    // VkDeviceSize
+    size: u64    // VkDeviceSize
 }
 VkDependencyInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    dependencyFlags: u32   // VkDependencyFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    dependencyFlags: u32    // VkDependencyFlags
     memoryBarrierCount: u32
     pMemoryBarriers: *VkMemoryBarrier2
     bufferMemoryBarrierCount: u32
@@ -3720,23 +3720,23 @@ VkDependencyInfo :: struct {
     pImageMemoryBarriers: *VkImageMemoryBarrier2
 }
 VkSemaphoreSubmitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    semaphore: u64   // VkSemaphore
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    semaphore: u64    // VkSemaphore
     value: u64
-    stageMask: u64   // VkPipelineStageFlags2
+    stageMask: u64    // VkPipelineStageFlags2
     deviceIndex: u32
 }
 VkCommandBufferSubmitInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    commandBuffer: *u8   // VkCommandBuffer
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    commandBuffer: *u8    // VkCommandBuffer
     deviceMask: u32
 }
 VkSubmitInfo2 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkSubmitFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkSubmitFlags
     waitSemaphoreInfoCount: u32
     pWaitSemaphoreInfos: *VkSemaphoreSubmitInfo
     commandBufferInfoCount: u32
@@ -3745,69 +3745,69 @@ VkSubmitInfo2 :: struct {
     pSignalSemaphoreInfos: *VkSemaphoreSubmitInfo
 }
 VkPhysicalDeviceSynchronization2Features :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    synchronization2: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    synchronization2: u32    // VkBool32
 }
 VkPhysicalDeviceShaderIntegerDotProductFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    shaderIntegerDotProduct: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    shaderIntegerDotProduct: u32    // VkBool32
 }
 VkPhysicalDeviceShaderIntegerDotProductProperties :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    integerDotProduct8BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct8BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct8BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct4x8BitPackedUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct4x8BitPackedSignedAccelerated: u32   // VkBool32
-    integerDotProduct4x8BitPackedMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct16BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct16BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct16BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct32BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct32BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct32BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProduct64BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProduct64BitSignedAccelerated: u32   // VkBool32
-    integerDotProduct64BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating8BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating8BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating16BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating16BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating32BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating32BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating32BitMixedSignednessAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating64BitUnsignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating64BitSignedAccelerated: u32   // VkBool32
-    integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    integerDotProduct8BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct8BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct8BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct4x8BitPackedUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct4x8BitPackedSignedAccelerated: u32    // VkBool32
+    integerDotProduct4x8BitPackedMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct16BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct16BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct16BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct32BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct32BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct32BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProduct64BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProduct64BitSignedAccelerated: u32    // VkBool32
+    integerDotProduct64BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating8BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating8BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating16BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating16BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating32BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating32BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating32BitMixedSignednessAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating64BitUnsignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating64BitSignedAccelerated: u32    // VkBool32
+    integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated: u32    // VkBool32
 }
 VkFormatProperties3 :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    linearTilingFeatures: u64   // VkFormatFeatureFlags2
-    optimalTilingFeatures: u64   // VkFormatFeatureFlags2
-    bufferFeatures: u64   // VkFormatFeatureFlags2
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    linearTilingFeatures: u64    // VkFormatFeatureFlags2
+    optimalTilingFeatures: u64    // VkFormatFeatureFlags2
+    bufferFeatures: u64    // VkFormatFeatureFlags2
 }
 VkPipelineRenderingCreateInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
     viewMask: u32
     colorAttachmentCount: u32
-    pColorAttachmentFormats: *i32   // VkFormat*
-    depthAttachmentFormat: i32   // VkFormat
-    stencilAttachmentFormat: i32   // VkFormat
+    pColorAttachmentFormats: *i32    // VkFormat*
+    depthAttachmentFormat: i32    // VkFormat
+    stencilAttachmentFormat: i32    // VkFormat
 }
 VkRenderingInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkRenderingFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkRenderingFlags
     renderArea: VkRect2D
     layerCount: u32
     viewMask: u32
@@ -3817,32 +3817,32 @@ VkRenderingInfo :: struct {
     pStencilAttachment: *VkRenderingAttachmentInfo
 }
 VkRenderingAttachmentInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    imageView: u64   // VkImageView
-    imageLayout: i32   // VkImageLayout
-    resolveMode: u32   // VkResolveModeFlagBits
-    resolveImageView: u64   // VkImageView
-    resolveImageLayout: i32   // VkImageLayout
-    loadOp: i32   // VkAttachmentLoadOp
-    storeOp: i32   // VkAttachmentStoreOp
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    imageView: u64    // VkImageView
+    imageLayout: i32    // VkImageLayout
+    resolveMode: u32    // VkResolveModeFlagBits
+    resolveImageView: u64    // VkImageView
+    resolveImageLayout: i32    // VkImageLayout
+    loadOp: i32    // VkAttachmentLoadOp
+    storeOp: i32    // VkAttachmentStoreOp
     clearValue: VkClearValue
 }
 VkPhysicalDeviceDynamicRenderingFeatures :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    dynamicRendering: u32   // VkBool32
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    dynamicRendering: u32    // VkBool32
 }
 VkCommandBufferInheritanceRenderingInfo :: struct {
-    sType: i32   // VkStructureType
-    pNext: *u8   // void*
-    flags: u32   // VkRenderingFlags
+    sType: i32    // VkStructureType
+    pNext: *u8    // void*
+    flags: u32    // VkRenderingFlags
     viewMask: u32
     colorAttachmentCount: u32
-    pColorAttachmentFormats: *i32   // VkFormat*
-    depthAttachmentFormat: i32   // VkFormat
-    stencilAttachmentFormat: i32   // VkFormat
-    rasterizationSamples: u32   // VkSampleCountFlagBits
+    pColorAttachmentFormats: *i32    // VkFormat*
+    depthAttachmentFormat: i32    // VkFormat
+    stencilAttachmentFormat: i32    // VkFormat
+    rasterizationSamples: u32    // VkSampleCountFlagBits
 }
 
 // ---- commands ----
@@ -4317,18 +4317,18 @@ extern "libvulkan.so.1" vkCreateWaylandSurfaceKHR :: (instance: *u8, pCreateInfo
 // VkBool32 vkGetPhysicalDeviceWaylandPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, struct wl_display* display)
 extern "libvulkan.so.1" vkGetPhysicalDeviceWaylandPresentationSupportKHR :: (physicalDevice: *u8, queueFamilyIndex: u32, display: *u8) -> u32
 // Not exported by the loader; get the address with vkGetInstanceProcAddr and cast it to
-// the function type shown: cast[fn(...) i32](vkGetInstanceProcAddr(instance, ptr("vkName")))
-//   vkSetDebugUtilsObjectNameEXT: fn(*u8, *VkDebugUtilsObjectNameInfoEXT) i32
-//   vkSetDebugUtilsObjectTagEXT: fn(*u8, *VkDebugUtilsObjectTagInfoEXT) i32
-//   vkQueueBeginDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
-//   vkQueueEndDebugUtilsLabelEXT: fn(*u8)
-//   vkQueueInsertDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
-//   vkCmdBeginDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
-//   vkCmdEndDebugUtilsLabelEXT: fn(*u8)
-//   vkCmdInsertDebugUtilsLabelEXT: fn(*u8, *VkDebugUtilsLabelEXT)
-//   vkCreateDebugUtilsMessengerEXT: fn(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) i32
-//   vkDestroyDebugUtilsMessengerEXT: fn(*u8, u64, *VkAllocationCallbacks)
-//   vkSubmitDebugUtilsMessageEXT: fn(*u8, u32, u32, *VkDebugUtilsMessengerCallbackDataEXT)
+// the function type shown: cast[(...) -> i32](vkGetInstanceProcAddr(instance, ptr("vkName")))
+//   vkSetDebugUtilsObjectNameEXT: (*u8, *VkDebugUtilsObjectNameInfoEXT) -> i32
+//   vkSetDebugUtilsObjectTagEXT: (*u8, *VkDebugUtilsObjectTagInfoEXT) -> i32
+//   vkQueueBeginDebugUtilsLabelEXT: (*u8, *VkDebugUtilsLabelEXT) -> ()
+//   vkQueueEndDebugUtilsLabelEXT: (*u8) -> ()
+//   vkQueueInsertDebugUtilsLabelEXT: (*u8, *VkDebugUtilsLabelEXT) -> ()
+//   vkCmdBeginDebugUtilsLabelEXT: (*u8, *VkDebugUtilsLabelEXT) -> ()
+//   vkCmdEndDebugUtilsLabelEXT: (*u8) -> ()
+//   vkCmdInsertDebugUtilsLabelEXT: (*u8, *VkDebugUtilsLabelEXT) -> ()
+//   vkCreateDebugUtilsMessengerEXT: (*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) -> i32
+//   vkDestroyDebugUtilsMessengerEXT: (*u8, u64, *VkAllocationCallbacks) -> ()
+//   vkSubmitDebugUtilsMessageEXT: (*u8, u32, u32, *VkDebugUtilsMessengerCallbackDataEXT) -> ()
 
 // ---- constructors: a zeroed struct with sType filled in ----
 // VkApplicationInfo with sType set.

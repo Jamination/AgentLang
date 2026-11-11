@@ -4,9 +4,9 @@
 // AL has no Windows backend yet: programs using this module type-check (`alc check`) but
 // cannot be built. See docs/std/dx12.md for the mapping rules and a walk-through.
 //
-//   var device *ID3D12Device
+//   device: *ID3D12Device
 //   dx_check(D3D12CreateDevice(nil, D3D_FEATURE_LEVEL_11_0, &IID_ID3D12Device, ppv(&device)), "D3D12CreateDevice")
-//   var queue *ID3D12CommandQueue
+//   queue: *ID3D12CommandQueue
 //   desc := D3D12_COMMAND_QUEUE_DESC{Type: D3D12_COMMAND_LIST_TYPE_DIRECT}
 //   dx_check(device.CreateCommandQueue(&desc, &IID_ID3D12CommandQueue, &queue), "CreateCommandQueue")
 
@@ -97,7 +97,7 @@ IDC_ARROW : u64 : 32512
 INFINITE : u32 : 0xffffffff
 WAIT_OBJECT_0 : u32 : 0
 
-// A window procedure is a plain AL function: fn(hwnd *u8, msg u32, wparam u64, lparam i64) i64.
+// A window procedure is a plain AL function: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64.
 
 // Handle of a loaded module; nil names the executable itself.
 extern "kernel32.dll" GetModuleHandleW :: (name: *u16) -> *u8
