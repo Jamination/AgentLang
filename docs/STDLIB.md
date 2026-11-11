@@ -8,7 +8,7 @@ helpers are `priv` and do not appear: a program may reuse their names).
 
 | Part | What it gives | Reference |
 |------|---------------|-----------|
-| core | printing, `Vec`, `Map`, strings, sorting, slice helpers that take closures (`any`, `filter`, `map_to`, ...), parsing, file I/O with `io_error()`, arena memory and regions, `clone`, `args` | [LANGUAGE.md](LANGUAGE.md#standard-library) |
+| core | printing, `Vec`, `Map`, strings, sorting, parsing, file I/O with `io_error()`, arena memory and regions, `clone`, `args` | [LANGUAGE.md](LANGUAGE.md#standard-library) |
 | built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [LANGUAGE.md](LANGUAGE.md#f32-vectors-matrices) |
 | math | scalar functions for `f32`/`f64`, vector / quaternion / matrix functions, geometry tests, easing, colour | [std/math.md](std/math.md) |
 | rand | seedable generators, ranges, shuffles, noise | [std/rand.md](std/rand.md) |

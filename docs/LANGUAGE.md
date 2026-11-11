@@ -18,7 +18,7 @@ Design rules that shaped it:
 
 Contents: [Quick tour](#quick-tour) · [Lexical structure](#lexical-structure) · [Types](#types) ·
 [Declarations](#declarations) · [Statements](#statements) · [Expressions](#expressions) ·
-[Generics](#generics) · [Closures](#closures) · [Memory](#memory) · [Run-time errors](#run-time-errors) ·
+[Generics](#generics) · [Memory](#memory) · [Run-time errors](#run-time-errors) ·
 [Builtins](#builtin-functions) · [Standard library](#standard-library) · [Tooling](#tooling) ·
 [Unsafe corners](#unsafe-corners) · [Grammar](#grammar-summary)
 
@@ -37,7 +37,7 @@ fn area(s Shape) f64 {
     }
 }
 
-fn largest[T](items []T, less |T, T| bool) T {
+fn largest[T](items []T, less fn(T, T) bool) T {
     best := items[0]
     for x in items {
         if less(best, x) {
@@ -49,7 +49,8 @@ fn largest[T](items []T, less |T, T| bool) T {
 
 fn main() {
     shapes := []Shape{Circle(Point{0.0, 0.0}, 1.0), Rect(Point{0.0, 0.0}, Point{2.0, 3.0}), Empty}
-    print("largest:", largest(shapes, |a Shape, b Shape| bool { area(a) < area(b) }))
+    fn smaller(a Shape, b Shape) bool { area(a) < area(b) }    // a nested function
+    print("largest:", largest(shapes, smaller))
     // largest: Rect(Point{x: 0.0, y: 0.0}, Point{x: 2.0, y: 3.0})
     counts := map[str, i64]()
     words := vec[str]()
@@ -57,8 +58,12 @@ fn main() {
         counts.set(w, counts.get_or(w, 0) + 1)
         words.push(w)
     }
-    limit := 1
-    print(counts.get_or("a", 0), counts.len, words[1], words[..].count_if(|w str| bool { counts.get_or(w, 0) > limit }))   // 3 3 b 3
+    often := 0
+    fn tally(w str) {                      // sees and changes the variables of main
+        if counts.get_or(w, 0) > 1 { often += 1 }
+    }
+    for w in words { tally(w) }
+    print(counts.get_or("a", 0), counts.len, words[1], often)   // 3 3 b 3
 }
 
 test "areas" {
@@ -78,8 +83,7 @@ alc test tour.al       # run the test blocks
 - Comments: `//` to the end of the line.
 - **Statements end at a newline** (or `;`). A newline does *not* end a statement when the line
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
-  A line cannot *start* with a binary operator. A `|` that closes a closure type ends the type,
-  not the line's statement (`var f |i64|`).
+  A line cannot *start* with a binary operator.
 - Keywords: `fn struct enum const var test use priv if else while loop for in by return break
   continue assert match defer inline noinline true false nil`. `type` is special only at the
   start of a declaration and stays usable as an identifier.
@@ -107,7 +111,6 @@ alc test tour.al       # run the test blocks
 | `str` | another name for `[]u8` |
 | `(A, B, ...)` | tuple |
 | `fn(A, B) R` | function value: a plain code pointer (8 bytes, C-compatible) |
-| `\|A, B\| R` | closure: a function value with an environment (16 bytes), see [Closures](#closures) |
 | `Name`, `Name[T, U]` | struct or enum, possibly generic; or a type alias |
 
 There are no implicit conversions between types. Untyped numeric literals take the type the
@@ -394,7 +397,12 @@ fn stack_dump() { print(slots[..], find("a=b", "=")) }
 use "stack.al"
 
 priv const LIMIT = "none"                  // another LIMIT: each file has its own
-priv fn find(xs []i64, x i64) bool { xs.any(|v i64| bool { v == x }) }
+priv fn find(xs []i64, x i64) bool {
+    for v in xs {
+        if v == x { return true }
+    }
+    false
+}
 
 fn main() {
     stack_set("a", 1)
@@ -470,6 +478,7 @@ break name    continue name                // leave / continue the enclosing loo
 assert cond                                // stops the program if false
 assert cond, "message"
 defer { ... }                              // runs when the enclosing block is left
+fn name(a T) R { ... }                     // nested function (see below)
 match value { ... }                        // see below
 { ... }                                    // nested block (new scope)
 ```
@@ -510,6 +519,61 @@ fn main() {
     print()                                  // 2.3..5..7....11..13...
 }
 ```
+
+### Nested functions
+
+A function declared inside a block can read and assign the variables of the function around it.
+
+```
+struct Item { name str, hp i64 }
+
+fn rank(items []Item, floor i64) i64 {
+    n := 0
+    fn keep(it Item) bool {                // sees `floor` and `n` of rank
+        if it.hp < floor { return false }  // returns from keep
+        n += 1                             // assigns the variable of rank
+        true
+    }
+    fn by_hp(a Item, b Item) bool { a.hp > b.hp }   // uses no variable of rank: a function value
+    for it in items { it.keep() }          // called as keep(it) or it.keep()
+    sort_by(items, by_hp)
+    n
+}
+
+fn depth(n i64) i64 {
+    deepest := 0
+    fn visit(level i64) {                  // may call itself
+        if level > deepest { deepest = level }
+        if level < n { visit(level + 1) }
+    }
+    visit(0)
+    deepest
+}
+```
+
+- **Declaration.** `fn name(params) Result { body }` as a statement. It has no type parameters of
+  its own and takes no `inline` / `noinline` / `priv` / `extern`; inside a generic function it
+  may use that function's type parameters. Nested functions may contain nested functions.
+- **Scope of the name.** From the declaration to the end of its block, and inside its own body.
+  There it hides top-level functions and builtins of that name, also in method-call syntax
+  (`x.name()`). A block cannot declare the name twice or use it for a variable as well;
+  nested functions are not overloaded.
+- **Variables.** The body sees the variables and parameters of the enclosing function(s) that
+  are in scope where the nested function is declared. They are the variables themselves, not
+  copies: assignments are seen outside, and each call sees their current values. A variable
+  declared after the nested function is not visible in it.
+- **Control flow.** `return` returns from the nested function. `break`, `continue` and labels
+  cannot reach a loop of the enclosing function, and `defer` blocks belong to the function
+  they are written in.
+- **As a value.** A nested function that uses no variable of an enclosing function (neither
+  directly nor through a nested function it calls) is an ordinary function: its name is a
+  `fn(A) R` value that can be passed, stored, returned and given to C. One that does use such
+  a variable can only be called (`f(x)`, `x.f()`); using its name as a value is an error. A
+  callback that needs state gets it as a parameter, as with `sort_by(items, ctx, less)`.
+- **Cost.** A nested function is compiled as an ordinary function that receives the addresses
+  of the variables it uses as extra arguments, and is inlined like any other; there is no
+  allocation and nothing to keep alive. Diagnostics, `--emit-ir` and the symbol table name it
+  `outer.name`.
 
 ### match
 
@@ -647,8 +711,7 @@ Operators, from tightest to loosest binding (all binary operators are left-assoc
 
 - Both operands of a binary operator must have the same type (shift counts excepted).
 - `==` / `!=` work on numbers, `bool`, pointers, enums without data, and **by content** on
-  `str`, slices, arrays, structs and tuples. Closures, and aggregates that contain one, cannot
-  be compared. Ordering operators work on numbers.
+  `str`, slices, arrays, structs and tuples. Ordering operators work on numbers.
 - `p.field` dereferences pointers automatically; `a[i]` works on slices, arrays, `Vec`s and
   pointers to them. `s.len` and `len(s)` give the length of a slice, array, string or `Vec`.
 - `a[i..j]` is the sub-slice `i <= index < j` (bounds may be omitted: `a[..n]`, `a[i..]`, `a[..]`);
@@ -686,8 +749,10 @@ parentheses (for example an empty named literal as a `match` scrutinee: `match (
 | `for`, `if`, `while` | the type is a name (`Name`, `Name[T]`) and the matching `}` is directly followed by `{`, `.`, `[` or a binary operator | `if p == Point{1, 2} { }`, `while Range{0, 3}.hi > j { }` |
 | `match` scrutinee | the type is a name and the braces contain something but no `=>` of their own | `match Point{5, 6}.y { ... }` |
 
-**Method-call syntax**: `x.f(a, b)` means `f(x, a, b)` for any function `f` (unless `x` has a
-field `f` that holds a function or closure; that is called instead). Two adjustments apply to
+**Method-call syntax**: `x.f(a, b)` means `f(x, a, b)` for any function `f`. If `x` has a
+field `f` that holds a function, that is called instead; otherwise a
+[nested function](#nested-functions) `f` in scope comes before the top-level functions. Two
+adjustments apply to
 the receiver only, never to other arguments, also for overloaded and generic functions (a
 parameter `p *T` takes the address, a generic parameter `T` alone takes the receiver by value):
 
@@ -743,135 +808,6 @@ sum([]f64{1.5, 2.5})          // T inferred from the arguments
 alloc[u32](16)                // explicit type arguments
 var o Opt[i64] = None         // inferred from the expected type (Opt is a library enum)
 ```
-
-## Closures
-
-A closure is an anonymous function written inside another function. It can read *and assign*
-the local variables and parameters of the function it is written in.
-
-```
-struct Point { x i64, y i64 }
-
-fn main() {
-    less := |a i64, b i64| bool { a < b }        // two parameters, result bool
-    count := 0
-    tick := || { count += 1 }                    // no parameters, no result; assigns a captured variable
-    tick()
-    count = 100                                  // the closure sees later changes
-    tick()
-    p := Point{1, 2}
-    move := |dx i64| { p.x += dx }
-    move(10)
-    print(less(1, 2), count, p, |x i64| i64 { x + 1 }(41))   // true 101 Point{x: 11, y: 2} 42
-
-    var fact |i64| i64                           // declared first, so that the literal can see it
-    fact = |n i64| i64 {
-        if n <= 1 {
-            return 1                             // returns from the closure
-        }
-        n * fact(n - 1)
-    }
-    print(fact(10), fact, sizeof[|i64| i64]())   // 3628800 <closure> 16
-}
-```
-
-**Types.** `|A, B| R` takes `A` and `B` and returns `R`; `|A|` has no result; `|| R` and `||`
-take no parameters. A closure type lists types only (no parameter names) and can be written
-wherever a type can (parameters, results, fields, enum payloads, type arguments:
-`vec[|i64| bool]()`). The result type, if any, follows the closing `|` on the same line.
-
-- A closure value is 16 bytes (alignment 8): a code pointer and an environment pointer. It is
-  passed, stored and copied like a struct of two words; a copy refers to the same environment.
-- The zero value (`var f |i64| i64`, a zeroed field, `nil`) is the nil closure; calling it is a
-  memory fault, like calling a nil function value.
-- Closures cannot be compared (not even with `nil`) or hashed, and neither can a struct or
-  tuple that contains one. `print` shows `<closure>`.
-
-**Literals.** `|name Type, ...| Result { body }`; `||` starts a literal without parameters.
-
-- Every parameter has a type; the result type is written out (never inferred) and omitted when
-  the closure yields no value. The type of a literal is the closure type of its written
-  types, whatever the context expects.
-- The body is a block as for a function: its last expression is the value, `return` returns
-  from the closure, `defer` blocks run when the closure returns. `break` and `continue` cannot
-  leave the closure.
-- A literal is an expression: it can be stored, passed, returned, or called at once.
-- In a generic function a literal may use the type parameters; it is compiled per instantiation.
-
-**Captures.** Inside the body, the locals and parameters of the enclosing function that are in
-scope at the literal are visible **by reference**: the closure works on the variable itself,
-not on a copy, and sees later changes.
-
-- Variables of any type can be captured (also loop variables and `match` bindings). Literals
-  nest: an inner literal sees the variables of all enclosing literals and of the function.
-  Parameters of the literal and variables declared in its body shadow outer names.
-- A variable declared after the literal is not visible in it. That includes the variable the
-  literal is assigned to, so a closure that calls itself is declared first (`fact` above).
-- Every local variable is one stack slot per call of the function, so closures made in a loop
-  share the loop variable and the variables of the loop body: after
-  `for i in 0..3 { fs.push(|| i64 { i }) }` all three closures yield the same value.
-- Creating a closure does not allocate: the environment lives in the stack frame of the
-  enclosing function. **A closure that captures variables is therefore valid only while the
-  call of the function that created it is active** (see [Unsafe corners](#unsafe-corners)).
-  Passing it down to functions you call is always fine. A closure that captures nothing is
-  valid forever.
-
-**Calling.** `c(args)`. A struct field that holds a closure is called as `s.field(args)` (before
-method-call syntax is considered, as for function fields). An expression that yields a closure
-can be called directly (`handlers[i](x)`, `make()(x)`), except a tuple element: copy it to a
-variable first (`g := t.0`).
-
-**Conversions.** Where a closure type is expected (an argument, an assignment, a typed `var`,
-`return`, an element of a literal, a global initialiser), a function name (also a generic one:
-its type arguments come from the closure type, or are written as `name[T]`), a value of the
-function type `fn(A) R` and a closure literal are accepted if the parameter and result types
-are the same. In the other direction only a **literal that captures nothing** is accepted
-where `fn(A) R` is expected (so it can be a C callback or an element of a `fn` table); a
-closure *value* never converts to `fn`.
-
-```
-struct Button { label str, on_click |i64| }
-
-fn double(x i64) i64 { x * 2 }
-fn ident[T](x T) T { x }
-fn apply[T, U](x T, f |T| U) U { f(x) }
-fn call_plain(f fn(i64) i64, x i64) i64 { f(x) }
-
-fn main() {
-    count := 2
-    var f |i64| i64 = double                     // function name
-    fv := double                                 // without an expected type: fn(i64) i64
-    f = fv                                       // fn value
-    f = |x i64| i64 { x + count }                // literal
-    var g |i64| i64 = ident                      // generic function: T = i64 from the closure type
-    print(f(1), g(7), apply(4, double), apply(4, |x i64| str { fmt("<", x, ">") }))   // 3 7 8 <4>
-    print(call_plain(|x i64| i64 { x + 1 }, 41)) // 42: a literal without captures is a plain function
-    b := Button{label: "ok", on_click: |n i64| { count += n }}
-    b.on_click(3)                                // a closure field is called like a method
-    print(count, b)                              // 5 Button{label: ok, on_click: <closure>}
-}
-```
-
-- Generic inference works through closure types: `apply(4, double)` binds `T` and `U` of the
-  parameter `|T| U` from the function or the literal.
-- Overloads: a closure literal argument is matched by the closure type of its written types,
-  first against closure parameters, then against `fn` parameters.
-- Without an expected type a function name is a `fn` value (`h := double`).
-- A global of a closure type can be initialised with a function name or `nil`, not with a
-  literal.
-
-**Syntax details.**
-
-- `|` and `||` start a closure literal or type only where an expression or a type starts; after
-  an operand they remain the operators (`a | b`, `a || b`), also at the end of a line.
-- Inside the parameter list of a closure type or literal a `|` always closes the list. So a
-  first parameter that is itself a closure type is written after a space in a *type*
-  (`| |i64| bool, i64| bool`; `||` would mean "no parameters"), and a function or closure type
-  inside the list cannot have a result type that starts with `|` (name such a type with
-  `type`). `|f |i64||` is fine: the final `||` closes both lists.
-- Common mistakes are reported with the correct form: untyped parameters (`|a, b| ..`), a body
-  that is not a block (`|x i64| x * 2`), a missing result type, `fn(a i64) i64 { .. }` as an
-  anonymous function, names in a closure type.
 
 ## Memory
 
@@ -1079,7 +1015,7 @@ undefined); `assert` and `panic` are kept.
 `print` renders: integers in decimal, floats as the shortest text that reads back exactly
 (`0.1`, `1e21`, `nan`), booleans as `true`/`false`, `str` as text, other slices and arrays as
 `[a, b]`, structs as `Name{field: value}`, tuples as `(a, b)`, enums as `Variant(fields)`,
-pointers as hexadecimal addresses, closures as `<closure>`.
+pointers as hexadecimal addresses.
 
 ```
 var big u64 = 0xFFFFFFFFFFFFFFFF
@@ -1101,12 +1037,8 @@ used(r *Region) i64            region_free(r *Region)
 min(a, b)   max(a, b)   abs(x)   swap(&a, &b)   floor(x)   ceil(x)   clock_ns() i64
 copy(dst []T, src []T) i64     fill(a []T, x T)
 sort(a []T)                                                   // ascending, needs `<`
-sort_by(a []T, less |T, T| bool)                              // stable; a closure or a function name
-
-// slices with closures (for a Vec pass v[..]); filter and map_to allocate their result
-any(s []T, p |T| bool) bool    all(s []T, p |T| bool) bool    // all: true for an empty slice
-count_if(s []T, p |T| bool) i64                               index_where(s []T, p |T| bool) i64   // or -1
-filter(s []T, p |T| bool) []T  map_to(s []T, f |T| U) []U     each(s []T, f |T|)
+sort_by(a []T, less fn(T, T) bool)                            // stable
+sort_by(a []T, ctx C, less fn(C, T, T) bool)                  // `ctx` is handed to every comparison
 
 // strings (str = []u8; slicing gives views without copying)
 concat(a, b) str        find(s, sub) i64        starts_with(s, p)        ends_with(s, p)
@@ -1138,18 +1070,13 @@ m.has(k)               m.del(k)         m.len          m.keys()   // []K
 `alc sigs file.al -- std` prints every library signature.
 
 ```
+fn by_score(scores []i64, a i64, b i64) bool { scores[a] > scores[b] }
+
 fn main() {
     scores := []i64{70, 95, 80}
     order := []i64{0, 1, 2}
-    sort_by(order, |a i64, b i64| bool { scores[a] > scores[b] })
-    limit := 75
-    big := |x i64| bool { x > limit }
-    print(order, scores.any(big), scores.all(big), scores.count_if(big), scores.index_where(big))
-    // [1, 2, 0] true false 2 1
-    print(scores.filter(big), scores.map_to(|x i64| str { fmt(x, "!") }))   // [95, 80] [70!, 95!, 80!]
-    sum := 0
-    scores.each(|x i64| { sum += x })
-    print(sum)                                   // 245
+    sort_by(order, scores, by_score)       // the comparison gets `scores` as its first argument
+    print(order)                           // [1, 2, 0]
 }
 ```
 
@@ -1230,12 +1157,6 @@ Everything above is checked. These features are not, and exist for low-level cod
   `Vec`s and `Map`s into it), or a slice into a local array after its function returned.
 - Copying a `Region` that holds memory or is entered; unbalanced `enter` / `leave` (an early
   `return` between them leaves the region entered).
-- **Calling a closure that captures variables after the call of the function that created it
-  has ended**: its environment and the captured variables live in that function's stack frame.
-  Returning such a closure, or storing it somewhere that outlives the call (a global, a
-  longer-lived struct, a `Vec` owned by the caller) and calling it later is undefined. A
-  captured variable whose block has ended still refers to the variable's slot, which a loop
-  reuses in its next iteration. Calling the nil closure faults.
 - `&name` in a pattern points into the payload of the variant that was matched. If the enum
   value is later overwritten with another variant (or the element it lives in is replaced or
   released), the pointer still points at that storage, which now holds something else: do not
@@ -1297,9 +1218,9 @@ p := cstr(path)                            // NUL-terminated copy of any str
 - Parameters and results must be integers, `bool`, `f32`/`f64`, pointers or function values;
   C structs are passed by pointer (AL structs have C layout). C `int` is `i32`, `long`/`size_t`
   are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.
-- A plain AL function, or a closure literal that captures nothing, can be passed where C expects
-  a callback (`fn(*u8, *u8) i32`), as long as its parameters are scalars. C functions cannot
-  receive closures. Code running on a foreign thread must not allocate.
+- A plain AL function (also a nested function that uses no variable of its enclosing function)
+  can be passed where C expects a callback (`fn(*u8, *u8) i32`), as long as its parameters are
+  scalars. Code running on a foreign thread must not allocate.
 - A program that calls at least one `extern` function becomes a dynamically linked executable
   (the system loader maps the libraries at start-up); every other program stays a static,
   libc-free executable. Only the libraries of functions that are actually reachable are needed.
@@ -1323,7 +1244,6 @@ tparams   = "[" IDENT {"," IDENT} "]"
 param     = IDENT type
 type      = IDENT ["[" type {"," type} "]"] | "*" type | "[" "]" type | "[" expr "]" type
           | "fn" "(" [type {"," type}] ")" [type] | "(" type {"," type} ")"
-          | "|" [type {"," type}] "|" [type] | "||" [type]
 block     = "{" { stmt } "}"
 stmt      = "var" IDENT (type ["=" expr] | "=" expr)
           | IDENT {"," IDENT} (":=" | "=") expr
@@ -1333,6 +1253,7 @@ stmt      = "var" IDENT (type ["=" expr] | "=" expr)
                         | "for" IDENT ["," IDENT] "in" expr [(".." | "..=") expr] ["by" expr] block)
           | "return" [expr] | "break" [IDENT] | "continue" [IDENT]
           | "assert" expr ["," expr] | "defer" block | block
+          | "fn" IDENT "(" [param {"," param}] ")" [type] block
 expr      = unary { binop unary }
 unary     = ("-" | "!" | "~" | "&" | "*") unary | postfix
 postfix   = primary { "(" [expr {"," expr}] ")" | "[" expr {"," expr} "]" | "[" [expr] ".." [expr] "]"
@@ -1341,7 +1262,6 @@ primary   = INT | FLOAT | STRING | CHAR | "true" | "false" | "nil" | IDENT | "("
           | "[" "]" type | "[" expr "]" type | "if" expr block "else" block
           | "match" expr "{" { pattern {"," pattern} ["if" expr] "=>" (block | stmt) } "}"
           | qual "." IDENT ["(" [expr {"," expr}] ")"]
-          | "|" [IDENT type {"," IDENT type}] "|" [type] block | "||" [type] block
 field     = [IDENT ":"] expr
 pattern   = "_" | expr | [qual "."] IDENT "(" [pattern {"," pattern}] ")"
           | "(" pattern "," pattern {"," pattern} ")" | "&" IDENT

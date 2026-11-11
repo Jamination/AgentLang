@@ -41,7 +41,7 @@ removed, both compilers were compared: byte-identical output for every program i
 | `src/base.al` | helpers for compiler code: `Opt`, Vec / Map conveniences, environment, processes, the working-memory regions |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
-| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_closure.al` (closure literals and values) |
+| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
 | `src/lint.al` | checks on the AST that need types: field writes to a struct copy that is never read |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
@@ -89,20 +89,22 @@ Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
   private one fits), and `priv_hint` (the "is declared `priv` in ..." hint). A new kind of
   declaration becomes private-capable with one case in `parser_set_priv` and one in
   `priv_decl_info` / `priv_rewrite`.
-- **Closures** (`src/lower_closure.al`). A closure value is a code pointer and an environment
-  pointer; a call through it is an indirect call that passes the environment as one extra
-  integer argument **after** the declared arguments. A literal with captures becomes a
-  function whose last parameter is the environment: an array of the addresses of the captured
-  variables, in the frame of the enclosing function, filled when the literal is evaluated. A
-  literal without captures is a plain function, and a plain function converted to a closure
-  has a nil environment and ignores the extra argument (it arrives in the next free integer
-  argument register or above the declared stack arguments, neither of which the callee looks
-  at). The literal's function is lowered immediately by `lower_fn_lower_body` with the type
-  environment of the enclosing function. The optimiser never turns an indirect call into a
-  direct one, and the inliner and tail-recursion pass only look at direct calls, so no pass
-  sees a call whose argument count differs from the callee's parameter count; a pass that
-  devirtualises `CallInd(FAddr f, args..)` must drop the last argument when `f` has one
-  parameter less.
+- **Nested functions** (`src/lower_nested.al`). `fn` inside a block (`SKFn`) is compiled by
+  lambda lifting: the function `outer.name` gets, after its declared parameters, one pointer
+  parameter per variable of the enclosing function(s) that its body uses, and every call
+  passes those addresses. The name lives in the block's scope next to the variables
+  (`Scope.vars`, with a negative type slot that indexes `Fx.nested`). The body is lowered at
+  the declaration by `lower_fn_lower_body`, with the type environment of the enclosing
+  function; the captured names are declared in its outermost scope with the parameter values
+  as their addresses. A nested function that calls another one (or itself) takes over the
+  callee's captures and passes them on; captures are identified by their address value, not
+  by name. Calls go through `call_fn`, the same code as calls of top-level functions, so they
+  are direct calls: the inliner treats them like any other, and after inlining the captured
+  variables are promoted to registers again. A nested function without captures is a plain
+  function value; one with captures cannot be used as a value, so no address of a local
+  outlives its call that way. The walk that finds what a body uses is exhaustive over the
+  AST enums: a new `EK` / `SK` / `Pat` variant does not compile until it is handled there
+  (a variant that declares names must add them to `bound`).
 - **Copy-write check** (`src/lint.al`). `lint_copy_writes` runs per `:=` statement while a
   function is lowered (it needs the type of the initialiser) and counts, in the rest of the
   block, direct field assignments to the new name against every other occurrence of it.

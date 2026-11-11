@@ -10,7 +10,7 @@ dynamically against exactly the libraries it reaches.
 It is meant for high-performance software such as games: `f32`, vectors, quaternions and
 matrices are built-in types compiled to SSE code, functions overload on argument types, and a
 game-oriented standard library ships inside the compiler. The language has generics, enums
-with data and `match`, closures that capture local variables by reference, file-private
+with data and `match`, nested functions that work on the variables around them, file-private
 declarations (`priv`), type aliases, and arena memory with regions and deep `clone` instead
 of `free` or a garbage collector.
 
@@ -34,7 +34,7 @@ of `free` or a garbage collector.
 | `build.sh`, `bootstrap/alc` | self-hosted build and its seed compiler |
 | `src/main.al`, `base.al` | driver; helpers shared by the compiler sources |
 | `src/lexer.al`, `parser.al`, `ast.al`, `priv.al` | front end; file-private names |
-| `src/types.al`, `lower*.al`, `lint.al` | type checking fused with lowering to SSA IR (`lower_closure.al`: closures, `lower_mem.al`: `Vec` indexing, `clone`) |
+| `src/types.al`, `lower*.al`, `lint.al` | type checking fused with lowering to SSA IR (`lower_nested.al`: nested functions, `lower_mem.al`: `Vec` indexing, `clone`) |
 | `src/ir.al` | SSA IR, dominators, loop analysis |
 | `src/opt/` | mem2reg/SROA, simplifier (const folding, strength reduction, magic-number division, CFG cleanup, jump threading, if-conversion), GVN with condition propagation, load/store elimination, LICM, inlining, tail-recursion elimination, full and partial loop unrolling, bounds-check hoisting and merging |
 | `src/x86/` | instruction selection (addressing modes, load folding, compare/branch fusion), graph-colouring register allocation with coalescing, peepholes, encoder with branch relaxation |
@@ -70,8 +70,8 @@ flowchart LR
   unoptimized, optimized and unchecked, and the optimizer's IR must pass the verifier after every
   pass (`ALC_DEBUG=verify`).
 - `tests/gen/fuzz_vec.py [count] [seed]` — the same for `f32` / vector / matrix code.
-- `tests/gen/fuzz_closure.py [count] [seed]` — programs made of closures, with expected output
-  computed by the generator.
+- `tests/gen/fuzz_nested.py [count] [seed]` — programs made of nested functions, with expected
+  output computed by the generator.
 - `tests/gen/divconst.py` regenerates the division-by-constant stress test.
 - `ALC_DISABLE=pass,...` switches optimization passes off (`unroll`, `bce`, `licm`, `gvn`,
   `loadelim`, `checkmerge`, `tre`, `partial`, `thread4`, `thread5`) for bisecting.
