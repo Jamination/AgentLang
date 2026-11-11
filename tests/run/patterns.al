@@ -147,6 +147,12 @@ fn bools(t (bool, bool)) str {
     }
 }
 
+var state Opt[P]
+fn clobber() bool {
+    state = None
+    false
+}
+
 var calls i64
 fn tick() bool {
     calls += 1
@@ -304,6 +310,14 @@ fn main() {
         None => 0
     }
     print(r, calls)
+
+    // a guard that changes the matched variable: the arms keep looking at the value as it was
+    state = Some(P{1, 2})
+    match state {
+        Some(p) if clobber() => print("not taken", p)
+        Some(p) => print("still", p, state)
+        None => print("none")
+    }
 
     // match as a value in several positions; loops and defer inside arms
     s := "abc"

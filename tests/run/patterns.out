@@ -25,6 +25,7 @@ P{x: 8, y: 9}
 5 5
 zero one-or-three even one-or-three even other 
 10 2
+still P{x: 1, y: 2} None
 1 2
 [c1.0, done, r2.0]
 2

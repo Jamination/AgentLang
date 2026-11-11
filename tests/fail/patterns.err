@@ -22,7 +22,7 @@ type mismatch: expected bool, found i64
 unknown identifier `k`: the pattern of an arm is a constant, not a new name for the matched value (write `_` and use the matched value itself, also in a guard)
 `Rod` is not a variant of Color (variants: Red, Green, Blue)
 cannot match on P (a match looks at integers, bool, str, enums and tuples)
-`Circle(..)` is an enum variant pattern, but the matched value has type *Shape (a pointer: match on the value it points to, `match *p { ... }`)
+match used as a value must be exhaustive; missing: nil, Rect(_, _)
 match used as a value must be exhaustive; missing: B(_, _), C (an arm with a guard does not count: add an arm without a guard or `_ =>`)
 match used as a value must be exhaustive; missing: (Circle(_), false)
 match used as a value must be exhaustive; missing: Some(Blue)

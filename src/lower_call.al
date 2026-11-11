@@ -698,11 +698,13 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 fv := self.expr(c, None)
                 return self.call_indirect(fv, args, pos)
             }
+            // a variant; in a call, a builtin function or type of the same name wins
+            // (`len(x)`, `i64(x)`): such a variant is constructed as `Enum.Variant(..)`
             bv := self.bare_variant(n, expect)
-            if bv.2 == 1 {
-                return self.construct_variant(bv.0, bv.1, args, expect, pos)
-            }
-            if bv.2 == 2 {
+            if bv.2 != 0 && !lower_match_builtin_name(n) {
+                if bv.2 == 1 {
+                    return self.construct_variant(bv.0, bv.1, args, expect, pos)
+                }
                 self.variant_ambiguous(n, pos)
                 lower_call_eval_all(self, args)
                 return val_err()

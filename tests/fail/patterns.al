@@ -82,6 +82,11 @@ fn main() {
     q5 := match n > 1 {
         true => 1
     }
+    q7 := match ps {
+        Circle(_) => 1
+        Rect(_, 0.0) => 2
+        Empty => 3
+    }
     q6 := match s {
         Circle(r) if r > 1.0 => 1
         Rect(_, _) => 2
