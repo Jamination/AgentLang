@@ -21,10 +21,10 @@ import tempfile
 
 ALC = os.path.join(os.path.dirname(__file__), "..", "..", "build", "alc")
 
-HEADER = """Color :: enum { R, G, B }
-Sh :: enum { Ci(i64), Re(i64, Color), Em }
+HEADER = """enum Color { R, G, B }
+enum Sh { Ci(i64), Re(i64, Color), Em }
 guards: i64
-flag :: (k: i64) -> bool {
+fn flag(k: i64) -> bool {
     guards += 1
     k % 2 == 0
 }
@@ -335,7 +335,7 @@ class Match:
         r = self.r
         out = []
         ret = " -> i64" if self.value_form else ""
-        out.append(f"m{self.idx} :: (v: {type_src(self.t)}){ret} {{")
+        out.append(f"fn m{self.idx}(v: {type_src(self.t)}){ret} {{")
         out.append("    r := match v {" if self.value_form else "    match v {")
         for ai, (alts, binds, guard) in enumerate(self.arms):
             pats = ", ".join(pat_src(r, self.t, p) for p in alts)
@@ -436,7 +436,7 @@ def program(seed):
         for _ in range(200):
             m = Match(r, 0, True)
             if domain_size(m.t) <= 4000 and not m.exhaustive():
-                return HEADER + m.source() + "\nmain :: () {}\n", None
+                return HEADER + m.source() + "\nfn main() {}\n", None
     ms = []
     while len(ms) < 6:
         m = Match(r, len(ms), r.random() < 0.5)
@@ -460,7 +460,7 @@ def program(seed):
             expected.extend(lines)
     body.append("print(guards)")
     expected.append(str(state["guards"]))
-    src = HEADER + "\n".join(m.source() for m in ms) + "\nmain :: () {\n"
+    src = HEADER + "\n".join(m.source() for m in ms) + "\nfn main() {\n"
     src += "".join("    " + s + "\n" for s in vals.setup + body) + "}\n"
     return src, "\n".join(expected) + "\n"
 

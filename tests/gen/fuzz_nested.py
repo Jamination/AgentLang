@@ -21,14 +21,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 ALC = os.environ.get("ALC", os.path.join(ROOT, "build", "alc"))
 MASK = (1 << 20) - 1
 
-HELPERS = """apply1 :: (f: (i64) -> i64, v: i64) -> i64 { f(v) }
-twice :: (f: (i64) -> i64, v: i64) -> i64 { f(f(v) & 1048575) }
-fold :: (xs: []i64, init: i64, f: (i64, i64) -> i64) -> i64 {
+HELPERS = """fn apply1(f: fn(i64) -> i64, v: i64) -> i64 { f(v) }
+fn twice(f: fn(i64) -> i64, v: i64) -> i64 { f(f(v) & 1048575) }
+fn fold(xs: []i64, init: i64, f: fn(i64, i64) -> i64) -> i64 {
     acc := init
     for x in xs { acc = f(acc, x) & 1048575 }
     return acc
 }
-poke :: (f: (*i64, i64) -> i64, p: *i64, v: i64) -> i64 { f(p, v) + *p }
+fn poke(f: fn(*i64, i64) -> i64, p: *i64, v: i64) -> i64 { f(p, v) + *p }
 """
 
 
@@ -52,7 +52,7 @@ class Fn:
         return not any(p[1] for p in self.params)
 
     def typ(self):
-        return "(" + ", ".join("*i64" if p[1] else "i64" for p in self.params) + ") -> i64"
+        return "fn(" + ", ".join("*i64" if p[1] else "i64" for p in self.params) + ") -> i64"
 
 
 class Gen:
@@ -280,7 +280,7 @@ class Gen:
     def fn_src(self, f, ind):
         pad = "    " * ind
         ps = ", ".join(f"{n}: {'*i64' if p else 'i64'}" for n, p in f.params)
-        lines = [f"{f.name} :: ({ps}) -> i64 {{" if f.name else f"({ps}) -> i64 {{"]
+        lines = [f"fn {f.name}({ps}) -> i64 {{" if f.name else f"fn({ps}) -> i64 {{"]
         if f.rec:
             lines.append(f"{pad}    if d <= 0 {{ return {len(f.params)} }}")
         for g in f.inner:
@@ -349,9 +349,9 @@ class Gen:
     def program(self):
         body = "\n".join(self.main_src(self.main, 1))
         if self.generic:
-            return (HELPERS + "run[T] :: (tag: T) {\n    same :: (x: T, y: T) -> T { y }\n    first :: (xs: []T) -> T { xs[0] }\n"
-                    + body + "\n    print(same(tag, first([]T{tag, tag})))\n}\nmain :: () {\n    run(7)\n    run(\"s\")\n}\n")
-        return HELPERS + "main :: () {\n" + body + "\n}\n"
+            return (HELPERS + "fn run[T](tag: T) {\n    fn same(x: T, y: T) -> T { y }\n    fn first(xs: []T) -> T { xs[0] }\n"
+                    + body + "\n    print(same(tag, first([]T{tag, tag})))\n}\nfn main() {\n    run(7)\n    run(\"s\")\n}\n")
+        return HELPERS + "fn main() {\n" + body + "\n}\n"
 
     # ---------- evaluation ----------
     def tick(self):

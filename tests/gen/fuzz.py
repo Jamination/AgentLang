@@ -252,17 +252,17 @@ class Gen:
             self.w(f"{a}: [{n}]{t}")
         self.w("")
         # fixed helpers that exercise structs, tuples, slices and run-time loop bounds
-        self.w("S :: struct { a: i64, b: u32, c: f64, d: i16 }")
-        self.w("smix :: (s: S, k: i64) -> S {")
+        self.w("struct S { a: i64, b: u32, c: f64, d: i16 }")
+        self.w("fn smix(s: S, k: i64) -> S {")
         self.w("    S{a: s.a * 3 + k, b: s.b ^ u32(k), c: s.c * 0.5 + f64(s.d), d: s.d + i16(k)}")
         self.w("}")
-        self.w("ssum :: (s: S) -> i64 {")
+        self.w("fn ssum(s: S) -> i64 {")
         self.w("    s.a + i64(s.b) + i64(s.c) + i64(s.d)")
         self.w("}")
-        self.w("pairup :: (x: i64, y: u32) -> (u32, i64) {")
+        self.w("fn pairup(x: i64, y: u32) -> (u32, i64) {")
         self.w("    (y + u32(x), x - i64(y))")
         self.w("}")
-        self.w("wsum :: (a: []i64, lo: i64, n: i64) -> i64 {")
+        self.w("fn wsum(a: []i64, lo: i64, n: i64) -> i64 {")
         self.w("    s := 0")
         self.w("    lo = lo & 7")
         self.w("    n = min(n & 7, len(a) - lo)")
@@ -276,7 +276,7 @@ class Gen:
         self.w("    }")
         self.w("    s")
         self.w("}")
-        self.w("rot :: (a: []i64, k: i64) {")
+        self.w("fn rot(a: []i64, k: i64) {")
         self.w("    n := len(a)")
         self.w("    for r in 0..(k & 3) {")
         self.w("        t := a[0]")
@@ -286,7 +286,7 @@ class Gen:
         self.w("        a[n - 1] = t + r")
         self.w("    }")
         self.w("}")
-        self.w("fibr :: (n: i64) -> i64 {")
+        self.w("fn fibr(n: i64) -> i64 {")
         self.w("    if n < 2 {")
         self.w("        return n")
         self.w("    }")
@@ -299,7 +299,7 @@ class Gen:
             name = f"f{fi}"
             params = ", ".join(f"p_{i}: {t}" for i, t in enumerate(ptys))
             attr = r.choice(["", "", "noinline ", "inline "])
-            self.w(f"{attr}{name} :: ({params}) -> {rty} {{")
+            self.w(f"{attr}fn {name}({params}) -> {rty} {{")
             env = {f"p_{i}": t for i, t in enumerate(ptys)}
             self.ind += 1
             self.w(f"acc: {rty} = {self.expr(env, rty, 2)}")
@@ -311,7 +311,7 @@ class Gen:
             self.w("}")
             self.w("")
             self.funcs.append((name, ptys, rty))
-        self.w("main :: () {")
+        self.w("fn main() {")
         self.ind += 1
         env = {}
         for a, t, n in self.arrays:

@@ -97,7 +97,7 @@ const IDC_ARROW: u64 = 32512
 const INFINITE: u32 = 0xffffffff
 const WAIT_OBJECT_0: u32 = 0
 
-// A window procedure is a plain AL function: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64.
+// A window procedure is a plain AL function: fn(hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64.
 
 // Handle of a loaded module; nil names the executable itself.
 extern "kernel32.dll" fn GetModuleHandleW(name: *u16) -> *u8
