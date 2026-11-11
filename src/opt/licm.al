@@ -116,6 +116,21 @@ fn licm_make_preheaders(f *Func) bool {
     return changed
 }
 
+// exiting.iter().all(|e| cfg.dom(b, *e)) && l.latches.iter().all(|t| cfg.dom(b, *t))
+fn licm_run_guaranteed(cfg *Cfg, exiting []i64, latches []i64, b i64) bool {
+    for e in exiting {
+        if !cfg.dom(b, e) {
+            return false
+        }
+    }
+    for t in latches {
+        if !cfg.dom(b, t) {
+            return false
+        }
+    }
+    return true
+}
+
 fn licm_run(f *Func) bool {
     changed := licm_make_preheaders(f)
     cfg := cfg_new(f)
@@ -181,20 +196,6 @@ fn licm_run(f *Func) bool {
                 exiting.push(b)
             }
         }
-        // does block b run in every iteration (it dominates every exit and latch)?
-        fn guaranteed(b i64) bool {
-            for e in exiting {
-                if !cfg.dom(b, e) {
-                    return false
-                }
-            }
-            for t in l.latches {
-                if !cfg.dom(b, t) {
-                    return false
-                }
-            }
-            return true
-        }
         loop {
             moved := false
             for b in blocks.items() {
@@ -220,7 +221,7 @@ fn licm_run(f *Func) bool {
                                 Some(k) => safe_const = k != 0 && !(k == -1 && (i.op == OpSDiv || i.op == OpSRem))
                                 None => {}
                             }
-                            ok = safe_const || guaranteed(b)
+                            ok = safe_const || licm_run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
                         } else if i.op == OpLoad {
                             m := alias_memref(f, v)
                             private := false
@@ -241,7 +242,7 @@ fn licm_run(f *Func) bool {
                                         break
                                     }
                                 }
-                                if !aliased && (safe_addr || guaranteed(b)) {
+                                if !aliased && (safe_addr || licm_run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)) {
                                     ok = true
                                 }
                             }

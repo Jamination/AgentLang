@@ -224,13 +224,13 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
     in_loop := in_loop_v.items()
     def_block_v := f.block_of()
     def_block := def_block_v.items()
-    // is v an original value defined inside the loop?
-    fn loop_def(v i64) bool {
+    // is v an original value (below n0) defined inside the loop?
+    fn loop_def(v i64, n0 i64, def_block []i64, in_loop []bool) bool {
         v < n0 && def_block[v] != 0xFFFFFFFF && in_loop[def_block[v]]
     }
     // the copy of v in the iteration that `m` describes
-    fn look(m *Vec[i64], v i64) i64 {
-        if loop_def(v) {
+    fn look(m *Vec[i64], v i64, n0 i64, def_block []i64, in_loop []bool) i64 {
+        if loop_def(v, n0, def_block, in_loop) {
             return m[v]
         }
         return v
@@ -268,7 +268,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
         cur := vec_fill(n0, NOV)
         for ph in hphis.items() {
             bk := unroll_phi_in_at(&phi_in, ph).1
-            cur[ph] = look(&prev, bk)
+            cur[ph] = look(&prev, bk, n0, def_block, in_loop)
         }
         // allocate ids
         for b in p.blocks.items() {
@@ -302,7 +302,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
                 nv := cur[v]
                 args := vec[i64]()
                 for a in f.insts[v].args.items() {
-                    args.push(look(&cur, a))
+                    args.push(look(&cur, a, n0, def_block, in_loop))
                 }
                 pb := vec[i64]()
                 for x in f.insts[v].pb.items() {
@@ -316,7 +316,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
             term := src_term
             match src_term {
                 TermJmp(t) => term = TermJmp(bmap.get_or(t, t))
-                TermBr(c, t, e) => term = TermBr(look(&cur, c), bmap.get_or(t, t), bmap.get_or(e, e))
+                TermBr(c, t, e) => term = TermBr(look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
                 _ => {}
             }
             f.blocks[nb].term = term
@@ -358,7 +358,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
                 v := f.blocks[b].insts[ii]
                 for ai in 0..f.insts[v].args.len {
                     a := f.insts[v].args[ai]
-                    if loop_def(a) {
+                    if loop_def(a, n0, def_block, in_loop) {
                         f.insts[v].args[ai] = last_m[a]
                     }
                 }
@@ -373,14 +373,14 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
             }
             match f.blocks[b].term {
                 TermBr(c, t, e) => {
-                    if loop_def(c) {
+                    if loop_def(c, n0, def_block, in_loop) {
                         f.blocks[b].term = TermBr(last_m[c], t, e)
                     }
                 }
                 TermRet(vs) => {
                     nvs := clone(vs)
                     for k in 0..nvs.len {
-                        if loop_def(nvs[k]) {
+                        if loop_def(nvs[k], n0, def_block, in_loop) {
                             nvs[k] = last_m[nvs[k]]
                         }
                     }
@@ -395,7 +395,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
         if p.trip > 1 {
             for ph in hphis.items() {
                 bk := unroll_phi_in_at(&phi_in, ph).1
-                nv := if loop_def(bk) { prev[bk] } else { bk }
+                nv := if loop_def(bk, n0, def_block, in_loop) { prev[bk] } else { bk }
                 i := f.im(ph)
                 for k in 0..i.pb.len {
                     if i.pb[k] == p.latch {

@@ -59,6 +59,22 @@ fn elf_used_externs(m *Module, out *Output) Vec[i64] {
     return res
 }
 
+fn elf_link_patch_data(buf *Vec[u8], base_addr i64, g *Global, ga i64, gaddr *Vec[i64], func_addr *Vec[i64]) {
+    for rl in g.relocs.items() {
+        off := rl.0
+        val := match rl.1 {
+            RelocTargetGlobal(tg, add) => gaddr.at(tg) + add
+            RelocTargetFunc(f) => func_addr.at(f)
+        }
+        at := (ga - base_addr) + off
+        assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
+        u := u64(val)
+        for k in 0..8 {
+            buf[at + k] = u8(u >> u64(8 * k))
+        }
+    }
+}
+
 // offset of a section name in the section header string table
 fn elf_link_name_of(shstr str, s str) i64 {
     pat := fmt("\0", s, "\0")
@@ -293,30 +309,15 @@ fn elf_link(m *Module, out *Output) (str, str) {
             }
         }
     }
-    // the addresses stored in the data of global `gi`, which is in `buf` (loaded at `base_addr`)
-    fn patch_data(buf *Vec[u8], base_addr i64, gi i64) {
-        for rl in m.globals[gi].relocs.items() {
-            val := match rl.1 {
-                RelocTargetGlobal(tg, add) => gaddr.at(tg) + add
-                RelocTargetFunc(f) => func_addr.at(f)
-            }
-            at := (gaddr[gi] - base_addr) + rl.0
-            assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
-            u := u64(val)
-            for k in 0..8 {
-                buf[at + k] = u8(u >> u64(8 * k))
-            }
-        }
-    }
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
         if g.relocs.is_empty() {
             continue
         }
         if g.readonly {
-            patch_data(&rodata, ELF_BASE + ro_off, gi)
+            elf_link_patch_data(&rodata, ELF_BASE + ro_off, g, gaddr[gi], &gaddr, &func_addr)
         } else if is_some(g.data) {
-            patch_data(&data, ELF_BASE + data_off, gi)
+            elf_link_patch_data(&data, ELF_BASE + data_off, g, gaddr[gi], &gaddr, &func_addr)
         }
     }
     // ---- symbols ----
@@ -356,31 +357,31 @@ fn elf_link(m *Module, out *Output) (str, str) {
     sh_off := elf_align_up(file.len, 8)
     file.resize(sh_off, 0)
     sh := vec[u8]()
-    // one section header (the name is looked up in the section name table)
-    fn section(name str, ty i64, flags i64, addr i64, off i64, size i64, link i64, info i64, align i64, entsize i64) {
-        elf_put32(&sh, if name == "" { 0 } else { elf_link_name_of(shstr, name) })
-        elf_put32(&sh, ty)
-        elf_put64(&sh, flags)
-        elf_put64(&sh, addr)
-        elf_put64(&sh, off)
-        elf_put64(&sh, size)
-        elf_put32(&sh, link)
-        elf_put32(&sh, info)
-        elf_put64(&sh, align)
-        elf_put64(&sh, entsize)
+    // one section header (the name is looked up in the section name table `names`)
+    fn section(sh *Vec[u8], names str, name str, ty i64, flags i64, addr i64, off i64, size i64, link i64, info i64, align i64, entsize i64) {
+        elf_put32(sh, if name == "" { 0 } else { elf_link_name_of(names, name) })
+        elf_put32(sh, ty)
+        elf_put64(sh, flags)
+        elf_put64(sh, addr)
+        elf_put64(sh, off)
+        elf_put64(sh, size)
+        elf_put32(sh, link)
+        elf_put32(sh, info)
+        elf_put64(sh, align)
+        elf_put64(sh, entsize)
     }
-    section("", 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    section(".text", 1, 6, ELF_BASE + text_off, text_off, text.len, 0, 0, 16, 0)
-    section(".rodata", 1, 2, ELF_BASE + ro_off, ro_off, rodata.len, 0, 0, 16, 0)
-    section(".data", 1, 3, ELF_BASE + data_off, data_off, data.len, 0, 0, 16, 0)
-    section(".bss", 8, 3, bss_addr, data_off + data.len, bss_size, 0, 0, 64, 0)
-    section(".symtab", 2, 0, 0, symtab_off, symtab.len, 6, nsyms, 8, 24)
-    section(".strtab", 3, 0, 0, strtab_off, strtab.len, 0, 0, 1, 0)
-    section(".shstrtab", 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)
+    section(&sh, shstr, "", 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    section(&sh, shstr, ".text", 1, 6, ELF_BASE + text_off, text_off, text.len, 0, 0, 16, 0)
+    section(&sh, shstr, ".rodata", 1, 2, ELF_BASE + ro_off, ro_off, rodata.len, 0, 0, 16, 0)
+    section(&sh, shstr, ".data", 1, 3, ELF_BASE + data_off, data_off, data.len, 0, 0, 16, 0)
+    section(&sh, shstr, ".bss", 8, 3, bss_addr, data_off + data.len, bss_size, 0, 0, 64, 0)
+    section(&sh, shstr, ".symtab", 2, 0, 0, symtab_off, symtab.len, 6, nsyms, 8, 24)
+    section(&sh, shstr, ".strtab", 3, 0, 0, strtab_off, strtab.len, 0, 0, 1, 0)
+    section(&sh, shstr, ".shstrtab", 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)
     if dynamic {
-        section(".dynstr", 3, 2, dynstr_at, dynstr_at - ELF_BASE, dynstr_len, 0, 0, 1, 0)
-        section(".dynsym", 11, 2, dynsym_at, dynsym_at - ELF_BASE, 24 * (externs.len + 1), 8, 1, 8, 24)
-        section(".dynamic", 6, 3, dyn_at, dyn_at - ELF_BASE, dyn_len, 8, 0, 8, 16)
+        section(&sh, shstr, ".dynstr", 3, 2, dynstr_at, dynstr_at - ELF_BASE, dynstr_len, 0, 0, 1, 0)
+        section(&sh, shstr, ".dynsym", 11, 2, dynsym_at, dynsym_at - ELF_BASE, 24 * (externs.len + 1), 8, 1, 8, 24)
+        section(&sh, shstr, ".dynamic", 6, 3, dyn_at, dyn_at - ELF_BASE, dyn_len, 8, 0, 8, 16)
     }
     file.extend(sh.items())
     // ELF header
@@ -400,26 +401,26 @@ fn elf_link(m *Module, out *Output) (str, str) {
     elf_put16(&h, if dynamic { 11 } else { 8 })
     elf_put16(&h, 7)
     // program headers
-    fn segment(ty i64, flags i64, off i64, vaddr i64, filesz i64, memsz i64, align i64) {
-        elf_put32(&h, ty)
-        elf_put32(&h, flags)
-        elf_put64(&h, off)
-        elf_put64(&h, vaddr)
-        elf_put64(&h, vaddr)
-        elf_put64(&h, filesz)
-        elf_put64(&h, memsz)
-        elf_put64(&h, align)
+    fn segment(h *Vec[u8], ty i64, flags i64, off i64, vaddr i64, filesz i64, memsz i64, align i64) {
+        elf_put32(h, ty)
+        elf_put32(h, flags)
+        elf_put64(h, off)
+        elf_put64(h, vaddr)
+        elf_put64(h, vaddr)
+        elf_put64(h, filesz)
+        elf_put64(h, memsz)
+        elf_put64(h, align)
     }
     if dynamic {
-        segment(6, 4, 64, ELF_BASE + 64, 56 * nph, 56 * nph, 8) // PT_PHDR
-        segment(3, 4, interp_at - ELF_BASE, interp_at, interp_len, interp_len, 1) // PT_INTERP
+        segment(&h, 6, 4, 64, ELF_BASE + 64, 56 * nph, 56 * nph, 8) // PT_PHDR
+        segment(&h, 3, 4, interp_at - ELF_BASE, interp_at, interp_len, interp_len, 1) // PT_INTERP
     }
-    segment(1, 5, 0, ELF_BASE, ro_end, ro_end, 0x1000)
-    segment(1, 6, data_off, ELF_BASE + data_off, data.len, data.len + bss_size, 0x1000)
+    segment(&h, 1, 5, 0, ELF_BASE, ro_end, ro_end, 0x1000)
+    segment(&h, 1, 6, data_off, ELF_BASE + data_off, data.len, data.len + bss_size, 0x1000)
     if dynamic {
-        segment(2, 6, dyn_at - ELF_BASE, dyn_at, dyn_len, dyn_len, 8) // PT_DYNAMIC
+        segment(&h, 2, 6, dyn_at - ELF_BASE, dyn_at, dyn_len, dyn_len, 8) // PT_DYNAMIC
     }
-    segment(0x6474e551, 6, 0, 0, 0, 0, 16)
+    segment(&h, 0x6474e551, 6, 0, 0, 0, 0, 16)
     assert h.len <= file.len
     for k in 0..h.len {
         file[k] = h[k]

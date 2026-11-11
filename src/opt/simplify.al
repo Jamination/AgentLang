@@ -1097,6 +1097,19 @@ fn simplify_fold_insts(f *Func) bool {
     return changed
 }
 
+// `fix` of step 5: the replacement of a value defined in b
+fn simplify_simplify_cfg_fix(a i64, def_block *Vec[i64], b i64, binsts *Vec[i64], side_t bool, repl_t *Vec[i64], repl_e *Vec[i64]) i64 {
+    if a < def_block.len && def_block[a] == b {
+        k := index_of(binsts.items(), a)
+        assert k >= 0
+        if side_t {
+            return repl_t[k]
+        }
+        return repl_e[k]
+    }
+    return a
+}
+
 // `side` of step 6: the block x is a tiny side-effect-free arm; returns where it jumps to
 fn simplify_simplify_cfg_side(f *Func, preds *Vec[Vec[i64]], x i64) Opt[i64] {
     if x == 0 || preds[x].len != 1 {
@@ -1680,18 +1693,6 @@ fn simplify_simplify_cfg(f *Func) bool {
                 }
             }
             // rewrite uses
-            // what a use in block `at` of the value `a` reads, if b defines `a`
-            fn fix(a i64, at i64) i64 {
-                if a < def_block.len && def_block[a] == b {
-                    k := index_of(binsts.items(), a)
-                    assert k >= 0
-                    if cfg.dom(t, at) {
-                        return repl_t[k]
-                    }
-                    return repl_e[k]
-                }
-                return a
-            }
             for bb in 0..f.blocks.len {
                 if !cfg.reachable(bb) || bb == b {
                     continue
@@ -1702,21 +1703,31 @@ fn simplify_simplify_cfg(f *Func) bool {
                         continue
                     }
                     for ai in 0..f.insts[v].args.len {
-                        at := bb
-                        if f.insts[v].op == OpPhi {
-                            at = f.insts[v].pb[ai]
+                        a := f.insts[v].args[ai]
+                        if a < def_block.len && def_block[a] == b {
+                            at := bb
+                            if f.insts[v].op == OpPhi {
+                                at = f.insts[v].pb[ai]
+                            }
+                            k := index_of(binsts.items(), a)
+                            assert k >= 0
+                            if cfg.dom(t, at) {
+                                f.insts[v].args[ai] = repl_t[k]
+                            } else {
+                                f.insts[v].args[ai] = repl_e[k]
+                            }
                         }
-                        f.insts[v].args[ai] = fix(f.insts[v].args[ai], at)
                     }
                 }
+                side_t := cfg.dom(t, bb)
                 match f.blocks[bb].term {
                     TermBr(cc, x, y) => {
-                        f.blocks[bb].term = TermBr(fix(cc, bb), x, y)
+                        f.blocks[bb].term = TermBr(simplify_simplify_cfg_fix(cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e), x, y)
                     }
                     TermRet(vs) => {
                         // vs shares its buffer with the terminator
                         for vi in 0..vs.len {
-                            vs[vi] = fix(vs[vi], bb)
+                            vs[vi] = simplify_simplify_cfg_fix(vs[vi], &def_block, b, &binsts, side_t, &repl_t, &repl_e)
                         }
                     }
                     _ => {}

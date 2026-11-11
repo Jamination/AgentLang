@@ -53,13 +53,13 @@ fn isel_split_critical_edges_analyze(f *Func, cfg *Cfg, loops *Loops, def_block 
         return (none, false)
     }
     // the branch condition (and what gets folded into it) must not read the header phis
-    fn is_hphi(v i64) bool {
+    fn is_hphi(f *Func, def_block *Vec[i64], header i64, v i64) bool {
         f.insts[v].op == OpPhi && def_block[v] == header
     }
     // operands folded into the compare are evaluated after the copies: they must not
     // depend on a header phi through anything that gets folded (addresses, test operands)
-    fn tree_has(v i64, depth i64) bool {
-        if is_hphi(v) {
+    fn tree_has(f *Func, v i64, depth i64, def_block *Vec[i64], header i64) bool {
+        if is_hphi(f, def_block, header, v) {
             return true
         }
         i := &f.insts[v]
@@ -70,26 +70,26 @@ fn isel_split_critical_edges_analyze(f *Func, cfg *Cfg, loops *Loops, def_block 
             return true
         }
         for a in i.args.items() {
-            if tree_has(a, depth - 1) {
+            if tree_has(f, a, depth - 1, def_block, header) {
                 return true
             }
         }
         return false
     }
     ci := &f.insts[c]
-    if is_hphi(c) {
+    if is_hphi(f, def_block, header, c) {
         return (none, false)
     }
     if ci.op.is_cmp() {
         for a in ci.args.items() {
-            if is_hphi(a) {
+            if is_hphi(f, def_block, header, a) {
                 return (none, false)
             }
         }
     }
     for a in ci.args.items() {
         ai := &f.insts[a]
-        if (ai.op == OpAnd || ai.op == OpLoad) && tree_has(a, 12) {
+        if (ai.op == OpAnd || ai.op == OpLoad) && tree_has(f, a, 12, def_block, header) {
             return (none, false)
         }
     }
