@@ -85,6 +85,38 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
                 }
             }
         }
+        // two definitions of a name whose parameter types are the same once type aliases
+        // are resolved (the texts differ, so the declaration pass did not see it)
+        okeys := cx.fn_over.keys()
+        sort_by(okeys, lower_fn_str_less)
+        for n in okeys {
+            l, _ := cx.fn_over.get(n)
+            if l.len < 2 || !cx.fn_names.has(n) {
+                continue
+            }
+            for a in 1..l.len {
+                da := cx.fn_decls.buf[l.buf[a]]
+                if da.tparams.len != 0 || da.pos.file < check_from_file || cx.lazy_files.has(da.pos.file) {
+                    continue
+                }
+                fa, has_a := cx.fn_insts.get((l.buf[a], vec[i64]().items()))
+                if !has_a || contains(&cx.fn_sigs.buf[fa].0, T_ERR) {
+                    continue
+                }
+                for b in 0..a {
+                    db := cx.fn_decls.buf[l.buf[b]]
+                    if db.tparams.len != 0 {
+                        continue
+                    }
+                    fb, has_b := cx.fn_insts.get((l.buf[b], vec[i64]().items()))
+                    if has_b && cx.fn_sigs.buf[fa].0.items() == cx.fn_sigs.buf[fb].0.items() {
+                        at := cx.pos_str(db.pos)
+                        cx.err(da.pos, fmt("`", n, "` is already declared with these parameter types at ", at, " (", lower_new_sig(da), " and ", lower_new_sig(db), " are the same types)"))
+                        break
+                    }
+                }
+            }
+        }
         // and force evaluation of user constants / globals
         // (the names are visited in sorted order: the Rust source iterates a HashMap, whose
         // order is arbitrary)

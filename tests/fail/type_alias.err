@@ -12,3 +12,5 @@ type_alias.al:23:17: error: type mismatch: expected i64, found str
 type_alias.al:24:10: error: type `Reg` cannot be used as a value here
 type_alias.al:25:11: error: argument `t` of `takes`: expected str, found i64
 type_alias.al:27:6: error: [4]i64 has no field `nope`
+type_alias.al:32:1: error: `dup` is already declared with these parameter types at tests/fail/type_alias.al:31:1 (i64 and Reg are the same types)
+type_alias.al:34:1: error: `dup` is already declared with these parameter types at tests/fail/type_alias.al:33:1 ([]u8 and Text are the same types)
