@@ -121,7 +121,7 @@ temporary work of unknown size, and for everything that allocates implicitly, us
 
 | Declaration | Description |
 |-------------|-------------|
-| `Arena :: struct { base: i64, cur: i64, end: i64, dirty: i64 }` | Addresses of the block and the cursor (`dirty` is internal: how far old data reaches). |
+| `struct Arena { base: i64, cur: i64, end: i64, dirty: i64 }` | Addresses of the block and the cursor (`dirty` is internal: how far old data reaches). |
 | `arena_new(bytes: i64) -> Arena` | An arena of `bytes` bytes carved from the arena in use. It lives as long as that memory: releasing a mark taken *before* `arena_new` (or resetting the region it was carved from) frees the whole arena. |
 | `arena_of(buf: []u8) -> Arena` | An arena over storage you provide, for example a global `buf: [65536]u8`: memory outside every arena. |
 | `alloc[T](a: *Arena, n: i64) -> []T` | `n` zeroed elements from the arena: `alloc[f32](&a, 256)` or `a.alloc[f32](256)`. |
@@ -147,8 +147,8 @@ free list, objects never move, and each object is named by a `Handle`.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Handle :: struct { idx: u32, gen: u32 }` | Slot index plus generation. The zero `Handle{}` is never valid and means "none"; handles compare with `==`. |
-| `Pool[T] :: struct { items: []T, gens: []u32, free: []u32, len: i64, used: i64, nfree: i64, growable: bool }` | `items`: the slots. `len`: number of live objects. `used`: number of slots that were ever occupied (the live objects are among `items[0..used]`). The rest is internal. |
+| `struct Handle { idx: u32, gen: u32 }` | Slot index plus generation. The zero `Handle{}` is never valid and means "none"; handles compare with `==`. |
+| `struct Pool[T] { items: []T, gens: []u32, free: []u32, len: i64, used: i64, nfree: i64, growable: bool }` | `items`: the slots. `len`: number of live objects. `used`: number of slots that were ever occupied (the live objects are among `items[0..used]`). The rest is internal. |
 | `pool_new[T](cap: i64) -> Pool[T]` | A pool with room for exactly `cap` objects. Allocates once; no later operation allocates. |
 | `pool_growable[T](cap: i64) -> Pool[T]` | A pool that doubles its storage when full. Growing allocates and moves the objects (handles stay valid, pointers do not), and the old storage stays in the arena. |
 | `insert[T](p: *Pool[T], v: T) -> Handle` | Stores `v` and returns its handle; the zero `Handle` if a fixed-capacity pool is full. |
@@ -193,10 +193,10 @@ shows a whole entity, the whole world can be dumped with `as_bytes(pool.items)`,
 behaviour is a new field plus a new loop.
 
 ```
-Kind :: enum { Player, Enemy, Bullet, Pickup }
+enum Kind { Player, Enemy, Bullet, Pickup }
 
 // one struct for every kind of entity; fields a kind does not need stay zero
-Entity :: struct {
+struct Entity {
     kind: Kind
     pos: vec2
     vel: vec2
@@ -205,9 +205,9 @@ Entity :: struct {
     ttl: f32            // seconds to live, 0 = forever
 }
 
-World :: struct { ents: Pool[Entity], player: Handle, score: i64 }
+struct World { ents: Pool[Entity], player: Handle, score: i64 }
 
-move_system :: (w: *World, dt: f32) {
+fn move_system(w: *World, dt: f32) {
     for i in 0..w.ents.used {
         if w.ents.is_live(i) {
             e := &w.ents.items[i]
@@ -217,7 +217,7 @@ move_system :: (w: *World, dt: f32) {
 }
 
 // enemies walk toward their target; a target that died is seen as nil
-chase_system :: (w: *World) {
+fn chase_system(w: *World) {
     for i in 0..w.ents.used {
         if !w.ents.is_live(i) || w.ents.items[i].kind != Enemy {
             continue
@@ -229,7 +229,7 @@ chase_system :: (w: *World) {
 }
 
 // bullets expire; removing inside the loop is fine because slots never move
-expire_system :: (w: *World, dt: f32) {
+fn expire_system(w: *World, dt: f32) {
     for i in 0..w.ents.used {
         if !w.ents.is_live(i) || w.ents.items[i].ttl == 0.0 {
             continue
@@ -242,7 +242,7 @@ expire_system :: (w: *World, dt: f32) {
     }
 }
 
-main :: () {
+fn main() {
     w := World{ents: pool_new[Entity](1024)}
     w.player = w.ents.insert(Entity{kind: Player, pos: vec2(10.0, 0.0), hp: 3})
     enemy := w.ents.insert(Entity{kind: Enemy, pos: vec2(0.0, 0.0), hp: 1, target: w.player})
@@ -278,7 +278,7 @@ Guidelines:
 - Per-kind data that is large or rare (an inventory, an AI plan) goes into its own pool or
   array, and the entity keeps a `Handle` or an index to it.
 - When kinds really are disjoint, an `enum` with data works as the payload:
-  `Body :: enum { Ship(ShipData), Rock(f32), Shot(Handle) }` as a field of the entity, taken apart
+  `enum Body { Ship(ShipData), Rock(f32), Shot(Handle) }` as a field of the entity, taken apart
   with `match`. Start with plain fields; reach for the enum when the struct gets confusing.
 - A system that only concerns a few entities does not need its own storage either: skip the
   others with `continue`. If profiling shows a hot loop over a sparse kind, keep the handles
@@ -293,7 +293,7 @@ A fixed-capacity first-in-first-out queue. Nothing allocates after `ring_new`.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Ring[T] :: struct { buf: []T, head: i64, len: i64 }` | `len`: number of queued elements. The capacity is `len(r.buf)`. |
+| `struct Ring[T] { buf: []T, head: i64, len: i64 }` | `len`: number of queued elements. The capacity is `len(r.buf)`. |
 | `ring_new[T](cap: i64) -> Ring[T]` | An empty ring with room for `cap` elements. |
 | `push[T](r: *Ring[T], x: T) -> bool` | Appends at the back; `false` (nothing stored) if the ring is full. |
 | `push_overwrite[T](r: *Ring[T], x: T)` | Appends at the back, dropping the oldest element if full: the ring keeps the last `cap` values (frame times, a trail, an undo history). |
@@ -313,7 +313,7 @@ array for iteration.
 
 | Declaration | Description |
 |-------------|-------------|
-| `SparseSet :: struct { dense: []u32, sparse: []u32, len: i64 }` | `dense[0..len]` are the members, in unspecified order; `sparse[id]` is the position of `id` in `dense`. |
+| `struct SparseSet { dense: []u32, sparse: []u32, len: i64 }` | `dense[0..len]` are the members, in unspecified order; `sparse[id]` is the position of `id` in `dense`. |
 | `sparse_set(cap: i64) -> SparseSet` | An empty set sized for ids below `cap` and up to `cap` members. It grows (allocating) if a larger id or more members are inserted. |
 | `insert(s: *SparseSet, id: u32) -> i64` | Adds `id`; returns its position in `dense` (also if it was a member already). |
 | `remove(s: *SparseSet, id: u32) -> i64` | Removes `id` by moving the last member into its place. Returns the position that was refilled, or -1 if `id` was not a member. |
@@ -337,11 +337,11 @@ The three lifetimes in one program: pools and a private arena for the whole run,
 level, a frame scope per frame. The numbers at the end show that nothing is left behind.
 
 ```
-Tile :: struct { kind: u8, height: u8 }
-Level :: struct { tiles: []Tile, w: i64, h: i64, name: str }
-Bullet :: struct { pos: vec2, vel: vec2, damage: i64 }
+struct Tile { kind: u8, height: u8 }
+struct Level { tiles: []Tile, w: i64, h: i64, name: str }
+struct Bullet { pos: vec2, vel: vec2, damage: i64 }
 
-load_level :: (n: i64) -> Level {
+fn load_level(n: i64) -> Level {
     lv := Level{w: 64 * n, h: 64, name: fmt("level ", n)}
     lv.tiles = alloc[Tile](lv.w * lv.h)
     for i in 0..len(lv.tiles) {
@@ -350,7 +350,7 @@ load_level :: (n: i64) -> Level {
     return lv
 }
 
-main :: () {
+fn main() {
     // 1. program lifetime: allocated once, never released
     bullets := pool_new[Bullet](256)
     events := ring_new[str](16)

@@ -8,7 +8,7 @@ libpng, no zlib, no libc, so programs using it stay static executables.
 // examples/image_demo.al
 use std.image
 
-main :: () {
+fn main() {
     img := image_new(256, 128, 4)
     for y in 0..img.h {
         for x in 0..img.w {
@@ -35,7 +35,7 @@ crc32 of the pixels: 282c2bf2
 ## Image
 
 ```
-Image :: struct { w: i64, h: i64, channels: i64, pix: []u8 }
+struct Image { w: i64, h: i64, channels: i64, pix: []u8 }
 ```
 
 Rows from top to bottom, pixels left to right, `channels` bytes per pixel: 1 = grey,

@@ -19,7 +19,7 @@ different game every run, and log the seed so that the run can be reproduced.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Rng :: struct { s0: u64, s1: u64, s2: u64, s3: u64 }` | Generator state: 32 bytes, no pointers. Copying it forks the sequence; storing it in a save file resumes it. The all-zero state is invalid (always create it with `rng`). |
+| `struct Rng { s0: u64, s1: u64, s2: u64, s3: u64 }` | Generator state: 32 bytes, no pointers. Copying it forks the sequence; storing it in a save file resumes it. The all-zero state is invalid (always create it with `rng`). |
 | `rng(seed: u64) -> Rng` | A generator determined by `seed`. The state is expanded from the seed with splitmix64, so nearby seeds (0, 1, 2) give unrelated sequences. |
 | `next_u64(r: *Rng) -> u64` | The next 64 random bits. |
 | `next_u32(r: *Rng) -> u32` | The next 32 random bits (high half of `next_u64`). |
@@ -90,10 +90,10 @@ output as needed (`n * 0.5 + 0.5` for `[0, 1]`).
 ## Example
 
 ```
-Loot :: struct { name: str, weight: i64 }
+struct Loot { name: str, weight: i64 }
 
 // weighted choice: walk the table until the roll is used up
-roll_loot :: (r: *Rng, table: []Loot) -> str {
+fn roll_loot(r: *Rng, table: []Loot) -> str {
     total := 0
     for l in table {
         total += l.weight
@@ -108,7 +108,7 @@ roll_loot :: (r: *Rng, table: []Loot) -> str {
     return ""
 }
 
-main :: () {
+fn main() {
     // one generator per subsystem: world generation does not disturb combat rolls
     world := rng(2024)
     combat := rng(7)

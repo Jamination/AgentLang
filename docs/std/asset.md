@@ -59,8 +59,8 @@ views of their argument and do not allocate.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Assets :: struct { root: str, cache: Map[str, Asset] }` | A root directory and the files loaded from it so far. |
-| `Asset :: struct { data: []u8, mtime: i64 }` | A cache entry: the bytes and the file's modification time when it was read. |
+| `struct Assets { root: str, cache: Map[str, Asset] }` | A root directory and the files loaded from it so far. |
+| `struct Asset { data: []u8, mtime: i64 }` | A cache entry: the bytes and the file's modification time when it was read. |
 | `assets_new(root: str) -> Assets` | A loader for the files under `root` (`""` = the working directory). |
 | `load(a: *Assets, name: str) -> ([]u8, bool)` | The content of `root/name`. The first call reads the file; later calls return the same cached slice without touching the disk. `(empty, false)` if the file cannot be read. |
 | `reload(a: *Assets, name: str) -> ([]u8, bool)` | Reads the file again and replaces the cache entry. If reading fails, returns `(empty, false)` and keeps the old entry. |
@@ -99,7 +99,7 @@ A key that occurs twice keeps its last value.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Config :: struct { values: Map[str, str], keys: Vec[str] }` | `keys`: every key once, in file order (`c.keys.items()`). `values`: key → text. |
+| `struct Config { values: Map[str, str], keys: Vec[str] }` | `keys`: every key once, in file order (`c.keys.items()`). `values`: key → text. |
 | `config_parse(text: str) -> Config` | Parses config text. Values are views into `text`, which must stay alive as long as the `Config`. |
 | `config_load(path: str) -> (Config, bool)` | Reads and parses a file; an empty config and `false` if it cannot be read. |
 | `has(c: *Config, key: str) -> bool` | True if the key is present. |
@@ -115,8 +115,8 @@ requested type, so a settings file only needs to list what differs from the defa
 
 | Declaration | Description |
 |-------------|-------------|
-| `JsonKind :: enum { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }` | The kind of a value. |
-| `Json :: struct { kind: JsonKind, num: f64, text: str, key: str, items: []Json }` | One value. `num`: the number, or 1.0/0.0 for true/false. `text`: the string, or the number as written. `key`: the member name when the value is a member of an object. `items`: the elements of an array or the members of an object, in document order, stored contiguously. |
+| `enum JsonKind { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }` | The kind of a value. |
+| `struct Json { kind: JsonKind, num: f64, text: str, key: str, items: []Json }` | One value. `num`: the number, or 1.0/0.0 for true/false. `text`: the string, or the number as written. `key`: the member name when the value is a member of an object. `items`: the elements of an array or the members of an object, in document order, stored contiguously. |
 | `json_parse(text: str) -> (*Json, bool)` | Parses a complete document; `(nil, false)` if it is not valid JSON. |
 | `json_error_line(text: str) -> i64` | The 1-based line of the first syntax error, or 0 if the text is valid. For error messages after `json_parse` failed. |
 | `get(v: *Json, key: str) -> *Json` | The member `key` of an object; `nil` if `v` is not an object or has no such member. |
@@ -152,9 +152,9 @@ few values and throw the tree away, parse between `mark()` and `release()`.
 ```
 use std.asset
 
-Settings :: struct { title: str, width: i64, height: i64, vsync: bool, volume: f64 }
+struct Settings { title: str, width: i64, height: i64, vsync: bool, volume: f64 }
 
-load_settings :: (a: *Assets) -> Settings {
+fn load_settings(a: *Assets) -> Settings {
     text, _ := a.load("settings.ini")            // a missing file gives the defaults below
     c := config_parse(text)
     return Settings{
@@ -166,7 +166,7 @@ load_settings :: (a: *Assets) -> Settings {
     }
 }
 
-main :: () {
+fn main() {
     // set up a small asset directory (a real game ships these files)
     root := "tmp/asset_example"
     make_dir(path_join(root, "levels"))

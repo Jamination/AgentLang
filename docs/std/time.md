@@ -30,7 +30,7 @@ Measures real elapsed time, for profiling and timeouts.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Stopwatch :: struct { start_ns: i64, acc_ns: i64, running: bool }` | |
+| `struct Stopwatch { start_ns: i64, acc_ns: i64, running: bool }` | |
 | `stopwatch() -> Stopwatch` | A running stopwatch started now. |
 | `elapsed(s: *Stopwatch) -> f64` | Seconds measured so far. |
 | `elapsed_ns(s: *Stopwatch) -> i64` | The same in nanoseconds. |
@@ -43,7 +43,7 @@ Call `tick` once at the top of every frame.
 
 | Declaration | Description |
 |-------------|-------------|
-| `FrameClock :: struct { dt: f64, elapsed: f64, frame: i64, fps: f64, max_dt: f64, last_ns: i64, avg: f64 }` | `dt`: seconds since the previous tick, clamped to `[0, max_dt]` (0 on the first tick). `elapsed`: the sum of all `dt`, i.e. game time. `frame`: number of ticks. `fps`: smoothed frames per second. `max_dt`: the clamp, 0.25 s unless changed. `last_ns`, `avg`: internal. |
+| `struct FrameClock { dt: f64, elapsed: f64, frame: i64, fps: f64, max_dt: f64, last_ns: i64, avg: f64 }` | `dt`: seconds since the previous tick, clamped to `[0, max_dt]` (0 on the first tick). `elapsed`: the sum of all `dt`, i.e. game time. `frame`: number of ticks. `fps`: smoothed frames per second. `max_dt`: the clamp, 0.25 s unless changed. `last_ns`, `avg`: internal. |
 | `frame_clock() -> FrameClock` | A new clock. |
 | `tick(c: *FrameClock) -> f64` | Starts a new frame from the real clock: updates the fields and returns `dt`. |
 | `tick_at(c: *FrameClock, now_ns: i64) -> f64` | The same with the time supplied by the caller (a monotonic nanosecond value). For tests, replays and benchmarks. |
@@ -60,7 +60,7 @@ simulation advances in steps of constant length. Physics then behaves the same a
 
 | Declaration | Description |
 |-------------|-------------|
-| `FixedStep :: struct { step: f64, acc: f64, max_steps: i64, steps: i64 }` | `step`: seconds per simulation step. `acc`: time not yet simulated (less than `step` after `advance`). `max_steps`: cap on steps per `advance`, 8 unless changed. `steps`: total steps handed out. |
+| `struct FixedStep { step: f64, acc: f64, max_steps: i64, steps: i64 }` | `step`: seconds per simulation step. `acc`: time not yet simulated (less than `step` after `advance`). `max_steps`: cap on steps per `advance`, 8 unless changed. `steps`: total steps handed out. |
 | `fixed_step(hz: f64) -> FixedStep` | An accumulator for `hz` simulation steps per second. |
 | `advance(f: *FixedStep, dt: f64) -> i64` | Adds the frame time and returns how many steps to run now, from 0 to `max_steps`. |
 | `alpha(f: *FixedStep) -> f32` | How far the current frame lies between the last two simulation states, in `[0, 1)`: draw `lerp(previous, current, alpha)`. |
@@ -84,7 +84,7 @@ the game. Timers are plain values: keep them in your entity or state structs.
 
 | Declaration | Description |
 |-------------|-------------|
-| `Timer :: struct { duration: f64, left: f64, repeat: bool, active: bool }` | `duration`: seconds per period. `left`: seconds until it fires next. `repeat`: restarts itself. `active`: false after a one-shot timer fired or after `stop`. |
+| `struct Timer { duration: f64, left: f64, repeat: bool, active: bool }` | `duration`: seconds per period. `left`: seconds until it fires next. `repeat`: restarts itself. `active`: false after a one-shot timer fired or after `stop`. |
 | `timer(seconds: f64, repeat: bool) -> Timer` | An active timer that fires after `seconds` (and then every `seconds` if `repeat`). |
 | `tick(t: *Timer, dt: f64) -> i64` | Advances by `dt` and returns how often the timer fired: 0 or 1 for a one-shot timer; for a repeating timer the number of periods that ended (a long `dt` can end several; the remainder carries over, so no time is lost). |
 | `done(t: *Timer) -> bool` | True once a one-shot timer has fired. |
@@ -104,10 +104,10 @@ frame times (so the output is reproducible), then running on the real clock at 1
 second.
 
 ```
-Game :: struct { x: f64, prev_x: f64, vx: f64, ticks: i64, spawn: Timer, spawned: i64 }
+struct Game { x: f64, prev_x: f64, vx: f64, ticks: i64, spawn: Timer, spawned: i64 }
 
 // one simulation step of fixed length: all game logic lives here
-update :: (g: *Game, dt: f64) {
+fn update(g: *Game, dt: f64) {
     g.prev_x = g.x
     g.x += g.vx * dt
     g.ticks += 1
@@ -115,11 +115,11 @@ update :: (g: *Game, dt: f64) {
 }
 
 // drawing interpolates between the last two states, so motion is smooth at any frame rate
-render_x :: (g: *Game, alpha: f32) -> f64 {
+fn render_x(g: *Game, alpha: f32) -> f64 {
     return g.prev_x + (g.x - g.prev_x) * f64(alpha)
 }
 
-main :: () {
+fn main() {
     game := Game{vx: 10.0, spawn: timer(0.1, true)}
     clock := frame_clock()
     sim := fixed_step(50.0)

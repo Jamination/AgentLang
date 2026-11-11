@@ -16,7 +16,7 @@ linked.
 ## Sound
 
 ```
-Sound :: struct { samples: []f32, rate: i64, channels: i64 }
+struct Sound { samples: []f32, rate: i64, channels: i64 }
 ```
 
 Interleaved `f32` samples in -1..1, `channels` samples per frame, `rate` frames per second. A
@@ -141,7 +141,7 @@ while !w.should_close() {
 // Renders two seconds of mixed sound to a WAV file, then plays the same mix on a device.
 use std.audio
 
-main :: () {
+fn main() {
     note := sound_tone(48000, 440.0, 0.3, 0.5)
     hiss := sound_noise(48000, 0.2, 0.1, 7)
     mixer := mixer_new(48000, 2, 16)

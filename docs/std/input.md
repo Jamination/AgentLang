@@ -53,9 +53,9 @@ letters and digits are consecutive: `KEY_A + 3 == KEY_D`, `KEY_0 + 7 == KEY_7`.
 ## Events
 
 ```
-EventKind :: enum { EventNone, EventClose, EventResize, EventFocus, EventUnfocus, EventKeyDown,
+enum EventKind { EventNone, EventClose, EventResize, EventFocus, EventUnfocus, EventKeyDown,
                  EventKeyUp, EventText, EventMouseMove, EventMouseDown, EventMouseUp, EventWheel }
-Event :: struct { kind: EventKind, key: i64, x: i64, y: i64, codepoint: u32, mods: u8, repeat: bool }
+struct Event { kind: EventKind, key: i64, x: i64, y: i64, codepoint: u32, mods: u8, repeat: bool }
 ```
 
 | Kind | Fields |
@@ -80,7 +80,7 @@ it in a struct or allocate it with `new[EventQueue]()` rather than passing it by
 
 ## Input
 
-`Input :: struct` (zero value is ready to use) has public fields `keys`, `buttons` (state bits
+`struct Input` (zero value is ready to use) has public fields `keys`, `buttons` (state bits
 per key / mouse button), `mouse_x/y`, `mouse_dx/dy`, `wheel_x/y`, `focused`, `text`,
 `text_len` and `pad` (a `Gamepad`). Usually it is read through:
 
@@ -107,7 +107,7 @@ Unknown key or button numbers are never an error: queries return false, events a
 
 ## ActionMap
 
-An action is a small integer the game defines (`ACT_JUMP :: 4`). Any number of keys,
+An action is a small integer the game defines (`const ACT_JUMP = 4`). Any number of keys,
 mouse buttons and gamepad buttons can be bound to it; the game asks only about actions, and
 rebinding is a data change.
 
@@ -130,7 +130,7 @@ register the names in the order of the constants. Gamepad bindings read `Input.p
 
 ## Gamepad
 
-`Gamepad :: struct { fd, connected, buttons, axes }` reads the kernel joystick interface. Button
+`struct Gamepad { fd, connected, buttons, axes }` reads the kernel joystick interface. Button
 and axis numbers are those of the driver; the `PAD_*` constants match the common Xbox-style
 layout (xpad), other pads may differ. Triggers are axes from -1 (released) to 1.
 
@@ -155,11 +155,11 @@ so the pad embedded in the window's `Input` needs only `gamepad_open(&w.input.pa
 // Action mapping on a scripted input sequence (no window needed).
 use std.input
 
-ACT_LEFT :: 0
-ACT_RIGHT :: 1
-ACT_JUMP :: 2
+const ACT_LEFT = 0
+const ACT_RIGHT = 1
+const ACT_JUMP = 2
 
-main :: () {
+fn main() {
     inp: Input
     actions := action_map()
     actions.bind_key(ACT_LEFT, KEY_A)

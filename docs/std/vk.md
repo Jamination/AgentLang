@@ -20,7 +20,7 @@ Vulkan loader), which must be installed together with a driver.
 |---|----|
 | dispatchable handle: `VkInstance`, `VkPhysicalDevice`, `VkDevice`, `VkQueue`, `VkCommandBuffer` | `*u8` (`nil` = no handle) |
 | non-dispatchable handle: `VkBuffer`, `VkImage`, `VkPipeline`, `VkSurfaceKHR`, ... | `u64` (`0` or `VK_NULL_HANDLE` = no handle) |
-| enum (`VkFormat`, `VkResult`, `VkStructureType`, ...) | `i32`; values are constants with the C names: `VK_FORMAT_R8G8B8A8_UNORM : i32 : 37` |
+| enum (`VkFormat`, `VkResult`, `VkStructureType`, ...) | `i32`; values are constants with the C names: `const VK_FORMAT_R8G8B8A8_UNORM: i32 = 37` |
 | flags (`VkImageUsageFlags`) and flag bits (`VK_IMAGE_USAGE_SAMPLED_BIT`) | `u32`; combine with `\|` |
 | 64-bit flags (`VkAccessFlags2`, `VkPipelineStageFlags2`, `VkFormatFeatureFlags2`) | `u64` |
 | `VkBool32` | `u32` (`VK_TRUE`, `VK_FALSE`) |
@@ -35,13 +35,13 @@ Vulkan loader), which must be installed together with a driver.
 | array parameter `const float blendConstants[4]` | `*f32` |
 | union (`VkClearValue`, `VkClearColorValue`) | `struct { data: [N]u32 }` of the union's size and alignment; build values with the helpers below |
 | struct with bit-fields | not bound (a comment in `std/vk.al` names it; none in the current selection) |
-| command | `extern "libvulkan.so.1" vkXxx :: (...)` with the C parameter names |
+| command | `extern "libvulkan.so.1" fn vkXxx(...)` with the C parameter names |
 | `VK_API_VERSION_1_x`, `VK_NULL_HANDLE`, `VK_WHOLE_SIZE`, `VK_KHR_SWAPCHAIN_EXTENSION_NAME`, ... | constants (`u32`, `u64`, `str`) |
 | window-system types | `Display*`, `xcb_connection_t*`, `wl_display*`, `wl_surface*` are `*u8`; `Window`, `VisualID` are `u64`; `xcb_window_t`, `xcb_visualid_t` are `u32` |
 
 AL has no type aliases, so the C type of a field or parameter that became `i32`/`u32`/`u64`/`*u8`
 is kept as a comment: every struct field carries `// VkFormat`-style notes and every `extern` is
-preceded by its C prototype. `std/vk.al` is meant to be searched (`grep -n 'VkImageCreateInfo :: struct' -A 16 std/vk.al`).
+preceded by its C prototype. `std/vk.al` is meant to be searched (`grep -n 'struct VkImageCreateInfo' -A 16 std/vk.al`).
 
 A field or parameter whose name is an AL keyword would get a trailing underscore (none of the
 current names needs it). Struct names that are aliases in C (`VkPhysicalDeviceVariablePointerFeatures`)
@@ -74,7 +74,7 @@ are listed as comments only; use the name they point to.
   and are reached the C way, through `vkGetInstanceProcAddr` and a cast to a function type:
 
   ```
-  on_message :: (severity: u32, kind: u32, data: *VkDebugUtilsMessengerCallbackDataEXT, user: *u8) -> u32 {
+  fn on_message(severity: u32, kind: u32, data: *VkDebugUtilsMessengerCallbackDataEXT, user: *u8) -> u32 {
       print(from_cstr(data.pMessage))
       VK_FALSE
   }
@@ -83,7 +83,7 @@ are listed as comments only; use the name they point to.
   m.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
   m.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
   m.pfnUserCallback = cast[*u8](on_message)
-  create := cast[(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) -> i32](
+  create := cast[fn(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) -> i32](
       vkGetInstanceProcAddr(instance, ptr("vkCreateDebugUtilsMessengerEXT")))
   messenger: u64
   vk_check(create(instance, &m, nil, &messenger), "vkCreateDebugUtilsMessengerEXT")
@@ -119,7 +119,7 @@ extension `VK_..._EXTENSION_NAME` (`str`) and `VK_..._SPEC_VERSION`.
 ```
 use std.vk
 
-main :: () -> i64 {
+fn main() -> i64 {
     version: u32
     vk_check(vkEnumerateInstanceVersion(&version), "vkEnumerateInstanceVersion")
     print("loader:", vk_version_major(version), vk_version_minor(version))

@@ -101,8 +101,8 @@ They are written with vector operators and compile to packed SSE code.
 ## Geometry
 
 ```
-Aabb :: struct { min: vec3, max: vec3 }      Ray :: struct { origin: vec3, dir: vec3 }
-Sphere :: struct { center: vec3, radius: f32 }   Plane :: struct { normal: vec3, d: f32 }   // dot(normal, p) == d
+struct Aabb { min: vec3, max: vec3 }      struct Ray { origin: vec3, dir: vec3 }
+struct Sphere { center: vec3, radius: f32 }   struct Plane { normal: vec3, d: f32 }         // dot(normal, p) == d
 ```
 
 | Functions | |

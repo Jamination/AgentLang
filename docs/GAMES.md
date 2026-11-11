@@ -43,8 +43,8 @@ and keep every system a simple loop:
 **Fat struct**: one struct with every field any kind of entity needs, plus a `kind`.
 
 ```
-Kind :: enum { Player, Rock, Shot }
-Entity :: struct { kind: Kind, pos: vec2, vel: vec2, radius: f32, life: f32, hp: i64, color: u32 }
+enum Kind { Player, Rock, Shot }
+struct Entity { kind: Kind, pos: vec2, vel: vec2, radius: f32, life: f32, hp: i64, color: u32 }
 
 for i in 0..g.ents.len {
     if !g.ents.is_live(i) { continue }
@@ -61,9 +61,9 @@ for i in 0..g.ents.len {
 variant, so adding a kind makes the compiler point at every place that has to handle it.
 
 ```
-Item :: enum { Weapon(i64, f32), Potion(i64), Key(str) }
+enum Item { Weapon(i64, f32), Potion(i64), Key(str) }
 
-describe :: (it: Item) -> str {
+fn describe(it: Item) -> str {
     match it {
         Weapon(damage, range) => fmt("weapon ", damage)
         Potion(heal) => fmt("potion +", heal)
@@ -106,7 +106,7 @@ each frame should be constant once a level is running.
 A system is a function over the state, called from `update` in a fixed order:
 
 ```
-update :: (g: *Game, inp: *Input, dt: f32) {
+fn update(g: *Game, inp: *Input, dt: f32) {
     control_player(g, inp, dt)
     spawn(g, dt)
     move_all(g, dt)

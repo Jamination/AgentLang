@@ -161,33 +161,33 @@ The example below is a complete program and a recommended skeleton:
 use std.window
 use std.audio
 
-FB_W :: 320                              // framebuffer size; `present` scales it to the window
-FB_H :: 180
-STEP_NS :: 1_000_000_000 / 120           // the simulation runs at exactly 120 steps per second
-STEP : f32 : 1.0 / 120.0
+const FB_W = 320                         // framebuffer size; `present` scales it to the window
+const FB_H = 180
+const STEP_NS = 1_000_000_000 / 120      // the simulation runs at exactly 120 steps per second
+const STEP: f32 = 1.0 / 120.0
 
-ACT_LEFT :: 0
-ACT_RIGHT :: 1
-ACT_DOWN :: 2
-ACT_UP :: 3
-ACT_BEEP :: 4
-ACT_QUIT :: 5
+const ACT_LEFT = 0
+const ACT_RIGHT = 1
+const ACT_DOWN = 2
+const ACT_UP = 3
+const ACT_BEEP = 4
+const ACT_QUIT = 5
 
 // What the player wants, sampled once per frame. Edge-triggered actions are latched until a
 // simulation step has consumed them, so they are neither lost nor seen twice.
-Controls :: struct {
+struct Controls {
     dir: vec2
     beep: bool
 }
 
 // The whole game state: plain data, no globals.
-Game :: struct {
+struct Game {
     pos: vec2
     prev: vec2       // position one step ago, for interpolated drawing
     beeps: i64
 }
 
-bindings :: () -> ActionMap {
+fn bindings() -> ActionMap {
     m := action_map()
     m.bind_key(ACT_LEFT, KEY_A)
     m.bind_key(ACT_LEFT, KEY_LEFT)
@@ -205,7 +205,7 @@ bindings :: () -> ActionMap {
 }
 
 // One fixed simulation step: the only place where the game state changes.
-step :: (g: *Game, c: *Controls, mixer: *Mixer, beep: Sound) {
+fn step(g: *Game, c: *Controls, mixer: *Mixer, beep: Sound) {
     g.prev = g.pos
     g.pos = g.pos + vec2(c.dir.x, -c.dir.y) * (90.0 * STEP)
     g.pos.x = fmin(fmax(g.pos.x, 0.0), f32(FB_W - 16))
@@ -219,7 +219,7 @@ step :: (g: *Game, c: *Controls, mixer: *Mixer, beep: Sound) {
 }
 
 // Draws the state `alpha` (0..1) of the way from the previous step to the current one.
-render :: (g: *Game, fb: []u8, alpha: f32) {
+fn render(g: *Game, fb: []u8, alpha: f32) {
     for i in 0..FB_W * FB_H {
         fb[i * 4] = 24
         fb[i * 4 + 1] = 28
@@ -238,12 +238,12 @@ render :: (g: *Game, fb: []u8, alpha: f32) {
     }
 }
 
-nap :: (ns: i64) {
+fn nap(ns: i64) {
     ts := [2]i64{0, ns}
     syscall(35, ptr(ts), 0)              // nanosleep
 }
 
-main :: () {
+fn main() {
     w, ok := window_open(WindowDesc{title: "AL game loop", width: 960, height: 540, resizable: true})
     if !ok {
         print("cannot open a window (no display?)")

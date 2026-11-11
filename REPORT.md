@@ -33,7 +33,7 @@ programs, so they are unchanged apart from timing noise.
 | `vec2`, `vec3`, `vec4`, `quat`, `mat4` | built-in types with operators, swizzles, component stores, constructors; one SSE register per vector, packed instructions (`addps`, `mulps`, `shufps`); C-compatible memory layout (`vec3` is 12 bytes) |
 | overloading | functions overload on parameter types; resolution looks at the receiver and then every argument; exact definitions beat generic ones |
 | `f[T](x)`, `x.f[T](a)`, generic function values | explicit type arguments everywhere |
-| `extern "lib.so" name :: (...)` | C functions; a program that reaches one becomes a dynamically linked ELF (PT_INTERP, PT_DYNAMIC, GLOB_DAT relocations written by `alc` itself), every other program stays static and libc-free |
+| `extern "lib.so" fn name(...)` | C functions; a program that reaches one becomes a dynamically linked ELF (PT_INTERP, PT_DYNAMIC, GLOB_DAT relocations written by `alc` itself), every other program stays static and libc-free |
 | `use std.<name>` | modules bundled inside the compiler binary |
 | raw strings, `embed("file")` | multi-line text between backquotes; file contents at compile time |
 | `fmin`, `fmax`, `cstr`, `from_cstr` | |
