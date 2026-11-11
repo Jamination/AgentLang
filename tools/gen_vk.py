@@ -35,9 +35,10 @@ HELPERS = os.path.join(ROOT, "tools", "vk_helpers.al")
 SCRATCH = os.path.join(ROOT, "tmp", "VulkanBindings")
 ALC = os.path.join(ROOT, "build", "alc")
 
+# the words src/lexer.al reserves (LEXER_KEYWORDS): a C name equal to one of them gets a trailing `_`
 AL_KEYWORDS = set(
     "fn struct enum const var test use if else while loop for in by return break continue "
-    "assert match defer inline noinline true false nil extern".split()
+    "assert match defer inline noinline true false nil extern priv".split()
 )
 
 # C scalar and window-system types: name -> (AL type, size). Size 0 marks an opaque type that

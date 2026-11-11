@@ -38,8 +38,9 @@ ENUMS_WITHOUT_CONSTANTS = {'D3D12_MESSAGE_ID'}
 RENAMED_INTERFACES = {'ID3D10Blob': 'ID3DBlob'}
 # constants built with function-like macros in the headers (checked by --verify like all others)
 EXTRA_CONSTANTS = [('D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING', 0x1688)]
+# the words src/lexer.al reserves (LEXER_KEYWORDS), and `self`, the receiver of the method wrappers
 AL_KEYWORDS = set('fn struct enum const var test use if else while loop for in by return break continue assert match '
-                  'defer inline noinline true false nil extern self'.split())
+                  'defer inline noinline true false nil extern priv self'.split())
 
 # Windows base types the D3D headers rely on, in C; they go through the same pipeline.
 BASE_DECLS = '''
