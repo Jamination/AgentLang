@@ -45,7 +45,7 @@ import re
 import sys
 
 KEYWORDS = {
-    "fn", "struct", "enum", "const", "var", "test", "use", "if", "else", "while", "loop", "for",
+    "fn", "struct", "enum", "const", "test", "use", "if", "else", "while", "loop", "for",
     "in", "return", "break", "continue", "assert", "true", "false", "nil", "match", "by", "defer",
     "inline", "noinline", "extern", "priv",
 }
@@ -58,7 +58,7 @@ LINE_END_KW = {"return", "break", "continue", "true", "false", "nil"}
 BINOPS = {"*": 9, "/": 9, "%": 9, "+": 8, "-": 8, "<<": 7, ">>": 7, "&": 6, "^": 5, "|": 4, "==": 3,
           "!=": 3, "<": 3, "<=": 3, ">": 3, ">=": 3, "&&": 2, "||": 1}
 ASSIGN_OPS = {"+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
-DECL_KW = {"fn", "struct", "enum", "const", "var", "test", "use", "inline", "noinline", "extern", "priv"}
+DECL_KW = {"fn", "struct", "enum", "const", "test", "use", "inline", "noinline", "extern", "priv"}
 
 
 class Tok:
@@ -1193,6 +1193,8 @@ def convert_span(code):
     parses as AL and something in it is old syntax; else None"""
     if "\n" in code or not ("::" in code or "->" in code or " : " in code):
         return None
+    if re.search(r"\S::|::\S", code):
+        return None         # `Path::join`, `A::B`: not a declaration
     p = Parser(code, True)
     p.file()
     if p.problems or not p.edits:
