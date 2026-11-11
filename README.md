@@ -10,7 +10,7 @@ dynamically against exactly the libraries it reaches.
 It is meant for high-performance software such as games: `f32`, vectors, quaternions and
 matrices are built-in types compiled to SSE code, functions overload on argument types, and a
 game-oriented standard library ships inside the compiler. The language has generics, enums
-with data and `match`, nested functions that work on the variables around them, file-private
+with data and `match`, nested and anonymous functions (plain function values, no captures), file-private
 declarations (`priv`), type aliases, and arena memory with regions and deep `clone` instead
 of `free` or a garbage collector.
 
@@ -70,7 +70,7 @@ flowchart LR
   unoptimized, optimized and unchecked, and the optimizer's IR must pass the verifier after every
   pass (`ALC_DEBUG=verify`).
 - `tests/gen/fuzz_vec.py [count] [seed]` — the same for `f32` / vector / matrix code.
-- `tests/gen/fuzz_nested.py [count] [seed]` — programs made of nested functions, with expected
+- `tests/gen/fuzz_nested.py [count] [seed]` — programs made of nested and anonymous functions, with expected
   output computed by the generator.
 - `tests/gen/divconst.py` regenerates the division-by-constant stress test.
 - `ALC_DISABLE=pass,...` switches optimization passes off (`unroll`, `bce`, `licm`, `gvn`,

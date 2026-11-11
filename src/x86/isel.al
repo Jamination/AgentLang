@@ -333,11 +333,6 @@ fn isel_is_r(o Opnd) bool {
     }
 }
 
-// order of (result index, value) pairs
-fn isel_proj_less(a (i64, i64), b (i64, i64)) bool {
-    return a.0 < b.0 || (a.0 == b.0 && a.1 < b.1)
-}
-
 struct IselSel {
     f *Func
     m *Module
@@ -1887,7 +1882,7 @@ fn call(self *IselSel, v i64, i *Inst) {
         if has {
             // multi-value results: assign registers in order of result index
             by_idx := clone(&ps)
-            sort_by(by_idx.items(), isel_proj_less)
+            sort_by(by_idx.items(), fn(a (i64, i64), b (i64, i64)) bool { a.0 < b.0 || (a.0 == b.0 && a.1 < b.1) })
             maxi := -1
             for p in by_idx.items() {
                 if p.0 > maxi {

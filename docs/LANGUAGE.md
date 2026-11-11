@@ -49,8 +49,7 @@ fn largest[T](items []T, less fn(T, T) bool) T {
 
 fn main() {
     shapes := []Shape{Circle(Point{0.0, 0.0}, 1.0), Rect(Point{0.0, 0.0}, Point{2.0, 3.0}), Empty}
-    fn smaller(a Shape, b Shape) bool { area(a) < area(b) }    // a nested function
-    print("largest:", largest(shapes, smaller))
+    print("largest:", largest(shapes, fn(a Shape, b Shape) bool { area(a) < area(b) }))
     // largest: Rect(Point{x: 0.0, y: 0.0}, Point{x: 2.0, y: 3.0})
     counts := map[str, i64]()
     words := vec[str]()
@@ -522,60 +521,45 @@ fn main() {
 
 ### Nested functions
 
-A function declared inside a block can read and assign the variables of the function around it.
+A function can be written inside another one, with a name (a statement) or without (an
+expression). Either way it is an ordinary function that happens to be declared there: **it
+does not see the variables of the function around it.** What it needs is passed as a parameter.
 
 ```
 struct Item { name str, hp i64 }
 
 fn rank(items []Item, floor i64) i64 {
     n := 0
-    fn keep(it Item) bool {                // sees `floor` and `n` of rank
-        if it.hp < floor { return false }  // returns from keep
-        n += 1                             // assigns the variable of rank
+    fn keep(it Item, floor i64, n *i64) bool {     // state comes in as parameters
+        if it.hp < floor { return false }          // returns from keep
+        *n += 1
         true
     }
-    fn by_hp(a Item, b Item) bool { a.hp > b.hp }   // uses no variable of rank: a function value
-    for it in items { it.keep() }          // called as keep(it) or it.keep()
-    sort_by(items, by_hp)
+    for it in items { it.keep(floor, &n) }         // keep(it, floor, &n) or it.keep(floor, &n)
+    sort_by(items, fn(a Item, b Item) bool { a.hp > b.hp })    // anonymous function
     n
-}
-
-fn depth(n i64) i64 {
-    deepest := 0
-    fn visit(level i64) {                  // may call itself
-        if level > deepest { deepest = level }
-        if level < n { visit(level + 1) }
-    }
-    visit(0)
-    deepest
 }
 ```
 
-- **Declaration.** `fn name(params) Result { body }` as a statement. It has no type parameters of
-  its own and takes no `inline` / `noinline` / `priv` / `extern`; inside a generic function it
-  may use that function's type parameters. Nested functions may contain nested functions.
-- **Scope of the name.** From the declaration to the end of its block, and inside its own body.
-  There it hides top-level functions and builtins of that name, also in method-call syntax
-  (`x.name()`). A block cannot declare the name twice or use it for a variable as well;
-  nested functions are not overloaded.
-- **Variables.** The body sees the variables and parameters of the enclosing function(s) that
-  are in scope where the nested function is declared. They are the variables themselves, not
-  copies: assignments are seen outside, and each call sees their current values. A variable
-  declared after the nested function is not visible in it.
+- **Forms.** `fn name(params) Result { body }` as a statement; `fn(params) Result { body }` as
+  an expression. Neither has type parameters of its own or takes `inline` / `noinline` /
+  `priv` / `extern`. They may contain further nested functions.
+- **What the body sees.** Globals, constants, top-level functions, nested functions declared
+  before it in the enclosing blocks, itself (recursion), and the type parameters of the
+  enclosing function. Using a variable or parameter of an enclosing function is a compile
+  error that names it: pass it as a parameter (`&x` if the function changes it). A callback
+  that needs state takes it as a context argument, as in `sort_by(items, ctx, less)`.
+- **Value.** The name of a nested function, and an anonymous function, is a plain `fn(A) R`
+  value: it can be called, passed, stored, returned, and given to C as a callback. It stays
+  valid after the enclosing function has returned.
+- **Scope of the name.** From the declaration to the end of its block. There it hides
+  top-level functions and builtins of that name, also in method-call syntax (`x.name()`). A
+  block cannot declare the name twice or use it for a variable as well; nested functions
+  are not overloaded and not assignable.
 - **Control flow.** `return` returns from the nested function. `break`, `continue` and labels
   cannot reach a loop of the enclosing function, and `defer` blocks belong to the function
   they are written in.
-- **As a value.** A nested function that uses no variable of an enclosing function (neither
-  directly nor through a nested function it calls) is an ordinary function: its name is a
-  `fn(A) R` value that can be passed, stored, returned and given to C. One that does use such
-  a variable can only be called (`f(x)`, `x.f()`); using its name as a value is an error. A
-  callback that needs state gets it as a parameter, as with `sort_by(items, ctx, less)`.
-- **Cost.** A nested function is compiled as an ordinary function that receives the addresses
-  of the variables it uses as extra arguments; there is no allocation and nothing to keep
-  alive. Small ones are inlined, and the variables are then ordinary locals in registers. If a
-  nested function is not inlined (it is large or recursive, or the enclosing function is very
-  large), the variables it uses live in memory for the whole enclosing function. Diagnostics,
-  `--emit-ir` and the symbol table name it `outer.name`.
+- Diagnostics, `--emit-ir` and the symbol table name them `outer.name` and `outer.fn@line:col`.
 
 ### match
 
@@ -1072,12 +1056,11 @@ m.has(k)               m.del(k)         m.len          m.keys()   // []K
 `alc sigs file.al -- std` prints every library signature.
 
 ```
-fn by_score(scores []i64, a i64, b i64) bool { scores[a] > scores[b] }
-
 fn main() {
     scores := []i64{70, 95, 80}
     order := []i64{0, 1, 2}
-    sort_by(order, scores, by_score)       // the comparison gets `scores` as its first argument
+    // the comparison gets `scores` as its first argument
+    sort_by(order, scores, fn(scores []i64, a i64, b i64) bool { scores[a] > scores[b] })
     print(order)                           // [1, 2, 0]
 }
 ```
@@ -1220,7 +1203,7 @@ p := cstr(path)                            // NUL-terminated copy of any str
 - Parameters and results must be integers, `bool`, `f32`/`f64`, pointers or function values;
   C structs are passed by pointer (AL structs have C layout). C `int` is `i32`, `long`/`size_t`
   are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.
-- A plain AL function (also a nested function that uses no variable of its enclosing function)
+- A plain AL function (also a nested or anonymous one)
   can be passed where C expects a callback (`fn(*u8, *u8) i32`), as long as its parameters are
   scalars. Code running on a foreign thread must not allocate.
 - A program that calls at least one `extern` function becomes a dynamically linked executable
@@ -1261,6 +1244,7 @@ unary     = ("-" | "!" | "~" | "&" | "*") unary | postfix
 postfix   = primary { "(" [expr {"," expr}] ")" | "[" expr {"," expr} "]" | "[" [expr] ".." [expr] "]"
                     | "." (IDENT | INT) | "{" [field {"," field}] "}" }
 primary   = INT | FLOAT | STRING | CHAR | "true" | "false" | "nil" | IDENT | "(" expr {"," expr} ")"
+          | "fn" "(" [param {"," param}] ")" [type] block
           | "[" "]" type | "[" expr "]" type | "if" expr block "else" block
           | "match" expr "{" { pattern {"," pattern} ["if" expr] "=>" (block | stmt) } "}"
           | qual "." IDENT ["(" [expr {"," expr}] ")"]

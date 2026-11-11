@@ -89,24 +89,18 @@ Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
   private one fits), and `priv_hint` (the "is declared `priv` in ..." hint). A new kind of
   declaration becomes private-capable with one case in `parser_set_priv` and one in
   `priv_decl_info` / `priv_rewrite`.
-- **Nested functions** (`src/lower_nested.al`). `fn` inside a block (`SKFn`) is compiled by
-  lambda lifting: the function `outer.name` gets, after its declared parameters, one pointer
-  parameter per variable of the enclosing function(s) that its body uses, and every call
-  passes those addresses. The name lives in the block's scope next to the variables
-  (`Scope.vars`, with a negative type slot that indexes `Fx.nested`). The body is lowered at
-  the declaration by `lower_fn_lower_body`, with the type environment of the enclosing
-  function; the captured names are declared in its outermost scope with the parameter values
-  as their addresses. A nested function that calls another one (or itself) takes over the
-  callee's captures and passes them on; captures are identified by their address value, not
-  by name. Calls go through `call_fn`, the same code as calls of top-level functions, so they
-  are direct calls: the inliner treats them like any other (a nested function with captures
-  carries the `inline` hint, because a call that is not inlined keeps those variables in
-  memory in the caller), and after inlining the captured variables are promoted to registers
-  again. A nested function without captures is a plain
-  function value; one with captures cannot be used as a value, so no address of a local
-  outlives its call that way. The walk that finds what a body uses is exhaustive over the
-  AST enums: a new `EK` / `SK` / `Pat` variant does not compile until it is handled there
-  (a variant that declares names must add them to `bound`).
+- **Nested and anonymous functions** (`src/lower_nested.al`). `fn name(..) { }` inside a
+  block is the statement `SKFn`, `fn(..) { }` the expression `EKFn` (a `FnDecl` with an empty
+  name). Both become ordinary IR functions `outer.name` / `outer.fn@line:col`, lowered where
+  they are written by `lower_fn_lower_body` with the type environment of the enclosing
+  function (so once per instantiation of it); `Fx.nested_done` makes a declaration that is
+  lowered again (a `defer` block on another way out) reuse the same function. The name lives
+  in the block's scope next to the variables (`Scope.vars`, with a negative type slot that
+  indexes `Cx.nested`). The `Fx` of the body has the enclosing one as `parent`: `lookup`
+  continues there, finds nested functions, and reports a variable as `LOWER_NESTED_OUTER`,
+  which is the "does not see the variables of the function around it" error. There is no
+  capture and no environment: calls go through `call_fn` like calls of top-level functions,
+  and the value is `OpFAddr`.
 - **Copy-write check** (`src/lint.al`). `lint_copy_writes` runs per `:=` statement while a
   function is lowered (it needs the type of the initialiser) and counts, in the rest of the
   block, direct field assignments to the new name against every other occurrence of it.

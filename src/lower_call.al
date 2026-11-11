@@ -271,10 +271,6 @@ fn lower_call_no_pre() [](i64, Val) {
     return [](i64, Val){}
 }
 
-fn lower_call_rank_less(a (i64, i64), b (i64, i64)) bool {
-    return a.0 < b.0
-}
-
 // `Path::parent` of a source file name (empty if there is none)
 fn lower_call_parent_dir(src str) str {
     n := len(src)
@@ -1388,7 +1384,7 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
             }
             ranked.push((rank, di))
         }
-        sort_by(ranked.items(), lower_call_rank_less)
+        sort_by(ranked.items(), fn(a (i64, i64), b (i64, i64)) bool { a.0 < b.0 })
         pick = ranked[0].1
         by_ret := false
         match expect {
