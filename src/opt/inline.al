@@ -220,8 +220,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         {
             f := &m.funcs[fid]
             frpo := f.rpo()
-            for b in frpo {
-                hit := false
+            search: for b in frpo {
                 for v in f.blocks[b].insts {
                     i := &f.insts[v]
                     if i.op != Call {
@@ -250,12 +249,8 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     }
                     if size <= limit {
                         found = Some((b, v, g))
-                        hit = true
-                        break
+                        break search
                     }
-                }
-                if hit {
-                    break
                 }
             }
         }

@@ -11,6 +11,13 @@ enum CV {
     Str(str),
 }
 
+fn is_cv_float(o: Opt[CV]) -> bool {
+    match o {
+        Some(Float(_)) => true
+        _ => false
+    }
+}
+
 priv enum CState {
     Busy,
     Done(Opt[i64], CV),
@@ -128,7 +135,7 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
     }
 }
 
-// `f as i64` of the Rust source: saturating, NaN gives 0
+// f64 to i64 at compile time: saturating, NaN gives 0
 priv fn f64_to_i64(f: f64) -> i64 {
     if f != f {
         return 0
@@ -564,7 +571,7 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
                 return T_ERR
             }
             es := self.types.size_of(e2)
-            // es * ln > 2^31 without overflow (a saturating multiplication in the Rust source)
+            // es * ln > 2^31, tested without overflow
             if es > 0 && ln > (1 << 31) / es {
                 self.err(n.pos, "array type too large (max 2 GiB)")
                 return T_ERR

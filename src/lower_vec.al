@@ -179,7 +179,7 @@ fn vec_index(self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
                 return None
             }
             if bv.mem && !is_some(bv.lane) {
-                // (`k as u8` in the Rust source: k is 0..3 here)
+                // (k is 0..3 here)
                 return Some(Val{ty: T_F32, v: bv.v, mem: true, alias: bv.alias, lane: Some((k, vt))})
             }
             x := self.scalar(bv)

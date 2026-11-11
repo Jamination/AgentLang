@@ -140,7 +140,6 @@ fn lower_call_is_fn(k: TyK) -> bool {
     }
 }
 
-
 fn lower_call_is_slice(k: TyK) -> bool {
     match k {
         Slice(_) => true
@@ -155,7 +154,7 @@ fn lower_call_is_enum(k: TyK) -> bool {
     }
 }
 
-// matches!(k, TyK::Int(bits, _))
+// an integer type of that width
 priv fn is_int_bits(k: TyK, bits: i64) -> bool {
     match k {
         Int(b, _) => i64(b) == bits
@@ -163,17 +162,10 @@ priv fn is_int_bits(k: TyK, bits: i64) -> bool {
     }
 }
 
-// matches!(k, TyK::Ptr(i) if i == inner)
+// a pointer to `inner`
 priv fn is_ptr_to(k: TyK, inner: i64) -> bool {
     match k {
         Ptr(i) => i == inner
-        _ => false
-    }
-}
-
-priv fn is_cv_float(o: Opt[CV]) -> bool {
-    match o {
-        Some(Float(_)) => true
         _ => false
     }
 }
@@ -191,7 +183,7 @@ fn lower_call_no_pre() -> [](i64, Val) {
     return [](i64, Val){}
 }
 
-// `Path::parent` of a source file name (empty if there is none)
+// the directory of a source file name (empty if there is none)
 fn lower_call_parent_dir(src: str) -> str {
     n := len(src)
     // trailing separators do not form a component
@@ -217,7 +209,7 @@ fn lower_call_parent_dir(src: str) -> str {
     return src[..i]
 }
 
-// `PathBuf::join`
+// `rel` seen from `dir` (an absolute `rel` stays as it is)
 fn lower_call_path_join(dir: str, rel: str) -> str {
     if len(rel) > 0 && rel[0] == '/' {
         return rel
@@ -231,7 +223,7 @@ fn lower_call_path_join(dir: str, rel: str) -> str {
     return fmt(dir, "/", rel)
 }
 
-// why `path` could not be read, in the words of `std::io::Error`
+// why `path` could not be read: the usual text for the errno and its number
 fn lower_call_io_error(path: str) -> str {
     e := 0
     fd := syscall(2, cstr(path), 0, 0)

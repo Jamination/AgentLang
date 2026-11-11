@@ -12,7 +12,7 @@ fn licm_outside_preds(cfg: *Cfg, loops: *Loops, li: i64, h: i64) -> Vec[i64] {
     return outside
 }
 
-// loop indices, deepest loops first; stable like Rust's sort_by
+// loop indices, deepest loops first; stable
 // (order.sort_by(|a, b| loops.loops[*b].depth.cmp(&loops.loops[*a].depth)))
 fn licm_loop_order(loops: *Loops) -> Vec[i64] {
     order := vec[i64]()

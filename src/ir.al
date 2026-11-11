@@ -220,7 +220,7 @@ enum Term {
     Trap,
 }
 
-// Term equality (PartialEq in the Rust source)
+// Term equality (`==` does not work on enums with data)
 fn eq(a: Term, b: Term) -> bool {
     match (a, b) {
         (Term.None, Term.None), (Trap, Trap) => true
@@ -242,10 +242,10 @@ struct Func {
     rets: Vec[T]
     insts: Vec[Inst]
     blocks: Vec[BlockData]
-    inl: i64 // `inline` in the Rust source (an AL keyword): 1 = always, -1 = never, 0 = auto
+    inl: i64 // inlining hint: 1 = always, -1 = never, 0 = auto
     noreturn: bool
     lowered: bool
-    // a C function in a shared library: index into Module::externs
+    // a C function in a shared library: index into Module.externs
     ext: Opt[i64]
 }
 
@@ -338,6 +338,19 @@ fn is_const(self: *Func, v: i64) -> Opt[i64] {
     } else {
         return None
     }
+}
+
+// a block that only traps (the failure block of a check)
+fn is_trap_block(f: *Func, b: i64) -> bool {
+    if !eq(f.blocks[b].term, Trap) {
+        return false
+    }
+    for v in f.blocks[b].insts {
+        if f.insts[v].op == Phi {
+            return false
+        }
+    }
+    return true
 }
 
 fn succs(self: *Func, b: i64) -> Vec[i64] {
@@ -691,7 +704,7 @@ fn contains(self: *Loops, li: i64, b: i64) -> bool {
 }
 
 // ---------- printer ----------
-// The text Rust's `{:?}` gives for a float, from AL's shortest round-trip text `s`
+// The text of a float in IR dumps, from AL's shortest round-trip text `s`
 // (`fmt(x)`): same digits, but exponent notation below 1e-4 and from 1e16 on, and `NaN`.
 priv fn float_debug(s: str) -> str {
     if s == "nan" || s == "-nan" {

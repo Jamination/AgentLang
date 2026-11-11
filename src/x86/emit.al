@@ -696,7 +696,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64]) {
     //    mov r, 0 -> xor r, r ; lea r, [r + x] -> add r, x
     for b in 0..nb {
         n := mf.blocks[b].insts.len
-        for k in 0..n {
+        insts: for k in 0..n {
             i := &mf.blocks[b].insts[k]
             a_low_reg := match i.a {
                 R(r) => i64(r) < 16
@@ -707,19 +707,15 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64]) {
             if !zero && !is_some(add) {
                 continue
             }
-            dead := true
+            // the flags must be dead after the instruction
             for j in k + 1..n {
                 o := mf.blocks[b].insts[j].op
                 if reads_flags(o) {
-                    dead = false
-                    break
+                    continue insts
                 }
                 if sets_flags(o) {
                     break
                 }
-            }
-            if !dead {
-                continue
             }
             a := i.a
             sz := i.sz

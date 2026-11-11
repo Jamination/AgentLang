@@ -67,7 +67,14 @@ enum Opnd {
     FAddr(i64),
 }
 
-// Opnd equality (PartialEq in the Rust source)
+fn is_r(o: Opnd) -> bool {
+    match o {
+        R(_) => true
+        _ => false
+    }
+}
+
+// Opnd equality (`==` does not work on enums with data)
 fn eq(a: Opnd, b: Opnd) -> bool {
     match (a, b) {
         (Opnd.None, Opnd.None) => true
@@ -348,8 +355,8 @@ fn mir_defs_uses(i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
     }
 }
 
-// The Rust `map_regs(i, f)` takes a closure; its callers either apply a lookup table or
-// substitute one register, so there is one function for each use.
+// Renaming registers: the callers either apply a lookup table or substitute one register;
+// there is one function for each use (a nested function cannot capture the table).
 
 priv fn map_regs_lookup(r: i64, table: []i64) -> i64 {
     if r < len(table) {

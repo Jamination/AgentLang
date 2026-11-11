@@ -3,18 +3,6 @@
 // becomes a single check of the largest index at the position of the first one. A failing
 // later check would end the program anyway and nothing observable happens in between.
 
-priv fn is_trap_block(f: *Func, b: i64) -> bool {
-    if !eq(f.blocks[b].term, Trap) {
-        return false
-    }
-    for v in f.blocks[b].insts {
-        if f.insts[v].op == Phi {
-            return false
-        }
-    }
-    return true
-}
-
 // (len value, constant index) of a check condition `len >u k` / `k <u len`
 priv fn const_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
     i := &f.insts[c]
@@ -55,21 +43,16 @@ fn checkmerge_run(f: *Func) -> bool {
         kmax := k0
         cur := ok
         steps := 0
-        loop {
+        walk: loop {
             steps += 1
             if steps > 256 || preds[cur].len != 1 || cur == b {
                 break
             }
-            blocked := false
             for v in f.blocks[cur].insts {
                 o := f.insts[v].op
                 if o == Call || o == CallInd || o == Syscall || o == Phi {
-                    blocked = true
-                    break
+                    break walk
                 }
-            }
-            if blocked {
-                break
             }
             match f.blocks[cur].term {
                 Jmp(t) => cur = t

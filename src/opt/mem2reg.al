@@ -106,28 +106,28 @@ priv fn run_once(f: *Func) -> bool {
             allocas.push(v)
         }
     }
-    for a in allocas {
-        escaped := term_used[a]
+    allocas: for a in allocas {
+        if term_used[a] {
+            continue
+        }
         derived := vec_of([](i64, i64){(a, 0)})
         is_derived := map[i64, i64]()
         is_derived.set(a, 0)
         accs := vec[(i64, i64, T)]()
         qi := 0
-        while qi < derived.len && !escaped {
+        while qi < derived.len {
             x := derived[qi].0
             off := derived[qi].1
             qi += 1
             if term_used[x] {
-                escaped = true
-                break
+                continue allocas
             }
             for u in users[x] {
                 inst := &f.insts[u]
                 if inst.op == Add {
                     other := if inst.args[0] == x { inst.args[1] } else { inst.args[0] }
                     if other == x {
-                        escaped = true
-                        break
+                        continue allocas
                     }
                     match f.is_const(other) {
                         Some(c) => {
@@ -138,38 +138,27 @@ priv fn run_once(f: *Func) -> bool {
                             }
                         }
                         None => {
-                            escaped = true
-                            break
+                            continue allocas
                         }
                     }
                 } else if inst.op == Load {
                     accs.push((u, off, inst.ty))
                 } else if inst.op == Store {
                     if inst.args[1] == x || inst.args[0] != x {
-                        escaped = true
-                        break
+                        continue allocas
                     }
                     accs.push((u, off, inst.ty))
                 } else {
-                    escaped = true
-                    break
+                    continue allocas
                 }
             }
         }
-        if escaped {
-            continue
-        }
         // stored values must not be derived pointers of this alloca
-        stores_derived := false
         for acc in accs {
             u := acc.0
             if f.insts[u].op == Store && is_derived.has(f.insts[u].args[1]) {
-                stores_derived = true
-                break
+                continue allocas
             }
-        }
-        if stores_derived {
-            continue
         }
         // slots: (offset, type); promotable when no partial overlap with a different slot
         size := f.insts[a].k
@@ -265,7 +254,7 @@ priv fn run_once(f: *Func) -> bool {
         ps.push(bp.1)
         by_block.set(bp.0, ps)
     }
-    // the Rust iterates the HashMap; blocks are independent of each other, sorted for determinism
+    // blocks are independent of each other; sorted for determinism
     bkeys := by_block.keys()
     sort(bkeys)
     for b in bkeys {

@@ -30,21 +30,6 @@ priv fn union_with(self: *BitSet, o: *BitSet) -> bool {
     return ch
 }
 
-// the members in ascending order (Rust: a lazy iterator; its one use, in the build loop of
-// regalloc_allocate, walks the words in place instead of collecting)
-priv fn iter(self: *BitSet) -> Vec[i64] {
-    out := vec[i64]()
-    for wi in 0..self.w.len {
-        bits := self.w[wi]
-        while bits != 0 {
-            t := i64(ctz(bits))
-            bits &= bits - 1
-            out.push(wi * 64 + t)
-        }
-    }
-    return out
-}
-
 priv fn liveness(mf: *MFunc, order: []i64) -> Vec[BitSet] {
     nreg := 32 + mf.vclass.len
     nb := mf.blocks.len
@@ -438,13 +423,6 @@ priv fn spill_slot(o: Opnd, first_spill: i64) -> Opt[i64] {
     return None
 }
 
-priv fn is_r(o: Opnd) -> bool {
-    match o {
-        R(r) => true
-        _ => false
-    }
-}
-
 // index of the first entry of `st` for slot `s`, or -1
 priv fn find_slot(st: *Vec[(i64, i64)], s: i64) -> i64 {
     for x in 0..st.len {
@@ -672,7 +650,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 stack: vec[i64](),
                 cost: vec_fill(n, 0.0),
             }
-            // vec![Vec::new(); n]: every element is its own Vec
+            // every element is its own Vec
             for x in 0..n {
                 g.adj.push(vec[i64]())
                 g.move_list.push(vec[i64]())
@@ -725,7 +703,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                         if !allocate_in_class(df, mf, class) {
                             continue
                         }
-                        // live.iter(), walked in place (the set does not change meanwhile)
+                        // the members of live, walked in place (the set does not change meanwhile)
                         for wi in 0..live.w.len {
                             bits := live.w[wi]
                             while bits != 0 {

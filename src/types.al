@@ -72,7 +72,7 @@ struct Leaf {
 
 struct Types {
     kinds: Vec[TyK]
-    // HashMap<TyK, Ty> in the Rust source: keyed by the canonical text of the kind (types_key)
+    // kind -> type id, keyed by the canonical text of the kind (types_key)
     map: Map[str, i64]
     structs: Vec[StructInfo]
     enums: Vec[EnumInfo]
@@ -204,7 +204,7 @@ fn vec_lanes(self: *Types, t: i64) -> Opt[i64] {
     }
 }
 
-// `Types::ptr` in the Rust source (a function named `ptr` would hide the builtin)
+// the pointer type to `t` (not named `ptr`: that would hide the builtin for a *Types)
 fn ptr_to(self: *Types, t: i64) -> i64 {
     return self.intern(Ptr(t))
 }
@@ -374,7 +374,7 @@ fn size_of(self: *Types, t: i64) -> i64 {
         Mat4 => return 64
         Slice(_) => return 16
         Array(e, n) => {
-            // (size as u64 * n).min(u32::MAX): unsigned, wrapping like the Rust
+            // min(size * n, 2^32 - 1), computed unsigned and wrapping
             total := u64(self.size_of(e)) * u64(n)
             if total > u64(0xFFFFFFFF) {
                 return 0xFFFFFFFF
@@ -518,8 +518,7 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
 
 priv const COUNT_MAX = 0x7FFFFFFFFFFFFFFF
 
-// saturating arithmetic on non-negative counts (u64 saturating_mul / saturating_add in the
-// Rust source; here the ceiling is the largest i64)
+// saturating arithmetic on non-negative counts (the ceiling is the largest i64)
 priv fn sat_mul(a: i64, b: i64) -> i64 {
     if a == 0 || b == 0 {
         return 0

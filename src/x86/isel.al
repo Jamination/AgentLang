@@ -326,13 +326,6 @@ priv fn const_is(f: *Func, v: i64, k: i64) -> bool {
     }
 }
 
-priv fn is_r(o: Opnd) -> bool {
-    match o {
-        R(r) => true
-        _ => false
-    }
-}
-
 priv struct Sel {
     f: *Func
     m: *Module
@@ -1174,7 +1167,6 @@ priv fn ext32(self: *Sel, v: i64, signed: bool) -> i64 {
 }
 
 priv fn inst(self: *Sel, v: i64) {
-    // (the Rust clones the instruction only to release the borrow; nothing here changes it)
     i := &self.f.insts[v]
     ty := i.ty
     match i.op {
@@ -1704,7 +1696,7 @@ priv fn inst(self: *Sel, v: i64) {
             }
         }
         _ => {
-            // (in the Rust this arm sits between FNeg/FAbs and SExt; no other arm is a compare)
+            // (no other arm is a compare)
             if i.op.is_cmp() {
                 d := self.vr(v)
                 cf := self.cmp_flags(v)
@@ -1820,7 +1812,6 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
     c.uses = used
     self.out.push(c)
     // results
-    // (the Rust also computes an unused `nrets` here)
     if i.ty != Void {
         if self.needed[v] {
             d := self.vr(v)

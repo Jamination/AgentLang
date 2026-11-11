@@ -30,13 +30,6 @@ fn lower_expr_is_ptr(k: TyK) -> bool {
     }
 }
 
-priv fn is_cv_float(o: Opt[CV]) -> bool {
-    match o {
-        Some(Float(_)) => true
-        _ => false
-    }
-}
-
 fn lower_expr_addressable(x: *Expr) -> bool {
     match x.k {
         Ident(_), Field(_, _), Index(_, _), Un(Deref, _) => true
@@ -44,7 +37,7 @@ fn lower_expr_addressable(x: *Expr) -> bool {
     }
 }
 
-// `name.parse::<usize>()`: decimal digits with an optional leading `+`
+// a non-negative decimal number with an optional leading `+`
 priv fn parse_usize(s: str) -> (i64, bool) {
     i := 0
     if len(s) > 0 && s[0] == '+' {

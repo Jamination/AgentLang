@@ -143,7 +143,7 @@ priv fn fold_bin(op: Op, ty: T, a: i64, b: i64) -> Opt[i64] {
     return Some(ir_canon(ty, r))
 }
 
-// i64::wrapping_div: MIN / -1 is MIN
+// wrapping division: MIN / -1 is MIN
 priv fn wrapping_div(a: i64, b: i64) -> i64 {
     if b == -1 {
         return 0 - a
@@ -151,7 +151,7 @@ priv fn wrapping_div(a: i64, b: i64) -> i64 {
     return a / b
 }
 
-// i64::wrapping_rem: MIN % -1 is 0
+// wrapping remainder: MIN % -1 is 0
 priv fn wrapping_rem(a: i64, b: i64) -> i64 {
     if b == -1 {
         return 0
@@ -900,8 +900,8 @@ priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
 }
 
 // unsigned division by a constant (Hacker's Delight, magicu)
-// The Rust code computes in u128; every value fits 64 bits (or is reduced modulo 2^w right
-// away), so this uses wrapping u64 arithmetic.
+// Every value fits 64 bits (or is reduced modulo 2^w right away), so wrapping u64
+// arithmetic is enough.
 priv fn udiv_magic(self: *Ctx, n: i64, ty: T, d: u64) -> i64 {
     w := i64(ty.bits())
     // a dividend known to be narrow needs only one multiplication and one shift
@@ -984,7 +984,7 @@ priv fn udiv_magic(self: *Ctx, n: i64, ty: T, d: u64) -> i64 {
 }
 
 // signed division by a constant (Hacker's Delight, magic)
-// u128 in the Rust code; all values fit 64 bits.
+// All values fit 64 bits.
 priv fn sdiv_magic(self: *Ctx, n: i64, ty: T, d: i64) -> i64 {
     w := i64(ty.bits())
     two_w1 := u64(1) << (w - 1)
@@ -1348,7 +1348,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         did := false
         rpo := f.rpo()
         scratch_off()
-        for b in rpo {
+        blocks: for b in rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
                 _ => continue
@@ -1380,8 +1380,6 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     }
                 }
             }
-            // `continue 'blocks`
-            bad := false
             for pi in 0..binsts.len {
                 ph := binsts[pi]
                 extra := 0
@@ -1389,12 +1387,8 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     extra = 1
                 }
                 if uses[ph] != phi_uses[pi] + extra {
-                    bad = true
-                    break
+                    continue blocks
                 }
-            }
-            if bad {
-                continue
             }
             cphi := f.insts[c]
             for k in 0..cphi.pb.len {
@@ -1444,11 +1438,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 }
                 retarget(f, p, b, target)
                 did = true
-                // `break 'blocks`
-                break
-            }
-            if did {
-                break
+                break blocks
             }
         }
         if !did {
@@ -1475,7 +1465,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         def_block := f.block_of()
         scratch_off()
         did := false
-        for b in cfg.rpo {
+        blocks2: for b in cfg.rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
                 _ => continue
@@ -1489,23 +1479,18 @@ priv fn simplify_cfg(f: *Func) -> bool {
             }
             cphi := f.insts[c]
             dest := vec[(i64, i64)]()
-            // `continue 'blocks2`
-            bad := false
             for k in 0..cphi.pb.len {
                 p := cphi.pb[k]
                 kc, hkc := unopt(f.is_const(cphi.args[k]))
                 if !hkc {
-                    bad = true
-                    break
+                    continue blocks2
                 }
                 if p == b {
-                    bad = true
-                    break
+                    continue blocks2
                 }
                 match f.blocks[p].term {
                     Br(_, x, y) if x == b && y == b => {
-                        bad = true
-                        break
+                        continue blocks2
                     }
                     _ => {}
                 }
@@ -1514,9 +1499,6 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 } else {
                     dest.push((p, e))
                 }
-            }
-            if bad {
-                continue
             }
             if dest.len != cfg.preds[b].len {
                 continue
@@ -1536,31 +1518,17 @@ priv fn simplify_cfg(f: *Func) -> bool {
                                 at = i.pb[k]
                             }
                             if !(cfg.dom(t, at) || cfg.dom(e, at)) {
-                                bad = true
-                                break
+                                continue blocks2
                             }
                         }
                     }
-                    if bad {
-                        break
-                    }
-                }
-                if bad {
-                    break
                 }
                 tu := f.term_uses(bb)
                 for a in tu {
                     if def_block[a] == b && !(cfg.dom(t, bb) || cfg.dom(e, bb)) {
-                        bad = true
-                        break
+                        continue blocks2
                     }
                 }
-                if bad {
-                    break
-                }
-            }
-            if bad {
-                continue
             }
             // build the replacement values of b's phis on each side
             repl_t := vec[i64]()

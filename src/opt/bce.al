@@ -31,18 +31,6 @@ priv enum Kind {
     Affine(BceAffine),
 }
 
-priv fn is_trap_block(f: *Func, b: i64) -> bool {
-    if !eq(f.blocks[b].term, Trap) {
-        return false
-    }
-    for v in f.blocks[b].insts {
-        if f.insts[v].op == Phi {
-            return false
-        }
-    }
-    return true
-}
-
 // the closure `invariant` of find_iv, match_affine and hoist_in_loop
 priv fn invariant(v: i64, in_loop: []bool, def_block: []i64) -> bool {
     return def_block[v] == 0xFFFFFFFF || !in_loop[def_block[v]]

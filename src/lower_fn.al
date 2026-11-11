@@ -129,8 +129,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             }
         }
         // and force evaluation of user constants / globals
-        // (the names are visited in sorted order: the Rust source iterates a HashMap, whose
-        // order is arbitrary)
+        // (the names are visited in sorted order, so that diagnostics come out the same every time)
         ckeys := cx.const_decls.keys()
         sort_by(ckeys, str_less)
         cnames := vec[str]()

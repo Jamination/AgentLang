@@ -60,8 +60,8 @@ priv const STD_MODULES = [15](str, str){
 // modules that are loaded into every program
 priv const CORE_MODULES = [4]str{"math", "rand", "time", "mem"}
 
-// ---------- paths (std::path in the Rust source) ----------
-// Path::join
+// ---------- paths ----------
+// `p` seen from `dir` (an absolute `p` stays as it is)
 priv fn path_join(dir: str, p: str) -> str {
     if starts_with(p, "/") || len(dir) == 0 {
         return p
@@ -72,7 +72,7 @@ priv fn path_join(dir: str, p: str) -> str {
     return fmt(dir, "/", p)
 }
 
-// the components of a path as Rust's Path compares them: a leading "/" is a component,
+// the components of a path as far as comparing paths goes: a leading "/" is a component,
 // empty components and "." are dropped, except a "." at the start of a relative path
 priv fn path_comps(p: str) -> Vec[str] {
     out := vec[str]()
@@ -109,7 +109,7 @@ priv fn path_trim(p: str) -> str {
     return p[..n]
 }
 
-// Path::file_name: the last component, unless the path ends in ".." or has none
+// the last component, unless the path ends in ".." or has none
 priv fn path_file_name(p: str) -> Opt[str] {
     t := path_trim(p)
     k := len(t)
@@ -123,7 +123,7 @@ priv fn path_file_name(p: str) -> Opt[str] {
     return Some(name)
 }
 
-// Path::parent: the path without its last component
+// the path without its last component
 priv fn path_parent(p: str) -> Opt[str] {
     t := path_trim(p)
     if len(t) == 0 || t == "/" {
@@ -140,7 +140,7 @@ priv fn path_parent(p: str) -> Opt[str] {
     return Some(t[..k])
 }
 
-// Path::file_stem: the file name without its last extension
+// the file name without its last extension
 priv fn path_file_stem(p: str) -> Opt[str] {
     name := match path_file_name(p) {
         Some(n) => n
@@ -157,7 +157,7 @@ priv fn path_file_stem(p: str) -> Opt[str] {
     return Some(name[..k])
 }
 
-// std::fs::canonicalize, as far as the driver needs it (to recognise a file that is included
+// the canonical form of a path, as far as the driver needs it (to recognise a file that is included
 // twice): the absolute path with "." and ".." resolved textually; symbolic links are kept
 priv fn canonical(path: str) -> str {
     full := path
@@ -185,7 +185,7 @@ priv fn canonical(path: str) -> str {
     return concat("/", join(parts.items(), "/"))
 }
 
-// the text of std::io::Error for an errno
+// the text for an errno, as in diagnostics: "No such file or directory (os error 2)"
 priv fn os_error(errno: i64) -> str {
     text := match errno {
         1 => "Operation not permitted"
@@ -210,7 +210,7 @@ priv fn os_error(errno: i64) -> str {
     return fmt(text, " (os error ", errno, ")")
 }
 
-// std::fs::read_to_string: (text, error); the error text is empty on success
+// the content of a file: (text, error); the error text is empty on success
 priv fn read_to_string(path: str) -> (str, str) {
     // read_file does not say why it failed: look at the file first
     fd := syscall(2, cstr(path), 0, 0)

@@ -119,7 +119,7 @@ enum SK {
     If(Expr, Block, Opt[Block]),
     While(Expr, Block),
     LoopStmt(Block),
-    // fields (named in the Rust source): var, var2, lo, hi, incl, step, body
+    // var, var2, lo, hi, incl, step, body
     For(str, Opt[str], Expr, Opt[Expr], bool, Opt[Expr], Block),
     Return(Opt[Expr]),
     Break,
@@ -143,7 +143,6 @@ struct FnDecl {
     ret: Opt[TypeAst]
     body: Block
     pos: Pos
-    // `inline` in the Rust source (a keyword in AL)
     inl: i64 // 1 = always inline, -1 = never, 0 = auto
     // `extern "lib" fn name(params) -> R`: a C function in the named shared library (no body)
     ext: Opt[str]

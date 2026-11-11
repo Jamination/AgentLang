@@ -20,7 +20,7 @@ priv fn fail[T]() -> (T, bool) {
     return (z, false)
 }
 
-// Box::new
+// a copy of x on the heap
 fn parser_box[T](x: T) -> *T {
     b := new[T]()
     *b = x
@@ -62,19 +62,11 @@ priv fn tk_id(t: Tk) -> bool {
     }
 }
 
-// is `t` the identifier `w`?
-priv fn tk_word(t: Tk, w: str) -> bool {
-    match t {
-        Id(s) => s == w
-        _ => false
-    }
-}
-
 priv fn cont(s: str, i: i64, lo: u8, hi: u8) -> bool {
     return i < len(s) && s[i] >= lo && s[i] <= hi
 }
 
-// String::from_utf8_lossy: every maximal invalid part becomes U+FFFD
+// the text as valid UTF-8: every maximal invalid part becomes U+FFFD
 priv fn utf8_lossy(s: str) -> str {
     valid := true
     for c in s {
@@ -265,7 +257,7 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
     return (z, false)
 }
 
-// (R<()> in the Rust source: only the ok flag)
+// consumes the punctuation `s` or reports that it was expected; false after an error
 priv fn expect_p(p: *Parser, s: str) -> bool {
     if p.eat_p(s) {
         return true
@@ -1293,7 +1285,7 @@ priv fn expr(p: *Parser) -> (Expr, bool) {
 }
 
 priv fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
-    // precedence as in Rust: arithmetic, shifts, &, ^, |, comparisons, &&, ||
+    // precedence, tightest first: arithmetic, shifts, &, ^, |, comparisons, &&, ||
     match p.peek() {
         P("*") => Some((Mul, 9))
         P("/") => Some((Div, 9))

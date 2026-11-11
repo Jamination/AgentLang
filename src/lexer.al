@@ -28,7 +28,7 @@ priv PUNCTS := [47]str{
     ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "@",
 }
 
-// Rust's `char::to_digit(radix)` for a byte
+// the value of the digit `c` in the given radix, if it is one
 priv fn to_digit(c: u8, radix: i64) -> Opt[i64] {
     d := -1
     if c >= '0' && c <= '9' {
@@ -44,7 +44,7 @@ priv fn to_digit(c: u8, radix: i64) -> Opt[i64] {
     return None
 }
 
-// Rust's `c as char` formatted with `{}`: the byte as a Unicode scalar value in UTF-8
+// the byte as a Unicode scalar value in UTF-8 (for messages)
 priv fn char_str(c: u8) -> str {
     if c < 0x80 {
         out := alloc[u8](1)
@@ -57,7 +57,7 @@ priv fn char_str(c: u8) -> str {
     return out
 }
 
-// Rust's `parse::<u64>()` for a non-empty text of decimal digits; false on overflow
+// the value of a non-empty text of decimal digits; false on overflow
 priv fn parse_u64(text: str) -> (u64, bool) {
     if len(text) == 0 {
         return (0, false)
@@ -322,7 +322,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 if pp == "(" || pp == "[" || pp == "{" {
                     stack.push(c)
                 } else if pp == ")" || pp == "]" || pp == "}" {
-                    // (Rust's pop on an empty Vec does nothing)
+                    // (an unmatched closing bracket is left to the parser)
                     if stack.len > 0 {
                         stack.pop()
                     }
