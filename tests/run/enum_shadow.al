@@ -24,7 +24,7 @@ fn name(t: Ty) -> str {
 fn main() {
     print(Some(4), None, Ok{v: 1})
     o: Opt[i64] = Opt.Some(3)
-    print(o, Opt[i64].None, Res[i64].Ok(5), Res[i64].Err("e").error())
+    print(o, Opt[i64].None)
     // in a pattern the matched type decides, whatever else has the name
     match o {
         Some(x) => print("some", x)

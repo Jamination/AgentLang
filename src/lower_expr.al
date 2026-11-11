@@ -496,7 +496,7 @@ fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
         self.err(pos, fmt("enum `", n, "` cannot be used as a value here; write `", n, ".Variant`"))
         return val_err()
     }
-    if is_some(lower_builtin_type(n)) || self.tenv.has(n) || is_some(self.cx.find_struct(n)) || is_some(self.cx.find_alias(n)) {
+    if is_some(lower_builtin_type(n)) || self.tenv.has(n) || is_some(self.cx.find_struct(n)) {
         self.err(pos, fmt("type `", n, "` cannot be used as a value here"))
         return val_err()
     }

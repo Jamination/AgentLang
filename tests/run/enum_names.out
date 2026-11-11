@@ -9,7 +9,7 @@ red RED Blue Amber
 Red
 Full(1, 2) Half(x) Zero Zero Zero 2 1 0
 [3, 5] 1 push pop vec 3 vec 4 map min
-Some(5) None Some(5) Some(6) None Ok(1) 11 Some(5) None
+Some(5) None Some(5) Some(6) None 11 Some(5) None
 min Map
 7
 5

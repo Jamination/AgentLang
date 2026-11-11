@@ -1,3 +1,0 @@
-type_alias_syntax.al:2:7: error: a type alias cannot have type parameters: expected `=`, found `[`
-type_alias_syntax.al:3:10: error: expected type, found number
-type_alias_syntax.al:4:8: error: expected `=`, found identifier `i64`

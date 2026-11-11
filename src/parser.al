@@ -4,13 +4,14 @@ struct Parser {
     toks: Vec[Token]
     i: i64
     errs: *Vec[Diag]
+    // inside the header of `if`, `while`, `for` or `match`: `Name{` is not a literal
     no_lit: bool
-    // inside the header of `if`, `while` or `for` (not `match`); only looked at with `no_lit`
-    hdr_stmt: bool
+    // index of the `{` after a header expression that ends in a name (`if x == Point {`), or -1
+    hdr_name: i64
 }
 
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
-    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_stmt: false}
+    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_name: -1}
 }
 
 // the failure result of a parsing function: (zero value, false)
@@ -246,6 +247,7 @@ fn parser_decl_habit(s: str) -> str {
     return match s {
         "let", "var", "mut", "auto", "val" => " (declare variables with `name := value` or `name: T = value`)"
         "func", "def", "function", "pub" => " (functions are declared `fn name(a: A) -> R { ... }`)"
+        "type", "typedef", "using", "alias" => " (there are no type aliases: write the type out; a distinct type is a `struct`)"
         _ => ""
     }
 }
@@ -272,6 +274,17 @@ fn err[T](p: *Parser, msg: str) -> (T, bool) {
         TkP(q) => {
             if q == "+" || q == "-" {
                 hint = " (there is no `++`/`--`: use `x += 1`)"
+            }
+        }
+        TkKw(k) => {
+            // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`
+            match p.peek_at(1) {
+                TkP(q) => {
+                    if q == ":=" || q == "=" || q == ":" || q == "," || q == ")" || q == "." || q == "+=" || q == "-=" {
+                        hint = fmt(" (`", k, "` is a keyword and cannot be used as a name)")
+                    }
+                }
+                _ => {}
             }
         }
         _ => {}
@@ -456,11 +469,6 @@ fn parser_set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
             g.pos = ppos
             DeclGlobal(g)
         }
-        DeclType(t) => {
-            t.is_priv = true
-            t.pos = ppos
-            DeclType(t)
-        }
         DeclTest(t) => d
         DeclUse(path, upos) => d
     }
@@ -608,7 +616,7 @@ fn fn_expr(p: *Parser, pos: Pos) -> (Expr, bool) {
 
 // ---------- constants, types, variables ----------
 
-// At `const`, `struct`, `enum`, or `type` followed by a name, where a declaration starts:
+// At `const`, `struct` or `enum`, where a declaration starts:
 //   const NAME = value      const NAME: T = value      type Name = T
 //   struct Name[T] { a: A, b: B }                      enum Name[T] { A, B(T) }
 fn kw_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
@@ -650,23 +658,7 @@ fn kw_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
         }
         return p.enum_rest(name, tparams, pos)
     }
-    // `type Name = T` (`type` is only special at the start of a declaration)
-    p.bump()
-    name, ok1 := p.ident()
-    if !ok1 {
-        return parser_fail[Decl]()
-    }
-    if p.is_p("[") {
-        return p.err[Decl]("a type alias cannot have type parameters: expected `=`")
-    }
-    if !p.expect_p("=") {
-        return parser_fail[Decl]()
-    }
-    at, ok2 := p.ty()
-    if !ok2 {
-        return parser_fail[Decl]()
-    }
-    return (DeclType(TypeDecl{name: name, ty: at, pos: pos}), true)
+    return p.err[Decl]("expected a declaration")
 }
 
 // the body of a struct: `{ name: Type, ... }` (fields separated by `,` or newlines)
@@ -757,7 +749,7 @@ fn var_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
         return (DeclGlobal(GlobalDecl{name: name, ty: None, init: Some(ie), pos: pos}), true)
     }
     if !p.eat_p(":") {
-        return p.err[Decl](fmt("a declaration that starts with a name declares a variable, `", name, ": T` or `", name, " := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`"))
+        return p.err[Decl](fmt("a declaration that starts with a name declares a variable, `", name, ": T` or `", name, " := value` (functions, types and constants start with `fn`, `struct`, `enum`, `const`): expected `:` or `:=`"))
     }
     v, ok3 := p.var_rest()
     if !ok3 {
@@ -803,7 +795,7 @@ fn decl(p: *Parser) -> (Decl, bool) {
     if inl != 0 || is_some(ext) {
         return p.err[Decl]("`inline`, `noinline` and `extern \"lib\"` stand in front of a function declaration: expected `fn`")
     }
-    if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") || (parser_tk_word(p.peek(), "type") && parser_tk_id(p.peek_at(1))) {
+    if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") {
         return p.kw_decl(pos)
     }
     if p.eat_kw("test") {
@@ -854,7 +846,7 @@ fn decl(p: *Parser) -> (Decl, bool) {
     if parser_tk_id(p.peek()) {
         return p.var_decl(pos)
     }
-    return p.err[Decl]("expected a declaration: `fn`, `struct`, `enum`, `type`, `const`, a variable (`name: T`, `name := value`), `test`, `use`, `extern` or `priv`")
+    return p.err[Decl]("expected a declaration: `fn`, `struct`, `enum`, `const`, a variable (`name: T`, `name := value`), `test`, `use`, `extern` or `priv`")
 }
 
 // ---------- types ----------
@@ -959,6 +951,10 @@ fn ty(p: *Parser) -> (TypeAst, bool) {
 
 // ---------- statements ----------
 fn block(p: *Parser) -> (Block, bool) {
+    // the body of a header that ends in a name: an error in its first statement is most
+    // likely a `Name{...}` literal that was taken for the body
+    after_name := p.hdr_name == p.i
+    nerr := p.errs.len
     if !p.expect_p("{") {
         return parser_fail[Block]()
     }
@@ -980,6 +976,10 @@ fn block(p: *Parser) -> (Block, bool) {
         } else {
             p.sync_stmt()
         }
+        if after_name && p.errs.len > nerr {
+            p.errs[nerr].msg = fmt(p.errs[nerr].msg, " (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)")
+        }
+        after_name = false
     }
     p.no_lit = save
     end := p.pos()
@@ -1017,94 +1017,34 @@ fn sync_stmt(p: *Parser) {
     }
 }
 
-// the scrutinee of a `match`
+// the scrutinee of a `match`, the condition of an `if` or `while`, an expression of a `for` header
 fn header_expr(p: *Parser) -> (Expr, bool) {
     save := p.no_lit
-    save_stmt := p.hdr_stmt
     p.no_lit = true
-    p.hdr_stmt = false
     e, ok := p.expr()
     p.no_lit = save
-    p.hdr_stmt = save_stmt
-    return (e, ok)
-}
-
-// the condition of an `if` or `while`, or an expression of a `for` header
-fn stmt_header_expr(p: *Parser) -> (Expr, bool) {
-    save := p.no_lit
-    save_stmt := p.hdr_stmt
-    p.no_lit = true
-    p.hdr_stmt = true
-    e, ok := p.expr()
-    p.no_lit = save
-    p.hdr_stmt = save_stmt
-    return (e, ok)
-}
-
-fn parser_tk_binop(t: Tk) -> bool {
-    match t {
-        TkP(q) => {
-            match q {
-                "*", "/", "%", "+", "-", "<<", ">>", "&", "^", "|", "==", "!=", "<", "<=", ">", ">=", "&&", "||" => {
-                    return true
-                }
-                _ => {}
-            }
-        }
-        _ => {}
+    if ok && p.i >= 1 && p.is_p("{") && parser_tk_id(p.toks[p.i - 1].t) {
+        p.hdr_name = p.i
     }
-    return false
+    return (e, ok)
 }
 
-// In a header (`if`, `while`, `for`, `match`) a `{` normally starts the body. With the
-// parser at a `{` that follows the type-like expression `e`, is it a `T{...}` literal?
-//  - yes if `e` is written as a type (`[]T`, `[N]T`): a type alone is not a value;
-//  - in the header of `if`, `while` and `for`: yes if the matching `}` is directly followed
-//    by `{` (that one starts the body), `.`, `[` or a binary operator; none of these can
-//    follow the body of such a statement;
-//  - after the scrutinee of a `match`: yes if the braces hold something but no `=>` of
-//    their own, which every match arm has.
-fn lit_in_header(p: *Parser, e: *Expr) -> bool {
+// In a header (`if`, `while`, `for`, `match`) a `{` starts the body, so `Name{...}` there
+// needs parentheses. Only after an expression written as a type (`[]T`, `[N]T`) it is a
+// literal: a type alone is not a value.
+fn lit_in_header(e: *Expr) -> bool {
     match e.k {
         EKTypeE(t) => {
             return true
         }
         _ => {}
     }
-    j := p.i
-    depth := 0
-    arrow := false
-    loop {
-        match p.toks[j].t {
-            TkEof => {
-                return false
-            }
-            TkP(q) => {
-                if q == "{" {
-                    depth += 1
-                } else if q == "}" {
-                    depth -= 1
-                    if depth == 0 {
-                        break
-                    }
-                } else if q == "=>" && depth == 1 {
-                    arrow = true
-                }
-            }
-            _ => {}
-        }
-        j += 1
-    }
-    if !p.hdr_stmt {
-        return !arrow && j > p.i + 1
-    }
-    after := p.toks[min(j + 1, p.toks.len - 1)].t
-    return parser_tk_p(after, "{") || parser_tk_p(after, ".") || parser_tk_p(after, "[") || parser_tk_binop(after)
+    return false
 }
 
 fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
     // `if` already consumed
-    c, ok1 := p.stmt_header_expr()
+    c, ok1 := p.header_expr()
     if !ok1 {
         return parser_fail[(Expr, Block, Opt[Block])]()
     }
@@ -1170,8 +1110,8 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         }
         return (SKFn(parser_box(f)), true)
     }
-    if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") || (parser_tk_word(p.peek(), "type") && parser_tk_id(p.peek_at(1))) {
-        p.errs.push(Diag{pos: p.pos(), msg: "constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)"})
+    if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") {
+        p.errs.push(Diag{pos: p.pos(), msg: "constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)"})
         return parser_fail[SK]()
     }
     if p.eat_kw("if") {
@@ -1182,7 +1122,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         return (SKIf(r.0, r.1, r.2), true)
     }
     if p.eat_kw("while") {
-        c, ok1 := p.stmt_header_expr()
+        c, ok1 := p.header_expr()
         if !ok1 {
             return parser_fail[SK]()
         }
@@ -1215,20 +1155,20 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !p.eat_kw("in") {
             return p.err[SK]("expected `in`")
         }
-        lo, ok3 := p.stmt_header_expr()
+        lo, ok3 := p.header_expr()
         if !ok3 {
             return parser_fail[SK]()
         }
         hi: Opt[Expr] = None
         incl := false
         if p.eat_p("..") {
-            h, ok4 := p.stmt_header_expr()
+            h, ok4 := p.header_expr()
             if !ok4 {
                 return parser_fail[SK]()
             }
             hi = Some(h)
         } else if p.eat_p("..=") {
-            h, ok4 := p.stmt_header_expr()
+            h, ok4 := p.header_expr()
             if !ok4 {
                 return parser_fail[SK]()
             }
@@ -1237,7 +1177,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         }
         step: Opt[Expr] = None
         if p.eat_kw("by") {
-            st, ok5 := p.stmt_header_expr()
+            st, ok5 := p.header_expr()
             if !ok5 {
                 return parser_fail[SK]()
             }
@@ -1690,7 +1630,7 @@ fn postfix(p: *Parser) -> (Expr, bool) {
                     return p.err[Expr]("expected field name")
                 }
             }
-        } else if p.is_p("{") && parser_typeish(&e) && (!p.no_lit || p.lit_in_header(&e)) {
+        } else if p.is_p("{") && parser_typeish(&e) && (!p.no_lit || lit_in_header(&e)) {
             p.bump()
             save := p.no_lit
             p.no_lit = false

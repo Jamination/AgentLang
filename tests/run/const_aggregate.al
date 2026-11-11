@@ -1,14 +1,13 @@
 // constants that are not scalars: aggregates in read-only memory, embed() in const / var
 struct Point { x: i64, y: i64 }
 struct Named { name: str, at: Point, tags: [2]str, f: fn(i64) -> i64, scale: f32 }
-type Row = [3]u8
 
 const TABLE = [4]i64{1, 2, 4, 8}
 const ORIGIN = Point{x: 0, y: 0}
 const UNIT: Point = Point{1, 1}
 const NAMES = [2]str{"a", "bb"}
 const N = 3
-const GRID = [2]Row{Row{1, 2, 3}, Row{4, 5, 6}}
+const GRID = [2][3]u8{[3]u8{1, 2, 3}, [3]u8{4, 5, 6}}
 const PARTIAL: [8]i32 = [8]i32{-1, N, N * 2}
 const THING = Named{name: "thing", at: UNIT, tags: NAMES, f: double, scale: 2.5}
 const PAIR = (N, "three", 3.5)
@@ -67,7 +66,7 @@ fn main() {
     for i, x in TABLE {
         t += i * x
     }
-    print(t, lookup(3), GRID, GRID[1][2], PARTIAL, sizeof[Row]())
+    print(t, lookup(3), GRID, GRID[1][2], PARTIAL, sizeof[[3]u8]())
     print(THING.name, THING.at, THING.tags[1], THING.f(21), THING.scale, PAIR, PAIR.1, COPY, CORNERS)
     print(UP, UP.y, UP * 2.0, IDENT[1], IDENT[2].z, OPS[0](5), OPS[1](5))
     print(len(TEXT), TEXT == blob, blob == blob2, len(TEXT) == TEXT_LEN, EMPTY, len(EMPTY), BYTES, FLAGS, FLOATS)

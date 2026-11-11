@@ -1,10 +1,10 @@
-// unwrap of an error stops the program with its message
-fn parse(s: str) -> Res[i64] {
+// unwrap of an absent value stops the program
+fn parse(s: str) -> Opt[i64] {
     v, ok := parse_i64(s)
     if !ok {
-        return Err(fmt("not a number: ", s))
+        return None
     }
-    Ok(v)
+    Some(v)
 }
 fn main() {
     print(parse("12").unwrap())

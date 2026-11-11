@@ -118,8 +118,7 @@ fn main() {
     o := Opt.Some(5)
     o2: Opt[i64] = Some(6)
     o3: Opt[i64] = None
-    r := Ok(1)
-    print(k, k2, o, o2, o3, r, o2.unwrap() + o.or(0), opt_of(k), opt_of(k2))
+    print(k, k2, o, o2, o3, o2.unwrap() + o.or(0), opt_of(k), opt_of(k2))
     cmd: Cmd = min
     print(cmd, Cmd.Map)
     // a local variable with the name of an enum or of a variant wins

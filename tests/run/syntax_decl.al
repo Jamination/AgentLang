@@ -31,9 +31,6 @@ struct Stack[T] {
 }
 enum Shape { Circle(f64), Rect(f64, f64), Dot }
 enum Maybe[T] { Just(T), Nothing }
-type Reg = i64
-type Pred = fn(Item) -> bool
-type Pairs = [](i64, i64)
 priv struct Hidden { v: i64 }
 struct OneLine { a: (i64, i64) b: i64 c: fn() -> i64 }
 
@@ -109,10 +106,10 @@ fn main() {
     // struct literals: `name: expr` in call arguments and headers
     it := Item{name: "sword", hp: 3}
     show(Item{name: "axe", hp: 4}, Item{name: "bow", hp: 1})
-    if it == Item{name: "sword", hp: 3} { print("same") }
+    if it == (Item{name: "sword", hp: 3}) { print("same") }
     for e in []Item{Item{name: "k", hp: 1}, it} { print(e.name) }
-    while it.hp > Item{name: "x", hp: 1}.hp { it.hp -= 1 }
-    match Item{name: "m", hp: 2}.hp {
+    while it.hp > (Item{name: "x", hp: 1}).hp { it.hp -= 1 }
+    match (Item{name: "m", hp: 2}).hp {
         2 => print("matched")
         _ => print("no")
     }
@@ -161,7 +158,7 @@ fn main() {
     takes_cb(fn() { counter += 1 }, 3)
     print(h(7), k(), counter, apply(3, fn(v: i64) -> str { fmt("<", v, ">") }))
     print(apply(2, fn(v: i64) -> (i64, i64) { (v, v) }), (fn() -> i64 { 1 })())
-    pred: Pred = fn(it: Item) -> bool { it.hp > 3 }
+    pred: fn(Item) -> bool = fn(it: Item) -> bool { it.hp > 3 }
     print(pred(items[0]), pred(items[2]))
 
     // function types: in type arguments, casts, literals, results
@@ -189,9 +186,9 @@ fn main() {
     st := Stack[i64]{buf: vec[i64](), top: 0, cmp: fn(a: i64, b: i64) -> bool { a < b }}
     st.push(3)
     ol := OneLine{a: (1, 2), b: 3, c: k}
-    rg: Reg = 7
+    rg: i64 = 7
     mb: Maybe[i64] = Just(1)
-    ps: Pairs = [](i64, i64){(1, 2)}
+    ps: [](i64, i64) = [](i64, i64){(1, 2)}
     hd := Hidden{v: 1}
     print(st.top, st.cmp(1, 2), ol.a, ol.b, ol.c(), rg, mb, ps, hd.v, area(Rect(2.0, 3.0)), area(Circle(1.0)), area(Dot))
     print(N, LIMIT, TABLE, NEG, GROUPED, PAIR, SECRET, MASK, ratio, names, hidden, ops[1](4), hook == nil)

@@ -1,10 +1,10 @@
 nested_fn_syntax.al:3:5: error: `inline` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`
 nested_fn_syntax.al:4:5: error: `noinline` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`
-nested_fn_syntax.al:5:5: error: `priv` applies to top-level declarations only; a local declaration is visible only in its block anyway, found keyword `priv`
+nested_fn_syntax.al:5:5: error: `priv` applies to top-level declarations only; a local declaration is visible only in its block anyway, found keyword
 nested_fn_syntax.al:6:5: error: `extern` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`
-nested_fn_syntax.al:7:10: error: an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level
-nested_fn_syntax.al:8:10: error: an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)
-nested_fn_syntax.al:9:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-nested_fn_syntax.al:10:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-nested_fn_syntax.al:11:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-nested_fn_syntax.al:12:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
+nested_fn_syntax.al:7:10: error: an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing functio
+nested_fn_syntax.al:8:10: error: an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool
+nested_fn_syntax.al:9:5: error: constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function
+nested_fn_syntax.al:10:5: error: constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a functio
+nested_fn_syntax.al:11:5: error: constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a functio
+nested_fn_syntax.al:12:10: error: expected end of statement, found identifier `R` (there are no type aliases: write the type out; a distinct type is a

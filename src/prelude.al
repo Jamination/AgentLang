@@ -1044,6 +1044,117 @@ fn items[T](v: *Vec[T]) -> []T {
     return v.buf[..v.len]
 }
 
+fn last[T](v: *Vec[T]) -> T {
+    assert v.len > 0, "last of an empty Vec"
+    return v.buf[v.len - 1]
+}
+
+fn is_empty[T](v: *Vec[T]) -> bool {
+    return v.len == 0
+}
+
+fn clear[T](v: *Vec[T]) {
+    v.len = 0
+}
+
+fn truncate[T](v: *Vec[T], n: i64) {
+    if n < v.len {
+        v.len = n
+    }
+}
+
+// grows (with copies of x) or shrinks to exactly n elements
+fn resize[T](v: *Vec[T], n: i64, x: T) {
+    reserve(v, n)
+    for i in v.len..n {
+        v.buf[i] = x
+    }
+    v.len = n
+}
+
+fn extend[T](v: *Vec[T], s: []T) {
+    reserve(v, v.len + len(s))
+    memcopy(cast[i64](ptr(v.buf)) + v.len * sizeof[T](), ptr(s), len(s) * sizeof[T]())
+    v.len += len(s)
+}
+
+// inserts x before position i
+fn insert[T](v: *Vec[T], i: i64, x: T) {
+    assert i >= 0 && i <= v.len, "Vec insert position out of range"
+    push(v, x)
+    k := v.len - 1
+    while k > i {
+        v.buf[k] = v.buf[k - 1]
+        k -= 1
+    }
+    v.buf[i] = x
+}
+
+// removes and returns element i, keeping the order of the rest
+fn remove[T](v: *Vec[T], i: i64) -> T {
+    assert i >= 0 && i < v.len, "Vec remove position out of range"
+    x := v.buf[i]
+    for k in i..v.len - 1 {
+        v.buf[k] = v.buf[k + 1]
+    }
+    v.len -= 1
+    return x
+}
+
+// removes and returns element i, moving the last element into its place
+fn swap_remove[T](v: *Vec[T], i: i64) -> T {
+    assert i >= 0 && i < v.len, "Vec swap_remove position out of range"
+    x := v.buf[i]
+    v.len -= 1
+    v.buf[i] = v.buf[v.len]
+    return x
+}
+
+// position of the first element equal to x, or -1
+fn index_of[T](s: []T, x: T) -> i64 {
+    for i, y in s {
+        if y == x {
+            return i
+        }
+    }
+    return -1
+}
+
+fn contains[T](s: []T, x: T) -> bool {
+    return index_of(s, x) >= 0
+}
+
+fn contains[T](v: *Vec[T], x: T) -> bool {
+    return index_of(v.buf[..v.len], x) >= 0
+}
+
+fn reverse[T](s: []T) {
+    i := 0
+    j := len(s) - 1
+    while i < j {
+        t := s[i]
+        s[i] = s[j]
+        s[j] = t
+        i += 1
+        j -= 1
+    }
+}
+
+// removes adjacent duplicates (use after sort)
+fn dedup[T](v: *Vec[T]) {
+    if v.len == 0 {
+        return
+    }
+    n := 1
+    for i in 1..v.len {
+        if v.buf[i] != v.buf[n - 1] {
+            v.buf[n] = v.buf[i]
+            n += 1
+        }
+    }
+    v.len = n
+}
+
 // ---------- hash map (open addressing, linear probing) ----------
 struct Map[K, V] { keys: []K, vals: []V, state: []u8, len: i64, used: i64 }
 
@@ -1153,6 +1264,21 @@ fn del[K, V](m: *Map[K, V], k: K) -> bool {
     m.state[i] = 2
     m.len -= 1
     return true
+}
+
+// removes every entry
+fn clear[K, V](m: *Map[K, V]) {
+    *m = map[K, V]()
+}
+
+// a pointer to the value stored for k (nil if k is missing), to change it in place; valid
+// until the next `set` of a new key
+fn ptr[K, V](m: *Map[K, V], k: K) -> *V {
+    i := __map_find(m, k)
+    if i < 0 {
+        return nil
+    }
+    return &m.vals[i]
 }
 
 // all keys, in unspecified order
@@ -2020,12 +2146,56 @@ fn from_cstr(p: *u8) -> str {
     return mkslice[u8](p, n)
 }
 
-// ---------- optional values and results ----------
+// ---------- characters, environment, standard error ----------
+fn is_digit(c: u8) -> bool {
+    return c >= '0' && c <= '9'
+}
+
+fn is_alpha(c: u8) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+fn is_alnum(c: u8) -> bool {
+    return is_digit(c) || is_alpha(c)
+}
+
+// ---------- process ----------
+// the value of an environment variable; ("", false) if it is not set
+fn env_get(name: str) -> (str, bool) {
+    envp := cast[*i64](__argv + 8 * (__argc + 1))
+    i := 0
+    while envp[i] != 0 {
+        p := cast[*u8](envp[i])
+        n := 0
+        while p[n] != 0 && p[n] != '=' {
+            n += 1
+        }
+        if p[n] == '=' && mkslice[u8](p, n) == name {
+            return (from_cstr(cast[*u8](envp[i] + n + 1)), true)
+        }
+        i += 1
+    }
+    return ("", false)
+}
+
+// like print, to standard error
+fn eprint(s: str) {
+    flush()
+    __write_all(2, cast[i64](ptr(s)), len(s))
+    nl := "\n"
+    __write_all(2, cast[i64](ptr(nl)), 1)
+}
+
+// like put (no newline), to standard error
+fn eput(s: str) {
+    flush()
+    __write_all(2, cast[i64](ptr(s)), len(s))
+}
+
+
+// ---------- optional values ----------
 // a value that may be absent
 enum Opt[T] { Some(T), None }
-
-// a value, or the message of the error that prevented it
-enum Res[T] { Ok(T), Err(str) }
 
 fn is_some[T](o: Opt[T]) -> bool {
     match o {
@@ -2055,43 +2225,5 @@ fn or[T](o: Opt[T], default: T) -> T {
     match o {
         Some(x) => x
         None => default
-    }
-}
-
-fn is_ok[T](r: Res[T]) -> bool {
-    match r {
-        Ok(_) => true
-        Err(_) => false
-    }
-}
-
-fn is_err[T](r: Res[T]) -> bool {
-    match r {
-        Ok(_) => false
-        Err(_) => true
-    }
-}
-
-// the value of `r`; stops the program with the error message if it is an error
-fn unwrap[T](r: Res[T]) -> T {
-    match r {
-        Ok(x) => { return x }
-        Err(e) => { __die("panic: unwrap of Err: ", e, "") }
-    }
-}
-
-// the value of `r`, or `default` if it is an error
-fn or[T](r: Res[T], default: T) -> T {
-    match r {
-        Ok(x) => x
-        Err(_) => default
-    }
-}
-
-// the error message of `r` ("" if it is not an error)
-fn error[T](r: Res[T]) -> str {
-    match r {
-        Ok(_) => ""
-        Err(e) => e
     }
 }

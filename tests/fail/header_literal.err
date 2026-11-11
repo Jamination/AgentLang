@@ -1,4 +1,2 @@
-header_literal.al:5:19: error: cannot iterate over Point
-header_literal.al:8:13: error: type mismatch: expected bool, found Point
-header_literal.al:11:16: error: type mismatch: expected bool, found []i64
-header_literal.al:14:14: error: expected a type before `{`
+header_literal.al:5:21: error: expected end of statement, found `,` (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)
+header_literal.al:8:15: error: expected end of statement, found `,` (if this `{` was meant

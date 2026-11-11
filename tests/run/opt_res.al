@@ -1,4 +1,30 @@
-// Opt[T] and Res[T] of the standard library.
+// Opt[T] of the standard library next to a user-defined generic result type.
+enum Res[T] { Ok(T), Err(str) }
+fn is_ok[T](r: Res[T]) -> bool {
+    match r {
+        Ok(_) => true
+        Err(_) => false
+    }
+}
+fn is_err[T](r: Res[T]) -> bool { !is_ok(r) }
+fn unwrap[T](r: Res[T]) -> T {
+    match r {
+        Ok(x) => x
+        Err(e) => panic(e)
+    }
+}
+fn or[T](r: Res[T], default: T) -> T {
+    match r {
+        Ok(x) => x
+        Err(_) => default
+    }
+}
+fn error[T](r: Res[T]) -> str {
+    match r {
+        Ok(_) => ""
+        Err(e) => e
+    }
+}
 struct Account { id: i64, owner: str }
 
 fn find(a: []i64, x: i64) -> Opt[i64] {

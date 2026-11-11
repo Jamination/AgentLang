@@ -155,16 +155,6 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         for i in 0..gnames.len {
             cx.global(gnames[i])
         }
-        // and resolution of user type aliases
-        akeys := cx.alias_decls.keys()
-        sort_by(akeys, lower_fn_str_less)
-        for n in akeys {
-            d, _ := cx.alias_decls.get(n)
-            if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
-                cx.alias_type(d)
-                cx.flush_layout_errors(d.pos)
-            }
-        }
     }
     // exposed scalar fields lose their private alias class
     if cx.exposed.len != 0 {

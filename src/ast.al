@@ -193,14 +193,6 @@ struct TestDecl {
     pos: Pos
 }
 
-// `type Name = T`: another name for the type `T`
-struct TypeDecl {
-    name: str
-    ty: TypeAst
-    pos: Pos
-    is_priv: bool
-}
-
 enum Decl {
     DeclFn(FnDecl),
     DeclStruct(StructDecl),
@@ -209,7 +201,6 @@ enum Decl {
     DeclGlobal(GlobalDecl),
     DeclTest(TestDecl),
     DeclUse(str, Pos),
-    DeclType(TypeDecl),
 }
 
 // the source forms of a list of types, separated by ", "

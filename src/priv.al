@@ -1,4 +1,4 @@
-// File-private declarations: `priv` in front of a function, struct, enum, type alias,
+// File-private declarations: `priv` in front of a function, struct, enum,
 // constant or global variable (`priv fn helper() { ... }`, `priv counter: i64`).
 //
 // All top-level names of a program share one namespace. A private declaration `name` of file
@@ -38,7 +38,6 @@ fn priv_decl_info(d: *Decl) -> (str, i64, bool, Pos) {
         DeclEnum(e) => (e.name, 2, e.is_priv, e.pos)
         DeclConst(c) => (c.name, 2, c.is_priv, c.pos)
         DeclGlobal(g) => (g.name, 2, g.is_priv, g.pos)
-        DeclType(t) => (t.name, 2, t.is_priv, t.pos)
         DeclTest(t) => ("", 0, false, t.pos)
         DeclUse(path, pos) => ("", 0, false, pos)
     }
@@ -166,11 +165,6 @@ fn priv_rewrite(r: *PrivCx, d: Decl) -> Decl {
             g.ty = priv_opt_type(r, g.ty)
             g.init = priv_opt_expr(r, g.init)
             DeclGlobal(g)
-        }
-        DeclType(t) => {
-            t.name = priv_name(r, t.name)
-            priv_type(r, &t.ty)
-            DeclType(t)
         }
         DeclTest(t) => {
             priv_block(r, t.body)

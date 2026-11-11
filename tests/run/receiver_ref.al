@@ -5,7 +5,6 @@ enum Shape { Circle(f64), Square(f64) }
 struct MFunc { n: i64, regs: Vec[u8] }
 struct Sel { mf: MFunc, count: i64, ops: [2]Op, pos: vec3, cur: Op, pair: (i64, Op) }
 struct Wrap[T] { v: T }
-type IntPtr = *i64
 
 fn is_pure(self: *Op) -> bool { *self != Jmp }
 fn next(self: *Op) {
@@ -20,7 +19,7 @@ fn add(p: *i64, k: i64) -> i64 {
     *p += k
     return *p
 }
-fn bump(p: IntPtr) { *p += 100 }
+fn bump(p: *i64) { *p += 100 }
 fn flip(v: *vec3) { v.x = -v.x }
 fn halve(x: *f64) { *x /= 2.0 }
 fn toggle(b: *bool) { *b = !*b }

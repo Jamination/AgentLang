@@ -12,29 +12,29 @@ syntax_decl.al:12:8: error: expected identifier, found `{`
 syntax_decl.al:13:6: error: expected identifier, found `{`
 syntax_decl.al:14:8: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found keyword `struct`
 syntax_decl.al:15:10: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found keyword `enum`
-syntax_decl.al:16:8: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `type`
+syntax_decl.al:16:8: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `type` (
 syntax_decl.al:17:10: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found keyword `const`
 syntax_decl.al:18:8: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `v1`
 syntax_decl.al:19:10: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `v2`
 syntax_decl.al:20:20: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `v3`
 syntax_decl.al:21:20: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found keyword `struct`
 syntax_decl.al:22:1: error: the C function `c_gen` cannot have type parameters
-syntax_decl.al:23:39: error: an `extern` function is a C function of the library and has no body: expected end of line after the declaration of `c_body`, found `{`
+syntax_decl.al:23:39: error: an `extern` function is a C function of the library and has no body: expected end of line after the declaration of `c_bod
 syntax_decl.al:24:8: error: expected a library name string after `extern`, e.g. `extern "libc.so.6" fn getpid() -> i32`, found keyword `fn`
 syntax_decl.al:25:8: error: `priv` is written first: `priv inline fn name(...)`, found keyword `priv`
-syntax_decl.al:26:8: error: a type alias cannot have type parameters: expected `=`, found `[`
+syntax_decl.al:26:6: error: a declaration that starts with a name declares a variable, `type: T` or `type := value` (functions, types and constants st
 syntax_decl.al:27:9: error: expected `=`, found `[`
-syntax_decl.al:28:3: error: a declaration that starts with a name declares a variable, `g1: T` or `g1 := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found `[`
-syntax_decl.al:29:4: error: a declaration that starts with a name declares a variable, `g2: T` or `g2 := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found `=`
-syntax_decl.al:30:4: error: a declaration that starts with a name declares a variable, `g3: T` or `g3 := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found identifier `i64`
-syntax_decl.al:31:6: error: a declaration that starts with a name declares a variable, `stray: T` or `stray := value` (functions, types and constants start with `fn`, `struct`, `enum`, `type`, `const`): expected `:` or `:=`, found `(`
-syntax_decl.al:34:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-syntax_decl.al:35:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-syntax_decl.al:36:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
-syntax_decl.al:37:5: error: constants and types (`const`, `struct`, `enum`, `type`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)
+syntax_decl.al:28:3: error: a declaration that starts with a name declares a variable, `g1: T` or `g1 := value` (functions, types and constants start
+syntax_decl.al:29:4: error: a declaration that starts with a name declares a variable, `g2: T` or `g2 := value` (functions, types and constants start
+syntax_decl.al:30:4: error: a declaration that starts with a name declares a variable, `g3: T` or `g3 := value` (functions, types and constants start
+syntax_decl.al:31:6: error: a declaration that starts with a name declares a variable, `stray: T` or `stray := value` (functions, types and constants
+syntax_decl.al:34:5: error: constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function the
+syntax_decl.al:35:5: error: constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function the
+syntax_decl.al:36:5: error: constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function the
+syntax_decl.al:37:10: error: expected end of statement, found identifier `L5` (there are no type aliases: write the type out; a distinct type is a `st
 syntax_decl.al:38:19: error: a function without a result has no arrow: leave out `-> ()`
 syntax_decl.al:39:13: error: expected `:` after the parameter name, found identifier `i64`
 syntax_decl.al:40:22: error: a function without a result has no arrow: leave out `-> ()`
-syntax_decl.al:41:11: error: an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)
-syntax_decl.al:42:11: error: an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level
+syntax_decl.al:41:11: error: an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a
+syntax_decl.al:42:11: error: an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function):
 syntax_decl.al:43:17: error: a function without a result has no arrow: leave out `-> ()`
