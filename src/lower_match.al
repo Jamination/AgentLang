@@ -284,6 +284,11 @@ fn lower_match_is_const(s *Fx, e *Expr) bool {
     return r
 }
 
+// does the name `n` denote anything in an expression?
+fn lower_match_known(s *Fx, n str) bool {
+    return is_some(s.lookup(n)) || s.cx.const_decls.has(n) || s.cx.global_decls.has(n) || s.cx.fn_names.has(n) || s.bare_variant(n, None).2 != 0
+}
+
 // the enum (index into the type table's enums) of a type, or -1
 fn lower_match_enum_of(s *Fx, ty i64) i64 {
     match s.cx.types.k(ty) {
@@ -333,7 +338,16 @@ fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr],
     eid := lower_match_enum_of(self, ty)
     tn := self.tyname(ty)
     if eid < 0 {
-        self.err(pos, fmt("`", name, if parens { "(..)" } else { "" }, "` is an enum variant pattern, but the matched value has type ", tn))
+        hint := ""
+        match self.cx.types.k(ty) {
+            TyKPtr(inner) => {
+                if lower_match_enum_of(self, inner) >= 0 {
+                    hint = " (a pointer: match on the value it points to, `match *p { ... }`)"
+                }
+            }
+            _ => {}
+        }
+        self.err(pos, fmt("`", name, if parens { "(..)" } else { "" }, "` is an enum variant pattern, but the matched value has type ", tn, hint))
         return lower_match_err(ty, pos)
     }
     ed := self.cx.types.enums.buf[eid].decl
@@ -457,6 +471,9 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
                     } else if eid >= 0 && !is_some(self.lookup(n)) && !self.cx.global_decls.has(n) {
                         // reports that `n` is not a variant
                         return self.pat_variant(n, &none, false, no_qual, ty, e.pos)
+                    } else if !lower_match_known(self, n) {
+                        self.err(e.pos, fmt("unknown identifier `", n, "`: the pattern of an arm is a constant, not a new name for the matched value (write `_` and use the matched value itself, also in a guard)"))
+                        return lower_match_err(ty, e.pos)
                     }
                 }
                 EKField(q, n) => {
@@ -478,7 +495,7 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
                 if eid >= 0 {
                     self.err(e.pos, "expected an enum variant pattern")
                 } else if top {
-                    self.err(e.pos, fmt("cannot match on ", tn))
+                    self.err(e.pos, fmt("a constant cannot match a value of type ", tn, "; write a tuple pattern `(.., ..)` or `_`"))
                 } else {
                     self.err(e.pos, fmt("a value of type ", tn, " cannot be compared with a constant in a pattern (bind it to a name and test it in a guard)"))
                 }
@@ -534,7 +551,11 @@ fn lower_match_names(s *Fx, p *Pat, top bool, out *Vec[str]) {
         PatConst(e) => {
             match e.k {
                 EKIdent(n) => {
-                    if !top && !s.cx.const_decls.has(n) && s.bare_variant(n, None).2 == 0 {
+                    if top {
+                        if !lower_match_known(s, n) {
+                            out.push(n)
+                        }
+                    } else if !s.cx.const_decls.has(n) && s.bare_variant(n, None).2 == 0 {
                         out.push(n)
                     }
                 }
@@ -1260,6 +1281,13 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
             // patterns with constants or variants inside can cover a value together
             missing = lower_match_missing(self, &rows, sv.ty)
             exhaustive = missing.len == 0
+        } else if sv.ty == T_BOOL {
+            if !seen_true {
+                missing.push("true")
+            }
+            if !seen_false {
+                missing.push("false")
+            }
         } else {
             match enum_id {
                 Some(e) => {
@@ -1304,4 +1332,13 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         None => {}
     }
     return val_unit()
+}
+
+// A note for a mismatch between two different types that print the same: a type of the
+// program has the name of a type of the standard library (for example its own `Opt`).
+fn lower_match_same_name(a str, b str) str {
+    if a != b {
+        return ""
+    }
+    return " (two different types have this name: one declared in this program, one in the standard library; the library's functions take the library's type)"
 }

@@ -1,0 +1,16 @@
+Red Red red RED
+Green Green green Green Green Red
+Pix{c: Green, l: Red} Pix{c: Red, l: Green} [Red, Green, Blue] [Red, Amber, Green] (Red, Red)
+true true true false true
+Blue Amber Circle(2.0) blue AMBER
+Red Red 0 0 2 1 12 12
+Empty Empty Rect(1.0, 2.0) 7 0
+red RED Blue Amber
+Red
+Full(1, 2) Half(x) Zero Zero Zero 2 1 0
+[3, 5] 1 push pop vec 3 vec 4 map min
+Some(5) None Some(5) Some(6) None Ok(1) 11 Some(5) None
+min Map
+7
+5
+B

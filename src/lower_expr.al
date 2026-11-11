@@ -1688,7 +1688,21 @@ fn construct_variant(self *Fx, ei i64, vi i64, args []Expr, expect Opt[i64], pos
                 }
             }
             if !ok || targs.len != d.tparams.len {
-                self.err(pos, fmt("cannot infer type arguments of enum `", d.name, "` for `", vname, "`; annotate the destination type"))
+                hint := ""
+                match expect {
+                    Some(et) => {
+                        if vname == "None" && lower_expr_is_ptr(self.cx.types.k(et)) {
+                            hint = " (the null pointer is `nil`)"
+                        }
+                        if ok && lower_call_is_enum(self.cx.types.k(et)) {
+                            // the destination is another enum: more type arguments would not help
+                            self.err(pos, fmt("type mismatch: expected ", self.tyname(et), ", found `", vname, "`, a variant of enum `", d.name, "`"))
+                            return val_err()
+                        }
+                    }
+                    None => {}
+                }
+                self.err(pos, fmt("cannot infer type arguments of enum `", d.name, "` for `", vname, "`; annotate the destination type or write `", d.name, "[T].", vname, "`", hint))
                 return val_err()
             }
             // the payload was evaluated above; it is not evaluated again below

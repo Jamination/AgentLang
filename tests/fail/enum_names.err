@@ -1,0 +1,22 @@
+enum variant `Blue2` conflicts with another declaration
+enum variant `f` conflicts with another declaration
+enum `Dup` declares the variant `X` twice
+enum variant `Red2` conflicts with another declaration
+`Red` is a variant of Color and of Light, and `f` is defined for both; write `Enum.Red`
+`Red` is a variant of several enums (`Color`, `Light`) and the expected type does not say which; write `Color.Red` or `Light.Red`
+enum `Color` has no variant `Purple` (variants: Red, Green, Blue)
+variant `Some` takes 1 value(s), got 0
+enum `Maybe` expects 1 type argument(s), got 2
+enum `Opt` has no variant `Nothing` (variants: Some, None)
+variant `Red` takes 0 value(s), got 1
+enum `Light` cannot be used as a value here; write `Light.Variant`
+unknown identifier `Colour`
+type mismatch: expected Color, found Light
+type mismatch: expected i64, found str
+variant `Some` takes 1 value(s), got 2
+cannot infer type arguments of enum `Maybe` for `None`; annotate the destination type or write `Maybe[T].None`
+(the null pointer is `nil`)
+`Green` is a variant of several enums (`Color`, `Light`)
+operands have different types: Opt[i64] and Maybe[i64]
+argument 1 of `is_some` has type Maybe[i64], which does not match the parameter type
+type mismatch: expected Opt[i64], found `None`, a variant of enum `Maybe`

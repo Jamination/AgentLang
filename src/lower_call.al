@@ -1291,6 +1291,7 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
         }
         sort_by(ranked.items(), lower_call_rank_less)
         pick = ranked.buf[0].1
+        by_ret := false
         match expect {
             Some(et) => {
                 for ri in 0..ranked.len {
@@ -1305,6 +1306,7 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                                 self.cx.errs.truncate(saved)
                                 if t == et {
                                     pick = di
+                                    by_ret = true
                                     break
                                 }
                             }
@@ -1314,6 +1316,26 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                 }
             }
             None => {}
+        }
+        if !by_ret && ranked.buf[1].0 == ranked.buf[0].0 {
+            // a variant that fits the enums of two definitions equally well decides nothing
+            for i in 0..len(args) {
+                a := &args[i]
+                vn := self.variant_ref(a)
+                if vn == "" {
+                    continue
+                }
+                saved := self.cx.errs.len
+                empty := map[str, i64]()
+                t0 := self.cx.resolve(&self.cx.fn_decls.buf[ranked.buf[0].1].params.buf[off + i].1, &empty)
+                t1 := self.cx.resolve(&self.cx.fn_decls.buf[ranked.buf[1].1].params.buf[off + i].1, &empty)
+                self.cx.errs.truncate(saved)
+                if t0 != t1 && lower_call_is_enum(self.cx.types.k(t0)) && lower_call_is_enum(self.cx.types.k(t1)) {
+                    s := lower_call_call_overloaded_sigs(self, cands)
+                    self.err(a.pos, fmt("`", vn, "` is a variant of ", self.tyname(t0), " and of ", self.tyname(t1), ", and `", name, "` is defined for both; write `Enum.", vn, "` (candidates: ", s, ")"))
+                    return val_err()
+                }
+            }
         }
     }
     return self.call_decl(pick, explicit, recv, args, expect, pos, pre.items())
@@ -1536,7 +1558,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b))
+            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, lower_match_same_name(a, b)))
             failed = true
         }
         final_vals.push(v)
