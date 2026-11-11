@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Fuzzer for nested functions.
+"""Random programs with nested and anonymous functions.
 
-Generates random AL programs built from nested functions: reads and writes of the variables
-of the enclosing functions, functions nested in functions, shadowing, early return, recursion,
-calls between nested functions (which forwards what the callee uses), up to eight parameters,
-method-call syntax, and nested functions that use no outer variable passed as plain function
-values (to higher-order and generic functions, in a struct field). The generator evaluates
-every program itself, so the output of the unoptimized, the optimized (with the IR verifier)
-and the unchecked build is compared with the expected one.
+A function written inside another one is an ordinary function: it sees no variable of the
+function around it, so everything it works on is a parameter (a pointer where it changes
+something). The generator builds programs out of nested functions at several block depths,
+functions nested in nested functions, shadowed names, recursion, anonymous functions,
+function values in locals and passed to helpers, and a generic enclosing function; it
+computes the expected output itself. Each program is built with -O0, default and
+--unchecked.
 
-usage: tests/gen/fuzz_nested.py [count] [first_seed] [--keep]
+usage: fuzz_nested.py [count] [first seed] [--keep]
 """
 import os
 import random
@@ -17,403 +17,443 @@ import subprocess
 import sys
 import tempfile
 
-ALC = os.path.join(os.path.dirname(__file__), "..", "..", "build", "alc")
-M = 1000003
-NAMES = ["a", "b", "c", "d", "e", "x", "y", "z"]
-INF = 1 << 30
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ALC = os.environ.get("ALC", os.path.join(ROOT, "build", "alc"))
+MASK = (1 << 20) - 1
 
-PRELUDE = """const M = 1000003
-struct Holder { f fn(i64) i64, bias i64 }
-fn p_inc(a i64) i64 { (a + 1) % M }
-fn p_add(a i64, b i64) i64 { (a + b) % M }
-fn p_mix(a i64, b i64, c i64, d i64, e i64, f i64, g i64, h i64) i64 { (a + 2 * b + 3 * c + 4 * d + 5 * e + 6 * f + 7 * g + 8 * h) % M }
-fn apply1(f fn(i64) i64, v i64) i64 { f(v) }
-fn twice(f fn(i64) i64, v i64) i64 { f(f(v)) }
-fn gapply[T](v T, f fn(T) T) T { f(v) }
+HELPERS = """fn apply1(f fn(i64) i64, v i64) i64 { f(v) }
+fn twice(f fn(i64) i64, v i64) i64 { f(f(v) & 1048575) }
 fn fold(xs []i64, init i64, f fn(i64, i64) i64) i64 {
     acc := init
-    for v in xs { acc = f(acc, v) }
-    acc
+    for x in xs { acc = f(acc, x) & 1048575 }
+    return acc
 }
-fn sum_map(xs []i64, f fn(i64) i64) i64 {
-    s := 0
-    for v in xs { s = (s + f(v)) % M }
-    s
-}
-fn call8(f fn(i64, i64, i64, i64, i64, i64, i64, i64) i64, v i64) i64 { f(v, 1, 2, 3, 4, 5, 6, 7) }
+fn poke(f fn(*i64, i64) i64, p *i64, v i64) i64 { f(p, v) + *p }
 """
 
 
-class Ret(Exception):
-    def __init__(self, v):
-        self.v = v
-
-
 class TooLong(Exception):
-    """The program runs too many statements (nested loops and recursion multiply)."""
+    pass
 
 
 class Fn:
-    """A nested function known to the generator."""
+    def __init__(self, name, params, rec):
+        self.name = name          # "" for an anonymous function
+        self.params = params      # [(name, is_ptr)]
+        self.rec = rec            # first parameter is a depth that goes down
+        self.inner = []           # functions nested in this one
+        self.body = []
+        self.result = None
 
-    def __init__(self, name, arity, rec, level):
-        self.name = name
-        self.arity = arity      # declared parameters (a recursive one has its depth first)
-        self.rec = rec
-        self.level = level      # level of its body
-        # lowest level of a variable it needs (directly or through a callee); INF: none, so
-        # it is a plain function value
-        self.need = INF
+    def sig(self):
+        return tuple(p[1] for p in self.params)
 
+    def pure(self):
+        return not any(p[1] for p in self.params)
 
-class Scope:
-    """One block: the names declared in it. `level` counts the enclosing functions."""
-
-    def __init__(self, parent, level):
-        self.parent = parent
-        self.level = level
-        self.ints = {}      # name -> may be assigned (loop variables and depths may not)
-        self.fns = {}       # name -> Fn
-
-    def all_ints(self, assignable=False):
-        out = {}
-        s = self
-        while s:
-            for n, rw in s.ints.items():
-                out.setdefault(n, (rw, s.level))
-            s = s.parent
-        return {n: v[1] for n, v in out.items() if v[0] or not assignable}
-
-    def all_fns(self):
-        out = {}
-        s = self
-        while s:
-            for n, f in s.fns.items():
-                out.setdefault(n, f)
-            s = s.parent
-        return out
+    def typ(self):
+        return "fn(" + ", ".join("*i64" if p[1] else "i64" for p in self.params) + ") i64"
 
 
 class Gen:
     def __init__(self, seed):
         self.r = random.Random(seed)
-        self.n_fns = 0
-        self.stack = []     # the nested functions whose bodies are being generated
-        # the lowest function level whose variables may be used (above 0 inside a function
-        # that is to be a plain function value)
-        self.floor = 0
+        self.steps = 0
+        self.nfn = 0
+        self.out = []
+        self.generic = self.r.random() < 0.4
+        self.main = self.block_main(0, [], [], [])
 
-    def need(self, level):
-        """The code being generated uses a variable of function level `level`."""
-        for f in self.stack:
-            if f.level > level:
-                f.need = min(f.need, level)
-
-    def var(self, sc, assignable=False):
-        ints = {n: l for n, l in sc.all_ints(assignable).items() if l >= self.floor}
-        if not ints:
-            return None
-        n = self.r.choice(sorted(ints))
-        self.need(ints[n])
-        return n
-
-    # ---- generation: statements are tuples, see `emit` and `run` ----
-    def expr(self, sc, depth):
+    # ---------- generation ----------
+    # expressions: ("c", n) ("v", name) ("d", ptr) ("op", o, a, b) ("if", a, b, x, y)
+    #              ("call", callee, args)   callee: ("fn", Fn) or ("val", local name, Fn)
+    def pure(self, ints, ptrs, fns, depth, me=None):
         r = self.r
-        if depth <= 0 or r.random() < 0.25:
-            v = self.var(sc) if r.random() < 0.75 else None
-            return ("var", v) if v else ("lit", r.randint(0, 50))
         k = r.random()
-        if k < 0.45:
-            return ("bin", r.choice(["+", "*", "-"]), self.expr(sc, depth - 1), self.expr(sc, depth - 1))
-        # (a function is not called from inside itself, except by the recursion pattern)
-        fns = {n: f for n, f in sc.all_fns().items() if f not in self.stack and (f.need == INF or f.need >= self.floor)}
-        if k < 0.8 and fns:
-            f = fns[r.choice(sorted(fns))]
-            if f.need != INF:
-                self.need(f.need)
-            elif not f.rec and r.random() < 0.5:
-                # a function that uses no outer variable is a value
-                if f.arity == 1:
-                    return ("hof1", r.choice(["apply1", "twice", "gapply", "sum_map", "holder"]), f.name, self.expr(sc, depth - 1))
-                if f.arity == 2:
-                    return ("fold", f.name, [r.randint(0, 9) for _ in range(r.randint(0, 4))], self.expr(sc, depth - 1))
-                if f.arity == 8:
-                    return ("call8", f.name, self.expr(sc, depth - 1))
-            args = [self.expr(sc, depth - 1) for _ in range(f.arity)]
-            if f.rec:
-                args[0] = ("lit", r.randint(0, 3))
-            return ("call", f.name, args, f.arity >= 1 and not f.rec and r.random() < 0.3)
-        if k < 0.9:
-            which = r.choice(["p_inc", "p_add", "p_mix"])
-            if which == "p_inc":
-                return ("hof1", r.choice(["apply1", "twice", "gapply", "sum_map", "holder"]), "p_inc", self.expr(sc, depth - 1))
-            if which == "p_add":
-                return ("fold", "p_add", [r.randint(0, 9) for _ in range(r.randint(0, 4))], self.expr(sc, depth - 1))
-            return ("call8", "p_mix", self.expr(sc, depth - 1))
-        return ("lit", r.randint(0, 50))
+        if depth <= 0 or k < 0.25:
+            c = r.random()
+            if ints and c < 0.55:
+                return ("v", r.choice(ints))
+            if ptrs and c < 0.8:
+                return ("d", r.choice(ptrs))
+            return ("c", r.randint(0, 40))
+        if k < 0.6:
+            return ("op", r.choice("+-*&^"), self.pure(ints, ptrs, fns, depth - 1, me), self.pure(ints, ptrs, fns, depth - 1, me))
+        if k < 0.7:
+            return ("if", self.pure(ints, ptrs, fns, depth - 1, me), self.pure(ints, ptrs, fns, depth - 1, me),
+                    self.pure(ints, ptrs, fns, depth - 1, me), self.pure(ints, ptrs, fns, depth - 1, me))
+        cands = [c for c in fns if c[-1].pure() and (not c[-1].rec or c[-1] is me or c[0] == "fn")]
+        if not cands:
+            return self.pure(ints, ptrs, fns, depth - 1, me)
+        c = r.choice(cands)
+        if c[-1].rec and c[0] != "fn":
+            return self.pure(ints, ptrs, fns, depth - 1, me)
+        return ("call", c, self.args(c[-1], ints, ptrs, fns, depth - 1, me, []))
 
-    def block(self, parent, depth, n=None):
-        r = self.r
-        sc = Scope(parent, parent.level)
+    def args(self, f, ints, ptrs, fns, depth, me, addr):
         out = []
-        for _ in range(n if n is not None else r.randint(1, 4)):
-            k = r.random()
-            if k < 0.25:
-                v = self.var(sc, assignable=True)
-                if v:
-                    out.append(("assign", v, self.expr(sc, 2)))
-            elif k < 0.45:
-                name = r.choice(NAMES)
-                if name in sc.ints or name in sc.fns:
-                    continue
-                e = self.expr(sc, 2)
-                sc.ints[name] = True
-                out.append(("let", name, e))
-            elif k < 0.6 and depth > 0:
-                c = (self.expr(sc, 1), self.expr(sc, 1))
-                out.append(("if", c, self.block(sc, depth - 1), self.block(sc, depth - 1)))
-            elif k < 0.7 and depth > 0:
-                iv = r.choice(["i", "j", "k"])
-                inner = Scope(sc, sc.level)
-                inner.ints[iv] = False
-                out.append(("for", iv, r.randint(0, 4), self.block(inner, depth - 1)))
-            elif k < 0.9 and depth > 0 and self.n_fns < 14:
-                out.append(self.function(sc, depth))
-            elif k < 0.95 and self.stack:
-                out.append(("retif", (self.expr(sc, 1), self.expr(sc, 1)), self.expr(sc, 1)))
+        for i, (pn, is_ptr) in enumerate(f.params):
+            if is_ptr:
+                pick = self.r.choice(ptrs + addr)
+                out.append(("p", pick) if pick in ptrs else ("a", pick))
+            elif i == 0 and f.rec:
+                out.append(("op", "-", ("v", me.params[0][0]), ("c", 1)) if f is me else ("c", self.r.randint(0, 5)))
             else:
-                v = self.var(sc)
-                if v:
-                    out.append(("print", v))
+                out.append(self.pure(ints, ptrs, fns, depth, me))
         return out
 
-    def function(self, sc, depth):
+    def new_fn(self, fns, named, level):
         r = self.r
-        self.n_fns += 1
-        name = f"f{self.n_fns}"
-        rec = r.random() < 0.2
-        own_pure = r.random() < 0.3     # uses nothing of the enclosing functions
-        ar = r.choice([0, 1, 1, 1, 2, 2, 3, 8])
-        params = r.sample(NAMES, ar)
+        rec = named and r.random() < 0.2
+        pool = ["v0", "v1", "v2", "a", "b", "p", "q", "n", "k"]
+        r.shuffle(pool)
+        n = r.randint(1, 3) if r.random() < 0.85 else r.randint(7, 9)
+        params = []
+        for i in range(n):
+            nm = pool[i] if i < len(pool) else f"x{i}"
+            params.append((nm, (not (rec and i == 0)) and r.random() < 0.3))
         if rec:
-            params = ["dep"] + params
-        f = Fn(name, len(params), rec, sc.level + 1)
-        ps = Scope(sc, sc.level + 1)
-        for p in params:
-            ps.ints[p] = p != "dep"
-        self.stack.append(f)
-        save_floor = self.floor
-        if own_pure:
-            self.floor = f.level
-        body = self.block(ps, depth - 1)
-        # the result expression sees the names of the body
-        bs = Scope(ps, ps.level)
-        for st in body:
-            if st[0] == "let":
-                bs.ints[st[1]] = True
-            if st[0] == "fn":
-                bs.fns[st[1].name] = st[1]
-        res = self.expr(bs, 2)
-        if rec:
-            args = [("bin", "-", ("var", "dep"), ("lit", 1))] + [self.expr(bs, 1) for _ in range(len(params) - 1)]
-            res = ("bin", "+", ("call", name, args, False), res)
-            body = [("retif", (("var", "dep"), ("lit", 1)), self.expr(ps, 1))] + body
-        self.stack.pop()
-        self.floor = save_floor
-        # what it needs below its own level is needed by the function around it too
-        if f.need != INF:
-            self.need(f.need)
-        sc.fns[name] = f
-        return ("fn", f, params, body, res)
+            params[0] = ("d", False)
+        name = ""
+        if named:
+            self.nfn += 1
+            # a few names are reused, so that inner declarations shadow outer ones
+            name = r.choice(["h0", "h1", "h2"]) if r.random() < 0.3 else f"n{self.nfn}"
+        f = Fn(name, params, rec)
+        ints = [p[0] for p in params if not p[1]]
+        ptrs = [p[0] for p in params if p[1]]
+        vis = list(fns)
+        if named:
+            vis = [c for c in vis if c[-1].name != name]
+            if rec:
+                vis.append(("fn", f))
+        taken = {name}
+        if named and level < 2:
+            for _ in range(r.choice([0, 0, 0, 1, 2])):
+                g = self.new_fn(vis, True, level + 1)
+                if g.name in taken or g.name in [p[0] for p in params]:
+                    continue
+                taken.add(g.name)
+                f.inner.append(g)
+                vis = [c for c in vis if c[-1].name != g.name] + [("fn", g)]
+        f.body = self.fn_stmts(f, ints, ptrs, vis, 2)
+        f.result = self.pure(ints + [s[1] for s in f.body if s[0] in ("let", "calllet")], ptrs, vis, 2, f)
+        return f
+
+    def fn_stmts(self, f, ints, ptrs, vis, depth, lets=True):
+        r = self.r
+        out = []
+        ints = list(ints)
+        for i in range(r.randint(0, 3)):
+            k = r.random()
+            if k < 0.35 and lets:
+                nm = f"t{len(ints)}_{depth}"
+                out.append(("let", nm, self.pure(ints, ptrs, vis, 2, f)))
+                ints.append(nm)
+            elif k < 0.65 and ptrs:
+                out.append(("set", r.choice(ptrs), self.pure(ints, ptrs, vis, 2, f)))
+            elif k < 0.85 and lets:
+                cands = [c for c in vis if not c[-1].pure() and not c[-1].rec]
+                if cands and ptrs:
+                    c = r.choice(cands)
+                    nm = f"t{len(ints)}_{depth}"
+                    out.append(("calllet", nm, c, self.args(c[-1], ints, ptrs, vis, 1, f, [])))
+                    ints.append(nm)
+            elif depth > 0:
+                out.append(("if", self.pure(ints, ptrs, vis, 1, f), self.pure(ints, ptrs, vis, 1, f),
+                            self.fn_stmts(f, ints, ptrs, vis, depth - 1, False), []))
+        return out
+
+    # statements of the enclosing function:
+    # ("let", name, expr) ("calllet", name, callee, args) ("fn", Fn) ("val", name, Fn, by_name)
+    # ("help", name, helper, Fn-or-local, args) ("if", a, b, stmts) ("for", var, n, stmts) ("print", name)
+    def block_main(self, depth, ints, fns, vals):
+        r = self.r
+        ints = list(ints)
+        fns = list(fns)
+        vals = list(vals)
+        out = []
+        declared = set()
+        if depth == 0:
+            for i in range(3):
+                out.append(("let", f"v{i}", ("c", r.randint(0, 99))))
+                ints.append(f"v{i}")
+        for _ in range(r.randint(3, 8) if depth == 0 else r.randint(1, 4)):
+            k = r.random()
+            vis = fns + vals
+            if k < 0.25:
+                f = self.new_fn(fns, True, 0)
+                if f.name in declared:
+                    continue
+                declared.add(f.name)
+                out.append(("fn", f))
+                fns = [c for c in fns if c[-1].name != f.name] + [("fn", f)]
+            elif k < 0.4:
+                nm = f"f{len(vals)}_{depth}_{len(out)}"
+                cands = [c[-1] for c in fns if not c[-1].rec]
+                if cands and r.random() < 0.5:
+                    f = r.choice(cands)
+                    out.append(("val", nm, f, True))
+                else:
+                    f = self.new_fn(fns, False, 0)
+                    out.append(("val", nm, f, False))
+                vals.append(("val", nm, f))
+            elif k < 0.55:
+                nm = f"v{len(ints)}_{depth}_{len(out)}"
+                helper = r.choice(["apply1", "twice", "fold", "poke"])
+                want = {"apply1": (False,), "twice": (False,), "fold": (False, False), "poke": (True, False)}[helper]
+                cands = [c for c in vis if c[-1].sig() == want and not c[-1].rec]
+                if cands and r.random() < 0.6:
+                    c = r.choice(cands)
+                    fa = ("name", c[-1]) if c[0] == "fn" else ("local", c[1], c[-1])
+                else:
+                    f = Fn("", [(n, p) for n, p in zip(["a", "b"], want)], False)
+                    fi = [p[0] for p in f.params if not p[1]]
+                    fp = [p[0] for p in f.params if p[1]]
+                    f.body = self.fn_stmts(f, fi, fp, fns, 1)
+                    f.result = self.pure(fi + [s[1] for s in f.body if s[0] in ("let", "calllet")], fp, fns, 2, f)
+                    fa = ("anon", f)
+                if helper == "fold":
+                    extra = [[r.randint(0, 50) for _ in range(r.randint(0, 5))], self.pure(ints, [], vis, 1)]
+                elif helper == "poke":
+                    extra = [r.choice(ints), self.pure(ints, [], vis, 1)]
+                else:
+                    extra = [self.pure(ints, [], vis, 2)]
+                out.append(("help", nm, helper, fa, extra))
+                ints.append(nm)
+            elif k < 0.75:
+                nm = f"v{len(ints)}_{depth}_{len(out)}"
+                cands = [c for c in vis if not c[-1].pure() and not c[-1].rec]
+                if cands and r.random() < 0.6:
+                    c = r.choice(cands)
+                    out.append(("calllet", nm, c, self.args(c[-1], ints, [], vis, 2, None, ints)))
+                else:
+                    out.append(("let", nm, self.pure(ints, [], vis, 3)))
+                ints.append(nm)
+            elif k < 0.85 and depth < 2:
+                out.append(("if", self.pure(ints, [], vis, 1), self.pure(ints, [], vis, 1), self.block_main(depth + 1, ints, fns, vals)))
+            elif k < 0.93 and depth < 2:
+                iv = f"i{depth}"
+                out.append(("for", iv, r.randint(1, 3), self.block_main(depth + 1, ints + [iv], fns, vals)))
+            else:
+                out.append(("print", r.choice(ints)))
+        for nm in ints:
+            if any(s[0] in ("let", "calllet", "help") and s[1] == nm for s in out):
+                out.append(("print", nm))
+        return out
+
+    # ---------- source ----------
+    def e(self, x):
+        t = x[0]
+        if t == "c":
+            return str(x[1])
+        if t == "v":
+            return x[1]
+        if t == "d":
+            return "*" + x[1]
+        if t == "op":
+            s = f"({self.e(x[2])} {x[1]} {self.e(x[3])})"
+            return f"({s} & {MASK})" if x[1] == "*" else s
+        if t == "if":
+            return f"(if {self.e(x[1])} < {self.e(x[2])} {{ {self.e(x[3])} }} else {{ {self.e(x[4])} }})"
+        return self.call(x[1], x[2])
+
+    def call(self, c, args):
+        name = c[-1].name if c[0] == "fn" else c[1]
+        parts = []
+        for a in args:
+            if a[0] == "p":
+                parts.append(a[1])
+            elif a[0] == "a":
+                parts.append("&" + a[1])
+            else:
+                parts.append(self.e(a))
+        # method-call syntax now and then
+        if parts and c[0] == "fn" and len(parts[0]) < 12 and parts[0].replace("_", "a").isalnum() and self.r.random() < 0.2:
+            return f"{parts[0]}.{name}({', '.join(parts[1:])})"
+        return f"{name}({', '.join(parts)})"
+
+    def fn_src(self, f, ind):
+        pad = "    " * ind
+        ps = ", ".join(f"{n} {'*i64' if p else 'i64'}" for n, p in f.params)
+        lines = [f"fn {f.name}({ps}) i64 {{" if f.name else f"fn({ps}) i64 {{"]
+        if f.rec:
+            lines.append(f"{pad}    if d <= 0 {{ return {len(f.params)} }}")
+        for g in f.inner:
+            lines.append(pad + "    " + self.fn_src(g, ind + 1))
+        lines += self.fn_body_src(f.body, ind + 1)
+        lines.append(f"{pad}    return {self.e(f.result)} & {MASK}")
+        lines.append(pad + "}")
+        return "\n".join(lines)
+
+    def fn_body_src(self, body, ind):
+        pad = "    " * ind
+        out = []
+        for s in body:
+            if s[0] == "let":
+                out.append(f"{pad}{s[1]} := {self.e(s[2])} & {MASK}")
+            elif s[0] == "set":
+                out.append(f"{pad}*{s[1]} = {self.e(s[2])} & {MASK}")
+            elif s[0] == "calllet":
+                out.append(f"{pad}{s[1]} := {self.call(s[2], s[3])}")
+            else:
+                out.append(f"{pad}if {self.e(s[1])} < {self.e(s[2])} {{")
+                out += self.fn_body_src(s[3], ind + 1)
+                out.append(pad + "}")
+        return out
+
+    def main_src(self, stmts, ind):
+        pad = "    " * ind
+        out = []
+        for s in stmts:
+            t = s[0]
+            if t == "let":
+                out.append(f"{pad}{s[1]} := {self.e(s[2])} & {MASK}")
+            elif t == "calllet":
+                out.append(f"{pad}{s[1]} := {self.call(s[2], s[3])}")
+            elif t == "fn":
+                out.append(pad + self.fn_src(s[1], ind))
+            elif t == "val":
+                if s[3]:
+                    form = self.r.choice([f"{s[1]} := {s[2].name}", f"var {s[1]} {s[2].typ()} = {s[2].name}"])
+                    out.append(pad + form)
+                else:
+                    out.append(f"{pad}{s[1]} := {self.fn_src(s[2], ind)}")
+            elif t == "help":
+                fa = s[3]
+                fs = fa[1].name if fa[0] == "name" else fa[1] if fa[0] == "local" else self.fn_src(fa[1], ind)
+                x = s[4]
+                if s[2] == "fold":
+                    rest = f"[]i64{{{', '.join(map(str, x[0]))}}}, {self.e(x[1])} & {MASK}, {fs}"
+                    out.append(f"{pad}{s[1]} := fold({rest})")
+                elif s[2] == "poke":
+                    out.append(f"{pad}{s[1]} := poke({fs}, &{x[0]}, {self.e(x[1])} & {MASK}) & {MASK}")
+                else:
+                    out.append(f"{pad}{s[1]} := {s[2]}({fs}, {self.e(x[0])} & {MASK})")
+            elif t == "if":
+                out.append(f"{pad}if {self.e(s[1])} < {self.e(s[2])} {{")
+                out += self.main_src(s[3], ind + 1)
+                out.append(pad + "}")
+            elif t == "for":
+                out.append(f"{pad}for {s[1]} in 0..{s[2]} {{")
+                out += self.main_src(s[3], ind + 1)
+                out.append(pad + "}")
+            else:
+                out.append(f"{pad}print({s[1]})")
+        return out
 
     def program(self):
-        top = Scope(None, 0)
-        body = []
-        for i in range(self.r.randint(2, 4)):
-            name = f"v{i}"
-            top.ints[name] = True
-            body.append(("let", name, ("lit", self.r.randint(0, 99))))
-        stmts = self.block(top, 3, n=self.r.randint(5, 10))
-        self.stmts = body + stmts
-        self.final = sorted(top.ints)
-        lines = [PRELUDE, "fn main() {"]
-        self.emit(self.stmts, 1, lines)
-        lines.append("    print(" + ", ".join(self.final) + ")")
-        lines.append("}")
-        return "\n".join(lines) + "\n"
+        body = "\n".join(self.main_src(self.main, 1))
+        if self.generic:
+            return (HELPERS + "fn run[T](tag T) {\n    fn same(x T, y T) T { y }\n    fn first(xs []T) T { xs[0] }\n"
+                    + body + "\n    print(same(tag, first([]T{tag, tag})))\n}\nfn main() {\n    run(7)\n    run(\"s\")\n}\n")
+        return HELPERS + "fn main() {\n" + body + "\n}\n"
 
-    # ---- AL text ----
-    def ex(self, e):
-        k = e[0]
-        if k == "lit":
-            return str(e[1])
-        if k == "var":
-            return e[1]
-        if k == "bin":
-            a, b = self.ex(e[2]), self.ex(e[3])
-            if e[1] == "-":
-                return f"(({a} + M - {b}) % M)"
-            return f"(({a} {e[1]} {b}) % M)"
-        if k == "call":
-            args = [self.ex(a) for a in e[2]]
-            if e[3]:
-                # method-call syntax
-                return f"({args[0]}).{e[1]}({', '.join(args[1:])})"
-            return f"{e[1]}({', '.join(args)})"
-        if k == "hof1":
-            how, name, a = e[1], e[2], self.ex(e[3])
-            if how == "gapply":
-                return f"gapply({a}, {name})"
-            if how == "sum_map":
-                return f"sum_map([]i64{{1, 2, {a}}}, {name})"
-            if how == "holder":
-                return f"Holder{{f: {name}, bias: 1}}.f({a})"
-            return f"{how}({name}, {a})"
-        if k == "fold":
-            return f"fold([]i64{{{', '.join(map(str, e[2]))}}}, {self.ex(e[3])}, {e[1]})"
-        if k == "call8":
-            return f"call8({e[1]}, {self.ex(e[2])})"
-        raise Exception(k)
+    # ---------- evaluation ----------
+    def tick(self):
+        self.steps += 1
+        if self.steps > 200000:
+            raise TooLong()
 
-    def emit(self, stmts, ind, out):
-        p = "    " * ind
+    def ev(self, x, env):
+        self.tick()
+        t = x[0]
+        if t == "c":
+            return x[1]
+        if t == "v":
+            return env[x[1]][0]
+        if t == "d":
+            return env[x[1]][0]
+        if t == "op":
+            a = self.ev(x[2], env)
+            b = self.ev(x[3], env)
+            o = x[1]
+            if o == "+":
+                return a + b
+            if o == "-":
+                return a - b
+            if o == "*":
+                return (a * b) & MASK
+            if o == "&":
+                return a & b
+            return a ^ b
+        if t == "if":
+            return self.ev(x[3], env) if self.ev(x[1], env) < self.ev(x[2], env) else self.ev(x[4], env)
+        return self.do_call(x[1][-1], x[2], env)
+
+    def do_call(self, f, args, env):
+        vals = []
+        for a in args:
+            if a[0] in ("p", "a"):
+                vals.append(env[a[1]])
+            else:
+                vals.append([self.ev(a, env)])
+        return self.invoke(f, vals)
+
+    # `cells`: one cell per parameter; a pointer parameter shares the cell of what it points to
+    def invoke(self, f, cells):
+        self.tick()
+        env = {}
+        for (n, is_ptr), c in zip(f.params, cells):
+            env[n] = c if is_ptr else [c[0]]
+        if f.rec and env["d"][0] <= 0:
+            return len(f.params)
+        self.fn_body(f.body, env)
+        return self.ev(f.result, env) & MASK
+
+    def fn_body(self, body, env):
+        for s in body:
+            if s[0] == "let":
+                env[s[1]] = [self.ev(s[2], env) & MASK]
+            elif s[0] == "set":
+                env[s[1]][0] = self.ev(s[2], env) & MASK
+            elif s[0] == "calllet":
+                env[s[1]] = [self.do_call(s[2][-1], s[3], env)]
+            elif self.ev(s[1], env) < self.ev(s[2], env):
+                self.fn_body(s[3], env)
+
+    def run_main(self, stmts, env):
         for s in stmts:
-            k = s[0]
-            if k == "assign":
-                out.append(f"{p}{s[1]} = {self.ex(s[2])}")
-            elif k == "let":
-                out.append(f"{p}{s[1]} := {self.ex(s[2])}")
-            elif k == "print":
-                out.append(f"{p}print({s[1]})")
-            elif k == "if":
-                out.append(f"{p}if ({self.ex(s[1][0])}) < ({self.ex(s[1][1])}) {{")
-                self.emit(s[2], ind + 1, out)
-                out.append(f"{p}}} else {{")
-                self.emit(s[3], ind + 1, out)
-                out.append(f"{p}}}")
-            elif k == "for":
-                out.append(f"{p}for {s[1]} in 0..{s[2]} {{")
-                self.emit(s[3], ind + 1, out)
-                out.append(f"{p}}}")
-            elif k == "retif":
-                out.append(f"{p}if ({self.ex(s[1][0])}) < ({self.ex(s[1][1])}) {{ return {self.ex(s[2])} }}")
-            elif k == "fn":
-                ps = ", ".join(f"{n} i64" for n in s[2])
-                out.append(f"{p}fn {s[1].name}({ps}) i64 {{")
-                self.emit(s[3], ind + 1, out)
-                out.append(f"{p}    {self.ex(s[4])}")
-                out.append(f"{p}}}")
-
-    # ---- the expected output ----
-    def look(self, env, name):
-        for fr in reversed(env):
-            if name in fr:
-                return fr
-        raise Exception("unbound " + name)
-
-    def ev(self, e, env):
-        k = e[0]
-        if k == "lit":
-            return e[1]
-        if k == "var":
-            return self.look(env, e[1])[e[1]]
-        if k == "bin":
-            a = self.ev(e[2], env)
-            b = self.ev(e[3], env)
-            if e[1] == "+":
-                return (a + b) % M
-            if e[1] == "*":
-                return (a * b) % M
-            return (a + M - b) % M
-        if k == "call":
-            f = self.fn(env, e[1])
-            return f(*[self.ev(a, env) for a in e[2]])
-        if k == "hof1":
-            a = self.ev(e[3], env)
-            f = self.fn(env, e[2])
-            if e[1] == "twice":
-                return f(f(a))
-            if e[1] == "sum_map":
-                s = 0
-                for v in (1, 2, a):
-                    s = (s + f(v)) % M
-                return s
-            return f(a)
-        if k == "fold":
-            acc = self.ev(e[3], env)
-            f = self.fn(env, e[1])
-            for v in e[2]:
-                acc = f(acc, v)
-            return acc
-        if k == "call8":
-            f = self.fn(env, e[1])
-            return f(self.ev(e[2], env), 1, 2, 3, 4, 5, 6, 7)
-        raise Exception(k)
-
-    def fn(self, env, name):
-        if name == "p_inc":
-            return lambda a: (a + 1) % M
-        if name == "p_add":
-            return lambda a, b: (a + b) % M
-        if name == "p_mix":
-            return lambda a, b, c, d, e, f, g, h: (a + 2 * b + 3 * c + 4 * d + 5 * e + 6 * f + 7 * g + 8 * h) % M
-        return self.look(env, name)[name]
-
-    def run(self, stmts, env, out):
-        env = env + [{}]
-        for s in stmts:
-            self.steps += 1
-            if self.steps > 100000:
-                raise TooLong()
-            k = s[0]
-            if k == "assign":
-                v = self.ev(s[2], env)
-                self.look(env, s[1])[s[1]] = v
-            elif k == "let":
-                # a new frame per declaration: functions declared earlier do not see the name
-                env = env + [{s[1]: self.ev(s[2], env)}]
-            elif k == "print":
-                out.append(str(self.look(env, s[1])[s[1]]))
-            elif k == "if":
-                a = self.ev(s[1][0], env)
-                b = self.ev(s[1][1], env)
-                self.run(s[2] if a < b else s[3], env, out)
-            elif k == "for":
+            t = s[0]
+            if t == "let":
+                env[s[1]] = [self.ev(s[2], env) & MASK]
+            elif t == "calllet":
+                env[s[1]] = [self.do_call(s[2][-1], s[3], env)]
+            elif t == "help":
+                f = s[3][-1]
+                x = s[4]
+                if s[2] == "apply1":
+                    v = self.invoke(f, [[self.ev(x[0], env) & MASK]])
+                elif s[2] == "twice":
+                    v = self.invoke(f, [[self.invoke(f, [[self.ev(x[0], env) & MASK]]) & MASK]])
+                elif s[2] == "fold":
+                    v = self.ev(x[1], env) & MASK
+                    for y in x[0]:
+                        v = self.invoke(f, [[v], [y]]) & MASK
+                else:
+                    cell = env[x[0]]
+                    v = self.invoke(f, [cell, [self.ev(x[1], env) & MASK]])
+                    v = (v + cell[0]) & MASK
+                env[s[1]] = [v]
+            elif t == "if":
+                if self.ev(s[1], env) < self.ev(s[2], env):
+                    self.run_main(s[3], dict(env))
+            elif t == "for":
                 for i in range(s[2]):
-                    self.run(s[3], env + [{s[1]: i}], out)
-            elif k == "retif":
-                a = self.ev(s[1][0], env)
-                b = self.ev(s[1][1], env)
-                if a < b:
-                    raise Ret(self.ev(s[2], env))
-            elif k == "fn":
-                frame = {}
-                env = env + [frame]
-                # (the function sees itself)
-                frame[s[1].name] = self.make(s, env, out)
-        return env
-
-    def make(self, s, env, out):
-        def call(*args):
-            frame = dict(zip(s[2], args))
-            try:
-                inner = self.run(s[3], env + [frame], out)
-                return self.ev(s[4], inner)
-            except Ret as r:
-                return r.v
-        return call
+                    inner = dict(env)
+                    inner[s[1]] = [i]
+                    self.run_main(s[3], inner)
+            elif t == "print":
+                self.out.append(str(env[s[1]][0]))
 
     def expected(self):
+        self.out = []
         self.steps = 0
-        out = []
-        env = [{}]
-        n_top = len(self.final)
-        for s in self.stmts[:n_top]:
-            env[0][s[1]] = s[2][1]
-        self.run(self.stmts[n_top:], env, out)
-        out.append(" ".join(str(env[0][n]) for n in self.final))
-        return "\n".join(out) + "\n"
+        self.run_main(self.main, {})
+        text = "".join(l + "\n" for l in self.out)
+        if self.generic:
+            return text + "7\n" + text + "s\n"
+        return text
 
 
 def run(cmd, timeout=20, env=None):

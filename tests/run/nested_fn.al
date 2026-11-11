@@ -1,242 +1,138 @@
-// nested functions: variables of the enclosing function, nesting, recursion, forwarding
-struct Item { hp i64, name str }
-struct P { x i64, y i64 }
+// nested functions and anonymous functions: ordinary functions written inside another one.
+// They see globals, constants, other functions and the type parameters of the enclosing
+// function, but none of its variables.
+struct Item { name str, hp i64 }
+struct Ops { f fn(i64) i64, g fn(*i64) }
+struct Big { a i64, b i64, c i64, d i64, e i64, f f64 }
+const K = 10
+var total i64
 
-fn rank(items []Item, floor i64) i64 {
-    n := 0
-    fn keep(it Item) bool {      // sees `floor` and `n` of rank
-        if it.hp < floor { return false }
-        n += 1
-        return true
-    }
-    fn by_hp(a Item, b Item) bool { a.hp > b.hp }   // uses no local: an ordinary function value
-    for it in items { keep(it) }
-    sort_by(items, by_hp)
-    return n
-}
+fn apply[T, U](x T, f fn(T) U) U { f(x) }
+fn compose(f fn(i64) i64, g fn(i64) i64, x i64) i64 { f(g(x)) }
 
-// nested in nested: the innermost sees the variables of both enclosing functions
-fn outer(n i64) i64 {
-    a := 1
-    b := 10
-    fn mid(x i64) i64 {
-        fn inner(y i64) i64 {
-            a += 1
-            x + y + a + b
-        }
-        inner(100) + inner(1000)
+// the type parameter of the enclosing function, one lowering per instantiation
+fn sorted[T](xs []T, less fn(T, T) bool) []T {
+    fn swap(a *T, b *T) {
+        t := *a
+        *a = *b
+        *b = t
     }
-    r := mid(10000)
-    r + a + n
-}
-
-// a nested function that calls another one passes on what the callee uses; a variable of
-// the same name in between does not change which variable that is
-fn tree(n i64) i64 {
-    x := 1
-    fn bump() { x += 1 }
-    fn level1(k i64) i64 {
-        x := 100
-        fn level2(j i64) i64 {
-            bump()
-            x += j
-            x
-        }
-        level2(k) + level2(k)
-    }
-    r := level1(n)
-    r * 1000 + x
-}
-
-fn forward() i64 {
-    total := 0
-    fn add(x i64) { total += x }
-    fn add2(x i64) { add(x); add(x) }       // uses `total` only through add
-    fn add4(x i64) { add2(x); add2(x) }
-    for i in 0..5 { add4(i) }
-    total
-}
-
-// recursion: directly, and with a variable of the enclosing function
-fn fact(n i64) i64 {
-    fn go(k i64, acc i64) i64 {
-        if k <= 1 { return acc }
-        go(k - 1, acc * k)
-    }
-    go(n, 1)
-}
-fn count_down(n i64) i64 {
-    steps := 0
-    fn go(k i64) {
-        if k == 0 { return }
-        steps += 1
-        go(k - 1)
-    }
-    go(n)
-    steps
-}
-// every call of the enclosing function has its own variables
-fn fib(n i64) i64 {
-    if n < 2 { return n }
-    fn f(k i64) i64 { fib(n - k) }
-    f(1) + f(2)
-}
-fn walk(depth i64, visit i64) i64 {
-    seen := 0
-    fn node(d i64) {
-        seen += 1
-        if d > 0 {
-            node(d - 1)
-            node(d - 1)
+    for i in 0..len(xs) {
+        for j in i + 1..len(xs) {
+            if less(xs[j], xs[i]) { swap(&xs[i], &xs[j]) }
         }
     }
-    node(depth)
-    seen + visit
+    return xs
 }
-
-// parameters (also one passed by reference), loop variables, variables of outer blocks
-fn params(p P, big [6]i64, k i64) i64 {
-    fn sum() i64 {
-        p.x += 1                 // the parameter of this call
-        t := k + p.x + p.y
-        for v in big { t += v }
-        big[0] = 100
-        t
-    }
-    sum() + sum()
-}
-fn loops() i64 {
-    total := 0
-    for i in 0..4 {
-        j := i * 10
-        fn acc() { total += i + j }
-        acc()
-        acc()
-    }
-    {
-        z := 5
-        fn bump() { z += 1; total += z }
-        {
-            bump()
-            bump()
-        }
-    }
-    for i, s in []str{"a", "bb"} {
-        fn note() { total += i * 1000 + len(s) * 100 }
-        note()
-    }
-    total
-}
-
-// `return` leaves the nested function only; `defer` and loops inside it are its own
-fn early(xs []i64, limit i64) i64 {
-    found := -1
-    fn find(x i64) bool {
-        defer { limit += 1 }
-        if x > limit {
-            found = x
-            return true
-        }
-        false
-    }
+fn largest[T](xs []T, key fn(T) i64) T {
+    best := xs[0]
+    fn better(a T, b T, key fn(T) i64) bool { key(a) > key(b) }
     for x in xs {
-        if find(x) { break }
+        if better(x, best, key) { best = x }
     }
-    found * 100 + limit
+    return best
 }
-fn inner_loops() i64 {
-    hits := 0
-    fn scan(n i64) i64 {
-        r := 0
-        rows: for i in 0..n {
-            for j in 0..n {
-                if j > i { continue rows }
-                if i + j > 6 { break rows }
-                hits += 1
-                r += j
-            }
-        }
-        r
+fn zero_of[T]() fn() T {
+    return fn() T {
+        var z T
+        z
     }
-    scan(5) * 1000 + hits
 }
 
-// names: a nested function hides top-level functions and builtins of its name, also in
-// method-call syntax; its own parameters and locals hide outer variables
-fn helper(x i64) i64 { x + 1000 }
-fn names() {
-    x := 5
-    fn f(x i64) i64 {
-        y := x * 2
-        {
-            x := y + 1
-            y = x
-        }
-        y
+// a function value that outlives the call that made it
+fn adder() fn(i64) i64 {
+    fn add_k(x i64) i64 { x + K }
+    return add_k
+}
+fn tripler() fn(i64) i64 { return fn(x i64) i64 { x * 3 } }
+
+fn fib(n i64) i64 {
+    fn go(n i64, a i64, b i64) i64 {
+        if n == 0 { return a }
+        return go(n - 1, b, a + b)
     }
-    print(f(10), x)
-    print(helper(1), len("abc"))
-    fn helper(x i64) i64 { x + 1 }
-    fn len(s str) i64 { 42 }
-    print(helper(1), 1.helper(), len("abc"), "abc".len())
-    {
-        fn helper(x i64) i64 { x + 2 }      // an inner block may declare the name again
-        print(helper(1))
-        {
-            helper := 7                     // and a variable of a block inside may hide it
-            print(helper)
-        }
+    return go(n, 0, 1)
+}
+
+fn shadow(x i64) i64 {
+    fn len(s str) i64 { 100 }
+    fn x2(x i64) i64 { x * 2 }
+    r := x2(x) + len("abc") + "abc".len()
+    if x > 0 {
+        fn x2(x i64) i64 { x * 20 }
+        return r + x2(x)
     }
-    print(helper(1))
+    return r
 }
 
 fn main() {
-    items := []Item{Item{3, "a"}, Item{9, "b"}, Item{5, "c"}}
-    print(rank(items, 4), items)
-    print(outer(5), tree(5), forward())
-    print(fact(10), count_down(100), fib(15), walk(4, 1000))
-    var big [6]i64
-    for i in 0..6 { big[i] = i }
-    print(params(P{1, 2}, big, 7), big[0], loops())
-    print(early([]i64{1, 5, 9, 12}, 6), early([]i64{1}, 6), inner_loops())
-    names()
+    // explicit state: pointers and context parameters
+    n := 0
+    fn bump(n *i64, k i64) { *n += k }
+    bump(&n, 4)
+    n.bump(1)
+    for i in 0..3 {
+        fn step(acc *i64, i i64) { *acc += i * K }
+        step(&n, i)
+    }
+    print(n)
 
-    // aggregates, floats, vectors and small integers read and assigned
-    var grid [4]i64
-    words := []str{"a", "b"}
-    t := (1, 2.5)
-    p := P{1, 10}
-    v := vec3(1.0, 2.0, 3.0)
-    var b8 u8 = 250
-    flag := false
-    fn fill(k i64) {
-        for i in 0..4 { grid[i] = k + i }
-        words[1] = "z"
-        t.0 += 1
-        t.1 *= 2.0
-        p.y = k
-        v = v + vec3(1.0)
-        b8 += 10
-        flag = !flag
-    }
-    fill(7)
-    print(grid, words, t, p, v, b8, flag)
+    // named and anonymous functions as values
+    xs := []Item{Item{name: "a", hp: 3}, Item{name: "b", hp: 9}, Item{name: "c", hp: 5}}
+    fn by_name(a Item, b Item) bool { a.name[0] < b.name[0] }
+    sort_by(xs, fn(a Item, b Item) bool { a.hp > b.hp })
+    print(xs[0].name, xs[1].name, xs[2].name)
+    sort_by(xs, by_name)
+    print(xs[0].name, largest(xs, fn(it Item) i64 { it.hp }).name)
+    keys := []i64{30, 10, 20}
+    idx := []i64{0, 1, 2}
+    sort_by(idx, keys, fn(k []i64, a i64, b i64) bool { k[a] < k[b] })
+    print(idx, sorted([]str{"pear", "fig", "apple"}, fn(a str, b str) bool { len(a) < len(b) }))
 
-    // match bindings
-    var o Opt[P] = Some(P{3, 4})
-    match o {
-        Some(q) => {
-            fn dist(k i64) i64 { q.x * k + q.y + p.y }
-            print(dist(10))
+    o := Ops{f: fn(x i64) i64 { x + 1 }, g: fn(p *i64) { *p = -*p }}
+    o.g(&n)
+    add := adder()
+    var tri fn(i64) i64 = tripler()
+    print(n, o.f(1), add(1), tri(5), compose(add, tri, 2), compose(fn(x i64) i64 { x - 1 }, o.f, 0))
+    print(apply(2, fn(x i64) str { fmt("<", x, ">") }), apply("abc", fn(s str) i64 { len(s) }))
+    print(zero_of[i64]()(), zero_of[f64]()(), len(zero_of[str]()()))
+    fs := []fn(i64) i64{add, tri, fn(x i64) i64 { -x }}
+    for f in fs { put(f(7), " ") }
+    print()
+
+    // globals are visible
+    fn count(x i64) { total += x }
+    count(3)
+    count(4)
+    print(total, fib(30), shadow(2), shadow(0))
+
+    // nested in nested, an anonymous function inside a nested one, forward to a later scope
+    fn outer(x i64) i64 {
+        fn inner(y i64) i64 {
+            fn innermost(z i64) i64 { z + K }
+            innermost(y) * 2
         }
-        None => {}
+        g := fn(v i64) i64 { inner(v) + 1 }
+        g(x)
     }
-    // a nested function with the name of a binding inside its own match
-    fn first(o Opt[P], p i64) i64 {
-        match o {
-            Some(p) => p.x
-            None => p
-        }
+    print(outer(1))
+
+    // many parameters, floats, structs by value and as result
+    fn m8(a i64, b i64, c i64, d i64, e i64, f i64, g i64, h i64) i64 { a + 2 * b + 3 * c + 4 * d + 5 * e + 6 * f + 7 * g + 8 * h }
+    fn mixed(a f64, b i64, v vec3, it Item, g Big, s str, h f32) Big {
+        Big{b, it.hp, len(it.name), g.e, len(s), a + f64(v.z) + g.f + f64(h)}
     }
-    print(first(o, 9), first(None, 9))
+    print(m8(1, 2, 3, 4, 5, 6, 7, 8), mixed(1.5, 2, vec3(1.0, 2.0, 3.0), xs[0], Big{1, 2, 3, 4, 5, 6.5}, "hey", 0.25))
+
+    // declared in a block that is lowered more than once
+    defer {
+        fn bye() { print("bye") }
+        bye()
+    }
+    k := 0
+    while fn(x i64) bool { x < 3 }(k) {
+        k += 1
+    }
+    print(k, fn() i64 { 42 }())
+    if k > 100 { return }
 }

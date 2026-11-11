@@ -1,20 +1,22 @@
-4:5: error: the nested function `gen[i64].id` cannot have type parameters of its own (`[U]`): it may use the type parameters of the enclosing function
-10:17: error: the nested function `main.addk` uses the variable `k` of the enclosing function, so it is not a function value: call it directly (`addk(...)`), or pass what it needs as parameters
-11:10: error: the nested function `main.addk` uses the variable `k` of the enclosing function
-12:5: error: `addk` is already declared in this scope: a nested function needs a name that no variable or other nested function of its block has
-13:5: error: `k` is already declared in this scope
-14:10: error: unknown function `early`: the nested function `early` is declared at line 15, after this use
-16:27: error: unknown identifier `later_var`: `later_var` is declared at line 17, after the nested function `main.uses_later`, which sees only what is declared before it
-18:23: error: unknown variable `later2`: `later2` is declared at line 19, after the nested function `main.sets_later`
-21:20: error: `break`/`continue` outside of a loop (the nested function `main.brk` cannot leave a loop of the enclosing function
-25:21: error: `continue lab`: there is no loop labelled `lab` around this statement in the nested function `main.brk2`
-29:8: error: function `two(a, b)` expects 2 argument(s), got 1
-30:12: error: argument `b` of `two`: expected i64, found str
-31:5: error: `addk` is a nested function: it is not assignable
-32:14: error: the nested function `addk` takes no type arguments
-33:22: error: function `main.noret` must return a value of type i64
-35:26: error: the nested function `main.fwd` uses the variable `k` of the enclosing function, so it is not a function value
-37:5: error: `i64` is a builtin type name
-38:32: error: unknown function `later_fn`: `later_fn` is declared at line 39, after the nested function `main.calls_later`
-42:11: error: the nested function `main.both` uses the variables `j`, `k` of the enclosing function, so it is not a function value
-46:10: error: unknown function `local`
+4:5: error: the nested function `gen[i64].id` cannot have type parameters of its own (`[U]`): it may use the t
+9:30: error: `k` is a variable of the enclosing function `main`: the nested function `main.addk` does not see
+10:37: error: `k` is a variable of the enclosing function `main`: the anonymous function `main.fn@10:17` does
+11:17: error: `k` is a variable of the enclosing function `main`: the nested function `main.setk` does not see
+12:5: error: `addk` is already declared in this scope: a nested function needs a name that no variable or othe
+13:5: error: `k` is already declared in this scope: a nested function needs a name that no variable or other n
+14:10: error: unknown function `early`: the nested function `early` is declared at line 15, after this use (a
+16:27: error: unknown identifier `later_var`: `later_var` is a variable of the enclosing function `main` (line
+19:20: error: `break`/`continue` outside of a loop (the nested function `main.brk` cannot leave a loop of the
+20:25: error: `i` is a variable of the enclosing function `main`: the anonymous function `main.fn@20:14` does
+23:21: error: `continue lab`: there is no loop labelled `lab` around this statement in the nested function `ma
+26:8: error: function `two(a, b)` expects 2 argument(s), got 1
+27:12: error: argument `b` of `two`: expected i64, found str
+28:5: error: `two` is a nested function: it is not assignable
+29:13: error: the nested function `two` takes no type arguments (a nested function has no type parameters of i
+30:22: error: function `main.noret` must return a value of type i64
+31:5: error: `i64` is a builtin type name
+32:32: error: unknown function `later_fn`: the nested function `later_fn` is declared at line 33, after `main.
+37:10: error: unknown function `local`
+38:26: error: type mismatch: expected fn(i64) i64, found fn(i64, i64) i64
+39:11: error: argument `f` of `apply`: expected fn(i64) i64, found fn(str) i64
+43:23: error: `p` is a variable of the enclosing function `param`: the anonymous function `param.fn@43:12` doe
