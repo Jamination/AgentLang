@@ -51,11 +51,11 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
             if generic {
                 // bind the type parameters the way `call_decl` does: by value, then through
                 // a pointer in either direction
-                e2 := lower_call_clone_env(&env)
+                e2 := clone(env)
                 if self.unify(pt, rv.ty, d.tparams.items(), &e2) {
                     env = e2
                 } else {
-                    e3 := lower_call_clone_env(&env)
+                    e3 := clone(env)
                     ok := match *pt {
                         Ptr(inner) => self.unify(inner, rv.ty, d.tparams.items(), &e3)
                         _ => match self.cx.types.k(rv.ty) {
@@ -213,7 +213,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
             None => true
         }
         if targs_ok && d.params.len == len(args) + nrecv {
-            if nrecv == 1 && !self.param_accepts(d, &d.params[0].1, lower_call_unwrap(recv).ty, true, lower_call_as_slice(explicit)) {
+            if nrecv == 1 && !self.param_accepts(d, &d.params[0].1, unwrap(recv).ty, true, lower_call_as_slice(explicit)) {
                 continue
             }
             alive.push(cands[ci])

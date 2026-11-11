@@ -35,7 +35,7 @@ priv fn is_trap_block(f: *Func, b: i64) -> bool {
     if !eq(f.blocks[b].term, Trap) {
         return false
     }
-    for v in f.blocks[b].insts.items() {
+    for v in f.blocks[b].insts {
         if f.insts[v].op == Phi {
             return false
         }
@@ -257,9 +257,9 @@ priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bo
     if db == 0xFFFFFFFF || !in_loop[db] {
         return v
     }
-    i := clone(&f.insts[v])
+    i := clone(f.insts[v])
     args := vec[i64]()
-    for a in i.args.items() {
+    for a in i.args {
         args.push(clone_at(f, pre, a, iv_phi, at, in_loop, def_block))
     }
     return f.push(pre, i.op, i.ty, args, i.k)
@@ -275,13 +275,13 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     pre := outside[0]
     latch := l.latches[0]
     in_loop_v := vec_fill(f.blocks.len, false)
-    for b in l.blocks.items() {
+    for b in l.blocks {
         in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
     // the loop may only be left through its latch or through failing checks, and has no calls
-    for b in l.blocks.items() {
-        for v in f.blocks[b].insts.items() {
+    for b in l.blocks {
+        for v in f.blocks[b].insts {
             o := f.insts[v].op
             if o == Call || o == CallInd || o == Syscall {
                 return false
@@ -292,7 +292,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
             _ => {}
         }
         ss := f.succs(b)
-        for s in ss.items() {
+        for s in ss {
             if !in_loop[s] && b != latch && !is_trap_block(f, s) {
                 return false
             }
@@ -312,7 +312,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     }
     // collect candidate checks
     cands := vec[(i64, i64, i64, i64, i64, i64, Kind)]() // block, cond, ok, trap, idx, len
-    for b in l.blocks.items() {
+    for b in l.blocks {
         c, t, e := match f.blocks[b].term {
             Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
@@ -540,7 +540,7 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
     latch := l.latches[0]
     // is there a check at all? (most loops have none: do not analyse them)
     any := false
-    for b in l.blocks.items() {
+    for b in l.blocks {
         match f.blocks[b].term {
             Br(_, _, e0) if b != latch && is_trap_block(f, e0) => any = true
             _ => {}
@@ -553,7 +553,7 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
         return false
     }
     in_loop_v := vec_fill(f.blocks.len, false)
-    for b in l.blocks.items() {
+    for b in l.blocks {
         in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
@@ -575,7 +575,7 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
     guarded := false
     guard_known := false
     did := false
-    for b in l.blocks.items() {
+    for b in l.blocks {
         c, t, e := match f.blocks[b].term {
             Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
@@ -638,7 +638,7 @@ fn bce_run(f: *Func) -> bool {
         loops := loops_new(f, &cfg)
         order := licm_loop_order(&loops)
         did := false
-        for li in order.items() {
+        for li in order {
             if hoist_in_loop(f, &cfg, &loops, li) {
                 did = true
                 break

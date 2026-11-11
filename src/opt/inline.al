@@ -4,7 +4,7 @@ priv fn cost(f: *Func) -> i64 {
     n := 0
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
-        for v in b.insts.items() {
+        for v in b.insts {
             o := f.insts[v].op
             if !(o == Const || o == FConst || o == Param || o == GAddr || o == FAddr || o == Alloca || o == Phi || o == Proj) {
                 n += 1
@@ -28,7 +28,7 @@ priv fn bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
 priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     pos := index_of(f.blocks[cb].insts.items(), call)
     assert pos >= 0
-    call_inst := clone(&f.insts[call])
+    call_inst := clone(f.insts[call])
     // split the block
     cont := f.new_block()
     tail := vec_of(f.blocks[cb].insts[pos + 1..f.blocks[cb].insts.len])
@@ -39,7 +39,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     f.blocks[cb].term = Term.None
     f.blocks[cont].term = old_term
     ss := f.succs(cont)
-    for s in ss.items() {
+    for s in ss {
         for ii in 0..f.blocks[s].insts.len {
             v := f.blocks[s].insts[ii]
             if f.insts[v].op != Phi {
@@ -56,12 +56,12 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     // clone callee
     grpo := g.rpo()
     bmap := map[i64, i64]()
-    for gb in grpo.items() {
+    for gb in grpo {
         bmap.set(gb, f.new_block())
     }
     vmap := vec_fill(g.insts.len, NOV)
-    for gb in grpo.items() {
-        for gv in g.blocks[gb].insts.items() {
+    for gb in grpo {
+        for gv in g.blocks[gb].insts {
             gi := &g.insts[gv]
             if gi.op == Param {
                 vmap[gv] = call_inst.args[gi.k]
@@ -74,20 +74,20 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
     }
     rets := vec[(i64, Vec[i64])]()
     allocas := vec[i64]()
-    for gb in grpo.items() {
+    for gb in grpo {
         nb := bmap_at(&bmap, gb)
-        for gv in g.blocks[gb].insts.items() {
+        for gv in g.blocks[gb].insts {
             gi := &g.insts[gv]
             if gi.op == Param {
                 continue
             }
             nv := vmap[gv]
             args := vec[i64]()
-            for a in gi.args.items() {
+            for a in gi.args {
                 args.push(vmap[a])
             }
             pb := vec[i64]()
-            for p in gi.pb.items() {
+            for p in gi.pb {
                 pb.push(bmap.get_or(p, 0xFFFFFFFF))
             }
             // drop phi inputs from blocks that were unreachable in the callee
@@ -117,7 +117,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
             Br(c, t, e) => f.blocks[nb].term = Br(vmap[c], bmap_at(&bmap, t), bmap_at(&bmap, e))
             Ret(vs) => {
                 rv := vec[i64]()
-                for v in vs.items() {
+                for v in vs {
                     rv.push(vmap[v])
                 }
                 rets.push((nb, rv))
@@ -149,11 +149,11 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
             f.blocks[0].insts.insert(0, z)
             results.push(z)
         } else if rets.len == 1 {
-            results.push(rets[0].1.at(k))
+            results.push(rets[0].1[k])
         } else {
             vals := vec[i64]()
             for ri in 0..rets.len {
-                vals.push(rets[ri].1.at(k))
+                vals.push(rets[ri].1[k])
             }
             phi := f.mk(Phi, rt, vals, 0)
             pbs := vec[i64]()
@@ -175,7 +175,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func) {
                 v := f.blocks[b].insts[ii]
                 i := &f.insts[v]
                 if i.op == Proj && i.args[0] == call {
-                    repl[v] = results.at(i.k)
+                    repl[v] = results[i.k]
                 }
             }
         }
@@ -220,9 +220,9 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         {
             f := &m.funcs[fid]
             frpo := f.rpo()
-            for b in frpo.items() {
+            for b in frpo {
                 hit := false
-                for v in f.blocks[b].insts.items() {
+                for v in f.blocks[b].insts {
                     i := &f.insts[v]
                     if i.op != Call {
                         continue
@@ -261,7 +261,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         }
         match found {
             Some(x) => {
-                gf := clone(&m.funcs[x.2])
+                gf := clone(m.funcs[x.2])
                 inline_call(&m.funcs[fid], x.0, x.1, &gf)
                 any = true
                 budget -= 1

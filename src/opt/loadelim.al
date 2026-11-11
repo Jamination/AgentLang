@@ -31,7 +31,7 @@ fn loadelim_run(f: *Func) -> bool {
     // state at the end of each block, reused by a child that has that block as its only predecessor
     no_state: Opt[Vec[Avail]] = None
     out_state := vec_fill(f.blocks.len, no_state)
-    for b in cfg.rpo.items() {
+    for b in cfg.rpo {
         st := vec[Avail]()
         if cfg.preds[b].len == 1 {
             p := cfg.preds[b][0]

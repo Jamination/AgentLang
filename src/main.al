@@ -35,36 +35,30 @@ use "elf.al"
 use "priv.al"
 use "lower_mem.al"
 
-// `embed` is only accepted inside a function: PRELUDE and STD_MODULES are globals that
-// load_embedded fills once, first thing in main.
-priv PRELUDE: str
+priv const PRELUDE = embed("prelude.al")
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
-priv STD_MODULES: Vec[(str, str)]
-
-priv fn load_embedded() {
-    PRELUDE = embed("prelude.al")
-    STD_MODULES = vec[(str, str)]()
-    STD_MODULES.push(("math", embed("../std/math.al")))
-    STD_MODULES.push(("rand", embed("../std/rand.al")))
-    STD_MODULES.push(("time", embed("../std/time.al")))
-    STD_MODULES.push(("mem", embed("../std/mem.al")))
-    STD_MODULES.push(("libc", embed("../std/libc.al")))
-    STD_MODULES.push(("asset", embed("../std/asset.al")))
-    STD_MODULES.push(("image", embed("../std/image.al")))
-    STD_MODULES.push(("x11", embed("../std/x11.al")))
-    STD_MODULES.push(("alsa", embed("../std/alsa.al")))
-    STD_MODULES.push(("window", embed("../std/window.al")))
-    STD_MODULES.push(("input", embed("../std/input.al")))
-    STD_MODULES.push(("audio", embed("../std/audio.al")))
-    STD_MODULES.push(("vk", embed("../std/vk.al")))
-    STD_MODULES.push(("dx12", embed("../std/dx12.al")))
-    STD_MODULES.push(("metal", embed("../std/metal.al")))
+priv const STD_MODULES = [15](str, str){
+    ("math", embed("../std/math.al")),
+    ("rand", embed("../std/rand.al")),
+    ("time", embed("../std/time.al")),
+    ("mem", embed("../std/mem.al")),
+    ("libc", embed("../std/libc.al")),
+    ("asset", embed("../std/asset.al")),
+    ("image", embed("../std/image.al")),
+    ("x11", embed("../std/x11.al")),
+    ("alsa", embed("../std/alsa.al")),
+    ("window", embed("../std/window.al")),
+    ("input", embed("../std/input.al")),
+    ("audio", embed("../std/audio.al")),
+    ("vk", embed("../std/vk.al")),
+    ("dx12", embed("../std/dx12.al")),
+    ("metal", embed("../std/metal.al")),
 }
 
 // modules that are loaded into every program
-priv CORE_MODULES := [4]str{"math", "rand", "time", "mem"}
+priv const CORE_MODULES = [4]str{"math", "rand", "time", "mem"}
 
 // ---------- paths (std::path in the Rust source) ----------
 // Path::join
@@ -458,7 +452,7 @@ priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
         // machine-readable diagnostics: one JSON array on stdout
         items := vec[str]()
         last := ""
-        for d in errs.items() {
+        for d in errs {
             file := file_name(names, d.pos.file)
             item := fmt("{\"file\":", json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", json_str(ast_plain_text(d.msg)), "}")
             if item != last {
@@ -471,7 +465,7 @@ priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     }
     last := ""
     n := 0
-    for d in errs.items() {
+    for d in errs {
         line := fmt(file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", ast_plain_text(d.msg))
         if line != last {
             eput(fmt(line, "\n"))
@@ -568,7 +562,7 @@ priv fn real_main() -> i64 {
                 }
             }
         } else {
-            sdecls = clone(src.decls)
+            sdecls = src.decls
         }
         print_sigs(&src.names, sdecls.items(), from)
         return 0
@@ -635,7 +629,7 @@ priv fn real_main() -> i64 {
     cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, n_prelude)
     if ar.cmd != "check" {
         // bundled modules are only compiled as far as the program reaches into them
-        for f in src.std_files.items() {
+        for f in src.std_files {
             cx.lazy_files.set(f, true)
         }
     }
@@ -710,7 +704,6 @@ fn main() -> i64 {
     // deep recursion in the frontend and SSA construction: use a big stack
     ensure_stack(1 << 30)
     t0 = clock_ns()
-    load_embedded()
     return real_main()
 }
 

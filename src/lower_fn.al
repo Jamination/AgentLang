@@ -1288,17 +1288,17 @@ fn str_val(self: *Fx, s: str) -> Val {
 fn store_slice(self: *Fx, dst: Val, p: i64, n: i64) {
     leaves := vec[Leaf]()
     self.cx.types.leaves(dst.ty, 0, &leaves)
-    self.store_raw(dst.v, p, I64, leaves.at(0).alias)
+    self.store_raw(dst.v, p, I64, leaves[0].alias)
     a := self.add_off(dst.v, 8)
-    self.store_raw(a, n, I64, leaves.at(1).alias)
+    self.store_raw(a, n, I64, leaves[1].alias)
 }
 
 fn slice_parts(self: *Fx, s: Val) -> (i64, i64) {
     leaves := vec[Leaf]()
     self.cx.types.leaves(s.ty, 0, &leaves)
-    p := self.load_raw(s.v, I64, leaves.at(0).alias)
+    p := self.load_raw(s.v, I64, leaves[0].alias)
     a := self.add_off(s.v, 8)
-    l := self.load_raw(a, I64, leaves.at(1).alias)
+    l := self.load_raw(a, I64, leaves[1].alias)
     return (p, l)
 }
 

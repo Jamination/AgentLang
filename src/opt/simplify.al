@@ -296,7 +296,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 } else if op == Xor && k == 1 && ty == I8 && self.op(a).is_cmp() {
                     ai := self.f.insts[a]
                     if ai.op.is_icmp() {
-                        self.set(v, ai.op.negate_icmp(), clone(&ai.args), 0)
+                        self.set(v, ai.op.negate_icmp(), clone(ai.args), 0)
                         return None
                     }
                     if ai.op == FEq || ai.op == FNe {
@@ -304,7 +304,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                         if ai.op == FEq {
                             nop = FNe
                         }
-                        self.set(v, nop, clone(&ai.args), 0)
+                        self.set(v, nop, clone(ai.args), 0)
                         return None
                     }
                 } else if op == And && k == -1 {
@@ -610,7 +610,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                             return Some(a)
                         }
                         if ai.op.is_icmp() {
-                            self.set(v, ai.op.negate_icmp(), clone(&ai.args), 0)
+                            self.set(v, ai.op.negate_icmp(), clone(ai.args), 0)
                             return None
                         }
                         if ai.op == FEq || ai.op == FNe {
@@ -618,7 +618,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                             if ai.op == FEq {
                                 nop = FNe
                             }
-                            self.set(v, nop, clone(&ai.args), 0)
+                            self.set(v, nop, clone(ai.args), 0)
                             return None
                         }
                     }
@@ -790,7 +790,7 @@ priv fn masked_by(self: *Ctx, v: i64, lenv: i64, depth: i64, root: i64) -> bool 
         return masked_by_is_len_m1(self, lenv, i.args[0]) || masked_by_is_len_m1(self, lenv, i.args[1])
     }
     if i.op == Phi && depth > 0 && !i.args.is_empty() {
-        for a in i.args.items() {
+        for a in i.args {
             if !(a == root || a == v || self.masked_by(a, lenv, depth - 1, root)) {
                 return false
             }
@@ -1054,11 +1054,11 @@ priv fn fold_insts(f: *Func) -> bool {
     repl := vec_fill(f.insts.len, NOV)
     uses := f.use_counts()
     cx := Ctx{f: f, new_insts: vec[i64](), changed: false, uses: uses}
-    for b in rpo.items() {
+    for b in rpo {
         old := cx.f.blocks[b].insts
         cx.f.blocks[b].insts = vec[i64]()
         cx.new_insts = vec[i64]()
-        for v in old.items() {
+        for v in old {
             for ai in 0..cx.f.insts[v].args.len {
                 a := cx.f.insts[v].args[ai]
                 r := fold_insts_find(&repl, a)
@@ -1110,7 +1110,7 @@ priv fn simplify_cfg_side(f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[i64] {
     }
     insts := f.blocks[x].insts
     real := 0
-    for v in insts.items() {
+    for v in insts {
         op := f.insts[v].op
         cheap := op == Const || op == FConst || op == GAddr || op == FAddr || op == Add || op == Sub ||
             op == And || op == Or || op == Xor || op == Shl || op == LShr || op == AShr || op == SExt ||
@@ -1130,7 +1130,7 @@ priv fn simplify_cfg_side(f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[i64] {
 
 // all instructions of the block are phis
 priv fn all_phis(f: *Func, binsts: *Vec[i64]) -> bool {
-    for v in binsts.items() {
+    for v in binsts {
         if f.insts[v].op != Phi {
             return false
         }
@@ -1209,7 +1209,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         dead := vec_fill(f.blocks.len, false)
         rpo := f.rpo()
         scratch_off()
-        for b in rpo.items() {
+        for b in rpo {
             if dead[b] {
                 continue
             }
@@ -1223,7 +1223,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 }
                 sinsts := f.blocks[s].insts
                 f.blocks[s].insts = vec[i64]()
-                for v in sinsts.items() {
+                for v in sinsts {
                     if f.insts[v].op == Phi {
                         repl[v] = f.insts[v].args[0]
                     } else {
@@ -1236,7 +1236,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 dead[s] = true
                 // successors of s now come from b
                 succs := f.succs(b)
-                for ss in succs.items() {
+                for ss in succs {
                     for ii in 0..f.blocks[ss].insts.len {
                         v := f.blocks[ss].insts[ii]
                         if f.insts[v].op != Phi {
@@ -1273,7 +1273,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         did := false
         rpo := f.rpo()
         scratch_off()
-        for e in rpo.items() {
+        for e in rpo {
             if e == 0 || !f.blocks[e].insts.is_empty() {
                 continue
             }
@@ -1286,7 +1286,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 t_has_phi = f.insts[f.blocks[t].insts[0]].op == Phi
             }
             moved_any := false
-            for p in preds[e].items() {
+            for p in preds[e] {
                 if p == e {
                     continue
                 }
@@ -1348,12 +1348,12 @@ priv fn simplify_cfg(f: *Func) -> bool {
         did := false
         rpo := f.rpo()
         scratch_off()
-        for b in rpo.items() {
+        for b in rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
                 _ => continue
             }
-            binsts := clone(&f.blocks[b].insts)
+            binsts := clone(f.blocks[b].insts)
             if binsts.is_empty() || !all_phis(f, &binsts) || !contains(&binsts, c) {
                 continue
             }
@@ -1364,7 +1364,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 if si == 1 {
                     s = e
                 }
-                for v in f.blocks[s].insts.items() {
+                for v in f.blocks[s].insts {
                     i := f.insts[v]
                     if i.op != Phi {
                         break
@@ -1475,12 +1475,12 @@ priv fn simplify_cfg(f: *Func) -> bool {
         def_block := f.block_of()
         scratch_off()
         did := false
-        for b in cfg.rpo.items() {
+        for b in cfg.rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
                 _ => continue
             }
-            binsts := clone(&f.blocks[b].insts)
+            binsts := clone(f.blocks[b].insts)
             if b == 0 || binsts.is_empty() || !all_phis(f, &binsts) || !contains(&binsts, c) {
                 continue
             }
@@ -1526,7 +1526,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 if !cfg.reachable(bb) || bb == b {
                     continue
                 }
-                for v in f.blocks[bb].insts.items() {
+                for v in f.blocks[bb].insts {
                     i := f.insts[v]
                     for k in 0..i.args.len {
                         a := i.args[k]
@@ -1549,7 +1549,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     break
                 }
                 tu := f.term_uses(bb)
-                for a in tu.items() {
+                for a in tu {
                     if def_block[a] == b && !(cfg.dom(t, bb) || cfg.dom(e, bb)) {
                         bad = true
                         break
@@ -1571,15 +1571,15 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     s = e
                 }
                 ps := vec[i64]()
-                for d in dest.items() {
+                for d in dest {
                     if d.1 == s {
                         ps.push(d.0)
                     }
                 }
-                for ph in binsts.items() {
+                for ph in binsts {
                     pi := f.insts[ph]
                     vals := vec[i64]()
-                    for p in ps.items() {
+                    for p in ps {
                         pk := index_of(pi.pb.items(), p)
                         assert pk >= 0
                         vals.push(pi.args[pk])
@@ -1589,7 +1589,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                         nv = ph
                     } else {
                         all_same := true
-                        for x in vals.items() {
+                        for x in vals {
                             if x != vals[0] {
                                 all_same = false
                                 break
@@ -1599,7 +1599,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                             nv = vals[0]
                         } else {
                             np := f.mk(Phi, pi.ty, vals, 0)
-                            f.im(np).pb = clone(&ps)
+                            f.im(np).pb = clone(ps)
                             f.blocks[s].insts.insert(0, np)
                             nv = np
                         }
@@ -1653,7 +1653,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 }
             }
             // retarget the predecessors
-            for d in dest.items() {
+            for d in dest {
                 retarget(f, d.0, b, d.1)
             }
             did = true
@@ -1676,7 +1676,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         did := false
         rpo := f.rpo()
         scratch_off()
-        for b in rpo.items() {
+        for b in rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 => (c1, t1, e1)
                 _ => continue
@@ -1712,7 +1712,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
             }
             // the join's phis decide whether this is worth it
             phis := vec[i64]()
-            for v in f.blocks[j].insts.items() {
+            for v in f.blocks[j].insts {
                 if f.insts[v].op != Phi {
                     break
                 }
@@ -1721,7 +1721,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
             pairs := vec[(i64, i64, i64)]()
             ok := true
             selects := 0
-            for ph in phis.items() {
+            for ph in phis {
                 i := f.insts[ph]
                 kt := index_of(i.pb.items(), from_t)
                 ke := index_of(i.pb.items(), from_e)
@@ -1757,7 +1757,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     None => {}
                 }
             }
-            for pr in pairs.items() {
+            for pr in pairs {
                 ph := pr.0
                 vt := pr.1
                 ve := pr.2

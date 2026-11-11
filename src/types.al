@@ -123,14 +123,14 @@ priv fn types_key(k: TyK) -> str {
         Enum(e) => return fmt("N", e)
         Tuple(v) => {
             parts := vec[str]()
-            for t in v.items() {
+            for t in v {
                 parts.push(fmt(t))
             }
             return concat("T", join(parts.items(), ","))
         }
         Fn(p, r) => {
             parts := vec[str]()
-            for t in p.items() {
+            for t in p {
                 parts.push(fmt(t))
             }
             return fmt("F", join(parts.items(), ","), ">", r)
@@ -182,18 +182,9 @@ fn intern(self: *Types, k: TyK) -> i64 {
         return t
     }
     id := self.kinds.len
-    self.kinds.push(kind_copy(k))
+    self.kinds.push(clone(k))
     self.map.set(key, id)
     return id
-}
-
-// the kind with its own type lists (the table must not share a buffer with the caller)
-priv fn kind_copy(k: TyK) -> TyK {
-    match k {
-        Tuple(v) => Tuple(clone(&v))
-        Fn(p, r) => Fn(clone(&p), r)
-        _ => k
-    }
 }
 
 fn k(self: *Types, t: i64) -> TyK {
@@ -246,7 +237,7 @@ fn is_scalar(self: *Types, t: i64) -> bool {
 
 priv fn names(self: *Types, v: Vec[i64]) -> str {
     parts := vec[str]()
-    for t in v.items() {
+    for t in v {
         parts.push(self.name(t))
     }
     return join(parts.items(), ", ")
@@ -340,7 +331,7 @@ priv fn layout_enum(self: *Types, eid: i64) {
     self.enums[eid].state = 1
     vars := vec[Vec[i64]]()
     for i in 0..self.enums[eid].variants.len {
-        vars.push(clone(&self.enums[eid].variants[i].1))
+        vars.push(clone(self.enums[eid].variants[i].1))
     }
     size := 8
     for i in 0..vars.len {
@@ -358,10 +349,10 @@ priv fn layout_enum(self: *Types, eid: i64) {
 
 // offsets of payload fields of a variant, relative to the enum start
 fn variant_offsets(self: *Types, eid: i64, var_: i64) -> Vec[i64] {
-    tys := clone(&self.enums[eid].variants[var_].1)
+    tys := clone(self.enums[eid].variants[var_].1)
     offs, s, a := self.layout_fields(tys.items())
     out := vec[i64]()
-    for o in offs.items() {
+    for o in offs {
         out.push(o + 8)
     }
     return out
@@ -503,7 +494,7 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
             for i in 0..self.structs[s].fields.len {
                 tys.push(self.structs[s].fields[i].1)
             }
-            offs := clone(&self.structs[s].offsets)
+            offs := clone(self.structs[s].offsets)
             leaves_fields(self, t, tys.items(), offs.items(), base, out)
         }
         Tuple(v) => {
@@ -556,14 +547,14 @@ fn leaf_count(self: *Types, t: i64) -> i64 {
                 tys.push(self.structs[s].fields[i].1)
             }
             total := 0
-            for ft in tys.items() {
+            for ft in tys {
                 total = sat_add(total, self.leaf_count(ft))
             }
             return total
         }
         Tuple(v) => {
             total := 0
-            for ft in v.items() {
+            for ft in v {
                 total = sat_add(total, self.leaf_count(ft))
             }
             return total

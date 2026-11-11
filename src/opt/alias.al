@@ -112,7 +112,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     esc := vec_fill(n, false)
     // derived[v] = alloca this pointer value is derived from
     derived := vec_fill(n, NOV)
-    for v in f.blocks[0].insts.items() {
+    for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
             derived[v] = v
         }
@@ -121,11 +121,11 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     changed := true
     while changed {
         changed = false
-        for b in rpo.items() {
-            for v in f.blocks[b].insts.items() {
+        for b in rpo {
+            for v in f.blocks[b].insts {
                 i := &f.insts[v]
                 if i.op == Add {
-                    for a in i.args.items() {
+                    for a in i.args {
                         d := derived[a]
                         if d != NOV && derived[v] != d {
                             if derived[v] != NOV {
@@ -146,7 +146,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
                         changed = true
                     }
                 } else {
-                    for a in i.args.items() {
+                    for a in i.args {
                         d := derived[a]
                         if d != NOV && !esc[d] {
                             esc[d] = true
@@ -156,7 +156,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
                 }
             }
             tu := f.term_uses(b)
-            for u in tu.items() {
+            for u in tu {
                 d := derived[u]
                 if d != NOV && !esc[d] {
                     esc[d] = true

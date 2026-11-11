@@ -1529,7 +1529,7 @@ priv fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
     match self.cx.types.k(dst.ty) {
         Struct(sid) => {
             self.cx.types.layout_struct(sid)
-            fields := clone(self.cx.types.structs[sid].fields)
+            fields := self.cx.types.structs[sid].fields
             offs := clone(self.cx.types.structs[sid].offsets)
             if len(items) < fields.len {
                 self.zero(dst)

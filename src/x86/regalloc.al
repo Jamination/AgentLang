@@ -62,11 +62,11 @@ priv fn liveness(mf: *MFunc, order: []i64) -> Vec[BitSet] {
         n := mf.blocks[b].insts.len
         for x in n - 1..=0 by -1 {
             mir_defs_uses(&mf.blocks[b].insts[x], &defs, &uses)
-            for d in defs.items() {
+            for d in defs {
                 gen[b].clear(d)
                 kill[b].set(d)
             }
-            for u in uses.items() {
+            for u in uses {
                 gen[b].set(u)
             }
         }
@@ -175,7 +175,7 @@ priv fn has_edge(self: *Irc, u: i64, v: i64) -> bool {
 
 priv fn adjacent(self: *Irc, n: i64) -> Vec[i64] {
     out := vec[i64]()
-    for m in self.adj[n].items() {
+    for m in self.adj[n] {
         st := self.state[m]
         if !(st == Stack || st == Coalesced) {
             out.push(m)
@@ -186,7 +186,7 @@ priv fn adjacent(self: *Irc, n: i64) -> Vec[i64] {
 
 priv fn node_moves(self: *Irc, n: i64) -> Vec[i64] {
     out := vec[i64]()
-    for m in self.move_list[n].items() {
+    for m in self.move_list[n] {
         ms := self.mstate[m]
         if ms == Active || ms == Worklist {
             out.push(m)
@@ -196,7 +196,7 @@ priv fn node_moves(self: *Irc, n: i64) -> Vec[i64] {
 }
 
 priv fn move_related(self: *Irc, n: i64) -> bool {
-    for m in self.move_list[n].items() {
+    for m in self.move_list[n] {
         ms := self.mstate[m]
         if ms == Active || ms == Worklist {
             return true
@@ -215,7 +215,7 @@ priv fn get_alias(self: *Irc, n0: i64) -> i64 {
 
 priv fn enable_moves(self: *Irc, n: i64) {
     nm := self.node_moves(n)
-    for m in nm.items() {
+    for m in nm {
         if self.mstate[m] == Active {
             self.mstate[m] = Worklist
             self.move_wl.push(m)
@@ -233,7 +233,7 @@ priv fn decrement_degree(self: *Irc, m: i64) {
     if d == self.k {
         self.enable_moves(m)
         adj := self.adjacent(m)
-        for a in adj.items() {
+        for a in adj {
             self.enable_moves(a)
         }
         if self.state[m] == Spill {
@@ -252,7 +252,7 @@ priv fn simplify(self: *Irc, n: i64) {
     self.state[n] = Stack
     self.stack.push(n)
     adj := self.adjacent(n)
-    for m in adj.items() {
+    for m in adj {
         self.decrement_degree(m)
     }
 }
@@ -273,7 +273,7 @@ priv fn conservative(self: *Irc, u: i64, v: i64) -> bool {
     k := 0
     au := self.adjacent(u)
     av := self.adjacent(v)
-    for n in au.items() {
+    for n in au {
         if !seen.has(n) {
             seen.set(n, true)
             if self.pre(n) || self.degree[n] >= self.k {
@@ -281,7 +281,7 @@ priv fn conservative(self: *Irc, u: i64, v: i64) -> bool {
             }
         }
     }
-    for n in av.items() {
+    for n in av {
         if !seen.has(n) {
             seen.set(n, true)
             if self.pre(n) || self.degree[n] >= self.k {
@@ -298,7 +298,7 @@ priv fn combine(self: *Irc, u: i64, v: i64) {
     self.alias[v] = u
     ml := clone(self.move_list[v])
     if !self.pre(u) {
-        for m in ml.items() {
+        for m in ml {
             if !contains(&self.move_list[u], m) {
                 self.move_list[u].push(m)
             }
@@ -307,7 +307,7 @@ priv fn combine(self: *Irc, u: i64, v: i64) {
     }
     self.enable_moves(v)
     adj_v := self.adjacent(v)
-    for t in adj_v.items() {
+    for t in adj_v {
         self.add_edge(t, u)
         self.decrement_degree(t)
     }
@@ -339,7 +339,7 @@ priv fn coalesce(self: *Irc, m: i64) {
         if self.pre(u) {
             can = true
             adj := self.adjacent(v)
-            for t in adj.items() {
+            for t in adj {
                 if !self.ok(t, u) {
                     can = false
                     break
@@ -360,7 +360,7 @@ priv fn coalesce(self: *Irc, m: i64) {
 
 priv fn freeze_moves(self: *Irc, u: i64) {
     nm := self.node_moves(u)
-    for m in nm.items() {
+    for m in nm {
         x, y := self.moves[m]
         v := if self.get_alias(y) == self.get_alias(u) { self.get_alias(x) } else { self.get_alias(y) }
         self.mstate[m] = Frozen
@@ -496,7 +496,7 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
     npreds := vec_fill(nb, 0)
     the_pred := vec_fill(nb, 0xFFFFFFFF)
     for b in order {
-        for s in mf.blocks[b].succs.items() {
+        for s in mf.blocks[b].succs {
             npreds[s] += 1
             the_pred[s] = b
         }
@@ -548,7 +548,7 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                 }
             }
             mir_defs_uses(&i, &defs, &uses)
-            for d in defs.items() {
+            for d in defs {
                 retain_reg_ne(&st, d)
             }
             if is_store {
@@ -699,12 +699,12 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 for x in ninsts - 1..=0 by -1 {
                     i := &mf.blocks[b].insts[x]
                     mir_defs_uses(i, &defs, &uses)
-                    for r in defs.items() {
+                    for r in defs {
                         if r >= 32 && allocate_in_class(r, mf, class) {
                             g.cost[r] += w
                         }
                     }
-                    for r in uses.items() {
+                    for r in uses {
                         if r >= 32 && allocate_in_class(r, mf, class) {
                             g.cost[r] += w
                         }
@@ -721,7 +721,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                             g.move_wl.push(mi)
                         }
                     }
-                    for df in defs.items() {
+                    for df in defs {
                         if !allocate_in_class(df, mf, class) {
                             continue
                         }
@@ -750,10 +750,10 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                             }
                         }
                     }
-                    for df in defs.items() {
+                    for df in defs {
                         live.clear(df)
                     }
-                    for u in uses.items() {
+                    for u in uses {
                         live.set(u)
                     }
                 }
@@ -797,7 +797,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 for x in 0..32 {
                     avail[x] = true
                 }
-                for w in g.adj[nd].items() {
+                for w in g.adj[nd] {
                     a := g.get_alias(w)
                     if g.state[a] == Colored || g.state[a] == Pre {
                         avail[g.color[a]] = false
@@ -805,7 +805,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 }
                 // biased coloring: prefer the color of a move partner
                 pick := 0xFFFFFFFF
-                for m in g.move_list[nd].items() {
+                for m in g.move_list[nd] {
                     x, y := g.moves[m]
                     o := if g.get_alias(x) == nd { g.get_alias(y) } else { g.get_alias(x) }
                     if g.state[o] == Colored || g.state[o] == Pre {
@@ -817,7 +817,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                     }
                 }
                 if pick == 0xFFFFFFFF {
-                    for c in all.items() {
+                    for c in all {
                         if avail[c] {
                             pick = c
                             break
@@ -880,7 +880,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                     uses := vec[i64]()
                     mir_defs_uses(&i, &defs, &uses)
                     if !(i.op == Call || i.op == CallInd) {
-                        for df in defs.items() {
+                        for df in defs {
                             if df < 32 {
                                 used[df] = true
                             }
@@ -951,12 +951,12 @@ priv fn spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool])
             i := insts[x]
             mir_defs_uses(&i, &defs, &uses)
             touched := vec[i64]()
-            for r in defs.items() {
+            for r in defs {
                 if slot_of.has(r) {
                     touched.push(r)
                 }
             }
-            for r in uses.items() {
+            for r in uses {
                 if slot_of.has(r) {
                     touched.push(r)
                 }
@@ -968,7 +968,7 @@ priv fn spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bool])
                 continue
             }
             after := vec[MInst]()
-            for v in touched.items() {
+            for v in touched {
                 slot, has_slot := slot_of.get(v)
                 cls := mf.class(v)
                 mem := M(mem_slot(slot, 0))

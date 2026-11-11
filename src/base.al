@@ -1,14 +1,4 @@
-// Helpers shared by the compiler sources: optional values, Vec and Map conveniences,
-// environment and process access.
-
-enum Opt[T] { Some(T), None }
-
-fn is_some[T](o: Opt[T]) -> bool {
-    match o {
-        Some(x) => true
-        None => false
-    }
-}
+// Helpers shared by the compiler sources: Vec conveniences, processes, working memory.
 
 // ---------- Vec ----------
 // a Vec holding a copy of the elements of s
@@ -19,7 +9,8 @@ fn vec_of[T](s: []T) -> Vec[T] {
     return Vec[T]{buf: buf, len: n}
 }
 
-// Vecs of one and two elements without an intermediate slice
+// Vecs of one and two elements without an intermediate slice (`succs` in ir.al is hot:
+// vec_of([]i64{t}) there costs 15 % of the whole compile time)
 fn vec_one[T](a: T) -> Vec[T] {
     buf := mkslice[T](__alloc_raw(sizeof[T]()), 1)
     buf[0] = a
@@ -40,29 +31,6 @@ fn vec_fill[T](n: i64, x: T) -> Vec[T] {
         buf[i] = x
     }
     return Vec[T]{buf: buf, len: n}
-}
-
-// an independent copy (assigning a Vec shares its buffer)
-fn clone[T](v: Vec[T]) -> Vec[T] {
-    return vec_of(v.buf[..v.len])
-}
-
-fn clone[T](v: *Vec[T]) -> Vec[T] {
-    return vec_of(v.buf[..v.len])
-}
-
-// element i, bounds-checked against the length (v.buf[i] is only checked against the capacity)
-inline fn at[T](v: *Vec[T], i: i64) -> T {
-    assert i >= 0 && i < v.len, "Vec index out of range"
-    return v.buf[i]
-}
-
-// ---------- text ----------
-// an independent copy of s
-priv fn str_copy(s: str) -> str {
-    out := alloc[u8](len(s))
-    memcopy(ptr(out), ptr(s), len(s))
-    return out
 }
 
 // ---------- process ----------

@@ -43,7 +43,7 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
         return (none, false)
     }
     phis := vec[i64]()
-    for v in f.blocks[header].insts.items() {
+    for v in f.blocks[header].insts {
         if f.insts[v].op != Phi {
             break
         }
@@ -69,7 +69,7 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
         if depth == 0 {
             return true
         }
-        for a in i.args.items() {
+        for a in i.args {
             if tree_has(f, a, depth - 1, def_block, header) {
                 return true
             }
@@ -81,13 +81,13 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
         return (none, false)
     }
     if ci.op.is_cmp() {
-        for a in ci.args.items() {
+        for a in ci.args {
             if is_hphi(f, def_block, header, a) {
                 return (none, false)
             }
         }
     }
-    for a in ci.args.items() {
+    for a in ci.args {
         ai := &f.insts[a]
         if (ai.op == And || ai.op == Load) && tree_has(f, a, 12, def_block, header) {
             return (none, false)
@@ -95,9 +95,9 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
     }
     // every other way out of the loop must be a trap
     trap_exits := vec[i64]()
-    for b in l.blocks.items() {
+    for b in l.blocks {
         ss := f.succs(b)
-        for s in ss.items() {
+        for s in ss {
             if loops.contains(li, s) || (b == latch && s == other) {
                 continue
             }
@@ -113,13 +113,13 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
     // Instruction selection may evaluate address arithmetic and compares lazily at their
     // use. Anything computed from a header phi inside the loop that could be re-evaluated
     // after the loop would then read the already-updated phi register: keep the edge split.
-    derived := clone(&phis)
+    derived := clone(phis)
     qi := 0
     while qi < derived.len {
         x := derived[qi]
         qi += 1
-        for b in l.blocks.items() {
-            for u in f.blocks[b].insts.items() {
+        for b in l.blocks {
+            for u in f.blocks[b].insts {
                 ui := &f.insts[u]
                 lazy := ui.op == Add || ui.op == Sub || ui.op == Shl || ui.op == Mul || ui.op == And || ui.op.is_cmp()
                 if lazy && contains(&ui.args, x) && !contains(&derived, u) {
@@ -132,15 +132,15 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
         if !cfg.reachable(b) || loops.contains(li, b) {
             continue
         }
-        for v in f.blocks[b].insts.items() {
-            for a in f.insts[v].args.items() {
+        for v in f.blocks[b].insts {
+            for a in f.insts[v].args {
                 if contains(&derived, a) && !contains(&phis, a) {
                     return (none, false)
                 }
             }
         }
         tu := f.term_uses(b)
-        for a in tu.items() {
+        for a in tu {
             if contains(&derived, a) && !contains(&phis, a) {
                 return (none, false)
             }
@@ -153,15 +153,15 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
             continue
         }
         used := vec[i64]()
-        for v in f.blocks[b].insts.items() {
-            for a in f.insts[v].args.items() {
+        for v in f.blocks[b].insts {
+            for a in f.insts[v].args {
                 if contains(&phis, a) {
                     used.push(a)
                 }
             }
         }
         tu := f.term_uses(b)
-        for a in tu.items() {
+        for a in tu {
             if contains(&phis, a) {
                 used.push(a)
             }
@@ -172,9 +172,9 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
         if contains(&trap_exits, b) {
             return (none, false)
         }
-        for p in used.items() {
+        for p in used {
             partner := -1
-            for q in phis.items() {
+            for q in phis {
                 qinst := &f.insts[q]
                 if q == p {
                     continue
@@ -445,7 +445,7 @@ fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFu
                     s.addr_only[a0] = false
                 }
                 _ => {
-                    for a in i.args.items() {
+                    for a in i.args {
                         s.addr_only[a] = false
                     }
                 }
@@ -457,14 +457,14 @@ fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFu
                 s.addr_only[c] = false
             }
             Ret(vs) => {
-                for v in vs.items() {
+                for v in vs {
                     s.addr_only[v] = false
                 }
             }
             _ => {}
         }
     }
-    for v in f.blocks[0].insts.items() {
+    for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
             sl := new_slot(&s.mf, f.insts[v].k, f.insts[v].aux)
             s.slot_of.set(v, sl)
@@ -475,7 +475,7 @@ fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFu
         b := rpo[ri]
         s.cur_block = b
         nroot := 0
-        for v in f.blocks[b].insts.items() {
+        for v in f.blocks[b].insts {
             if cleanup_is_root(f.insts[v].op) {
                 nroot += 1
             }
@@ -756,7 +756,7 @@ fn params(self: *Sel) {
     // locate Param instructions by index
     by_index := map[i64, i64]()
     for bi in 0..self.f.blocks.len {
-        for v in self.f.blocks[bi].insts.items() {
+        for v in self.f.blocks[bi].insts {
             if self.f.insts[v].op == Param {
                 by_index.set(self.f.insts[v].k, v)
             }
@@ -804,13 +804,13 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
     // parallel copies for the phis of s along edge b -> s
     moves := vec[(i64, Opnd, u8)]()
     phis := vec[i64]()
-    for v in self.f.blocks[s].insts.items() {
+    for v in self.f.blocks[s].insts {
         if self.f.insts[v].op != Phi {
             break
         }
         phis.push(v)
     }
-    for p in phis.items() {
+    for p in phis {
         self.needed[p] = true
         inst := &self.f.insts[p]
         ai := index_of(inst.pb.items(), b)
@@ -845,7 +845,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
     }
     // sequentialize: register sources first, respecting dependencies
     pending := vec[(i64, Opnd, u8)]()
-    for mv in moves.items() {
+    for mv in moves {
         if is_r(mv.1) {
             pending.push(mv)
         }
@@ -883,7 +883,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
             }
         }
     }
-    for mv in moves.items() {
+    for mv in moves {
         d := mv.0
         s2 := mv.1
         match s2 {
@@ -1055,7 +1055,7 @@ priv fn term(self: *Sel, b: i64) {
             nf := 0
             used := vec[i64]()
             moves := vec[(i64, i64)]()
-            for v in vals.items() {
+            for v in vals {
                 if self.f.insts[v].ty.is_fp() {
                     moves.push((XMM0 + nf, v))
                     nf += 1
@@ -1066,7 +1066,7 @@ priv fn term(self: *Sel, b: i64) {
             }
             // evaluate sources into vregs first, then move to the fixed registers
             srcs := vec[(i64, Opnd, bool)]()
-            for mv in moves.items() {
+            for mv in moves {
                 v := mv.1
                 isf := self.f.insts[v].ty.is_fp()
                 o: Opnd
@@ -1077,7 +1077,7 @@ priv fn term(self: *Sel, b: i64) {
                 }
                 srcs.push((mv.0, o, isf))
             }
-            for sv in srcs.items() {
+            for sv in srcs {
                 self.e(if sv.2 { MovSd } else { Mov }, 8, R(sv.0), sv.1)
                 used.push(sv.0)
             }
@@ -1540,7 +1540,7 @@ priv fn inst(self: *Sel, v: i64) {
         Syscall => {
             sr := [7]i64{RAX, RDI, RSI, RDX, R10, R8, R9}
             srcs := vec[Opnd]()
-            for a in i.args.items() {
+            for a in i.args {
                 srcs.push(self.mov_src(a))
             }
             used := vec[i64]()
@@ -1581,7 +1581,7 @@ priv fn inst(self: *Sel, v: i64) {
             d := self.vr(v)
             consts := vec[Opt[u32]]()
             all_const := true
-            for a in i.args.items() {
+            for a in i.args {
                 if self.f.insts[a].op == FConst {
                     consts.push(Some(u32(self.f.insts[a].k)))
                 } else {
@@ -1614,7 +1614,7 @@ priv fn inst(self: *Sel, v: i64) {
                 return
             }
             rs := vec[i64]()
-            for a in i.args.items() {
+            for a in i.args {
                 rs.push(self.reg(a))
             }
             self.e(MovSd, 8, R(d), R(rs[0]))
@@ -1736,7 +1736,7 @@ priv fn dies_here(self: *Sel, v: i64) -> bool {
 
 priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
     // x + const where x dies here: two-address add coalesces
-    for a in i.args.items() {
+    for a in i.args {
         if self.vreg[a] == base {
             return self.dies_here(a)
         }
@@ -1789,7 +1789,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
         None => None
     }
     self.mf.out_args = max(self.mf.out_args, nstack)
-    for sm in stack_moves.items() {
+    for sm in stack_moves {
         m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: OutArg, id: sm.0}
         if sm.2 != 0 {
             self.e(MovSd, sm.2, M(m), sm.1)
@@ -1798,7 +1798,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
         }
     }
     used := vec[i64]()
-    for rm in reg_moves.items() {
+    for rm in reg_moves {
         self.e(if rm.2 { MovSd } else { Mov }, 8, R(rm.0), rm.1)
         used.push(rm.0)
     }
@@ -1834,10 +1834,10 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
         ps, has := self.projs.get(v)
         if has {
             // multi-value results: assign registers in order of result index
-            by_idx := clone(&ps)
+            by_idx := clone(ps)
             sort_by(by_idx.items(), fn(a: (i64, i64), b: (i64, i64)) -> bool { a.0 < b.0 || (a.0 == b.0 && a.1 < b.1) })
             maxi := -1
-            for p in by_idx.items() {
+            for p in by_idx {
                 if p.0 > maxi {
                     maxi = p.0
                 }
@@ -1845,11 +1845,11 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             // result types: from callee signature when known, else from projections
             types := vec[T]()
             if i.op == Call {
-                types = clone(&self.m.funcs[i.k].rets)
+                types = clone(self.m.funcs[i.k].rets)
             } else {
                 for k in 0..=maxi {
                     t := I64
-                    for p in by_idx.items() {
+                    for p in by_idx {
                         if p.0 == k {
                             t = self.f.insts[p.1].ty
                             break
@@ -1861,7 +1861,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             ni2 := 0
             nf2 := 0
             locs := vec[i64]()
-            for t in types.items() {
+            for t in types {
                 if t.is_fp() {
                     locs.push(XMM0 + nf2)
                     nf2 += 1
@@ -1870,7 +1870,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
                     ni2 += 1
                 }
             }
-            for kp in by_idx.items() {
+            for kp in by_idx {
                 k := kp.0
                 p := kp.1
                 if !self.needed[p] {

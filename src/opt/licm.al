@@ -4,7 +4,7 @@
 // (cfg.preds[h].iter().copied().filter(|p| !loops.contains(li, *p)).collect())
 fn licm_outside_preds(cfg: *Cfg, loops: *Loops, li: i64, h: i64) -> Vec[i64] {
     outside := vec[i64]()
-    for p in cfg.preds[h].items() {
+    for p in cfg.preds[h] {
         if !loops.contains(li, p) {
             outside.push(p)
         }
@@ -43,7 +43,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
         }
         p := f.new_block()
         f.blocks[p].term = Jmp(h)
-        for o in outside.items() {
+        for o in outside {
             match f.blocks[o].term {
                 Jmp(&t) => {
                     if *t == h {
@@ -62,12 +62,12 @@ fn licm_make_preheaders(f: *Func) -> bool {
             }
         }
         // fix header phis
-        hinsts := clone(&f.blocks[h].insts)
-        for v in hinsts.items() {
+        hinsts := clone(f.blocks[h].insts)
+        for v in hinsts {
             if f.insts[v].op != Phi {
                 break
             }
-            inst := clone(&f.insts[v])
+            inst := clone(f.insts[v])
             out_vals := vec[(i64, i64)]()
             keep_args := vec[i64]()
             keep_pb := vec[i64]()
@@ -81,7 +81,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
                 }
             }
             all_same := true
-            for x in out_vals.items() {
+            for x in out_vals {
                 if x.1 != out_vals[0].1 {
                     all_same = false
                     break
@@ -89,11 +89,11 @@ fn licm_make_preheaders(f: *Func) -> bool {
             }
             incoming := 0
             if all_same {
-                incoming = out_vals.at(0).1
+                incoming = out_vals[0].1
             } else {
                 vals := vec[i64]()
                 pbs := vec[i64]()
-                for x in out_vals.items() {
+                for x in out_vals {
                     vals.push(x.1)
                     pbs.push(x.0)
                 }
@@ -138,7 +138,7 @@ fn licm_run(f: *Func) -> bool {
     esc := alias_escaped_allocas(f)
     def_block := f.block_of()
     order := licm_loop_order(&loops)
-    for li in order.items() {
+    for li in order {
         l := &loops.loops[li]
         h := l.header
         outside := licm_outside_preds(&cfg, &loops, li, h)
@@ -147,12 +147,12 @@ fn licm_run(f: *Func) -> bool {
         }
         pre := outside[0]
         in_loop := vec_fill(f.blocks.len, false)
-        for b in l.blocks.items() {
+        for b in l.blocks {
             in_loop[b] = true
         }
         // blocks.sort_by_key(|b| cfg.rpo_idx[*b as usize]) (stable)
         blocks := vec[i64]()
-        for b in l.blocks.items() {
+        for b in l.blocks {
             blocks.push(b)
             k := blocks.len - 1
             while k > 0 && cfg.rpo_idx[blocks[k - 1]] > cfg.rpo_idx[b] {
@@ -165,8 +165,8 @@ fn licm_run(f: *Func) -> bool {
         stores := vec[MemRef]()
         has_call := false
         exiting := vec[i64]()
-        for b in blocks.items() {
-            for v in f.blocks[b].insts.items() {
+        for b in blocks {
+            for v in f.blocks[b].insts {
                 o := f.insts[v].op
                 if o == Store {
                     stores.push(alias_memref(f, v))
@@ -176,7 +176,7 @@ fn licm_run(f: *Func) -> bool {
             }
             leaves := false
             ss := f.succs(b)
-            for s in ss.items() {
+            for s in ss {
                 if !in_loop[s] {
                     leaves = true
                     break
@@ -194,13 +194,13 @@ fn licm_run(f: *Func) -> bool {
         }
         loop {
             moved := false
-            for b in blocks.items() {
-                insts := clone(&f.blocks[b].insts)
+            for b in blocks {
+                insts := clone(f.blocks[b].insts)
                 keep := vec[i64]()
-                for v in insts.items() {
+                for v in insts {
                     i := &f.insts[v]
                     invariant_args := true
-                    for a in i.args.items() {
+                    for a in i.args {
                         db := def_block[a]
                         if !(db == 0xFFFFFFFF || !in_loop[db]) {
                             invariant_args = false

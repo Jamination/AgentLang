@@ -162,7 +162,7 @@ fn opt_optimize(m: *Module, level: i64) {
             }
             // keep the function, drop the passes' temporary data (see work_begin in base.al)
             work_end()
-            m.funcs[fid] = clone(f)
+            m.funcs[fid] = clone(*f)
         }
     }
     if level == 0 {
@@ -175,7 +175,7 @@ fn opt_optimize(m: *Module, level: i64) {
     for fi in 0..n {
         f := &m.funcs[fi]
         for bi in 0..f.blocks.len {
-            for v in f.blocks[bi].insts.items() {
+            for v in f.blocks[bi].insts {
                 i := &f.insts[v]
                 if i.op == Call {
                     call_counts[i.k] += 1
@@ -214,7 +214,7 @@ fn opt_optimize(m: *Module, level: i64) {
     }
     pol := Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000}
     done := vec_fill(n, false)
-    for fid in order.items() {
+    for fid in order {
         if m.funcs[fid].lowered {
             work_begin()
             local_opt(&m.funcs[fid], level)
@@ -223,7 +223,7 @@ fn opt_optimize(m: *Module, level: i64) {
                 local_opt(&m.funcs[fid], level)
             }
             work_end()
-            m.funcs[fid] = clone(&m.funcs[fid])
+            m.funcs[fid] = clone(m.funcs[fid])
         }
         done[fid] = true
     }

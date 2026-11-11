@@ -198,7 +198,7 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
     f.noreturn = rty == T_NEVER
     cx.fn_abi(&f, ptys.items(), rty)
     cx.module.funcs.push(f)
-    cx.fn_sigs.push((clone(&ptys), rty))
+    cx.fn_sigs.push((clone(ptys), rty))
     cx.nested[idx].fid = fid
     cx.nested[idx].ptys = ptys
     cx.nested[idx].rty = rty
@@ -236,7 +236,7 @@ fn nested_value(self: *Fx, idx: i64) -> Val {
     if nf.fid < 0 {
         return val_err()
     }
-    ty := self.cx.types.intern(Fn(clone(&nf.ptys), nf.rty))
+    ty := self.cx.types.intern(Fn(clone(nf.ptys), nf.rty))
     v := self.ins(FAddr, I64, vec[i64](), nf.fid)
     return self.sval(ty, v)
 }

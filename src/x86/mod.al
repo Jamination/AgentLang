@@ -20,7 +20,7 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
         out.push(f)
         func := &m.funcs[f]
         for bi in 0..func.blocks.len {
-            for v in func.blocks[bi].insts.items() {
+            for v in func.blocks[bi].insts {
                 i := &func.insts[v]
                 if (i.op == Call || i.op == FAddr) && !seen[i.k] {
                     seen[i.k] = true
@@ -31,7 +31,7 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
     }
     // function pointers stored in global data
     for gi in 0..m.globals.len {
-        for rl in m.globals[gi].relocs.items() {
+        for rl in m.globals[gi].relocs {
             t := rl.1
             match t {
                 Function(f) if !seen[f] => {
@@ -51,7 +51,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     fpool := vec[Bits128]()
     fpool_ix := map[Bits128, i64]()
     funcs := vec[Compiled]()
-    for fid in fids.items() {
+    for fid in fids {
         f := &m.funcs[fid]
         // everything up to the machine code of this function is temporary (see work_begin)
         work_begin()
@@ -93,7 +93,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         ra := regalloc_allocate(&mf, layout.items())
         opt_trace("emit", f)
         local := vec[i64]()
-        for bits in mf.fconsts.items() {
+        for bits in mf.fconsts {
             ix, has := fpool_ix.get(bits)
             if !has {
                 // the pool outlives this function
@@ -114,7 +114,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
             put(mir_print_mfunc(&mf))
         }
         work_end()
-        funcs.push(Compiled{fid: fid, code: Code{bytes: clone(&code.bytes), relocs: clone(&code.relocs)}})
+        funcs.push(Compiled{fid: fid, code: Code{bytes: clone(code.bytes), relocs: clone(code.relocs)}})
         // the function's IR was rewritten on the work heap and is not needed again
         f.insts = vec[Inst]()
         f.blocks = vec[BlockData]()
@@ -173,12 +173,12 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
         }
     }
     out := vec[i64]()
-    for b in post.items() {
+    for b in post {
         if !cold[b] || b == 0 {
             out.push(b)
         }
     }
-    for b in post.items() {
+    for b in post {
         if cold[b] && b != 0 {
             out.push(b)
         }

@@ -63,7 +63,7 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
         }
         Slot => {
             r.base = i8(RSP)
-            r.disp += self.frame.slot_off.at(i64(m.id))
+            r.disp += self.frame.slot_off[i64(m.id)]
         }
         OutArg => {
             r.base = i8(RSP)
@@ -747,7 +747,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     // frame layout
     off: i32 = 8 * i32(mf.out_args)
     slot_off := vec[i32]()
-    for sl in mf.slots.items() {
+    for sl in mf.slots {
         a := i32(min(max(i64(sl.1), 1), 16))
         off = (off + a - 1) / a * a
         slot_off.push(off)
@@ -764,7 +764,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     frame := Frame{slot_off: slot_off, size: size, npush: npush}
     // prologue / epilogue
     pro := vec[MInst]()
-    for r in alloc.used_callee_saved.items() {
+    for r in alloc.used_callee_saved {
         pro.push(minst_new(Push, 8, R(r), Opnd.None))
     }
     if size > 0 {
@@ -776,7 +776,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     mf.blocks[entry].insts = vec[MInst]()
     pro.extend(body.items())
     mf.blocks[entry].insts = pro
-    for b in layout.items() {
+    for b in layout {
         insts := mf.blocks[b].insts
         mf.blocks[b].insts = vec[MInst]()
         out := vec[MInst]()
@@ -798,7 +798,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     // encode
     items := vec[Item]()
     block_item := vec_fill(mf.blocks.len, -1)
-    for b in layout.items() {
+    for b in layout {
         if mf.blocks[b].align {
             items.push(Align(16))
         }
@@ -864,7 +864,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         assert bytes.len == offs[k]
         match items[k] {
             Bytes(b, r) => {
-                for rr in r.items() {
+                for rr in r {
                     relocs.push(Reloc{off: rr.off + bytes.len, kind: rr.kind, addend: rr.addend})
                 }
                 bytes.extend(b.items())

@@ -116,15 +116,6 @@ fn lower_call_mentions_unbound(t: *TypeAst, tparams: []str, env: *Map[str, i64])
     return false
 }
 
-// an independent copy of a unification environment (assigning a Map shares its storage)
-fn lower_call_clone_env(m: *Map[str, i64]) -> Map[str, i64] {
-    out := map[str, i64]()
-    for key in m.keys() {
-        out.set(key, m.get_or(key, 0))
-    }
-    return out
-}
-
 // `!env.contains_key(p)` for any type parameter
 priv fn any_unbound(tparams: *Vec[str], env: *Map[str, i64]) -> bool {
     for j in 0..tparams.len {
@@ -184,13 +175,6 @@ priv fn is_cv_float(o: Opt[CV]) -> bool {
     match o {
         Some(Float(_)) => true
         _ => false
-    }
-}
-
-fn lower_call_unwrap(o: Opt[Val]) -> Val {
-    match o {
-        Some(v) => v
-        None => panic("called `Option::unwrap()` on a `None` value")
     }
 }
 
@@ -992,7 +976,7 @@ priv fn resolve_in(s: *Fx, d: *FnDecl, pt: *TypeAst, env: *Map[str, i64]) -> i64
 
 // unification binds the type parameters; the concrete parts are compared after resolution
 priv fn param_accepts_fits(s: *Fx, d: *FnDecl, base: *Map[str, i64], pt: *TypeAst, ty: i64) -> bool {
-    env := lower_call_clone_env(base)
+    env := clone(*base)
     if !s.unify(pt, ty, d.tparams.items(), &env) {
         return false
     }
@@ -1332,11 +1316,11 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             if generic {
                 // try by value, then through a pointer in either direction
                 pt := &d.params[0].1
-                e2 := lower_call_clone_env(&env)
+                e2 := clone(env)
                 if self.unify(pt, rv.ty, d.tparams.items(), &e2) {
                     env = e2
                 } else {
-                    e3 := lower_call_clone_env(&env)
+                    e3 := clone(env)
                     ok := false
                     is_ptr_param := false
                     match (pt, self.cx.types.k(rv.ty)) {
@@ -1440,7 +1424,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
         // the expected result type can bind remaining parameters
         match (expect, &d.ret) {
             (Some(et), Some(&rt)) if any_unbound(&d.tparams, &env) => {
-                e2 := lower_call_clone_env(&env)
+                e2 := clone(env)
                 if self.unify(rt, et, d.tparams.items(), &e2) {
                     env = e2
                 }
@@ -1463,7 +1447,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
     rty := T_UNIT
     if nest >= 0 {
         fid = self.cx.nested[nest].fid
-        ptys = clone(&self.cx.nested[nest].ptys)
+        ptys = clone(self.cx.nested[nest].ptys)
         rty = self.cx.nested[nest].rty
     } else {
         self.cx.inst_depth += 1
@@ -1480,7 +1464,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
     }
     final_vals := vec[Val]()
     for i in 0..vals.len {
-        v := lower_call_unwrap(vals[i])
+        v := unwrap(vals[i])
         pt := ptys[i]
         if i == 0 && is_some(recv) && v.ty != pt {
             // UFCS receiver adjustment: auto-ref / auto-deref
@@ -2237,7 +2221,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 return
             }
             name := self.cx.types.structs[sid].name
-            fields := clone(self.cx.types.structs[sid].fields)
+            fields := self.cx.types.structs[sid].fields
             self.put_lit(fmt(name, "{"), pos)
             for i in 0..fields.len {
                 fname := fields[i].0
@@ -2275,7 +2259,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 return
             }
             simple := self.cx.types.enums[eid].simple
-            variants := clone(self.cx.types.enums[eid].variants)
+            variants := self.cx.types.enums[eid].variants
             tag := 0
             if simple {
                 tag = self.scalar(v)

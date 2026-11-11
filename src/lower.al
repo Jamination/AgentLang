@@ -128,14 +128,6 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
     }
 }
 
-// the value of an optional type, or `d`
-priv fn opt_or(o: Opt[i64], d: i64) -> i64 {
-    match o {
-        Some(t) => t
-        None => d
-    }
-}
-
 // `f as i64` of the Rust source: saturating, NaN gives 0
 priv fn f64_to_i64(f: f64) -> i64 {
     if f != f {
@@ -945,7 +937,7 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
         Str(_) => return T_STR
         Lit(t, _) => {
             env := map[str, i64]()
-            return opt_or(self.expr_type(t, &env), T_ERR)
+            return self.expr_type(t, &env).or(T_ERR)
         }
         Call(c, _) => {
             env := map[str, i64]()
@@ -1516,7 +1508,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                         _ => return false
                     }
                     self.types.layout_struct(sid)
-                    fields := clone(self.types.structs[sid].fields)
+                    fields := self.types.structs[sid].fields
                     offs := clone(self.types.structs[sid].offsets)
                     for i in 0..items.len {
                         fi := i

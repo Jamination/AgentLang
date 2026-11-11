@@ -1224,7 +1224,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
                 return fail[SK]()
             }
             lhs := vec[Expr]()
-            for n in names.items() {
+            for n in names {
                 lhs.push(Expr{k: Ident(n), pos: pos})
             }
             return (MultiAssign(lhs, e), true)

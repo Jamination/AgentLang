@@ -32,7 +32,7 @@ priv fn analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
 // the leading phis of block `h`
 priv fn header_phis(f: *Func, h: i64) -> Vec[i64] {
     hphis := vec[i64]()
-    for v in f.blocks[h].insts.items() {
+    for v in f.blocks[h].insts {
         if f.insts[v].op != Phi {
             break
         }
@@ -51,7 +51,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     pre := outside[0]
     latch := l.latches[0]
     in_loop := vec_fill(f.blocks.len, false)
-    for b in l.blocks.items() {
+    for b in l.blocks {
         in_loop[b] = true
     }
     c, t, e := match f.blocks[latch].term {
@@ -131,7 +131,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     // longest chain of header phis that only shift values along (h = g; g = f; ...)
     hphis := header_phis(f, h)
     chain := 1
-    for ph in hphis.items() {
+    for ph in hphis {
         ln := 1
         cur := ph
         loop {
@@ -147,14 +147,14 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     // size and exits
     def_block := f.block_of()
     size := 0
-    for b in l.blocks.items() {
+    for b in l.blocks {
         size += f.blocks[b].insts.len + 1
         match f.blocks[b].term {
             Ret(_), Term.None, Trap => return None
             _ => {}
         }
         ss := f.succs(b)
-        for s in ss.items() {
+        for s in ss {
             if in_loop[s] || (b == latch && s == exit_b) {
                 continue
             }
@@ -163,12 +163,12 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
             if !eq(sb.term, Trap) {
                 return None
             }
-            for v in sb.insts.items() {
+            for v in sb.insts {
                 inst := &f.insts[v]
                 if inst.op == Phi {
                     return None
                 }
-                for a in inst.args.items() {
+                for a in inst.args {
                     if def_block[a] != 0xFFFFFFFF && in_loop[def_block[a]] {
                         return None
                     }
@@ -177,12 +177,12 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
         }
     }
     if trip <= MAX_TRIP && size * trip <= MAX_UNROLLED_SIZE {
-        return Some(Plan{blocks: clone(&l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: trip, full: true})
+        return Some(Plan{blocks: clone(l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: trip, full: true})
     }
     // partial: unrolling by the shift-chain length turns the per-iteration register shuffle into
     // plain renaming
     if opt_enabled("partial") && chain >= 2 && chain <= 8 && trip % chain == 0 && trip > chain && size * chain <= MAX_PARTIAL_SIZE {
-        return Some(Plan{blocks: clone(&l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: chain, full: false})
+        return Some(Plan{blocks: clone(l.blocks), header: h, latch: latch, pre: pre, exit: exit_b, trip: chain, full: false})
     }
     return None
 }
@@ -205,7 +205,7 @@ priv fn apply(f: *Func, p: *Plan) {
     n0 := f.insts.len
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
-    for b in p.blocks.items() {
+    for b in p.blocks {
         in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
@@ -225,7 +225,7 @@ priv fn apply(f: *Func, p: *Plan) {
     hphis := header_phis(f, p.header)
     // (start value, back-edge value) of each header phi
     phi_in := map[i64, (i64, i64)]()
-    for ph in hphis.items() {
+    for ph in hphis {
         i := &f.insts[ph]
         s := NOV
         bk := NOV
@@ -249,16 +249,16 @@ priv fn apply(f: *Func, p: *Plan) {
     prev_header_of_last := p.header
     for kk in 1..p.trip {
         bmap := map[i64, i64]()
-        for b in p.blocks.items() {
+        for b in p.blocks {
             bmap.set(b, f.new_block())
         }
         cur := vec_fill(n0, NOV)
-        for ph in hphis.items() {
+        for ph in hphis {
             bk := phi_in_at(&phi_in, ph).1
             cur[ph] = look(&prev, bk, n0, def_block, in_loop)
         }
         // allocate ids
-        for b in p.blocks.items() {
+        for b in p.blocks {
             for ii in 0..f.blocks[b].insts.len {
                 v := f.blocks[b].insts[ii]
                 if v >= n0 || cur[v] != NOV {
@@ -276,10 +276,10 @@ priv fn apply(f: *Func, p: *Plan) {
                 cur[v] = nv
             }
         }
-        for b in p.blocks.items() {
+        for b in p.blocks {
             nb := bmap_at(&bmap, b)
-            insts := clone(&f.blocks[b].insts)
-            for v in insts.items() {
+            insts := clone(f.blocks[b].insts)
+            for v in insts {
                 if v >= n0 {
                     continue
                 }
@@ -288,11 +288,11 @@ priv fn apply(f: *Func, p: *Plan) {
                 }
                 nv := cur[v]
                 args := vec[i64]()
-                for a in f.insts[v].args.items() {
+                for a in f.insts[v].args {
                     args.push(look(&cur, a, n0, def_block, in_loop))
                 }
                 pb := vec[i64]()
-                for x in f.insts[v].pb.items() {
+                for x in f.insts[v].pb {
                     pb.push(bmap.get_or(x, x))
                 }
                 f.im(nv).args = args
@@ -375,7 +375,7 @@ priv fn apply(f: *Func, p: *Plan) {
     if !p.full {
         // header phis stay: their back-edge inputs now come from the last copy
         if p.trip > 1 {
-            for ph in hphis.items() {
+            for ph in hphis {
                 bk := phi_in_at(&phi_in, ph).1
                 nv := if loop_def(bk, n0, def_block, in_loop) { prev[bk] } else { bk }
                 i := f.im(ph)
@@ -391,7 +391,7 @@ priv fn apply(f: *Func, p: *Plan) {
     }
     // copy 0: header phis take their initial values
     repl := vec_fill(f.insts.len, NOV)
-    for ph in hphis.items() {
+    for ph in hphis {
         repl[ph] = phi_in_at(&phi_in, ph).0
     }
     hb := &f.blocks[p.header]
@@ -418,7 +418,7 @@ fn unroll_run(f: *Func) -> bool {
         loops := loops_new(f, &cfg)
         order := licm_loop_order(&loops)
         plan: Opt[Plan] = None
-        for li in order.items() {
+        for li in order {
             match analyze(f, &cfg, &loops, li) {
                 Some(p) => {
                     plan = Some(p)

@@ -33,7 +33,7 @@ fn gvn_run(f: *Func) -> bool {
         step := stack.pop()
         match step {
             Exit(keys, facts) => {
-                for k in keys.items() {
+                for k in keys {
                     table.del(k)
                 }
                 fi := facts.len - 1
@@ -75,7 +75,7 @@ fn gvn_run(f: *Func) -> bool {
                 old := f.blocks[b].insts
                 f.blocks[b].insts = vec[i64]()
                 nw := vec[i64]()
-                for v in old.items() {
+                for v in old {
                     for ai in 0..f.insts[v].args.len {
                         a := f.insts[v].args[ai]
                         r := run_find(repl.items(), a)
@@ -102,7 +102,7 @@ fn gvn_run(f: *Func) -> bool {
                         nw.push(v)
                         continue
                     }
-                    args := clone(&i.args)
+                    args := clone(i.args)
                     if i.op.is_commutative() && args.len == 2 && args[0] > args[1] {
                         t := args[0]
                         args[0] = args[1]

@@ -7,7 +7,7 @@ priv fn is_trap_block(f: *Func, b: i64) -> bool {
     if !eq(f.blocks[b].term, Trap) {
         return false
     }
-    for v in f.blocks[b].insts.items() {
+    for v in f.blocks[b].insts {
         if f.insts[v].op == Phi {
             return false
         }
@@ -37,7 +37,7 @@ fn checkmerge_run(f: *Func) -> bool {
     preds := f.preds()
     changed := false
     rpo := f.rpo()
-    for b in rpo.items() {
+    for b in rpo {
         c, ok, trap := match f.blocks[b].term {
             Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
@@ -61,7 +61,7 @@ fn checkmerge_run(f: *Func) -> bool {
                 break
             }
             blocked := false
-            for v in f.blocks[cur].insts.items() {
+            for v in f.blocks[cur].insts {
                 o := f.insts[v].op
                 if o == Call || o == CallInd || o == Syscall || o == Phi {
                     blocked = true

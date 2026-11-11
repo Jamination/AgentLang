@@ -4,7 +4,7 @@
 fn cleanup_prune_unreachable(f: *Func) -> bool {
     rpo := f.rpo()
     reach := vec_fill(f.blocks.len, false)
-    for b in rpo.items() {
+    for b in rpo {
         reach[b] = true
     }
     changed := false
@@ -16,7 +16,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
         }
     }
     preds := f.preds()
-    for b in rpo.items() {
+    for b in rpo {
         for ii in 0..f.blocks[b].insts.len {
             v := f.blocks[b].insts[ii]
             if f.insts[v].op != Phi {
@@ -55,7 +55,7 @@ fn cleanup_dce(f: *Func) -> bool {
     work := vec[i64]()
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
-        for v in b.insts.items() {
+        for v in b.insts {
             if cleanup_is_root(f.insts[v].op) {
                 live[v] = true
                 work.push(v)
@@ -67,7 +67,7 @@ fn cleanup_dce(f: *Func) -> bool {
                 work.push(c)
             }
             Ret(vs) => {
-                for v in vs.items() {
+                for v in vs {
                     if !live[v] {
                         live[v] = true
                         work.push(v)
@@ -130,7 +130,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
                 }
                 same := NOV
                 trivial := true
-                for a0 in f.insts[v].args.items() {
+                for a0 in f.insts[v].args {
                     a := trivial_phis_res(&repl, a0)
                     if a == v || a == same {
                         continue

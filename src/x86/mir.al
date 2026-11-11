@@ -176,11 +176,6 @@ fn minst_new(op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
     return MInst{op: op, sz: sz, sz2: 0, cc: 0, a: a, b: b, c: Opnd.None, tgt: 0, uses: vec[i64](), defs: vec[i64]()}
 }
 
-// an independent copy (uses and defs are not shared)
-priv fn clone(i: *MInst) -> MInst {
-    return MInst{op: i.op, sz: i.sz, sz2: i.sz2, cc: i.cc, a: i.a, b: i.b, c: i.c, tgt: i.tgt, uses: clone(&i.uses), defs: clone(&i.defs)}
-}
-
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
 fn is_copy(self: *MInst) -> (i64, i64, bool) {
     if self.op == Mov || self.op == MovSd {

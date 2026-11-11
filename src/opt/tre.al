@@ -35,7 +35,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         return false
     }
     // locals whose address is observable would be shared between iterations
-    for v in f.blocks[0].insts.items() {
+    for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
             return false
         }
@@ -44,7 +44,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     rpo := f.rpo()
     sites := vec[Site]()
     acc_op: Opt[Op] = None
-    for b in rpo.items() {
+    for b in rpo {
         rv := match f.blocks[b].term {
             Ret(vs) => clone(vs)
             _ => continue
@@ -91,7 +91,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     params := vec[i64]()
     keep := vec[i64]()
     moved := vec[i64]()
-    for v in entry_insts.items() {
+    for v in entry_insts {
         if f.insts[v].op == Param {
             params.push(v)
             keep.push(v)
@@ -105,7 +105,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     f.blocks[header].term = entry_term
     // successors of the old entry now come from the header
     ss := f.succs(header)
-    for s in ss.items() {
+    for s in ss {
         for ii in 0..f.blocks[s].insts.len {
             v := f.blocks[s].insts[ii]
             if f.insts[v].op != Phi {
@@ -128,7 +128,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     // parameter phis (one per declared parameter that has a Param instruction)
     pphi := vec[(i64, i64, i64)]() // (index, param value, phi)
     head := vec[i64]()
-    for p in params.items() {
+    for p in params {
         ty := f.insts[p].ty
         k := f.insts[p].k
         phi := f.mk(Phi, ty, vec_of([]i64{p}), 0)
@@ -139,10 +139,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     acc_phi: Opt[i64] = None
     match acc_op {
         Some(op) => {
-            idk := match identity(op) {
-                Some(x) => x
-                None => panic("called `Option::unwrap()` on a `None` value")
-            }
+            idk := unwrap(identity(op))
             c := f.mk(Const, ret_ty, vec[i64](), ir_canon(ret_ty, idk))
             f.blocks[0].insts.push(c)
             phi := f.mk(Phi, ret_ty, vec_of([]i64{c}), 0)
@@ -156,11 +153,11 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     f.blocks[header].insts = head
     // uses of parameters become uses of the phis (except in the phis' own entry inputs)
     repl := vec_fill(f.insts.len, NOV)
-    for pp in pphi.items() {
+    for pp in pphi {
         repl[pp.1] = pp.2
     }
     f.apply_repl(&repl)
-    for pp in pphi.items() {
+    for pp in pphi {
         i := f.im(pp.2)
         i.args[0] = pp.1
     }
@@ -172,7 +169,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     for si in 0..sites.len {
         s := &sites[si]
         b := s.block
-        call_args := clone(&f.insts[s.call].args)
+        call_args := clone(f.insts[s.call].args)
         // new accumulator value
         new_acc: Opt[i64] = None
         match (acc_phi, s.acc) {
@@ -211,8 +208,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             _ => {}
         }
         f.blocks[b].term = Jmp(header)
-        for pp in pphi.items() {
-            a := call_args.at(pp.0)
+        for pp in pphi {
+            a := call_args[pp.0]
             i := f.im(pp.2)
             i.args.push(a)
             i.pb.push(b)

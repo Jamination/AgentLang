@@ -212,11 +212,6 @@ struct Inst {
     pb: Vec[i64] // phi predecessor blocks, parallel to args
 }
 
-// an independent copy (args and pb are not shared)
-fn clone(i: *Inst) -> Inst {
-    return Inst{op: i.op, ty: i.ty, args: clone(&i.args), k: i.k, aux: i.aux, pb: clone(&i.pb)}
-}
-
 enum Term {
     None,
     Jmp(i64),
@@ -236,21 +231,9 @@ fn eq(a: Term, b: Term) -> bool {
     }
 }
 
-// an independent copy (the value list of Ret is not shared)
-fn clone(t: Term) -> Term {
-    match t {
-        Ret(vs) => Ret(clone(&vs))
-        _ => t
-    }
-}
-
 struct BlockData {
     insts: Vec[i64]
     term: Term
-}
-
-fn clone(b: *BlockData) -> BlockData {
-    return BlockData{insts: clone(&b.insts), term: clone(b.term)}
 }
 
 struct Func {
@@ -266,29 +249,6 @@ struct Func {
     ext: Opt[i64]
 }
 
-// a deep copy
-fn clone(f: *Func) -> Func {
-    insts := vec[Inst]()
-    for i in 0..f.insts.len {
-        insts.push(clone(&f.insts[i]))
-    }
-    blocks := vec[BlockData]()
-    for i in 0..f.blocks.len {
-        blocks.push(clone(&f.blocks[i]))
-    }
-    return Func{
-        name: f.name,
-        params: clone(&f.params),
-        rets: clone(&f.rets),
-        insts: insts,
-        blocks: blocks,
-        inl: f.inl,
-        noreturn: f.noreturn,
-        lowered: f.lowered,
-        ext: f.ext,
-    }
-}
-
 enum RelocTarget {
     Glob(i64, i64),
     Function(i64),
@@ -301,14 +261,6 @@ struct Global {
     data: Opt[Vec[u8]]
     relocs: Vec[(i64, RelocTarget)]
     readonly: bool
-}
-
-fn clone(g: *Global) -> Global {
-    data: Opt[Vec[u8]] = match g.data {
-        Some(d) => Some(clone(&d))
-        None => None
-    }
-    return Global{name: g.name, size: g.size, align: g.align, data: data, relocs: clone(&g.relocs), readonly: g.readonly}
 }
 
 struct Module {
@@ -400,7 +352,7 @@ fn preds(self: *Func) -> Vec[Vec[i64]] {
     p := lists(self.blocks.len)
     for b in 0..self.blocks.len {
         ss := self.succs(b)
-        for s in ss.items() {
+        for s in ss {
             p[s].push(b)
         }
     }
@@ -439,7 +391,7 @@ fn rpo(self: *Func) -> Vec[i64] {
 fn term_uses(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
         Br(c, _, _) => vec_of([]i64{c})
-        Ret(v) => clone(&v)
+        Ret(v) => clone(v)
         _ => vec[i64]()
     }
 }
@@ -448,8 +400,8 @@ fn use_counts(self: *Func) -> Vec[i64] {
     c := vec_fill(self.insts.len, 0)
     for bi in 0..self.blocks.len {
         b := &self.blocks[bi]
-        for v in b.insts.items() {
-            for a in self.insts[v].args.items() {
+        for v in b.insts {
+            for a in self.insts[v].args {
                 c[a] += 1
             }
         }
@@ -458,7 +410,7 @@ fn use_counts(self: *Func) -> Vec[i64] {
                 c[v] += 1
             }
             Ret(vs) => {
-                for v in vs.items() {
+                for v in vs {
                     c[v] += 1
                 }
             }
@@ -519,7 +471,7 @@ fn apply_repl(self: *Func, map: *Vec[i64]) {
 fn block_of(self: *Func) -> Vec[i64] {
     bo := vec_fill(self.insts.len, 0xFFFFFFFF)
     for bi in 0..self.blocks.len {
-        for v in self.blocks[bi].insts.items() {
+        for v in self.blocks[bi].insts {
             bo[v] = bi
         }
     }
@@ -553,9 +505,9 @@ fn cfg_new(f: *Func) -> Cfg {
         rpo_idx[rpo[i]] = i
     }
     preds := lists(n)
-    for b in rpo.items() {
+    for b in rpo {
         ss := f.succs(b)
-        for s in ss.items() {
+        for s in ss {
             preds[s].push(b)
         }
     }
@@ -567,7 +519,7 @@ fn cfg_new(f: *Func) -> Cfg {
         for bi in 1..rpo.len {
             b := rpo[bi]
             nw := 0xFFFFFFFF
-            for p in preds[b].items() {
+            for p in preds[b] {
                 if idom[p] == 0xFFFFFFFF {
                     continue
                 }
@@ -650,9 +602,9 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
     loops := vec[Loop]()
     none: Opt[i64] = None
     by_header := vec_fill(n, none)
-    for b in cfg.rpo.items() {
+    for b in cfg.rpo {
         ss := f.succs(b)
-        for s in ss.items() {
+        for s in ss {
             if cfg.dom(s, b) {
                 li := match by_header[s] {
                     Some(x) => x
@@ -671,7 +623,7 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
         inl := vec_fill(n, false)
         inl[l.header] = true
         work := vec[i64]()
-        for lt in l.latches.items() {
+        for lt in l.latches {
             if !inl[lt] {
                 inl[lt] = true
                 work.push(lt)
@@ -680,7 +632,7 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
         }
         while work.len > 0 {
             b := work.pop()
-            for p in cfg.preds[b].items() {
+            for p in cfg.preds[b] {
                 if !inl[p] {
                     inl[p] = true
                     l.blocks.push(p)
@@ -705,7 +657,7 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
         }
     }
     loop_of := vec_fill(n, none)
-    for li in order.items() {
+    for li in order {
         parent := loop_of[loops[li].header]
         loops[li].parent = parent
         loops[li].depth = match parent {
@@ -811,18 +763,18 @@ priv fn float_debug(s: str) -> str {
 fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
     s := vec[str]()
     ps := vec[str]()
-    for t in f.params.items() {
+    for t in f.params {
         ps.push(t.name())
     }
     rs := vec[str]()
-    for t in f.rets.items() {
+    for t in f.rets {
         rs.push(t.name())
     }
     s.push(fmt("fn ", f.name, "(", join(ps.items(), ", "), ") -> (", join(rs.items(), ", "), ") {\n"))
     rpo := f.rpo()
-    for b in rpo.items() {
+    for b in rpo {
         s.push(fmt("b", b, ":\n"))
-        for v in f.blocks[b].insts.items() {
+        for v in f.blocks[b].insts {
             i := &f.insts[v]
             if i.ty != Void && i.op != Store {
                 s.push(fmt("  %", v, " = "))
@@ -889,7 +841,7 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
             }
             Ret(vs) => {
                 v := vec[str]()
-                for x in vs.items() {
+                for x in vs {
                     v.push(fmt("%", x))
                 }
                 s.push(fmt("  ret ", join(v.items(), ", "), "\n"))
@@ -910,7 +862,7 @@ fn ir_verify(f: *Func) -> str {
     n := f.insts.len
     def_block := vec_fill(n, 0xFFFFFFFF)
     def_pos := vec_fill(n, 0)
-    for b in cfg.rpo.items() {
+    for b in cfg.rpo {
         for pi in 0..f.blocks[b].insts.len {
             v := f.blocks[b].insts[pi]
             if def_block[v] != 0xFFFFFFFF {
@@ -920,7 +872,7 @@ fn ir_verify(f: *Func) -> str {
             def_pos[v] = pi
         }
     }
-    for b in cfg.rpo.items() {
+    for b in cfg.rpo {
         blk := &f.blocks[b]
         seen_non_phi := false
         for pi in 0..blk.insts.len {
@@ -930,9 +882,9 @@ fn ir_verify(f: *Func) -> str {
                 if seen_non_phi {
                     return fmt("phi %", v, " after non-phi in b", b)
                 }
-                pbs := clone(&i.pb)
+                pbs := clone(i.pb)
                 sort(pbs.items())
-                ps := clone(&cfg.preds[b])
+                ps := clone(cfg.preds[b])
                 sort(ps.items())
                 ps.dedup()
                 if pbs.items() != ps.items() {
@@ -950,7 +902,7 @@ fn ir_verify(f: *Func) -> str {
                 }
             } else {
                 seen_non_phi = true
-                for a in i.args.items() {
+                for a in i.args {
                     db := def_block[a]
                     if db == 0xFFFFFFFF {
                         return fmt("%", v, " in b", b, " uses %", a, " which is not defined in reachable code")
@@ -966,7 +918,7 @@ fn ir_verify(f: *Func) -> str {
             }
         }
         tu := f.term_uses(b)
-        for a in tu.items() {
+        for a in tu {
             db := def_block[a]
             if db == 0xFFFFFFFF || !cfg.dom(db, b) {
                 return fmt("terminator of b", b, " uses %", a, " which does not dominate it")

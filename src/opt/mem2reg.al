@@ -56,8 +56,8 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
         phi := self.f.mk(Phi, self.var_ty[var_], vec[i64](), 0)
         self.def_in.set((var_, b), phi)
         self.new_phis.push((b, phi))
-        preds := clone(&self.cfg.preds[b])
-        for p in preds.items() {
+        preds := clone(self.cfg.preds[b])
+        for p in preds {
             a := self.read_out(var_, p)
             inst := self.f.im(phi)
             inst.args.push(a)
@@ -86,14 +86,14 @@ priv fn run_once(f: *Func) -> bool {
     // users of each value (instruction users only) + escape through terminators
     users := vec_fill(n, vec[i64]())
     term_used := vec_fill(n, false)
-    for b in cfg.rpo.items() {
-        for v in f.blocks[b].insts.items() {
-            for a in f.insts[v].args.items() {
+    for b in cfg.rpo {
+        for v in f.blocks[b].insts {
+            for a in f.insts[v].args {
                 users[a].push(v)
             }
         }
         tu := f.term_uses(b)
-        for u in tu.items() {
+        for u in tu {
             term_used[u] = true
         }
     }
@@ -101,12 +101,12 @@ priv fn run_once(f: *Func) -> bool {
     access := map[i64, i64]()
     var_ty := vec[T]()
     allocas := vec[i64]()
-    for v in f.blocks[0].insts.items() {
+    for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
             allocas.push(v)
         }
     }
-    for a in allocas.items() {
+    for a in allocas {
         escaped := term_used[a]
         derived := vec_of([](i64, i64){(a, 0)})
         is_derived := map[i64, i64]()
@@ -121,7 +121,7 @@ priv fn run_once(f: *Func) -> bool {
                 escaped = true
                 break
             }
-            for u in users[x].items() {
+            for u in users[x] {
                 inst := &f.insts[u]
                 if inst.op == Add {
                     other := if inst.args[0] == x { inst.args[1] } else { inst.args[0] }
@@ -161,7 +161,7 @@ priv fn run_once(f: *Func) -> bool {
         }
         // stored values must not be derived pointers of this alloca
         stores_derived := false
-        for acc in accs.items() {
+        for acc in accs {
             u := acc.0
             if f.insts[u].op == Store && is_derived.has(f.insts[u].args[1]) {
                 stores_derived = true
@@ -174,7 +174,7 @@ priv fn run_once(f: *Func) -> bool {
         // slots: (offset, type); promotable when no partial overlap with a different slot
         size := f.insts[a].k
         slots := vec[(i64, T)]()
-        for acc in accs.items() {
+        for acc in accs {
             if !contains(&slots, (acc.1, acc.2)) {
                 slots.push((acc.1, acc.2))
             }
@@ -204,7 +204,7 @@ priv fn run_once(f: *Func) -> bool {
                 var_ty.push(slots[i].1)
             }
         }
-        for acc in accs.items() {
+        for acc in accs {
             si := index_of(slots.items(), (acc.1, acc.2))
             assert si >= 0
             if ok[si] {
@@ -217,8 +217,8 @@ priv fn run_once(f: *Func) -> bool {
     }
     // last store per (var, block)
     last_store := map[(i64, i64), i64]()
-    for b in cfg.rpo.items() {
-        for v in f.blocks[b].insts.items() {
+    for b in cfg.rpo {
+        for v in f.blocks[b].insts {
             if f.insts[v].op == Store {
                 var_, found := access.get(v)
                 if found {
@@ -228,13 +228,13 @@ priv fn run_once(f: *Func) -> bool {
         }
     }
     repl := vec_fill(n, NOV)
-    rpo := clone(&cfg.rpo)
+    rpo := clone(cfg.rpo)
     cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, last_store: last_store, def_in: map[(i64, i64), i64](), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: map[T, i64]()}
-    for b in rpo.items() {
-        insts := clone(&cx.f.blocks[b].insts)
+    for b in rpo {
+        insts := clone(cx.f.blocks[b].insts)
         cur := map[i64, i64]()
         keep := vec[i64]()
-        for v in insts.items() {
+        for v in insts {
             var_, found := access.get(v)
             if found {
                 if cx.f.insts[v].op == Store {
@@ -260,7 +260,7 @@ priv fn run_once(f: *Func) -> bool {
     entry_consts := cx.entry_consts
     // insert phis at block heads, constants at the entry
     by_block := map[i64, Vec[i64]]()
-    for bp in new_phis.items() {
+    for bp in new_phis {
         ps := by_block.get_or(bp.0, vec[i64]())
         ps.push(bp.1)
         by_block.set(bp.0, ps)

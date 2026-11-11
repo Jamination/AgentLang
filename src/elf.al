@@ -38,7 +38,7 @@ priv fn used_externs(m: *Module, out: *Output) -> Vec[i64] {
     }
     for ci in 0..out.funcs.len {
         c := &out.funcs[ci]
-        for r in c.code.relocs.items() {
+        for r in c.code.relocs {
             match r.kind {
                 Abs32Global(g) => {
                     i, found := by_got.get(g)
@@ -60,11 +60,11 @@ priv fn used_externs(m: *Module, out: *Output) -> Vec[i64] {
 }
 
 priv fn link_patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr: *Vec[i64], func_addr: *Vec[i64]) {
-    for rl in g.relocs.items() {
+    for rl in g.relocs {
         off := rl.0
         val := match rl.1 {
-            Glob(tg, add) => gaddr.at(tg) + add
-            Function(f) => func_addr.at(f)
+            Glob(tg, add) => gaddr[tg] + add
+            Function(f) => func_addr[f]
         }
         at := (ga - base_addr) + off
         assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
@@ -89,7 +89,7 @@ priv fn link_name_of(shstr: str, s: str) -> i64 {
 fn elf_link(m: *Module, out: *Output) -> (str, str) {
     externs := used_externs(m, out)
     dynamic := !externs.is_empty()
-    for x in externs.items() {
+    for x in externs {
         lib := m.externs[x].lib
         if ends_with(lib, ".dll") || ends_with(lib, ".dylib") || find(lib, ".framework") >= 0 {
             return ("", fmt("`", m.externs[x].name, "` is imported from `", lib,
@@ -120,7 +120,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     ro_off := align_up(text_off + text.len, 16)
     rodata := vec[u8]()
     fpool_addr := BASE + ro_off
-    for bits in out.fpool.items() {
+    for bits in out.fpool {
         put64(&rodata, i64(bits.lo))
         put64(&rodata, i64(bits.hi))
     }
@@ -159,18 +159,18 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         rodata.extend(interp)
         dynstr := vec_of([]u8{0})
         libs := vec[str]()
-        for x in externs.items() {
+        for x in externs {
             if !contains(&libs, m.externs[x].lib) {
                 libs.push(m.externs[x].lib)
             }
         }
-        for l in libs.items() {
+        for l in libs {
             needed.push(dynstr.len)
             dynstr.extend(l)
             dynstr.push(0)
         }
         dynsym := vec_fill(24, u8(0))
-        for x in externs.items() {
+        for x in externs {
             put32(&dynsym, dynstr.len)
             dynstr.extend(m.externs[x].name)
             dynstr.push(0)
@@ -231,7 +231,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         }
         dyn_at = BASE + data_off + data.len
         d := vec[(i64, i64)]()
-        for n in needed.items() {
+        for n in needed {
             d.push((1, n)) // DT_NEEDED
         }
         d.push((4, hash_at)) // DT_HASH
@@ -246,7 +246,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         d.push((0x6ffffffb, 1)) // DT_FLAGS_1: NOW
         d.push((21, 0)) // DT_DEBUG
         d.push((0, 0))
-        for e in d.items() {
+        for e in d {
             put64(&data, e.0)
             put64(&data, e.1)
         }
@@ -256,7 +256,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         for k in 0..externs.len {
             x := externs[k]
             r := vec[u8]()
-            put64(&r, gaddr.at(m.externs[x].got))
+            put64(&r, gaddr[m.externs[x].got])
             put64(&r, ((k + 1) << 32) | 6)
             put64(&r, 0)
             assert base + 24 * k + 24 <= rodata.len
@@ -283,7 +283,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         }
     }
     // ---- relocations ----
-    entry_addr := func_addr.at(m.entry)
+    entry_addr := func_addr[m.entry]
     start_addr := BASE + text_off
     rel := i32(entry_addr - (start_addr + 8))
     for k in 0..4 {
@@ -291,15 +291,15 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     }
     for ci in 0..out.funcs.len {
         c := &out.funcs[ci]
-        fo := func_off.at(c.fid)
-        fa := func_addr.at(c.fid)
-        for r in c.code.relocs.items() {
+        fo := func_off[c.fid]
+        fa := func_addr[c.fid]
+        for r in c.code.relocs {
             at := fo + r.off
             val := match r.kind {
-                Abs32Global(g) => gaddr.at(g) + i64(r.addend)
-                Abs32Func(f) => func_addr.at(f) + i64(r.addend)
+                Abs32Global(g) => gaddr[g] + i64(r.addend)
+                Abs32Func(f) => func_addr[f] + i64(r.addend)
                 Abs32FConst(i) => fpool_addr + 16 * i + i64(r.addend)
-                Rel32Func(f) => func_addr.at(f) - (fa + r.off + 4)
+                Rel32Func(f) => func_addr[f] - (fa + r.off + 4)
             }
             assert val >= -2147483648 && val <= 2147483647, "relocation out of range"
             assert at >= 0 && at + 4 <= text.len
