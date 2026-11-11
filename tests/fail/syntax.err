@@ -1,4 +1,4 @@
 syntax.al:3:5: error: expected `)`, found identifier `y`
 syntax.al:6:12: error: expected expression, found `{`
 syntax.al:8:13: error: expected `)`, found identifier `b`
-syntax.al:9:21: error: a field is written `b: Type`: expected `:` after the name, found `}`
+syntax.al:9:21: error: expected `:` after the field name, found `}`
