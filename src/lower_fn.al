@@ -571,6 +571,7 @@ fn block(self *Fx, b *Block) {
     self.push_scope()
     for i in 0..b.stmts.len {
         self.stmt(&b.stmts.buf[i])
+        lint_copy_writes(self, b, i)
     }
     self.pop_scope()
 }
@@ -587,6 +588,7 @@ fn block_value(self *Fx, b *Block, want bool, expect Opt[i64]) Val {
         s := &b.stmts.buf[i]
         if i + 1 < n {
             self.stmt(s)
+            lint_copy_writes(self, b, i)
             continue
         }
         match s.k {
