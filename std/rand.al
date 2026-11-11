@@ -6,7 +6,7 @@
 // state is invalid. Copying an Rng forks the sequence.
 struct Rng { s0 u64, s1 u64, s2 u64, s3 u64 }
 
-fn __rand_splitmix(x *u64) u64 {
+priv fn splitmix(x *u64) u64 {
     *x += 0x9e3779b97f4a7c15
     z := *x
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
@@ -17,10 +17,10 @@ fn __rand_splitmix(x *u64) u64 {
 // a generator whose sequence is fully determined by `seed` (state expanded with splitmix64)
 fn rng(seed u64) Rng {
     var r Rng
-    r.s0 = __rand_splitmix(&seed)
-    r.s1 = __rand_splitmix(&seed)
-    r.s2 = __rand_splitmix(&seed)
-    r.s3 = __rand_splitmix(&seed)
+    r.s0 = splitmix(&seed)
+    r.s1 = splitmix(&seed)
+    r.s2 = splitmix(&seed)
+    r.s3 = splitmix(&seed)
     return r
 }
 
@@ -164,31 +164,31 @@ fn normal(r *Rng, mean f32, stddev f32) f32 {
 // ---------- default generator ----------
 // One process-wide generator for code that does not care about reproducible streams per
 // subsystem. It starts in the state of rng(0), so unseeded programs are deterministic too.
-var __rand_global = Rng{s0: 0xe220a8397b1dcdaf, s1: 0x6e789e6aa1b965f4, s2: 0x06c45d188009454f, s3: 0xf88bb8a8724c81ec}
+priv var default_rng = Rng{s0: 0xe220a8397b1dcdaf, s1: 0x6e789e6aa1b965f4, s2: 0x06c45d188009454f, s3: 0xf88bb8a8724c81ec}
 
 // restarts the default generator from `seed`
 fn rand_seed(seed u64) {
-    __rand_global = rng(seed)
+    default_rng = rng(seed)
 }
 
 // next 64 bits of the default generator
 fn rand_u64() u64 {
-    return next_u64(&__rand_global)
+    return next_u64(&default_rng)
 }
 
 // uniform f32 in [0, 1) from the default generator
 fn rand_f32() f32 {
-    return next_f32(&__rand_global)
+    return next_f32(&default_rng)
 }
 
 // unbiased uniform integer in [lo, hi) from the default generator
 fn rand_range(lo i64, hi i64) i64 {
-    return range(&__rand_global, lo, hi)
+    return range(&default_rng, lo, hi)
 }
 
 // uniform f32 in [lo, hi) from the default generator
 fn rand_range(lo f32, hi f32) f32 {
-    return range(&__rand_global, lo, hi)
+    return range(&default_rng, lo, hi)
 }
 
 // ---------- noise ----------
@@ -200,24 +200,24 @@ fn noise_hash(x i64, y i64, z i64, seed u32) u32 {
     return h ^ (h >> 16)
 }
 
-inline fn __noise_floor(x f32) i64 {
+priv inline fn ifloor(x f32) i64 {
     i := i64(x)
     if f32(i) > x { i - 1 } else { i }
 }
 
-inline fn __noise_fade(t f32) f32 {
+priv inline fn fade(t f32) f32 {
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
 // dot product of the offset (dx, dy) with the pseudo-random gradient of lattice point (ix, iy)
-inline fn __noise_grad2(ix i64, iy i64, seed u32, dx f32, dy f32) f32 {
+priv inline fn grad2(ix i64, iy i64, seed u32, dx f32, dy f32) f32 {
     h := noise_hash(ix, iy, 0, seed)
     gx := f32(i64(h & 0xFFFF)) * (1.0 / 32768.0) - 1.0
     gy := f32(i64(h >> 16)) * (1.0 / 32768.0) - 1.0
     return gx * dx + gy * dy
 }
 
-inline fn __noise_grad3(ix i64, iy i64, iz i64, seed u32, dx f32, dy f32, dz f32) f32 {
+priv inline fn grad3(ix i64, iy i64, iz i64, seed u32, dx f32, dy f32, dz f32) f32 {
     h := noise_hash(ix, iy, iz, seed)
     gx := f32(i64(h & 0x3FF)) * (1.0 / 512.0) - 1.0
     gy := f32(i64((h >> 10) & 0x3FF)) * (1.0 / 512.0) - 1.0
@@ -228,18 +228,18 @@ inline fn __noise_grad3(ix i64, iy i64, iz i64, seed u32, dx f32, dy f32, dz f32
 // 2D gradient noise in [-1, 1]: smooth, 0 at integer points, one feature per unit; `seed`
 // selects an independent noise field
 fn noise2(x f32, y f32, seed u32) f32 {
-    ix := __noise_floor(x)
-    iy := __noise_floor(y)
+    ix := ifloor(x)
+    iy := ifloor(y)
     fx := x - f32(ix)
     fy := y - f32(iy)
-    u := __noise_fade(fx)
-    a := __noise_grad2(ix, iy, seed, fx, fy)
-    b := __noise_grad2(ix + 1, iy, seed, fx - 1.0, fy)
-    c := __noise_grad2(ix, iy + 1, seed, fx, fy - 1.0)
-    d := __noise_grad2(ix + 1, iy + 1, seed, fx - 1.0, fy - 1.0)
+    u := fade(fx)
+    a := grad2(ix, iy, seed, fx, fy)
+    b := grad2(ix + 1, iy, seed, fx - 1.0, fy)
+    c := grad2(ix, iy + 1, seed, fx, fy - 1.0)
+    d := grad2(ix + 1, iy + 1, seed, fx - 1.0, fy - 1.0)
     lo := a + (b - a) * u
     hi := c + (d - c) * u
-    return lo + (hi - lo) * __noise_fade(fy)
+    return lo + (hi - lo) * fade(fy)
 }
 
 // 2D gradient noise with seed 0
@@ -249,26 +249,26 @@ fn noise2(x f32, y f32) f32 {
 
 // 3D gradient noise in [-1, 1] (use z as time for animated 2D fields)
 fn noise3(x f32, y f32, z f32, seed u32) f32 {
-    ix := __noise_floor(x)
-    iy := __noise_floor(y)
-    iz := __noise_floor(z)
+    ix := ifloor(x)
+    iy := ifloor(y)
+    iz := ifloor(z)
     fx := x - f32(ix)
     fy := y - f32(iy)
     fz := z - f32(iz)
-    u := __noise_fade(fx)
-    v := __noise_fade(fy)
+    u := fade(fx)
+    v := fade(fy)
     var plane [2]f32
     for k in 0..2 {
         dz := fz - f32(k)
-        a := __noise_grad3(ix, iy, iz + k, seed, fx, fy, dz)
-        b := __noise_grad3(ix + 1, iy, iz + k, seed, fx - 1.0, fy, dz)
-        c := __noise_grad3(ix, iy + 1, iz + k, seed, fx, fy - 1.0, dz)
-        d := __noise_grad3(ix + 1, iy + 1, iz + k, seed, fx - 1.0, fy - 1.0, dz)
+        a := grad3(ix, iy, iz + k, seed, fx, fy, dz)
+        b := grad3(ix + 1, iy, iz + k, seed, fx - 1.0, fy, dz)
+        c := grad3(ix, iy + 1, iz + k, seed, fx, fy - 1.0, dz)
+        d := grad3(ix + 1, iy + 1, iz + k, seed, fx - 1.0, fy - 1.0, dz)
         lo := a + (b - a) * u
         hi := c + (d - c) * u
         plane[k] = lo + (hi - lo) * v
     }
-    return (plane[0] + (plane[1] - plane[0]) * __noise_fade(fz)) * (2.0 / 3.0)
+    return (plane[0] + (plane[1] - plane[0]) * fade(fz)) * (2.0 / 3.0)
 }
 
 // 3D gradient noise with seed 0

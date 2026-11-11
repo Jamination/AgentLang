@@ -3,48 +3,48 @@
 
 // ---------- checksums ----------
 // slicing-by-8 tables for crc32, filled on first use
-var __crc_tab [2048]u32
+priv var crc_tab [2048]u32
 
-fn __crc_init() {
+priv fn crc_init() {
     for i in 0..256 {
         c := u32(i)
         for k in 0..8 {
             c = if c & 1 != 0 { c >> 1 ^ 0xEDB88320 } else { c >> 1 }
         }
-        __crc_tab[i] = c
+        crc_tab[i] = c
     }
     for i in 0..256 {
-        c := __crc_tab[i]
+        c := crc_tab[i]
         for t in 1..8 {
-            c = __crc_tab[c & 255] ^ c >> 8
-            __crc_tab[t * 256 + i] = c
+            c = crc_tab[c & 255] ^ c >> 8
+            crc_tab[t * 256 + i] = c
         }
     }
 }
 
-inline fn __load64(addr i64) u64 {
+priv inline fn load64(addr i64) u64 {
     cast[*u64](addr)[0]
 }
 
 // CRC-32 (the PNG / zip / gzip polynomial) of data, continuing from the CRC `prev` of the bytes before it
 fn crc32(prev u32, data []u8) u32 {
-    if __crc_tab[1] == 0 {
-        __crc_init()
+    if crc_tab[1] == 0 {
+        crc_init()
     }
     c := ~prev
     n := len(data)
     p := cast[i64](ptr(data))
     i := 0
     while i + 8 <= n {
-        w := __load64(p + i) ^ u64(c)
-        c = __crc_tab[1792 + (w & 255)] ^ __crc_tab[1536 + (w >> 8 & 255)] ^
-            __crc_tab[1280 + (w >> 16 & 255)] ^ __crc_tab[1024 + (w >> 24 & 255)] ^
-            __crc_tab[768 + (w >> 32 & 255)] ^ __crc_tab[512 + (w >> 40 & 255)] ^
-            __crc_tab[256 + (w >> 48 & 255)] ^ __crc_tab[w >> 56]
+        w := load64(p + i) ^ u64(c)
+        c = crc_tab[1792 + (w & 255)] ^ crc_tab[1536 + (w >> 8 & 255)] ^
+            crc_tab[1280 + (w >> 16 & 255)] ^ crc_tab[1024 + (w >> 24 & 255)] ^
+            crc_tab[768 + (w >> 32 & 255)] ^ crc_tab[512 + (w >> 40 & 255)] ^
+            crc_tab[256 + (w >> 48 & 255)] ^ crc_tab[w >> 56]
         i += 8
     }
     while i < n {
-        c = __crc_tab[(c ^ u32(data[i])) & 255] ^ c >> 8
+        c = crc_tab[(c ^ u32(data[i])) & 255] ^ c >> 8
         i += 1
     }
     ~c
@@ -81,61 +81,61 @@ fn adler32(data []u8) u32 {
 }
 
 // ---------- byte order helpers ----------
-inline fn __be16(d []u8, i i64) i64 {
+priv inline fn be16(d []u8, i i64) i64 {
     i64(d[i]) << 8 | i64(d[i + 1])
 }
 
-inline fn __be32(d []u8, i i64) i64 {
+priv inline fn be32(d []u8, i i64) i64 {
     i64(d[i]) << 24 | i64(d[i + 1]) << 16 | i64(d[i + 2]) << 8 | i64(d[i + 3])
 }
 
-inline fn __le16(d []u8, i i64) i64 {
+priv inline fn le16(d []u8, i i64) i64 {
     i64(d[i]) | i64(d[i + 1]) << 8
 }
 
-inline fn __le32(d []u8, i i64) i64 {
+priv inline fn le32(d []u8, i i64) i64 {
     i64(d[i]) | i64(d[i + 1]) << 8 | i64(d[i + 2]) << 16 | i64(d[i + 3]) << 24
 }
 
-fn __put_be32(d []u8, i i64, v i64) {
+priv fn put_be32(d []u8, i i64, v i64) {
     d[i] = u8(v >> 24)
     d[i + 1] = u8(v >> 16)
     d[i + 2] = u8(v >> 8)
     d[i + 3] = u8(v)
 }
 
-fn __put_le16(d []u8, i i64, v i64) {
+priv fn put_le16(d []u8, i i64, v i64) {
     d[i] = u8(v)
     d[i + 1] = u8(v >> 8)
 }
 
-fn __put_le32(d []u8, i i64, v i64) {
-    __put_le16(d, i, v)
-    __put_le16(d, i + 2, v >> 16)
+priv fn put_le32(d []u8, i i64, v i64) {
+    put_le16(d, i, v)
+    put_le16(d, i + 2, v >> 16)
 }
 
 // ---------- inflate ----------
-var __LEN_BASE = [29]u16{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
-var __LEN_EXTRA = [29]u8{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
-var __DIST_BASE = [30]u16{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577}
-var __DIST_EXTRA = [30]u8{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13}
-var __CL_ORDER = [19]u8{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
+priv var LEN_BASE = [29]u16{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
+priv var LEN_EXTRA = [29]u8{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
+priv var DIST_BASE = [30]u16{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577}
+priv var DIST_EXTRA = [30]u8{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13}
+priv var CL_ORDER = [19]u8{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
 
 // Decoding table entries: bits 0-7 code bits to consume, bits 8-12 number of extra bits (or the
 // index bits of a subtable), bits 16-31 literal / base value / subtable offset, and the flags:
-const __F_SUB u32 = 0x2000      // pointer to a subtable for codes longer than the root index
-const __F_BASE u32 = 0x4000     // length or distance: base value plus extra bits
-const __F_END u32 = 0x8000      // end of block (value 0) or invalid code (value 1)
-const __BAD_CODE u32 = 0x18000
-const __LIT_ROOT = 10
-const __DIST_ROOT = 8
+priv const F_SUB u32 = 0x2000      // pointer to a subtable for codes longer than the root index
+priv const F_BASE u32 = 0x4000     // length or distance: base value plus extra bits
+priv const F_END u32 = 0x8000      // end of block (value 0) or invalid code (value 1)
+priv const BAD_CODE u32 = 0x18000
+priv const LIT_ROOT = 10
+priv const DIST_ROOT = 8
 
 // kind of code a decoding table is built for
-const __K_LIT = 0
-const __K_DIST = 1
-const __K_LENS = 2
+priv const K_LIT = 0
+priv const K_DIST = 1
+priv const K_LENS = 2
 
-struct __Inflate {
+priv struct Inflate {
     src []u8
     pos i64          // next byte of src that is not in bitbuf
     bitbuf u64
@@ -148,31 +148,31 @@ struct __Inflate {
 }
 
 // the low n (1..16) bits of x in reverse order
-inline fn __rev_bits(x i64, n i64) i64 {
+priv inline fn rev_bits(x i64, n i64) i64 {
     x = (x & 0x5555) << 1 | (x >> 1 & 0x5555)
     x = (x & 0x3333) << 2 | (x >> 2 & 0x3333)
     x = (x & 0x0F0F) << 4 | (x >> 4 & 0x0F0F)
     ((x & 0xFF) << 8 | (x >> 8 & 0xFF)) >> (16 - n)
 }
 
-fn __huff_entry(sym i64, kind i64) u32 {
-    if kind == __K_LIT {
+priv fn huff_entry(sym i64, kind i64) u32 {
+    if kind == K_LIT {
         if sym < 256 {
             return u32(sym) << 16
         }
         if sym == 256 {
-            return __F_END
+            return F_END
         }
         if sym > 285 {
-            return __BAD_CODE
+            return BAD_CODE
         }
-        return u32(__LEN_BASE[sym - 257]) << 16 | __F_BASE | u32(__LEN_EXTRA[sym - 257]) << 8
+        return u32(LEN_BASE[sym - 257]) << 16 | F_BASE | u32(LEN_EXTRA[sym - 257]) << 8
     }
-    if kind == __K_DIST {
+    if kind == K_DIST {
         if sym > 29 {
-            return __BAD_CODE
+            return BAD_CODE
         }
-        return u32(__DIST_BASE[sym]) << 16 | __F_BASE | u32(__DIST_EXTRA[sym]) << 8
+        return u32(DIST_BASE[sym]) << 16 | F_BASE | u32(DIST_EXTRA[sym]) << 8
     }
     u32(sym) << 16
 }
@@ -180,7 +180,7 @@ fn __huff_entry(sym i64, kind i64) u32 {
 // Fills `tab` for the canonical Huffman code with the given code lengths: codes are looked up
 // by their first `root` bits (LSB first), longer ones continue in a subtable. Like zlib, it
 // rejects over-subscribed codes and incomplete ones other than a single 1-bit code.
-fn __huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
+priv fn huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
     var count [16]i64
     for l in lens {
         count[l] += 1
@@ -191,7 +191,7 @@ fn __huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
         maxl -= 1
     }
     if maxl == 0 {
-        fill(tab[..size], __BAD_CODE)
+        fill(tab[..size], BAD_CODE)
         return true
     }
     left := 1
@@ -202,10 +202,10 @@ fn __huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
         }
     }
     if left > 0 {
-        if kind == __K_LENS || maxl != 1 {
+        if kind == K_LENS || maxl != 1 {
             return false
         }
-        fill(tab[..size], __BAD_CODE)
+        fill(tab[..size], BAD_CODE)
     }
     // symbols ordered by code length, then by value: the order of their canonical codes
     var offs [17]i64
@@ -228,8 +228,8 @@ fn __huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
     sub_bits := 0
     for l in 1..=maxl {
         for k in 0..count[l] {
-            r := __rev_bits(code, l)
-            e := __huff_entry(i64(sorted[si]), kind)
+            r := rev_bits(code, l)
+            e := huff_entry(i64(sorted[si]), kind)
             si += 1
             code += 1
             if l <= root {
@@ -262,7 +262,7 @@ fn __huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
                 sub_prefix = prefix
                 sub_off = used
                 used += 1 << sub_bits
-                tab[prefix] = u32(sub_off) << 16 | __F_SUB | u32(sub_bits) << 8 | u32(root)
+                tab[prefix] = u32(sub_off) << 16 | F_SUB | u32(sub_bits) << 8 | u32(root)
             }
             e |= u32(l - root)
             for j in r >> root..1 << sub_bits by 1 << (l - root) {
@@ -275,7 +275,7 @@ fn __huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
 }
 
 // moves whole bytes from src into the bit buffer
-fn __refill(s *__Inflate) {
+priv fn refill(s *Inflate) {
     while s.bitcnt <= 56 && s.pos < len(s.src) {
         s.bitbuf |= u64(s.src[s.pos]) << s.bitcnt
         s.pos += 1
@@ -285,9 +285,9 @@ fn __refill(s *__Inflate) {
 
 // Takes the next n (at most 32) bits. Past the end of the input it yields zeros and leaves
 // bitcnt negative, which the callers check once per block or symbol.
-fn __bits(s *__Inflate, n i64) i64 {
+priv fn take_bits(s *Inflate, n i64) i64 {
     if s.bitcnt < n {
-        __refill(s)
+        refill(s)
     }
     v := i64(s.bitbuf & ((u64(1) << n) - 1))
     s.bitbuf = s.bitbuf >> n
@@ -296,7 +296,7 @@ fn __bits(s *__Inflate, n i64) i64 {
 }
 
 // makes room for n more output bytes; false if the output buffer is fixed and full
-fn __out_room(s *__Inflate, n i64) bool {
+priv fn out_room(s *Inflate, n i64) bool {
     if s.n + n <= len(s.out) {
         return true
     }
@@ -309,7 +309,7 @@ fn __out_room(s *__Inflate, n i64) bool {
     true
 }
 
-fn __inflate_stored(s *__Inflate) bool {
+priv fn inflate_stored(s *Inflate) bool {
     if s.bitcnt < 0 {
         return false
     }
@@ -320,12 +320,12 @@ fn __inflate_stored(s *__Inflate) bool {
     if s.pos + 4 > len(s.src) {
         return false
     }
-    n := __le16(s.src, s.pos)
-    if n != __le16(s.src, s.pos + 2) ^ 0xFFFF {
+    n := le16(s.src, s.pos)
+    if n != le16(s.src, s.pos + 2) ^ 0xFFFF {
         return false
     }
     s.pos += 4
-    if s.pos + n > len(s.src) || !__out_room(s, n) {
+    if s.pos + n > len(s.src) || !out_room(s, n) {
         return false
     }
     copy(s.out[s.n..s.n + n], s.src[s.pos..s.pos + n])
@@ -335,19 +335,19 @@ fn __inflate_stored(s *__Inflate) bool {
 }
 
 // reads the code lengths of a dynamic block and builds both decoding tables
-fn __inflate_dynamic(s *__Inflate) bool {
-    hlit := __bits(s, 5) + 257
-    hdist := __bits(s, 5) + 1
-    hclen := __bits(s, 4) + 4
+priv fn inflate_dynamic(s *Inflate) bool {
+    hlit := take_bits(s, 5) + 257
+    hdist := take_bits(s, 5) + 1
+    hclen := take_bits(s, 4) + 4
     if hlit > 286 || hdist > 30 {
         return false
     }
     var cl [19]u8
     for i in 0..hclen {
-        cl[__CL_ORDER[i]] = u8(__bits(s, 3))
+        cl[CL_ORDER[i]] = u8(take_bits(s, 3))
     }
     var cltab [128]u32
-    if !__huff_build(cltab[..], cl[..], 7, __K_LENS) {
+    if !huff_build(cltab[..], cl[..], 7, K_LENS) {
         return false
     }
     var lens [316]u8
@@ -355,13 +355,13 @@ fn __inflate_dynamic(s *__Inflate) bool {
     i := 0
     while i < total {
         if s.bitcnt < 7 {
-            __refill(s)
+            refill(s)
         }
         e := cltab[s.bitbuf & 127]
         nb := i64(e & 255)
         s.bitbuf = s.bitbuf >> nb
         s.bitcnt -= nb
-        if s.bitcnt < 0 || e & __F_END != 0 {
+        if s.bitcnt < 0 || e & F_END != 0 {
             return false
         }
         sym := i64(e >> 16)
@@ -377,11 +377,11 @@ fn __inflate_dynamic(s *__Inflate) bool {
                 return false
             }
             val = lens[i - 1]
-            rep = 3 + __bits(s, 2)
+            rep = 3 + take_bits(s, 2)
         } else if sym == 17 {
-            rep = 3 + __bits(s, 3)
+            rep = 3 + take_bits(s, 3)
         } else {
-            rep = 11 + __bits(s, 7)
+            rep = 11 + take_bits(s, 7)
         }
         if i + rep > total {
             return false
@@ -393,12 +393,12 @@ fn __inflate_dynamic(s *__Inflate) bool {
     if s.bitcnt < 0 || lens[256] == 0 {
         return false
     }
-    __huff_build(s.lit[..], lens[..hlit], __LIT_ROOT, __K_LIT) &&
-        __huff_build(s.dist[..], lens[hlit..total], __DIST_ROOT, __K_DIST)
+    huff_build(s.lit[..], lens[..hlit], LIT_ROOT, K_LIT) &&
+        huff_build(s.dist[..], lens[hlit..total], DIST_ROOT, K_DIST)
 }
 
 // decodes the symbols of one Huffman-coded block with the tables in s
-fn __inflate_codes(s *__Inflate) bool {
+priv fn inflate_codes(s *Inflate) bool {
     src := s.src
     in_n := len(src)
     in_p := cast[i64](ptr(src))
@@ -414,7 +414,7 @@ fn __inflate_codes(s *__Inflate) bool {
     // every symbol needs at most 48 bits (15 + 5 for a length, 15 + 13 for a distance)
     while bc >= 0 {
         if pos + 8 <= in_n {
-            bb |= __load64(in_p + pos) << bc
+            bb |= load64(in_p + pos) << bc
             pos += (63 - bc) >> 3
             bc |= 56
         } else {
@@ -425,18 +425,18 @@ fn __inflate_codes(s *__Inflate) bool {
             }
         }
         e := lit[bb & 1023]
-        if e & __F_SUB != 0 {
-            bb = bb >> __LIT_ROOT
-            bc -= __LIT_ROOT
+        if e & F_SUB != 0 {
+            bb = bb >> LIT_ROOT
+            bc -= LIT_ROOT
             e = lit[u64(e >> 16) + (bb & ((u64(1) << (e >> 8 & 31)) - 1))]
         }
         nb := i64(e & 255)
         bb = bb >> nb
         bc -= nb
-        if e & (__F_BASE | __F_END) == 0 {
+        if e & (F_BASE | F_END) == 0 {
             if n == cap {
                 s.n = n
-                if !__out_room(s, 1) {
+                if !out_room(s, 1) {
                     break
                 }
                 out = s.out
@@ -446,7 +446,7 @@ fn __inflate_codes(s *__Inflate) bool {
             n += 1
             continue
         }
-        if e & __F_BASE == 0 {
+        if e & F_BASE == 0 {
             ok = e >> 16 == 0 && bc >= 0
             break
         }
@@ -455,15 +455,15 @@ fn __inflate_codes(s *__Inflate) bool {
         bb = bb >> xb
         bc -= xb
         e = dist[bb & 255]
-        if e & __F_SUB != 0 {
-            bb = bb >> __DIST_ROOT
-            bc -= __DIST_ROOT
+        if e & F_SUB != 0 {
+            bb = bb >> DIST_ROOT
+            bc -= DIST_ROOT
             e = dist[u64(e >> 16) + (bb & ((u64(1) << (e >> 8 & 31)) - 1))]
         }
         nb = i64(e & 255)
         bb = bb >> nb
         bc -= nb
-        if e & __F_BASE == 0 {
+        if e & F_BASE == 0 {
             break
         }
         xb = i64(e >> 8 & 31)
@@ -475,7 +475,7 @@ fn __inflate_codes(s *__Inflate) bool {
         }
         if n + length + 8 > cap {
             s.n = n
-            if !__out_room(s, length) {
+            if !out_room(s, length) {
                 break
             }
             out = s.out
@@ -486,7 +486,7 @@ fn __inflate_codes(s *__Inflate) bool {
             q := cast[i64](ptr(out)) + n
             end := q + length
             loop {
-                cast[*u64](q)[0] = __load64(q - d)
+                cast[*u64](q)[0] = load64(q - d)
                 q += 8
                 if q >= end {
                     break
@@ -509,12 +509,12 @@ fn __inflate_codes(s *__Inflate) bool {
 }
 
 // decodes all blocks of a deflate stream starting at s.pos
-fn __inflate_run(s *__Inflate) bool {
+priv fn inflate_run(s *Inflate) bool {
     loop {
-        final := __bits(s, 1)
-        kind := __bits(s, 2)
+        final := take_bits(s, 1)
+        kind := take_bits(s, 2)
         if kind == 0 {
-            if !__inflate_stored(s) {
+            if !inflate_stored(s) {
                 return false
             }
         } else if kind == 1 {
@@ -524,12 +524,12 @@ fn __inflate_run(s *__Inflate) bool {
             fill(lens[256..280], 7)
             fill(lens[280..288], 8)
             fill(lens[288..], 5)
-            __huff_build(s.lit[..], lens[..288], __LIT_ROOT, __K_LIT)
-            __huff_build(s.dist[..], lens[288..], __DIST_ROOT, __K_DIST)
-            if !__inflate_codes(s) {
+            huff_build(s.lit[..], lens[..288], LIT_ROOT, K_LIT)
+            huff_build(s.dist[..], lens[288..], DIST_ROOT, K_DIST)
+            if !inflate_codes(s) {
                 return false
             }
-        } else if kind == 3 || !__inflate_dynamic(s) || !__inflate_codes(s) {
+        } else if kind == 3 || !inflate_dynamic(s) || !inflate_codes(s) {
             return false
         }
         if s.bitcnt < 0 {
@@ -542,71 +542,71 @@ fn __inflate_run(s *__Inflate) bool {
 }
 
 // checks the zlib header, inflates, and verifies the Adler-32 that follows the deflate stream
-fn __zlib_run(s *__Inflate) bool {
+priv fn zlib_run(s *Inflate) bool {
     d := s.src
-    if len(d) < 6 || d[0] & 15 != 8 || d[0] >> 4 > 7 || d[1] & 0x20 != 0 || __be16(d, 0) % 31 != 0 {
+    if len(d) < 6 || d[0] & 15 != 8 || d[0] >> 4 > 7 || d[1] & 0x20 != 0 || be16(d, 0) % 31 != 0 {
         return false
     }
     s.pos = 2
-    if !__inflate_run(s) {
+    if !inflate_run(s) {
         return false
     }
     end := s.pos - (s.bitcnt >> 3)
-    end + 4 <= len(d) && u32(__be32(d, end)) == adler32(s.out[..s.n])
+    end + 4 <= len(d) && u32(be32(d, end)) == adler32(s.out[..s.n])
 }
 
 // Decompresses a raw deflate stream (RFC 1951) into a new buffer. Allocates: the buffer is
 // doubled as needed, so up to twice the result size stays behind in the arena.
 fn inflate(data []u8) ([]u8, bool) {
-    var s __Inflate
+    var s Inflate
     s.src = data
     s.out = alloc[u8](len(data) * 4 + 4096)
     s.grow = true
-    ok := __inflate_run(&s)
+    ok := inflate_run(&s)
     (s.out[..s.n], ok)
 }
 
 // Decompresses a raw deflate stream into `out` without allocating. Returns the number of bytes
 // written; false if the stream is malformed or does not fit.
 fn inflate_into(data []u8, out []u8) (i64, bool) {
-    var s __Inflate
+    var s Inflate
     s.src = data
     s.out = out
-    ok := __inflate_run(&s)
+    ok := inflate_run(&s)
     (s.n, ok)
 }
 
 // Decompresses a zlib stream (RFC 1950) into a new buffer and verifies its Adler-32. Allocates like inflate.
 fn zlib_decompress(data []u8) ([]u8, bool) {
-    var s __Inflate
+    var s Inflate
     s.src = data
     s.out = alloc[u8](len(data) * 4 + 4096)
     s.grow = true
-    ok := __zlib_run(&s)
+    ok := zlib_run(&s)
     (s.out[..s.n], ok)
 }
 
 // Decompresses a zlib stream into `out` without allocating and verifies its Adler-32. Returns
 // the number of bytes written; false if the stream is malformed or does not fit.
 fn zlib_decompress_into(data []u8, out []u8) (i64, bool) {
-    var s __Inflate
+    var s Inflate
     s.src = data
     s.out = out
-    ok := __zlib_run(&s)
+    ok := zlib_run(&s)
     (s.n, ok)
 }
 
 // ---------- deflate ----------
-const __BLOCK_SYMS = 32768      // symbols per block
-const __MAX_CHAIN = 128         // hash chain entries examined per position
-const __GOOD_LEN = 8            // a pending match this long quarters the chain limit
-const __MAX_LAZY = 16           // a pending match this long is taken without looking further
-const __NICE_LEN = 128          // a match this long ends the search
+priv const BLOCK_SYMS = 32768      // symbols per block
+priv const MAX_CHAIN = 128         // hash chain entries examined per position
+priv const GOOD_LEN = 8            // a pending match this long quarters the chain limit
+priv const MAX_LAZY = 16           // a pending match this long is taken without looking further
+priv const NICE_LEN = 128          // a match this long ends the search
 
-struct __BitWriter { buf []u8, n i64, acc u64, cnt i64 }
+priv struct BitWriter { buf []u8, n i64, acc u64, cnt i64 }
 
-struct __Deflate {
-    w *__BitWriter
+priv struct Deflate {
+    w *BitWriter
     src []u8
     syms []u32       // literal byte, or match length | distance << 9
     nsym i64
@@ -616,11 +616,11 @@ struct __Deflate {
 }
 
 // appends the low nbits (at most 32) bits of v
-inline fn __put_bits(w *__BitWriter, v i64, nbits i64) {
+priv inline fn put_bits(w *BitWriter, v i64, nbits i64) {
     w.acc |= u64(v) << w.cnt
     w.cnt += nbits
     if w.cnt >= 32 {
-        __put_le32(w.buf, w.n, i64(w.acc & 0xFFFFFFFF))
+        put_le32(w.buf, w.n, i64(w.acc & 0xFFFFFFFF))
         w.n += 4
         w.acc = w.acc >> 32
         w.cnt -= 32
@@ -628,7 +628,7 @@ inline fn __put_bits(w *__BitWriter, v i64, nbits i64) {
 }
 
 // pads with zero bits to the next byte boundary
-fn __flush_bits(w *__BitWriter) {
+priv fn flush_bits(w *BitWriter) {
     while w.cnt > 0 {
         w.buf[w.n] = u8(w.acc)
         w.n += 1
@@ -639,7 +639,7 @@ fn __flush_bits(w *__BitWriter) {
 }
 
 // index (0..28) of the length code for a match length 3..258
-inline fn __len_code(length i64) i64 {
+priv inline fn len_code(length i64) i64 {
     l := length - 3
     if l < 8 {
         return l
@@ -652,7 +652,7 @@ inline fn __len_code(length i64) i64 {
 }
 
 // distance code (0..29) for a distance 1..32768
-inline fn __dist_code(dist i64) i64 {
+priv inline fn dist_code(dist i64) i64 {
     d := dist - 1
     if d < 4 {
         return d
@@ -663,7 +663,7 @@ inline fn __dist_code(dist i64) i64 {
 
 // Code lengths (0 for unused symbols, at most maxlen) of a minimum-redundancy prefix code for
 // the given frequencies. At least two symbols get a code, so the code is always complete.
-fn __huff_lengths(freq []i64, lens []u8, maxlen i64) {
+priv fn huff_lengths(freq []i64, lens []u8, maxlen i64) {
     var key [288]i64
     n := 0
     for s in 0..len(freq) {
@@ -760,7 +760,7 @@ fn __huff_lengths(freq []i64, lens []u8, maxlen i64) {
 }
 
 // canonical codes for the given lengths, bit-reversed so that they can be written LSB first
-fn __huff_codes(lens []u8, codes []u16) {
+priv fn huff_codes(lens []u8, codes []u16) {
     var count [16]i64
     for l in lens {
         count[l] += 1
@@ -775,7 +775,7 @@ fn __huff_codes(lens []u8, codes []u16) {
     for s in 0..len(lens) {
         l := i64(lens[s])
         if l != 0 {
-            codes[s] = u16(__rev_bits(next[l], l))
+            codes[s] = u16(rev_bits(next[l], l))
             next[l] += 1
         }
     }
@@ -783,14 +783,14 @@ fn __huff_codes(lens []u8, codes []u16) {
 
 // Writes the pending symbols, which cover src[d.start..end], as one block: stored, fixed or
 // dynamic Huffman, whichever is smallest.
-fn __flush_block(d *__Deflate, end i64, final bool) {
+priv fn flush_block(d *Deflate, end i64, final bool) {
     w := d.w
     last := if final { 1 } else { 0 }
     d.lfreq[256] = 1
     var llen [288]u8
     var dlen [32]u8
-    __huff_lengths(d.lfreq[..286], llen[..286], 15)
-    __huff_lengths(d.dfreq[..30], dlen[..30], 15)
+    huff_lengths(d.lfreq[..286], llen[..286], 15)
+    huff_lengths(d.dfreq[..30], dlen[..30], 15)
     hlit := 286
     while hlit > 257 && llen[hlit - 1] == 0 {
         hlit -= 1
@@ -843,9 +843,9 @@ fn __flush_block(d *__Deflate, end i64, final bool) {
         }
     }
     var cllen [19]u8
-    __huff_lengths(clfreq[..], cllen[..], 7)
+    huff_lengths(clfreq[..], cllen[..], 7)
     hclen := 19
-    while hclen > 4 && cllen[__CL_ORDER[hclen - 1]] == 0 {
+    while hclen > 4 && cllen[CL_ORDER[hclen - 1]] == 0 {
         hclen -= 1
     }
     // exact sizes in bits of the three encodings
@@ -861,14 +861,14 @@ fn __flush_block(d *__Deflate, end i64, final bool) {
     fix := 3
     for s in 0..286 {
         f := d.lfreq[s]
-        x := if s > 256 { i64(__LEN_EXTRA[s - 257]) } else { 0 }
+        x := if s > 256 { i64(LEN_EXTRA[s - 257]) } else { 0 }
         dyn += f * (i64(llen[s]) + x)
         fix += f * (i64(flen[s]) + x)
     }
     for s in 0..30 {
         f := d.dfreq[s]
-        dyn += f * i64(dlen[s] + __DIST_EXTRA[s])
-        fix += f * i64(5 + __DIST_EXTRA[s])
+        dyn += f * i64(dlen[s] + DIST_EXTRA[s])
+        fix += f * i64(5 + DIST_EXTRA[s])
     }
     span := end - d.start
     stored := span * 8 + 42 * max(1, (span + 65534) / 65535)
@@ -876,10 +876,10 @@ fn __flush_block(d *__Deflate, end i64, final bool) {
         p := d.start
         loop {
             k := min(end - p, 65535)
-            __put_bits(w, if p + k == end { last } else { 0 }, 3)
-            __flush_bits(w)
-            __put_le16(w.buf, w.n, k)
-            __put_le16(w.buf, w.n + 2, k ^ 0xFFFF)
+            put_bits(w, if p + k == end { last } else { 0 }, 3)
+            flush_bits(w)
+            put_le16(w.buf, w.n, k)
+            put_le16(w.buf, w.n + 2, k ^ 0xFFFF)
             copy(w.buf[w.n + 4..w.n + 4 + k], d.src[p..p + k])
             w.n += 4 + k
             p += k
@@ -889,47 +889,47 @@ fn __flush_block(d *__Deflate, end i64, final bool) {
         }
     } else {
         if fix <= dyn {
-            __put_bits(w, last | 2, 3)
+            put_bits(w, last | 2, 3)
             copy(llen[..], flen[..])
             fill(dlen[..], 5)
         } else {
-            __put_bits(w, last | 4, 3)
-            __put_bits(w, hlit - 257, 5)
-            __put_bits(w, hdist - 1, 5)
-            __put_bits(w, hclen - 4, 4)
+            put_bits(w, last | 4, 3)
+            put_bits(w, hlit - 257, 5)
+            put_bits(w, hdist - 1, 5)
+            put_bits(w, hclen - 4, 4)
             for k in 0..hclen {
-                __put_bits(w, i64(cllen[__CL_ORDER[k]]), 3)
+                put_bits(w, i64(cllen[CL_ORDER[k]]), 3)
             }
             var clcode [19]u16
-            __huff_codes(cllen[..], clcode[..])
+            huff_codes(cllen[..], clcode[..])
             for k in 0..nrle {
                 sym := i64(rle[k] & 255)
-                __put_bits(w, i64(clcode[sym]), i64(cllen[sym]))
+                put_bits(w, i64(clcode[sym]), i64(cllen[sym]))
                 if sym >= 16 {
-                    __put_bits(w, i64(rle[k] >> 8), if sym == 16 { 2 } else if sym == 17 { 3 } else { 7 })
+                    put_bits(w, i64(rle[k] >> 8), if sym == 16 { 2 } else if sym == 17 { 3 } else { 7 })
                 }
             }
         }
         var lcode [288]u16
         var dcode [32]u16
-        __huff_codes(llen[..], lcode[..])
-        __huff_codes(dlen[..], dcode[..])
+        huff_codes(llen[..], lcode[..])
+        huff_codes(dlen[..], dcode[..])
         for k in 0..d.nsym {
             sym := i64(d.syms[k])
             dist := sym >> 9
             if dist == 0 {
-                __put_bits(w, i64(lcode[sym]), i64(llen[sym]))
+                put_bits(w, i64(lcode[sym]), i64(llen[sym]))
                 continue
             }
             length := sym & 511
-            lc := __len_code(length)
+            lc := len_code(length)
             nb := i64(llen[257 + lc])
-            __put_bits(w, i64(lcode[257 + lc]) | (length - i64(__LEN_BASE[lc])) << nb, nb + i64(__LEN_EXTRA[lc]))
-            dc := __dist_code(dist)
+            put_bits(w, i64(lcode[257 + lc]) | (length - i64(LEN_BASE[lc])) << nb, nb + i64(LEN_EXTRA[lc]))
+            dc := dist_code(dist)
             nb = i64(dlen[dc])
-            __put_bits(w, i64(dcode[dc]) | (dist - i64(__DIST_BASE[dc])) << nb, nb + i64(__DIST_EXTRA[dc]))
+            put_bits(w, i64(dcode[dc]) | (dist - i64(DIST_BASE[dc])) << nb, nb + i64(DIST_EXTRA[dc]))
         }
-        __put_bits(w, i64(lcode[256]), i64(llen[256]))
+        put_bits(w, i64(lcode[256]), i64(llen[256]))
     }
     d.nsym = 0
     d.start = end
@@ -938,10 +938,10 @@ fn __flush_block(d *__Deflate, end i64, final bool) {
 }
 
 // number of equal bytes (at most maxlen) at addresses a and b
-inline fn __match_len(a i64, b i64, maxlen i64) i64 {
+priv inline fn match_len(a i64, b i64, maxlen i64) i64 {
     l := 0
     while l + 8 <= maxlen {
-        x := __load64(a + l) ^ __load64(b + l)
+        x := load64(a + l) ^ load64(b + l)
         if x != 0 {
             return l + i64(ctz(x) >> 3)
         }
@@ -954,23 +954,23 @@ inline fn __match_len(a i64, b i64, maxlen i64) i64 {
 }
 
 // hash of the three bytes at src[i]
-inline fn __hash3(src []u8, i i64) i64 {
+priv inline fn hash3(src []u8, i i64) i64 {
     i64((u32(src[i]) | u32(src[i + 1]) << 8 | u32(src[i + 2]) << 16) * 0x9E3779B1 >> 17)
 }
 
 // an upper limit for the deflate stream of n bytes: stored blocks plus their headers
-inline fn __deflate_bound(n i64) i64 {
+priv inline fn deflate_bound(n i64) i64 {
     n + (n >> 10) + 64
 }
 
-// Appends the deflate stream for src to w, whose buffer must have __deflate_bound(len(src))
+// Appends the deflate stream for src to w, whose buffer must have deflate_bound(len(src))
 // bytes of room. LZ77 with hash chains and lazy matching; working memory is released again.
-fn __deflate(w *__BitWriter, src []u8) {
+priv fn deflate_body(w *BitWriter, src []u8) {
     m := mark()
-    var d __Deflate
+    var d Deflate
     d.w = w
     d.src = src
-    d.syms = alloc[u32](__BLOCK_SYMS)
+    d.syms = alloc[u32](BLOCK_SYMS)
     // head[h]: last position with hash h, prev[p & 32767]: the position before p with the same
     // hash; both store position + 1 so that 0 means none
     head := alloc[i64](32768)
@@ -984,23 +984,23 @@ fn __deflate(w *__BitWriter, src []u8) {
         mlen := 0
         mdist := 0
         if i + 3 <= n {
-            h := __hash3(src, i)
+            h := hash3(src, i)
             c := head[h] - 1
             head[h] = i + 1
             prev[i & 32767] = c + 1
             maxlen := min(n - i, 258)
             best := max(plen, 2)
-            if plen < __MAX_LAZY && best < maxlen {
-                chain := if plen >= __GOOD_LEN { __MAX_CHAIN >> 2 } else { __MAX_CHAIN }
+            if plen < MAX_LAZY && best < maxlen {
+                chain := if plen >= GOOD_LEN { MAX_CHAIN >> 2 } else { MAX_CHAIN }
                 limit := max(i - 32767, 0)
                 while c >= limit && chain > 0 {
                     if src[c + best] == src[i + best] {
-                        l := __match_len(base + c, base + i, maxlen)
+                        l := match_len(base + c, base + i, maxlen)
                         if l > best {
                             best = l
                             mlen = l
                             mdist = i - c
-                            if l >= __NICE_LEN || l == maxlen {
+                            if l >= NICE_LEN || l == maxlen {
                                 break
                             }
                         }
@@ -1018,13 +1018,13 @@ fn __deflate(w *__BitWriter, src []u8) {
         if plen != 0 && mlen <= plen {
             // the match at i - 1 stands: emit it and index the positions it covers
             d.syms[d.nsym] = u32(plen | pdist << 9)
-            d.lfreq[257 + __len_code(plen)] += 1
-            d.dfreq[__dist_code(pdist)] += 1
+            d.lfreq[257 + len_code(plen)] += 1
+            d.dfreq[dist_code(pdist)] += 1
             end = i - 1 + plen
             i += 1
             while i < end {
                 if i + 3 <= n {
-                    h := __hash3(src, i)
+                    h := hash3(src, i)
                     prev[i & 32767] = head[h]
                     head[h] = i + 1
                 }
@@ -1050,33 +1050,33 @@ fn __deflate(w *__BitWriter, src []u8) {
             i += 1
         }
         d.nsym += 1
-        if d.nsym == __BLOCK_SYMS {
-            __flush_block(&d, end, false)
+        if d.nsym == BLOCK_SYMS {
+            flush_block(&d, end, false)
         }
     }
-    __flush_block(&d, n, true)
-    __flush_bits(w)
+    flush_block(&d, n, true)
+    flush_bits(w)
     release(m)
 }
 
 // Compresses data into a raw deflate stream (RFC 1951). Allocates the result; it is never
 // more than len(data) / 1024 + 64 bytes longer than data.
 fn deflate(data []u8) []u8 {
-    var w __BitWriter
-    w.buf = alloc[u8](__deflate_bound(len(data)))
-    __deflate(&w, data)
+    var w BitWriter
+    w.buf = alloc[u8](deflate_bound(len(data)))
+    deflate_body(&w, data)
     w.buf[..w.n]
 }
 
 // Compresses data into a zlib stream (RFC 1950: header, deflate stream, Adler-32). Allocates the result.
 fn zlib_compress(data []u8) []u8 {
-    var w __BitWriter
-    w.buf = alloc[u8](__deflate_bound(len(data)) + 6)
+    var w BitWriter
+    w.buf = alloc[u8](deflate_bound(len(data)) + 6)
     w.buf[0] = 0x78
     w.buf[1] = 0x9C
     w.n = 2
-    __deflate(&w, data)
-    __put_be32(w.buf, w.n, i64(adler32(data)))
+    deflate_body(&w, data)
+    put_be32(w.buf, w.n, i64(adler32(data)))
     w.buf[..w.n + 4]
 }
 
@@ -1086,8 +1086,8 @@ fn zlib_compress(data []u8) []u8 {
 struct Image { w i64, h i64, channels i64, pix []u8 }
 
 // limits of the decoders: larger dimensions or decoded sizes are rejected
-const __MAX_DIM = 1 << 24
-const __MAX_BYTES = 1 << 31
+priv const MAX_DIM = 1 << 24
+priv const MAX_BYTES = 1 << 31
 
 // a new image with every byte zero (allocates w * h * channels bytes)
 fn image_new(w i64, h i64, channels i64) Image {
@@ -1106,7 +1106,7 @@ inline fn set(img *Image, x i64, y i64, c i64, v u8) {
 }
 
 // the pixel starting at pix[i] as red, green, blue, alpha (grey is spread, missing alpha is 255)
-inline fn __rgba(img Image, i i64) (u8, u8, u8, u8) {
+priv inline fn rgba(img Image, i i64) (u8, u8, u8, u8) {
     p := img.pix
     match img.channels {
         1 => (p[i], p[i], p[i], u8(255))
@@ -1117,19 +1117,19 @@ inline fn __rgba(img Image, i i64) (u8, u8, u8, u8) {
 }
 
 // grey value of a colour, with the integer weights 77 / 150 / 29 for red / green / blue
-inline fn __luma(r u8, g u8, b u8) u8 {
+priv inline fn luma(r u8, g u8, b u8) u8 {
     u8((i64(r) * 77 + i64(g) * 150 + i64(b) * 29) >> 8)
 }
 
 // stores a colour in the pixel starting at pix[i]: 1 and 2 channel images keep its grey value
-inline fn __set_rgba(img Image, i i64, r u8, g u8, b u8, a u8) {
+priv inline fn set_rgba(img Image, i i64, r u8, g u8, b u8, a u8) {
     p := img.pix
     if img.channels >= 3 {
         p[i] = r
         p[i + 1] = g
         p[i + 2] = b
     } else {
-        p[i] = __luma(r, g, b)
+        p[i] = luma(r, g, b)
     }
     if img.channels == 2 || img.channels == 4 {
         p[i + img.channels - 1] = a
@@ -1138,14 +1138,14 @@ inline fn __set_rgba(img Image, i i64, r u8, g u8, b u8, a u8) {
 
 // the pixel at (x, y) as an RGBA colour with components 0..1
 fn get(img Image, x i64, y i64) vec4 {
-    r, g, b, a := __rgba(img, (y * img.w + x) * img.channels)
+    r, g, b, a := rgba(img, (y * img.w + x) * img.channels)
     vec4(f32(r), f32(g), f32(b), f32(a)) / 255.0
 }
 
 // sets the pixel at (x, y) from an RGBA colour with components 0..1 (clamped, rounded to 8 bits)
 fn set(img *Image, x i64, y i64, col vec4) {
     c := fmin(fmax(col, vec4(0.0)), vec4(1.0)) * 255.0 + vec4(0.5)
-    __set_rgba(*img, (y * img.w + x) * img.channels, u8(i64(c.x)), u8(i64(c.y)), u8(i64(c.z)), u8(i64(c.w)))
+    set_rgba(*img, (y * img.w + x) * img.channels, u8(i64(c.x)), u8(i64(c.y)), u8(i64(c.z)), u8(i64(c.w)))
 }
 
 // The image with another channel count (allocates; returns img itself if it already has that
@@ -1156,8 +1156,8 @@ fn convert(img Image, channels i64) Image {
     }
     out := image_new(img.w, img.h, channels)
     for i in 0..img.w * img.h {
-        r, g, b, a := __rgba(img, i * img.channels)
-        __set_rgba(out, i * channels, r, g, b, a)
+        r, g, b, a := rgba(img, i * img.channels)
+        set_rgba(out, i * channels, r, g, b, a)
     }
     out
 }
@@ -1222,7 +1222,7 @@ fn resize_nearest(img Image, w i64, h i64) Image {
 }
 
 // position of the centre of destination pixel i in a source of sn pixels, in 1/256 pixel units
-inline fn __src_pos(i i64, sn i64, dn i64) i64 {
+priv inline fn src_pos(i i64, sn i64, dn i64) i64 {
     max(0, min((2 * i + 1) * sn * 128 / dn - 128, (sn - 1) * 256))
 }
 
@@ -1239,11 +1239,11 @@ fn resize_bilinear(img Image, w i64, h i64) Image {
     m := mark()
     xs := alloc[i64](w)
     for x in 0..w {
-        xs[x] = __src_pos(x, img.w, w)
+        xs[x] = src_pos(x, img.w, w)
     }
     o := 0
     for y in 0..h {
-        sy := __src_pos(y, img.h, h)
+        sy := src_pos(y, img.h, h)
         fy := sy & 255
         r0 := (sy >> 8) * img.w
         r1 := min((sy >> 8) + 1, img.h - 1) * img.w
@@ -1320,7 +1320,7 @@ fn mipmap_chain(img Image) []Image {
 }
 
 // ---------- PNG ----------
-struct __Png {
+priv struct Png {
     w i64
     h i64
     depth i64        // bits per sample
@@ -1336,7 +1336,7 @@ struct __Png {
 
 // The Paeth predictor: whichever of left, up, up-left is closest to left + up - up-left (ties
 // in that order). Written as two selects so that it compiles without branches.
-inline fn __paeth(a i64, b i64, c i64) i64 {
+priv inline fn paeth(a i64, b i64, c i64) i64 {
     pa := abs(b - c)
     pb := abs(a - c)
     pc := abs(a + b - 2 * c)
@@ -1346,7 +1346,7 @@ inline fn __paeth(a i64, b i64, c i64) i64 {
 
 // Reverses the scanline filter `ft`: reads the filtered bytes src, writes the row to cur (which
 // may be the same memory); prev is the row above, bpp the bytes per complete pixel.
-fn __png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
+priv fn png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
     n := len(cur)
     if ft == 0 {
         if ptr(cur) != ptr(src) {
@@ -1375,7 +1375,7 @@ fn __png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
             cur[i] = src[i] + prev[i]
         }
         for i in bpp..n {
-            cur[i] = src[i] + u8(__paeth(i64(cur[i - bpp]), i64(prev[i]), i64(prev[i - bpp])))
+            cur[i] = src[i] + u8(paeth(i64(cur[i - bpp]), i64(prev[i]), i64(prev[i - bpp])))
         }
     } else {
         return false
@@ -1384,25 +1384,25 @@ fn __png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
 }
 
 // sample i of an unfiltered row with `depth` bits per sample
-inline fn __png_sample(row []u8, i i64, depth i64) i64 {
+priv inline fn png_sample(row []u8, i i64, depth i64) i64 {
     if depth == 8 {
         return i64(row[i])
     }
     if depth == 16 {
-        return __be16(row, 2 * i)
+        return be16(row, 2 * i)
     }
     i64(row[i * depth >> 3]) >> (8 - depth - (i * depth & 7)) & ((1 << depth) - 1)
 }
 
 // Converts w pixels of an unfiltered row to 8-bit pixels in dst: applies the palette and the
 // transparent colour, scales 1/2/4-bit grey to 0..255 and keeps the high byte of 16-bit samples.
-fn __png_expand(p *__Png, row []u8, dst []u8, w i64) bool {
+priv fn png_expand(p *Png, row []u8, dst []u8, w i64) bool {
     depth := p.depth
     scale := if depth < 8 { 255 / ((1 << depth) - 1) } else { 1 }
     o := 0
     for x in 0..w {
         if p.ctype == 3 {
-            i := __png_sample(row, x, depth)
+            i := png_sample(row, x, depth)
             if i >= p.npal {
                 return false
             }
@@ -1410,7 +1410,7 @@ fn __png_expand(p *__Png, row []u8, dst []u8, w i64) bool {
         } else {
             clear := p.trns
             for c in 0..p.nin {
-                s := __png_sample(row, x * p.nin + c, depth)
+                s := png_sample(row, x * p.nin + c, depth)
                 if s != p.key[c] {
                     clear = false
                 }
@@ -1426,25 +1426,25 @@ fn __png_expand(p *__Png, row []u8, dst []u8, w i64) bool {
 }
 
 // width or height of an Adam7 pass: the pixels start, start + step, ... below n
-inline fn __pass_size(n i64, start i64, step i64) i64 {
+priv inline fn pass_size(n i64, start i64, step i64) i64 {
     (n - start + step - 1) / step
 }
 
-var __ADAM7_X = [7]u8{0, 4, 0, 2, 0, 1, 0}
-var __ADAM7_Y = [7]u8{0, 0, 4, 0, 2, 0, 1}
-var __ADAM7_DX = [7]u8{8, 8, 4, 4, 2, 2, 1}
-var __ADAM7_DY = [7]u8{8, 8, 8, 4, 4, 2, 2}
+priv var ADAM7_X = [7]u8{0, 4, 0, 2, 0, 1, 0}
+priv var ADAM7_Y = [7]u8{0, 0, 4, 0, 2, 0, 1}
+priv var ADAM7_DX = [7]u8{8, 8, 4, 4, 2, 2, 1}
+priv var ADAM7_DY = [7]u8{8, 8, 8, 4, 4, 2, 2}
 
 // bytes of the inflated image data: every scanline of every pass plus its filter byte
-fn __png_raw_size(p *__Png) i64 {
+priv fn png_raw_size(p *Png) i64 {
     bits := p.nin * p.depth
     if p.interlace == 0 {
         return p.h * (1 + (p.w * bits + 7) / 8)
     }
     n := 0
     for i in 0..7 {
-        pw := __pass_size(p.w, i64(__ADAM7_X[i]), i64(__ADAM7_DX[i]))
-        ph := __pass_size(p.h, i64(__ADAM7_Y[i]), i64(__ADAM7_DY[i]))
+        pw := pass_size(p.w, i64(ADAM7_X[i]), i64(ADAM7_DX[i]))
+        ph := pass_size(p.h, i64(ADAM7_Y[i]), i64(ADAM7_DY[i]))
         if pw > 0 {
             n += ph * (1 + (pw * bits + 7) / 8)
         }
@@ -1453,7 +1453,7 @@ fn __png_raw_size(p *__Png) i64 {
 }
 
 // unfilters the inflated data `raw` in place and writes the pixels to pix
-fn __png_rows(p *__Png, raw []u8, pix []u8) bool {
+priv fn png_rows(p *Png, raw []u8, pix []u8) bool {
     bits := p.nin * p.depth
     bpp := max(bits / 8, 1)
     ch := p.channels
@@ -1468,7 +1468,7 @@ fn __png_rows(p *__Png, raw []u8, pix []u8) bool {
             src := raw[at + 1..at + 1 + stride]
             dst := pix[y * p.w * ch..(y + 1) * p.w * ch]
             cur := if direct { dst } else { src }
-            if !__png_unfilter(raw[at], cur, src, prev, bpp) || (!direct && !__png_expand(p, src, dst, p.w)) {
+            if !png_unfilter(raw[at], cur, src, prev, bpp) || (!direct && !png_expand(p, src, dst, p.w)) {
                 return false
             }
             prev = cur
@@ -1478,10 +1478,10 @@ fn __png_rows(p *__Png, raw []u8, pix []u8) bool {
     line := alloc[u8](p.w * ch)
     at := 0
     for i in 0..7 {
-        dx := i64(__ADAM7_DX[i])
-        dy := i64(__ADAM7_DY[i])
-        pw := __pass_size(p.w, i64(__ADAM7_X[i]), dx)
-        ph := __pass_size(p.h, i64(__ADAM7_Y[i]), dy)
+        dx := i64(ADAM7_DX[i])
+        dy := i64(ADAM7_DY[i])
+        pw := pass_size(p.w, i64(ADAM7_X[i]), dx)
+        ph := pass_size(p.h, i64(ADAM7_Y[i]), dy)
         if pw == 0 {
             continue
         }
@@ -1489,10 +1489,10 @@ fn __png_rows(p *__Png, raw []u8, pix []u8) bool {
         prev := zero[..stride]
         for y in 0..ph {
             src := raw[at + 1..at + 1 + stride]
-            if !__png_unfilter(raw[at], src, src, prev, bpp) || !__png_expand(p, src, line, pw) {
+            if !png_unfilter(raw[at], src, src, prev, bpp) || !png_expand(p, src, line, pw) {
                 return false
             }
-            o := ((i64(__ADAM7_Y[i]) + y * dy) * p.w + i64(__ADAM7_X[i])) * ch
+            o := ((i64(ADAM7_Y[i]) + y * dy) * p.w + i64(ADAM7_X[i])) * ch
             for x in 0..pw {
                 copy(pix[o..o + ch], line[x * ch..x * ch + ch])
                 o += dx * ch
@@ -1505,9 +1505,9 @@ fn __png_rows(p *__Png, raw []u8, pix []u8) bool {
 }
 
 // reads and checks the IHDR fields at data[at..at + 13]
-fn __png_header(p *__Png, data []u8, at i64) bool {
-    p.w = __be32(data, at)
-    p.h = __be32(data, at + 4)
+priv fn png_header(p *Png, data []u8, at i64) bool {
+    p.w = be32(data, at)
+    p.h = be32(data, at + 4)
     p.depth = i64(data[at + 8])
     p.ctype = i64(data[at + 9])
     p.interlace = i64(data[at + 12])
@@ -1522,7 +1522,7 @@ fn __png_header(p *__Png, data []u8, at i64) bool {
     }
     // allowed depths: grey 1-16, palette 1-8, everything else 8 or 16
     depth_ok := d == 8 || (d == 16 && p.ctype != 3) || ((d == 1 || d == 2 || d == 4) && p.nin == 1)
-    p.nin != 0 && depth_ok && p.w > 0 && p.h > 0 && p.w <= __MAX_DIM && p.h <= __MAX_DIM &&
+    p.nin != 0 && depth_ok && p.w > 0 && p.h > 0 && p.w <= MAX_DIM && p.h <= MAX_DIM &&
         data[at + 10] == 0 && data[at + 11] == 0 && p.interlace <= 1
 }
 
@@ -1533,7 +1533,7 @@ fn __png_header(p *__Png, data []u8, at i64) bool {
 // the pixels (working memory is released again).
 fn png_decode(data []u8) (Image, bool) {
     var none Image
-    var p __Png
+    var p Png
     n := len(data)
     if n < 57 || data[..8] != "\x89PNG\r\n\x1a\n" {
         return (none, false)
@@ -1547,9 +1547,9 @@ fn png_decode(data []u8) (Image, bool) {
         if pos + 12 > n {
             return (none, false)
         }
-        clen := __be32(data, pos)
+        clen := be32(data, pos)
         body := pos + 8
-        if clen > n - pos - 12 || u32(__be32(data, body + clen)) != crc32(data[pos + 4..body + clen]) {
+        if clen > n - pos - 12 || u32(be32(data, body + clen)) != crc32(data[pos + 4..body + clen]) {
             return (none, false)
         }
         kind = data[pos + 4..body]
@@ -1557,7 +1557,7 @@ fn png_decode(data []u8) (Image, bool) {
             return (none, false)
         }
         if kind == "IHDR" {
-            if clen != 13 || !__png_header(&p, data, body) {
+            if clen != 13 || !png_header(&p, data, body) {
                 return (none, false)
             }
         } else if kind == "PLTE" {
@@ -1585,7 +1585,7 @@ fn png_decode(data []u8) (Image, bool) {
                 if p.ctype == 3 {
                     p.pal[i * 4 + 3] = data[body + i]
                 } else if i & 1 == 0 {
-                    p.key[i >> 1] = __be16(data, body + i)
+                    p.key[i >> 1] = be16(data, body + i)
                 }
             }
         } else if kind == "IDAT" {
@@ -1604,22 +1604,22 @@ fn png_decode(data []u8) (Image, bool) {
     if p.trns {
         p.channels += 1
     }
-    rawn := __png_raw_size(&p)
+    rawn := png_raw_size(&p)
     // deflate cannot expand by more than 1032:1, so short data for a huge image is rejected
     // before anything is allocated
-    if nidat == 0 || (p.ctype == 3 && p.npal == 0) || rawn > zlen * 1032 + 1024 || p.w * p.h * p.channels > __MAX_BYTES {
+    if nidat == 0 || (p.ctype == 3 && p.npal == 0) || rawn > zlen * 1032 + 1024 || p.w * p.h * p.channels > MAX_BYTES {
         return (none, false)
     }
     m0 := mark()
     img := image_new(p.w, p.h, p.channels)
     m := mark()
-    z := data[idat + 8..idat + 8 + __be32(data, idat)]
+    z := data[idat + 8..idat + 8 + be32(data, idat)]
     if nidat > 1 {
         z = alloc[u8](zlen)
         o := 0
         q := idat
         while q < pos {
-            clen := __be32(data, q)
+            clen := be32(data, q)
             if data[q + 4..q + 8] == "IDAT" {
                 copy(z[o..o + clen], data[q + 8..q + 8 + clen])
                 o += clen
@@ -1629,7 +1629,7 @@ fn png_decode(data []u8) (Image, bool) {
     }
     raw := alloc[u8](rawn)
     got, ok := zlib_decompress_into(z, raw)
-    ok = ok && got == rawn && __png_rows(&p, raw, img.pix)
+    ok = ok && got == rawn && png_rows(&p, raw, img.pix)
     release(m)
     if !ok {
         release(m0)
@@ -1640,7 +1640,7 @@ fn png_decode(data []u8) (Image, bool) {
 
 // Filters the row cur with filter type ft into dst (prev is the row above); returns the sum of
 // the filtered bytes taken as signed values, the usual measure of how well a filter fits.
-fn __png_filter(ft i64, dst []u8, cur []u8, prev []u8, bpp i64) i64 {
+priv fn png_filter(ft i64, dst []u8, cur []u8, prev []u8, bpp i64) i64 {
     sum := 0
     for i in 0..len(cur) {
         a := if i >= bpp { i64(cur[i - bpp]) } else { 0 }
@@ -1650,7 +1650,7 @@ fn __png_filter(ft i64, dst []u8, cur []u8, prev []u8, bpp i64) i64 {
             1 => a
             2 => b
             3 => (a + b) >> 1
-            _ => __paeth(a, b, if i >= bpp { i64(prev[i - bpp]) } else { 0 })
+            _ => paeth(a, b, if i >= bpp { i64(prev[i - bpp]) } else { 0 })
         }
         v := cur[i] - u8(pred)
         dst[i] = v
@@ -1660,9 +1660,9 @@ fn __png_filter(ft i64, dst []u8, cur []u8, prev []u8, bpp i64) i64 {
 }
 
 // writes the length and CRC of the chunk whose type and data are out[at + 4..end]; returns the offset after it
-fn __png_seal(out []u8, at i64, end i64) i64 {
-    __put_be32(out, at, end - at - 8)
-    __put_be32(out, end, i64(crc32(out[at + 4..end])))
+priv fn png_seal(out []u8, at i64, end i64) i64 {
+    put_be32(out, at, end - at - 8)
+    put_be32(out, end, i64(crc32(out[at + 4..end])))
     end + 4
 }
 
@@ -1674,7 +1674,7 @@ fn png_encode(img Image) []u8 {
     ch := img.channels
     stride := img.w * ch
     rawn := (stride + 1) * img.h
-    out := alloc[u8](8 + 25 + 12 + 6 + __deflate_bound(rawn) + 12)
+    out := alloc[u8](8 + 25 + 12 + 6 + deflate_bound(rawn) + 12)
     m := mark()
     // filter every scanline with the type that gives the smallest sum
     raw := alloc[u8](rawn)
@@ -1683,9 +1683,9 @@ fn png_encode(img Image) []u8 {
     for y in 0..img.h {
         cur := img.pix[y * stride..(y + 1) * stride]
         row := raw[y * (stride + 1) + 1..(y + 1) * (stride + 1)]
-        best := __png_filter(0, row, cur, prev, ch)
+        best := png_filter(0, row, cur, prev, ch)
         for ft in 1..5 {
-            sum := __png_filter(ft, try, cur, prev, ch)
+            sum := png_filter(ft, try, cur, prev, ch)
             if sum < best {
                 best = sum
                 raw[y * (stride + 1)] = u8(ft)
@@ -1696,8 +1696,8 @@ fn png_encode(img Image) []u8 {
     }
     copy(out, "\x89PNG\r\n\x1a\n")
     copy(out[12..], "IHDR")
-    __put_be32(out, 16, img.w)
-    __put_be32(out, 20, img.h)
+    put_be32(out, 16, img.w)
+    put_be32(out, 20, img.h)
     out[24] = 8
     out[25] = match ch {
         1 => 0
@@ -1705,30 +1705,30 @@ fn png_encode(img Image) []u8 {
         3 => 2
         _ => 6
     }
-    at := __png_seal(out, 8, 29)
+    at := png_seal(out, 8, 29)
     copy(out[at + 4..], "IDAT\x78\x9C")
-    var w __BitWriter
+    var w BitWriter
     w.buf = out
     w.n = at + 10
-    __deflate(&w, raw)
-    __put_be32(out, w.n, i64(adler32(raw)))
-    at = __png_seal(out, at, w.n + 4)
+    deflate_body(&w, raw)
+    put_be32(out, w.n, i64(adler32(raw)))
+    at = png_seal(out, at, w.n + 4)
     copy(out[at + 4..], "IEND")
-    at = __png_seal(out, at, at + 8)
+    at = png_seal(out, at, at + 8)
     release(m)
     out[..at]
 }
 
 // ---------- BMP ----------
 // the bits of v selected by mask, scaled to 0..255
-inline fn __bmp_field(v i64, mask i64) u8 {
+priv inline fn bmp_field(v i64, mask i64) u8 {
     m := mask >> ctz(mask)
     x := (v & mask) >> ctz(mask)
     u8(if m == 255 { x } else { (x * 255 + (m >> 1)) / m })
 }
 
 // true if mask is a single run of 1 bits
-inline fn __bmp_mask_ok(mask i64) bool {
+priv inline fn bmp_mask_ok(mask i64) bool {
     m := mask >> ctz(mask)
     mask != 0 && m & (m + 1) == 0
 }
@@ -1744,16 +1744,16 @@ fn bmp_decode(data []u8) (Image, bool) {
     if n < 54 || data[0] != 'B' || data[1] != 'M' {
         return (none, false)
     }
-    off := __le32(data, 10)
-    hsize := __le32(data, 14)
-    w := i64(i32(__le32(data, 18)))
-    h := i64(i32(__le32(data, 22)))
-    bpp := __le16(data, 28)
-    comp := __le32(data, 30)
+    off := le32(data, 10)
+    hsize := le32(data, 14)
+    w := i64(i32(le32(data, 18)))
+    h := i64(i32(le32(data, 22)))
+    bpp := le16(data, 28)
+    comp := le32(data, 30)
     bottom_up := h > 0
     h = abs(h)
     if (hsize != 40 && hsize != 52 && hsize != 56 && hsize != 108 && hsize != 124) || 14 + hsize > n ||
-        w <= 0 || h == 0 || w > __MAX_DIM || h > __MAX_DIM || __le16(data, 26) != 1 {
+        w <= 0 || h == 0 || w > MAX_DIM || h > MAX_DIM || le16(data, 26) != 1 {
         return (none, false)
     }
     rmask := 0xFF0000
@@ -1764,7 +1764,7 @@ fn bmp_decode(data []u8) (Image, bool) {
     pal := 14 + hsize
     npal := 0
     if bpp == 1 || bpp == 4 || bpp == 8 {
-        npal = __le32(data, 46)
+        npal = le32(data, 46)
         if npal == 0 {
             npal = 1 << bpp
         }
@@ -1776,13 +1776,13 @@ fn bmp_decode(data []u8) (Image, bool) {
         if n < 70 {
             return (none, false)
         }
-        rmask = __le32(data, 54)
-        gmask = __le32(data, 58)
-        bmask = __le32(data, 62)
+        rmask = le32(data, 54)
+        gmask = le32(data, 58)
+        bmask = le32(data, 62)
         if hsize >= 56 || comp == 6 {
-            amask = __le32(data, 66)
+            amask = le32(data, 66)
         }
-        if !__bmp_mask_ok(rmask) || !__bmp_mask_ok(gmask) || !__bmp_mask_ok(bmask) || (amask != 0 && !__bmp_mask_ok(amask)) {
+        if !bmp_mask_ok(rmask) || !bmp_mask_ok(gmask) || !bmp_mask_ok(bmask) || (amask != 0 && !bmp_mask_ok(amask)) {
             return (none, false)
         }
         if amask != 0 {
@@ -1796,7 +1796,7 @@ fn bmp_decode(data []u8) (Image, bool) {
     }
     // rows are padded to 4 bytes; the padding of the last row in the file may be missing
     stride := (w * bpp + 31) / 32 * 4
-    if off > n || stride * (h - 1) + (w * bpp + 7) / 8 > n - off || w * h * channels > __MAX_BYTES {
+    if off > n || stride * (h - 1) + (w * bpp + 7) / 8 > n - off || w * h * channels > MAX_BYTES {
         return (none, false)
     }
     m := mark()
@@ -1821,12 +1821,12 @@ fn bmp_decode(data []u8) (Image, bool) {
                 pix[o + 1] = row[x * 3 + 1]
                 pix[o + 2] = row[x * 3]
             } else {
-                v := __le32(row, x * 4)
-                pix[o] = __bmp_field(v, rmask)
-                pix[o + 1] = __bmp_field(v, gmask)
-                pix[o + 2] = __bmp_field(v, bmask)
+                v := le32(row, x * 4)
+                pix[o] = bmp_field(v, rmask)
+                pix[o + 1] = bmp_field(v, gmask)
+                pix[o + 2] = bmp_field(v, bmask)
                 if channels == 4 {
-                    pix[o + 3] = __bmp_field(v, amask)
+                    pix[o + 3] = bmp_field(v, amask)
                     opaque |= v & amask
                 }
             }
@@ -1854,30 +1854,30 @@ fn bmp_encode(img Image) []u8 {
     out := alloc[u8](off + stride * img.h)
     out[0] = 'B'
     out[1] = 'M'
-    __put_le32(out, 2, len(out))
-    __put_le32(out, 10, off)
-    __put_le32(out, 14, hsize)
-    __put_le32(out, 18, img.w)
-    __put_le32(out, 22, img.h)
-    __put_le16(out, 26, 1)
-    __put_le16(out, 28, bytes * 8)
-    __put_le32(out, 34, stride * img.h)
+    put_le32(out, 2, len(out))
+    put_le32(out, 10, off)
+    put_le32(out, 14, hsize)
+    put_le32(out, 18, img.w)
+    put_le32(out, 22, img.h)
+    put_le16(out, 26, 1)
+    put_le16(out, 28, bytes * 8)
+    put_le32(out, 34, stride * img.h)
     // 72 dpi
-    __put_le32(out, 38, 2835)
-    __put_le32(out, 42, 2835)
+    put_le32(out, 38, 2835)
+    put_le32(out, 42, 2835)
     if alpha {
         // bit fields for B, G, R, A byte order and the sRGB colour space tag
-        __put_le32(out, 30, 3)
-        __put_le32(out, 54, 0xFF0000)
-        __put_le32(out, 58, 0xFF00)
-        __put_le32(out, 62, 0xFF)
-        __put_le32(out, 66, 0xFF000000)
-        __put_le32(out, 70, 0x73524742)
+        put_le32(out, 30, 3)
+        put_le32(out, 54, 0xFF0000)
+        put_le32(out, 58, 0xFF00)
+        put_le32(out, 62, 0xFF)
+        put_le32(out, 66, 0xFF000000)
+        put_le32(out, 70, 0x73524742)
     }
     for y in 0..img.h {
         o := off + (img.h - 1 - y) * stride
         for x in 0..img.w {
-            r, g, b, a := __rgba(img, (y * img.w + x) * img.channels)
+            r, g, b, a := rgba(img, (y * img.w + x) * img.channels)
             out[o] = b
             out[o + 1] = g
             out[o + 2] = r
