@@ -10,13 +10,13 @@ struct TreSite {
 }
 
 fn tre_identity(op: Op) -> Opt[i64] {
-    if op == OpAdd || op == OpOr || op == OpXor {
+    if op == Add || op == Or || op == Xor {
         return Some(0)
     }
-    if op == OpMul {
+    if op == Mul {
         return Some(1)
     }
-    if op == OpAnd {
+    if op == And {
         return Some(-1)
     }
     return None
@@ -37,7 +37,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     }
     // locals whose address is observable would be shared between iterations
     for v in f.blocks[0].insts.items() {
-        if f.insts[v].op == OpAlloca {
+        if f.insts[v].op == Alloca {
             return false
         }
     }
@@ -48,7 +48,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     for b in rpo.items() {
         rv := vec[i64]()
         match f.blocks[b].term {
-            TermRet(vs) => rv = clone(vs)
+            Ret(vs) => rv = clone(vs)
             _ => continue
         }
         insts := &f.blocks[b].insts
@@ -59,7 +59,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         last_v := insts[n - 1]
         li := &f.insts[last_v]
         // plain tail call: [call; ret call] or [call; ret] for no result
-        if li.op == OpCall && li.k == fid && ((rv.is_empty() && f.rets.is_empty()) || (rv.len == 1 && rv[0] == last_v && uses[last_v] == 1)) {
+        if li.op == Call && li.k == fid && ((rv.is_empty() && f.rets.is_empty()) || (rv.len == 1 && rv[0] == last_v && uses[last_v] == 1)) {
             sites.push(TreSite{block: b, call: last_v, acc: None})
             continue
         }
@@ -68,7 +68,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             if is_some(tre_identity(li.op)) {
                 call := insts[n - 2]
                 ci := &f.insts[call]
-                if ci.op == OpCall && ci.k == fid && uses[call] == 1 && contains(&li.args, call) {
+                if ci.op == Call && ci.k == fid && uses[call] == 1 && contains(&li.args, call) {
                     x := if li.args[0] == call { li.args[1] } else { li.args[0] }
                     if x != call && tre_none_or_same(acc_op, li.op) {
                         acc_op = Some(li.op)
@@ -82,7 +82,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         return false
     }
     // all sites must agree: with an accumulator, plain tail calls are fine too (acc unchanged)
-    ret_ty := TVoid
+    ret_ty := Void
     if f.rets.len > 0 {
         ret_ty = f.rets[0]
     }
@@ -94,7 +94,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     keep := vec[i64]()
     moved := vec[i64]()
     for v in entry_insts.items() {
-        if f.insts[v].op == OpParam {
+        if f.insts[v].op == Param {
             params.push(v)
             keep.push(v)
         } else {
@@ -103,14 +103,14 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     }
     f.blocks[0].insts = keep
     entry_term := f.blocks[0].term
-    f.blocks[0].term = TermJmp(header)
+    f.blocks[0].term = Jmp(header)
     f.blocks[header].term = entry_term
     // successors of the old entry now come from the header
     ss := f.succs(header)
     for s in ss.items() {
         for ii in 0..f.blocks[s].insts.len {
             v := f.blocks[s].insts[ii]
-            if f.insts[v].op != OpPhi {
+            if f.insts[v].op != Phi {
                 break
             }
             pbs := &f.insts[v].pb
@@ -133,7 +133,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     for p in params.items() {
         ty := f.insts[p].ty
         k := f.insts[p].k
-        phi := f.mk(OpPhi, ty, vec_of([]i64{p}), 0)
+        phi := f.mk(Phi, ty, vec_of([]i64{p}), 0)
         f.im(phi).pb = vec_of([]i64{0})
         head.push(phi)
         pphi.push((k, p, phi))
@@ -146,9 +146,9 @@ fn tre_run(f: *Func, fid: i64) -> bool {
                 Some(x) => idk = x
                 None => panic("called `Option::unwrap()` on a `None` value")
             }
-            c := f.mk(OpConst, ret_ty, vec[i64](), ir_canon(ret_ty, idk))
+            c := f.mk(Const, ret_ty, vec[i64](), ir_canon(ret_ty, idk))
             f.blocks[0].insts.push(c)
-            phi := f.mk(OpPhi, ret_ty, vec_of([]i64{c}), 0)
+            phi := f.mk(Phi, ret_ty, vec_of([]i64{c}), 0)
             f.im(phi).pb = vec_of([]i64{0})
             head.push(phi)
             acc_phi = Some(phi)
@@ -221,7 +221,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             }
             None => {}
         }
-        f.blocks[b].term = TermJmp(header)
+        f.blocks[b].term = Jmp(header)
         for pp in pphi.items() {
             a := call_args.at(pp.0)
             i := f.im(pp.2)
@@ -252,10 +252,10 @@ fn tre_run(f: *Func, fid: i64) -> bool {
                             continue
                         }
                         match f.blocks[bi].term {
-                            TermRet(vs) => {
+                            Ret(vs) => {
                                 if vs.len == 1 {
                                     nv := f.push(bi, op, ret_ty, vec_of([]i64{ap, vs[0]}), 0)
-                                    f.blocks[bi].term = TermRet(vec_of([]i64{nv}))
+                                    f.blocks[bi].term = Ret(vec_of([]i64{nv}))
                                 }
                             }
                             _ => {}

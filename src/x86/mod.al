@@ -22,7 +22,7 @@ fn x86_reachable_funcs(m: *Module) -> Vec[i64] {
         for bi in 0..func.blocks.len {
             for v in func.blocks[bi].insts.items() {
                 i := &func.insts[v]
-                if (i.op == OpCall || i.op == OpFAddr) && !seen[i.k] {
+                if (i.op == Call || i.op == FAddr) && !seen[i.k] {
                     seen[i.k] = true
                     work.push(i.k)
                 }
@@ -34,7 +34,7 @@ fn x86_reachable_funcs(m: *Module) -> Vec[i64] {
         for rl in m.globals[gi].relocs.items() {
             t := rl.1
             match t {
-                RelocTargetFunc(f) => {
+                Function(f) => {
                     if !seen[f] {
                         seen[f] = true
                         out.push(f)
@@ -167,11 +167,11 @@ fn x86_block_layout(f: *Func) -> Vec[i64] {
             }
             tm := f.blocks[b].term
             c := match tm {
-                TermTrap => true
-                TermNone => true
-                TermJmp(t) => cold[t]
-                TermBr(x, t, e) => cold[t] && cold[e]
-                TermRet(vs) => false
+                Trap => true
+                Term.None => true
+                Jmp(t) => cold[t]
+                Br(x, t, e) => cold[t] && cold[e]
+                Ret(vs) => false
             }
             if c {
                 cold[b] = true

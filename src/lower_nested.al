@@ -123,18 +123,18 @@ fn nested_hint(self: *Fx, n: str, pos: Pos) -> str {
                 line := 0
                 is_fn := false
                 match s.k {
-                    SKFn(d) => {
+                    Fn(d) => {
                         if d.name == n {
                             line = s.pos.line
                             is_fn = true
                         }
                     }
-                    SKLet(names, e) => {
+                    Let(names, e) => {
                         if fx != self && contains(&names, n) {
                             line = s.pos.line
                         }
                     }
-                    SKVar(name, ty, init) => {
+                    Var(name, ty, init) => {
                         if fx != self && name == n {
                             line = s.pos.line
                         }
@@ -244,8 +244,8 @@ fn nested_value(self: *Fx, idx: i64) -> Val {
     if nf.fid < 0 {
         return val_err()
     }
-    ty := self.cx.types.intern(TyKFn(clone(&nf.ptys), nf.rty))
-    v := self.ins(OpFAddr, TI64, vec[i64](), nf.fid)
+    ty := self.cx.types.intern(Fn(clone(&nf.ptys), nf.rty))
+    v := self.ins(FAddr, I64, vec[i64](), nf.fid)
     return self.sval(ty, v)
 }
 

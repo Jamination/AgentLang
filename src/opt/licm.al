@@ -42,15 +42,15 @@ fn licm_make_preheaders(f: *Func) -> bool {
             continue
         }
         p := f.new_block()
-        f.blocks[p].term = TermJmp(h)
+        f.blocks[p].term = Jmp(h)
         for o in outside.items() {
             match f.blocks[o].term {
-                TermJmp(t) => {
+                Jmp(t) => {
                     if t == h {
-                        f.blocks[o].term = TermJmp(p)
+                        f.blocks[o].term = Jmp(p)
                     }
                 }
-                TermBr(c, a, b) => {
+                Br(c, a, b) => {
                     na := a
                     nb := b
                     if a == h {
@@ -59,7 +59,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
                     if b == h {
                         nb = p
                     }
-                    f.blocks[o].term = TermBr(c, na, nb)
+                    f.blocks[o].term = Br(c, na, nb)
                 }
                 _ => {}
             }
@@ -67,7 +67,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
         // fix header phis
         hinsts := clone(&f.blocks[h].insts)
         for v in hinsts.items() {
-            if f.insts[v].op != OpPhi {
+            if f.insts[v].op != Phi {
                 break
             }
             inst := clone(&f.insts[v])
@@ -100,7 +100,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
                     vals.push(x.1)
                     pbs.push(x.0)
                 }
-                np := f.mk(OpPhi, inst.ty, vals, 0)
+                np := f.mk(Phi, inst.ty, vals, 0)
                 f.im(np).pb = pbs
                 f.blocks[p].insts.push(np)
                 incoming = np
@@ -171,9 +171,9 @@ fn licm_run(f: *Func) -> bool {
         for b in blocks.items() {
             for v in f.blocks[b].insts.items() {
                 o := f.insts[v].op
-                if o == OpStore {
+                if o == Store {
                     stores.push(alias_memref(f, v))
-                } else if o == OpCall || o == OpCallInd || o == OpSyscall || o == OpMemCpy || o == OpMemSet {
+                } else if o == Call || o == CallInd || o == Syscall || o == MemCpy || o == MemSet {
                     has_call = true
                 }
             }
@@ -187,8 +187,8 @@ fn licm_run(f: *Func) -> bool {
             }
             if !leaves {
                 match f.blocks[b].term {
-                    TermRet(vs) => leaves = true
-                    TermTrap => leaves = true
+                    Ret(vs) => leaves = true
+                    Trap => leaves = true
                     _ => {}
                 }
             }
@@ -215,24 +215,24 @@ fn licm_run(f: *Func) -> bool {
                     if invariant_args {
                         if i.op.is_pure() {
                             ok = true
-                        } else if i.op == OpSDiv || i.op == OpUDiv || i.op == OpSRem || i.op == OpURem {
+                        } else if i.op == SDiv || i.op == UDiv || i.op == SRem || i.op == URem {
                             safe_const := false
                             match f.is_const(i.args[1]) {
-                                Some(k) => safe_const = k != 0 && !(k == -1 && (i.op == OpSDiv || i.op == OpSRem))
+                                Some(k) => safe_const = k != 0 && !(k == -1 && (i.op == SDiv || i.op == SRem))
                                 None => {}
                             }
                             ok = safe_const || licm_run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
-                        } else if i.op == OpLoad {
+                        } else if i.op == Load {
                             m := alias_memref(f, v)
                             private := false
                             safe_addr := false
                             match m.addr.base {
-                                BaseAlloca(x) => {
+                                Alloca(x) => {
                                     private = !esc[x]
                                     safe_addr = is_some(m.addr.off)
                                 }
-                                BaseGlobal(g) => safe_addr = is_some(m.addr.off)
-                                BaseUnknown(u) => {}
+                                Glob(g) => safe_addr = is_some(m.addr.off)
+                                Unknown(u) => {}
                             }
                             if !has_call || private {
                                 aliased := false

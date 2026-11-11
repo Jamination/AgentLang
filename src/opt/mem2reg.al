@@ -18,9 +18,9 @@ fn zero_of(self: *Mem2regCtx, t: T) -> i64 {
     }
     z := 0
     if t.is_fp() {
-        z = self.f.mk(OpFConst, t, vec[i64](), 0)
+        z = self.f.mk(FConst, t, vec[i64](), 0)
     } else {
-        z = self.f.mk(OpConst, t, vec[i64](), 0)
+        z = self.f.mk(Const, t, vec[i64](), 0)
     }
     self.entry_consts.push(z)
     self.zero.set(t, z)
@@ -53,7 +53,7 @@ fn read_in(self: *Mem2regCtx, var_: i64, b: i64) -> i64 {
             v = self.read_out(var_, p)
         }
     } else {
-        phi := self.f.mk(OpPhi, self.var_ty[var_], vec[i64](), 0)
+        phi := self.f.mk(Phi, self.var_ty[var_], vec[i64](), 0)
         self.def_in.set((var_, b), phi)
         self.new_phis.push((b, phi))
         preds := clone(&self.cfg.preds[b])
@@ -102,7 +102,7 @@ fn mem2reg_run_once(f: *Func) -> bool {
     var_ty := vec[T]()
     allocas := vec[i64]()
     for v in f.blocks[0].insts.items() {
-        if f.insts[v].op == OpAlloca {
+        if f.insts[v].op == Alloca {
             allocas.push(v)
         }
     }
@@ -123,7 +123,7 @@ fn mem2reg_run_once(f: *Func) -> bool {
             }
             for u in users[x].items() {
                 inst := &f.insts[u]
-                if inst.op == OpAdd {
+                if inst.op == Add {
                     other := if inst.args[0] == x { inst.args[1] } else { inst.args[0] }
                     if other == x {
                         escaped = true
@@ -142,9 +142,9 @@ fn mem2reg_run_once(f: *Func) -> bool {
                             break
                         }
                     }
-                } else if inst.op == OpLoad {
+                } else if inst.op == Load {
                     accs.push((u, off, inst.ty))
-                } else if inst.op == OpStore {
+                } else if inst.op == Store {
                     if inst.args[1] == x || inst.args[0] != x {
                         escaped = true
                         break
@@ -163,7 +163,7 @@ fn mem2reg_run_once(f: *Func) -> bool {
         stores_derived := false
         for acc in accs.items() {
             u := acc.0
-            if f.insts[u].op == OpStore && is_derived.has(f.insts[u].args[1]) {
+            if f.insts[u].op == Store && is_derived.has(f.insts[u].args[1]) {
                 stores_derived = true
                 break
             }
@@ -219,7 +219,7 @@ fn mem2reg_run_once(f: *Func) -> bool {
     last_store := map[(i64, i64), i64]()
     for b in cfg.rpo.items() {
         for v in f.blocks[b].insts.items() {
-            if f.insts[v].op == OpStore {
+            if f.insts[v].op == Store {
                 var_, found := access.get(v)
                 if found {
                     last_store.set((var_, b), f.insts[v].args[1])
@@ -237,7 +237,7 @@ fn mem2reg_run_once(f: *Func) -> bool {
         for v in insts.items() {
             var_, found := access.get(v)
             if found {
-                if cx.f.insts[v].op == OpStore {
+                if cx.f.insts[v].op == Store {
                     cur.set(var_, cx.f.insts[v].args[1])
                 } else {
                     val, have := cur.get(var_)

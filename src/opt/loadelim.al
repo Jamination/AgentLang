@@ -55,7 +55,7 @@ fn loadelim_run(f: *Func) -> bool {
                 }
             }
             op := f.insts[v].op
-            if op == OpLoad {
+            if op == Load {
                 m := alias_memref(f, v)
                 ty := f.insts[v].ty
                 hit: Opt[i64] = None
@@ -89,7 +89,7 @@ fn loadelim_run(f: *Func) -> bool {
                         st.push(LoadelimAvail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: v, pending_store: None})
                     }
                 }
-            } else if op == OpStore {
+            } else if op == Store {
                 m := alias_memref(f, v)
                 ty := f.insts[v].ty
                 val := f.insts[v].args[1]
@@ -118,13 +118,13 @@ fn loadelim_run(f: *Func) -> bool {
                 }
                 st.len = n
                 st.push(LoadelimAvail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: val, pending_store: Some(v)})
-            } else if op == OpCall || op == OpCallInd || op == OpSyscall || op == OpMemCpy || op == OpMemSet {
+            } else if op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet {
                 // may read or write anything reachable: only non-escaped stack slots survive
                 n := 0
                 for k in 0..st.len {
                     keep := false
                     match st[k].mref_addr.base {
-                        BaseAlloca(x) => keep = !esc[x]
+                        Alloca(x) => keep = !esc[x]
                         _ => {}
                     }
                     if keep {
@@ -133,7 +133,7 @@ fn loadelim_run(f: *Func) -> bool {
                     }
                 }
                 st.len = n
-                if op == OpMemCpy || op == OpMemSet {
+                if op == MemCpy || op == MemSet {
                     // these take raw pointers that may point into any alloca passed to them
                     st.clear()
                 }

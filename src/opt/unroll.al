@@ -33,7 +33,7 @@ fn unroll_analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
 fn unroll_header_phis(f: *Func, h: i64) -> Vec[i64] {
     hphis := vec[i64]()
     for v in f.blocks[h].insts.items() {
-        if f.insts[v].op != OpPhi {
+        if f.insts[v].op != Phi {
             break
         }
         hphis.push(v)
@@ -58,7 +58,7 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
     t := 0
     e := 0
     match f.blocks[latch].term {
-        TermBr(c0, t0, e0) => {
+        Br(c0, t0, e0) => {
             c = c0
             t = t0
             e = e0
@@ -89,7 +89,7 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
         None => return None
     }
     ni := &f.insts[next]
-    if ni.op != OpAdd {
+    if ni.op != Add {
         return None
     }
     step := 0
@@ -99,7 +99,7 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
     }
     phi := ni.args[0]
     pi := &f.insts[phi]
-    if pi.op != OpPhi || pi.args.len != 2 || !contains(&f.blocks[h].insts, phi) {
+    if pi.op != Phi || pi.args.len != 2 || !contains(&f.blocks[h].insts, phi) {
         return None
     }
     start_opt: Opt[i64] = None
@@ -161,9 +161,9 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
     for b in l.blocks.items() {
         size += f.blocks[b].insts.len + 1
         match f.blocks[b].term {
-            TermRet(vs) => return None
-            TermNone => return None
-            TermTrap => return None
+            Ret(vs) => return None
+            Term.None => return None
+            Trap => return None
             _ => {}
         }
         ss := f.succs(b)
@@ -173,12 +173,12 @@ fn unroll_analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan
             }
             // side exits must be traps that do not look at loop values
             sb := &f.blocks[s]
-            if !eq(sb.term, TermTrap) {
+            if !eq(sb.term, Trap) {
                 return None
             }
             for v in sb.insts.items() {
                 inst := &f.insts[v]
-                if inst.op == OpPhi {
+                if inst.op == Phi {
                     return None
                 }
                 for a in inst.args.items() {
@@ -277,7 +277,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
                 if v >= n0 || cur[v] != NOV {
                     continue
                 }
-                if b == p.header && f.insts[v].op == OpPhi {
+                if b == p.header && f.insts[v].op == Phi {
                     continue
                 }
                 op := f.insts[v].op
@@ -296,7 +296,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
                 if v >= n0 {
                     continue
                 }
-                if b == p.header && f.insts[v].op == OpPhi {
+                if b == p.header && f.insts[v].op == Phi {
                     continue
                 }
                 nv := cur[v]
@@ -315,25 +315,25 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
             src_term := if b == p.latch { clone(orig_latch_term) } else { clone(f.blocks[b].term) }
             term := src_term
             match src_term {
-                TermJmp(t) => term = TermJmp(bmap.get_or(t, t))
-                TermBr(c, t, e) => term = TermBr(look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
+                Jmp(t) => term = Jmp(bmap.get_or(t, t))
+                Br(c, t, e) => term = Br(look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
                 _ => {}
             }
             f.blocks[nb].term = term
         }
         // the previous copy's latch falls into this copy
-        f.blocks[prev_latch].term = TermJmp(unroll_bmap_at(&bmap, p.header))
+        f.blocks[prev_latch].term = Jmp(unroll_bmap_at(&bmap, p.header))
         prev_latch = unroll_bmap_at(&bmap, p.latch)
         prev_header_of_last = unroll_bmap_at(&bmap, p.header)
         prev = cur
     }
     if p.full {
         // the last copy leaves the loop
-        f.blocks[prev_latch].term = TermJmp(p.exit)
+        f.blocks[prev_latch].term = Jmp(p.exit)
     } else if p.trip > 1 {
         // the last copy branches back to the first one
         match f.blocks[prev_latch].term {
-            TermBr(c, t, e) => {
+            Br(c, t, e) => {
                 nt := t
                 ne := e
                 if t != p.exit {
@@ -342,7 +342,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
                 if e != p.exit {
                     ne = p.header
                 }
-                f.blocks[prev_latch].term = TermBr(c, nt, ne)
+                f.blocks[prev_latch].term = Br(c, nt, ne)
             }
             _ => {}
         }
@@ -362,7 +362,7 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
                         f.insts[v].args[ai] = last_m[a]
                     }
                 }
-                if f.insts[v].op == OpPhi && b == p.exit {
+                if f.insts[v].op == Phi && b == p.exit {
                     pbs := &f.insts[v].pb
                     for k in 0..pbs.len {
                         if pbs[k] == p.latch {
@@ -372,19 +372,19 @@ fn unroll_apply(f: *Func, p: *UnrollPlan) {
                 }
             }
             match f.blocks[b].term {
-                TermBr(c, t, e) => {
+                Br(c, t, e) => {
                     if loop_def(c, n0, def_block, in_loop) {
-                        f.blocks[b].term = TermBr(last_m[c], t, e)
+                        f.blocks[b].term = Br(last_m[c], t, e)
                     }
                 }
-                TermRet(vs) => {
+                Ret(vs) => {
                     nvs := clone(vs)
                     for k in 0..nvs.len {
                         if loop_def(nvs[k], n0, def_block, in_loop) {
                             nvs[k] = last_m[nvs[k]]
                         }
                     }
-                    f.blocks[b].term = TermRet(nvs)
+                    f.blocks[b].term = Ret(nvs)
                 }
                 _ => {}
             }

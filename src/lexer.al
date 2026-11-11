@@ -1,14 +1,14 @@
 // Lexer for AL: source text to tokens.
 
 enum Tk {
-    TkId(str),
-    TkInt(u64),
-    TkFloat(f64),
-    TkStr(str),
-    TkKw(str),
-    TkP(str),
-    TkNl,
-    TkEof,
+    Id(str),
+    Int(u64),
+    Float(f64),
+    Str(str),
+    Kw(str),
+    P(str),
+    Nl,
+    Eof,
 }
 
 struct Token {
@@ -96,29 +96,29 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 term := false
                 if out.len > 0 {
                     match out[out.len - 1].t {
-                        TkId(x) => {
+                        Id(x) => {
                             term = true
                         }
-                        TkInt(x) => {
+                        Int(x) => {
                             term = true
                         }
-                        TkFloat(x) => {
+                        Float(x) => {
                             term = true
                         }
-                        TkStr(x) => {
+                        Str(x) => {
                             term = true
                         }
-                        TkP(p) => {
+                        P(p) => {
                             term = p == ")" || p == "]" || p == "}"
                         }
-                        TkKw(k) => {
+                        Kw(k) => {
                             term = k == "return" || k == "break" || k == "continue" || k == "true" || k == "false" || k == "nil"
                         }
                         _ => {}
                     }
                 }
                 if term {
-                    out.push(Token{t: TkNl, pos: lexer_pos(file, line, i, line_start)})
+                    out.push(Token{t: Nl, pos: lexer_pos(file, line, i, line_start)})
                 }
             }
             i += 1
@@ -146,13 +146,13 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             is_kw := false
             for k in LEXER_KEYWORDS {
                 if k == w {
-                    out.push(Token{t: TkKw(k), pos: p})
+                    out.push(Token{t: Kw(k), pos: p})
                     is_kw = true
                     break
                 }
             }
             if !is_kw {
-                out.push(Token{t: TkId(w), pos: p})
+                out.push(Token{t: Id(w), pos: p})
             }
             continue
         }
@@ -184,7 +184,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 if !any {
                     errs.push(Diag{pos: p, msg: "empty integer literal"})
                 }
-                out.push(Token{t: TkInt(v), pos: p})
+                out.push(Token{t: Int(v), pos: p})
                 continue
             }
             while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
@@ -224,18 +224,18 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             if is_float {
                 v, ok := parse_f64(text)
                 if ok {
-                    out.push(Token{t: TkFloat(v), pos: p})
+                    out.push(Token{t: Float(v), pos: p})
                 } else {
                     errs.push(Diag{pos: p, msg: "invalid float literal"})
-                    out.push(Token{t: TkFloat(0.0), pos: p})
+                    out.push(Token{t: Float(0.0), pos: p})
                 }
             } else {
                 v, ok := lexer_parse_u64(text)
                 if ok {
-                    out.push(Token{t: TkInt(v), pos: p})
+                    out.push(Token{t: Int(v), pos: p})
                 } else {
                     errs.push(Diag{pos: p, msg: "integer literal too large"})
-                    out.push(Token{t: TkInt(0), pos: p})
+                    out.push(Token{t: Int(0), pos: p})
                 }
             }
             continue
@@ -254,7 +254,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             if i >= len(s) {
                 errs.push(Diag{pos: p, msg: "unterminated raw string (missing closing `)"})
             }
-            out.push(Token{t: TkStr(s[st..min(i, len(s))]), pos: p})
+            out.push(Token{t: Str(s[st..min(i, len(s))]), pos: p})
             i += 1
             continue
         }
@@ -318,7 +318,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 errs.push(Diag{pos: p, msg: "unterminated string/char literal"})
             }
             if q == '"' {
-                out.push(Token{t: TkStr(buf[..buf.len]), pos: p})
+                out.push(Token{t: Str(buf[..buf.len]), pos: p})
             } else {
                 if buf.len != 1 {
                     errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
@@ -327,7 +327,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 if buf.len > 0 {
                     first = buf[0]
                 }
-                out.push(Token{t: TkInt(u64(first)), pos: p})
+                out.push(Token{t: Int(u64(first)), pos: p})
             }
             continue
         }
@@ -342,7 +342,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                         stack.pop()
                     }
                 }
-                out.push(Token{t: TkP(pp), pos: p})
+                out.push(Token{t: P(pp), pos: p})
                 i += len(pp)
                 matched = true
                 break
@@ -357,15 +357,15 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     if out.len > 0 {
         last_nl := false
         match out[out.len - 1].t {
-            TkNl => {
+            Nl => {
                 last_nl = true
             }
             _ => {}
         }
         if !last_nl {
-            out.push(Token{t: TkNl, pos: p})
+            out.push(Token{t: Nl, pos: p})
         }
     }
-    out.push(Token{t: TkEof, pos: p})
+    out.push(Token{t: Eof, pos: p})
     return out
 }

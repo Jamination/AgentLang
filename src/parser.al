@@ -29,7 +29,7 @@ fn parser_box[T](x: T) -> *T {
 
 fn parser_tk_p(t: Tk, p: str) -> bool {
     match t {
-        TkP(q) => {
+        P(q) => {
             return q == p
         }
         _ => {}
@@ -39,7 +39,7 @@ fn parser_tk_p(t: Tk, p: str) -> bool {
 
 fn parser_tk_kw(t: Tk, k: str) -> bool {
     match t {
-        TkKw(q) => {
+        Kw(q) => {
             return q == k
         }
         _ => {}
@@ -49,7 +49,7 @@ fn parser_tk_kw(t: Tk, k: str) -> bool {
 
 fn parser_tk_nl(t: Tk) -> bool {
     match t {
-        TkNl => {
+        Nl => {
             return true
         }
         _ => {}
@@ -59,7 +59,7 @@ fn parser_tk_nl(t: Tk) -> bool {
 
 fn parser_tk_eof(t: Tk) -> bool {
     match t {
-        TkEof => {
+        Eof => {
             return true
         }
         _ => {}
@@ -69,7 +69,7 @@ fn parser_tk_eof(t: Tk) -> bool {
 
 fn parser_tk_id(t: Tk) -> bool {
     match t {
-        TkId(s) => {
+        Id(s) => {
             return true
         }
         _ => {}
@@ -80,7 +80,7 @@ fn parser_tk_id(t: Tk) -> bool {
 // is `t` the identifier `w`?
 fn parser_tk_word(t: Tk, w: str) -> bool {
     match t {
-        TkId(s) => {
+        Id(s) => {
             return s == w
         }
         _ => {}
@@ -214,28 +214,28 @@ fn eat_kw(p: *Parser, k: str) -> bool {
 
 fn tok_desc(p: *Parser) -> str {
     match p.peek() {
-        TkId(s) => {
+        Id(s) => {
             return fmt("identifier `", s, "`")
         }
-        TkInt(n) => {
+        Int(n) => {
             return "number"
         }
-        TkFloat(f) => {
+        Float(f) => {
             return "number"
         }
-        TkStr(s) => {
+        Str(s) => {
             return "string"
         }
-        TkKw(k) => {
+        Kw(k) => {
             return fmt("keyword `", k, "`")
         }
-        TkP(q) => {
+        P(q) => {
             return fmt("`", q, "`")
         }
-        TkNl => {
+        Nl => {
             return "end of line"
         }
-        TkEof => {
+        Eof => {
             return "end of file"
         }
     }
@@ -257,7 +257,7 @@ fn err[T](p: *Parser, msg: str) -> (T, bool) {
     // habits from other languages get a direct pointer to the AL spelling
     hint := ""
     match p.peek() {
-        TkId(s) => {
+        Id(s) => {
             hint = parser_decl_habit(s)
             if hint == "" {
                 hint = match s {
@@ -271,15 +271,15 @@ fn err[T](p: *Parser, msg: str) -> (T, bool) {
                 }
             }
         }
-        TkP(q) => {
+        P(q) => {
             if q == "+" || q == "-" {
                 hint = " (there is no `++`/`--`: use `x += 1`)"
             }
         }
-        TkKw(k) => {
+        Kw(k) => {
             // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`
             match p.peek_at(1) {
-                TkP(q) => {
+                P(q) => {
                     if q == ":=" || q == "=" || q == ":" || q == "," || q == ")" || q == "." || q == "+=" || q == "-=" {
                         hint = fmt(" (`", k, "` is a keyword and cannot be used as a name)")
                     }
@@ -292,7 +292,7 @@ fn err[T](p: *Parser, msg: str) -> (T, bool) {
     // (`let x = 5`, `func main()`: the error is at the token after the foreign word)
     if hint == "" && p.i >= 1 {
         match p.toks[p.i - 1].t {
-            TkId(prev) => {
+            Id(prev) => {
                 hint = parser_decl_habit(prev)
             }
             _ => {}
@@ -315,7 +315,7 @@ fn expect_p(p: *Parser, s: str) -> bool {
 
 fn ident(p: *Parser) -> (str, bool) {
     match p.peek() {
-        TkId(s) => {
+        Id(s) => {
             p.bump()
             return (s, true)
         }
@@ -368,22 +368,22 @@ fn sync_decl(p: *Parser, from: i64) {
     loop {
         starts := p.i > 0 && parser_tk_nl(p.toks[p.i - 1].t)
         match p.peek() {
-            TkEof => {
+            Eof => {
                 return
             }
-            TkP(q) => {
+            P(q) => {
                 if q == "{" {
                     depth += 1
                 } else if q == "}" {
                     depth -= 1
                 }
             }
-            TkKw(k) => {
+            Kw(k) => {
                 if starts && (depth <= 0 || p.pos().col == 1) && (k == "fn" || k == "struct" || k == "enum" || k == "const" || k == "test" || k == "use" || k == "inline" || k == "noinline" || k == "extern" || k == "priv") {
                     return
                 }
             }
-            TkId(s) => {
+            Id(s) => {
                 if starts && depth <= 0 {
                     return
                 }
@@ -440,37 +440,37 @@ fn priv_decl(p: *Parser) -> (Decl, bool) {
 // decide here whether it can be private.
 fn parser_set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
     return match d {
-        DeclFn(f) => {
+        Fn(f) => {
             if f.name == "main" {
                 errs.push(Diag{pos: ppos, msg: "`main` cannot be `priv`: it is where the program starts, which is outside this file; remove `priv`"})
             } else {
                 f.is_priv = true
                 f.pos = ppos
             }
-            DeclFn(f)
+            Fn(f)
         }
-        DeclStruct(s) => {
+        Struct(s) => {
             s.is_priv = true
             s.pos = ppos
-            DeclStruct(s)
+            Struct(s)
         }
-        DeclEnum(e) => {
+        Enum(e) => {
             e.is_priv = true
             e.pos = ppos
-            DeclEnum(e)
+            Enum(e)
         }
-        DeclConst(c) => {
+        Const(c) => {
             c.is_priv = true
             c.pos = ppos
-            DeclConst(c)
+            Const(c)
         }
-        DeclGlobal(g) => {
+        Glob(g) => {
             g.is_priv = true
             g.pos = ppos
-            DeclGlobal(g)
+            Glob(g)
         }
-        DeclTest(t) => d
-        DeclUse(path, upos) => d
+        Test(t) => d
+        Use(path, upos) => d
     }
 }
 
@@ -587,11 +587,11 @@ fn fn_expr(p: *Parser, pos: Pos) -> (Expr, bool) {
             return parser_fail[Expr]()
         }
         if !p.is_p("{") {
-            return (Expr{k: EKTypeE(t), pos: pos}, true)
+            return (Expr{k: TypeE(t), pos: pos}, true)
         }
         // `fn() -> R { ... }`
         match t {
-            TypeAstFn(ps, r) => {
+            Fn(ps, r) => {
                 if !ps.is_empty() {
                     p.errs.push(Diag{pos: pos, msg: "an anonymous function names its parameters and gives each one a type, like any function: `fn(a: i64, b: i64) -> bool { a < b }` (`fn(A, B) -> R` alone is a function type)"})
                     return parser_fail[Expr]()
@@ -611,7 +611,7 @@ fn fn_expr(p: *Parser, pos: Pos) -> (Expr, bool) {
         return parser_fail[Expr]()
     }
     d.body = body
-    return (Expr{k: EKFn(parser_box(d)), pos: pos}, true)
+    return (Expr{k: EK.Fn(parser_box(d)), pos: pos}, true)
 }
 
 // ---------- constants, types, variables ----------
@@ -640,7 +640,7 @@ fn kw_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
         if !ok3 {
             return parser_fail[Decl]()
         }
-        return (DeclConst(ConstDecl{name: name, ty: ty, val: val, pos: pos}), true)
+        return (Const(ConstDecl{name: name, ty: ty, val: val, pos: pos}), true)
     }
     is_struct := p.is_kw("struct")
     if is_struct || p.is_kw("enum") {
@@ -689,7 +689,7 @@ fn struct_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, boo
         fields.push((fname, fty))
         p.eat_p(",")
     }
-    return (DeclStruct(StructDecl{name: name, tparams: tparams, fields: fields, pos: pos}), true)
+    return (Struct(StructDecl{name: name, tparams: tparams, fields: fields, pos: pos}), true)
 }
 
 // the body of an enum: `{ Variant, Variant(Type, ...), ... }`
@@ -717,7 +717,7 @@ fn enum_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, bool)
         variants.push((vname, tys))
         p.eat_p(",")
     }
-    return (DeclEnum(EnumDecl{name: name, tparams: tparams, variants: variants, pos: pos}), true)
+    return (Enum(EnumDecl{name: name, tparams: tparams, variants: variants, pos: pos}), true)
 }
 
 // after the `:` of a variable (global or local): `T` or `T = value`
@@ -746,7 +746,7 @@ fn var_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
         if !ok2 {
             return parser_fail[Decl]()
         }
-        return (DeclGlobal(GlobalDecl{name: name, ty: None, init: Some(ie), pos: pos}), true)
+        return (Glob(GlobalDecl{name: name, ty: None, init: Some(ie), pos: pos}), true)
     }
     if !p.eat_p(":") {
         return p.err[Decl](fmt("a declaration that starts with a name declares a variable, `", name, ": T` or `", name, " := value` (functions, types and constants start with `fn`, `struct`, `enum`, `const`): expected `:` or `:=`"))
@@ -755,7 +755,7 @@ fn var_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
     if !ok3 {
         return parser_fail[Decl]()
     }
-    return (DeclGlobal(GlobalDecl{name: name, ty: Some(v.0), init: v.1, pos: pos}), true)
+    return (Glob(GlobalDecl{name: name, ty: Some(v.0), init: v.1, pos: pos}), true)
 }
 
 fn decl(p: *Parser) -> (Decl, bool) {
@@ -776,7 +776,7 @@ fn decl(p: *Parser) -> (Decl, bool) {
     if p.eat_kw("extern") {
         // extern "libfoo.so.1" fn name(a: A) -> R     (a C function; no body)
         match p.bump() {
-            TkStr(s) => {
+            Str(s) => {
                 ext = Some(parser_utf8_lossy(s))
             }
             _ => {
@@ -790,7 +790,7 @@ fn decl(p: *Parser) -> (Decl, bool) {
         if !ok {
             return parser_fail[Decl]()
         }
-        return (DeclFn(f), true)
+        return (Fn(f), true)
     }
     if inl != 0 || is_some(ext) {
         return p.err[Decl]("`inline`, `noinline` and `extern \"lib\"` stand in front of a function declaration: expected `fn`")
@@ -801,7 +801,7 @@ fn decl(p: *Parser) -> (Decl, bool) {
     if p.eat_kw("test") {
         name := ""
         match p.bump() {
-            TkStr(s) => {
+            Str(s) => {
                 name = parser_utf8_lossy(s)
             }
             _ => {
@@ -813,18 +813,18 @@ fn decl(p: *Parser) -> (Decl, bool) {
         if !ok1 {
             return parser_fail[Decl]()
         }
-        return (DeclTest(TestDecl{name: name, body: body, pos: pos}), true)
+        return (Test(TestDecl{name: name, body: body, pos: pos}), true)
     }
     if p.eat_kw("use") {
         // use "file.al"   or   use std.name (a module bundled with the compiler)
         match p.peek() {
-            TkId(a) => {
+            Id(a) => {
                 if parser_tk_p(p.peek_at(1), ".") {
                     match p.peek_at(2) {
-                        TkId(b) => {
+                        Id(b) => {
                             if a == "std" {
                                 p.i += 3
-                                return (DeclUse(fmt("std:", b), pos), true)
+                                return (Use(fmt("std:", b), pos), true)
                             }
                         }
                         _ => {}
@@ -834,8 +834,8 @@ fn decl(p: *Parser) -> (Decl, bool) {
             _ => {}
         }
         match p.bump() {
-            TkStr(s) => {
-                return (DeclUse(parser_utf8_lossy(s), pos), true)
+            Str(s) => {
+                return (Use(parser_utf8_lossy(s), pos), true)
             }
             _ => {
                 p.i -= 1
@@ -873,7 +873,7 @@ fn ty(p: *Parser) -> (TypeAst, bool) {
         if !ok {
             return parser_fail[TypeAst]()
         }
-        return (TypeAstPtr(parser_box(t)), true)
+        return (Ptr(parser_box(t)), true)
     }
     if p.eat_p("[") {
         if p.eat_p("]") {
@@ -881,7 +881,7 @@ fn ty(p: *Parser) -> (TypeAst, bool) {
             if !ok {
                 return parser_fail[TypeAst]()
             }
-            return (TypeAstSlice(parser_box(t)), true)
+            return (Slice(parser_box(t)), true)
         }
         save := p.no_lit
         p.no_lit = false
@@ -898,14 +898,14 @@ fn ty(p: *Parser) -> (TypeAst, bool) {
         if !ok2 {
             return parser_fail[TypeAst]()
         }
-        return (TypeAstArray(nb, parser_box(t)), true)
+        return (Array(nb, parser_box(t)), true)
     }
     if p.eat_p("(") {
         v := vec[TypeAst]()
         if !p.type_list(&v) {
             return parser_fail[TypeAst]()
         }
-        return (TypeAstTuple(v), true)
+        return (Tuple(v), true)
     }
     if p.eat_kw("fn") {
         // a function type: `fn(A, B) -> R`, without a result `fn(A, B)`
@@ -921,10 +921,10 @@ fn ty(p: *Parser) -> (TypeAst, bool) {
             }
             None => {}
         }
-        return (TypeAstFn(v, ret), true)
+        return (Fn(v, ret), true)
     }
     match p.peek() {
-        TkId(name) => {
+        Id(name) => {
             p.bump()
             args := vec[TypeAst]()
             if p.eat_p("[") {
@@ -942,7 +942,7 @@ fn ty(p: *Parser) -> (TypeAst, bool) {
                     return parser_fail[TypeAst]()
                 }
             }
-            return (TypeAstName(name, args, pos), true)
+            return (Name(name, args, pos), true)
         }
         _ => {}
     }
@@ -993,15 +993,15 @@ fn sync_stmt(p: *Parser) {
     depth := 0
     loop {
         match p.peek() {
-            TkEof => {
+            Eof => {
                 return
             }
-            TkNl => {
+            Nl => {
                 if depth == 0 {
                     return
                 }
             }
-            TkP(q) => {
+            P(q) => {
                 if q == "{" {
                     depth += 1
                 } else if q == "}" {
@@ -1034,7 +1034,7 @@ fn header_expr(p: *Parser) -> (Expr, bool) {
 // literal: a type alone is not a value.
 fn lit_in_header(e: *Expr) -> bool {
     match e.k {
-        EKTypeE(t) => {
+        TypeE(t) => {
             return true
         }
         _ => {}
@@ -1066,7 +1066,7 @@ fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
                 return parser_fail[(Expr, Block, Opt[Block])]()
             }
             end := r.1.end
-            inner := Stmt{k: SKIf(r.0, r.1, r.2), pos: pos}
+            inner := Stmt{k: If(r.0, r.1, r.2), pos: pos}
             eb: Opt[Block] = Some(Block{stmts: vec_of([]Stmt{inner}), end: end})
             return ((c, t, eb), true)
         }
@@ -1095,7 +1095,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         return p.err[SK]("`priv` applies to top-level declarations only; a local declaration is visible only in its block anyway")
     }
     match p.peek() {
-        TkKw(k) => {
+        Kw(k) => {
             if k == "inline" || k == "noinline" || k == "extern" {
                 p.errs.push(Diag{pos: p.pos(), msg: fmt("`", k, "` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`")})
                 return parser_fail[SK]()
@@ -1108,7 +1108,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok {
             return parser_fail[SK]()
         }
-        return (SKFn(parser_box(f)), true)
+        return (Fn(parser_box(f)), true)
     }
     if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") {
         p.errs.push(Diag{pos: p.pos(), msg: "constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)"})
@@ -1119,7 +1119,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok {
             return parser_fail[SK]()
         }
-        return (SKIf(r.0, r.1, r.2), true)
+        return (If(r.0, r.1, r.2), true)
     }
     if p.eat_kw("while") {
         c, ok1 := p.header_expr()
@@ -1130,14 +1130,14 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok2 {
             return parser_fail[SK]()
         }
-        return (SKWhile(c, b), true)
+        return (While(c, b), true)
     }
     if p.eat_kw("loop") {
         b, ok := p.block()
         if !ok {
             return parser_fail[SK]()
         }
-        return (SKLoop(b), true)
+        return (LoopStmt(b), true)
     }
     if p.eat_kw("for") {
         v1, ok1 := p.ident()
@@ -1187,44 +1187,44 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok6 {
             return parser_fail[SK]()
         }
-        return (SKFor(v1, v2, lo, hi, incl, step, body), true)
+        return (For(v1, v2, lo, hi, incl, step, body), true)
     }
     if p.eat_kw("return") {
         if parser_tk_nl(p.peek()) || p.is_p("}") || p.is_p(";") {
-            return (SKReturn(None), true)
+            return (Return(None), true)
         }
         e, ok := p.expr()
         if !ok {
             return parser_fail[SK]()
         }
-        return (SKReturn(Some(e)), true)
+        return (Return(Some(e)), true)
     }
     if p.eat_kw("break") {
         // a label must be on the same line (a newline after `break` ends the statement)
         match p.peek() {
-            TkId(label) => {
+            Id(label) => {
                 p.bump()
-                return (SKBreakTo(label), true)
+                return (BreakTo(label), true)
             }
             _ => {}
         }
         if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
             return p.err[SK]("`break` leaves a loop and takes at most a loop label (`break outer`): expected end of statement")
         }
-        return (SKBreak, true)
+        return (Break, true)
     }
     if p.eat_kw("continue") {
         match p.peek() {
-            TkId(label) => {
+            Id(label) => {
                 p.bump()
-                return (SKContinueTo(label), true)
+                return (ContinueTo(label), true)
             }
             _ => {}
         }
         if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
             return p.err[SK]("`continue` takes at most a loop label (`continue outer`): expected end of statement")
         }
-        return (SKContinue, true)
+        return (Continue, true)
     }
     if p.eat_kw("assert") {
         c, ok1 := p.expr()
@@ -1239,21 +1239,21 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             m = Some(me)
         }
-        return (SKAssert(c, m), true)
+        return (Assert(c, m), true)
     }
     if p.eat_kw("defer") {
         b, ok := p.block()
         if !ok {
             return parser_fail[SK]()
         }
-        return (SKDefer(b), true)
+        return (Defer(b), true)
     }
     if p.is_p("{") {
         b, ok := p.block()
         if !ok {
             return parser_fail[SK]()
         }
-        return (SKBlock(b), true)
+        return (BlockStmt(b), true)
     }
     // a labelled loop: `name: for ...`, `name: while ...`, `name: loop ...`
     if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ":") {
@@ -1268,7 +1268,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
             if !ok2 {
                 return parser_fail[SK]()
             }
-            return (SKLabeled(label, parser_box(inner)), true)
+            return (Labeled(label, parser_box(inner)), true)
         }
         if parser_tk_kw(after, "if") || parser_tk_kw(after, "match") || parser_tk_p(after, "{") {
             p.bump()
@@ -1282,7 +1282,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok2 {
             return parser_fail[SK]()
         }
-        return (SKVar(name, Some(v.0), v.1), true)
+        return (Var(name, Some(v.0), v.1), true)
     }
     // multi-let: a, b := e
     if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ",") {
@@ -1307,9 +1307,9 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             lhs := vec[Expr]()
             for n in names.items() {
-                lhs.push(Expr{k: EKIdent(n), pos: pos})
+                lhs.push(Expr{k: Ident(n), pos: pos})
             }
-            return (SKMultiAssign(lhs, e), true)
+            return (MultiAssign(lhs, e), true)
         }
         if !p.expect_p(":=") {
             return parser_fail[SK]()
@@ -1318,7 +1318,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok4 {
             return parser_fail[SK]()
         }
-        return (SKLet(names, e), true)
+        return (Let(names, e), true)
     }
     e, ok1 := p.expr()
     if !ok1 {
@@ -1327,7 +1327,7 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
     if p.eat_p(":=") {
         name := ""
         match e.k {
-            EKIdent(n) => {
+            Ident(n) => {
                 name = n
             }
             _ => {
@@ -1339,48 +1339,48 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok2 {
             return parser_fail[SK]()
         }
-        return (SKLet(vec_of([]str{name}), v), true)
+        return (Let(vec_of([]str{name}), v), true)
     }
     if p.eat_p("=") {
         v, ok2 := p.expr()
         if !ok2 {
             return parser_fail[SK]()
         }
-        return (SKAssign(e, None, v), true)
+        return (Assign(e, None, v), true)
     }
     op: Opt[BinOp] = None
     match p.peek() {
-        TkP(q) => {
+        P(q) => {
             match q {
                 "+=" => {
-                    op = Some(BinOpAdd)
+                    op = Some(Add)
                 }
                 "-=" => {
-                    op = Some(BinOpSub)
+                    op = Some(Sub)
                 }
                 "*=" => {
-                    op = Some(BinOpMul)
+                    op = Some(Mul)
                 }
                 "/=" => {
-                    op = Some(BinOpDiv)
+                    op = Some(Div)
                 }
                 "%=" => {
-                    op = Some(BinOpRem)
+                    op = Some(Rem)
                 }
                 "&=" => {
-                    op = Some(BinOpAnd)
+                    op = Some(And)
                 }
                 "|=" => {
-                    op = Some(BinOpOr)
+                    op = Some(Or)
                 }
                 "^=" => {
-                    op = Some(BinOpXor)
+                    op = Some(Xor)
                 }
                 "<<=" => {
-                    op = Some(BinOpShl)
+                    op = Some(Shl)
                 }
                 ">>=" => {
-                    op = Some(BinOpShr)
+                    op = Some(Shr)
                 }
                 _ => {}
             }
@@ -1393,9 +1393,9 @@ fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok2 {
             return parser_fail[SK]()
         }
-        return (SKAssign(e, op, v), true)
+        return (Assign(e, op, v), true)
     }
-    return (SKExpr(e), true)
+    return (ExprStmt(e), true)
 }
 
 // ---------- expressions ----------
@@ -1406,7 +1406,7 @@ fn expr(p: *Parser) -> (Expr, bool) {
 fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
     q := ""
     match p.peek() {
-        TkP(s) => {
+        P(s) => {
             q = s
         }
         _ => {
@@ -1416,58 +1416,58 @@ fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
     // precedence as in Rust: arithmetic, shifts, &, ^, |, comparisons, &&, ||
     match q {
         "*" => {
-            return Some((BinOpMul, 9))
+            return Some((Mul, 9))
         }
         "/" => {
-            return Some((BinOpDiv, 9))
+            return Some((Div, 9))
         }
         "%" => {
-            return Some((BinOpRem, 9))
+            return Some((Rem, 9))
         }
         "+" => {
-            return Some((BinOpAdd, 8))
+            return Some((Add, 8))
         }
         "-" => {
-            return Some((BinOpSub, 8))
+            return Some((Sub, 8))
         }
         "<<" => {
-            return Some((BinOpShl, 7))
+            return Some((Shl, 7))
         }
         ">>" => {
-            return Some((BinOpShr, 7))
+            return Some((Shr, 7))
         }
         "&" => {
-            return Some((BinOpAnd, 6))
+            return Some((And, 6))
         }
         "^" => {
-            return Some((BinOpXor, 5))
+            return Some((Xor, 5))
         }
         "|" => {
-            return Some((BinOpOr, 4))
+            return Some((Or, 4))
         }
         "==" => {
-            return Some((BinOpEq, 3))
+            return Some((Eq, 3))
         }
         "!=" => {
-            return Some((BinOpNe, 3))
+            return Some((Ne, 3))
         }
         "<" => {
-            return Some((BinOpLt, 3))
+            return Some((Lt, 3))
         }
         "<=" => {
-            return Some((BinOpLe, 3))
+            return Some((Le, 3))
         }
         ">" => {
-            return Some((BinOpGt, 3))
+            return Some((Gt, 3))
         }
         ">=" => {
-            return Some((BinOpGe, 3))
+            return Some((Ge, 3))
         }
         "&&" => {
-            return Some((BinOpLAnd, 2))
+            return Some((LAnd, 2))
         }
         "||" => {
-            return Some((BinOpLOr, 1))
+            return Some((LOr, 1))
         }
         _ => {}
     }
@@ -1480,7 +1480,7 @@ fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
         return parser_fail[Expr]()
     }
     loop {
-        op: BinOp = BinOpAdd
+        op: BinOp = Add
         prec := 0
         match p.binop() {
             Some(x) => {
@@ -1501,7 +1501,7 @@ fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
         if !ok2 {
             return parser_fail[Expr]()
         }
-        lhs = Expr{k: EKBin(op, parser_box(lhs), parser_box(rhs)), pos: pos}
+        lhs = Expr{k: Bin(op, parser_box(lhs), parser_box(rhs)), pos: pos}
     }
     return (lhs, true)
 }
@@ -1510,22 +1510,22 @@ fn unary(p: *Parser) -> (Expr, bool) {
     pos := p.pos()
     op: Opt[UnOp] = None
     match p.peek() {
-        TkP(q) => {
+        P(q) => {
             match q {
                 "-" => {
-                    op = Some(UnOpNeg)
+                    op = Some(Neg)
                 }
                 "!" => {
-                    op = Some(UnOpNot)
+                    op = Some(Not)
                 }
                 "~" => {
-                    op = Some(UnOpBitNot)
+                    op = Some(BitNot)
                 }
                 "&" => {
-                    op = Some(UnOpAddr)
+                    op = Some(AddrOf)
                 }
                 "*" => {
-                    op = Some(UnOpDeref)
+                    op = Some(Deref)
                 }
                 _ => {}
             }
@@ -1539,7 +1539,7 @@ fn unary(p: *Parser) -> (Expr, bool) {
             if !ok {
                 return parser_fail[Expr]()
             }
-            return (Expr{k: EKUn(o, parser_box(e)), pos: pos}, true)
+            return (Expr{k: Un(o, parser_box(e)), pos: pos}, true)
         }
         None => {}
     }
@@ -1548,15 +1548,15 @@ fn unary(p: *Parser) -> (Expr, bool) {
 
 fn parser_typeish(e: *Expr) -> bool {
     match e.k {
-        EKIdent(n) => {
+        Ident(n) => {
             return true
         }
-        EKTypeE(t) => {
+        TypeE(t) => {
             return true
         }
-        EKIndex(b, a) => {
+        Index(b, a) => {
             match b.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     return true
                 }
                 _ => {}
@@ -1607,7 +1607,7 @@ fn postfix(p: *Parser) -> (Expr, bool) {
             if !ok2 {
                 return parser_fail[Expr]()
             }
-            e = Expr{k: EKCall(parser_box(e), a), pos: pos}
+            e = Expr{k: Call(parser_box(e), a), pos: pos}
         } else if p.eat_p("[") {
             save := p.no_lit
             p.no_lit = false
@@ -1619,11 +1619,11 @@ fn postfix(p: *Parser) -> (Expr, bool) {
             e = r
         } else if p.eat_p(".") {
             match p.bump() {
-                TkId(n) => {
-                    e = Expr{k: EKField(parser_box(e), n), pos: pos}
+                Id(n) => {
+                    e = Expr{k: Field(parser_box(e), n), pos: pos}
                 }
-                TkInt(n) => {
-                    e = Expr{k: EKField(parser_box(e), fmt(n)), pos: pos}
+                Int(n) => {
+                    e = Expr{k: Field(parser_box(e), fmt(n)), pos: pos}
                 }
                 _ => {
                     p.i -= 1
@@ -1639,7 +1639,7 @@ fn postfix(p: *Parser) -> (Expr, bool) {
             if !ok2 {
                 return parser_fail[Expr]()
             }
-            e = Expr{k: EKLit(parser_box(e), r), pos: pos}
+            e = Expr{k: Lit(parser_box(e), r), pos: pos}
         } else {
             break
         }
@@ -1660,7 +1660,7 @@ fn index_tail(p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
         if !p.expect_p("]") {
             return parser_fail[Expr]()
         }
-        return (Expr{k: EKSlice(parser_box(base), None, hi), pos: pos}, true)
+        return (Expr{k: Slice(parser_box(base), None, hi), pos: pos}, true)
     }
     first, ok1 := p.expr()
     if !ok1 {
@@ -1678,7 +1678,7 @@ fn index_tail(p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
         if !p.expect_p("]") {
             return parser_fail[Expr]()
         }
-        return (Expr{k: EKSlice(parser_box(base), Some(parser_box(first)), hi), pos: pos}, true)
+        return (Expr{k: Slice(parser_box(base), Some(parser_box(first)), hi), pos: pos}, true)
     }
     v := vec_of([]Expr{first})
     while p.eat_p(",") {
@@ -1691,7 +1691,7 @@ fn index_tail(p: *Parser, base: Expr, pos: Pos) -> (Expr, bool) {
     if !p.expect_p("]") {
         return parser_fail[Expr]()
     }
-    return (Expr{k: EKIndex(parser_box(base), v), pos: pos}, true)
+    return (Expr{k: Index(parser_box(base), v), pos: pos}, true)
 }
 
 fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
@@ -1705,7 +1705,7 @@ fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
         }
         fname: Opt[str] = None
         match p.peek() {
-            TkId(n) => {
+            Id(n) => {
                 if parser_tk_p(p.peek_at(1), ":") {
                     fname = Some(n)
                 }
@@ -1764,7 +1764,7 @@ fn parser_primary_r(p: *Parser, pos: Pos) -> (Expr, bool) {
         if !p.expect_p(")") {
             return parser_fail[Expr]()
         }
-        return (Expr{k: EKTuple(v), pos: pos}, true)
+        return (Expr{k: Tuple(v), pos: pos}, true)
     }
     if !p.expect_p(")") {
         return parser_fail[Expr]()
@@ -1775,34 +1775,34 @@ fn parser_primary_r(p: *Parser, pos: Pos) -> (Expr, bool) {
 fn primary(p: *Parser) -> (Expr, bool) {
     pos := p.pos()
     match p.peek() {
-        TkInt(n) => {
+        Int(n) => {
             p.bump()
-            return (Expr{k: EKInt(n), pos: pos}, true)
+            return (Expr{k: EK.Int(n), pos: pos}, true)
         }
-        TkFloat(f) => {
+        Float(f) => {
             p.bump()
-            return (Expr{k: EKFloat(f), pos: pos}, true)
+            return (Expr{k: EK.Float(f), pos: pos}, true)
         }
-        TkStr(s) => {
+        Str(s) => {
             p.bump()
-            return (Expr{k: EKStr(s), pos: pos}, true)
+            return (Expr{k: EK.Str(s), pos: pos}, true)
         }
-        TkId(n) => {
+        Id(n) => {
             p.bump()
-            return (Expr{k: EKIdent(n), pos: pos}, true)
+            return (Expr{k: Ident(n), pos: pos}, true)
         }
-        TkKw(k) => {
+        Kw(k) => {
             if k == "true" {
                 p.bump()
-                return (Expr{k: EKBool(true), pos: pos}, true)
+                return (Expr{k: Bool(true), pos: pos}, true)
             }
             if k == "false" {
                 p.bump()
-                return (Expr{k: EKBool(false), pos: pos}, true)
+                return (Expr{k: Bool(false), pos: pos}, true)
             }
             if k == "nil" {
                 p.bump()
-                return (Expr{k: EKNil, pos: pos}, true)
+                return (Expr{k: Nil, pos: pos}, true)
             }
             if k == "if" {
                 p.bump()
@@ -1812,7 +1812,7 @@ fn primary(p: *Parser) -> (Expr, bool) {
                 }
                 match r.2 {
                     Some(e) => {
-                        return (Expr{k: EKIf(parser_box(r.0), r.1, e), pos: pos}, true)
+                        return (Expr{k: If(parser_box(r.0), r.1, e), pos: pos}, true)
                     }
                     None => {
                         p.errs.push(Diag{pos: pos, msg: "`if` used as an expression needs an `else` branch"})
@@ -1837,13 +1837,13 @@ fn primary(p: *Parser) -> (Expr, bool) {
                 if !ok2 {
                     return parser_fail[Expr]()
                 }
-                return (Expr{k: EKMatch(sb, r), pos: pos}, true)
+                return (Expr{k: Match(sb, r), pos: pos}, true)
             }
             if k == "fn" {
                 return p.fn_expr(pos)
             }
         }
-        TkP(q) => {
+        P(q) => {
             if q == "(" {
                 p.bump()
                 save := p.no_lit
@@ -1857,7 +1857,7 @@ fn primary(p: *Parser) -> (Expr, bool) {
                 if !ok {
                     return parser_fail[Expr]()
                 }
-                return (Expr{k: EKTypeE(t), pos: pos}, true)
+                return (Expr{k: TypeE(t), pos: pos}, true)
             }
         }
         _ => {}
@@ -1868,16 +1868,16 @@ fn primary(p: *Parser) -> (Expr, bool) {
 // where an expression starts in the source (its `pos` may be that of an operator)
 fn parser_expr_start(e: *Expr) -> Pos {
     match e.k {
-        EKCall(c, _) => {
+        Call(c, _) => {
             return parser_expr_start(c)
         }
-        EKField(b, _) => {
+        Field(b, _) => {
             return parser_expr_start(b)
         }
-        EKIndex(b, _) => {
+        Index(b, _) => {
             return parser_expr_start(b)
         }
-        EKBin(_, a, _) => {
+        Bin(_, a, _) => {
             return parser_expr_start(a)
         }
         _ => {}
@@ -1890,23 +1890,23 @@ fn parser_expr_start(e: *Expr) -> Pos {
 // an expression (a constant, or a name that lowering resolves).
 fn parser_pat(e: Expr) -> Pat {
     match e.k {
-        EKIdent(n) => {
+        Ident(n) => {
             if n == "_" {
-                return PatWild
+                return Wild
             }
         }
-        EKCall(c, args) => {
+        Call(c, args) => {
             name := ""
             qual: Opt[*Expr] = None
             is_variant := false
             match c.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     name = n
                     is_variant = true
                 }
-                EKField(q, n) => {
+                Field(q, n) => {
                     match q.k {
-                        EKTypeE(_) => {}
+                        TypeE(_) => {}
                         _ => {
                             if parser_typeish(q) {
                                 name = n
@@ -1925,21 +1925,21 @@ fn parser_pat(e: Expr) -> Pat {
                 for i in 0..args.len {
                     subs.push(parser_pat(args[i]))
                 }
-                return PatVariant(name, subs, parser_expr_start(c), qual)
+                return Variant(name, subs, parser_expr_start(c), qual)
             }
         }
-        EKTuple(es) => {
+        Tuple(es) => {
             subs := vec[Pat]()
             for i in 0..es.len {
                 subs.push(parser_pat(es[i]))
             }
-            return PatTuple(subs, e.pos)
+            return Pat.Tuple(subs, e.pos)
         }
-        EKUn(op, x) => {
-            if op == UnOpAddr {
+        Un(op, x) => {
+            if op == AddrOf {
                 match x.k {
-                    EKIdent(n) => {
-                        return PatRef(n, e.pos)
+                    Ident(n) => {
+                        return Ref(n, e.pos)
                     }
                     _ => {}
                 }
@@ -1947,7 +1947,7 @@ fn parser_pat(e: Expr) -> Pat {
         }
         _ => {}
     }
-    return PatConst(e)
+    return Const(e)
 }
 
 fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {

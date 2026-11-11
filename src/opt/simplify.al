@@ -90,47 +90,47 @@ fn simplify_fold_bin(op: Op, ty: T, a: i64, b: i64) -> Opt[i64] {
     sh := i64(u32(u64(b) & (u64(bits) - 1)))
     r: i64
     match op {
-        OpAdd => { r = a + b }
-        OpSub => { r = a - b }
-        OpMul => { r = a * b }
-        OpSDiv => {
+        Add => { r = a + b }
+        Sub => { r = a - b }
+        Mul => { r = a * b }
+        SDiv => {
             if b == 0 {
                 return None
             }
             r = simplify_wrapping_div(a, b)
         }
-        OpSRem => {
+        SRem => {
             if b == 0 {
                 return None
             }
             r = simplify_wrapping_rem(a, b)
         }
-        OpUDiv => {
+        UDiv => {
             if ub == 0 {
                 return None
             }
             r = i64(ua / ub)
         }
-        OpURem => {
+        URem => {
             if ub == 0 {
                 return None
             }
             r = i64(ua % ub)
         }
-        OpAnd => { r = a & b }
-        OpOr => { r = a | b }
-        OpXor => { r = a ^ b }
-        OpShl => { r = i64((ua << sh) & m) }
-        OpLShr => { r = i64(ua >> sh) }
-        OpAShr => { r = a >> sh }
-        OpRotl => {
+        And => { r = a & b }
+        Or => { r = a | b }
+        Xor => { r = a ^ b }
+        Shl => { r = i64((ua << sh) & m) }
+        LShr => { r = i64(ua >> sh) }
+        AShr => { r = a >> sh }
+        Rotl => {
             if sh == 0 {
                 r = a
             } else {
                 r = i64(((ua << sh) | (ua >> (bits - sh))) & m)
             }
         }
-        OpRotr => {
+        Rotr => {
             if sh == 0 {
                 r = a
             } else {
@@ -138,9 +138,9 @@ fn simplify_fold_bin(op: Op, ty: T, a: i64, b: i64) -> Opt[i64] {
             }
         }
         // ((a as i128) * (b as i128)) >> bits
-        OpMulHiS => { r = simplify_shr128(u64(a) * u64(b), u64(simplify_mulhs(a, b)), bits, true) }
+        MulHiS => { r = simplify_shr128(u64(a) * u64(b), u64(simplify_mulhs(a, b)), bits, true) }
         // ((ua as u128) * (ub as u128)) >> bits
-        OpMulHiU => { r = simplify_shr128(ua * ub, simplify_mulhu(ua, ub), bits, false) }
+        MulHiU => { r = simplify_shr128(ua * ub, simplify_mulhu(ua, ub), bits, false) }
         _ => { return None }
     }
     return Some(ir_canon(ty, r))
@@ -167,16 +167,16 @@ fn simplify_fold_icmp(op: Op, ty: T, a: i64, b: i64) -> Opt[bool] {
     ua := u64(a) & m
     ub := u64(b) & m
     match op {
-        OpEq => { return Some(a == b) }
-        OpNe => { return Some(a != b) }
-        OpSlt => { return Some(a < b) }
-        OpSle => { return Some(a <= b) }
-        OpSgt => { return Some(a > b) }
-        OpSge => { return Some(a >= b) }
-        OpUlt => { return Some(ua < ub) }
-        OpUle => { return Some(ua <= ub) }
-        OpUgt => { return Some(ua > ub) }
-        OpUge => { return Some(ua >= ub) }
+        Eq => { return Some(a == b) }
+        Ne => { return Some(a != b) }
+        Slt => { return Some(a < b) }
+        Sle => { return Some(a <= b) }
+        Sgt => { return Some(a > b) }
+        Sge => { return Some(a >= b) }
+        Ult => { return Some(ua < ub) }
+        Ule => { return Some(ua <= ub) }
+        Ugt => { return Some(ua > ub) }
+        Uge => { return Some(ua >= ub) }
         _ => {}
     }
     return None
@@ -197,9 +197,9 @@ fn c(self: *SimplifyCtx, v: i64) -> Opt[i64] {
 // scalar float constants only (vector constants are never folded)
 fn fc(self: *SimplifyCtx, v: i64) -> Opt[f64] {
     i := &self.f.insts[v]
-    if i.op == OpFConst && i.ty == TF64 {
+    if i.op == FConst && i.ty == F64 {
         return Some(cast[f64](u64(i.k)))
-    } else if i.op == OpFConst && i.ty == TF32 {
+    } else if i.op == FConst && i.ty == F32 {
         return Some(f64(cast[f32](u32(i.k))))
     }
     return None
@@ -208,14 +208,14 @@ fn fc(self: *SimplifyCtx, v: i64) -> Opt[f64] {
 // bits of the constant r in type ty; f32 results are computed in f64 and rounded once,
 // which is exact for + - * / sqrt
 fn simplify_ctx_fbits(ty: T, r: f64) -> i64 {
-    if ty == TF32 {
+    if ty == F32 {
         return i64(cast[u32](f32(r)))
     }
     return i64(cast[u64](r))
 }
 
 fn konst(self: *SimplifyCtx, ty: T, k: i64) -> i64 {
-    v := self.f.mk(OpConst, ty, vec[i64](), ir_canon(ty, k))
+    v := self.f.mk(Const, ty, vec[i64](), ir_canon(ty, k))
     self.new_insts.push(v)
     return v
 }
@@ -238,7 +238,7 @@ fn set(self: *SimplifyCtx, v: i64, op: Op, args: Vec[i64], k: i64) {
 
 fn set_const(self: *SimplifyCtx, v: i64, k: i64) {
     ty := self.f.insts[v].ty
-    self.set(v, OpConst, vec[i64](), ir_canon(ty, k))
+    self.set(v, Const, vec[i64](), ir_canon(ty, k))
 }
 
 fn op(self: *SimplifyCtx, v: i64) -> Op {
@@ -251,7 +251,7 @@ fn simplify_simplify_small(k: i64) -> bool {
 
 fn simplify_simplify_is_not(s: *SimplifyCtx, n: i64, x: i64) -> bool {
     ni := s.f.insts[n]
-    return ni.op == OpXor && simplify_opt_is(s.c(ni.args[1]), -1) && ni.args[0] == x
+    return ni.op == Xor && simplify_opt_is(s.c(ni.args[1]), -1) && ni.args[0] == x
 }
 
 // returns Some(w) when v should be replaced by the existing value w
@@ -260,8 +260,8 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
     ty := inst.ty
     op := inst.op
     match op {
-        OpAdd, OpSub, OpMul, OpSDiv, OpUDiv, OpSRem, OpURem, OpAnd, OpOr, OpXor, OpShl, OpLShr, OpAShr,
-        OpRotl, OpRotr, OpMulHiS, OpMulHiU => {
+        Add, Sub, Mul, SDiv, UDiv, SRem, URem, And, Or, Xor, Shl, LShr, AShr,
+        Rotl, Rotr, MulHiS, MulHiU => {
             a := inst.args[0]
             b := inst.args[1]
             x0, hx0 := simplify_unopt(self.c(a))
@@ -284,112 +284,112 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             bits := i64(ty.bits())
             k, hk := simplify_unopt(cb)
             if hk {
-                is_shift := op == OpShl || op == OpLShr || op == OpAShr || op == OpRotl || op == OpRotr
-                if k == 0 && (op == OpAdd || op == OpSub || op == OpOr || op == OpXor || is_shift) {
+                is_shift := op == Shl || op == LShr || op == AShr || op == Rotl || op == Rotr
+                if k == 0 && (op == Add || op == Sub || op == Or || op == Xor || is_shift) {
                     return Some(a)
                 } else if is_shift && k & (bits - 1) == 0 {
                     return Some(a)
-                } else if k == 1 && (op == OpMul || op == OpSDiv || op == OpUDiv) {
+                } else if k == 1 && (op == Mul || op == SDiv || op == UDiv) {
                     return Some(a)
-                } else if k == 0 && (op == OpMul || op == OpAnd) {
+                } else if k == 0 && (op == Mul || op == And) {
                     self.set_const(v, 0)
                     return None
-                } else if k == 1 && (op == OpSRem || op == OpURem) {
+                } else if k == 1 && (op == SRem || op == URem) {
                     self.set_const(v, 0)
                     return None
-                } else if op == OpXor && k == 1 && ty == TI8 && self.op(a).is_cmp() {
+                } else if op == Xor && k == 1 && ty == I8 && self.op(a).is_cmp() {
                     ai := self.f.insts[a]
                     if ai.op.is_icmp() {
                         self.set(v, ai.op.negate_icmp(), clone(&ai.args), 0)
                         return None
                     }
-                    if ai.op == OpFEq || ai.op == OpFNe {
-                        nop := OpFEq
-                        if ai.op == OpFEq {
-                            nop = OpFNe
+                    if ai.op == FEq || ai.op == FNe {
+                        nop := FEq
+                        if ai.op == FEq {
+                            nop = FNe
                         }
                         self.set(v, nop, clone(&ai.args), 0)
                         return None
                     }
-                } else if op == OpAnd && k == -1 {
+                } else if op == And && k == -1 {
                     return Some(a)
-                } else if op == OpOr && k == -1 {
+                } else if op == Or && k == -1 {
                     self.set_const(v, -1)
                     return None
-                } else if op == OpSub {
+                } else if op == Sub {
                     nk := self.konst(ty, 0 - k)
-                    self.set(v, OpAdd, vec_of([]i64{a, nk}), 0)
+                    self.set(v, Add, vec_of([]i64{a, nk}), 0)
                     return None
-                } else if op == OpMul && k > 0 && simplify_is_pow2(u64(k)) {
+                } else if op == Mul && k > 0 && simplify_is_pow2(u64(k)) {
                     s := self.konst(ty, i64(ctz(u64(k))))
-                    self.set(v, OpShl, vec_of([]i64{a, s}), 0)
+                    self.set(v, Shl, vec_of([]i64{a, s}), 0)
                     return None
-                } else if op == OpMul && k == -1 {
+                } else if op == Mul && k == -1 {
                     z := self.konst(ty, 0)
-                    self.set(v, OpSub, vec_of([]i64{z, a}), 0)
+                    self.set(v, Sub, vec_of([]i64{z, a}), 0)
                     return None
-                } else if op == OpUDiv {
+                } else if op == UDiv {
                     uk := u64(k) & simplify_mask(i64(ty.bits()))
                     if simplify_is_pow2(uk) {
                         s := self.konst(ty, i64(ctz(uk)))
-                        self.set(v, OpLShr, vec_of([]i64{a, s}), 0)
+                        self.set(v, LShr, vec_of([]i64{a, s}), 0)
                         return None
                     }
-                    if ty == TI64 || ty == TI32 {
+                    if ty == I64 || ty == I32 {
                         q := self.udiv_magic(a, ty, uk)
                         return Some(q)
                     }
-                } else if op == OpURem {
+                } else if op == URem {
                     uk := u64(k) & simplify_mask(i64(ty.bits()))
                     if simplify_is_pow2(uk) {
                         m := self.konst(ty, i64(uk - 1))
-                        self.set(v, OpAnd, vec_of([]i64{a, m}), 0)
+                        self.set(v, And, vec_of([]i64{a, m}), 0)
                         return None
                     }
-                    if ty == TI64 || ty == TI32 {
+                    if ty == I64 || ty == I32 {
                         q := self.udiv_magic(a, ty, uk)
                         d := self.konst(ty, k)
-                        p := self.mk(OpMul, ty, vec_of([]i64{q, d}))
-                        self.set(v, OpSub, vec_of([]i64{a, p}), 0)
+                        p := self.mk(Mul, ty, vec_of([]i64{q, d}))
+                        self.set(v, Sub, vec_of([]i64{a, p}), 0)
                         return None
                     }
-                } else if (op == OpSDiv || op == OpSRem) && k != 0 && k != -1 && (ty == TI64 || ty == TI32) &&
-                    k != i64(0x8000000000000000) && !(ty == TI32 && k == i64(i32(0x80000000))) {
+                } else if (op == SDiv || op == SRem) && k != 0 && k != -1 && (ty == I64 || ty == I32) &&
+                    k != i64(0x8000000000000000) && !(ty == I32 && k == i64(i32(0x80000000))) {
                     q: i64
                     if simplify_is_pow2(simplify_uabs(k)) {
                         // (a + ((a >> bits-1) >>> (bits - s))) >> s, negated for negative divisors
                         s := i64(ctz(simplify_uabs(k)))
                         c1 := self.konst(ty, bits - 1)
-                        sign := self.mk(OpAShr, ty, vec_of([]i64{a, c1}))
+                        sign := self.mk(AShr, ty, vec_of([]i64{a, c1}))
                         c2 := self.konst(ty, bits - s)
-                        bias := self.mk(OpLShr, ty, vec_of([]i64{sign, c2}))
-                        sum := self.mk(OpAdd, ty, vec_of([]i64{a, bias}))
+                        bias := self.mk(LShr, ty, vec_of([]i64{sign, c2}))
+                        sum := self.mk(Add, ty, vec_of([]i64{a, bias}))
                         c3 := self.konst(ty, s)
-                        q1 := self.mk(OpAShr, ty, vec_of([]i64{sum, c3}))
+                        q1 := self.mk(AShr, ty, vec_of([]i64{sum, c3}))
                         if k < 0 {
                             z := self.konst(ty, 0)
-                            q = self.mk(OpSub, ty, vec_of([]i64{z, q1}))
+                            q = self.mk(Sub, ty, vec_of([]i64{z, q1}))
                         } else {
                             q = q1
                         }
                     } else {
                         q = self.sdiv_magic(a, ty, k)
                     }
-                    if op == OpSDiv {
+                    if op == SDiv {
                         return Some(q)
                     }
                     d := self.konst(ty, k)
-                    p := self.mk(OpMul, ty, vec_of([]i64{q, d}))
-                    self.set(v, OpSub, vec_of([]i64{a, p}), 0)
+                    p := self.mk(Mul, ty, vec_of([]i64{q, d}))
+                    self.set(v, Sub, vec_of([]i64{a, p}), 0)
                     return None
                 }
             }
             if a == b {
-                if op == OpSub || op == OpXor {
+                if op == Sub || op == Xor {
                     self.set_const(v, 0)
                     return None
                 }
-                if op == OpAnd || op == OpOr {
+                if op == And || op == Or {
                     return Some(a)
                 }
             }
@@ -397,7 +397,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             if hk {
                 k2 := k
                 ai := self.f.insts[a]
-                if ai.op == op && (op == OpAdd || op == OpMul || op == OpAnd || op == OpOr || op == OpXor) {
+                if ai.op == op && (op == Add || op == Mul || op == And || op == Or || op == Xor) {
                     k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     if hk1 {
                         x := ai.args[0]
@@ -409,7 +409,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                     }
                 }
                 // (x << c1) << c2, (x >>> c1) >>> c2
-                if ai.op == op && (op == OpShl || op == OpLShr) {
+                if ai.op == op && (op == Shl || op == LShr) {
                     k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     if hk1 {
                         s1 := k1 & (bits - 1)
@@ -429,7 +429,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             if hk {
                 k2 := k
                 ai := self.f.insts[a]
-                if (op == OpShl || op == OpMul) && ai.op == OpAdd {
+                if (op == Shl || op == Mul) && ai.op == Add {
                     k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     prod_small := false
                     if hk1 {
@@ -444,12 +444,12 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                         kf, hkf := simplify_unopt(simplify_fold_bin(op, ty, k1, k2))
                         assert hkf
                         kc := self.konst(ty, kf)
-                        self.set(v, OpAdd, vec_of([]i64{inner, kc}), 0)
+                        self.set(v, Add, vec_of([]i64{inner, kc}), 0)
                         return None
                     }
                 }
             }
-            if op == OpXor || op == OpOr {
+            if op == Xor || op == Or {
                 ai := self.f.insts[a]
                 bi := self.f.insts[b]
                 ua := 2
@@ -460,7 +460,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                 if b < self.uses.len {
                     ub = self.uses[b]
                 }
-                if ai.op == OpAnd && bi.op == OpAnd && ua == 1 && ub == 1 {
+                if ai.op == And && bi.op == And && ua == 1 && ub == 1 {
                     // bit select: (x & y) ^ (~x & z)  =>  z ^ (x & (y ^ z))
                     has_sel := false
                     sel_x := 0
@@ -485,19 +485,19 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                         }
                     }
                     if has_sel {
-                        yz := self.mk(OpXor, ty, vec_of([]i64{sel_y, sel_z}))
-                        m := self.mk(OpAnd, ty, vec_of([]i64{sel_x, yz}))
-                        self.set(v, OpXor, vec_of([]i64{sel_z, m}), 0)
+                        yz := self.mk(Xor, ty, vec_of([]i64{sel_y, sel_z}))
+                        m := self.mk(And, ty, vec_of([]i64{sel_x, yz}))
+                        self.set(v, Xor, vec_of([]i64{sel_z, m}), 0)
                         return None
                     }
                     // (x & y) ^ (x & z)  =>  x & (y ^ z)
-                    if op == OpXor {
+                    if op == Xor {
                         for pi in 0..2 {
                             for qi in 0..2 {
                                 if ai.args[pi] == bi.args[qi] {
                                     x := ai.args[pi]
-                                    yz := self.mk(OpXor, ty, vec_of([]i64{ai.args[1 - pi], bi.args[1 - qi]}))
-                                    self.set(v, OpAnd, vec_of([]i64{x, yz}), 0)
+                                    yz := self.mk(Xor, ty, vec_of([]i64{ai.args[1 - pi], bi.args[1 - qi]}))
+                                    self.set(v, And, vec_of([]i64{x, yz}), 0)
                                     return None
                                 }
                             }
@@ -506,7 +506,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                 }
             }
             // rotate idioms: (x >>> n) | (x << (bits - n))
-            if op == OpOr || op == OpXor || op == OpAdd {
+            if op == Or || op == Xor || op == Add {
                 match self.match_rotate(a, b, ty) {
                     Some(r) => {
                         self.set(v, r.0, vec_of([]i64{r.1, r.2}), 0)
@@ -516,52 +516,52 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                 }
             }
             // x + (0 - y) => x - y
-            if op == OpAdd {
+            if op == Add {
                 bi := self.f.insts[b]
-                if bi.op == OpSub && simplify_opt_is(self.c(bi.args[0]), 0) {
+                if bi.op == Sub && simplify_opt_is(self.c(bi.args[0]), 0) {
                     y := bi.args[1]
-                    self.set(v, OpSub, vec_of([]i64{a, y}), 0)
+                    self.set(v, Sub, vec_of([]i64{a, y}), 0)
                     return None
                 }
             }
             return None
         }
-        OpFAdd, OpFSub, OpFMul, OpFDiv => {
+        FAdd, FSub, FMul, FDiv => {
             x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
                 y, hy := simplify_unopt(self.fc(inst.args[1]))
                 if hy {
                     r: f64
-                    if op == OpFAdd {
+                    if op == FAdd {
                         r = x + y
-                    } else if op == OpFSub {
+                    } else if op == FSub {
                         r = x - y
-                    } else if op == OpFMul {
+                    } else if op == FMul {
                         r = x * y
                     } else {
                         r = x / y
                     }
-                    self.set(v, OpFConst, vec[i64](), simplify_ctx_fbits(ty, r))
+                    self.set(v, FConst, vec[i64](), simplify_ctx_fbits(ty, r))
                 }
             }
             return None
         }
-        OpFNeg, OpFAbs, OpFSqrt => {
+        FNeg, FAbs, FSqrt => {
             x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
                 r: f64
-                if op == OpFNeg {
+                if op == FNeg {
                     r = -x
-                } else if op == OpFAbs {
+                } else if op == FAbs {
                     r = fabs(x)
                 } else {
                     r = sqrt(x)
                 }
-                self.set(v, OpFConst, vec[i64](), simplify_ctx_fbits(ty, r))
+                self.set(v, FConst, vec[i64](), simplify_ctx_fbits(ty, r))
             }
             return None
         }
-        OpEq, OpNe, OpSlt, OpSle, OpSgt, OpSge, OpUlt, OpUle, OpUgt, OpUge => {
+        Eq, Ne, Slt, Sle, Sgt, Sge, Ult, Ule, Ugt, Uge => {
             a := inst.args[0]
             b := inst.args[1]
             at := self.f.insts[a].ty
@@ -584,21 +584,21 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                 self.changed = true
             }
             if a == b {
-                r := op == OpEq || op == OpSle || op == OpSge || op == OpUle || op == OpUge
+                r := op == Eq || op == Sle || op == Sge || op == Ule || op == Uge
                 self.set_const(v, i64(r))
                 return None
             }
             // (x & (len - 1)) <u len  is true exactly when len != 0
-            if op == OpUlt || op == OpUgt {
+            if op == Ult || op == Ugt {
                 idx := b
                 lenv := a
-                if op == OpUlt {
+                if op == Ult {
                     idx = a
                     lenv = b
                 }
                 if self.masked_by(idx, lenv, 4, idx) {
                     z := self.konst(at, 0)
-                    self.set(v, OpNe, vec_of([]i64{lenv, z}), 0)
+                    self.set(v, Ne, vec_of([]i64{lenv, z}), 0)
                     return None
                 }
             }
@@ -606,8 +606,8 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             k, hk := simplify_unopt(self.c(b))
             if hk {
                 ai := self.f.insts[a]
-                if (op == OpEq || op == OpNe) && at == TI8 && ai.op.is_cmp() {
-                    truth := (op == OpNe) == (k == 0)
+                if (op == Eq || op == Ne) && at == I8 && ai.op.is_cmp() {
+                    truth := (op == Ne) == (k == 0)
                     // (cmp != 0) or (cmp == 1) => cmp ; (cmp == 0) or (cmp != 1) => !cmp
                     if k == 0 || k == 1 {
                         if truth {
@@ -617,10 +617,10 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                             self.set(v, ai.op.negate_icmp(), clone(&ai.args), 0)
                             return None
                         }
-                        if ai.op == OpFEq || ai.op == OpFNe {
-                            nop := OpFEq
-                            if ai.op == OpFEq {
-                                nop = OpFNe
+                        if ai.op == FEq || ai.op == FNe {
+                            nop := FEq
+                            if ai.op == FEq {
+                                nop = FNe
                             }
                             self.set(v, nop, clone(&ai.args), 0)
                             return None
@@ -628,16 +628,16 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
                     }
                 }
                 // unsigned x < 0 is false, x >= 0 is true
-                if k == 0 && op == OpUlt {
+                if k == 0 && op == Ult {
                     self.set_const(v, 0)
                     return None
                 }
-                if k == 0 && op == OpUge {
+                if k == 0 && op == Uge {
                     self.set_const(v, 1)
                     return None
                 }
                 // (x + c1) == c2  =>  x == c2 - c1
-                if (op == OpEq || op == OpNe) && ai.op == OpAdd {
+                if (op == Eq || op == Ne) && ai.op == Add {
                     k1, hk1 := simplify_unopt(self.c(ai.args[1]))
                     if hk1 {
                         nk := self.konst(at, k - k1)
@@ -648,21 +648,21 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             }
             return None
         }
-        OpFEq, OpFNe, OpFLt, OpFLe, OpFGt, OpFGe => {
+        FEq, FNe, FLt, FLe, FGt, FGe => {
             x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
                 y, hy := simplify_unopt(self.fc(inst.args[1]))
                 if hy {
                     r: bool
-                    if op == OpFEq {
+                    if op == FEq {
                         r = x == y
-                    } else if op == OpFNe {
+                    } else if op == FNe {
                         r = x != y
-                    } else if op == OpFLt {
+                    } else if op == FLt {
                         r = x < y
-                    } else if op == OpFLe {
+                    } else if op == FLe {
                         r = x <= y
-                    } else if op == OpFGt {
+                    } else if op == FGt {
                         r = x > y
                     } else {
                         r = x >= y
@@ -672,7 +672,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             }
             return None
         }
-        OpSExt, OpZExt, OpTrunc => {
+        SExt, ZExt, Trunc => {
             a := inst.args[0]
             at := self.f.insts[a].ty
             if at == ty {
@@ -681,81 +681,81 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             x, hx := simplify_unopt(self.c(a))
             if hx {
                 r := x
-                if op == OpZExt {
+                if op == ZExt {
                     r = i64(u64(x) & simplify_mask(i64(at.bits())))
                 }
                 self.set_const(v, r)
                 return None
             }
             ai := self.f.insts[a]
-            if (op == OpSExt && ai.op == OpSExt) || (op == OpZExt && ai.op == OpZExt) {
+            if (op == SExt && ai.op == SExt) || (op == ZExt && ai.op == ZExt) {
                 self.set(v, op, vec_of([]i64{ai.args[0]}), 0)
-            } else if op == OpSExt && ai.op == OpZExt {
+            } else if op == SExt && ai.op == ZExt {
                 // zero-extended value is non-negative
-                self.set(v, OpZExt, vec_of([]i64{ai.args[0]}), 0)
-            } else if op == OpTrunc && (ai.op == OpSExt || ai.op == OpZExt || ai.op == OpTrunc) {
+                self.set(v, ZExt, vec_of([]i64{ai.args[0]}), 0)
+            } else if op == Trunc && (ai.op == SExt || ai.op == ZExt || ai.op == Trunc) {
                 src := ai.args[0]
                 st := self.f.insts[src].ty
                 if st == ty {
                     return Some(src)
                 }
-                if ai.op == OpTrunc || i64(st.bits()) > i64(ty.bits()) {
-                    self.set(v, OpTrunc, vec_of([]i64{src}), 0)
+                if ai.op == Trunc || i64(st.bits()) > i64(ty.bits()) {
+                    self.set(v, Trunc, vec_of([]i64{src}), 0)
                 } else {
                     self.set(v, ai.op, vec_of([]i64{src}), 0)
                 }
             }
             return None
         }
-        OpSIToF => {
+        SIToF => {
             x, hx := simplify_unopt(self.c(inst.args[0]))
             if hx {
                 fbits: i64
-                if ty == TF32 {
+                if ty == F32 {
                     fbits = i64(cast[u32](f32(x)))
                 } else {
                     fbits = i64(cast[u64](f64(x)))
                 }
-                self.set(v, OpFConst, vec[i64](), fbits)
+                self.set(v, FConst, vec[i64](), fbits)
             }
             return None
         }
-        OpFToSI => {
+        FToSI => {
             x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
-                if simplify_is_finite(x) && fabs(x) < 9.0e18 && (ty == TI64 || fabs(x) < 2.0e9) {
+                if simplify_is_finite(x) && fabs(x) < 9.0e18 && (ty == I64 || fabs(x) < 2.0e9) {
                     self.set_const(v, i64(x))
                 }
             }
             return None
         }
-        OpBitsToF => {
+        BitsToF => {
             x, hx := simplify_unopt(self.c(inst.args[0]))
             if hx {
                 kb := x
-                if ty == TF32 {
+                if ty == F32 {
                     kb = x & 0xFFFFFFFF
                 }
-                self.set(v, OpFConst, vec[i64](), kb)
+                self.set(v, FConst, vec[i64](), kb)
             }
             return None
         }
-        OpFToBits => {
+        FToBits => {
             i := self.f.insts[inst.args[0]]
-            if i.op == OpFConst {
+            if i.op == FConst {
                 k := i.k
                 self.set_const(v, k)
             }
             return None
         }
-        OpFExt, OpFTrunc => {
+        FExt, FTrunc => {
             x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
-                self.set(v, OpFConst, vec[i64](), simplify_ctx_fbits(ty, x))
+                self.set(v, FConst, vec[i64](), simplify_ctx_fbits(ty, x))
             }
             return None
         }
-        OpSelect => {
+        Select => {
             c := inst.args[0]
             a := inst.args[1]
             b := inst.args[2]
@@ -771,7 +771,7 @@ fn simplify(self: *SimplifyCtx, v: i64) -> Opt[i64] {
             }
             return None
         }
-        OpPhi => { return None }
+        Phi => { return None }
         _ => {}
     }
     return None
@@ -784,16 +784,16 @@ fn simplify_is_finite(x: f64) -> bool {
 
 fn simplify_masked_by_is_len_m1(s: *SimplifyCtx, lenv: i64, m: i64) -> bool {
     mi := s.f.insts[m]
-    return mi.op == OpAdd && mi.args[0] == lenv && simplify_opt_is(s.c(mi.args[1]), -1)
+    return mi.op == Add && mi.args[0] == lenv && simplify_opt_is(s.c(mi.args[1]), -1)
 }
 
 // is v always of the form (x & (len - 1)), directly or through phis?
 fn masked_by(self: *SimplifyCtx, v: i64, lenv: i64, depth: i64, root: i64) -> bool {
     i := self.f.insts[v]
-    if i.op == OpAnd {
+    if i.op == And {
         return simplify_masked_by_is_len_m1(self, lenv, i.args[0]) || simplify_masked_by_is_len_m1(self, lenv, i.args[1])
     }
-    if i.op == OpPhi && depth > 0 && !i.args.is_empty() {
+    if i.op == Phi && depth > 0 && !i.args.is_empty() {
         for a in i.args.items() {
             if !(a == root || a == v || self.masked_by(a, lenv, depth - 1, root)) {
                 return false
@@ -820,29 +820,29 @@ fn ubits(self: *SimplifyCtx, v: i64, depth: i64) -> i64 {
         return tb
     }
     r := tb
-    if i.op == OpConst {
+    if i.op == Const {
         r = 64 - i64(clz(u64(i.k) & simplify_mask(tb)))
-    } else if i.op == OpLShr {
+    } else if i.op == LShr {
         k, hk := simplify_unopt(self.c(i.args[1]))
         if hk {
             r = simplify_sat_sub(self.ubits(i.args[0], depth - 1), i64(u32(k & (tb - 1))))
         } else {
             r = tb
         }
-    } else if i.op == OpAnd {
+    } else if i.op == And {
         r0 := self.ubits(i.args[0], depth - 1)
         r = min(r0, self.ubits(i.args[1], depth - 1))
-    } else if i.op == OpZExt {
+    } else if i.op == ZExt {
         r0 := self.ubits(i.args[0], depth - 1)
         r = min(r0, i64(self.f.insts[i.args[0]].ty.bits()))
-    } else if i.op == OpURem {
+    } else if i.op == URem {
         k, hk := simplify_unopt(self.c(i.args[1]))
         if hk {
             r = 64 - i64(clz(u64(k) & simplify_mask(tb)))
         } else {
             r = tb
         }
-    } else if i.op == OpUDiv {
+    } else if i.op == UDiv {
         k, hk := simplify_unopt(self.c(i.args[1]))
         if hk && k > 0 {
             r = simplify_sat_sub(self.ubits(i.args[0], depth - 1), 63 - i64(clz(u64(k))))
@@ -859,7 +859,7 @@ fn ubits(self: *SimplifyCtx, v: i64, depth: i64) -> i64 {
 
 fn simplify_match_rotate_is_complement(s: *SimplifyCtx, bits: i64, m: i64, n: i64) -> bool {
     mi := s.f.insts[m]
-    if !(mi.op == OpSub && mi.args[1] == n) {
+    if !(mi.op == Sub && mi.args[1] == n) {
         return false
     }
     k, hk := simplify_unopt(s.c(mi.args[0]))
@@ -875,10 +875,10 @@ fn match_rotate(self: *SimplifyCtx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)
     bi := self.f.insts[b]
     shr: Inst
     shl: Inst
-    if ai.op == OpLShr && bi.op == OpShl {
+    if ai.op == LShr && bi.op == Shl {
         shr = ai
         shl = bi
-    } else if ai.op == OpShl && bi.op == OpLShr {
+    } else if ai.op == Shl && bi.op == LShr {
         shr = bi
         shl = ai
     } else {
@@ -896,16 +896,16 @@ fn match_rotate(self: *SimplifyCtx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)
         kr := kr0 & (bits - 1)
         kl := kl0 & (bits - 1)
         if kr + kl == bits && kr != 0 {
-            return Some((OpRotr, x, nr))
+            return Some((Rotr, x, nr))
         }
         return None
     }
     // variable amounts: (x >>> n) | (x << (bits - n))  or  (x << n) | (x >>> (bits - n))
     if simplify_match_rotate_is_complement(self, bits, nl, nr) {
-        return Some((OpRotr, x, nr))
+        return Some((Rotr, x, nr))
     }
     if simplify_match_rotate_is_complement(self, bits, nr, nl) {
-        return Some((OpRotl, x, nl))
+        return Some((Rotl, x, nl))
     }
     return None
 }
@@ -917,7 +917,7 @@ fn udiv_magic(self: *SimplifyCtx, n: i64, ty: T, d: u64) -> i64 {
     w := i64(ty.bits())
     // a dividend known to be narrow needs only one multiplication and one shift
     nb := self.ubits(n, 6)
-    if ty == TI64 && nb < 64 && nb > 0 {
+    if ty == I64 && nb < 64 && nb > 0 {
         if nb < 64 && d >= (u64(1) << nb) {
             return self.konst(ty, 0)
         }
@@ -928,9 +928,9 @@ fn udiv_magic(self: *SimplifyCtx, n: i64, ty: T, d: u64) -> i64 {
             // (e << nb) <= two_s
             if e <= (u64(1) << (sh - nb)) && m < (u64(1) << (64 - nb)) {
                 mc := self.konst(ty, i64(m))
-                t := self.mk(OpMul, ty, vec_of([]i64{n, mc}))
+                t := self.mk(Mul, ty, vec_of([]i64{n, mc}))
                 sc := self.konst(ty, sh)
-                return self.mk(OpLShr, ty, vec_of([]i64{t, sc}))
+                return self.mk(LShr, ty, vec_of([]i64{t, sc}))
             }
         }
     }
@@ -974,23 +974,23 @@ fn udiv_magic(self: *SimplifyCtx, n: i64, ty: T, d: u64) -> i64 {
     m := (q2 + 1) & wmask
     s := p - w
     mc := self.konst(ty, i64(m))
-    t := self.mk(OpMulHiU, ty, vec_of([]i64{n, mc}))
+    t := self.mk(MulHiU, ty, vec_of([]i64{n, mc}))
     if !add {
         if s == 0 {
             return t
         }
         sc := self.konst(ty, s)
-        return self.mk(OpLShr, ty, vec_of([]i64{t, sc}))
+        return self.mk(LShr, ty, vec_of([]i64{t, sc}))
     } else {
-        diff := self.mk(OpSub, ty, vec_of([]i64{n, t}))
+        diff := self.mk(Sub, ty, vec_of([]i64{n, t}))
         one := self.konst(ty, 1)
-        half := self.mk(OpLShr, ty, vec_of([]i64{diff, one}))
-        sum := self.mk(OpAdd, ty, vec_of([]i64{half, t}))
+        half := self.mk(LShr, ty, vec_of([]i64{diff, one}))
+        sum := self.mk(Add, ty, vec_of([]i64{half, t}))
         if s - 1 == 0 {
             return sum
         }
         sc := self.konst(ty, s - 1)
-        return self.mk(OpLShr, ty, vec_of([]i64{sum, sc}))
+        return self.mk(LShr, ty, vec_of([]i64{sum, sc}))
     }
 }
 
@@ -1037,19 +1037,19 @@ fn sdiv_magic(self: *SimplifyCtx, n: i64, ty: T, d: i64) -> i64 {
     }
     s := p - w
     mc := self.konst(ty, m)
-    q := self.mk(OpMulHiS, ty, vec_of([]i64{n, mc}))
+    q := self.mk(MulHiS, ty, vec_of([]i64{n, mc}))
     if d > 0 && m < 0 {
-        q = self.mk(OpAdd, ty, vec_of([]i64{q, n}))
+        q = self.mk(Add, ty, vec_of([]i64{q, n}))
     } else if d < 0 && m > 0 {
-        q = self.mk(OpSub, ty, vec_of([]i64{q, n}))
+        q = self.mk(Sub, ty, vec_of([]i64{q, n}))
     }
     if s > 0 {
         sc := self.konst(ty, s)
-        q = self.mk(OpAShr, ty, vec_of([]i64{q, sc}))
+        q = self.mk(AShr, ty, vec_of([]i64{q, sc}))
     }
     c := self.konst(ty, w - 1)
-    sign := self.mk(OpLShr, ty, vec_of([]i64{q, c}))
-    return self.mk(OpAdd, ty, vec_of([]i64{q, sign}))
+    sign := self.mk(LShr, ty, vec_of([]i64{q, c}))
+    return self.mk(Add, ty, vec_of([]i64{q, sign}))
 }
 
 fn simplify_fold_insts_find(repl: *Vec[i64], v0: i64) -> i64 {
@@ -1117,20 +1117,20 @@ fn simplify_simplify_cfg_side(f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[i6
     }
     j := 0
     match f.blocks[x].term {
-        TermJmp(j1) => { j = j1 }
+        Jmp(j1) => { j = j1 }
         _ => { return None }
     }
     insts := f.blocks[x].insts
     real := 0
     for v in insts.items() {
         op := f.insts[v].op
-        cheap := op == OpConst || op == OpFConst || op == OpGAddr || op == OpFAddr || op == OpAdd || op == OpSub ||
-            op == OpAnd || op == OpOr || op == OpXor || op == OpShl || op == OpLShr || op == OpAShr || op == OpSExt ||
-            op == OpZExt || op == OpTrunc
+        cheap := op == Const || op == FConst || op == GAddr || op == FAddr || op == Add || op == Sub ||
+            op == And || op == Or || op == Xor || op == Shl || op == LShr || op == AShr || op == SExt ||
+            op == ZExt || op == Trunc
         if !cheap {
             return None
         }
-        if !(op == OpConst || op == OpFConst || op == OpGAddr || op == OpFAddr) {
+        if !(op == Const || op == FConst || op == GAddr || op == FAddr) {
             real += 1
         }
     }
@@ -1143,7 +1143,7 @@ fn simplify_simplify_cfg_side(f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[i6
 // all instructions of the block are phis
 fn simplify_all_phis(f: *Func, binsts: *Vec[i64]) -> bool {
     for v in binsts.items() {
-        if f.insts[v].op != OpPhi {
+        if f.insts[v].op != Phi {
             return false
         }
     }
@@ -1153,12 +1153,12 @@ fn simplify_all_phis(f: *Func, binsts: *Vec[i64]) -> bool {
 // redirect the edge p -> from to p -> to
 fn simplify_retarget(f: *Func, p: i64, from: i64, to: i64) {
     match f.blocks[p].term {
-        TermJmp(x) => {
+        Jmp(x) => {
             if x == from {
-                f.blocks[p].term = TermJmp(to)
+                f.blocks[p].term = Jmp(to)
             }
         }
-        TermBr(c, x, y) => {
+        Br(c, x, y) => {
             nx := x
             ny := y
             if x == from {
@@ -1167,7 +1167,7 @@ fn simplify_retarget(f: *Func, p: i64, from: i64, to: i64) {
             if y == from {
                 ny = to
             }
-            f.blocks[p].term = TermBr(c, nx, ny)
+            f.blocks[p].term = Br(c, nx, ny)
         }
         _ => {}
     }
@@ -1178,25 +1178,25 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
     // 1. fold constant / degenerate branches
     for b in 0..f.blocks.len {
         match f.blocks[b].term {
-            TermBr(c, t, e) => {
+            Br(c, t, e) => {
                 if t == e {
-                    f.blocks[b].term = TermJmp(t)
+                    f.blocks[b].term = Jmp(t)
                     changed = true
                     continue
                 }
                 ci := f.insts[c]
-                if ci.op == OpConst {
+                if ci.op == Const {
                     if ci.k != 0 {
-                        f.blocks[b].term = TermJmp(t)
+                        f.blocks[b].term = Jmp(t)
                     } else {
-                        f.blocks[b].term = TermJmp(e)
+                        f.blocks[b].term = Jmp(e)
                     }
                     changed = true
-                } else if ci.op == OpXor && simplify_opt_is(f.is_const(ci.args[1]), 1) && f.insts[ci.args[0]].ty == TI8 {
+                } else if ci.op == Xor && simplify_opt_is(f.is_const(ci.args[1]), 1) && f.insts[ci.args[0]].ty == I8 {
                     // br !x, t, e  =>  br x, e, t  (x is a boolean)
                     x := ci.args[0]
                     if f.insts[x].op.is_cmp() {
-                        f.blocks[b].term = TermBr(x, e, t)
+                        f.blocks[b].term = Br(x, e, t)
                         changed = true
                     }
                 }
@@ -1232,7 +1232,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 s := 0
                 is_jmp := false
                 match f.blocks[b].term {
-                    TermJmp(s1) => {
+                    Jmp(s1) => {
                         s = s1
                         is_jmp = true
                     }
@@ -1247,14 +1247,14 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 sinsts := f.blocks[s].insts
                 f.blocks[s].insts = vec[i64]()
                 for v in sinsts.items() {
-                    if f.insts[v].op == OpPhi {
+                    if f.insts[v].op == Phi {
                         repl[v] = f.insts[v].args[0]
                     } else {
                         f.blocks[b].insts.push(v)
                     }
                 }
                 st := f.blocks[s].term
-                f.blocks[s].term = TermNone
+                f.blocks[s].term = Term.None
                 f.blocks[b].term = st
                 dead[s] = true
                 // successors of s now come from b
@@ -1262,7 +1262,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 for ss in succs.items() {
                     for ii in 0..f.blocks[ss].insts.len {
                         v := f.blocks[ss].insts[ii]
-                        if f.insts[v].op != OpPhi {
+                        if f.insts[v].op != Phi {
                             break
                         }
                         pb := f.insts[v].pb
@@ -1303,7 +1303,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             t := 0
             is_jmp := false
             match f.blocks[e].term {
-                TermJmp(t1) => {
+                Jmp(t1) => {
                     if t1 != e {
                         t = t1
                         is_jmp = true
@@ -1316,7 +1316,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             }
             t_has_phi := false
             if f.blocks[t].insts.len > 0 {
-                t_has_phi = f.insts[f.blocks[t].insts[0]].op == OpPhi
+                t_has_phi = f.insts[f.blocks[t].insts[0]].op == Phi
             }
             moved_any := false
             for p in preds[e].items() {
@@ -1330,7 +1330,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 if t_has_phi {
                     skip := false
                     match f.blocks[p].term {
-                        TermBr(c, a, b2) => {
+                        Br(c, a, b2) => {
                             if a == t || b2 == t {
                                 skip = true
                             }
@@ -1346,7 +1346,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 if t_has_phi {
                     for ii in 0..f.blocks[t].insts.len {
                         v := f.blocks[t].insts[ii]
-                        if f.insts[v].op != OpPhi {
+                        if f.insts[v].op != Phi {
                             break
                         }
                         inst := f.im(v)
@@ -1395,7 +1395,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             e := 0
             is_br := false
             match f.blocks[b].term {
-                TermBr(c1, t1, e1) => {
+                Br(c1, t1, e1) => {
                     if t1 != e1 && t1 != b && e1 != b {
                         c = c1
                         t = t1
@@ -1421,7 +1421,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 }
                 for v in f.blocks[s].insts.items() {
                     i := f.insts[v]
-                    if i.op != OpPhi {
+                    if i.op != Phi {
                         break
                     }
                     for k in 0..i.args.len {
@@ -1472,7 +1472,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 // a conditional branch in p with both arms into b cannot be threaded simply
                 both := false
                 match f.blocks[p].term {
-                    TermBr(pc, x, y) => {
+                    Br(pc, x, y) => {
                         if x == b && y == b {
                             both = true
                         }
@@ -1485,7 +1485,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 // new phi inputs in the target for the edge p -> target
                 for ii in 0..f.blocks[target].insts.len {
                     v := f.blocks[target].insts[ii]
-                    if f.insts[v].op != OpPhi {
+                    if f.insts[v].op != Phi {
                         break
                     }
                     inst := f.insts[v]
@@ -1544,7 +1544,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             e := 0
             is_br := false
             match f.blocks[b].term {
-                TermBr(c1, t1, e1) => {
+                Br(c1, t1, e1) => {
                     if t1 != e1 && t1 != b && e1 != b {
                         c = c1
                         t = t1
@@ -1580,7 +1580,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                     break
                 }
                 match f.blocks[p].term {
-                    TermBr(pc, x, y) => {
+                    Br(pc, x, y) => {
                         if x == b && y == b {
                             bad = true
                         }
@@ -1613,7 +1613,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                         a := i.args[k]
                         if def_block[a] == b {
                             at := bb
-                            if i.op == OpPhi {
+                            if i.op == Phi {
                                 at = i.pb[k]
                             }
                             if !(cfg.dom(t, at) || cfg.dom(e, at)) {
@@ -1679,7 +1679,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                         if all_same {
                             nv = vals[0]
                         } else {
-                            np := f.mk(OpPhi, pi.ty, vals, 0)
+                            np := f.mk(Phi, pi.ty, vals, 0)
                             f.im(np).pb = clone(&ps)
                             f.blocks[s].insts.insert(0, np)
                             nv = np
@@ -1706,7 +1706,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                         a := f.insts[v].args[ai]
                         if a < def_block.len && def_block[a] == b {
                             at := bb
-                            if f.insts[v].op == OpPhi {
+                            if f.insts[v].op == Phi {
                                 at = f.insts[v].pb[ai]
                             }
                             k := index_of(binsts.items(), a)
@@ -1721,10 +1721,10 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 }
                 side_t := cfg.dom(t, bb)
                 match f.blocks[bb].term {
-                    TermBr(cc, x, y) => {
-                        f.blocks[bb].term = TermBr(simplify_simplify_cfg_fix(cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e), x, y)
+                    Br(cc, x, y) => {
+                        f.blocks[bb].term = Br(simplify_simplify_cfg_fix(cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e), x, y)
                     }
-                    TermRet(vs) => {
+                    Ret(vs) => {
                         // vs shares its buffer with the terminator
                         for vi in 0..vs.len {
                             vs[vi] = simplify_simplify_cfg_fix(vs[vi], &def_block, b, &binsts, side_t, &repl_t, &repl_e)
@@ -1763,7 +1763,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             e := 0
             is_br := false
             match f.blocks[b].term {
-                TermBr(c1, t1, e1) => {
+                Br(c1, t1, e1) => {
                     if t1 != e1 {
                         c = c1
                         t = t1
@@ -1810,7 +1810,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
             // the join's phis decide whether this is worth it
             phis := vec[i64]()
             for v in f.blocks[j].insts.items() {
-                if f.insts[v].op != OpPhi {
+                if f.insts[v].op != Phi {
                     break
                 }
                 phis.push(v)
@@ -1861,7 +1861,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 ty := f.insts[ph].ty
                 nv := vt
                 if vt != ve {
-                    nv = f.push(b, OpSelect, ty, vec_of([]i64{c, vt, ve}), 0)
+                    nv = f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0)
                 }
                 i := f.im(ph)
                 k := 0
@@ -1876,7 +1876,7 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
                 i.pb.push(b)
                 i.args.push(nv)
             }
-            f.blocks[b].term = TermJmp(j)
+            f.blocks[b].term = Jmp(j)
             did = true
             break
         }
@@ -1889,9 +1889,9 @@ fn simplify_simplify_cfg(f: *Func) -> bool {
     // normalize `br c, t, t`
     for b in 0..f.blocks.len {
         match f.blocks[b].term {
-            TermBr(c, t, e) => {
+            Br(c, t, e) => {
                 if t == e {
-                    f.blocks[b].term = TermJmp(t)
+                    f.blocks[b].term = Jmp(t)
                     changed = true
                 }
             }

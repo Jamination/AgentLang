@@ -350,7 +350,7 @@ fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
     for di in 0..decls.len {
         d := decls[di]
         match d {
-            DeclUse(path, pos) => {
+            Use(path, pos) => {
                 if starts_with(path, "std:") {
                     mname := path[4..]
                     match main_std_text(mname) {
@@ -499,38 +499,38 @@ fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
         pos: Pos
         text := ""
         match d {
-            DeclFn(f) => {
+            Fn(f) => {
                 pos = f.pos
                 text = fmt(main_sigs_priv(f.name), ast_sig_str(&f))
             }
-            DeclStruct(s) => {
+            Struct(s) => {
                 pos = s.pos
                 text = fmt(main_sigs_priv(s.name), ast_struct_str(&s))
             }
-            DeclEnum(e) => {
+            Enum(e) => {
                 pos = e.pos
                 text = fmt(main_sigs_priv(e.name), ast_enum_str(&e))
             }
             // (the value of a constant or a global is not shown: `...`)
-            DeclConst(c) => {
+            Const(c) => {
                 pos = c.pos
                 text = match c.ty {
                     Some(ty) => fmt(main_sigs_priv(c.name), "const ", c.name, ": ", ast_type_str(&ty), " = ...")
                     None => fmt(main_sigs_priv(c.name), "const ", c.name, " = ...")
                 }
             }
-            DeclGlobal(g) => {
+            Glob(g) => {
                 pos = g.pos
                 text = match g.ty {
                     Some(ty) => fmt(main_sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
                     None => fmt(main_sigs_priv(g.name), g.name, " := ...")
                 }
             }
-            DeclTest(t) => {
+            Test(t) => {
                 pos = t.pos
                 text = fmt("test \"", t.name, "\"")
             }
-            DeclUse(path, upos) => {
+            Use(path, upos) => {
                 continue
             }
         }
@@ -544,10 +544,10 @@ fn main_print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
 // is a declaration shown by `alc sigs <file> -- std`?
 fn main_sigs_visible(d: *Decl) -> bool {
     match *d {
-        DeclFn(f) => {
+        Fn(f) => {
             return !starts_with(f.name, "__")
         }
-        DeclGlobal(g) => {
+        Glob(g) => {
             return !starts_with(g.name, "__")
         }
         _ => {}
@@ -606,17 +606,17 @@ fn main_real_main() -> i64 {
     for x in 0..taken.len {
         d := taken[x]
         match d {
-            DeclTest(t) => {
+            Test(t) => {
                 fname := fmt("__test_", tests.len)
                 tests.push(t.name)
-                decls.push(DeclFn(FnDecl{name: fname, tparams: vec[str](), params: vec[(str, TypeAst)](), ret: None, body: t.body, pos: t.pos, inl: -1, ext: None}))
+                decls.push(Fn(FnDecl{name: fname, tparams: vec[str](), params: vec[(str, TypeAst)](), ret: None, body: t.body, pos: t.pos, inl: -1, ext: None}))
             }
-            DeclFn(f) => {
+            Fn(f) => {
                 if f.name == "main" {
                     has_main = true
                     main_ret = is_some(f.ret)
                 }
-                decls.push(DeclFn(f))
+                decls.push(Fn(f))
             }
             _ => {
                 decls.push(d)

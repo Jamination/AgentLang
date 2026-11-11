@@ -106,24 +106,24 @@ fn regalloc_liveness(mf: *MFunc, order: []i64) -> Vec[RegallocBitSet] {
 }
 
 enum RegallocNS {
-    RegallocNSPre,
-    RegallocNSInitial,
-    RegallocNSSimplify,
-    RegallocNSFreeze,
-    RegallocNSSpill,
-    RegallocNSSpilled,
-    RegallocNSCoalesced,
-    RegallocNSColored,
-    RegallocNSStack,
-    RegallocNSOther, // different class
+    Pre,
+    Initial,
+    Simplify,
+    Freeze,
+    Spill,
+    Spilled,
+    Coalesced,
+    Colored,
+    Stack,
+    Other, // different class
 }
 
 enum RegallocMS {
-    RegallocMSWorklist,
-    RegallocMSActive,
-    RegallocMSCoalesced,
-    RegallocMSConstrained,
-    RegallocMSFrozen,
+    Worklist,
+    Active,
+    Coalesced,
+    Constrained,
+    Frozen,
 }
 
 struct RegallocIrc {
@@ -177,7 +177,7 @@ fn adjacent(self: *RegallocIrc, n: i64) -> Vec[i64] {
     out := vec[i64]()
     for m in self.adj[n].items() {
         st := self.state[m]
-        if !(st == RegallocNSStack || st == RegallocNSCoalesced) {
+        if !(st == Stack || st == Coalesced) {
             out.push(m)
         }
     }
@@ -188,7 +188,7 @@ fn node_moves(self: *RegallocIrc, n: i64) -> Vec[i64] {
     out := vec[i64]()
     for m in self.move_list[n].items() {
         ms := self.mstate[m]
-        if ms == RegallocMSActive || ms == RegallocMSWorklist {
+        if ms == Active || ms == Worklist {
             out.push(m)
         }
     }
@@ -198,7 +198,7 @@ fn node_moves(self: *RegallocIrc, n: i64) -> Vec[i64] {
 fn move_related(self: *RegallocIrc, n: i64) -> bool {
     for m in self.move_list[n].items() {
         ms := self.mstate[m]
-        if ms == RegallocMSActive || ms == RegallocMSWorklist {
+        if ms == Active || ms == Worklist {
             return true
         }
     }
@@ -207,7 +207,7 @@ fn move_related(self: *RegallocIrc, n: i64) -> bool {
 
 fn get_alias(self: *RegallocIrc, n0: i64) -> i64 {
     n := n0
-    while self.state[n] == RegallocNSCoalesced {
+    while self.state[n] == Coalesced {
         n = self.alias[n]
     }
     return n
@@ -216,8 +216,8 @@ fn get_alias(self: *RegallocIrc, n0: i64) -> i64 {
 fn enable_moves(self: *RegallocIrc, n: i64) {
     nm := self.node_moves(n)
     for m in nm.items() {
-        if self.mstate[m] == RegallocMSActive {
-            self.mstate[m] = RegallocMSWorklist
+        if self.mstate[m] == Active {
+            self.mstate[m] = Worklist
             self.move_wl.push(m)
         }
     }
@@ -236,12 +236,12 @@ fn decrement_degree(self: *RegallocIrc, m: i64) {
         for a in adj.items() {
             self.enable_moves(a)
         }
-        if self.state[m] == RegallocNSSpill {
+        if self.state[m] == Spill {
             if self.move_related(m) {
-                self.state[m] = RegallocNSFreeze
+                self.state[m] = Freeze
                 self.freeze_wl.push(m)
             } else {
-                self.state[m] = RegallocNSSimplify
+                self.state[m] = Simplify
                 self.simplify_wl.push(m)
             }
         }
@@ -249,7 +249,7 @@ fn decrement_degree(self: *RegallocIrc, m: i64) {
 }
 
 fn simplify(self: *RegallocIrc, n: i64) {
-    self.state[n] = RegallocNSStack
+    self.state[n] = Stack
     self.stack.push(n)
     adj := self.adjacent(n)
     for m in adj.items() {
@@ -258,8 +258,8 @@ fn simplify(self: *RegallocIrc, n: i64) {
 }
 
 fn add_worklist(self: *RegallocIrc, u: i64) {
-    if !self.pre(u) && self.state[u] == RegallocNSFreeze && !self.move_related(u) && self.degree[u] < self.k {
-        self.state[u] = RegallocNSSimplify
+    if !self.pre(u) && self.state[u] == Freeze && !self.move_related(u) && self.degree[u] < self.k {
+        self.state[u] = Simplify
         self.simplify_wl.push(u)
     }
 }
@@ -294,7 +294,7 @@ fn conservative(self: *RegallocIrc, u: i64, v: i64) -> bool {
 
 fn combine(self: *RegallocIrc, u: i64, v: i64) {
     // v is merged into u
-    self.state[v] = RegallocNSCoalesced
+    self.state[v] = Coalesced
     self.alias[v] = u
     ml := clone(self.move_list[v])
     if !self.pre(u) {
@@ -311,8 +311,8 @@ fn combine(self: *RegallocIrc, u: i64, v: i64) {
         self.add_edge(t, u)
         self.decrement_degree(t)
     }
-    if !self.pre(u) && self.degree[u] >= self.k && self.state[u] == RegallocNSFreeze {
-        self.state[u] = RegallocNSSpill
+    if !self.pre(u) && self.degree[u] >= self.k && self.state[u] == Freeze {
+        self.state[u] = Spill
         self.spill_wl.push(u)
     }
 }
@@ -328,10 +328,10 @@ fn coalesce(self: *RegallocIrc, m: i64) {
         v = x
     }
     if u == v {
-        self.mstate[m] = RegallocMSCoalesced
+        self.mstate[m] = Coalesced
         self.add_worklist(u)
     } else if self.pre(v) || self.has_edge(u, v) {
-        self.mstate[m] = RegallocMSConstrained
+        self.mstate[m] = Constrained
         self.add_worklist(u)
         self.add_worklist(v)
     } else {
@@ -349,11 +349,11 @@ fn coalesce(self: *RegallocIrc, m: i64) {
             can = self.conservative(u, v)
         }
         if can {
-            self.mstate[m] = RegallocMSCoalesced
+            self.mstate[m] = Coalesced
             self.combine(u, v)
             self.add_worklist(u)
         } else {
-            self.mstate[m] = RegallocMSActive
+            self.mstate[m] = Active
         }
     }
 }
@@ -363,9 +363,9 @@ fn freeze_moves(self: *RegallocIrc, u: i64) {
     for m in nm.items() {
         x, y := self.moves[m]
         v := if self.get_alias(y) == self.get_alias(u) { self.get_alias(x) } else { self.get_alias(y) }
-        self.mstate[m] = RegallocMSFrozen
-        if !self.pre(v) && self.state[v] == RegallocNSFreeze && !self.move_related(v) && self.degree[v] < self.k {
-            self.state[v] = RegallocNSSimplify
+        self.mstate[m] = Frozen
+        if !self.pre(v) && self.state[v] == Freeze && !self.move_related(v) && self.degree[v] < self.k {
+            self.state[v] = Simplify
             self.simplify_wl.push(v)
         }
     }
@@ -375,18 +375,18 @@ fn run(self: *RegallocIrc) {
     loop {
         if self.simplify_wl.len > 0 {
             n := self.simplify_wl.pop()
-            if self.state[n] == RegallocNSSimplify {
+            if self.state[n] == Simplify {
                 self.simplify(n)
             }
         } else if self.move_wl.len > 0 {
             m := self.move_wl.pop()
-            if self.mstate[m] == RegallocMSWorklist {
+            if self.mstate[m] == Worklist {
                 self.coalesce(m)
             }
         } else if self.freeze_wl.len > 0 {
             u := self.freeze_wl.pop()
-            if self.state[u] == RegallocNSFreeze {
-                self.state[u] = RegallocNSSimplify
+            if self.state[u] == Freeze {
+                self.state[u] = Simplify
                 self.simplify_wl.push(u)
                 self.freeze_moves(u)
             }
@@ -395,7 +395,7 @@ fn run(self: *RegallocIrc) {
             best: Opt[(i64, f64)] = None
             for i in 0..self.spill_wl.len {
                 n := self.spill_wl[i]
-                if self.state[n] != RegallocNSSpill {
+                if self.state[n] != Spill {
                     continue
                 }
                 c := self.cost[n] / f64(max(self.degree[n], 1))
@@ -410,7 +410,7 @@ fn run(self: *RegallocIrc) {
             match best {
                 Some(b) => {
                     n := self.spill_wl.swap_remove(b.0)
-                    self.state[n] = RegallocNSSimplify
+                    self.state[n] = Simplify
                     self.simplify_wl.push(n)
                     self.freeze_moves(n)
                 }
@@ -428,8 +428,8 @@ struct Alloc {
 
 fn regalloc_spill_slot(o: Opnd, first_spill: i64) -> Opt[i64] {
     match o {
-        OpndM(m) => {
-            if m.kind == MemKindSlot && i64(m.id) >= first_spill && i64(m.base) == NOREG && i64(m.idx) == NOREG && i64(m.disp) == 0 {
+        M(m) => {
+            if m.kind == Slot && i64(m.id) >= first_spill && i64(m.base) == NOREG && i64(m.idx) == NOREG && i64(m.disp) == 0 {
                 return Some(i64(m.id))
             }
         }
@@ -440,7 +440,7 @@ fn regalloc_spill_slot(o: Opnd, first_spill: i64) -> Opt[i64] {
 
 fn regalloc_is_r(o: Opnd) -> bool {
     match o {
-        OpndR(r) => true
+        R(r) => true
         _ => false
     }
 }
@@ -520,28 +520,28 @@ fn regalloc_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
         out := vec[MInst]()
         for x in 0..insts.len {
             i := insts[x]
-            is_store := (i.op == MOpMov || i.op == MOpMovSd) && is_some(regalloc_spill_slot(i.a, first_spill))
+            is_store := (i.op == Mov || i.op == MovSd) && is_some(regalloc_spill_slot(i.a, first_spill))
             // uses of a slot whose value is still in a register
             match regalloc_spill_slot(i.b, first_spill) {
                 Some(s) => {
                     fi := regalloc_find_slot(&st, s)
                     if fi >= 0 {
                         r := st[fi].1
-                        full_reload := ((i.op == MOpMov && i.sz == 8) || i.op == MOpMovSd) && regalloc_is_r(i.a)
-                        if full_reload && eq(i.a, OpndR(r)) {
+                        full_reload := ((i.op == Mov && i.sz == 8) || i.op == MovSd) && regalloc_is_r(i.a)
+                        if full_reload && eq(i.a, R(r)) {
                             continue
                         }
-                        i.b = OpndR(r)
+                        i.b = R(r)
                     }
                 }
                 None => {}
             }
-            if i.op == MOpCmp || i.op == MOpTest {
+            if i.op == Cmp || i.op == Test {
                 match regalloc_spill_slot(i.a, first_spill) {
                     Some(s) => {
                         fi := regalloc_find_slot(&st, s)
                         if fi >= 0 {
-                            i.a = OpndR(st[fi].1)
+                            i.a = R(st[fi].1)
                         }
                     }
                     None => {}
@@ -558,7 +558,7 @@ fn regalloc_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                 }
                 regalloc_retain_slot_ne(&st, s)
                 match i.b {
-                    OpndR(r) => st.push((s, r))
+                    R(r) => st.push((s, r))
                     _ => {}
                 }
             } else {
@@ -567,9 +567,9 @@ fn regalloc_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                 match regalloc_spill_slot(i.b, first_spill) {
                     Some(s) => {
                         match i.a {
-                            OpndR(d) => {
+                            R(d) => {
                                 matched = true
-                                if ((i.op == MOpMov && i.sz == 8) || i.op == MOpMovSd) && regalloc_find_slot(&st, s) < 0 {
+                                if ((i.op == Mov && i.sz == 8) || i.op == MovSd) && regalloc_find_slot(&st, s) < 0 {
                                     st.push((s, d))
                                 }
                             }
@@ -599,12 +599,12 @@ fn regalloc_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
     for b in order {
         for x in 0..mf.blocks[b].insts.len {
             i := &mf.blocks[b].insts[x]
-            is_store := (i.op == MOpMov || i.op == MOpMovSd) && is_some(regalloc_spill_slot(i.a, first_spill))
+            is_store := (i.op == Mov || i.op == MovSd) && is_some(regalloc_spill_slot(i.a, first_spill))
             ops := [3]Opnd{i.a, i.b, i.c}
             for k, o in ops {
                 match o {
-                    OpndM(m) => {
-                        if m.kind == MemKindSlot && i64(m.id) >= first_spill && !(k == 0 && is_store) {
+                    M(m) => {
+                        if m.kind == Slot && i64(m.id) >= first_spill && !(k == 0 && is_store) {
                             reads[i64(m.id)] += 1
                         }
                     }
@@ -619,7 +619,7 @@ fn regalloc_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
         n := 0
         for x in 0..insts.len {
             i := &insts[x]
-            is_store := i.op == MOpMov || i.op == MOpMovSd
+            is_store := i.op == Mov || i.op == MovSd
             keep := true
             if is_store {
                 match regalloc_spill_slot(i.a, first_spill) {
@@ -669,7 +669,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             g := RegallocIrc{
                 k: k,
                 n: n,
-                state: vec_fill(n, RegallocNSOther),
+                state: vec_fill(n, Other),
                 adj_set: map[u64, bool](),
                 adj: vec[Vec[i64]](),
                 degree: vec_fill(n, 0),
@@ -692,14 +692,14 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             }
             for r in 0..32 {
                 if regalloc_allocate_in_class(r, mf, class) {
-                    g.state[r] = RegallocNSPre
+                    g.state[r] = Pre
                     g.color[r] = r
                     g.degree[r] = 0xFFFFFFFF / 2
                 }
             }
             for v in 0..mf.vclass.len {
                 if mf.vclass[v] == class {
-                    g.state[32 + v] = RegallocNSInitial
+                    g.state[32 + v] = Initial
                 }
             }
             // build
@@ -728,7 +728,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                             live.clear(s)
                             mi := g.moves.len
                             g.moves.push((d, s))
-                            g.mstate.push(RegallocMSWorklist)
+                            g.mstate.push(Worklist)
                             g.move_list[d].push(mi)
                             g.move_list[s].push(mi)
                             g.move_wl.push(mi)
@@ -778,17 +778,17 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             }
             // make worklists
             for v in 32..n {
-                if g.state[v] != RegallocNSInitial {
+                if g.state[v] != Initial {
                     continue
                 }
                 if g.degree[v] >= k {
-                    g.state[v] = RegallocNSSpill
+                    g.state[v] = Spill
                     g.spill_wl.push(v)
                 } else if g.move_related(v) {
-                    g.state[v] = RegallocNSFreeze
+                    g.state[v] = Freeze
                     g.freeze_wl.push(v)
                 } else {
-                    g.state[v] = RegallocNSSimplify
+                    g.state[v] = Simplify
                     g.simplify_wl.push(v)
                 }
             }
@@ -812,7 +812,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 }
                 for w in g.adj[nd].items() {
                     a := g.get_alias(w)
-                    if g.state[a] == RegallocNSColored || g.state[a] == RegallocNSPre {
+                    if g.state[a] == Colored || g.state[a] == Pre {
                         avail[g.color[a]] = false
                     }
                 }
@@ -821,7 +821,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 for m in g.move_list[nd].items() {
                     x, y := g.moves[m]
                     o := if g.get_alias(x) == nd { g.get_alias(y) } else { g.get_alias(x) }
-                    if g.state[o] == RegallocNSColored || g.state[o] == RegallocNSPre {
+                    if g.state[o] == Colored || g.state[o] == Pre {
                         c := g.color[o]
                         if c != 0xFFFFFFFF && c != RSP && avail[c] && contains(&all, c) {
                             pick = c
@@ -838,22 +838,22 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                     }
                 }
                 if pick == 0xFFFFFFFF {
-                    g.state[nd] = RegallocNSSpilled
+                    g.state[nd] = Spilled
                     spilled.push(nd)
                 } else {
-                    g.state[nd] = RegallocNSColored
+                    g.state[nd] = Colored
                     g.color[nd] = pick
                 }
             }
             for v in 32..n {
-                if g.state[v] == RegallocNSCoalesced {
+                if g.state[v] == Coalesced {
                     a := g.get_alias(v)
-                    if g.state[a] == RegallocNSSpilled {
+                    if g.state[a] == Spilled {
                         spilled.push(v)
                     } else {
                         colors[v] = g.color[a]
                     }
-                } else if g.state[v] == RegallocNSColored {
+                } else if g.state[v] == Colored {
                     colors[v] = g.color[v]
                 }
             }
@@ -892,7 +892,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                     defs := vec[i64]()
                     uses := vec[i64]()
                     mir_defs_uses(&i, &defs, &uses)
-                    if !(i.op == MOpCall || i.op == MOpCallInd) {
+                    if !(i.op == Call || i.op == CallInd) {
                         for df in defs.items() {
                             if df < 32 {
                                 used[df] = true
@@ -924,25 +924,25 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
 // can operand `b` of this instruction be a memory operand?
 fn regalloc_b_can_be_mem(i: *MInst) -> bool {
     match i.a {
-        OpndM(m) => {
+        M(m) => {
             return false
         }
         _ => {}
     }
     op := i.op
-    if op == MOpAdd || op == MOpSub || op == MOpAnd || op == MOpOr || op == MOpXor || op == MOpCmp || op == MOpImul ||
-        op == MOpAddsd || op == MOpSubsd || op == MOpMulsd || op == MOpDivsd || op == MOpMinsd || op == MOpMaxsd ||
-        op == MOpSqrtsd || op == MOpCvtf || op == MOpUcomisd || op == MOpCvtsi2sd || op == MOpCvttsd2si || op == MOpCmov ||
-        op == MOpImul3 {
+    if op == Add || op == Sub || op == And || op == Or || op == Xor || op == Cmp || op == Imul ||
+        op == Addsd || op == Subsd || op == Mulsd || op == Divsd || op == Minsd || op == Maxsd ||
+        op == Sqrtsd || op == Cvtf || op == Ucomisd || op == Cvtsi2sd || op == Cvttsd2si || op == Cmov ||
+        op == Imul3 {
         return true
     }
-    if op == MOpMov {
+    if op == Mov {
         return i.sz == 8 || i.sz == 4
     }
-    if op == MOpMovSd {
+    if op == MovSd {
         return true
     }
-    if op == MOpMovzx || op == MOpMovsx {
+    if op == Movzx || op == Movsx {
         return true
     }
     return false
@@ -984,8 +984,8 @@ fn regalloc_spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bo
             for v in touched.items() {
                 slot, has_slot := slot_of.get(v)
                 cls := mf.class(v)
-                mem := OpndM(mem_slot(slot, 0))
-                mv := if cls == 1 { MOpMovSd } else { MOpMov }
+                mem := M(mem_slot(slot, 0))
+                mv := if cls == 1 { MovSd } else { Mov }
                 msz: u8 = if cls == 1 && mf.wide_xmm { 16 } else { 8 }
                 is_def := contains(&defs, v)
                 is_use := contains(&uses, v)
@@ -1003,20 +1003,20 @@ fn regalloc_spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bo
                         continue
                     }
                 }
-                if is_use && !is_def && eq(i.b, OpndR(v)) && regalloc_b_can_be_mem(&i) {
+                if is_use && !is_def && eq(i.b, R(v)) && regalloc_b_can_be_mem(&i) {
                     // the only occurrence must be operand b
                     cnt := mir_count_reg(&i, v)
                     if cnt == 1 && !contains(&i.uses, v) {
                         i.b = mem
-                        if i.op == MOpMovSd {
+                        if i.op == MovSd {
                             i.sz = msz
                         }
                         continue
                     }
                 }
-                if i.op == MOpMov && i.sz == 8 && eq(i.a, OpndR(v)) && is_def && !is_use {
+                if i.op == Mov && i.sz == 8 && eq(i.a, R(v)) && is_def && !is_use {
                     match i.b {
-                        OpndI(k) => {
+                        I(k) => {
                             if k >= -2147483648 && k <= 2147483647 {
                                 i.a = mem
                                 continue
@@ -1040,10 +1040,10 @@ fn regalloc_spill(mf: *MFunc, order: []i64, spilled: []i64, unspillable: *Vec[bo
                     }
                 }
                 if is_use {
-                    out.push(minst_new(mv, msz, OpndR(t), mem))
+                    out.push(minst_new(mv, msz, R(t), mem))
                 }
                 if is_def {
-                    after.push(minst_new(mv, msz, mem, OpndR(t)))
+                    after.push(minst_new(mv, msz, mem, R(t)))
                 }
             }
             out.push(i)

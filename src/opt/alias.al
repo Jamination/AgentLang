@@ -1,9 +1,9 @@
 // Simple alias analysis: identified objects (allocas, globals), constant offsets, type-based classes.
 
 enum Base {
-    BaseAlloca(i64),
-    BaseGlobal(i64),
-    BaseUnknown(i64),
+    Alloca(i64),
+    Glob(i64),
+    Unknown(i64),
 }
 
 struct Addr {
@@ -14,21 +14,21 @@ struct Addr {
 // `==` of two bases (derive(PartialEq))
 fn eq(a: Base, b: Base) -> bool {
     match a {
-        BaseAlloca(x) => {
+        Alloca(x) => {
             match b {
-                BaseAlloca(y) => return x == y
+                Alloca(y) => return x == y
                 _ => return false
             }
         }
-        BaseGlobal(x) => {
+        Glob(x) => {
             match b {
-                BaseGlobal(y) => return x == y
+                Glob(y) => return x == y
                 _ => return false
             }
         }
-        BaseUnknown(x) => {
+        Unknown(x) => {
             match b {
-                BaseUnknown(y) => return x == y
+                Unknown(y) => return x == y
                 _ => return false
             }
         }
@@ -65,13 +65,13 @@ fn alias_decompose(f: *Func, addr: i64) -> Addr {
     depth := 0
     loop {
         i := &f.insts[v]
-        if i.op == OpAlloca {
-            return Addr{base: BaseAlloca(v), off: off}
+        if i.op == Alloca {
+            return Addr{base: Base.Alloca(v), off: off}
         }
-        if i.op == OpGAddr {
-            return Addr{base: BaseGlobal(i.k), off: off}
+        if i.op == GAddr {
+            return Addr{base: Glob(i.k), off: off}
         }
-        if i.op == OpAdd && depth < 32 {
+        if i.op == Add && depth < 32 {
             depth += 1
             a := i.args[0]
             b := i.args[1]
@@ -102,9 +102,9 @@ fn alias_decompose(f: *Func, addr: i64) -> Addr {
                 Some(base) => return Addr{base: base, off: None}
                 None => {}
             }
-            return Addr{base: BaseUnknown(v), off: off}
+            return Addr{base: Unknown(v), off: off}
         }
-        return Addr{base: BaseUnknown(v), off: off}
+        return Addr{base: Unknown(v), off: off}
     }
 }
 
@@ -113,13 +113,13 @@ fn alias_decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
         return None
     }
     i := &f.insts[v]
-    if i.op == OpAlloca {
-        return Some(BaseAlloca(v))
+    if i.op == Alloca {
+        return Some(Base.Alloca(v))
     }
-    if i.op == OpGAddr {
-        return Some(BaseGlobal(i.k))
+    if i.op == GAddr {
+        return Some(Glob(i.k))
     }
-    if i.op == OpAdd {
+    if i.op == Add {
         r := alias_decompose_obj(f, i.args[0], depth + 1)
         match r {
             Some(x) => return r
@@ -137,7 +137,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     // derived[v] = alloca this pointer value is derived from
     derived := vec_fill(n, NOV)
     for v in f.blocks[0].insts.items() {
-        if f.insts[v].op == OpAlloca {
+        if f.insts[v].op == Alloca {
             derived[v] = v
         }
     }
@@ -148,7 +148,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
         for b in rpo.items() {
             for v in f.blocks[b].insts.items() {
                 i := &f.insts[v]
-                if i.op == OpAdd {
+                if i.op == Add {
                     for a in i.args.items() {
                         d := derived[a]
                         if d != NOV && derived[v] != d {
@@ -162,8 +162,8 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
                             }
                         }
                     }
-                } else if i.op == OpLoad {
-                } else if i.op == OpStore {
+                } else if i.op == Load {
+                } else if i.op == Store {
                     d := derived[i.args[1]]
                     if d != NOV && !esc[d] {
                         esc[d] = true
@@ -206,35 +206,35 @@ fn alias_memref(f: *Func, v: i64) -> MemRef {
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
     match a.addr.base {
-        BaseAlloca(x) => {
+        Alloca(x) => {
             match b.addr.base {
-                BaseAlloca(y) => {
+                Alloca(y) => {
                     if x != y {
                         return false
                     }
                 }
-                BaseGlobal(y) => return false
-                BaseUnknown(y) => {
+                Glob(y) => return false
+                Unknown(y) => {
                     if !esc[x] {
                         return false
                     }
                 }
             }
         }
-        BaseGlobal(x) => {
+        Glob(x) => {
             match b.addr.base {
-                BaseAlloca(y) => return false
-                BaseGlobal(y) => {
+                Alloca(y) => return false
+                Glob(y) => {
                     if x != y {
                         return false
                     }
                 }
-                BaseUnknown(y) => {}
+                Unknown(y) => {}
             }
         }
-        BaseUnknown(u) => {
+        Unknown(u) => {
             match b.addr.base {
-                BaseAlloca(x) => {
+                Alloca(x) => {
                     if !esc[x] {
                         return false
                     }

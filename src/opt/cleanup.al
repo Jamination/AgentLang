@@ -11,7 +11,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
     for b in 0..f.blocks.len {
         if !reach[b] && (!f.blocks[b].insts.is_empty() || !cleanup_term_is_none(f.blocks[b].term)) {
             f.blocks[b].insts.clear()
-            f.blocks[b].term = TermNone
+            f.blocks[b].term = Term.None
             changed = true
         }
     }
@@ -19,7 +19,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
     for b in rpo.items() {
         for ii in 0..f.blocks[b].insts.len {
             v := f.blocks[b].insts[ii]
-            if f.insts[v].op != OpPhi {
+            if f.insts[v].op != Phi {
                 continue
             }
             inst := &f.insts[v]
@@ -41,14 +41,14 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
 // `term != Term::None`
 fn cleanup_term_is_none(t: Term) -> bool {
     match t {
-        TermNone => { return true }
+        Term.None => { return true }
         _ => {}
     }
     return false
 }
 
 fn cleanup_is_root(op: Op) -> bool {
-    return op == OpStore || op == OpCall || op == OpCallInd || op == OpSyscall || op == OpMemCpy || op == OpMemSet
+    return op == Store || op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet
 }
 
 fn cleanup_dce(f: *Func) -> bool {
@@ -64,13 +64,13 @@ fn cleanup_dce(f: *Func) -> bool {
             }
         }
         match b.term {
-            TermBr(c, t, e) => {
+            Br(c, t, e) => {
                 if !live[c] {
                     live[c] = true
                     work.push(c)
                 }
             }
-            TermRet(vs) => {
+            Ret(vs) => {
                 for v in vs.items() {
                     if !live[v] {
                         live[v] = true
@@ -129,7 +129,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
         for bi in 0..f.blocks.len {
             for ii in 0..f.blocks[bi].insts.len {
                 v := f.blocks[bi].insts[ii]
-                if f.insts[v].op != OpPhi || repl[v] != NOV {
+                if f.insts[v].op != Phi || repl[v] != NOV {
                     continue
                 }
                 same := NOV

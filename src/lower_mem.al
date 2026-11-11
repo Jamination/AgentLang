@@ -61,7 +61,7 @@ fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], 
                     ok := false
                     is_ptr_param := false
                     match *pt {
-                        TypeAstPtr(inner) => {
+                        Ptr(inner) => {
                             is_ptr_param = true
                             ok = self.unify(inner, rv.ty, d.tparams.items(), &e3)
                         }
@@ -69,7 +69,7 @@ fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], 
                     }
                     if !is_ptr_param {
                         match self.cx.types.k(rv.ty) {
-                            TyKPtr(t) => {
+                            Ptr(t) => {
                                 ok = self.unify(pt, t, d.tparams.items(), &e3)
                             }
                             _ => {}
@@ -134,7 +134,7 @@ fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[Val], 
 fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     k := s.cx.types.k(t)
     match a.k {
-        EKNil => {
+        Nil => {
             return lower_call_is_ptr(k) || lower_call_is_fn(k) || lower_call_is_slice(k)
         }
         _ => {}
@@ -142,7 +142,7 @@ fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     vn := s.variant_ref(a)
     if vn != "" {
         match k {
-            TyKEnum(eid) => {
+            Enum(eid) => {
                 return s.cx.variant_of(s.cx.types.enums[eid].decl, vn) >= 0
             }
             _ => {}
@@ -152,16 +152,16 @@ fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     match s.cx.const_eval(a) {
         Some(cv) => {
             match cv {
-                CVStr(_) => {
+                Str(_) => {
                     return t == T_STR
                 }
-                CVBool(_) => {
+                Bool(_) => {
                     return t == T_BOOL
                 }
-                CVFloat(_) => {
+                Float(_) => {
                     return s.cx.types.is_float(t)
                 }
-                CVInt(_) => {}
+                Int(_) => {}
             }
         }
         None => {}
@@ -172,10 +172,10 @@ fn lower_mem_literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
 // the type an untyped literal (or constant) takes without context; -1 if it has none
 fn lower_mem_literal_type(s: *Fx, a: *Expr) -> i64 {
     match a.k {
-        EKNil => {
+        Nil => {
             return -1
         }
-        EKIdent(n) => {
+        Ident(n) => {
             if !is_some(s.lookup(n)) {
                 bv := s.bare_variant(n, None)
                 if bv.2 == 2 {
@@ -197,16 +197,16 @@ fn lower_mem_literal_type(s: *Fx, a: *Expr) -> i64 {
     match s.cx.const_eval(a) {
         Some(cv) => {
             match cv {
-                CVStr(_) => {
+                Str(_) => {
                     return T_STR
                 }
-                CVBool(_) => {
+                Bool(_) => {
                     return T_BOOL
                 }
-                CVFloat(_) => {
+                Float(_) => {
                     return T_F64
                 }
-                CVInt(_) => {}
+                Int(_) => {}
             }
         }
         None => {}
@@ -375,7 +375,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
 // the element type of the library's `Vec[T]` (a user struct that is also named Vec is not one)
 fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
     match self.types.k(t) {
-        TyKStruct(sid) => {
+        Struct(sid) => {
             di, has := self.p_struct_names.get("Vec")
             si := &self.types.structs[sid]
             if has && si.decl == di && si.targs.len == 1 {
@@ -390,7 +390,7 @@ fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
 // the key and value types of the library's `Map[K, V]`
 fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
     match self.types.k(t) {
-        TyKStruct(sid) => {
+        Struct(sid) => {
             di, has := self.p_struct_names.get("Map")
             si := &self.types.structs[sid]
             if has && si.decl == di && si.targs.len == 2 {
@@ -419,7 +419,7 @@ fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
     }
     sid := 0
     match self.cx.types.k(v.ty) {
-        TyKStruct(s) => {
+        Struct(s) => {
             sid = s
         }
         _ => {}
@@ -433,10 +433,10 @@ fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
         leaves := vec[Leaf]()
         self.cx.types.leaves(self.cx.types.slice(et), 0, &leaves)
         a := self.add_off(v.v, off_buf)
-        p = self.load_raw(a, TI64, leaves[0].alias)
+        p = self.load_raw(a, I64, leaves[0].alias)
     }
     a := self.add_off(v.v, off_len)
-    l := self.load_raw(a, TI64, self.cx.types.field_alias(v.ty, 1, T_I64))
+    l := self.load_raw(a, I64, self.cx.types.field_alias(v.ty, 1, T_I64))
     return Some((p, l, et))
 }
 
@@ -449,9 +449,9 @@ fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
         return false
     }
     match self.types.k(t) {
-        TyKSlice(_) => return true
-        TyKArray(e, n) => return n != 0 && self.has_heap(e, depth + 1)
-        TyKStruct(sid) => {
+        Slice(_) => return true
+        Array(e, n) => return n != 0 && self.has_heap(e, depth + 1)
+        Struct(sid) => {
             for i in 0..self.types.structs[sid].fields.len {
                 if self.has_heap(self.types.structs[sid].fields[i].1, depth + 1) {
                     return true
@@ -459,7 +459,7 @@ fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
             }
             return false
         }
-        TyKEnum(eid) => {
+        Enum(eid) => {
             for vi in 0..self.types.enums[eid].variants.len {
                 for i in 0..self.types.enums[eid].variants[vi].1.len {
                     if self.has_heap(self.types.enums[eid].variants[vi].1[i], depth + 1) {
@@ -469,7 +469,7 @@ fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
             }
             return false
         }
-        TyKTuple(ts) => {
+        Tuple(ts) => {
             for i in 0..ts.len {
                 if self.has_heap(ts[i], depth + 1) {
                     return true
@@ -555,15 +555,15 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
         return self.clone_copy(v)
     }
     match self.cx.types.k(ty) {
-        TyKSlice(et) => {
+        Slice(et) => {
             // plain elements: one allocation and one memory copy
             name := if self.cx.has_heap(et, 0) { "__clone_slice" } else { "__clone_plain" }
             return self.call_rt(name, vec_of([]i64{et}), vec_of([]Val{v}), pos)
         }
-        TyKArray(et, n) => {
+        Array(et, n) => {
             t := self.temp(ty)
             sty := self.cx.types.slice(et)
-            nv := self.iconst(TI64, n)
+            nv := self.iconst(I64, n)
             d := self.mval(sty, self.temp(sty))
             self.store_slice(d, t, nv)
             s := self.mval(sty, self.temp(sty))
@@ -571,7 +571,7 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             self.call_rt("__clone_elems", vec_of([]i64{et}), vec_of([]Val{d, s}), pos)
             return self.mval(ty, t)
         }
-        TyKStruct(sid) => {
+        Struct(sid) => {
             match self.cx.vec_elem(ty) {
                 Some(et) => {
                     // the live elements only: the spare capacity is uninitialised memory
@@ -583,8 +583,8 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             match self.cx.map_kv(ty) {
                 Some(kv) => {
                     m := self.sval(self.cx.types.ptr_to(ty), v.v)
-                    kp := self.sval(T_BOOL, self.iconst(TI8, lower_expr_bool_i64(!self.cx.has_heap(kv.0, 0))))
-                    vp := self.sval(T_BOOL, self.iconst(TI8, lower_expr_bool_i64(!self.cx.has_heap(kv.1, 0))))
+                    kp := self.sval(T_BOOL, self.iconst(I8, lower_expr_bool_i64(!self.cx.has_heap(kv.0, 0))))
+                    vp := self.sval(T_BOOL, self.iconst(I8, lower_expr_bool_i64(!self.cx.has_heap(kv.1, 0))))
                     return self.call_rt("__clone_map", vec_of([]i64{kv.0, kv.1}), vec_of([]Val{m, kp, vp}), pos)
                 }
                 None => {}
@@ -599,7 +599,7 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             lower_mem_clone_fields(self, v, tv, names, tys, pos, depth)
             return tv
         }
-        TyKTuple(ts) => {
+        Tuple(ts) => {
             names := vec[str]()
             tys := vec[i64]()
             for i in 0..ts.len {
@@ -610,11 +610,11 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             lower_mem_clone_fields(self, v, tv, names, tys, pos, depth)
             return tv
         }
-        TyKEnum(eid) => {
+        Enum(eid) => {
             // the same variant; its payload values that own storage are cloned
             tv := self.clone_copy(v)
             nvar := self.cx.types.enums[eid].variants.len
-            tag := self.load_raw(v.v, TI64, AK_ANY)
+            tag := self.load_raw(v.v, I64, AK_ANY)
             bj := self.new_block()
             for vi in 0..nvar {
                 ptys := vec[i64]()
@@ -631,8 +631,8 @@ fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 }
                 bt := self.new_block()
                 bn := self.new_block()
-                c := self.iconst(TI64, vi)
-                eq := self.ins(OpEq, TI8, vec_of([]i64{tag, c}), 0)
+                c := self.iconst(I64, vi)
+                eq := self.ins(Eq, I8, vec_of([]i64{tag, c}), 0)
                 self.br(eq, bt, bn)
                 self.switch_to(bt)
                 offs := self.cx.types.variant_offsets(eid, vi)

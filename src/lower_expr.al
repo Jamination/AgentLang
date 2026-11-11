@@ -1,10 +1,10 @@
 // Expression lowering: operators, places, literals, conversions, match.
 
 fn lower_expr_is_arith(op: BinOp) -> bool {
-    return op == BinOpAdd || op == BinOpSub || op == BinOpMul || op == BinOpDiv || op == BinOpRem || op == BinOpAnd || op == BinOpOr || op == BinOpXor
+    return op == Add || op == Sub || op == Mul || op == Div || op == Rem || op == And || op == Or || op == Xor
 }
 fn lower_expr_is_cmp(op: BinOp) -> bool {
-    return op == BinOpEq || op == BinOpNe || op == BinOpLt || op == BinOpLe || op == BinOpGt || op == BinOpGe
+    return op == Eq || op == Ne || op == Lt || op == Le || op == Gt || op == Ge
 }
 
 // `a.or(b)` on optional types
@@ -36,7 +36,7 @@ fn lower_expr_bool_i64(b: bool) -> i64 {
 // matches!(k, TyK::Ptr(_))
 fn lower_expr_is_ptr(k: TyK) -> bool {
     match k {
-        TyKPtr(t) => { return true }
+        Ptr(t) => { return true }
         _ => { return false }
     }
     return false
@@ -47,7 +47,7 @@ fn lower_expr_is_cv_float(o: Opt[CV]) -> bool {
     match o {
         Some(cv) => {
             match cv {
-                CVFloat(f) => { return true }
+                Float(f) => { return true }
                 _ => { return false }
             }
         }
@@ -59,10 +59,10 @@ fn lower_expr_is_cv_float(o: Opt[CV]) -> bool {
 // matches!(x.k, EK::Ident(_) | EK::Field(..) | EK::Index(..) | EK::Un(UnOp::Deref, _))
 fn lower_expr_addressable(x: *Expr) -> bool {
     match x.k {
-        EKIdent(n) => { return true }
-        EKField(b, n) => { return true }
-        EKIndex(b, idx) => { return true }
-        EKUn(op, p) => { return op == UnOpDeref }
+        Ident(n) => { return true }
+        Field(b, n) => { return true }
+        Index(b, idx) => { return true }
+        Un(op, p) => { return op == Deref }
         _ => { return false }
     }
     return false
@@ -95,22 +95,22 @@ fn lower_expr_parse_usize(s: str) -> (i64, bool) {
 
 fn is_untyped(self: *Fx, e: *Expr) -> bool {
     match e.k {
-        EKInt(n) => { return true }
-        EKFloat(f) => { return true }
-        EKNil => { return true }
-        EKUn(op, x) => {
-            if op == UnOpNeg || op == UnOpBitNot {
+        Int(n) => { return true }
+        Float(f) => { return true }
+        Nil => { return true }
+        Un(op, x) => {
+            if op == Neg || op == BitNot {
                 return self.is_untyped(x)
             }
             return false
         }
-        EKBin(op, a, b) => {
-            if lower_expr_is_arith(op) || op == BinOpShl || op == BinOpShr {
+        Bin(op, a, b) => {
+            if lower_expr_is_arith(op) || op == Shl || op == Shr {
                 return self.is_untyped(a) && self.is_untyped(b)
             }
             return false
         }
-        EKIdent(n) => {
+        Ident(n) => {
             if is_some(self.lookup(n)) {
                 return false
             }
@@ -124,8 +124,8 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
             return false
         }
         // a variant whose enum type comes from the context
-        EKField(b, n) => { return self.variant_ref(e) != "" }
-        EKCall(c, args) => { return self.variant_ref(e) != "" }
+        Field(b, n) => { return self.variant_ref(e) != "" }
+        Call(c, args) => { return self.variant_ref(e) != "" }
         _ => { return false }
     }
     return false
@@ -135,7 +135,7 @@ fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
     match expect {
         Some(ty) => {
             match self.cx.types.k(ty) {
-                TyKInt(bits, signed) => {
+                Int(bits, signed) => {
                     if bits < 64 {
                         lo := -(1 << (bits - 1))
                         hi := if signed && neg { 1 << (bits - 1) } else { 1 << bits }
@@ -148,17 +148,17 @@ fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
                     v := self.iconst(it, n)
                     return self.sval(ty, v)
                 }
-                TyKF64 => { return self.lower_expr_int_lit_float(n, expect) }
-                TyKF32 => { return self.lower_expr_int_lit_float(n, expect) }
-                TyKVec(l) => { return self.lower_expr_int_lit_float(n, expect) }
-                TyKQuat => { return self.lower_expr_int_lit_float(n, expect) }
-                TyKMat4 => { return self.lower_expr_int_lit_float(n, expect) }
+                F64 => { return self.lower_expr_int_lit_float(n, expect) }
+                F32 => { return self.lower_expr_int_lit_float(n, expect) }
+                Vec(l) => { return self.lower_expr_int_lit_float(n, expect) }
+                Quat => { return self.lower_expr_int_lit_float(n, expect) }
+                Mat4 => { return self.lower_expr_int_lit_float(n, expect) }
                 _ => {}
             }
         }
         None => {}
     }
-    v := self.iconst(TI64, n)
+    v := self.iconst(I64, n)
     return self.sval(T_I64, v)
 }
 
@@ -170,16 +170,16 @@ fn lower_expr_int_lit_float(self: *Fx, n: i64, expect: Opt[i64]) -> Val {
 
 fn const_val(self: *Fx, ty: Opt[i64], cv: CV, expect: Opt[i64], pos: Pos) -> Val {
     match cv {
-        CVInt(i) => { return self.int_lit(i, i < 0, lower_expr_or(ty, expect), pos) }
-        CVFloat(f) => {
+        Int(i) => { return self.int_lit(i, i < 0, lower_expr_or(ty, expect), pos) }
+        Float(f) => {
             ft := self.float_expect(lower_expr_or(ty, expect))
             return self.fconst_ty(ft, f)
         }
-        CVBool(b) => {
-            v := self.iconst(TI8, lower_expr_bool_i64(b))
+        Bool(b) => {
+            v := self.iconst(I8, lower_expr_bool_i64(b))
             return self.sval(T_BOOL, v)
         }
-        CVStr(s) => { return self.str_val(s) }
+        Str(s) => { return self.str_val(s) }
     }
     return val_err()
 }
@@ -193,8 +193,8 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
         }
     }
     match e.k {
-        EKInt(n) => { return self.int_lit(i64(n), false, expect, e.pos) }
-        EKFloat(f) => {
+        Int(n) => { return self.int_lit(i64(n), false, expect, e.pos) }
+        Float(f) => {
             match expect {
                 Some(t) => {
                     if self.cx.types.is_int(t) {
@@ -207,29 +207,29 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             ft := self.float_expect(expect)
             return self.fconst_ty(ft, f)
         }
-        EKBool(b) => {
-            v := self.iconst(TI8, lower_expr_bool_i64(b))
+        Bool(b) => {
+            v := self.iconst(I8, lower_expr_bool_i64(b))
             return self.sval(T_BOOL, v)
         }
-        EKNil => {
+        Nil => {
             match expect {
                 Some(et) => {
                     match self.cx.types.k(et) {
-                        TyKPtr(t) => {
-                            v := self.iconst(TI64, 0)
+                        Ptr(t) => {
+                            v := self.iconst(I64, 0)
                             return self.sval(et, v)
                         }
-                        TyKFn(ps, r) => {
-                            v := self.iconst(TI64, 0)
+                        Fn(ps, r) => {
+                            v := self.iconst(I64, 0)
                             return self.sval(et, v)
                         }
-                        TyKSlice(t) => {
+                        Slice(t) => {
                             tmp := self.temp(et)
                             v := self.mval(et, tmp)
                             self.zero(v)
                             return v
                         }
-                        TyKErr => { return val_err() }
+                        Err => { return val_err() }
                         _ => {}
                     }
                 }
@@ -238,12 +238,12 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             self.err(e.pos, "cannot infer the type of `nil` here")
             return val_err()
         }
-        EKStr(s) => { return self.str_val(s) }
-        EKIdent(n) => { return self.ident(n, expect, e.pos) }
-        EKUn(op, x) => { return self.unary(op, x, expect, e.pos) }
-        EKBin(op, a, b) => { return self.binary(op, a, b, expect, e.pos) }
-        EKCall(c, args) => { return self.call(c, args.items(), expect, e.pos) }
-        EKField(b, name) => {
+        Str(s) => { return self.str_val(s) }
+        Ident(n) => { return self.ident(n, expect, e.pos) }
+        Un(op, x) => { return self.unary(op, x, expect, e.pos) }
+        Bin(op, a, b) => { return self.binary(op, a, b, expect, e.pos) }
+        Call(c, args) => { return self.call(c, args.items(), expect, e.pos) }
+        Field(b, name) => {
             // Enum.Variant
             q := self.qual_enum(b)
             if q.0 >= 0 {
@@ -268,10 +268,10 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                 None => { return val_err() }
             }
         }
-        EKIndex(b, idx) => {
+        Index(b, idx) => {
             // f[T]: an instantiation of a generic function as a value
             match b.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.global_decls.has(n) {
                         env := self.tenv
                         saved := self.cx.errs.len
@@ -316,19 +316,19 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                 None => { return val_err() }
             }
         }
-        EKSlice(b, lo, hi) => { return self.slice_expr(b, lo, hi, e.pos) }
-        EKLit(te, items) => {
+        Slice(b, lo, hi) => { return self.slice_expr(b, lo, hi, e.pos) }
+        Lit(te, items) => {
             ty: i64
             match self.lit_type(te, expect) {
                 Some(t) => { ty = t }
                 None => { return val_err() }
             }
             match self.cx.types.k(ty) {
-                TyKSlice(et) => {
+                Slice(et) => {
                     // heap-allocated slice literal
                     es := self.cx.types.size_of(et)
                     n := items.len
-                    bytes := self.iconst(TI64, n * es)
+                    bytes := self.iconst(I64, n * es)
                     bv := self.sval(T_I64, bytes)
                     p := self.call_rt("__alloc_raw", vec[i64](), vec_of([]Val{bv}), e.pos)
                     pv := self.scalar(p)
@@ -345,7 +345,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                     }
                     t := self.temp(ty)
                     sv := self.mval(ty, t)
-                    nv := self.iconst(TI64, n)
+                    nv := self.iconst(I64, n)
                     self.store_slice(sv, pv, nv)
                     return sv
                 }
@@ -356,17 +356,17 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             self.init_lit(dst, items.items(), e.pos)
             return dst
         }
-        EKTypeE(ta) => {
+        TypeE(ta) => {
             self.err(e.pos, "a type cannot be used as a value here")
             return val_err()
         }
-        EKIf(c, t, el) => { return self.if_value(c, &t, &el, true, expect) }
-        EKTuple(es) => {
+        If(c, t, el) => { return self.if_value(c, &t, &el, true, expect) }
+        Tuple(es) => {
             exp_tys: Opt[Vec[i64]] = None
             match expect {
                 Some(t) => {
                     match self.cx.types.k(t) {
-                        TyKTuple(ts) => {
+                        Tuple(ts) => {
                             if ts.len == es.len {
                                 exp_tys = Some(ts)
                             }
@@ -406,7 +406,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             for i in 0..vals.len {
                 tys.push(vals[i].ty)
             }
-            ty := self.cx.types.intern(TyKTuple(clone(tys)))
+            ty := self.cx.types.intern(TyK.Tuple(clone(tys)))
             offs := self.cx.types.tuple_offsets(tys.items())
             t := self.temp(ty)
             for i in 0..vals.len {
@@ -419,8 +419,8 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             }
             return self.mval(ty, t)
         }
-        EKMatch(sc, arms) => { return self.match_expr(sc, arms.items(), true, expect, e.pos) }
-        EKFn(d) => { return self.nested_value(self.nested_lower(d)) }
+        Match(sc, arms) => { return self.match_expr(sc, arms.items(), true, expect, e.pos) }
+        Fn(d) => { return self.nested_value(self.nested_lower(d)) }
     }
     return val_err()
 }
@@ -461,7 +461,7 @@ fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
             // an aggregate or vector constant: read from its read-only memory
             match self.cx.const_global(n) {
                 Some(g) => {
-                    a := self.ins(OpGAddr, TI64, vec[i64](), g.1)
+                    a := self.ins(GAddr, I64, vec[i64](), g.1)
                     m := self.mval(g.0, a)
                     m.ro = true
                     return self.rvalue(m)
@@ -476,7 +476,7 @@ fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
     }
     match self.cx.global(n) {
         Some(g) => {
-            a := self.ins(OpGAddr, TI64, vec[i64](), g.1)
+            a := self.ins(GAddr, I64, vec[i64](), g.1)
             m := self.mval(g.0, a)
             return self.rvalue(m)
         }
@@ -512,13 +512,13 @@ fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
 // the name of the constant that the place expression `e` is (a part of), if any
 fn const_root(self: *Fx, e: *Expr) -> Opt[str] {
     match e.k {
-        EKIdent(n) => {
+        Ident(n) => {
             if !is_some(self.lookup(n)) && self.cx.const_decls.has(n) {
                 return Some(n)
             }
         }
-        EKField(b, _) => { return self.const_root(b) }
-        EKIndex(b, _) => { return self.const_root(b) }
+        Field(b, _) => { return self.const_root(b) }
+        Index(b, _) => { return self.const_root(b) }
         _ => {}
     }
     return None
@@ -558,7 +558,7 @@ fn place(self: *Fx, e: *Expr) -> Opt[Val] {
 
 fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
     match e.k {
-        EKIdent(n) => {
+        Ident(n) => {
             match self.lookup(n) {
                 Some(x) => {
                     if x.0 == LOWER_NESTED_OUTER {
@@ -576,7 +576,7 @@ fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
             if !self.cx.const_decls.has(n) {
                 match self.cx.global(n) {
                     Some(g) => {
-                        a := self.ins(OpGAddr, TI64, vec[i64](), g.1)
+                        a := self.ins(GAddr, I64, vec[i64](), g.1)
                         return Some(self.mval(g.0, a))
                     }
                     None => {}
@@ -594,7 +594,7 @@ fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
             }
             return None
         }
-        EKField(b, name) => {
+        Field(b, name) => {
             bv := self.lvalue_base(b)
             match self.field_of(bv, name, e.pos) {
                 Some(p) => {
@@ -607,7 +607,7 @@ fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                 None => { return None }
             }
         }
-        EKIndex(b, idx) => {
+        Index(b, idx) => {
             if idx.len == 1 {
                 match self.index_place(b, &idx[0], e.pos) {
                     Some(p) => {
@@ -621,15 +621,15 @@ fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                 }
             }
         }
-        EKUn(op, p) => {
-            if op == UnOpDeref {
+        Un(op, p) => {
+            if op == Deref {
                 pv := self.expr(p, None)
                 match self.cx.types.k(pv.ty) {
-                    TyKPtr(t) => {
+                    Ptr(t) => {
                         a := self.scalar(pv)
                         return Some(self.mval(t, a))
                     }
-                    TyKErr => { return None }
+                    Err => { return None }
                     _ => {
                         tn := self.tyname(pv.ty)
                         self.err(e.pos, fmt("cannot dereference ", tn))
@@ -649,7 +649,7 @@ fn auto_deref(self: *Fx, v0: Val) -> Val {
     v := v0
     loop {
         match self.cx.types.k(v.ty) {
-            TyKPtr(t) => {
+            Ptr(t) => {
                 if !lower_expr_is_ptr(self.cx.types.k(t)) && !self.cx.types.is_scalar(t) {
                     a := self.scalar(v)
                     v = self.mval(t, a)
@@ -684,7 +684,7 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
         None => {}
     }
     match self.cx.types.k(bv.ty) {
-        TyKStruct(sid) => {
+        Struct(sid) => {
             self.cx.types.layout_struct(sid)
             si := &self.cx.types.structs[sid]
             fi := -1
@@ -714,7 +714,7 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
             self.err(pos, fmt(tn, " has no field `", name, "` (fields: ", join(names.items(), ", "), ")"))
             return None
         }
-        TyKTuple(tys) => {
+        Tuple(tys) => {
             i, ok := lower_expr_parse_usize(name)
             if ok && i < tys.len {
                 offs := self.cx.types.tuple_offsets(tys.items())
@@ -730,7 +730,7 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
             self.err(pos, fmt(tn, " has no element `", name, "`"))
             return None
         }
-        TyKErr => { return None }
+        Err => { return None }
         _ => {
             tn := self.tyname(bv.ty)
             self.err(pos, fmt(tn, " has no field `", name, "`"))
@@ -743,15 +743,15 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
 fn len_of(self: *Fx, v0: Val) -> Opt[Val] {
     v := self.auto_deref(v0)
     match self.cx.types.k(v.ty) {
-        TyKSlice(et) => {
+        Slice(et) => {
             p, l := self.slice_parts(v)
             return Some(self.sval(T_I64, l))
         }
-        TyKArray(et, n) => {
-            l := self.iconst(TI64, i64(n))
+        Array(et, n) => {
+            l := self.iconst(I64, i64(n))
             return Some(self.sval(T_I64, l))
         }
-        TyKStruct(sid) => {
+        Struct(sid) => {
             match self.vec_parts(v, false) {
                 Some(x) => { return Some(self.sval(T_I64, x.1)) }
                 None => { return None }
@@ -765,11 +765,11 @@ fn len_of(self: *Fx, v0: Val) -> Opt[Val] {
 fn to_i64(self: *Fx, v: Val) -> i64 {
     s := self.scalar(v)
     it := self.irt(v.ty)
-    if it == TI64 {
+    if it == I64 {
         return s
     }
-    op := if self.cx.types.is_signed(v.ty) { OpSExt } else { OpZExt }
-    return self.ins(op, TI64, vec_of([]i64{s}), 0)
+    op := if self.cx.types.is_signed(v.ty) { SExt } else { ZExt }
+    return self.ins(op, I64, vec_of([]i64{s}), 0)
 }
 
 // (ptr, len or NOV, elem type) of an indexable value
@@ -780,23 +780,23 @@ fn indexable(self: *Fx, bv0: Val, pos: Pos) -> Opt[(i64, i64, i64)] {
         None => {}
     }
     match self.cx.types.k(bv.ty) {
-        TyKSlice(et) => {
+        Slice(et) => {
             p, l := self.slice_parts(bv)
             return Some((p, l, et))
         }
-        TyKMat4 => {
-            l := self.iconst(TI64, 4)
+        Mat4 => {
+            l := self.iconst(I64, 4)
             return Some((bv.v, l, T_VEC4))
         }
-        TyKArray(et, n) => {
-            l := self.iconst(TI64, i64(n))
+        Array(et, n) => {
+            l := self.iconst(I64, i64(n))
             return Some((bv.v, l, et))
         }
-        TyKPtr(t) => {
+        Ptr(t) => {
             p := self.scalar(bv)
             return Some((p, NOV, t))
         }
-        TyKErr => { return None }
+        Err => { return None }
         _ => {
             tn := self.tyname(bv.ty)
             self.err(pos, fmt("cannot index ", tn))
@@ -858,23 +858,23 @@ fn index_place(self: *Fx, b: *Expr, idx: *Expr, pos: Pos) -> Opt[Val] {
             None => {}
         }
         if !both && self.cx.opts.checks {
-            c := self.ins(OpUlt, TI8, vec_of([]i64{i, len_}), 0)
+            c := self.ins(Ult, I8, vec_of([]i64{i, len_}), 0)
             self.check(c, 0, pos)
         }
     }
     es := self.cx.types.size_of(et)
     off := i
     if es != 1 {
-        c := self.iconst(TI64, es)
-        off = self.ins(OpMul, TI64, vec_of([]i64{i, c}), 0)
+        c := self.iconst(I64, es)
+        off = self.ins(Mul, I64, vec_of([]i64{i, c}), 0)
     }
-    a := self.ins(OpAdd, TI64, vec_of([]i64{ptr_, off}), 0)
+    a := self.ins(Add, I64, vec_of([]i64{ptr_, off}), 0)
     ev := self.mval(et, a)
     // the elements of an array (or matrix) constant are part of the constant
     if bv.ro {
         match self.cx.types.k(bv.ty) {
-            TyKArray(_, _) => { ev.ro = true }
-            TyKMat4 => { ev.ro = true }
+            Array(_, _) => { ev.ro = true }
+            Mat4 => { ev.ro = true }
             _ => {}
         }
     }
@@ -906,7 +906,7 @@ fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos) -> 
             }
             lo_v = self.to_i64(v)
         }
-        None => { lo_v = self.iconst(TI64, 0) }
+        None => { lo_v = self.iconst(I64, 0) }
     }
     hi_v: i64
     match hi {
@@ -929,18 +929,18 @@ fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos) -> 
         }
     }
     if self.cx.opts.checks {
-        c := self.ins(OpUle, TI8, vec_of([]i64{lo_v, hi_v}), 0)
+        c := self.ins(Ule, I8, vec_of([]i64{lo_v, hi_v}), 0)
         self.check(c, 0, pos)
         if len_ != NOV && is_some(hi) {
-            c2 := self.ins(OpUle, TI8, vec_of([]i64{hi_v, len_}), 0)
+            c2 := self.ins(Ule, I8, vec_of([]i64{hi_v, len_}), 0)
             self.check(c2, 0, pos)
         }
     }
     es := self.cx.types.size_of(et)
-    c := self.iconst(TI64, es)
-    off := self.ins(OpMul, TI64, vec_of([]i64{lo_v, c}), 0)
-    p := self.ins(OpAdd, TI64, vec_of([]i64{ptr_, off}), 0)
-    n := self.ins(OpSub, TI64, vec_of([]i64{hi_v, lo_v}), 0)
+    c := self.iconst(I64, es)
+    off := self.ins(Mul, I64, vec_of([]i64{lo_v, c}), 0)
+    p := self.ins(Add, I64, vec_of([]i64{ptr_, off}), 0)
+    n := self.ins(Sub, I64, vec_of([]i64{hi_v, lo_v}), 0)
     sty := self.cx.types.slice(et)
     t := self.temp(sty)
     sv := self.mval(sty, t)
@@ -950,9 +950,9 @@ fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos) -> 
 
 fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
     match op {
-        UnOpNeg => {
+        Neg => {
             match x.k {
-                EKInt(n) => { return self.int_lit(-i64(n), true, expect, pos) }
+                Int(n) => { return self.int_lit(-i64(n), true, expect, pos) }
                 _ => {}
             }
             v := self.expr(x, expect)
@@ -963,12 +963,12 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
                 it := self.irt(v.ty)
                 z := self.iconst(it, 0)
                 s := self.scalar(v)
-                r := self.ins(OpSub, it, vec_of([]i64{z, s}), 0)
+                r := self.ins(Sub, it, vec_of([]i64{z, s}), 0)
                 return self.sval(v.ty, r)
             } else if self.cx.types.is_float(v.ty) || is_some(self.cx.types.vec_lanes(v.ty)) {
                 it := self.irt(v.ty)
                 s := self.scalar(v)
-                r := self.ins(OpFNeg, it, vec_of([]i64{s}), 0)
+                r := self.ins(FNeg, it, vec_of([]i64{s}), 0)
                 return self.sval(v.ty, r)
             } else {
                 tn := self.tyname(v.ty)
@@ -976,18 +976,18 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
                 return val_err()
             }
         }
-        UnOpNot => {
+        Not => {
             v0 := self.expr(x, Some(T_BOOL))
             v := self.coerce(v0, T_BOOL, x.pos)
             if v.ty == T_ERR {
                 return v
             }
             s := self.scalar(v)
-            one := self.iconst(TI8, 1)
-            r := self.ins(OpXor, TI8, vec_of([]i64{s, one}), 0)
+            one := self.iconst(I8, 1)
+            r := self.ins(Xor, I8, vec_of([]i64{s, one}), 0)
             return self.sval(T_BOOL, r)
         }
-        UnOpBitNot => {
+        BitNot => {
             v := self.expr(x, expect)
             if v.ty == T_ERR {
                 return v
@@ -1000,17 +1000,17 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
             it := self.irt(v.ty)
             s := self.scalar(v)
             m := self.iconst(it, -1)
-            r := self.ins(OpXor, it, vec_of([]i64{s, m}), 0)
+            r := self.ins(Xor, it, vec_of([]i64{s, m}), 0)
             return self.sval(v.ty, r)
         }
-        UnOpAddr => {
+        AddrOf => {
             match x.k {
-                EKLit(te, items) => {
+                Lit(te, items) => {
                     inner_expect: Opt[i64] = None
                     match expect {
                         Some(et) => {
                             match self.cx.types.k(et) {
-                                TyKPtr(t) => { inner_expect = Some(t) }
+                                Ptr(t) => { inner_expect = Some(t) }
                                 _ => {}
                             }
                         }
@@ -1022,7 +1022,7 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
                         None => { return val_err() }
                     }
                     sz := self.cx.types.size_of(ty)
-                    bytes := self.iconst(TI64, sz)
+                    bytes := self.iconst(I64, sz)
                     bv := self.sval(T_I64, bytes)
                     p := self.call_rt("__alloc_raw", vec[i64](), vec_of([]Val{bv}), pos)
                     pv := self.scalar(p)
@@ -1060,15 +1060,15 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
                 None => { return val_err() }
             }
         }
-        UnOpDeref => {
+        Deref => {
             pv := self.expr(x, None)
             match self.cx.types.k(pv.ty) {
-                TyKPtr(t) => {
+                Ptr(t) => {
                     a := self.scalar(pv)
                     m := self.mval(t, a)
                     return self.rvalue(m)
                 }
-                TyKErr => { return val_err() }
+                Err => { return val_err() }
                 _ => {
                     tn := self.tyname(pv.ty)
                     self.err(pos, fmt("cannot dereference ", tn))
@@ -1081,13 +1081,13 @@ fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val {
 }
 
 fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: Pos) -> Val {
-    if op == BinOpLAnd || op == BinOpLOr {
+    if op == LAnd || op == LOr {
         slot := self.temp(T_BOOL)
         bt := self.new_block()
         bf := self.new_block()
         bj := self.new_block()
         mid := self.new_block()
-        if op == BinOpLAnd {
+        if op == LAnd {
             self.cond_br(a, mid, bf)
         } else {
             self.cond_br(a, bt, mid)
@@ -1095,18 +1095,18 @@ fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: Pos) 
         self.switch_to(mid)
         self.cond_br(b, bt, bf)
         self.switch_to(bt)
-        one := self.iconst(TI8, 1)
-        self.store_raw(slot, one, TI8, 0)
+        one := self.iconst(I8, 1)
+        self.store_raw(slot, one, I8, 0)
         self.jmp(bj)
         self.switch_to(bf)
-        zero := self.iconst(TI8, 0)
-        self.store_raw(slot, zero, TI8, 0)
+        zero := self.iconst(I8, 0)
+        self.store_raw(slot, zero, I8, 0)
         self.jmp(bj)
         self.switch_to(bj)
-        v := self.load_raw(slot, TI8, 0)
+        v := self.load_raw(slot, I8, 0)
         return self.sval(T_BOOL, v)
     }
-    if op == BinOpShl || op == BinOpShr {
+    if op == Shl || op == Shr {
         l := self.expr(a, expect)
         r := self.expr(b, None)
         return self.binary_vals(op, l, r, pos)
@@ -1143,7 +1143,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         return val_err()
     }
     lk := self.cx.types.k(l.ty)
-    if op == BinOpShl || op == BinOpShr {
+    if op == Shl || op == Shr {
         if !self.cx.types.is_int(l.ty) || !self.cx.types.is_int(r.ty) {
             self.err(pos, "shift operands must be integers")
             return val_err()
@@ -1153,16 +1153,16 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         lv := self.scalar(l)
         rv := self.scalar(r)
         if rt.size() > it.size() {
-            rv = self.ins(OpTrunc, it, vec_of([]i64{rv}), 0)
+            rv = self.ins(Trunc, it, vec_of([]i64{rv}), 0)
         } else if rt.size() < it.size() {
-            rv = self.ins(OpZExt, it, vec_of([]i64{rv}), 0)
+            rv = self.ins(ZExt, it, vec_of([]i64{rv}), 0)
         }
-        o := OpShl
-        if op != BinOpShl {
+        o := Op.Shl
+        if op != Shl {
             if self.cx.types.is_signed(l.ty) {
-                o = OpAShr
+                o = AShr
             } else {
-                o = OpLShr
+                o = LShr
             }
         }
         v := self.ins(o, it, vec_of([]i64{lv, rv}), 0)
@@ -1177,8 +1177,8 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         b := self.tyname(r.ty)
         ptr_or_fn := false
         match self.cx.types.k(l.ty) {
-            TyKPtr(t) => { ptr_or_fn = true }
-            TyKFn(ps, rt) => { ptr_or_fn = true }
+            Ptr(t) => { ptr_or_fn = true }
+            Fn(ps, rt) => { ptr_or_fn = true }
             _ => {}
         }
         if self.cx.types.is_scalar(l.ty) && self.cx.types.is_scalar(r.ty) && !ptr_or_fn {
@@ -1189,94 +1189,94 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         return val_err()
     }
     if lower_expr_is_cmp(op) {
-        eq_only := op == BinOpEq || op == BinOpNe
+        eq_only := op == Eq || op == Ne
         // which of the guarded arms the type selects
         is_f := false
         scalar_eq := false
         str_eq := false
         agg_eq := false
         match lk {
-            TyKInt(bits, signed) => {
-                o := OpUge
-                if op == BinOpEq {
-                    o = OpEq
-                } else if op == BinOpNe {
-                    o = OpNe
+            Int(bits, signed) => {
+                o := Uge
+                if op == Eq {
+                    o = Op.Eq
+                } else if op == Ne {
+                    o = Op.Ne
                 } else if signed {
-                    if op == BinOpLt {
-                        o = OpSlt
-                    } else if op == BinOpLe {
-                        o = OpSle
-                    } else if op == BinOpGt {
-                        o = OpSgt
-                    } else if op == BinOpGe {
-                        o = OpSge
+                    if op == Lt {
+                        o = Slt
+                    } else if op == Le {
+                        o = Sle
+                    } else if op == Gt {
+                        o = Sgt
+                    } else if op == Ge {
+                        o = Sge
                     }
                 } else {
-                    if op == BinOpLt {
-                        o = OpUlt
-                    } else if op == BinOpLe {
-                        o = OpUle
-                    } else if op == BinOpGt {
-                        o = OpUgt
+                    if op == Lt {
+                        o = Ult
+                    } else if op == Le {
+                        o = Ule
+                    } else if op == Gt {
+                        o = Ugt
                     }
                 }
                 a := self.scalar(l)
                 b := self.scalar(r)
-                v := self.ins(o, TI8, vec_of([]i64{a, b}), 0)
+                v := self.ins(o, I8, vec_of([]i64{a, b}), 0)
                 return self.sval(T_BOOL, v)
             }
-            TyKF64 => { is_f = true }
-            TyKF32 => { is_f = true }
-            TyKBool => { scalar_eq = true }
-            TyKPtr(t) => { scalar_eq = true }
-            TyKFn(ps, rt) => { scalar_eq = true }
-            TyKEnum(eid) => { scalar_eq = true }
-            TyKSlice(et) => {
+            F64 => { is_f = true }
+            F32 => { is_f = true }
+            Bool => { scalar_eq = true }
+            Ptr(t) => { scalar_eq = true }
+            Fn(ps, rt) => { scalar_eq = true }
+            Enum(eid) => { scalar_eq = true }
+            Slice(et) => {
                 if et == T_U8 {
                     str_eq = true
                 } else {
                     agg_eq = true
                 }
             }
-            TyKArray(et, n) => { agg_eq = true }
-            TyKStruct(sid) => { agg_eq = true }
-            TyKTuple(ts) => { agg_eq = true }
+            Array(et, n) => { agg_eq = true }
+            Struct(sid) => { agg_eq = true }
+            Tuple(ts) => { agg_eq = true }
             _ => {}
         }
         if is_f {
-            o := OpFGe
-            if op == BinOpEq {
-                o = OpFEq
-            } else if op == BinOpNe {
-                o = OpFNe
-            } else if op == BinOpLt {
-                o = OpFLt
-            } else if op == BinOpLe {
-                o = OpFLe
-            } else if op == BinOpGt {
-                o = OpFGt
+            o := FGe
+            if op == Eq {
+                o = FEq
+            } else if op == Ne {
+                o = FNe
+            } else if op == Lt {
+                o = FLt
+            } else if op == Le {
+                o = FLe
+            } else if op == Gt {
+                o = FGt
             }
             a := self.scalar(l)
             b := self.scalar(r)
-            v := self.ins(o, TI8, vec_of([]i64{a, b}), 0)
+            v := self.ins(o, I8, vec_of([]i64{a, b}), 0)
             return self.sval(T_BOOL, v)
         }
         if scalar_eq && eq_only && self.cx.types.is_scalar(l.ty) {
             a := self.scalar(l)
             b := self.scalar(r)
-            o := if op == BinOpEq { OpEq } else { OpNe }
-            v := self.ins(o, TI8, vec_of([]i64{a, b}), 0)
+            o := if op == Eq { Op.Eq } else { Op.Ne }
+            v := self.ins(o, I8, vec_of([]i64{a, b}), 0)
             return self.sval(T_BOOL, v)
         }
         if str_eq && eq_only {
             v := self.call_rt("__str_eq", vec[i64](), vec_of([]Val{l, r}), pos)
-            if op == BinOpEq {
+            if op == Eq {
                 return v
             }
             s := self.scalar(v)
-            one := self.iconst(TI8, 1)
-            x := self.ins(OpXor, TI8, vec_of([]i64{s, one}), 0)
+            one := self.iconst(I8, 1)
+            x := self.ins(Op.Xor, I8, vec_of([]i64{s, one}), 0)
             return self.sval(T_BOOL, x)
         }
         if agg_eq && eq_only {
@@ -1285,11 +1285,11 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
                 Some(ev) => { e = ev }
                 None => { return val_err() }
             }
-            if op == BinOpEq {
+            if op == Eq {
                 return self.sval(T_BOOL, e)
             }
-            one := self.iconst(TI8, 1)
-            x := self.ins(OpXor, TI8, vec_of([]i64{e, one}), 0)
+            one := self.iconst(I8, 1)
+            x := self.ins(Op.Xor, I8, vec_of([]i64{e, one}), 0)
             return self.sval(T_BOOL, x)
         }
         tn := self.tyname(l.ty)
@@ -1298,45 +1298,45 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
     }
     is_f := false
     match lk {
-        TyKInt(bits, signed) => {
+        Int(bits, signed) => {
             it := self.irt(l.ty)
             a := self.scalar(l)
             b := self.scalar(r)
             o: Op
-            if op == BinOpAdd {
-                o = OpAdd
-            } else if op == BinOpSub {
-                o = OpSub
-            } else if op == BinOpMul {
-                o = OpMul
-            } else if op == BinOpAnd {
-                o = OpAnd
-            } else if op == BinOpOr {
-                o = OpOr
-            } else if op == BinOpXor {
-                o = OpXor
-            } else if op == BinOpDiv || op == BinOpRem {
-                return self.int_div(op == BinOpDiv, signed, l.ty, it, a, b, pos)
+            if op == Add {
+                o = Op.Add
+            } else if op == Sub {
+                o = Op.Sub
+            } else if op == Mul {
+                o = Op.Mul
+            } else if op == And {
+                o = Op.And
+            } else if op == Or {
+                o = Op.Or
+            } else if op == Xor {
+                o = Op.Xor
+            } else if op == Div || op == Rem {
+                return self.int_div(op == Div, signed, l.ty, it, a, b, pos)
             } else {
                 panic("internal error: entered unreachable code")
             }
             v := self.ins(o, it, vec_of([]i64{a, b}), 0)
             return self.sval(l.ty, v)
         }
-        TyKF64 => { is_f = true }
-        TyKF32 => { is_f = true }
+        F64 => { is_f = true }
+        F32 => { is_f = true }
         _ => {}
     }
     if is_f {
         o: Op
-        if op == BinOpAdd {
-            o = OpFAdd
-        } else if op == BinOpSub {
-            o = OpFSub
-        } else if op == BinOpMul {
-            o = OpFMul
-        } else if op == BinOpDiv {
-            o = OpFDiv
+        if op == Add {
+            o = FAdd
+        } else if op == Sub {
+            o = FSub
+        } else if op == Mul {
+            o = FMul
+        } else if op == Div {
+            o = FDiv
         } else {
             self.err(pos, "this operator is not defined for f64")
             return val_err()
@@ -1357,19 +1357,19 @@ fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
     names := vec[str]()
     fieldwise := false
     match self.cx.types.k(l.ty) {
-        TyKSlice(et) => {
+        Slice(et) => {
             if et != T_U8 {
                 v := self.call_rt("__slice_eq", vec_of([]i64{et}), vec_of([]Val{l, r}), pos)
                 return Some(self.scalar(v))
             }
         }
-        TyKArray(et, n) => {
+        Array(et, n) => {
             sty := self.cx.types.slice(et)
             sl := vec[Val]()
             for x in ([]Val{l, r}) {
                 t := self.temp(sty)
                 sv := self.mval(sty, t)
-                nv := self.iconst(TI64, i64(n))
+                nv := self.iconst(I64, i64(n))
                 self.store_slice(sv, x.v, nv)
                 sl.push(sv)
             }
@@ -1381,14 +1381,14 @@ fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
             }
             return Some(self.scalar(v))
         }
-        TyKStruct(sid) => {
+        Struct(sid) => {
             fieldwise = true
             fields := self.cx.types.structs[sid].fields
             for i in 0..fields.len {
                 names.push(fields[i].0)
             }
         }
-        TyKTuple(ts) => {
+        Tuple(ts) => {
             fieldwise = true
             for i in 0..ts.len {
                 names.push(fmt(i))
@@ -1397,7 +1397,7 @@ fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
         _ => {}
     }
     if fieldwise {
-        acc := self.iconst(TI8, 1)
+        acc := self.iconst(I8, 1)
         for ni in 0..names.len {
             n := names[ni]
             pl: Val
@@ -1412,16 +1412,16 @@ fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
             }
             fl := self.rvalue(pl)
             fr := self.rvalue(pr)
-            e := self.binary_vals(BinOpEq, fl, fr, pos)
+            e := self.binary_vals(Eq, fl, fr, pos)
             if e.ty == T_ERR {
                 return None
             }
             ev := self.scalar(e)
-            acc = self.ins(OpAnd, TI8, vec_of([]i64{acc, ev}), 0)
+            acc = self.ins(And, I8, vec_of([]i64{acc, ev}), 0)
         }
         return Some(acc)
     }
-    v := self.binary_vals(BinOpEq, l, r, pos)
+    v := self.binary_vals(Eq, l, r, pos)
     if v.ty == T_ERR {
         return None
     }
@@ -1429,13 +1429,13 @@ fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
 }
 
 fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64, pos: Pos) -> Val {
-    o := OpURem
+    o := URem
     if is_div && signed {
-        o = OpSDiv
+        o = SDiv
     } else if is_div {
-        o = OpUDiv
+        o = UDiv
     } else if signed {
-        o = OpSRem
+        o = SRem
     }
     match self.f.is_const(b) {
         Some(k) => {
@@ -1447,7 +1447,7 @@ fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64
                 z := self.iconst(it, 0)
                 v := z
                 if is_div {
-                    v = self.ins(OpSub, it, vec_of([]i64{z, a}), 0)
+                    v = self.ins(Sub, it, vec_of([]i64{z, a}), 0)
                 }
                 return self.sval(ty, v)
             }
@@ -1461,7 +1461,7 @@ fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64
         return self.sval(ty, v)
     }
     z := self.iconst(it, 0)
-    nz := self.ins(OpNe, TI8, vec_of([]i64{b, z}), 0)
+    nz := self.ins(Ne, I8, vec_of([]i64{b, z}), 0)
     self.check(nz, 1, pos)
     if !signed {
         v := self.ins(o, it, vec_of([]i64{a, b}), 0)
@@ -1470,7 +1470,7 @@ fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64
     // signed: x / -1 wraps instead of trapping
     slot := self.alloca(it.size(), it.size())
     m1 := self.iconst(it, -1)
-    is_m1 := self.ins(OpEq, TI8, vec_of([]i64{b, m1}), 0)
+    is_m1 := self.ins(Eq, I8, vec_of([]i64{b, m1}), 0)
     b_m1 := self.new_block()
     b_div := self.new_block()
     bj := self.new_block()
@@ -1480,7 +1480,7 @@ fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b: i64
     z2 := self.iconst(it, 0)
     v1 := z2
     if is_div {
-        v1 = self.ins(OpSub, it, vec_of([]i64{z2, a}), 0)
+        v1 = self.ins(Sub, it, vec_of([]i64{z2, a}), 0)
     }
     self.store_raw(slot, v1, it, 0)
     self.jmp(bj)
@@ -1506,92 +1506,92 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
     tk := self.cx.types.k(to)
     tt := self.irt(to)
     match fk {
-        TyKInt(fb, fs) => {
+        Int(fb, fs) => {
             match tk {
-                TyKInt(tb, ts) => {
+                Int(tb, ts) => {
                     s := self.scalar(v)
                     r := s
                     if tb < fb {
-                        r = self.ins(OpTrunc, tt, vec_of([]i64{s}), 0)
+                        r = self.ins(Trunc, tt, vec_of([]i64{s}), 0)
                     } else if tb > fb {
-                        r = self.ins(if fs { OpSExt } else { OpZExt }, tt, vec_of([]i64{s}), 0)
+                        r = self.ins(if fs { SExt } else { ZExt }, tt, vec_of([]i64{s}), 0)
                     }
                     return self.sval(to, r)
                 }
-                TyKF64 => {
+                F64 => {
                     s := self.scalar(v)
                     if fb < 64 {
-                        s = self.ins(if fs { OpSExt } else { OpZExt }, TI64, vec_of([]i64{s}), 0)
-                        r := self.ins(OpSIToF, TF64, vec_of([]i64{s}), 0)
+                        s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
+                        r := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
                         return self.sval(to, r)
                     }
                     if fs {
-                        r := self.ins(OpSIToF, TF64, vec_of([]i64{s}), 0)
+                        r := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
                         return self.sval(to, r)
                     }
                     // u64: values >= 2^63 are halved (keeping the sticky bit), converted and doubled
                     slot := self.alloca(8, 8)
-                    zero := self.iconst(TI64, 0)
-                    nonneg := self.ins(OpSge, TI8, vec_of([]i64{s, zero}), 0)
+                    zero := self.iconst(I64, 0)
+                    nonneg := self.ins(Sge, I8, vec_of([]i64{s, zero}), 0)
                     b_lo := self.new_block()
                     b_hi := self.new_block()
                     bj := self.new_block()
                     d := self.dead
                     self.br(nonneg, b_lo, b_hi)
                     self.switch_to(b_lo)
-                    r1 := self.ins(OpSIToF, TF64, vec_of([]i64{s}), 0)
-                    self.store_raw(slot, r1, TF64, 0)
+                    r1 := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
+                    self.store_raw(slot, r1, T.F64, 0)
                     self.jmp(bj)
                     self.switch_to(b_hi)
-                    one := self.iconst(TI64, 1)
-                    half := self.ins(OpLShr, TI64, vec_of([]i64{s, one}), 0)
-                    low := self.ins(OpAnd, TI64, vec_of([]i64{s, one}), 0)
-                    h := self.ins(OpOr, TI64, vec_of([]i64{half, low}), 0)
-                    hf := self.ins(OpSIToF, TF64, vec_of([]i64{h}), 0)
-                    r2 := self.ins(OpFAdd, TF64, vec_of([]i64{hf, hf}), 0)
-                    self.store_raw(slot, r2, TF64, 0)
+                    one := self.iconst(I64, 1)
+                    half := self.ins(LShr, I64, vec_of([]i64{s, one}), 0)
+                    low := self.ins(And, I64, vec_of([]i64{s, one}), 0)
+                    h := self.ins(Or, I64, vec_of([]i64{half, low}), 0)
+                    hf := self.ins(SIToF, T.F64, vec_of([]i64{h}), 0)
+                    r2 := self.ins(FAdd, T.F64, vec_of([]i64{hf, hf}), 0)
+                    self.store_raw(slot, r2, T.F64, 0)
                     self.jmp(bj)
                     self.switch_to(bj)
                     self.dead = d
-                    r := self.load_raw(slot, TF64, 0)
+                    r := self.load_raw(slot, T.F64, 0)
                     return self.sval(to, r)
                 }
-                TyKF32 => {
+                F32 => {
                     if fb == 64 && !fs {
                         d := self.convert(v, T_F64, pos)
                         return self.convert(d, T_F32, pos)
                     }
                     s := self.scalar(v)
                     if fb < 64 {
-                        s = self.ins(if fs { OpSExt } else { OpZExt }, TI64, vec_of([]i64{s}), 0)
+                        s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
                     }
-                    r := self.ins(OpSIToF, TF32, vec_of([]i64{s}), 0)
+                    r := self.ins(SIToF, T.F32, vec_of([]i64{s}), 0)
                     return self.sval(to, r)
                 }
                 _ => {}
             }
         }
-        TyKBool => {
+        Bool => {
             match tk {
-                TyKInt(tb, ts) => {
+                Int(tb, ts) => {
                     s := self.scalar(v)
                     r := s
                     if tb > 8 {
-                        r = self.ins(OpZExt, tt, vec_of([]i64{s}), 0)
+                        r = self.ins(ZExt, tt, vec_of([]i64{s}), 0)
                     }
                     return self.sval(to, r)
                 }
                 _ => {}
             }
         }
-        TyKEnum(eid) => {
+        Enum(eid) => {
             match tk {
-                TyKInt(tb, ts) => {
+                Int(tb, ts) => {
                     if self.cx.types.is_scalar(v.ty) {
                         s := self.scalar(v)
                         r := s
                         if tb < 64 {
-                            r = self.ins(OpTrunc, tt, vec_of([]i64{s}), 0)
+                            r = self.ins(Trunc, tt, vec_of([]i64{s}), 0)
                         }
                         return self.sval(to, r)
                     }
@@ -1599,25 +1599,25 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
                 _ => {}
             }
         }
-        TyKF32 => {
+        F32 => {
             match tk {
-                TyKF64 => {
+                F64 => {
                     s := self.scalar(v)
-                    r := self.ins(OpFExt, TF64, vec_of([]i64{s}), 0)
+                    r := self.ins(FExt, T.F64, vec_of([]i64{s}), 0)
                     return self.sval(to, r)
                 }
-                TyKInt(tb, ts) => { return self.lower_expr_float_to_int(v, to, tt, tb) }
+                Int(tb, ts) => { return self.lower_expr_float_to_int(v, to, tt, tb) }
                 _ => {}
             }
         }
-        TyKF64 => {
+        F64 => {
             match tk {
-                TyKF32 => {
+                F32 => {
                     s := self.scalar(v)
-                    r := self.ins(OpFTrunc, TF32, vec_of([]i64{s}), 0)
+                    r := self.ins(FTrunc, T.F32, vec_of([]i64{s}), 0)
                     return self.sval(to, r)
                 }
-                TyKInt(tb, ts) => { return self.lower_expr_float_to_int(v, to, tt, tb) }
+                Int(tb, ts) => { return self.lower_expr_float_to_int(v, to, tt, tb) }
                 _ => {}
             }
         }
@@ -1632,9 +1632,9 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
 // the `(TyK::F64 | TyK::F32, TyK::Int(tb, _))` arm of `convert`
 fn lower_expr_float_to_int(self: *Fx, v: Val, to: i64, tt: T, tb: i64) -> Val {
     s := self.scalar(v)
-    r := self.ins(OpFToSI, TI64, vec_of([]i64{s}), 0)
+    r := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
     if tb < 64 {
-        r = self.ins(OpTrunc, tt, vec_of([]i64{r}), 0)
+        r = self.ins(Trunc, tt, vec_of([]i64{r}), 0)
     }
     return self.sval(to, r)
 }
@@ -1653,13 +1653,13 @@ fn lit_type(self: *Fx, te: *Expr, expect: Opt[i64]) -> Opt[i64] {
     }
     // generic struct named without type arguments: take them from the expected type
     match te.k {
-        EKIdent(n) => {
+        Ident(n) => {
             match self.cx.find_struct(n) {
                 Some(si) => {
                     match expect {
                         Some(t) => {
                             match self.cx.types.k(t) {
-                                TyKStruct(sid) => {
+                                Struct(sid) => {
                                     if self.cx.types.structs[sid].decl == si {
                                         return expect
                                     }
@@ -1689,7 +1689,7 @@ fn lit_type(self: *Fx, te: *Expr, expect: Opt[i64]) -> Opt[i64] {
 
 fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
     match self.cx.types.k(dst.ty) {
-        TyKStruct(sid) => {
+        Struct(sid) => {
             self.cx.types.layout_struct(sid)
             fields := clone(self.cx.types.structs[sid].fields)
             offs := clone(self.cx.types.structs[sid].offsets)
@@ -1736,7 +1736,7 @@ fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
                 self.store(fd, v)
             }
         }
-        TyKArray(et, n) => {
+        Array(et, n) => {
             if len(items) > i64(n) {
                 self.err(pos, fmt("too many elements in array literal (max ", i64(n), ")"))
                 return
@@ -1757,7 +1757,7 @@ fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
                 self.store(ed, v)
             }
         }
-        TyKTuple(tys) => {
+        Tuple(tys) => {
             if len(items) != tys.len {
                 self.err(pos, "wrong number of tuple elements")
                 return
@@ -1801,7 +1801,7 @@ fn construct_variant(self: *Fx, ei: i64, vi: i64, args: []Expr, expect: Opt[i64]
         match expect {
             Some(t) => {
                 match self.cx.types.k(t) {
-                    TyKEnum(eid) => {
+                    Enum(eid) => {
                         if self.cx.types.enums[eid].decl == ei {
                             from_expect = true
                             ety = t
@@ -1855,7 +1855,7 @@ fn construct_variant(self: *Fx, ei: i64, vi: i64, args: []Expr, expect: Opt[i64]
     }
     eid: i64
     match self.cx.types.k(ety) {
-        TyKEnum(x) => { eid = x }
+        Enum(x) => { eid = x }
         _ => { return val_err() }
     }
     ptys := clone(self.cx.types.enums[eid].variants[vi].1)
@@ -1864,14 +1864,14 @@ fn construct_variant(self: *Fx, ei: i64, vi: i64, args: []Expr, expect: Opt[i64]
         return val_err()
     }
     if self.cx.types.enums[eid].simple {
-        v := self.iconst(TI64, vi)
+        v := self.iconst(I64, vi)
         return self.sval(ety, v)
     }
     t := self.temp(ety)
     dst := self.mval(ety, t)
     self.zero(dst)
-    tag := self.iconst(TI64, vi)
-    self.store_raw(t, tag, TI64, AK_ANY)
+    tag := self.iconst(I64, vi)
+    self.store_raw(t, tag, I64, AK_ANY)
     offs := self.cx.types.variant_offsets(eid, vi)
     for i in 0..len(args) {
         a := &args[i]
@@ -1905,8 +1905,8 @@ fn store_any(self: *Fx, dst: Val, src: Val) {
     self.cx.types.leaves(dst.ty, 0, &lvs)
     if lvs.len > 64 {
         sz := self.cx.types.size_of(dst.ty)
-        c := self.iconst(TI64, sz)
-        self.ins(OpMemCpy, TVoid, vec_of([]i64{dst.v, src.v, c}), 0)
+        c := self.iconst(I64, sz)
+        self.ins(MemCpy, Void, vec_of([]i64{dst.v, src.v, c}), 0)
         return
     }
     vals := vec[i64]()
@@ -1930,8 +1930,8 @@ fn load_any(self: *Fx, src: i64, ty: i64) -> Val {
     self.cx.types.leaves(ty, 0, &lvs)
     if lvs.len > 64 {
         sz := self.cx.types.size_of(ty)
-        c := self.iconst(TI64, sz)
-        self.ins(OpMemCpy, TVoid, vec_of([]i64{t, src, c}), 0)
+        c := self.iconst(I64, sz)
+        self.ins(MemCpy, Void, vec_of([]i64{t, src, c}), 0)
         return dst
     }
     for i in 0..lvs.len {

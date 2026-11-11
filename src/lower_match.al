@@ -87,7 +87,7 @@ fn bare_variant(self: *Fx, n: str, expect: Opt[i64]) -> (i64, i64, i64) {
     match expect {
         Some(t) => {
             match cx.types.k(t) {
-                TyKEnum(eid) => {
+                Enum(eid) => {
                     ed := cx.types.enums[eid].decl
                     if (cx.enum_decls[ed].pos.file < cx.n_prelude) == cx.scope_prelude {
                         if own_has {
@@ -144,14 +144,14 @@ fn variant_ambiguous(self: *Fx, n: str, pos: Pos) {
 // typed by its context, like a literal.
 fn variant_ref(self: *Fx, e: *Expr) -> str {
     match e.k {
-        EKIdent(n) => {
+        Ident(n) => {
             if !is_some(self.lookup(n)) && self.bare_variant(n, None).2 != 0 {
                 return n
             }
         }
-        EKField(b, n) => {
+        Field(b, n) => {
             match b.k {
-                EKIdent(q) => {
+                Ident(q) => {
                     ei := self.cx.qual_enum_name(q)
                     if ei >= 0 && self.cx.enum_decls[ei].tparams.len != 0 && !is_some(self.lookup(q)) {
                         return n
@@ -160,9 +160,9 @@ fn variant_ref(self: *Fx, e: *Expr) -> str {
                 _ => {}
             }
         }
-        EKCall(c, _) => {
+        Call(c, _) => {
             match c.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     if !is_some(self.lookup(n)) && self.bare_variant(n, None).2 == 2 {
                         return n
                     }
@@ -179,7 +179,7 @@ fn variant_ref(self: *Fx, e: *Expr) -> str {
 // the enum type if the qualifier fixes it: -1 for a generic enum without type arguments)
 fn qual_enum(self: *Fx, b: *Expr) -> (i64, i64) {
     match b.k {
-        EKIdent(n) => {
+        Ident(n) => {
             ei := self.cx.qual_enum_name(n)
             if ei < 0 || is_some(self.lookup(n)) {
                 return (-1, -1)
@@ -189,9 +189,9 @@ fn qual_enum(self: *Fx, b: *Expr) -> (i64, i64) {
             }
             return (ei, -1)
         }
-        EKIndex(x, targs) => {
+        Index(x, targs) => {
             match x.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     ei := self.cx.qual_enum_name(n)
                     if ei < 0 || is_some(self.lookup(n)) {
                         return (-1, -1)
@@ -273,11 +273,11 @@ fn lower_match_err(ty: i64, pos: Pos) -> RPat {
 // is a pattern expression a compile-time constant?
 fn lower_match_is_const(s: *Fx, e: *Expr) -> bool {
     match e.k {
-        EKInt(_) => return true
-        EKFloat(_) => return true
-        EKStr(_) => return true
-        EKBool(_) => return true
-        EKNil => return true
+        Int(_) => return true
+        Float(_) => return true
+        Str(_) => return true
+        Bool(_) => return true
+        Nil => return true
         _ => {}
     }
     saved := s.cx.errs.len
@@ -294,7 +294,7 @@ fn lower_match_known(s: *Fx, n: str) -> bool {
 // the enum (index into the type table's enums) of a type, or -1
 fn lower_match_enum_of(s: *Fx, ty: i64) -> i64 {
     match s.cx.types.k(ty) {
-        TyKEnum(e) => return e
+        Enum(e) => return e
         _ => {}
     }
     return -1
@@ -399,7 +399,7 @@ fn lower_match_structural(s: *Fx, p: *Pat, ty: i64) -> bool {
     t := ty
     loop {
         match s.cx.types.k(t) {
-            TyKPtr(inner) => {
+            Ptr(inner) => {
                 t = inner
             }
             _ => {
@@ -409,21 +409,21 @@ fn lower_match_structural(s: *Fx, p: *Pat, ty: i64) -> bool {
     }
     eid := lower_match_enum_of(s, t)
     match *p {
-        PatTuple(_, _) => {
+        Tuple(_, _) => {
             match s.cx.types.k(t) {
-                TyKTuple(_) => return true
+                Tuple(_) => return true
                 _ => {}
             }
         }
-        PatVariant(_, _, _, _) => {
+        Variant(_, _, _, _) => {
             return eid >= 0
         }
-        PatConst(e) => {
+        Const(e) => {
             if eid < 0 {
                 return false
             }
             match e.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     nv := s.cx.types.enums[eid].variants.len
                     for i in 0..nv {
                         if s.cx.types.enums[eid].variants[i].0 == n {
@@ -431,14 +431,14 @@ fn lower_match_structural(s: *Fx, p: *Pat, ty: i64) -> bool {
                         }
                     }
                 }
-                EKField(q, _) => {
+                Field(q, _) => {
                     match q.k {
-                        EKIdent(qn) => {
+                        Ident(qn) => {
                             return s.cx.qual_enum_name(qn) >= 0 && !is_some(s.lookup(qn))
                         }
-                        EKIndex(x, _) => {
+                        Index(x, _) => {
                             match x.k {
-                                EKIdent(qn) => {
+                                Ident(qn) => {
                                     return s.cx.qual_enum_name(qn) >= 0 && !is_some(s.lookup(qn))
                                 }
                                 _ => {}
@@ -461,7 +461,7 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
     // a variant or tuple pattern matches through a pointer: the pointer must not be nil
     // and its target must match
     match self.cx.types.k(ty) {
-        TyKPtr(inner) => {
+        Ptr(inner) => {
             if lower_match_structural(self, p, inner) {
                 sub := self.pat_resolve(p, inner, top)
                 if sub.k == RP_ERR {
@@ -475,14 +475,14 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
         _ => {}
     }
     match *p {
-        PatWild => {
+        Wild => {
             return RPat{k: RP_WILD, ty: ty}
         }
-        PatRef(n, pos) => {
+        Ref(n, pos) => {
             if top {
                 if is_some(self.lookup(n)) || self.cx.global_decls.has(n) {
                     // as before: the address of a variable, compared with a pointer
-                    as_expr := PatConst(Expr{k: EKUn(UnOpAddr, parser_box(Expr{k: EKIdent(n), pos: pos})), pos: pos})
+                    as_expr := Pat.Const(Expr{k: Un(AddrOf, parser_box(Expr{k: Ident(n), pos: pos})), pos: pos})
                     return self.pat_resolve(&as_expr, ty, top)
                 }
                 self.err(pos, fmt("`&", n, "` binds a part of the matched value; it is only allowed inside a variant or tuple pattern, e.g. `Some(&", n, ")`"))
@@ -493,14 +493,14 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
             }
             return RPat{k: RP_REF, ty: ty, pos: pos, name: n, nbinds: 1}
         }
-        PatTuple(subs, pos) => {
+        Tuple(subs, pos) => {
             if ty == T_ERR {
                 return lower_match_err(ty, pos)
             }
             tys: Vec[i64]
             is_tuple := false
             match self.cx.types.k(ty) {
-                TyKTuple(ts) => {
+                Tuple(ts) => {
                     tys = ts
                     is_tuple = true
                 }
@@ -516,20 +516,20 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
             }
             return lower_match_subs(self, RPat{k: RP_TUPLE, ty: ty, pos: pos}, &subs, &tys)
         }
-        PatVariant(name, subs, pos, full) => {
+        Variant(name, subs, pos, full) => {
             qual: Opt[*Expr] = None
             match full {
                 Some(fe) => {
                     // Enum.Variant(..): `fe` is a call of the field `Variant` of `Enum`
                     match fe.k {
-                        EKCall(c, _) => {
+                        Call(c, _) => {
                             match c.k {
-                                EKField(q, _) => {
+                                Field(q, _) => {
                                     qual = Some(q)
                                     if top && self.qual_enum(q).0 < 0 {
                                         // not an enum: as before, an expression `x.f(a)`
                                         // that the matched value is compared with
-                                        as_expr := PatConst(*fe)
+                                        as_expr := Pat.Const(*fe)
                                         return self.pat_resolve(&as_expr, ty, top)
                                     }
                                 }
@@ -543,13 +543,13 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
             }
             return self.pat_variant(name, &subs, true, qual, ty, pos)
         }
-        PatConst(e) => {
+        Const(e) => {
             eid := lower_match_enum_of(self, ty)
             const_name := false
             none: Vec[Pat]
             no_qual: Opt[*Expr] = None
             match e.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     if eid >= 0 {
                         has := false
                         nv := self.cx.types.enums[eid].variants.len
@@ -576,7 +576,7 @@ fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
                         return lower_match_err(ty, e.pos)
                     }
                 }
-                EKField(q, n) => {
+                Field(q, n) => {
                     if self.qual_enum(q).0 >= 0 {
                         return self.pat_variant(n, &none, false, Some(q), ty, parser_expr_start(q))
                     }
@@ -635,22 +635,22 @@ fn lower_match_collect(s: *Fx, rp: *RPat, out: *Vec[(str, i64, Pos)]) {
 // pattern, so that the arm's body does not report them as unknown)
 fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
     match *p {
-        PatRef(n, _) => {
+        Ref(n, _) => {
             out.push(n)
         }
-        PatTuple(subs, _) => {
+        Tuple(subs, _) => {
             for i in 0..subs.len {
                 lower_match_names(s, &subs[i], false, out)
             }
         }
-        PatVariant(_, subs, _, _) => {
+        Variant(_, subs, _, _) => {
             for i in 0..subs.len {
                 lower_match_names(s, &subs[i], false, out)
             }
         }
-        PatConst(e) => {
+        Const(e) => {
             match e.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     if top {
                         if !lower_match_known(s, n) {
                             out.push(n)
@@ -669,15 +669,15 @@ fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
 // does a pattern contain `&name`?
 fn lower_match_has_ref(p: *Pat) -> bool {
     match *p {
-        PatRef(_, _) => return true
-        PatTuple(subs, _) => {
+        Ref(_, _) => return true
+        Tuple(subs, _) => {
             for i in 0..subs.len {
                 if lower_match_has_ref(&subs[i]) {
                     return true
                 }
             }
         }
-        PatVariant(_, subs, _, _) => {
+        Variant(_, subs, _, _) => {
             for i in 0..subs.len {
                 if lower_match_has_ref(&subs[i]) {
                     return true
@@ -695,7 +695,7 @@ fn pat_offsets(self: *Fx, rp: *RPat) -> Vec[i64] {
         return self.cx.types.variant_offsets(lower_match_enum_of(self, rp.ty), rp.vi)
     }
     match self.cx.types.k(rp.ty) {
-        TyKTuple(ts) => {
+        Tuple(ts) => {
             return self.cx.types.tuple_offsets(ts.items())
         }
         _ => {}
@@ -725,7 +725,7 @@ fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
     pv: Val
     is_nil := false
     match rp.e.k {
-        EKNil => {
+        Nil => {
             is_nil = true
         }
         _ => {}
@@ -736,7 +736,7 @@ fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
         // inside a pattern a name is a constant even if a local variable has the same name
         pv = val_err()
         match rp.e.k {
-            EKIdent(n) => {
+            Ident(n) => {
                 match self.cx.const_named(n) {
                     Some(c) => {
                         pv = self.const_val(c.0, c.1, Some(rp.ty), rp.pos)
@@ -801,12 +801,12 @@ fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool,
         }
         if key != NOV {
             p := self.scalar(pv)
-            eq := self.ins(OpEq, TI8, vec_of([]i64{key, p}), 0)
+            eq := self.ins(Op.Eq, I8, vec_of([]i64{key, p}), 0)
             self.br(eq, ok_b, fail_b)
             return
         }
         l := self.rvalue(part)
-        r := self.binary_vals(BinOpEq, l, pv, rp.pos)
+        r := self.binary_vals(BinOp.Eq, l, pv, rp.pos)
         c := self.scalar(r)
         self.br(c, ok_b, fail_b)
         return
@@ -817,11 +817,11 @@ fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool,
             if self.cx.types.is_scalar(rp.ty) {
                 tag = self.scalar(part)
             } else {
-                tag = self.load_raw(part.v, TI64, AK_ANY)
+                tag = self.load_raw(part.v, I64, AK_ANY)
             }
         }
-        c := self.iconst(TI64, rp.vi)
-        eq := self.ins(OpEq, TI8, vec_of([]i64{tag, c}), 0)
+        c := self.iconst(I64, rp.vi)
+        eq := self.ins(Op.Eq, I8, vec_of([]i64{tag, c}), 0)
         if !lower_match_subs_refutable(rp) {
             self.br(eq, ok_b, fail_b)
             return
@@ -837,8 +837,8 @@ fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool,
         if p == NOV {
             p = self.scalar(part)
         }
-        z := self.iconst(TI64, 0)
-        ne := self.ins(OpNe, TI8, vec_of([]i64{p, z}), 0)
+        z := self.iconst(I64, 0)
+        ne := self.ins(Ne, I8, vec_of([]i64{p, z}), 0)
         b := self.new_block()
         self.br(ne, b, fail_b)
         self.switch_to(b)
@@ -859,8 +859,8 @@ fn copy_any(self: *Fx, dst: i64, src: i64, ty: i64) {
     self.cx.types.leaves(ty, 0, &lvs)
     if lvs.len > 64 {
         sz := self.cx.types.size_of(ty)
-        c := self.iconst(TI64, sz)
-        self.ins(OpMemCpy, TVoid, vec_of([]i64{dst, src, c}), 0)
+        c := self.iconst(I64, sz)
+        self.ins(MemCpy, Void, vec_of([]i64{dst, src, c}), 0)
         return
     }
     for i in 0..lvs.len {
@@ -956,7 +956,7 @@ fn lower_match_is_nil(rp: *RPat) -> bool {
         return false
     }
     match rp.e.k {
-        EKNil => return true
+        Nil => return true
         _ => {}
     }
     return false
@@ -972,7 +972,7 @@ fn lower_match_bool_pat(s: *Fx, rp: *RPat) -> i64 {
     match s.cx.const_eval(rp.e) {
         Some(cv) => {
             match cv {
-                CVBool(b) => {
+                Bool(b) => {
                     r = if b { 1 } else { 0 }
                 }
                 _ => {}
@@ -1070,7 +1070,7 @@ fn lower_match_uncovered(s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *
     elems: Vec[i64]
     is_tuple := false
     match s.cx.types.k(t) {
-        TyKTuple(ts) => {
+        Tuple(ts) => {
             elems = ts
             is_tuple = true
         }
@@ -1112,7 +1112,7 @@ fn lower_match_uncovered(s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *
     is_ptr := false
     target := 0
     match s.cx.types.k(t) {
-        TyKPtr(inner) => {
+        Ptr(inner) => {
             target = inner
             for i in 0..rows.len {
                 if rows[i][0].k == RP_DEREF {
@@ -1178,7 +1178,7 @@ fn lower_match_missing(s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str] {
         return out
     }
     match s.cx.types.k(ty) {
-        TyKPtr(inner) => {
+        Ptr(inner) => {
             // nil, then what is missing of the target
             any := false
             nil_rows := vec[Vec[*RPat]]()
@@ -1224,8 +1224,8 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     enum_id: Opt[i64] = None
     is_tuple := false
     match sk {
-        TyKEnum(e) => { enum_id = Some(e) }
-        TyKTuple(_) => { is_tuple = true }
+        Enum(e) => { enum_id = Some(e) }
+        Tuple(_) => { is_tuple = true }
         _ => {}
     }
     payload_enum := false
@@ -1236,7 +1236,7 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     // scrutinee: scalar value, or tag for payload enums
     key: i64
     if payload_enum {
-        key = self.load_raw(sv.v, TI64, AK_ANY)
+        key = self.load_raw(sv.v, I64, AK_ANY)
     } else if self.cx.types.is_scalar(sv.ty) {
         key = self.scalar(sv)
     } else if sv.ty == T_STR || is_tuple {
@@ -1512,7 +1512,7 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
         }
     }
     if exhaustive {
-        self.terminate(TermTrap)
+        self.terminate(Trap)
     } else {
         if want && is_some(slot) && !any_pat_err {
             hint := if any_guard { " (an arm with a guard does not count: add an arm without a guard or `_ =>`)" } else { "" }

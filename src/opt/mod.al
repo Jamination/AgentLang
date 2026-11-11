@@ -177,10 +177,10 @@ fn opt_optimize(m: *Module, level: i64) {
         for bi in 0..f.blocks.len {
             for v in f.blocks[bi].insts.items() {
                 i := &f.insts[v]
-                if i.op == OpCall {
+                if i.op == Call {
                     call_counts[i.k] += 1
                     callees[fi].push(i.k)
-                } else if i.op == OpFAddr {
+                } else if i.op == FAddr {
                     addr_taken[i.k] = true
                 }
             }

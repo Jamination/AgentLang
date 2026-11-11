@@ -3,28 +3,28 @@
 const NOV = 0xFFFFFFFF
 
 enum T {
-    TVoid,
-    TI8,
-    TI16,
-    TI32,
-    TI64,
-    TF64,
-    TF32,
+    Void,
+    I8,
+    I16,
+    I32,
+    I64,
+    F64,
+    F32,
     // 128-bit vectors of f32 lanes held in an xmm register; they differ in memory size only
-    TV2,
-    TV3,
-    TV4,
+    V2,
+    V3,
+    V4,
 }
 
 fn size(self: T) -> i64 {
     match self {
-        TVoid => 0
-        TI8 => 1
-        TI16 => 2
-        TI32, TF32 => 4
-        TI64, TF64, TV2 => 8
-        TV3 => 12
-        TV4 => 16
+        Void => 0
+        I8 => 1
+        I16 => 2
+        I32, F32 => 4
+        I64, F64, V2 => 8
+        V3 => 12
+        V4 => 16
     }
 }
 
@@ -33,129 +33,129 @@ fn bits(self: T) -> i64 {
 }
 
 fn is_int(self: T) -> bool {
-    return self == TI8 || self == TI16 || self == TI32 || self == TI64
+    return self == I8 || self == I16 || self == I32 || self == I64
 }
 
 // lives in an xmm register
 fn is_fp(self: T) -> bool {
-    return self == TF32 || self == TF64 || self == TV2 || self == TV3 || self == TV4
+    return self == F32 || self == F64 || self == V2 || self == V3 || self == V4
 }
 
 fn is_vec(self: T) -> bool {
-    return self == TV2 || self == TV3 || self == TV4
+    return self == V2 || self == V3 || self == V4
 }
 
 fn name(self: T) -> str {
     match self {
-        TVoid => "void"
-        TI8 => "i8"
-        TI16 => "i16"
-        TI32 => "i32"
-        TI64 => "i64"
-        TF64 => "f64"
-        TF32 => "f32"
-        TV2 => "v2"
-        TV3 => "v3"
-        TV4 => "v4"
+        Void => "void"
+        I8 => "i8"
+        I16 => "i16"
+        I32 => "i32"
+        I64 => "i64"
+        F64 => "f64"
+        F32 => "f32"
+        V2 => "v2"
+        V3 => "v3"
+        V4 => "v4"
     }
 }
 
 enum Op {
-    OpConst,  // k = value (sign-extended to i64, canonical for type)
-    OpFConst, // k = f64 bits (f32 bits for F32; vectors: only 0)
-    OpParam,  // k = index
-    OpGAddr,  // k = global id
-    OpFAddr,  // k = function id
-    OpAlloca, // k = size, aux = align
-    OpAdd,
-    OpSub,
-    OpMul,
-    OpSDiv,
-    OpUDiv,
-    OpSRem,
-    OpURem,
-    OpAnd,
-    OpOr,
-    OpXor,
-    OpShl,
-    OpLShr,
-    OpAShr,
-    OpRotl,
-    OpRotr,
-    OpMulHiS,
-    OpMulHiU,
-    OpFAdd,
-    OpFSub,
-    OpFMul,
-    OpFDiv,
-    OpFSqrt,
-    OpFNeg,
-    OpFAbs,
-    OpFMin,   // x86 semantics: a < b ? a : b
-    OpFMax,   // a > b ? a : b
-    OpFExt,   // f32 -> f64
-    OpFTrunc, // f64 -> f32
-    OpVSplat, // f32 -> vector with every lane equal
-    OpVBuild, // f32 lanes -> vector
-    OpVExt,   // vector -> f32, k = lane
-    OpVIns,   // args = [vector, f32], k = lane
-    OpVShuf,  // args = [a, b], k = shufps immediate: lanes 0,1 from a and 2,3 from b
-    OpEq,
-    OpNe,
-    OpSlt,
-    OpSle,
-    OpSgt,
-    OpSge,
-    OpUlt,
-    OpUle,
-    OpUgt,
-    OpUge,
-    OpFEq,
-    OpFNe,
-    OpFLt,
-    OpFLe,
-    OpFGt,
-    OpFGe,
-    OpSExt,
-    OpZExt,
-    OpTrunc,
-    OpSIToF,
-    OpFToSI,
-    OpBitsToF,
-    OpFToBits,
-    OpSelect, // args = [cond, a, b]
-    OpLoad,   // args = [addr], aux = alias class
-    OpStore,  // args = [addr, val], ty = type of val, aux = alias class
-    OpCall,   // k = func id
-    OpCallInd, // args[0] = fn pointer
-    OpSyscall,
-    OpProj, // args[0] = call, k = result index
-    OpPhi,
-    OpMemCpy, // args = [dst, src, n]
-    OpMemSet, // args = [dst, byte, n]
-    OpBswap,
-    OpPopcnt,
-    OpCtz,
-    OpClz,
+    Const,  // k = value (sign-extended to i64, canonical for type)
+    FConst, // k = f64 bits (f32 bits for F32; vectors: only 0)
+    Param,  // k = index
+    GAddr,  // k = global id
+    FAddr,  // k = function id
+    Alloca, // k = size, aux = align
+    Add,
+    Sub,
+    Mul,
+    SDiv,
+    UDiv,
+    SRem,
+    URem,
+    And,
+    Or,
+    Xor,
+    Shl,
+    LShr,
+    AShr,
+    Rotl,
+    Rotr,
+    MulHiS,
+    MulHiU,
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    FSqrt,
+    FNeg,
+    FAbs,
+    FMin,   // x86 semantics: a < b ? a : b
+    FMax,   // a > b ? a : b
+    FExt,   // f32 -> f64
+    FTrunc, // f64 -> f32
+    VSplat, // f32 -> vector with every lane equal
+    VBuild, // f32 lanes -> vector
+    VExt,   // vector -> f32, k = lane
+    VIns,   // args = [vector, f32], k = lane
+    VShuf,  // args = [a, b], k = shufps immediate: lanes 0,1 from a and 2,3 from b
+    Eq,
+    Ne,
+    Slt,
+    Sle,
+    Sgt,
+    Sge,
+    Ult,
+    Ule,
+    Ugt,
+    Uge,
+    FEq,
+    FNe,
+    FLt,
+    FLe,
+    FGt,
+    FGe,
+    SExt,
+    ZExt,
+    Trunc,
+    SIToF,
+    FToSI,
+    BitsToF,
+    FToBits,
+    Select, // args = [cond, a, b]
+    Load,   // args = [addr], aux = alias class
+    Store,  // args = [addr, val], ty = type of val, aux = alias class
+    Call,   // k = func id
+    CallInd, // args[0] = fn pointer
+    Syscall,
+    Proj, // args[0] = call, k = result index
+    Phi,
+    MemCpy, // args = [dst, src, n]
+    MemSet, // args = [dst, byte, n]
+    Bswap,
+    Popcnt,
+    Ctz,
+    Clz,
 }
 
 fn is_cmp(self: Op) -> bool {
     match self {
-        OpEq, OpNe, OpSlt, OpSle, OpSgt, OpSge, OpUlt, OpUle, OpUgt, OpUge, OpFEq, OpFNe, OpFLt, OpFLe, OpFGt, OpFGe => true
+        Eq, Ne, Slt, Sle, Sgt, Sge, Ult, Ule, Ugt, Uge, FEq, FNe, FLt, FLe, FGt, FGe => true
         _ => false
     }
 }
 
 fn is_icmp(self: Op) -> bool {
     match self {
-        OpEq, OpNe, OpSlt, OpSle, OpSgt, OpSge, OpUlt, OpUle, OpUgt, OpUge => true
+        Eq, Ne, Slt, Sle, Sgt, Sge, Ult, Ule, Ugt, Uge => true
         _ => false
     }
 }
 
 fn is_commutative(self: Op) -> bool {
     match self {
-        OpAdd, OpMul, OpAnd, OpOr, OpXor, OpFAdd, OpFMul, OpEq, OpNe, OpFEq, OpFNe, OpMulHiS, OpMulHiU => true
+        Add, Mul, And, Or, Xor, FAdd, FMul, Eq, Ne, FEq, FNe, MulHiS, MulHiU => true
         _ => false
     }
 }
@@ -163,25 +163,25 @@ fn is_commutative(self: Op) -> bool {
 // no side effects, no memory dependence, cannot trap
 fn is_pure(self: Op) -> bool {
     match self {
-        OpParam, OpAlloca, OpSDiv, OpUDiv, OpSRem, OpURem, OpLoad, OpStore, OpCall, OpCallInd, OpSyscall, OpProj, OpPhi, OpMemCpy, OpMemSet => false
+        Param, Alloca, SDiv, UDiv, SRem, URem, Load, Store, Call, CallInd, Syscall, Proj, Phi, MemCpy, MemSet => false
         _ => true
     }
 }
 
 fn swap_cmp(self: Op) -> Op {
     match self {
-        OpSlt => OpSgt
-        OpSle => OpSge
-        OpSgt => OpSlt
-        OpSge => OpSle
-        OpUlt => OpUgt
-        OpUle => OpUge
-        OpUgt => OpUlt
-        OpUge => OpUle
-        OpFLt => OpFGt
-        OpFLe => OpFGe
-        OpFGt => OpFLt
-        OpFGe => OpFLe
+        Slt => Sgt
+        Sle => Sge
+        Sgt => Slt
+        Sge => Sle
+        Ult => Ugt
+        Ule => Uge
+        Ugt => Ult
+        Uge => Ule
+        FLt => FGt
+        FLe => FGe
+        FGt => FLt
+        FGe => FLe
         _ => self
     }
 }
@@ -189,16 +189,16 @@ fn swap_cmp(self: Op) -> Op {
 // integer compare negation (not valid for float compares because of NaN)
 fn negate_icmp(self: Op) -> Op {
     match self {
-        OpEq => OpNe
-        OpNe => OpEq
-        OpSlt => OpSge
-        OpSle => OpSgt
-        OpSgt => OpSle
-        OpSge => OpSlt
-        OpUlt => OpUge
-        OpUle => OpUgt
-        OpUgt => OpUle
-        OpUge => OpUlt
+        Eq => Ne
+        Ne => Eq
+        Slt => Sge
+        Sle => Sgt
+        Sgt => Sle
+        Sge => Slt
+        Ult => Uge
+        Ule => Ugt
+        Ugt => Ule
+        Uge => Ult
         _ => self
     }
 }
@@ -218,43 +218,43 @@ fn clone(i: *Inst) -> Inst {
 }
 
 enum Term {
-    TermNone,
-    TermJmp(i64),
-    TermBr(i64, i64, i64),
-    TermRet(Vec[i64]),
-    TermTrap,
+    None,
+    Jmp(i64),
+    Br(i64, i64, i64),
+    Ret(Vec[i64]),
+    Trap,
 }
 
 // Term equality (PartialEq in the Rust source)
 fn eq(a: Term, b: Term) -> bool {
     match a {
-        TermNone => {
+        Term.None => {
             match b {
-                TermNone => return true
+                Term.None => return true
                 _ => return false
             }
         }
-        TermJmp(t) => {
+        Jmp(t) => {
             match b {
-                TermJmp(t2) => return t == t2
+                Jmp(t2) => return t == t2
                 _ => return false
             }
         }
-        TermBr(c, t, e) => {
+        Br(c, t, e) => {
             match b {
-                TermBr(c2, t2, e2) => return c == c2 && t == t2 && e == e2
+                Br(c2, t2, e2) => return c == c2 && t == t2 && e == e2
                 _ => return false
             }
         }
-        TermRet(vs) => {
+        Ret(vs) => {
             match b {
-                TermRet(vs2) => return vs.items() == vs2.items()
+                Ret(vs2) => return vs.items() == vs2.items()
                 _ => return false
             }
         }
-        TermTrap => {
+        Trap => {
             match b {
-                TermTrap => return true
+                Trap => return true
                 _ => return false
             }
         }
@@ -264,7 +264,7 @@ fn eq(a: Term, b: Term) -> bool {
 // an independent copy (the value list of Ret is not shared)
 fn clone(t: Term) -> Term {
     match t {
-        TermRet(vs) => return TermRet(clone(&vs))
+        Ret(vs) => return Ret(clone(&vs))
         _ => return t
     }
 }
@@ -315,8 +315,8 @@ fn clone(f: *Func) -> Func {
 }
 
 enum RelocTarget {
-    RelocTargetGlobal(i64, i64),
-    RelocTargetFunc(i64),
+    Glob(i64, i64),
+    Function(i64),
 }
 
 struct Global {
@@ -356,9 +356,9 @@ struct ExternFn {
 
 fn ir_canon(ty: T, k: i64) -> i64 {
     match ty {
-        TI8 => i64(i8(k))
-        TI16 => i64(i16(k))
-        TI32 => i64(i32(k))
+        I8 => i64(i8(k))
+        I16 => i64(i16(k))
+        I32 => i64(i32(k))
         _ => k
     }
 }
@@ -387,7 +387,7 @@ fn ir_lists(n: i64) -> Vec[Vec[i64]] {
 }
 
 fn new_block(self: *Func) -> i64 {
-    self.blocks.push(BlockData{insts: vec[i64](), term: TermNone})
+    self.blocks.push(BlockData{insts: vec[i64](), term: Term.None})
     return self.blocks.len - 1
 }
 
@@ -409,7 +409,7 @@ fn im(self: *Func, v: i64) -> *Inst {
 
 fn is_const(self: *Func, v: i64) -> Opt[i64] {
     i := &self.insts[v]
-    if i.op == OpConst {
+    if i.op == Const {
         return Some(i.k)
     } else {
         return None
@@ -418,8 +418,8 @@ fn is_const(self: *Func, v: i64) -> Opt[i64] {
 
 fn succs(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
-        TermJmp(t) => return vec_one(t)
-        TermBr(c, t, f) => {
+        Jmp(t) => return vec_one(t)
+        Br(c, t, f) => {
             if t == f {
                 return vec_one(t)
             } else {
@@ -472,8 +472,8 @@ fn rpo(self: *Func) -> Vec[i64] {
 
 fn term_uses(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
-        TermBr(c, t, e) => return vec_of([]i64{c})
-        TermRet(v) => return clone(&v)
+        Br(c, t, e) => return vec_of([]i64{c})
+        Ret(v) => return clone(&v)
         _ => return vec[i64]()
     }
 }
@@ -488,10 +488,10 @@ fn use_counts(self: *Func) -> Vec[i64] {
             }
         }
         match b.term {
-            TermBr(v, t, e) => {
+            Br(v, t, e) => {
                 c[v] += 1
             }
-            TermRet(vs) => {
+            Ret(vs) => {
                 for v in vs.items() {
                     c[v] += 1
                 }
@@ -532,12 +532,12 @@ fn apply_repl(self: *Func, map: *Vec[i64]) {
             }
         }
         match self.blocks[bi].term {
-            TermBr(c, t, e) => {
+            Br(c, t, e) => {
                 if map[c] != NOV {
-                    self.blocks[bi].term = TermBr(ir_apply_repl_find(map, c), t, e)
+                    self.blocks[bi].term = Br(ir_apply_repl_find(map, c), t, e)
                 }
             }
-            TermRet(vs) => {
+            Ret(vs) => {
                 // vs shares its buffer with the terminator: updated in place
                 for i in 0..vs.len {
                     if map[vs[i]] != NOV {
@@ -871,7 +871,7 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
         s.push(fmt("b", b, ":\n"))
         for v in f.blocks[b].insts.items() {
             i := &f.insts[v]
-            if i.ty != TVoid && i.op != OpStore {
+            if i.ty != Void && i.op != Store {
                 s.push(fmt("  %", v, " = "))
             } else {
                 s.push("  ")
@@ -879,20 +879,20 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
             // the variant name without its `Op` prefix, as `{:?}` prints it
             s.push(fmt(fmt(i.op)[2..], " ", i.ty.name()))
             match i.op {
-                OpConst => {
+                Const => {
                     s.push(fmt(" ", i.k))
                 }
-                OpFConst => {
-                    if i.ty == TF32 {
+                FConst => {
+                    if i.ty == F32 {
                         s.push(concat(" ", ir_float_debug(fmt(cast[f32](u32(i.k))))))
                     } else {
                         s.push(concat(" ", ir_float_debug(fmt(cast[f64](u64(i.k))))))
                     }
                 }
-                OpParam, OpProj, OpVExt, OpVIns, OpVShuf => {
+                Param, Proj, VExt, VIns, VShuf => {
                     s.push(fmt(" #", i.k))
                 }
-                OpGAddr => {
+                GAddr => {
                     name := ""
                     match m {
                         Some(mm) => {
@@ -902,7 +902,7 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
                     }
                     s.push(fmt(" @g", i.k, "(", name, ")"))
                 }
-                OpCall, OpFAddr => {
+                Call, FAddr => {
                     name := ""
                     match m {
                         Some(mm) => {
@@ -912,17 +912,17 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
                     }
                     s.push(fmt(" @f", i.k, "(", name, ")"))
                 }
-                OpAlloca => {
+                Alloca => {
                     s.push(fmt(" size=", i.k, " align=", i.aux))
                 }
-                OpLoad, OpStore => {
+                Load, Store => {
                     s.push(fmt(" !", i.aux & 15, ".", i.aux >> 4))
                 }
                 _ => {}
             }
             for ai in 0..i.args.len {
                 a := i.args[ai]
-                if i.op == OpPhi {
+                if i.op == Phi {
                     s.push(fmt(" [b", i.pb[ai], ": %", a, "]"))
                 } else {
                     s.push(fmt(" %", a))
@@ -931,23 +931,23 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
             s.push("\n")
         }
         match f.blocks[b].term {
-            TermNone => {
+            Term.None => {
                 s.push("  <no terminator>\n")
             }
-            TermJmp(t) => {
+            Jmp(t) => {
                 s.push(fmt("  jmp b", t, "\n"))
             }
-            TermBr(c, t, e) => {
+            Br(c, t, e) => {
                 s.push(fmt("  br %", c, " b", t, " b", e, "\n"))
             }
-            TermRet(vs) => {
+            Ret(vs) => {
                 v := vec[str]()
                 for x in vs.items() {
                     v.push(fmt("%", x))
                 }
                 s.push(fmt("  ret ", join(v.items(), ", "), "\n"))
             }
-            TermTrap => {
+            Trap => {
                 s.push("  trap\n")
             }
         }
@@ -979,7 +979,7 @@ fn ir_verify(f: *Func) -> str {
         for pi in 0..blk.insts.len {
             v := blk.insts[pi]
             i := &f.insts[v]
-            if i.op == OpPhi {
+            if i.op == Phi {
                 if seen_non_phi {
                     return fmt("phi %", v, " after non-phi in b", b)
                 }
@@ -1025,7 +1025,7 @@ fn ir_verify(f: *Func) -> str {
                 return fmt("terminator of b", b, " uses %", a, " which does not dominate it")
             }
         }
-        if eq(blk.term, TermNone) {
+        if eq(blk.term, Term.None) {
             return fmt("b", b, " has no terminator")
         }
     }

@@ -17,20 +17,20 @@ struct LintUse {
 // is `e` a place that is copied when read: a field or element of something (not a call)
 fn lint_is_place(e: *Expr) -> bool {
     match e.k {
-        EKIndex(b, idx) => return lint_is_root(b)
-        EKField(b, f) => return lint_is_root(b)
+        Index(b, idx) => return lint_is_root(b)
+        Field(b, f) => return lint_is_root(b)
         _ => return false
     }
 }
 
 fn lint_is_root(e: *Expr) -> bool {
     match e.k {
-        EKIdent(n) => return true
-        EKIndex(b, idx) => return lint_is_root(b)
-        EKField(b, f) => return lint_is_root(b)
-        EKUn(op, x) => {
+        Ident(n) => return true
+        Index(b, idx) => return lint_is_root(b)
+        Field(b, f) => return lint_is_root(b)
+        Un(op, x) => {
             match op {
-                UnOpDeref => return lint_is_root(x)
+                Deref => return lint_is_root(x)
                 _ => return false
             }
         }
@@ -41,19 +41,19 @@ fn lint_is_root(e: *Expr) -> bool {
 // source text of a place expression (an index that is not a name or number is shown as `..`)
 fn lint_place_str(e: *Expr) -> str {
     match e.k {
-        EKIdent(n) => return ast_plain(n)
-        EKInt(v) => return fmt(v)
-        EKField(b, f) => return fmt(lint_place_str(b), ".", f)
-        EKIndex(b, idx) => {
+        Ident(n) => return ast_plain(n)
+        Int(v) => return fmt(v)
+        Field(b, f) => return fmt(lint_place_str(b), ".", f)
+        Index(b, idx) => {
             parts := vec[str]()
             for i in 0..idx.len {
                 parts.push(lint_place_str(&idx[i]))
             }
             return fmt(lint_place_str(b), "[", join(parts.items(), ", "), "]")
         }
-        EKUn(op, x) => {
+        Un(op, x) => {
             match op {
-                UnOpDeref => return fmt("(*", lint_place_str(x), ")")
+                Deref => return fmt("(*", lint_place_str(x), ")")
                 _ => return ".."
             }
         }
@@ -84,52 +84,52 @@ fn lint_block(u: *LintUse, b: *Block) -> bool {
 
 fn lint_expr(u: *LintUse, e: *Expr) -> bool {
     return match e.k {
-        EKInt(v) => true
-        EKFloat(v) => true
-        EKStr(s) => true
-        EKBool(b) => true
-        EKNil => true
-        EKIdent(n) => {
+        Int(v) => true
+        Float(v) => true
+        Str(s) => true
+        Bool(b) => true
+        Nil => true
+        Ident(n) => {
             if n == u.name {
                 u.others += 1
             }
             true
         }
-        EKUn(op, x) => lint_expr(u, x)
-        EKBin(op, a, b) => {
+        Un(op, x) => lint_expr(u, x)
+        Bin(op, a, b) => {
             lint_expr(u, a)
             lint_expr(u, b)
         }
-        EKCall(c, args) => {
+        Call(c, args) => {
             lint_expr(u, c)
             lint_exprs(u, &args)
         }
-        EKIndex(b, idx) => {
+        Index(b, idx) => {
             lint_expr(u, b)
             lint_exprs(u, &idx)
         }
-        EKSlice(b, lo, hi) => {
+        Slice(b, lo, hi) => {
             lint_expr(u, b)
             lint_opt(u, lo)
             lint_opt(u, hi)
         }
-        EKField(b, f) => lint_expr(u, b)
-        EKLit(t, fields) => {
+        Field(b, f) => lint_expr(u, b)
+        Lit(t, fields) => {
             lint_expr(u, t)
             for i in 0..fields.len {
                 lint_expr(u, &fields[i].1)
             }
             true
         }
-        EKTypeE(t) => true
-        EKIf(c, a, b) => {
+        TypeE(t) => true
+        If(c, a, b) => {
             lint_expr(u, c)
             lint_block(u, &a)
             lint_block(u, &b)
         }
-        EKTuple(es) => lint_exprs(u, &es)
-        EKFn(d) => true
-        EKMatch(sc, arms) => {
+        Tuple(es) => lint_exprs(u, &es)
+        Fn(d) => true
+        Match(sc, arms) => {
             lint_expr(u, sc)
             for i in 0..arms.len {
                 lint_opt(u, arms[i].guard)
@@ -142,25 +142,25 @@ fn lint_expr(u: *LintUse, e: *Expr) -> bool {
 
 fn lint_stmt(u: *LintUse, s: *Stmt) -> bool {
     return match s.k {
-        SKExpr(e) => lint_expr(u, &e)
-        SKLet(names, e) => lint_expr(u, &e)
-        SKMultiAssign(lhs, e) => {
+        ExprStmt(e) => lint_expr(u, &e)
+        Let(names, e) => lint_expr(u, &e)
+        MultiAssign(lhs, e) => {
             lint_exprs(u, &lhs)
             lint_expr(u, &e)
         }
-        SKVar(name, ty, init) => {
+        Var(name, ty, init) => {
             match init {
                 Some(e) => lint_expr(u, &e)
                 None => true
             }
         }
-        SKAssign(lhs, op, rhs) => {
+        Assign(lhs, op, rhs) => {
             lint_expr(u, &rhs)
             direct := false
             match lhs.k {
-                EKField(b, f) => {
+                Field(b, f) => {
                     match b.k {
-                        EKIdent(n) => {
+                        Ident(n) => {
                             if n == u.name {
                                 direct = true
                                 if u.writes == 0 {
@@ -181,7 +181,7 @@ fn lint_stmt(u: *LintUse, s: *Stmt) -> bool {
                 lint_expr(u, &lhs)
             }
         }
-        SKIf(c, t, eo) => {
+        If(c, t, eo) => {
             lint_expr(u, &c)
             lint_block(u, &t)
             match eo {
@@ -189,12 +189,12 @@ fn lint_stmt(u: *LintUse, s: *Stmt) -> bool {
                 None => true
             }
         }
-        SKWhile(c, body) => {
+        While(c, body) => {
             lint_expr(u, &c)
             lint_block(u, &body)
         }
-        SKLoop(body) => lint_block(u, &body)
-        SKFor(var1, var2, lo, hi, incl, step, body) => {
+        LoopStmt(body) => lint_block(u, &body)
+        For(var1, var2, lo, hi, incl, step, body) => {
             lint_expr(u, &lo)
             match hi {
                 Some(h) => {
@@ -210,28 +210,28 @@ fn lint_stmt(u: *LintUse, s: *Stmt) -> bool {
             }
             lint_block(u, &body)
         }
-        SKReturn(e) => {
+        Return(e) => {
             match e {
                 Some(x) => lint_expr(u, &x)
                 None => true
             }
         }
-        SKBreak => true
-        SKContinue => true
-        SKAssert(c, m) => {
+        Break => true
+        Continue => true
+        Assert(c, m) => {
             lint_expr(u, &c)
             match m {
                 Some(x) => lint_expr(u, &x)
                 None => true
             }
         }
-        SKBlock(b) => lint_block(u, &b)
-        SKDefer(b) => lint_block(u, &b)
-        SKLabeled(label, st) => lint_stmt(u, st)
-        SKBreakTo(label) => true
-        SKContinueTo(label) => true
+        BlockStmt(b) => lint_block(u, &b)
+        Defer(b) => lint_block(u, &b)
+        Labeled(label, st) => lint_stmt(u, st)
+        BreakTo(label) => true
+        ContinueTo(label) => true
         // (a nested function does not see the variable)
-        SKFn(d) => true
+        Fn(d) => true
     }
 }
 
@@ -240,7 +240,7 @@ fn lint_stmt(u: *LintUse, s: *Stmt) -> bool {
 fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
     s := &b.stmts[i]
     match s.k {
-        SKLet(names, e) => {
+        Let(names, e) => {
             if names.len != 1 || names[0] == "_" || !lint_is_place(&e) {
                 return
             }
@@ -248,7 +248,7 @@ fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
             match self.lookup(name) {
                 Some(v) => {
                     match self.cx.types.k(v.0) {
-                        TyKStruct(sid) => {}
+                        Struct(sid) => {}
                         _ => return
                     }
                 }

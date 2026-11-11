@@ -33,13 +33,13 @@ struct PrivCx {
 // 1 = function, 2 = any other kind
 fn priv_decl_info(d: *Decl) -> (str, i64, bool, Pos) {
     return match *d {
-        DeclFn(f) => (f.name, 1, f.is_priv, f.pos)
-        DeclStruct(s) => (s.name, 2, s.is_priv, s.pos)
-        DeclEnum(e) => (e.name, 2, e.is_priv, e.pos)
-        DeclConst(c) => (c.name, 2, c.is_priv, c.pos)
-        DeclGlobal(g) => (g.name, 2, g.is_priv, g.pos)
-        DeclTest(t) => ("", 0, false, t.pos)
-        DeclUse(path, pos) => ("", 0, false, pos)
+        Fn(f) => (f.name, 1, f.is_priv, f.pos)
+        Struct(s) => (s.name, 2, s.is_priv, s.pos)
+        Enum(e) => (e.name, 2, e.is_priv, e.pos)
+        Const(c) => (c.name, 2, c.is_priv, c.pos)
+        Glob(g) => (g.name, 2, g.is_priv, g.pos)
+        Test(t) => ("", 0, false, t.pos)
+        Use(path, pos) => ("", 0, false, pos)
     }
 }
 
@@ -90,7 +90,7 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
     // would hide the variant
     for i in 0..decls.len {
         match decls[i] {
-            DeclEnum(e) => {
+            Enum(e) => {
                 for vi in 0..e.variants.len {
                     vn := e.variants[vi].0
                     if r.names.has(vn) {
@@ -134,43 +134,43 @@ fn priv_fn(r: *PrivCx, f: *FnDecl) -> bool {
 
 fn priv_rewrite(r: *PrivCx, d: Decl) -> Decl {
     return match d {
-        DeclFn(f) => {
+        Fn(f) => {
             priv_fn(r, &f)
-            DeclFn(f)
+            Fn(f)
         }
-        DeclStruct(s) => {
+        Struct(s) => {
             s.name = priv_name(r, s.name)
             priv_names(r, &s.tparams)
             for i in 0..s.fields.len {
                 priv_type(r, &s.fields[i].1)
             }
-            DeclStruct(s)
+            Struct(s)
         }
-        DeclEnum(e) => {
+        Enum(e) => {
             e.name = priv_name(r, e.name)
             priv_names(r, &e.tparams)
             for i in 0..e.variants.len {
                 priv_types(r, &e.variants[i].1)
             }
-            DeclEnum(e)
+            Enum(e)
         }
-        DeclConst(c) => {
+        Const(c) => {
             c.name = priv_name(r, c.name)
             c.ty = priv_opt_type(r, c.ty)
             priv_expr(r, &c.val)
-            DeclConst(c)
+            Const(c)
         }
-        DeclGlobal(g) => {
+        Glob(g) => {
             g.name = priv_name(r, g.name)
             g.ty = priv_opt_type(r, g.ty)
             g.init = priv_opt_expr(r, g.init)
-            DeclGlobal(g)
+            Glob(g)
         }
-        DeclTest(t) => {
+        Test(t) => {
             priv_block(r, t.body)
-            DeclTest(t)
+            Test(t)
         }
-        DeclUse(path, pos) => d
+        Use(path, pos) => d
     }
 }
 
@@ -183,28 +183,28 @@ fn priv_types(r: *PrivCx, ts: *Vec[TypeAst]) -> bool {
 
 fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
     return match *t {
-        TypeAstName(n, args, pos) => {
+        Name(n, args, pos) => {
             priv_types(r, &args)
             nn, found := r.names.get(n)
             if found {
-                *t = TypeAstName(nn, args, pos)
+                *t = Name(nn, args, pos)
             }
             true
         }
-        TypeAstPtr(e) => priv_type(r, e)
-        TypeAstSlice(e) => priv_type(r, e)
-        TypeAstArray(n, e) => {
+        Ptr(e) => priv_type(r, e)
+        Slice(e) => priv_type(r, e)
+        Array(n, e) => {
             priv_expr(r, n)
             priv_type(r, e)
         }
-        TypeAstFn(ps, ret) => {
+        Fn(ps, ret) => {
             priv_types(r, &ps)
             match ret {
                 Some(rt) => priv_type(r, rt)
                 None => true
             }
         }
-        TypeAstTuple(ts) => priv_types(r, &ts)
+        Tuple(ts) => priv_types(r, &ts)
     }
 }
 
@@ -253,17 +253,17 @@ fn priv_exprs(r: *PrivCx, es: *Vec[Expr]) -> bool {
 // in this file (lowering still prefers a field `f` that holds a function)
 fn priv_callee(r: *PrivCx, c: *Expr) -> bool {
     match c.k {
-        EKField(recv, name) => {
+        Field(recv, name) => {
             priv_expr(r, recv)
             mn, found := r.methods.get(name)
             if found {
-                c.k = EKField(recv, mn)
+                c.k = Field(recv, mn)
             }
             return true
         }
-        EKIndex(b, targs) => {
+        Index(b, targs) => {
             match b.k {
-                EKField(recv, name) => {
+                Field(recv, name) => {
                     priv_callee(r, b)
                     return priv_exprs(r, &targs)
                 }
@@ -277,39 +277,39 @@ fn priv_callee(r: *PrivCx, c: *Expr) -> bool {
 
 fn priv_expr(r: *PrivCx, e: *Expr) -> bool {
     return match e.k {
-        EKInt(v) => true
-        EKFloat(v) => true
-        EKStr(s) => true
-        EKBool(b) => true
-        EKNil => true
-        EKIdent(n) => {
+        Int(v) => true
+        Float(v) => true
+        Str(s) => true
+        Bool(b) => true
+        Nil => true
+        Ident(n) => {
             nn, found := r.names.get(n)
             if found {
-                e.k = EKIdent(nn)
+                e.k = Ident(nn)
             }
             true
         }
-        EKUn(op, x) => priv_expr(r, x)
-        EKBin(op, a, b) => {
+        Un(op, x) => priv_expr(r, x)
+        Bin(op, a, b) => {
             priv_expr(r, a)
             priv_expr(r, b)
         }
-        EKCall(c, args) => {
+        Call(c, args) => {
             priv_callee(r, c)
             priv_exprs(r, &args)
         }
-        EKIndex(b, idx) => {
+        Index(b, idx) => {
             priv_expr(r, b)
             priv_exprs(r, &idx)
         }
-        EKSlice(b, lo, hi) => {
+        Slice(b, lo, hi) => {
             priv_expr(r, b)
             priv_opt_pexpr(r, lo)
             priv_opt_pexpr(r, hi)
         }
         // a field name is not a top-level name
-        EKField(b, name) => priv_expr(r, b)
-        EKLit(te, items) => {
+        Field(b, name) => priv_expr(r, b)
+        Lit(te, items) => {
             priv_expr(r, te)
             // field labels stay as written
             for i in 0..items.len {
@@ -317,20 +317,20 @@ fn priv_expr(r: *PrivCx, e: *Expr) -> bool {
             }
             true
         }
-        EKTypeE(t) => {
+        TypeE(t) => {
             tt: TypeAst = t
             priv_type(r, &tt)
-            e.k = EKTypeE(tt)
+            e.k = TypeE(tt)
             true
         }
-        EKIf(c, a, b) => {
+        If(c, a, b) => {
             priv_expr(r, c)
             priv_block(r, a)
             priv_block(r, b)
         }
-        EKTuple(es) => priv_exprs(r, &es)
-        EKFn(d) => priv_fn(r, d)
-        EKMatch(sc, arms) => {
+        Tuple(es) => priv_exprs(r, &es)
+        Fn(d) => priv_fn(r, d)
+        Match(sc, arms) => {
             priv_expr(r, sc)
             for i in 0..arms.len {
                 arm := &arms[i]
@@ -352,16 +352,16 @@ fn priv_expr(r: *PrivCx, e: *Expr) -> bool {
 
 fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
     return match *p {
-        PatWild => true
-        PatConst(e) => {
+        Wild => true
+        Const(e) => {
             ee: Expr = e
             priv_expr(r, &ee)
-            *p = PatConst(ee)
+            *p = Const(ee)
             true
         }
         // the variant name stays (variants are not private); the bindings are local variables
         // (a name inside is a constant, a variant or a binding: renamed like any identifier)
-        PatVariant(name, subs, pos, qual) => {
+        Variant(name, subs, pos, qual) => {
             for i in 0..subs.len {
                 priv_pat(r, &subs[i])
             }
@@ -369,15 +369,15 @@ fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
             match qual {
                 Some(q) => {
                     match q.k {
-                        EKCall(c, args) => {
+                        Call(c, args) => {
                             match c.k {
-                                EKField(b, f) => {
+                                Field(b, f) => {
                                     priv_expr(r, b)
                                 }
                                 _ => {}
                             }
                         }
-                        EKField(b, f) => {
+                        Field(b, f) => {
                             priv_expr(r, b)
                         }
                         _ => {}
@@ -387,14 +387,14 @@ fn priv_pat(r: *PrivCx, p: *Pat) -> bool {
             }
             true
         }
-        PatTuple(subs, pos) => {
+        Tuple(subs, pos) => {
             for i in 0..subs.len {
                 priv_pat(r, &subs[i])
             }
             true
         }
-        PatRef(name, pos) => {
-            *p = PatRef(priv_name(r, name), pos)
+        Ref(name, pos) => {
+            *p = Ref(priv_name(r, name), pos)
             true
         }
     }
@@ -410,39 +410,39 @@ fn priv_block(r: *PrivCx, b: Block) -> bool {
 
 fn priv_stmt(r: *PrivCx, s: *Stmt) -> bool {
     return match s.k {
-        SKExpr(e) => {
+        ExprStmt(e) => {
             ee: Expr = e
             priv_expr(r, &ee)
-            s.k = SKExpr(ee)
+            s.k = ExprStmt(ee)
             true
         }
-        SKLet(names, e) => {
+        Let(names, e) => {
             priv_names(r, &names)
             ee: Expr = e
             priv_expr(r, &ee)
-            s.k = SKLet(names, ee)
+            s.k = Let(names, ee)
             true
         }
-        SKMultiAssign(lhs, e) => {
+        MultiAssign(lhs, e) => {
             priv_exprs(r, &lhs)
             ee: Expr = e
             priv_expr(r, &ee)
-            s.k = SKMultiAssign(lhs, ee)
+            s.k = MultiAssign(lhs, ee)
             true
         }
-        SKVar(name, ty, init) => {
-            s.k = SKVar(priv_name(r, name), priv_opt_type(r, ty), priv_opt_expr(r, init))
+        Var(name, ty, init) => {
+            s.k = Var(priv_name(r, name), priv_opt_type(r, ty), priv_opt_expr(r, init))
             true
         }
-        SKAssign(a, op, b) => {
+        Assign(a, op, b) => {
             aa: Expr = a
             bb: Expr = b
             priv_expr(r, &aa)
             priv_expr(r, &bb)
-            s.k = SKAssign(aa, op, bb)
+            s.k = Assign(aa, op, bb)
             true
         }
-        SKIf(c, then, els) => {
+        If(c, then, els) => {
             cc: Expr = c
             priv_expr(r, &cc)
             priv_block(r, then)
@@ -452,17 +452,17 @@ fn priv_stmt(r: *PrivCx, s: *Stmt) -> bool {
                 }
                 None => {}
             }
-            s.k = SKIf(cc, then, els)
+            s.k = If(cc, then, els)
             true
         }
-        SKWhile(c, body) => {
+        While(c, body) => {
             cc: Expr = c
             priv_expr(r, &cc)
-            s.k = SKWhile(cc, body)
+            s.k = While(cc, body)
             priv_block(r, body)
         }
-        SKLoop(body) => priv_block(r, body)
-        SKFor(v1, v2, lo, hi, incl, step, body) => {
+        LoopStmt(body) => priv_block(r, body)
+        For(v1, v2, lo, hi, incl, step, body) => {
             v2n: Opt[str] = v2
             match v2 {
                 Some(n2) => {
@@ -472,27 +472,27 @@ fn priv_stmt(r: *PrivCx, s: *Stmt) -> bool {
             }
             ll: Expr = lo
             priv_expr(r, &ll)
-            s.k = SKFor(priv_name(r, v1), v2n, ll, priv_opt_expr(r, hi), incl, priv_opt_expr(r, step), body)
+            s.k = For(priv_name(r, v1), v2n, ll, priv_opt_expr(r, hi), incl, priv_opt_expr(r, step), body)
             priv_block(r, body)
         }
-        SKReturn(v) => {
-            s.k = SKReturn(priv_opt_expr(r, v))
+        Return(v) => {
+            s.k = Return(priv_opt_expr(r, v))
             true
         }
-        SKBreak => true
-        SKLabeled(label, st) => priv_stmt(r, st)
-        SKBreakTo(label) => true
-        SKContinueTo(label) => true
-        SKContinue => true
-        SKAssert(c, msg) => {
+        Break => true
+        Labeled(label, st) => priv_stmt(r, st)
+        BreakTo(label) => true
+        ContinueTo(label) => true
+        Continue => true
+        Assert(c, msg) => {
             cc: Expr = c
             priv_expr(r, &cc)
-            s.k = SKAssert(cc, priv_opt_expr(r, msg))
+            s.k = Assert(cc, priv_opt_expr(r, msg))
             true
         }
-        SKBlock(b) => priv_block(r, b)
-        SKDefer(b) => priv_block(r, b)
+        BlockStmt(b) => priv_block(r, b)
+        Defer(b) => priv_block(r, b)
         // a nested function is a local name: renamed like the variables of that spelling
-        SKFn(d) => priv_fn(r, d)
+        Fn(d) => priv_fn(r, d)
     }
 }

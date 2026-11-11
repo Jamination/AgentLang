@@ -12,41 +12,41 @@ struct Diag {
 }
 
 enum TypeAst {
-    TypeAstName(str, Vec[TypeAst], Pos),
-    TypeAstPtr(*TypeAst),
-    TypeAstSlice(*TypeAst),
-    TypeAstArray(*Expr, *TypeAst),
-    TypeAstFn(Vec[TypeAst], Opt[*TypeAst]),
-    TypeAstTuple(Vec[TypeAst]),
+    Name(str, Vec[TypeAst], Pos),
+    Ptr(*TypeAst),
+    Slice(*TypeAst),
+    Array(*Expr, *TypeAst),
+    Fn(Vec[TypeAst], Opt[*TypeAst]),
+    Tuple(Vec[TypeAst]),
 }
 
 enum UnOp {
-    UnOpNeg,
-    UnOpNot,
-    UnOpBitNot,
-    UnOpAddr,
-    UnOpDeref,
+    Neg,
+    Not,
+    BitNot,
+    AddrOf,
+    Deref,
 }
 
 enum BinOp {
-    BinOpAdd,
-    BinOpSub,
-    BinOpMul,
-    BinOpDiv,
-    BinOpRem,
-    BinOpAnd,
-    BinOpOr,
-    BinOpXor,
-    BinOpShl,
-    BinOpShr,
-    BinOpEq,
-    BinOpNe,
-    BinOpLt,
-    BinOpLe,
-    BinOpGt,
-    BinOpGe,
-    BinOpLAnd,
-    BinOpLOr,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    LAnd,
+    LOr,
 }
 
 struct Expr {
@@ -55,25 +55,25 @@ struct Expr {
 }
 
 enum EK {
-    EKInt(u64),
-    EKFloat(f64),
-    EKStr(str),
-    EKBool(bool),
-    EKNil,
-    EKIdent(str),
-    EKUn(UnOp, *Expr),
-    EKBin(BinOp, *Expr, *Expr),
-    EKCall(*Expr, Vec[Expr]),
-    EKIndex(*Expr, Vec[Expr]),
-    EKSlice(*Expr, Opt[*Expr], Opt[*Expr]),
-    EKField(*Expr, str),
-    EKLit(*Expr, Vec[(Opt[str], Expr)]),
-    EKTypeE(TypeAst),
-    EKIf(*Expr, Block, Block),
-    EKTuple(Vec[Expr]),
-    EKMatch(*Expr, Vec[MatchArm]),
+    Int(u64),
+    Float(f64),
+    Str(str),
+    Bool(bool),
+    Nil,
+    Ident(str),
+    Un(UnOp, *Expr),
+    Bin(BinOp, *Expr, *Expr),
+    Call(*Expr, Vec[Expr]),
+    Index(*Expr, Vec[Expr]),
+    Slice(*Expr, Opt[*Expr], Opt[*Expr]),
+    Field(*Expr, str),
+    Lit(*Expr, Vec[(Opt[str], Expr)]),
+    TypeE(TypeAst),
+    If(*Expr, Block, Block),
+    Tuple(Vec[Expr]),
+    Match(*Expr, Vec[MatchArm]),
     // anonymous function `fn(a: A, b: B) -> R { body }` (the declaration has an empty name)
-    EKFn(*FnDecl),
+    Fn(*FnDecl),
 }
 
 struct MatchArm {
@@ -85,19 +85,19 @@ struct MatchArm {
 }
 
 enum Pat {
-    PatWild,
+    Wild,
     // an expression: a constant (int, string, named constant, ...). A bare name or
     // `Enum.Variant` is resolved when the match is lowered: a data-less variant of the
     // matched type, a constant, or (inside a variant / tuple pattern) a new binding.
-    PatConst(Expr),
+    Const(Expr),
     // [Enum.]Variant(sub-patterns): variant name, one pattern per payload field, position,
     // and, if the pattern has a qualifier, the whole pattern as the expression it was
     // parsed from: a call of `Enum.Variant` or `Enum[T].Variant`
-    PatVariant(str, Vec[Pat], Pos, Opt[*Expr]),
+    Variant(str, Vec[Pat], Pos, Opt[*Expr]),
     // (p, p, ...)
-    PatTuple(Vec[Pat], Pos),
+    Tuple(Vec[Pat], Pos),
     // &name: binds a pointer to the matched part
-    PatRef(str, Pos),
+    Ref(str, Pos),
 }
 
 struct Block {
@@ -111,29 +111,29 @@ struct Stmt {
 }
 
 enum SK {
-    SKExpr(Expr),
-    SKLet(Vec[str], Expr),
-    SKMultiAssign(Vec[Expr], Expr),
-    SKVar(str, Opt[TypeAst], Opt[Expr]),
-    SKAssign(Expr, Opt[BinOp], Expr),
-    SKIf(Expr, Block, Opt[Block]),
-    SKWhile(Expr, Block),
-    SKLoop(Block),
+    ExprStmt(Expr),
+    Let(Vec[str], Expr),
+    MultiAssign(Vec[Expr], Expr),
+    Var(str, Opt[TypeAst], Opt[Expr]),
+    Assign(Expr, Opt[BinOp], Expr),
+    If(Expr, Block, Opt[Block]),
+    While(Expr, Block),
+    LoopStmt(Block),
     // fields (named in the Rust source): var, var2, lo, hi, incl, step, body
-    SKFor(str, Opt[str], Expr, Opt[Expr], bool, Opt[Expr], Block),
-    SKReturn(Opt[Expr]),
-    SKBreak,
-    SKContinue,
-    SKAssert(Expr, Opt[Expr]),
-    SKBlock(Block),
-    SKDefer(Block),
+    For(str, Opt[str], Expr, Opt[Expr], bool, Opt[Expr], Block),
+    Return(Opt[Expr]),
+    Break,
+    Continue,
+    Assert(Expr, Opt[Expr]),
+    BlockStmt(Block),
+    Defer(Block),
     // `name: for/while/loop ...`: the loop statement with its label
-    SKLabeled(str, *Stmt),
+    Labeled(str, *Stmt),
     // `break name` / `continue name`
-    SKBreakTo(str),
-    SKContinueTo(str),
+    BreakTo(str),
+    ContinueTo(str),
     // `fn name(params) -> R { body }` inside a block: a nested function
-    SKFn(*FnDecl),
+    Fn(*FnDecl),
 }
 
 struct FnDecl {
@@ -194,13 +194,13 @@ struct TestDecl {
 }
 
 enum Decl {
-    DeclFn(FnDecl),
-    DeclStruct(StructDecl),
-    DeclEnum(EnumDecl),
-    DeclConst(ConstDecl),
-    DeclGlobal(GlobalDecl),
-    DeclTest(TestDecl),
-    DeclUse(str, Pos),
+    Fn(FnDecl),
+    Struct(StructDecl),
+    Enum(EnumDecl),
+    Const(ConstDecl),
+    Glob(GlobalDecl),
+    Test(TestDecl),
+    Use(str, Pos),
 }
 
 // the source forms of a list of types, separated by ", "
@@ -215,33 +215,33 @@ fn ast_type_str_list(ts: *Vec[TypeAst]) -> str {
 // source form of a type (for signatures in diagnostics and `alc sigs`)
 fn ast_type_str(t: *TypeAst) -> str {
     match *t {
-        TypeAstName(n, args, _) => {
+        Name(n, args, _) => {
             if args.is_empty() {
                 return n
             } else {
                 return fmt(n, "[", ast_type_str_list(&args), "]")
             }
         }
-        TypeAstPtr(e) => {
+        Ptr(e) => {
             return fmt("*", ast_type_str(e))
         }
-        TypeAstSlice(e) => {
+        Slice(e) => {
             return fmt("[]", ast_type_str(e))
         }
-        TypeAstArray(n, e) => {
+        Array(n, e) => {
             len: str = "_"
             match n.k {
-                EKInt(k) => {
+                Int(k) => {
                     len = fmt(k)
                 }
-                EKIdent(name) => {
+                Ident(name) => {
                     len = name
                 }
                 _ => {}
             }
             return fmt("[", len, "]", ast_type_str(e))
         }
-        TypeAstFn(ps, r) => {
+        Fn(ps, r) => {
             p := ast_type_str_list(&ps)
             match r {
                 Some(r2) => {
@@ -252,7 +252,7 @@ fn ast_type_str(t: *TypeAst) -> str {
                 }
             }
         }
-        TypeAstTuple(ts) => {
+        Tuple(ts) => {
             return fmt("(", ast_type_str_list(&ts), ")")
         }
     }

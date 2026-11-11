@@ -1,10 +1,10 @@
 // Frame layout, final peepholes, x86-64 encoding and branch relaxation.
 
 enum RelocKind {
-    RelocKindAbs32Global(i64),
-    RelocKindAbs32Func(i64),
-    RelocKindRel32Func(i64),
-    RelocKindAbs32FConst(i64), // module float pool index
+    Abs32Global(i64),
+    Abs32Func(i64),
+    Rel32Func(i64),
+    Abs32FConst(i64), // module float pool index
 }
 
 struct Reloc {
@@ -54,22 +54,22 @@ fn rm_mem(self: *EmitEnc, m: *Mem) -> EmitRM {
         r.idx = i8(m.idx)
     }
     match m.kind {
-        MemKindNormal => {}
-        MemKindGlobal => {
-            r.reloc = Some(RelocKindAbs32Global(i64(m.id)))
+        Normal => {}
+        Glob => {
+            r.reloc = Some(Abs32Global(i64(m.id)))
         }
-        MemKindFConst => {
-            r.reloc = Some(RelocKindAbs32FConst(self.fpool[i64(m.id)]))
+        FConst => {
+            r.reloc = Some(Abs32FConst(self.fpool[i64(m.id)]))
         }
-        MemKindSlot => {
+        Slot => {
             r.base = i8(RSP)
             r.disp += self.frame.slot_off.at(i64(m.id))
         }
-        MemKindOutArg => {
+        OutArg => {
             r.base = i8(RSP)
             r.disp += 8 * i32(m.id)
         }
-        MemKindInArg => {
+        InArg => {
             r.base = i8(RSP)
             r.disp += self.frame.size + 8 * self.frame.npush + 8 + 8 * i32(m.id)
         }
@@ -79,10 +79,10 @@ fn rm_mem(self: *EmitEnc, m: *Mem) -> EmitRM {
 
 fn rm(self: *EmitEnc, o: Opnd) -> EmitRM {
     match o {
-        OpndR(r) => {
+        R(r) => {
             return emit_rm_reg(i64(r))
         }
-        OpndM(m) => {
+        M(m) => {
             return self.rm_mem(&m)
         }
         _ => {}
@@ -203,7 +203,7 @@ fn emit_fp_pfx(sz: u8) -> u8 {
 
 fn emit_byte_reg_needs_rex(o: Opnd) -> bool {
     match o {
-        OpndR(r) => {
+        R(r) => {
             return i64(r) >= 4 && i64(r) < 8
         }
         _ => {}
@@ -213,7 +213,7 @@ fn emit_byte_reg_needs_rex(o: Opnd) -> bool {
 
 fn emit_reg_of(o: Opnd) -> i64 {
     match o {
-        OpndR(r) => {
+        R(r) => {
             return i64(r)
         }
         _ => {}
@@ -231,19 +231,19 @@ const EMIT_K_FADDR = 5
 
 fn emit_kind(o: Opnd) -> i64 {
     return match o {
-        OpndNone => EMIT_K_NONE
-        OpndR(r) => EMIT_K_R
-        OpndI(k) => EMIT_K_I
-        OpndM(m) => EMIT_K_M
-        OpndGAddr(g, off) => EMIT_K_GADDR
-        OpndFAddr(f) => EMIT_K_FADDR
+        Opnd.None => EMIT_K_NONE
+        R(r) => EMIT_K_R
+        I(k) => EMIT_K_I
+        M(m) => EMIT_K_M
+        GAddr(g, off) => EMIT_K_GADDR
+        FAddr(f) => EMIT_K_FADDR
     }
 }
 
 // the immediate of an Opnd::I (only called when the shape is known)
 fn emit_imm_of(o: Opnd) -> i64 {
     match o {
-        OpndI(k) => {
+        I(k) => {
             return k
         }
         _ => {}
@@ -254,11 +254,11 @@ fn emit_imm_of(o: Opnd) -> i64 {
 // relocation of a symbol address operand: (kind, addend)
 fn emit_addr_reloc(o: Opnd) -> (RelocKind, i32) {
     match o {
-        OpndGAddr(g, off) => {
-            return (RelocKindAbs32Global(i64(g)), i32(off))
+        GAddr(g, off) => {
+            return (Abs32Global(i64(g)), i32(off))
         }
-        OpndFAddr(f) => {
-            return (RelocKindAbs32Func(i64(f)), 0)
+        FAddr(f) => {
+            return (Abs32Func(i64(f)), 0)
         }
         _ => {}
     }
@@ -272,7 +272,7 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
     ka := emit_kind(i.a)
     kb := emit_kind(i.b)
     match i.op {
-        MOpMov => {
+        Mov => {
             if ka == EMIT_K_R && kb == EMIT_K_R {
                 d := emit_reg_of(i.a)
                 s := emit_reg_of(i.b)
@@ -335,7 +335,7 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 panic(fmt("encoder: bad mov ", *i))
             }
         }
-        MOpMovzx => {
+        Movzx => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             match sz {
@@ -344,7 +344,7 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 _ => e.op(false, 0, false, []u8{0x8B}, u8(d & 15), &rm, false)
             }
         }
-        MOpMovsx => {
+        Movsx => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             w2 := u8(i.sz2) == 8
@@ -360,18 +360,18 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 }
             }
         }
-        MOpLea => {
+        Lea => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0, w, []u8{0x8D}, u8(d & 15), &rm, false)
         }
-        MOpAdd, MOpSub, MOpAnd, MOpOr, MOpXor, MOpCmp => {
+        Add, Sub, And, Or, Xor, Cmp => {
             n: u8 = match i.op {
-                MOpAdd => 0
-                MOpOr => 1
-                MOpAnd => 4
-                MOpSub => 5
-                MOpXor => 6
+                Add => 0
+                Or => 1
+                And => 4
+                Sub => 5
+                Xor => 6
                 _ => 7
             }
             if kb == EMIT_K_I {
@@ -404,7 +404,7 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 panic(fmt("encoder: bad alu ", *i))
             }
         }
-        MOpTest => {
+        Test => {
             if kb == EMIT_K_I {
                 k := emit_imm_of(i.b)
                 rm := e.rm(i.a)
@@ -420,12 +420,12 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 panic(fmt("encoder: bad test ", *i))
             }
         }
-        MOpImul => {
+        Imul => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(p66, 0, w, []u8{0x0F, 0xAF}, u8(d & 15), &rm, false)
         }
-        MOpImul3 => {
+        Imul3 => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             if emit_kind(i.c) != EMIT_K_I {
@@ -440,25 +440,25 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 e.imm(k, 4)
             }
         }
-        MOpNeg, MOpNot, MOpIdiv, MOpDiv, MOpMul1, MOpImul1 => {
+        Neg, Not, Idiv, Div, Mul1, Imul1 => {
             n: u8 = match i.op {
-                MOpNot => 2
-                MOpNeg => 3
-                MOpMul1 => 4
-                MOpImul1 => 5
-                MOpDiv => 6
+                Not => 2
+                Neg => 3
+                Mul1 => 4
+                Imul1 => 5
+                Div => 6
                 _ => 7
             }
             rm := e.rm(i.a)
             force := sz == 1 && emit_byte_reg_needs_rex(i.a)
             e.op(p66, 0, w, []u8{if sz == 1 { 0xF6 } else { 0xF7 }}, n, &rm, force)
         }
-        MOpShl, MOpShr, MOpSar, MOpRol, MOpRor => {
+        Shl, Shr, Sar, Rol, Ror => {
             n: u8 = match i.op {
-                MOpRol => 0
-                MOpRor => 1
-                MOpShl => 4
-                MOpShr => 5
+                Rol => 0
+                Ror => 1
+                Shl => 4
+                Shr => 5
                 _ => 7
             }
             rm := e.rm(i.a)
@@ -477,34 +477,34 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 panic(fmt("encoder: bad shift ", *i))
             }
         }
-        MOpCqo => {
+        Cqo => {
             if w {
                 e.out.push(0x48)
             }
             e.out.push(0x99)
         }
-        MOpSetcc => {
+        Setcc => {
             rm := e.rm(i.a)
             e.op(false, 0, false, []u8{0x0F, 0x90 | u8(i.cc)}, 0, &rm, emit_byte_reg_needs_rex(i.a))
         }
-        MOpCmov => {
+        Cmov => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0, w, []u8{0x0F, 0x40 | u8(i.cc)}, u8(d & 15), &rm, false)
         }
-        MOpCall => {
+        Call => {
             e.out.push(0xE8)
-            e.relocs.push(Reloc{off: e.out.len, kind: RelocKindRel32Func(i64(i.tgt)), addend: 0})
+            e.relocs.push(Reloc{off: e.out.len, kind: Rel32Func(i64(i.tgt)), addend: 0})
             e.imm(0, 4)
         }
-        MOpCallInd => {
+        CallInd => {
             rm := e.rm(i.a)
             e.op(false, 0, false, []u8{0xFF}, 2, &rm, false)
         }
-        MOpRet => e.out.push(0xC3)
-        MOpSyscall => e.out.extend([]u8{0x0F, 0x05})
-        MOpUd2 => e.out.extend([]u8{0x0F, 0x0B})
-        MOpMovSd => {
+        Ret => e.out.push(0xC3)
+        Syscall => e.out.extend([]u8{0x0F, 0x05})
+        Ud2 => e.out.extend([]u8{0x0F, 0x0B})
+        MovSd => {
             // movaps between registers; movsd / movss / movups to and from memory
             pfx := emit_fp_pfx(sz)
             if ka == EMIT_K_R && kb == EMIT_K_R {
@@ -523,27 +523,27 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 panic(fmt("encoder: bad movsd ", *i))
             }
         }
-        MOpAddsd, MOpSubsd, MOpMulsd, MOpDivsd, MOpSqrtsd, MOpMinsd, MOpMaxsd => {
+        Addsd, Subsd, Mulsd, Divsd, Sqrtsd, Minsd, Maxsd => {
             o: u8 = match i.op {
-                MOpAddsd => 0x58
-                MOpMulsd => 0x59
-                MOpSubsd => 0x5C
-                MOpDivsd => 0x5E
-                MOpMinsd => 0x5D
-                MOpMaxsd => 0x5F
+                Addsd => 0x58
+                Mulsd => 0x59
+                Subsd => 0x5C
+                Divsd => 0x5E
+                Minsd => 0x5D
+                Maxsd => 0x5F
                 _ => 0x51
             }
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, emit_fp_pfx(sz), false, []u8{0x0F, o}, u8(d & 15), &rm, false)
         }
-        MOpCvtf => {
+        Cvtf => {
             // cvtss2sd (sz 8) / cvtsd2ss (sz 4)
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, if sz == 8 { 0xF3 } else { 0xF2 }, false, []u8{0x0F, 0x5A}, u8(d & 15), &rm, false)
         }
-        MOpShufps => {
+        Shufps => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0, false, []u8{0x0F, 0xC6}, u8(d & 15), &rm, false)
@@ -552,50 +552,50 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
             }
             e.imm(emit_imm_of(i.c), 1)
         }
-        MOpMovlo => {
+        Movlo => {
             d := emit_reg_of(i.a)
             rm := emit_rm_reg(emit_reg_of(i.b))
             e.op(false, 0xF3, false, []u8{0x0F, 0x10}, u8(d & 15), &rm, false)
         }
-        MOpUnpcklps => {
+        Unpcklps => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0, false, []u8{0x0F, 0x14}, u8(d & 15), &rm, false)
         }
-        MOpUcomisd, MOpXorpd, MOpAndpd => {
+        Ucomisd, Xorpd, Andpd => {
             o: u8 = match i.op {
-                MOpUcomisd => 0x2E
-                MOpXorpd => 0x57
+                Ucomisd => 0x2E
+                Xorpd => 0x57
                 _ => 0x54
             }
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(sz == 8, 0, false, []u8{0x0F, o}, u8(d & 15), &rm, false)
         }
-        MOpCvtsi2sd => {
+        Cvtsi2sd => {
             // sz = integer size, sz2 = float size (4: single)
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, if u8(i.sz2) == 4 { 0xF3 } else { 0xF2 }, w, []u8{0x0F, 0x2A}, u8(d & 15), &rm, false)
         }
-        MOpCvttsd2si => {
+        Cvttsd2si => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, if u8(i.sz2) == 4 { 0xF3 } else { 0xF2 }, w, []u8{0x0F, 0x2C}, u8(d & 15), &rm, false)
         }
-        MOpMovqToX => {
+        MovqToX => {
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(true, 0, w, []u8{0x0F, 0x6E}, u8(d & 15), &rm, false)
         }
-        MOpMovqToR => {
+        MovqToR => {
             s := emit_reg_of(i.b)
             rm := e.rm(i.a)
             e.op(true, 0, w, []u8{0x0F, 0x7E}, u8(s & 15), &rm, false)
         }
-        MOpRepMovsb => e.out.extend([]u8{0xF3, 0xA4})
-        MOpRepStosb => e.out.extend([]u8{0xF3, 0xAA})
-        MOpBswap => {
+        RepMovsb => e.out.extend([]u8{0xF3, 0xA4})
+        RepStosb => e.out.extend([]u8{0xF3, 0xAA})
+        Bswap => {
             d := u8(emit_reg_of(i.a) & 15)
             rex := 0x40 | (u8(w) << 3) | (d >> 3)
             if rex != 0x40 {
@@ -604,25 +604,25 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
             e.out.push(0x0F)
             e.out.push(0xC8 | (d & 7))
         }
-        MOpPopcnt, MOpTzcnt, MOpLzcnt => {
+        Popcnt, Tzcnt, Lzcnt => {
             o: u8 = match i.op {
-                MOpPopcnt => 0xB8
-                MOpTzcnt => 0xBC
+                Popcnt => 0xB8
+                Tzcnt => 0xBC
                 _ => 0xBD
             }
             d := emit_reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0xF3, w, []u8{0x0F, o}, u8(d & 15), &rm, false)
         }
-        MOpPush, MOpPop => {
+        Push, Pop => {
             r := u8(emit_reg_of(i.a) & 15)
             if r >= 8 {
                 e.out.push(0x41)
             }
-            base: u8 = if i.op == MOpPush { 0x50 } else { 0x58 }
+            base: u8 = if i.op == Push { 0x50 } else { 0x58 }
             e.out.push(base | (r & 7))
         }
-        MOpZero => {
+        Zero => {
             r := emit_reg_of(i.a)
             rm := emit_rm_reg(r)
             if r >= 16 {
@@ -631,20 +631,20 @@ fn emit_enc_inst(e: *EmitEnc, i: *MInst) {
                 e.op(false, 0, false, []u8{0x31}, u8(r & 15), &rm, false)
             }
         }
-        MOpJmp, MOpJcc => panic("unreachable")
+        Jmp, Jcc => panic("unreachable")
     }
 }
 
 fn emit_sets_flags(op: MOp) -> bool {
-    return op == MOpAdd || op == MOpSub || op == MOpAnd || op == MOpOr || op == MOpXor || op == MOpCmp || op == MOpTest ||
-        op == MOpImul || op == MOpImul3 || op == MOpNeg || op == MOpShl || op == MOpShr || op == MOpSar || op == MOpRol ||
-        op == MOpRor || op == MOpIdiv || op == MOpDiv || op == MOpMul1 || op == MOpImul1 || op == MOpUcomisd ||
-        op == MOpPopcnt || op == MOpTzcnt || op == MOpLzcnt || op == MOpZero || op == MOpCall || op == MOpCallInd ||
-        op == MOpSyscall || op == MOpBswap
+    return op == Add || op == Sub || op == And || op == Or || op == Xor || op == Cmp || op == Test ||
+        op == Imul || op == Imul3 || op == Neg || op == Shl || op == Shr || op == Sar || op == Rol ||
+        op == Ror || op == Idiv || op == Div || op == Mul1 || op == Imul1 || op == Ucomisd ||
+        op == Popcnt || op == Tzcnt || op == Lzcnt || op == Zero || op == Call || op == CallInd ||
+        op == Syscall || op == Bswap
 }
 
 fn emit_reads_flags(op: MOp) -> bool {
-    return op == MOpJcc || op == MOpSetcc || op == MOpCmov
+    return op == Jcc || op == Setcc || op == Cmov
 }
 
 fn emit_peephole_resolve(b0: i64, fwd: *Vec[i64]) -> i64 {
@@ -660,21 +660,21 @@ fn emit_peephole_resolve(b0: i64, fwd: *Vec[i64]) -> i64 {
 // the `add` replacement of step 3 of the peephole for a `lea`, if there is one
 fn emit_peephole_lea_add(i: *MInst) -> Opt[Opnd] {
     add: Opt[Opnd] = None
-    if i.op == MOpLea {
+    if i.op == Lea {
         match i.a {
-            OpndR(d0) => {
+            R(d0) => {
                 d := i64(d0)
                 match i.b {
-                    OpndM(m) => {
-                        if m.kind == MemKindNormal {
+                    M(m) => {
+                        if m.kind == Normal {
                             base := i64(m.base)
                             idx := i64(m.idx)
                             if base == d && idx == NOREG && i32(m.disp) != 0 {
-                                add = Some(OpndI(i64(m.disp)))
+                                add = Some(I(i64(m.disp)))
                             } else if base == d && idx != NOREG && u8(m.scale) == 1 && i32(m.disp) == 0 && idx != d {
-                                add = Some(OpndR(m.idx))
+                                add = Some(R(m.idx))
                             } else if idx == d && u8(m.scale) == 1 && i32(m.disp) == 0 && base != NOREG && base != d {
-                                add = Some(OpndR(m.base))
+                                add = Some(R(m.base))
                             }
                         }
                     }
@@ -697,14 +697,14 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
     }
     for b in 0..nb {
         blk := &mf.blocks[b]
-        if blk.insts.len == 1 && blk.insts[0].op == MOpJmp && i64(blk.insts[0].tgt) != b {
+        if blk.insts.len == 1 && blk.insts[0].op == Jmp && i64(blk.insts[0].tgt) != b {
             fwd[b] = i64(blk.insts[0].tgt)
         }
     }
     for b in 0..nb {
         for x in 0..mf.blocks[b].insts.len {
             i := &mf.blocks[b].insts[x]
-            if i.op == MOpJmp || i.op == MOpJcc {
+            if i.op == Jmp || i.op == Jcc {
                 i.tgt = emit_peephole_resolve(i64(i.tgt), &fwd)
             }
         }
@@ -718,7 +718,7 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
             b := work.pop()
             for x in 0..mf.blocks[b].insts.len {
                 i := &mf.blocks[b].insts[x]
-                if (i.op == MOpJmp || i.op == MOpJcc) && !reach[i64(i.tgt)] {
+                if (i.op == Jmp || i.op == Jcc) && !reach[i64(i.tgt)] {
                     reach[i64(i.tgt)] = true
                     work.push(i64(i.tgt))
                 }
@@ -740,8 +740,8 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
         next := if li + 1 < layout.len { layout[li + 1] } else { 0xFFFFFFFF }
         insts := &mf.blocks[b].insts
         n := insts.len
-        if n >= 2 && insts[n - 1].op == MOpJmp && insts[n - 2].op == MOpJcc {
-            single_jcc := n < 3 || insts[n - 3].op != MOpJcc
+        if n >= 2 && insts[n - 1].op == Jmp && insts[n - 2].op == Jcc {
+            single_jcc := n < 3 || insts[n - 3].op != Jcc
             if i64(insts[n - 2].tgt) == i64(insts[n - 1].tgt) && single_jcc {
                 insts.remove(n - 2)
             } else if i64(insts[n - 2].tgt) == next && single_jcc {
@@ -752,7 +752,7 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
             }
         }
         n2 := insts.len
-        if n2 >= 1 && insts[n2 - 1].op == MOpJmp && i64(insts[n2 - 1].tgt) == next {
+        if n2 >= 1 && insts[n2 - 1].op == Jmp && i64(insts[n2 - 1].tgt) == next {
             insts.pop()
         }
     }
@@ -763,10 +763,10 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
         for k in 0..n {
             i := &mf.blocks[b].insts[k]
             a_low_reg := match i.a {
-                OpndR(r) => i64(r) < 16
+                R(r) => i64(r) < 16
                 _ => false
             }
-            zero := i.op == MOpMov && a_low_reg && eq(i.b, OpndI(0))
+            zero := i.op == Mov && a_low_reg && eq(i.b, I(0))
             add := emit_peephole_lea_add(i)
             if !zero && !is_some(add) {
                 continue
@@ -788,11 +788,11 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
             a := i.a
             sz := i.sz
             if zero {
-                mf.blocks[b].insts[k] = minst_new(MOpZero, 4, a, OpndNone)
+                mf.blocks[b].insts[k] = minst_new(Zero, 4, a, Opnd.None)
             } else {
                 match add {
                     Some(src) => {
-                        mf.blocks[b].insts[k] = minst_new(MOpAdd, sz, a, src)
+                        mf.blocks[b].insts[k] = minst_new(Add, sz, a, src)
                     }
                     None => {}
                 }
@@ -802,9 +802,9 @@ fn emit_peephole(mf: *MFunc, layout: *Vec[i64]) {
 }
 
 enum EmitItem {
-    EmitItemBytes(Vec[u8], Vec[Reloc]),
-    EmitItemJump(Opt[u8], i64, bool), // cc, tgt, long
-    EmitItemAlign(i64),
+    Bytes(Vec[u8], Vec[Reloc]),
+    Jump(Opt[u8], i64, bool), // cc, tgt, long
+    Align(i64),
 }
 
 fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
@@ -829,10 +829,10 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     // prologue / epilogue
     pro := vec[MInst]()
     for r in alloc.used_callee_saved.items() {
-        pro.push(minst_new(MOpPush, 8, OpndR(r), OpndNone))
+        pro.push(minst_new(Push, 8, R(r), Opnd.None))
     }
     if size > 0 {
-        pro.push(minst_new(MOpSub, 8, OpndR(RSP), OpndI(i64(size))))
+        pro.push(minst_new(Sub, 8, R(RSP), I(i64(size))))
     }
     layout := vec_of(layout0)
     entry := layout[0]
@@ -846,12 +846,12 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         out := vec[MInst]()
         for x in 0..insts.len {
             i := insts[x]
-            if i.op == MOpRet {
+            if i.op == Ret {
                 if size > 0 {
-                    out.push(minst_new(MOpAdd, 8, OpndR(RSP), OpndI(i64(size))))
+                    out.push(minst_new(Add, 8, R(RSP), I(i64(size))))
                 }
                 for y in alloc.used_callee_saved.len - 1..=0 by -1 {
-                    out.push(minst_new(MOpPop, 8, OpndR(alloc.used_callee_saved[y]), OpndNone))
+                    out.push(minst_new(Pop, 8, R(alloc.used_callee_saved[y]), Opnd.None))
                 }
             }
             out.push(i)
@@ -864,29 +864,29 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     block_item := vec_fill(mf.blocks.len, -1)
     for b in layout.items() {
         if mf.blocks[b].align {
-            items.push(EmitItemAlign(16))
+            items.push(Align(16))
         }
         block_item[b] = items.len
         enc := EmitEnc{out: vec[u8](), relocs: vec[Reloc](), frame: &frame, fpool: fpool}
         for x in 0..mf.blocks[b].insts.len {
             i := &mf.blocks[b].insts[x]
-            if i.op == MOpJmp || i.op == MOpJcc {
+            if i.op == Jmp || i.op == Jcc {
                 if !enc.out.is_empty() {
-                    items.push(EmitItemBytes(enc.out, enc.relocs))
+                    items.push(Bytes(enc.out, enc.relocs))
                     enc.out = vec[u8]()
                     enc.relocs = vec[Reloc]()
                 }
                 cc: Opt[u8] = None
-                if i.op == MOpJcc {
+                if i.op == Jcc {
                     cc = Some(u8(i.cc))
                 }
-                items.push(EmitItemJump(cc, i64(i.tgt), false))
+                items.push(Jump(cc, i64(i.tgt), false))
             } else {
                 emit_enc_inst(&enc, i)
             }
         }
         if !enc.out.is_empty() {
-            items.push(EmitItemBytes(enc.out, enc.relocs))
+            items.push(Bytes(enc.out, enc.relocs))
         }
     }
     // relaxation
@@ -896,8 +896,8 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         for k in 0..items.len {
             offs[k] = o
             o += match items[k] {
-                EmitItemBytes(b, r) => b.len
-                EmitItemJump(cc, tgt, long) => {
+                Bytes(b, r) => b.len
+                Jump(cc, tgt, long) => {
                     if !long {
                         2
                     } else if !is_some(cc) {
@@ -906,19 +906,19 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                         6
                     }
                 }
-                EmitItemAlign(a) => emit_align_pad(o, a)
+                Align(a) => emit_align_pad(o, a)
             }
         }
         offs[items.len] = o
         changed := false
         for k in 0..items.len {
             match items[k] {
-                EmitItemJump(cc, tgt, long) => {
+                Jump(cc, tgt, long) => {
                     if !long {
                         t := offs[block_item[tgt]]
                         d := t - (offs[k] + 2)
                         if !(d >= -128 && d <= 127) {
-                            items[k] = EmitItemJump(cc, tgt, true)
+                            items[k] = Jump(cc, tgt, true)
                             changed = true
                         }
                     }
@@ -935,13 +935,13 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     for k in 0..items.len {
         assert bytes.len == offs[k]
         match items[k] {
-            EmitItemBytes(b, r) => {
+            Bytes(b, r) => {
                 for rr in r.items() {
                     relocs.push(Reloc{off: rr.off + bytes.len, kind: rr.kind, addend: rr.addend})
                 }
                 bytes.extend(b.items())
             }
-            EmitItemJump(cc, tgt, long) => {
+            Jump(cc, tgt, long) => {
                 t := offs[block_item[tgt]]
                 if long {
                     match cc {
@@ -967,7 +967,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                     bytes.push(u8(i8(d)))
                 }
             }
-            EmitItemAlign(a) => {
+            Align(a) => {
                 pad := emit_align_pad(bytes.len, a)
                 emit_nops(&bytes, pad)
             }

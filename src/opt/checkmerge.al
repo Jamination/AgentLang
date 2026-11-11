@@ -4,11 +4,11 @@
 // later check would end the program anyway and nothing observable happens in between.
 
 fn checkmerge_is_trap_block(f: *Func, b: i64) -> bool {
-    if !eq(f.blocks[b].term, TermTrap) {
+    if !eq(f.blocks[b].term, Trap) {
         return false
     }
     for v in f.blocks[b].insts.items() {
-        if f.insts[v].op == OpPhi {
+        if f.insts[v].op == Phi {
             return false
         }
     }
@@ -18,13 +18,13 @@ fn checkmerge_is_trap_block(f: *Func, b: i64) -> bool {
 // (len value, constant index) of a check condition `len >u k` / `k <u len`
 fn checkmerge_const_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
     i := &f.insts[c]
-    if i.op == OpUgt {
+    if i.op == Ugt {
         match f.is_const(i.args[1]) {
             Some(k) => return Some((i.args[0], k))
             None => return None
         }
     }
-    if i.op == OpUlt {
+    if i.op == Ult {
         match f.is_const(i.args[0]) {
             Some(k) => return Some((i.args[1], k))
             None => return None
@@ -42,7 +42,7 @@ fn checkmerge_run(f: *Func) -> bool {
         ok := 0
         trap := 0
         match f.blocks[b].term {
-            TermBr(c0, t0, e0) => {
+            Br(c0, t0, e0) => {
                 c = c0
                 ok = t0
                 trap = e0
@@ -61,7 +61,7 @@ fn checkmerge_run(f: *Func) -> bool {
             }
             None => continue
         }
-        if f.insts[ln].ty != TI64 || k0 < 0 {
+        if f.insts[ln].ty != I64 || k0 < 0 {
             continue
         }
         kmax := k0
@@ -75,7 +75,7 @@ fn checkmerge_run(f: *Func) -> bool {
             blocked := false
             for v in f.blocks[cur].insts.items() {
                 o := f.insts[v].op
-                if o == OpCall || o == OpCallInd || o == OpSyscall || o == OpPhi {
+                if o == Call || o == CallInd || o == Syscall || o == Phi {
                     blocked = true
                     break
                 }
@@ -84,8 +84,8 @@ fn checkmerge_run(f: *Func) -> bool {
                 break
             }
             match f.blocks[cur].term {
-                TermJmp(t) => cur = t
-                TermBr(c2, t2, e2) => {
+                Jmp(t) => cur = t
+                Br(c2, t2, e2) => {
                     if !checkmerge_is_trap_block(f, e2) {
                         break
                     }
@@ -93,7 +93,7 @@ fn checkmerge_run(f: *Func) -> bool {
                         Some(x) => {
                             if x.0 == ln && x.1 >= 0 {
                                 kmax = max(kmax, x.1)
-                                f.blocks[cur].term = TermJmp(t2)
+                                f.blocks[cur].term = Jmp(t2)
                                 changed = true
                             }
                         }
@@ -105,9 +105,9 @@ fn checkmerge_run(f: *Func) -> bool {
             }
         }
         if kmax > k0 {
-            kc := f.push(b, OpConst, TI64, vec[i64](), kmax)
-            nc := f.push(b, OpUgt, TI8, vec_of([]i64{ln, kc}), 0)
-            f.blocks[b].term = TermBr(nc, ok, trap)
+            kc := f.push(b, Const, I64, vec[i64](), kmax)
+            nc := f.push(b, Ugt, I8, vec_of([]i64{ln, kc}), 0)
+            f.blocks[b].term = Br(nc, ok, trap)
         }
     }
     if changed {

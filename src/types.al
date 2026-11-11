@@ -1,23 +1,23 @@
 // Type table: interned semantic types, layout, scalar leaves.
 
 enum TyK {
-    TyKErr,
-    TyKUnit,
-    TyKBool,
-    TyKInt(i64, bool), // bits, signed
-    TyKF64,
-    TyKF32,
-    TyKVec(i64), // vec2 / vec3 / vec4: f32 lanes
-    TyKQuat,
-    TyKMat4, // four vec4 columns
-    TyKPtr(i64),
-    TyKSlice(i64),
-    TyKArray(i64, i64),
-    TyKStruct(i64),
-    TyKEnum(i64),
-    TyKTuple(Vec[i64]),
-    TyKFn(Vec[i64], i64),
-    TyKNever,
+    Err,
+    Unit,
+    Bool,
+    Int(i64, bool), // bits, signed
+    F64,
+    F32,
+    Vec(i64), // vec2 / vec3 / vec4: f32 lanes
+    Quat,
+    Mat4, // four vec4 columns
+    Ptr(i64),
+    Slice(i64),
+    Array(i64, i64),
+    Struct(i64),
+    Enum(i64),
+    Tuple(Vec[i64]),
+    Fn(Vec[i64], i64),
+    Never,
 }
 
 const T_ERR = 0
@@ -107,35 +107,35 @@ fn types_may_alias_class(a: i64, b: i64) -> bool {
 // canonical text of a kind: equal kinds have equal keys and different kinds different keys
 fn types_key(k: TyK) -> str {
     match k {
-        TyKErr => return "E"
-        TyKUnit => return "U"
-        TyKBool => return "B"
-        TyKInt(b, s) => return fmt(if s { "i" } else { "u" }, b)
-        TyKF64 => return "D"
-        TyKF32 => return "G"
-        TyKVec(n) => return fmt("V", n)
-        TyKQuat => return "Q"
-        TyKMat4 => return "M"
-        TyKPtr(t) => return fmt("P", t)
-        TyKSlice(t) => return fmt("S", t)
-        TyKArray(t, n) => return fmt("A", t, ",", n)
-        TyKStruct(s) => return fmt("R", s)
-        TyKEnum(e) => return fmt("N", e)
-        TyKTuple(v) => {
+        Err => return "E"
+        Unit => return "U"
+        Bool => return "B"
+        Int(b, s) => return fmt(if s { "i" } else { "u" }, b)
+        F64 => return "D"
+        F32 => return "G"
+        Vec(n) => return fmt("V", n)
+        Quat => return "Q"
+        Mat4 => return "M"
+        Ptr(t) => return fmt("P", t)
+        Slice(t) => return fmt("S", t)
+        Array(t, n) => return fmt("A", t, ",", n)
+        Struct(s) => return fmt("R", s)
+        Enum(e) => return fmt("N", e)
+        Tuple(v) => {
             parts := vec[str]()
             for t in v.items() {
                 parts.push(fmt(t))
             }
             return concat("T", join(parts.items(), ","))
         }
-        TyKFn(p, r) => {
+        Fn(p, r) => {
             parts := vec[str]()
             for t in p.items() {
                 parts.push(fmt(t))
             }
             return fmt("F", join(parts.items(), ","), ">", r)
         }
-        TyKNever => return "!"
+        Never => return "!"
     }
 }
 
@@ -149,29 +149,29 @@ fn types_new() -> Types {
         next_field_id: 1,
         layout_errors: vec[str](),
     }
-    t.intern(TyKErr)
-    t.intern(TyKUnit)
-    t.intern(TyKBool)
-    t.intern(TyKInt(8, true))
-    t.intern(TyKInt(16, true))
-    t.intern(TyKInt(32, true))
-    t.intern(TyKInt(64, true))
-    t.intern(TyKInt(8, false))
-    t.intern(TyKInt(16, false))
-    t.intern(TyKInt(32, false))
-    t.intern(TyKInt(64, false))
-    t.intern(TyKF64)
-    t.intern(TyKF32)
-    s := t.intern(TyKSlice(T_U8))
+    t.intern(Err)
+    t.intern(Unit)
+    t.intern(Bool)
+    t.intern(Int(8, true))
+    t.intern(Int(16, true))
+    t.intern(Int(32, true))
+    t.intern(Int(64, true))
+    t.intern(Int(8, false))
+    t.intern(Int(16, false))
+    t.intern(Int(32, false))
+    t.intern(Int(64, false))
+    t.intern(F64)
+    t.intern(F32)
+    s := t.intern(Slice(T_U8))
     assert s == T_STR
-    n := t.intern(TyKNever)
+    n := t.intern(Never)
     assert n == T_NEVER
-    t.intern(TyKVec(2))
-    t.intern(TyKVec(3))
-    t.intern(TyKVec(4))
-    t.intern(TyKQuat)
-    t.intern(TyKMat4)
-    assert t.intern(TyKMat4) == T_MAT4
+    t.intern(Vec(2))
+    t.intern(Vec(3))
+    t.intern(Vec(4))
+    t.intern(Quat)
+    t.intern(Mat4)
+    assert t.intern(Mat4) == T_MAT4
     return t
 }
 
@@ -190,8 +190,8 @@ fn intern(self: *Types, k: TyK) -> i64 {
 // the kind with its own type lists (the table must not share a buffer with the caller)
 fn types_kind_copy(k: TyK) -> TyK {
     match k {
-        TyKTuple(v) => return TyKTuple(clone(&v))
-        TyKFn(p, r) => return TyKFn(clone(&p), r)
+        Tuple(v) => return Tuple(clone(&v))
+        Fn(p, r) => return Fn(clone(&p), r)
         _ => return k
     }
 }
@@ -207,43 +207,43 @@ fn is_float(self: *Types, t: i64) -> bool {
 // vec2 / vec3 / vec4 / quat: the number of f32 lanes
 fn vec_lanes(self: *Types, t: i64) -> Opt[i64] {
     match self.k(t) {
-        TyKVec(n) => return Some(n)
-        TyKQuat => return Some(4)
+        Vec(n) => return Some(n)
+        Quat => return Some(4)
         _ => return None
     }
 }
 
 // `Types::ptr` in the Rust source (a function named `ptr` would hide the builtin)
 fn ptr_to(self: *Types, t: i64) -> i64 {
-    return self.intern(TyKPtr(t))
+    return self.intern(Ptr(t))
 }
 
 fn slice(self: *Types, t: i64) -> i64 {
-    return self.intern(TyKSlice(t))
+    return self.intern(Slice(t))
 }
 
 fn is_int(self: *Types, t: i64) -> bool {
     match self.k(t) {
-        TyKInt(b, s) => return true
+        Int(b, s) => return true
         _ => return false
     }
 }
 
 fn is_signed(self: *Types, t: i64) -> bool {
     match self.k(t) {
-        TyKInt(b, s) => return s
+        Int(b, s) => return s
         _ => return false
     }
 }
 
 fn is_scalar(self: *Types, t: i64) -> bool {
     match self.k(t) {
-        TyKBool, TyKF64, TyKF32, TyKQuat => return true
-        TyKInt(b, s) => return true
-        TyKVec(n) => return true
-        TyKPtr(e) => return true
-        TyKFn(p, r) => return true
-        TyKEnum(e) => return self.enums[e].simple
+        Bool, F64, F32, Quat => return true
+        Int(b, s) => return true
+        Vec(n) => return true
+        Ptr(e) => return true
+        Fn(p, r) => return true
+        Enum(e) => return self.enums[e].simple
         _ => return false
     }
 }
@@ -258,29 +258,29 @@ fn types_names(self: *Types, v: Vec[i64]) -> str {
 
 fn name(self: *Types, t: i64) -> str {
     match self.k(t) {
-        TyKErr => return "<error>"
-        TyKUnit => return "()"
-        TyKNever => return "never"
-        TyKBool => return "bool"
-        TyKInt(b, s) => return fmt(if s { "i" } else { "u" }, b)
-        TyKF64 => return "f64"
-        TyKF32 => return "f32"
-        TyKVec(n) => return fmt("vec", n)
-        TyKQuat => return "quat"
-        TyKMat4 => return "mat4"
-        TyKPtr(e) => return concat("*", self.name(e))
-        TyKSlice(e) => {
+        Err => return "<error>"
+        Unit => return "()"
+        Never => return "never"
+        Bool => return "bool"
+        Int(b, s) => return fmt(if s { "i" } else { "u" }, b)
+        F64 => return "f64"
+        F32 => return "f32"
+        Vec(n) => return fmt("vec", n)
+        Quat => return "quat"
+        Mat4 => return "mat4"
+        Ptr(e) => return concat("*", self.name(e))
+        Slice(e) => {
             if e == T_U8 {
                 return "str"
             } else {
                 return concat("[]", self.name(e))
             }
         }
-        TyKArray(e, n) => return fmt("[", n, "]", self.name(e))
-        TyKStruct(s) => return self.structs[s].name
-        TyKEnum(s) => return self.enums[s].name
-        TyKTuple(v) => return fmt("(", types_names(self, v), ")")
-        TyKFn(p, r) => {
+        Array(e, n) => return fmt("[", n, "]", self.name(e))
+        Struct(s) => return self.structs[s].name
+        Enum(s) => return self.enums[s].name
+        Tuple(v) => return fmt("(", types_names(self, v), ")")
+        Fn(p, r) => {
             ps := types_names(self, p)
             if r == T_UNIT {
                 return fmt("fn(", ps, ")")
@@ -388,18 +388,18 @@ fn tuple_offsets(self: *Types, tys: []i64) -> Vec[i64] {
 
 fn size_of(self: *Types, t: i64) -> i64 {
     match self.k(t) {
-        TyKErr, TyKUnit, TyKNever => return 0
-        TyKBool => return 1
-        TyKInt(b, s) => return b / 8
-        TyKF64 => return 8
-        TyKPtr(e) => return 8
-        TyKFn(p, r) => return 8
-        TyKF32 => return 4
-        TyKVec(n) => return 4 * n
-        TyKQuat => return 16
-        TyKMat4 => return 64
-        TyKSlice(e) => return 16
-        TyKArray(e, n) => {
+        Err, Unit, Never => return 0
+        Bool => return 1
+        Int(b, s) => return b / 8
+        F64 => return 8
+        Ptr(e) => return 8
+        Fn(p, r) => return 8
+        F32 => return 4
+        Vec(n) => return 4 * n
+        Quat => return 16
+        Mat4 => return 64
+        Slice(e) => return 16
+        Array(e, n) => {
             // (size as u64 * n).min(u32::MAX): unsigned, wrapping like the Rust
             total := u64(self.size_of(e)) * u64(n)
             if total > u64(0xFFFFFFFF) {
@@ -407,36 +407,36 @@ fn size_of(self: *Types, t: i64) -> i64 {
             }
             return i64(total)
         }
-        TyKStruct(s) => {
+        Struct(s) => {
             self.layout_struct(s)
             return self.structs[s].size
         }
-        TyKEnum(e) => {
+        Enum(e) => {
             self.layout_enum(e)
             return self.enums[e].size
         }
-        TyKTuple(v) => return self.layout_fields(v.items()).1
+        Tuple(v) => return self.layout_fields(v.items()).1
     }
 }
 
 fn align_of(self: *Types, t: i64) -> i64 {
     match self.k(t) {
-        TyKErr, TyKUnit, TyKNever => return 1
-        TyKBool => return 1
-        TyKInt(b, s) => return b / 8
-        TyKF64 => return 8
-        TyKPtr(e) => return 8
-        TyKFn(p, r) => return 8
-        TyKSlice(e) => return 8
-        TyKEnum(e) => return 8
-        TyKF32, TyKQuat, TyKMat4 => return 4
-        TyKVec(n) => return 4
-        TyKArray(e, n) => return self.align_of(e)
-        TyKStruct(s) => {
+        Err, Unit, Never => return 1
+        Bool => return 1
+        Int(b, s) => return b / 8
+        F64 => return 8
+        Ptr(e) => return 8
+        Fn(p, r) => return 8
+        Slice(e) => return 8
+        Enum(e) => return 8
+        F32, Quat, Mat4 => return 4
+        Vec(n) => return 4
+        Array(e, n) => return self.align_of(e)
+        Struct(s) => {
             self.layout_struct(s)
             return self.structs[s].align
         }
-        TyKTuple(v) => return self.layout_fields(v.items()).2
+        Tuple(v) => return self.layout_fields(v.items()).2
     }
 }
 
@@ -454,35 +454,35 @@ fn field_id(self: *Types, owner: i64, idx: i64) -> i64 {
 // IR type + alias kind of a scalar type
 fn scalar_ir(self: *Types, t: i64) -> (T, i64) {
     match self.k(t) {
-        TyKBool => return (TI8, AK_ANY)
-        TyKInt(b, s) => {
+        Bool => return (I8, AK_ANY)
+        Int(b, s) => {
             if b == 8 {
-                return (TI8, AK_ANY)
+                return (I8, AK_ANY)
             }
             if b == 16 {
-                return (TI16, AK_I16)
+                return (I16, AK_I16)
             }
             if b == 32 {
-                return (TI32, AK_I32)
+                return (I32, AK_I32)
             }
-            return (TI64, AK_I64)
+            return (I64, AK_I64)
         }
-        TyKF64 => return (TF64, AK_F64)
-        TyKF32 => return (TF32, AK_F32)
-        TyKVec(n) => {
+        F64 => return (T.F64, AK_F64)
+        F32 => return (T.F32, AK_F32)
+        Vec(n) => {
             if n == 2 {
-                return (TV2, AK_VEC)
+                return (V2, AK_VEC)
             }
             if n == 3 {
-                return (TV3, AK_VEC)
+                return (V3, AK_VEC)
             }
-            return (TV4, AK_VEC)
+            return (V4, AK_VEC)
         }
-        TyKQuat => return (TV4, AK_VEC)
-        TyKPtr(e) => return (TI64, AK_PTR)
-        TyKFn(p, r) => return (TI64, AK_PTR)
-        TyKEnum(e) => return (TI64, AK_I64)
-        _ => return (TI64, AK_ANY)
+        Quat => return (V4, AK_VEC)
+        Ptr(e) => return (I64, AK_PTR)
+        Fn(p, r) => return (I64, AK_PTR)
+        Enum(e) => return (I64, AK_I64)
+        _ => return (I64, AK_ANY)
     }
 }
 
@@ -516,24 +516,24 @@ fn types_leaves_fields(self: *Types, t: i64, tys: []i64, offs: []i64, base: i64,
 
 fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
     match self.k(t) {
-        TyKErr, TyKUnit, TyKNever => {}
-        TyKMat4 => {
+        Err, Unit, Never => {}
+        Mat4 => {
             for c in 0..4 {
-                out.push(Leaf{off: base + 16 * c, t: TV4, alias: AK_VEC})
+                out.push(Leaf{off: base + 16 * c, t: V4, alias: AK_VEC})
             }
         }
-        TyKBool, TyKF64, TyKF32, TyKQuat => types_leaves_scalar(self, t, base, out)
-        TyKInt(b, s) => types_leaves_scalar(self, t, base, out)
-        TyKVec(n) => types_leaves_scalar(self, t, base, out)
-        TyKPtr(e) => types_leaves_scalar(self, t, base, out)
-        TyKFn(p, r) => types_leaves_scalar(self, t, base, out)
-        TyKSlice(e) => {
+        Bool, F64, F32, Quat => types_leaves_scalar(self, t, base, out)
+        Int(b, s) => types_leaves_scalar(self, t, base, out)
+        Vec(n) => types_leaves_scalar(self, t, base, out)
+        Ptr(e) => types_leaves_scalar(self, t, base, out)
+        Fn(p, r) => types_leaves_scalar(self, t, base, out)
+        Slice(e) => {
             f0 := self.field_id(t, 0)
             f1 := self.field_id(t, 1)
-            out.push(Leaf{off: base, t: TI64, alias: AK_PTR | (f0 << 4)})
-            out.push(Leaf{off: base + 8, t: TI64, alias: AK_I64 | (f1 << 4)})
+            out.push(Leaf{off: base, t: I64, alias: AK_PTR | (f0 << 4)})
+            out.push(Leaf{off: base + 8, t: I64, alias: AK_I64 | (f1 << 4)})
         }
-        TyKArray(e, n) => {
+        Array(e, n) => {
             es := self.size_of(e)
             for i in 0..n {
                 self.leaves(e, base + i * es, out)
@@ -542,7 +542,7 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
                 }
             }
         }
-        TyKStruct(s) => {
+        Struct(s) => {
             self.layout_struct(s)
             tys := vec[i64]()
             for i in 0..self.structs[s].fields.len {
@@ -551,18 +551,18 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
             offs := clone(&self.structs[s].offsets)
             types_leaves_fields(self, t, tys.items(), offs.items(), base, out)
         }
-        TyKTuple(v) => {
+        Tuple(v) => {
             offs := self.tuple_offsets(v.items())
             types_leaves_fields(self, t, v.items(), offs.items(), base, out)
         }
-        TyKEnum(e) => {
+        Enum(e) => {
             if self.enums[e].simple {
-                out.push(Leaf{off: base, t: TI64, alias: AK_I64})
+                out.push(Leaf{off: base, t: I64, alias: AK_I64})
             } else {
                 sz := self.size_of(t)
                 o := 0
                 while o < sz {
-                    out.push(Leaf{off: base + o, t: TI64, alias: AK_ANY})
+                    out.push(Leaf{off: base + o, t: I64, alias: AK_ANY})
                     o += 8
                 }
             }
@@ -594,8 +594,8 @@ fn types_sat_add(a: i64, b: i64) -> i64 {
 // number of leaves without materializing huge arrays
 fn leaf_count(self: *Types, t: i64) -> i64 {
     match self.k(t) {
-        TyKArray(e, n) => return types_sat_mul(self.leaf_count(e), n)
-        TyKStruct(s) => {
+        Array(e, n) => return types_sat_mul(self.leaf_count(e), n)
+        Struct(s) => {
             tys := vec[i64]()
             for i in 0..self.structs[s].fields.len {
                 tys.push(self.structs[s].fields[i].1)
@@ -606,17 +606,17 @@ fn leaf_count(self: *Types, t: i64) -> i64 {
             }
             return total
         }
-        TyKTuple(v) => {
+        Tuple(v) => {
             total := 0
             for ft in v.items() {
                 total = types_sat_add(total, self.leaf_count(ft))
             }
             return total
         }
-        TyKSlice(e) => return 2
-        TyKMat4 => return 4
-        TyKEnum(e) => return self.size_of(t) / 8
-        TyKErr, TyKUnit, TyKNever => return 0
+        Slice(e) => return 2
+        Mat4 => return 4
+        Enum(e) => return self.size_of(t) / 8
+        Err, Unit, Never => return 0
         _ => return 1
     }
 }

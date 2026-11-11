@@ -5,12 +5,12 @@
 struct GvnKey { op: Op, ty: T, args: []i64, k: i64 }
 
 enum GvnStep {
-    GvnStepEnter(i64),
-    GvnStepExit(Vec[GvnKey], Vec[(i64, Opt[bool])]),
+    Enter(i64),
+    Exit(Vec[GvnKey], Vec[(i64, Opt[bool])]),
 }
 
 fn gvn_numberable(op: Op) -> bool {
-    return op.is_pure() || op == OpSDiv || op == OpUDiv || op == OpSRem || op == OpURem || op == OpProj
+    return op.is_pure() || op == SDiv || op == UDiv || op == SRem || op == URem || op == Proj
 }
 
 fn gvn_run_find(repl: []i64, v0: i64) -> i64 {
@@ -28,11 +28,11 @@ fn gvn_run(f: *Func) -> bool {
     known := map[i64, bool]()
     changed := false
     bool_consts := [2]i64{NOV, NOV}
-    stack := vec_of([]GvnStep{GvnStepEnter(0)})
+    stack := vec_of([]GvnStep{Enter(0)})
     while stack.len > 0 {
         step := stack.pop()
         match step {
-            GvnStepExit(keys, facts) => {
+            Exit(keys, facts) => {
                 for k in keys.items() {
                     table.del(k)
                 }
@@ -50,14 +50,14 @@ fn gvn_run(f: *Func) -> bool {
                     fi -= 1
                 }
             }
-            GvnStepEnter(b) => {
+            Enter(b) => {
                 added := vec[GvnKey]()
                 facts := vec[(i64, Opt[bool])]()
                 // a block reached only through one arm of a conditional branch knows the condition
                 if cfg.preds[b].len == 1 {
                     p := cfg.preds[b][0]
                     match f.blocks[p].term {
-                        TermBr(c0, t, e) => {
+                        Br(c0, t, e) => {
                             if t != e {
                                 c := gvn_run_find(repl.items(), c0)
                                 val := t == b
@@ -84,11 +84,11 @@ fn gvn_run(f: *Func) -> bool {
                         // a condition decided by a dominating branch is a constant here
                         val, is_known := known.get(r)
                         if is_known {
-                            if f.insts[r].op != OpConst {
+                            if f.insts[r].op != Const {
                                 // the constants live at the top of the entry block
                                 slot := i64(val)
                                 if bool_consts[slot] == NOV {
-                                    bool_consts[slot] = f.mk(OpConst, TI8, vec[i64](), i64(val))
+                                    bool_consts[slot] = f.mk(Const, I8, vec[i64](), i64(val))
                                     repl.push(NOV)
                                 }
                                 r = bool_consts[slot]
@@ -123,24 +123,24 @@ fn gvn_run(f: *Func) -> bool {
                 }
                 f.blocks[b].insts = nw
                 match f.blocks[b].term {
-                    TermBr(c0, t, e) => {
+                    Br(c0, t, e) => {
                         c := gvn_run_find(repl.items(), c0)
                         val, is_known := known.get(c)
                         if is_known {
                             if val {
-                                f.blocks[b].term = TermJmp(t)
+                                f.blocks[b].term = Jmp(t)
                             } else {
-                                f.blocks[b].term = TermJmp(e)
+                                f.blocks[b].term = Jmp(e)
                             }
                             changed = true
                         }
                     }
                     _ => {}
                 }
-                stack.push(GvnStepExit(added, facts))
+                stack.push(Exit(added, facts))
                 ci := cfg.children[b].len - 1
                 while ci >= 0 {
-                    stack.push(GvnStepEnter(cfg.children[b][ci]))
+                    stack.push(Enter(cfg.children[b][ci]))
                     ci -= 1
                 }
             }

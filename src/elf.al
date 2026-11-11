@@ -40,7 +40,7 @@ fn elf_used_externs(m: *Module, out: *Output) -> Vec[i64] {
         c := &out.funcs[ci]
         for r in c.code.relocs.items() {
             match r.kind {
-                RelocKindAbs32Global(g) => {
+                Abs32Global(g) => {
                     i, found := by_got.get(g)
                     if found {
                         used[i] = true
@@ -63,8 +63,8 @@ fn elf_link_patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr
     for rl in g.relocs.items() {
         off := rl.0
         val := match rl.1 {
-            RelocTargetGlobal(tg, add) => gaddr.at(tg) + add
-            RelocTargetFunc(f) => func_addr.at(f)
+            Glob(tg, add) => gaddr.at(tg) + add
+            Function(f) => func_addr.at(f)
         }
         at := (ga - base_addr) + off
         assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
@@ -296,10 +296,10 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         for r in c.code.relocs.items() {
             at := fo + r.off
             val := match r.kind {
-                RelocKindAbs32Global(g) => gaddr.at(g) + i64(r.addend)
-                RelocKindAbs32Func(f) => func_addr.at(f) + i64(r.addend)
-                RelocKindAbs32FConst(i) => fpool_addr + 16 * i + i64(r.addend)
-                RelocKindRel32Func(f) => func_addr.at(f) - (fa + r.off + 4)
+                Abs32Global(g) => gaddr.at(g) + i64(r.addend)
+                Abs32Func(f) => func_addr.at(f) + i64(r.addend)
+                Abs32FConst(i) => fpool_addr + 16 * i + i64(r.addend)
+                Rel32Func(f) => func_addr.at(f) - (fa + r.off + 4)
             }
             assert val >= -2147483648 && val <= 2147483647, "relocation out of range"
             assert at >= 0 && at + 4 <= text.len

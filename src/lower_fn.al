@@ -162,7 +162,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             f := &cx.module.funcs[fi]
             for ii in 0..f.insts.len {
                 i := &f.insts[ii]
-                if (i.op == OpLoad || i.op == OpStore) && i.aux >> 4 != 0 && cx.exposed.has(i.aux >> 4) {
+                if (i.op == Load || i.op == Store) && i.aux >> 4 != 0 && cx.exposed.has(i.aux >> 4) {
                     i.aux &= 15
                 }
             }
@@ -208,8 +208,8 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     fx.cur = fx.f.new_block()
     pi := 0
     match fx.cx.abi_ret(rty) {
-        RetAbiSRet => {
-            p := fx.ins(OpParam, TI64, vec[i64](), pi)
+        SRet => {
+            p := fx.ins(Param, I64, vec[i64](), pi)
             pi += 1
             fx.sret = Some(p)
         }
@@ -219,25 +219,25 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         pname := params[i].0
         pt := ptys[i]
         match fx.cx.abi_param(pt) {
-            ParamAbiScalar(t) => {
-                p := fx.ins(OpParam, t, vec[i64](), pi)
+            Scalar(t) => {
+                p := fx.ins(Param, t, vec[i64](), pi)
                 pi += 1
                 addr := fx.declare(pname, pt, pos)
                 ak := fx.cx.types.scalar_ir(pt).1
                 fx.store_raw(addr, p, t, ak)
             }
-            ParamAbiFlat(leaves) => {
+            Flat(leaves) => {
                 addr := fx.declare(pname, pt, pos)
                 for li in 0..leaves.len {
                     l := leaves[li]
-                    p := fx.ins(OpParam, l.t, vec[i64](), pi)
+                    p := fx.ins(Param, l.t, vec[i64](), pi)
                     pi += 1
                     a := fx.add_off(addr, l.off)
                     fx.store_raw(a, p, l.t, l.alias)
                 }
             }
-            ParamAbiByRef => {
-                p := fx.ins(OpParam, TI64, vec[i64](), pi)
+            ByRef => {
+                p := fx.ins(Param, I64, vec[i64](), pi)
                 pi += 1
                 had := fx.scopes[0].vars.has(pname)
                 fx.scopes[0].vars.set(pname, (pt, p))
@@ -255,12 +255,12 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     v := fx.block_value(body, want, expect)
     if !fx.dead {
         if rty == T_NEVER {
-            fx.terminate(TermTrap)
+            fx.terminate(Trap)
         } else if rty == T_UNIT {
-            fx.terminate(TermRet(vec[i64]()))
+            fx.terminate(Ret(vec[i64]()))
         } else if v.ty == T_UNIT {
             fx.cx.err(body.end, fmt("function `", name, "` must return a value of type ", fx.cx.types.name(rty)))
-            fx.terminate(TermTrap)
+            fx.terminate(Trap)
         } else {
             v2 := fx.coerce(v, rty, body.end)
             fx.do_return(Some(v2))
@@ -272,8 +272,8 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     fx.f.blocks[0].insts = entry
     for bi in 0..fx.f.blocks.len {
         match fx.f.blocks[bi].term {
-            TermNone => {
-                fx.f.blocks[bi].term = TermTrap
+            Term.None => {
+                fx.f.blocks[bi].term = Trap
             }
             _ => {}
         }
@@ -290,7 +290,7 @@ fn ins(self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
 }
 
 fn iconst(self: *Fx, ty: T, k: i64) -> i64 {
-    return self.ins(OpConst, ty, vec[i64](), ir_canon(ty, k))
+    return self.ins(Const, ty, vec[i64](), ir_canon(ty, k))
 }
 
 fn new_block(self: *Fx) -> i64 {
@@ -310,13 +310,13 @@ fn terminate(self: *Fx, t: Term) {
 
 fn jmp(self: *Fx, b: i64) {
     d := self.dead
-    self.f.blocks[self.cur].term = TermJmp(b)
+    self.f.blocks[self.cur].term = Jmp(b)
     self.cur = self.f.new_block()
     self.dead = d
 }
 
 fn br(self: *Fx, c: i64, t: i64, e: i64) {
-    self.f.blocks[self.cur].term = TermBr(c, t, e)
+    self.f.blocks[self.cur].term = Br(c, t, e)
     self.cur = self.f.new_block()
 }
 
@@ -329,7 +329,7 @@ fn tyname(self: *Fx, t: i64) -> str {
 }
 
 fn alloca(self: *Fx, size: i64, align: i64) -> i64 {
-    v := self.f.mk(OpAlloca, TI64, vec[i64](), max(size, 1))
+    v := self.f.mk(Alloca, I64, vec[i64](), max(size, 1))
     i := self.f.im(v)
     i.aux = max(align, 1)
     self.allocas.push(v)
@@ -346,19 +346,19 @@ fn add_off(self: *Fx, addr: i64, off: i64) -> i64 {
     if off == 0 {
         return addr
     }
-    c := self.iconst(TI64, off)
-    return self.ins(OpAdd, TI64, vec_of([]i64{addr, c}), 0)
+    c := self.iconst(I64, off)
+    return self.ins(Add, I64, vec_of([]i64{addr, c}), 0)
 }
 
 fn load_raw(self: *Fx, addr: i64, t: T, alias: i64) -> i64 {
-    v := self.ins(OpLoad, t, vec_of([]i64{addr}), 0)
+    v := self.ins(Load, t, vec_of([]i64{addr}), 0)
     i := self.f.im(v)
     i.aux = alias
     return v
 }
 
 fn store_raw(self: *Fx, addr: i64, val: i64, t: T, alias: i64) {
-    v := self.ins(OpStore, t, vec_of([]i64{addr, val}), 0)
+    v := self.ins(Store, t, vec_of([]i64{addr, val}), 0)
     i := self.f.im(v)
     i.aux = alias
 }
@@ -383,14 +383,14 @@ fn irt(self: *Fx, ty: i64) -> T {
 // scalar SSA value of a Val
 fn scalar(self: *Fx, v: Val) -> i64 {
     if v.ty == T_ERR || v.ty == T_NEVER || v.ty == T_UNIT {
-        return self.iconst(TI64, 0)
+        return self.iconst(I64, 0)
     }
     if v.mem {
         match v.lane {
             Some(kv) => {
                 // one f32 lane of a vector in memory
                 x := self.load_raw(v.v, kv.1, v.alias)
-                return self.ins(OpVExt, TF32, vec_of([]i64{x}), kv.0)
+                return self.ins(VExt, F32, vec_of([]i64{x}), kv.0)
             }
             None => {}
         }
@@ -410,7 +410,7 @@ fn store(self: *Fx, dst: Val, src: Val) {
         match dst.lane {
             Some(kv) => {
                 old := self.load_raw(dst.v, kv.1, dst.alias)
-                nv := self.ins(OpVIns, kv.1, vec_of([]i64{old, v}), kv.0)
+                nv := self.ins(VIns, kv.1, vec_of([]i64{old, v}), kv.0)
                 self.store_raw(dst.v, nv, kv.1, dst.alias)
                 return
             }
@@ -443,8 +443,8 @@ fn store(self: *Fx, dst: Val, src: Val) {
         }
     } else {
         sz := self.cx.types.size_of(dst.ty)
-        c := self.iconst(TI64, sz)
-        self.ins(OpMemCpy, TVoid, vec_of([]i64{dst.v, src.v, c}), 0)
+        c := self.iconst(I64, sz)
+        self.ins(MemCpy, Void, vec_of([]i64{dst.v, src.v, c}), 0)
     }
 }
 
@@ -459,14 +459,14 @@ fn zero(self: *Fx, dst: Val) {
         for i in 0..leaves.len {
             l := leaves[i]
             a := self.add_off(dst.v, l.off)
-            z := if l.t.is_fp() { self.ins(OpFConst, l.t, vec[i64](), 0) } else { self.iconst(l.t, 0) }
+            z := if l.t.is_fp() { self.ins(FConst, l.t, vec[i64](), 0) } else { self.iconst(l.t, 0) }
             self.store_raw(a, z, l.t, l.alias)
         }
     } else {
         sz := self.cx.types.size_of(dst.ty)
-        c := self.iconst(TI64, sz)
-        z := self.iconst(TI8, 0)
-        self.ins(OpMemSet, TVoid, vec_of([]i64{dst.v, z, c}), 0)
+        c := self.iconst(I64, sz)
+        z := self.iconst(I8, 0)
+        self.ins(MemSet, Void, vec_of([]i64{dst.v, z, c}), 0)
     }
 }
 
@@ -589,10 +589,10 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
             continue
         }
         match s.k {
-            SKExpr(e) => {
+            ExprStmt(e) => {
                 v = self.expr(&e, expect)
             }
-            SKIf(c, t, eo) => {
+            If(c, t, eo) => {
                 match eo {
                     Some(e) => {
                         v = self.if_value(&c, &t, &e, true, expect)
@@ -627,15 +627,15 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
 // 2 = `&&` / `||` (may have effects through its operands), 3 = anything else
 fn lower_fn_stmt_expr_kind(e: *Expr) -> i64 {
     match e.k {
-        EKMatch(_, _) => return 0
-        EKInt(_) => return 1
-        EKFloat(_) => return 1
-        EKStr(_) => return 1
-        EKBool(_) => return 1
-        EKIdent(_) => return 1
-        EKFn(_) => return 1
-        EKBin(op, _, _) => {
-            if op == BinOpLAnd || op == BinOpLOr {
+        Match(_, _) => return 0
+        Int(_) => return 1
+        Float(_) => return 1
+        Str(_) => return 1
+        Bool(_) => return 1
+        Ident(_) => return 1
+        Fn(_) => return 1
+        Bin(op, _, _) => {
+            if op == LAnd || op == LOr {
                 return 2
             }
             return 1
@@ -659,7 +659,7 @@ fn lower_fn_break_continue(fx: *Fx, pos: Pos, is_break: bool) {
     target := if is_break { l.brk } else { l.cont }
     depth := l.scope_depth
     fx.run_defers_down_to(depth)
-    fx.f.blocks[fx.cur].term = TermJmp(target)
+    fx.f.blocks[fx.cur].term = Jmp(target)
     fx.cur = fx.f.new_block()
     fx.dead = true
 }
@@ -691,18 +691,18 @@ fn lower_fn_break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
     l := fx.loops[idx]
     target := if is_break { l.brk } else { l.cont }
     fx.run_defers_down_to(l.scope_depth)
-    fx.f.blocks[fx.cur].term = TermJmp(target)
+    fx.f.blocks[fx.cur].term = Jmp(target)
     fx.cur = fx.f.new_block()
     fx.dead = true
 }
 
 fn stmt(self: *Fx, s: *Stmt) {
     match s.k {
-        SKExpr(e) => {
+        ExprStmt(e) => {
             kind := lower_fn_stmt_expr_kind(&e)
             if kind == 0 {
                 match e.k {
-                    EKMatch(sc, arms) => {
+                    Match(sc, arms) => {
                         self.match_expr(sc, arms.items(), false, None, e.pos)
                     }
                     _ => {}
@@ -716,7 +716,7 @@ fn stmt(self: *Fx, s: *Stmt) {
                 self.expr(&e, None)
             }
         }
-        SKLet(names, e) => {
+        Let(names, e) => {
             v := self.expr(&e, None)
             if names.len == 1 {
                 if v.ty == T_UNIT || v.ty == T_NEVER {
@@ -730,13 +730,13 @@ fn stmt(self: *Fx, s: *Stmt) {
                 tys: Vec[i64]
                 is_tuple := false
                 match self.cx.types.k(v.ty) {
-                    TyKTuple(ts) => {
+                    Tuple(ts) => {
                         if ts.len == names.len {
                             tys = ts
                             is_tuple = true
                         }
                     }
-                    TyKErr => return
+                    Err => return
                     _ => {}
                 }
                 if !is_tuple {
@@ -757,14 +757,14 @@ fn stmt(self: *Fx, s: *Stmt) {
                 }
             }
         }
-        SKMultiAssign(lhs, e) => {
+        MultiAssign(lhs, e) => {
             v := self.expr(&e, None)
             is_tuple := false
             match self.cx.types.k(v.ty) {
-                TyKTuple(ts) => {
+                Tuple(ts) => {
                     is_tuple = ts.len == lhs.len
                 }
-                TyKErr => return
+                Err => return
                 _ => {}
             }
             if !is_tuple {
@@ -793,7 +793,7 @@ fn stmt(self: *Fx, s: *Stmt) {
                 }
             }
         }
-        SKVar(name, ty, init) => {
+        Var(name, ty, init) => {
             t: Opt[i64] = None
             match ty {
                 Some(ta) => {
@@ -832,9 +832,9 @@ fn stmt(self: *Fx, s: *Stmt) {
                 }
             }
         }
-        SKAssign(lhs, op, rhs) => {
+        Assign(lhs, op, rhs) => {
             match lhs.k {
-                EKIdent(n) => {
+                Ident(n) => {
                     if n == "_" {
                         self.expr(&rhs, None)
                         return
@@ -862,7 +862,7 @@ fn stmt(self: *Fx, s: *Stmt) {
                     cur := self.scalar(dst)
                     l := self.sval(dst.ty, cur)
                     r: Val
-                    if bop == BinOpShl || bop == BinOpShr {
+                    if bop == Shl || bop == Shr {
                         r = self.expr(&rhs, None)
                     } else {
                         r = self.expr(&rhs, Some(dst.ty))
@@ -873,7 +873,7 @@ fn stmt(self: *Fx, s: *Stmt) {
                 }
             }
         }
-        SKIf(c, t, eo) => {
+        If(c, t, eo) => {
             match eo {
                 Some(e) => {
                     self.if_value(&c, &t, &e, false, None)
@@ -889,7 +889,7 @@ fn stmt(self: *Fx, s: *Stmt) {
                 }
             }
         }
-        SKWhile(c, body) => {
+        While(c, body) => {
             bb := self.new_block()
             bc := self.new_block()
             bx := self.new_block()
@@ -903,7 +903,7 @@ fn stmt(self: *Fx, s: *Stmt) {
             self.cond_br(&c, bb, bx)
             self.switch_to(bx)
         }
-        SKLoop(body) => {
+        LoopStmt(body) => {
             bb := self.new_block()
             bx := self.new_block()
             self.jmp(bb)
@@ -917,10 +917,10 @@ fn stmt(self: *Fx, s: *Stmt) {
             reach := false
             for bi in 0..self.f.blocks.len {
                 match self.f.blocks[bi].term {
-                    TermJmp(t) => {
+                    Jmp(t) => {
                         reach = t == bx
                     }
-                    TermBr(_, t, e) => {
+                    Br(_, t, e) => {
                         reach = t == bx || e == bx
                     }
                     _ => {}
@@ -931,7 +931,7 @@ fn stmt(self: *Fx, s: *Stmt) {
             }
             self.dead = !reach
         }
-        SKFor(var1, var2, lo, hi, incl, step_e, body) => {
+        For(var1, var2, lo, hi, incl, step_e, body) => {
             // the optional bounds are copied to locals of this arm so that they can be
             // passed by pointer
             hi_e: Expr
@@ -954,7 +954,7 @@ fn stmt(self: *Fx, s: *Stmt) {
             }
             self.for_stmt(var1, var2, &lo, hi_p, incl, step_p, &body, s.pos)
         }
-        SKReturn(eo) => {
+        Return(eo) => {
             v: Opt[Val] = None
             match eo {
                 Some(e) => {
@@ -979,13 +979,13 @@ fn stmt(self: *Fx, s: *Stmt) {
                 self.do_return(v)
             }
         }
-        SKBreak => {
+        Break => {
             lower_fn_break_continue(self, s.pos, true)
         }
-        SKContinue => {
+        Continue => {
             lower_fn_break_continue(self, s.pos, false)
         }
-        SKAssert(c, msg) => {
+        Assert(c, msg) => {
             ok := self.new_block()
             fail := self.new_block()
             self.cond_br(&c, ok, fail)
@@ -1003,20 +1003,20 @@ fn stmt(self: *Fx, s: *Stmt) {
             }
             self.call_rt("__assert_fail", vec[i64](), vec_of([]Val{loc, m}), s.pos)
             if !self.dead {
-                self.terminate(TermTrap)
+                self.terminate(Trap)
             }
             self.switch_to(ok)
         }
-        SKBlock(b) => {
+        BlockStmt(b) => {
             self.block(&b)
         }
-        SKDefer(b) => {
+        Defer(b) => {
             // the scope keeps a pointer: the block is copied to the heap
             bp := new[Block]()
             *bp = b
             self.scopes[self.scopes.len - 1].defers.push(bp)
         }
-        SKLabeled(label, inner) => {
+        Labeled(label, inner) => {
             for i in 0..self.labels.len {
                 if self.labels[i].0 == label {
                     self.err(s.pos, fmt("loop label `", label, "` is already used by the enclosing loop at line ", self.labels[i].2, " (give nested loops different labels)"))
@@ -1027,13 +1027,13 @@ fn stmt(self: *Fx, s: *Stmt) {
             self.stmt(inner)
             self.labels.pop()
         }
-        SKBreakTo(label) => {
+        BreakTo(label) => {
             lower_fn_break_continue_to(self, s.pos, true, label)
         }
-        SKContinueTo(label) => {
+        ContinueTo(label) => {
             lower_fn_break_continue_to(self, s.pos, false, label)
         }
-        SKFn(d) => {
+        Fn(d) => {
             self.nested_fn(d)
         }
     }
@@ -1045,18 +1045,18 @@ fn do_return(self: *Fx, v: Opt[Val]) {
         Some(rv) => {
             if rv.ty != T_ERR {
                 match self.cx.abi_ret(self.ret_ty) {
-                    RetAbiNone => {}
-                    RetAbiScalar(_) => {
+                    RetAbi.None => {}
+                    Scalar(_) => {
                         rets.push(self.scalar(rv))
                     }
-                    RetAbiFlat(leaves) => {
+                    Flat(leaves) => {
                         for i in 0..leaves.len {
                             l := leaves[i]
                             a := self.add_off(rv.v, l.off)
                             rets.push(self.load_raw(a, l.t, l.alias))
                         }
                     }
-                    RetAbiSRet => {
+                    SRet => {
                         sp: i64
                         match self.sret {
                             Some(p) => {
@@ -1070,14 +1070,14 @@ fn do_return(self: *Fx, v: Opt[Val]) {
                 }
             } else {
                 self.run_defers_down_to(0)
-                self.terminate(TermTrap)
+                self.terminate(Trap)
                 return
             }
         }
         None => {}
     }
     self.run_defers_down_to(0)
-    self.terminate(TermRet(rets))
+    self.terminate(Ret(rets))
 }
 
 fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i64]) -> Val {
@@ -1180,7 +1180,7 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
                         Some(cv) => {
                             good := false
                             match cv {
-                                CVInt(k) => {
+                                Int(k) => {
                                     if k != 0 {
                                         stepk = k
                                         good = true
@@ -1200,7 +1200,7 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
                             s := self.scalar(sv)
                             if self.cx.opts.checks {
                                 z := self.iconst(it, 0)
-                                ok := self.ins(if self.cx.types.is_signed(ty) { OpSgt } else { OpNe }, TI8, vec_of([]i64{s, z}), 0)
+                                ok := self.ins(if self.cx.types.is_signed(ty) { Sgt } else { Ne }, I8, vec_of([]i64{s, z}), 0)
                                 self.check(ok, 2, se.pos)
                             }
                             step_dyn = Some(s)
@@ -1214,15 +1214,15 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
             cmpop: Op
             if signed {
                 if stepk > 0 {
-                    cmpop = if incl { OpSle } else { OpSlt }
+                    cmpop = if incl { Sle } else { Slt }
                 } else {
-                    cmpop = if incl { OpSge } else { OpSgt }
+                    cmpop = if incl { Sge } else { Sgt }
                 }
             } else {
                 if stepk > 0 {
-                    cmpop = if incl { OpUle } else { OpUlt }
+                    cmpop = if incl { Ule } else { Ult }
                 } else {
-                    cmpop = if incl { OpUge } else { OpUgt }
+                    cmpop = if incl { Uge } else { Ugt }
                 }
             }
             lo_s := self.scalar(lv)
@@ -1230,7 +1230,7 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
             addr := self.declare(var1, ty, pos)
             iv := self.mval(ty, addr)
             self.store_raw(addr, lo_s, it, iv.alias)
-            c := self.ins(cmpop, TI8, vec_of([]i64{lo_s, end}), 0)
+            c := self.ins(cmpop, I8, vec_of([]i64{lo_s, end}), 0)
             self.br(c, bb, bx)
             self.switch_to(bb)
             self.loops.push(LoopCtx{brk: bx, cont: bc, scope_depth: self.scopes.len})
@@ -1248,9 +1248,9 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
                     st = self.iconst(it, stepk)
                 }
             }
-            next := self.ins(OpAdd, it, vec_of([]i64{cur, st}), 0)
+            next := self.ins(Add, it, vec_of([]i64{cur, st}), 0)
             self.store_raw(addr, next, it, iv.alias)
-            c2 := self.ins(cmpop, TI8, vec_of([]i64{next, end}), 0)
+            c2 := self.ins(cmpop, I8, vec_of([]i64{next, end}), 0)
             self.br(c2, bb, bx)
         }
         None => {
@@ -1263,20 +1263,20 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
             et: i64
             iterable := false
             match self.cx.types.k(cv.ty) {
-                TyKSlice(st) => {
+                Slice(st) => {
                     parts := self.slice_parts(cv)
                     p = parts.0
                     ln = parts.1
                     et = st
                     iterable = true
                 }
-                TyKArray(at, n) => {
-                    ln = self.iconst(TI64, n)
+                Array(at, n) => {
+                    ln = self.iconst(I64, n)
                     p = cv.v
                     et = at
                     iterable = true
                 }
-                TyKErr => {
+                Err => {
                     self.pop_scope()
                     return
                 }
@@ -1309,19 +1309,19 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
                 None => {}
             }
             iaddr := self.declare(iname, T_I64, pos)
-            zero := self.iconst(TI64, 0)
-            self.store_raw(iaddr, zero, TI64, AK_I64)
-            c := self.ins(OpSlt, TI8, vec_of([]i64{zero, ln}), 0)
+            zero := self.iconst(I64, 0)
+            self.store_raw(iaddr, zero, I64, AK_I64)
+            c := self.ins(Slt, I8, vec_of([]i64{zero, ln}), 0)
             self.br(c, bb, bx)
             self.switch_to(bb)
             self.push_scope()
             match ename {
                 Some(en) => {
-                    i := self.load_raw(iaddr, TI64, AK_I64)
+                    i := self.load_raw(iaddr, I64, AK_I64)
                     es := self.cx.types.size_of(et)
-                    esz := self.iconst(TI64, es)
-                    off := self.ins(OpMul, TI64, vec_of([]i64{i, esz}), 0)
-                    ea := self.ins(OpAdd, TI64, vec_of([]i64{p, off}), 0)
+                    esz := self.iconst(I64, es)
+                    off := self.ins(Mul, I64, vec_of([]i64{i, esz}), 0)
+                    ea := self.ins(Add, I64, vec_of([]i64{p, off}), 0)
                     src := self.mval(et, ea)
                     eaddr := self.declare(en, et, pos)
                     dst := self.mval(et, eaddr)
@@ -1335,11 +1335,11 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
             self.pop_scope()
             self.jmp(bc)
             self.switch_to(bc)
-            cur := self.load_raw(iaddr, TI64, AK_I64)
-            one := self.iconst(TI64, 1)
-            next := self.ins(OpAdd, TI64, vec_of([]i64{cur, one}), 0)
-            self.store_raw(iaddr, next, TI64, AK_I64)
-            c2 := self.ins(OpSlt, TI8, vec_of([]i64{next, ln}), 0)
+            cur := self.load_raw(iaddr, I64, AK_I64)
+            one := self.iconst(I64, 1)
+            next := self.ins(Add, I64, vec_of([]i64{cur, one}), 0)
+            self.store_raw(iaddr, next, I64, AK_I64)
+            c2 := self.ins(Slt, I8, vec_of([]i64{next, ln}), 0)
             self.br(c2, bb, bx)
         }
     }
@@ -1350,15 +1350,15 @@ fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], i
 // ---------- conditions ----------
 fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
     match e.k {
-        EKBin(op, a, b) => {
-            if op == BinOpLAnd {
+        Bin(op, a, b) => {
+            if op == LAnd {
                 mid := self.new_block()
                 self.cond_br(a, mid, f)
                 self.switch_to(mid)
                 self.cond_br(b, t, f)
                 return
             }
-            if op == BinOpLOr {
+            if op == LOr {
                 mid := self.new_block()
                 self.cond_br(a, t, mid)
                 self.switch_to(mid)
@@ -1366,8 +1366,8 @@ fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
                 return
             }
         }
-        EKUn(op, a) => {
-            if op == UnOpNot {
+        Un(op, a) => {
+            if op == Not {
                 self.cond_br(a, f, t)
                 return
             }
@@ -1395,8 +1395,8 @@ fn loc_str(self: *Fx, pos: Pos) -> Val {
 fn str_val(self: *Fx, s: str) -> Val {
     g := self.cx.string_global(s)
     t := self.temp(T_STR)
-    p := self.ins(OpGAddr, TI64, vec[i64](), g)
-    n := self.iconst(TI64, len(s))
+    p := self.ins(GAddr, I64, vec[i64](), g)
+    n := self.iconst(I64, len(s))
     v := self.mval(T_STR, t)
     self.store_slice(v, p, n)
     return v
@@ -1405,17 +1405,17 @@ fn str_val(self: *Fx, s: str) -> Val {
 fn store_slice(self: *Fx, dst: Val, p: i64, n: i64) {
     leaves := vec[Leaf]()
     self.cx.types.leaves(dst.ty, 0, &leaves)
-    self.store_raw(dst.v, p, TI64, leaves.at(0).alias)
+    self.store_raw(dst.v, p, I64, leaves.at(0).alias)
     a := self.add_off(dst.v, 8)
-    self.store_raw(a, n, TI64, leaves.at(1).alias)
+    self.store_raw(a, n, I64, leaves.at(1).alias)
 }
 
 fn slice_parts(self: *Fx, s: Val) -> (i64, i64) {
     leaves := vec[Leaf]()
     self.cx.types.leaves(s.ty, 0, &leaves)
-    p := self.load_raw(s.v, TI64, leaves.at(0).alias)
+    p := self.load_raw(s.v, I64, leaves.at(0).alias)
     a := self.add_off(s.v, 8)
-    l := self.load_raw(a, TI64, leaves.at(1).alias)
+    l := self.load_raw(a, I64, leaves.at(1).alias)
     return (p, l)
 }
 
@@ -1437,7 +1437,7 @@ fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     }
     self.call_rt(name, vec[i64](), vec_of([]Val{loc}), pos)
     if !self.dead {
-        self.terminate(TermTrap)
+        self.terminate(Trap)
     }
     self.cur = save_cur
     self.dead = save_dead

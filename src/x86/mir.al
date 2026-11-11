@@ -32,12 +32,12 @@ struct Bits128 {
 }
 
 enum MemKind {
-    MemKindNormal,
-    MemKindGlobal,   // disp is relative to global `id`
-    MemKindSlot,     // disp is relative to frame slot `id` (base is rsp)
-    MemKindInArg,    // incoming stack argument `id` (base is rsp)
-    MemKindOutArg,   // outgoing stack argument `id` (base is rsp)
-    MemKindFConst,   // float constant pool entry `id`
+    Normal,
+    Glob,   // disp is relative to global `id`
+    Slot,     // disp is relative to frame slot `id` (base is rsp)
+    InArg,    // incoming stack argument `id` (base is rsp)
+    OutArg,   // outgoing stack argument `id` (base is rsp)
+    FConst,   // float constant pool entry `id`
 }
 
 struct Mem {
@@ -50,59 +50,59 @@ struct Mem {
 }
 
 fn mem_new() -> Mem {
-    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MemKindNormal, id: 0}
+    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: Normal, id: 0}
 }
 
 fn mem_slot(id: i64, disp: i32) -> Mem {
-    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: disp, kind: MemKindSlot, id: id}
+    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: disp, kind: Slot, id: id}
 }
 
 enum Opnd {
-    OpndNone,
-    OpndR(i64),
-    OpndI(i64),
-    OpndM(Mem),
+    None,
+    R(i64),
+    I(i64),
+    M(Mem),
     // absolute address of a symbol: global (id) or function
-    OpndGAddr(i64, i64),
-    OpndFAddr(i64),
+    GAddr(i64, i64),
+    FAddr(i64),
 }
 
 // Opnd equality (PartialEq in the Rust source)
 fn eq(a: Opnd, b: Opnd) -> bool {
     match a {
-        OpndNone => {
+        Opnd.None => {
             match b {
-                OpndNone => return true
+                Opnd.None => return true
                 _ => return false
             }
         }
-        OpndR(r) => {
+        R(r) => {
             match b {
-                OpndR(r2) => return r == r2
+                R(r2) => return r == r2
                 _ => return false
             }
         }
-        OpndI(i) => {
+        I(i) => {
             match b {
-                OpndI(i2) => return i == i2
+                I(i2) => return i == i2
                 _ => return false
             }
         }
-        OpndM(m) => {
+        M(m) => {
             match b {
-                OpndM(m2) => return m == m2
+                M(m2) => return m == m2
                 _ => return false
             }
         }
-        OpndGAddr(g, d) => {
+        GAddr(g, d) => {
             match b {
-                OpndGAddr(g2, d2) => return g == g2 && d == d2
+                GAddr(g2, d2) => return g == g2 && d == d2
                 _ => return false
             }
         }
-        OpndFAddr(f) => {
+        FAddr(f) => {
             match b {
-                OpndFAddr(f2) => return f == f2
+                FAddr(f2) => return f == f2
                 _ => return false
             }
         }
@@ -110,69 +110,69 @@ fn eq(a: Opnd, b: Opnd) -> bool {
 }
 
 enum MOp {
-    MOpMov,
-    MOpMovzx, // sz = source size, 32-bit destination
-    MOpMovsx, // sz = source size, sz2 = destination size
-    MOpLea,
-    MOpAdd,
-    MOpSub,
-    MOpAnd,
-    MOpOr,
-    MOpXor,
-    MOpCmp,
-    MOpTest,
-    MOpImul,
-    MOpImul3,
-    MOpNeg,
-    MOpNot,
-    MOpShl,
-    MOpShr,
-    MOpSar,
-    MOpRol,
-    MOpRor,
-    MOpCqo,
-    MOpIdiv,
-    MOpDiv,
-    MOpMul1,
-    MOpImul1,
-    MOpSetcc,
-    MOpCmov,
-    MOpJmp,
-    MOpJcc,
-    MOpCall,
-    MOpCallInd,
-    MOpRet,
-    MOpSyscall,
-    MOpUd2,
-    MOpMovSd,
-    MOpAddsd,
-    MOpSubsd,
-    MOpMulsd,
-    MOpDivsd,
-    MOpSqrtsd,
-    MOpUcomisd,
-    MOpXorpd,
-    MOpAndpd,
+    Mov,
+    Movzx, // sz = source size, 32-bit destination
+    Movsx, // sz = source size, sz2 = destination size
+    Lea,
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    Cmp,
+    Test,
+    Imul,
+    Imul3,
+    Neg,
+    Not,
+    Shl,
+    Shr,
+    Sar,
+    Rol,
+    Ror,
+    Cqo,
+    Idiv,
+    Div,
+    Mul1,
+    Imul1,
+    Setcc,
+    Cmov,
+    Jmp,
+    Jcc,
+    Call,
+    CallInd,
+    Ret,
+    Syscall,
+    Ud2,
+    MovSd,
+    Addsd,
+    Subsd,
+    Mulsd,
+    Divsd,
+    Sqrtsd,
+    Ucomisd,
+    Xorpd,
+    Andpd,
     // SSE operations above take sz 8 (scalar double), 4 (scalar single) or 16 (packed single)
-    MOpMinsd,
-    MOpMaxsd,
-    MOpCvtf,     // sz 8: single -> double, sz 4: double -> single
-    MOpShufps,   // a = dst, b = src, c = immediate
-    MOpUnpcklps,
-    MOpMovlo, // movss xmm, xmm: replaces lane 0, keeps the rest
-    MOpCvtsi2sd,
-    MOpCvttsd2si,
-    MOpMovqToX, // xmm <- gpr
-    MOpMovqToR, // gpr <- xmm
-    MOpRepMovsb,
-    MOpRepStosb,
-    MOpBswap,
-    MOpPopcnt,
-    MOpTzcnt,
-    MOpLzcnt,
-    MOpPush,
-    MOpPop,
-    MOpZero, // xor r32, r32 (clobbers flags)
+    Minsd,
+    Maxsd,
+    Cvtf,     // sz 8: single -> double, sz 4: double -> single
+    Shufps,   // a = dst, b = src, c = immediate
+    Unpcklps,
+    Movlo, // movss xmm, xmm: replaces lane 0, keeps the rest
+    Cvtsi2sd,
+    Cvttsd2si,
+    MovqToX, // xmm <- gpr
+    MovqToR, // gpr <- xmm
+    RepMovsb,
+    RepStosb,
+    Bswap,
+    Popcnt,
+    Tzcnt,
+    Lzcnt,
+    Push,
+    Pop,
+    Zero, // xor r32, r32 (clobbers flags)
 }
 
 const CC_B: u8 = 2
@@ -202,7 +202,7 @@ struct MInst {
 }
 
 fn minst_new(op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
-    return MInst{op: op, sz: sz, sz2: 0, cc: 0, a: a, b: b, c: OpndNone, tgt: 0, uses: vec[i64](), defs: vec[i64]()}
+    return MInst{op: op, sz: sz, sz2: 0, cc: 0, a: a, b: b, c: Opnd.None, tgt: 0, uses: vec[i64](), defs: vec[i64]()}
 }
 
 // an independent copy (uses and defs are not shared)
@@ -212,12 +212,12 @@ fn clone(i: *MInst) -> MInst {
 
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
 fn is_copy(self: *MInst) -> (i64, i64, bool) {
-    if self.op == MOpMov || self.op == MOpMovSd {
+    if self.op == Mov || self.op == MovSd {
         match self.a {
-            OpndR(d) => {
+            R(d) => {
                 match self.b {
-                    OpndR(s) => {
-                        if self.op == MOpMovSd || self.sz == 8 {
+                    R(s) => {
+                        if self.op == MovSd || self.sz == 8 {
                             return (d, s, true)
                         }
                     }
@@ -279,8 +279,8 @@ fn mir_mem_regs(m: Mem, uses: *Vec[i64]) {
 
 fn mir_opnd_uses(o: Opnd, uses: *Vec[i64]) {
     match o {
-        OpndR(r) => uses.push(r)
-        OpndM(m) => mir_mem_regs(m, uses)
+        R(r) => uses.push(r)
+        M(m) => mir_mem_regs(m, uses)
         _ => {}
     }
 }
@@ -290,64 +290,64 @@ fn mir_defs_uses(i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
     defs.clear()
     uses.clear()
     match i.op {
-        MOpMov, MOpMovzx, MOpMovsx, MOpLea, MOpMovSd, MOpCvtsi2sd, MOpCvttsd2si, MOpMovqToX, MOpMovqToR, MOpSetcc, MOpSqrtsd, MOpCvtf, MOpPopcnt, MOpTzcnt, MOpLzcnt, MOpImul3 => {
+        Mov, Movzx, Movsx, Lea, MovSd, Cvtsi2sd, Cvttsd2si, MovqToX, MovqToR, Setcc, Sqrtsd, Cvtf, Popcnt, Tzcnt, Lzcnt, Imul3 => {
             match i.a {
-                OpndR(r) => defs.push(r)
-                OpndM(m) => mir_mem_regs(m, uses)
+                R(r) => defs.push(r)
+                M(m) => mir_mem_regs(m, uses)
                 _ => {}
             }
             mir_opnd_uses(i.b, uses)
         }
-        MOpZero => {
+        Zero => {
             match i.a {
-                OpndR(r) => defs.push(r)
+                R(r) => defs.push(r)
                 _ => {}
             }
         }
-        MOpAdd, MOpSub, MOpAnd, MOpOr, MOpXor, MOpImul, MOpAddsd, MOpSubsd, MOpMulsd, MOpDivsd, MOpMinsd, MOpMaxsd, MOpShufps, MOpUnpcklps, MOpMovlo, MOpXorpd, MOpAndpd, MOpCmov, MOpShl, MOpShr, MOpSar, MOpRol, MOpRor => {
+        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Cmov, Shl, Shr, Sar, Rol, Ror => {
             match i.a {
-                OpndR(r) => {
+                R(r) => {
                     defs.push(r)
                     uses.push(r)
                 }
-                OpndM(m) => mir_mem_regs(m, uses)
+                M(m) => mir_mem_regs(m, uses)
                 _ => {}
             }
             mir_opnd_uses(i.b, uses)
         }
-        MOpNeg, MOpNot, MOpBswap => {
+        Neg, Not, Bswap => {
             match i.a {
-                OpndR(r) => {
+                R(r) => {
                     defs.push(r)
                     uses.push(r)
                 }
-                OpndM(m) => mir_mem_regs(m, uses)
+                M(m) => mir_mem_regs(m, uses)
                 _ => {}
             }
         }
-        MOpCmp, MOpTest, MOpUcomisd => {
+        Cmp, Test, Ucomisd => {
             mir_opnd_uses(i.a, uses)
             mir_opnd_uses(i.b, uses)
         }
-        MOpCqo => {
+        Cqo => {
             uses.push(RAX)
             defs.push(RDX)
         }
-        MOpIdiv, MOpDiv => {
+        Idiv, Div => {
             uses.push(RAX)
             uses.push(RDX)
             mir_opnd_uses(i.a, uses)
             defs.push(RAX)
             defs.push(RDX)
         }
-        MOpMul1, MOpImul1 => {
+        Mul1, Imul1 => {
             uses.push(RAX)
             mir_opnd_uses(i.a, uses)
             defs.push(RAX)
             defs.push(RDX)
         }
-        MOpJmp, MOpJcc, MOpUd2 => {}
-        MOpCall, MOpCallInd => {
+        Jmp, Jcc, Ud2 => {}
+        Call, CallInd => {
             mir_opnd_uses(i.a, uses)
             uses.extend(i.uses.items())
             for r in CALLER_SAVED_GPR {
@@ -357,16 +357,16 @@ fn mir_defs_uses(i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
                 defs.push(XMM0 + x)
             }
         }
-        MOpRet => {
+        Ret => {
             uses.extend(i.uses.items())
         }
-        MOpSyscall => {
+        Syscall => {
             uses.extend(i.uses.items())
             defs.push(RAX)
             defs.push(RCX)
             defs.push(R11)
         }
-        MOpRepMovsb => {
+        RepMovsb => {
             uses.push(RDI)
             uses.push(RSI)
             uses.push(RCX)
@@ -374,17 +374,17 @@ fn mir_defs_uses(i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
             defs.push(RSI)
             defs.push(RCX)
         }
-        MOpRepStosb => {
+        RepStosb => {
             uses.push(RDI)
             uses.push(RAX)
             uses.push(RCX)
             defs.push(RDI)
             defs.push(RCX)
         }
-        MOpPush => mir_opnd_uses(i.a, uses)
-        MOpPop => {
+        Push => mir_opnd_uses(i.a, uses)
+        Pop => {
             match i.a {
-                OpndR(r) => defs.push(r)
+                R(r) => defs.push(r)
                 _ => {}
             }
         }
@@ -403,8 +403,8 @@ fn mir_map_regs_lookup(r: i64, table: []i64) -> i64 {
 
 fn mir_map_regs_mo(o: Opnd, table: []i64) -> Opnd {
     match o {
-        OpndR(r) => return OpndR(mir_map_regs_lookup(r, table))
-        OpndM(m) => {
+        R(r) => return R(mir_map_regs_lookup(r, table))
+        M(m) => {
             mm := m
             if mm.base != NOREG {
                 mm.base = mir_map_regs_lookup(mm.base, table)
@@ -412,7 +412,7 @@ fn mir_map_regs_mo(o: Opnd, table: []i64) -> Opnd {
             if mm.idx != NOREG {
                 mm.idx = mir_map_regs_lookup(mm.idx, table)
             }
-            return OpndM(mm)
+            return M(mm)
         }
         _ => return o
     }
@@ -428,13 +428,13 @@ fn mir_map_regs(i: *MInst, table: []i64) {
 
 fn mir_replace_reg_mo(o: Opnd, from: i64, to: i64) -> Opnd {
     match o {
-        OpndR(r) => {
+        R(r) => {
             if r == from {
-                return OpndR(to)
+                return R(to)
             }
             return o
         }
-        OpndM(m) => {
+        M(m) => {
             mm := m
             if mm.base != NOREG && mm.base == from {
                 mm.base = to
@@ -442,7 +442,7 @@ fn mir_replace_reg_mo(o: Opnd, from: i64, to: i64) -> Opnd {
             if mm.idx != NOREG && mm.idx == from {
                 mm.idx = to
             }
-            return OpndM(mm)
+            return M(mm)
         }
         _ => return o
     }
@@ -457,13 +457,13 @@ fn mir_replace_reg(i: *MInst, from: i64, to: i64) {
 
 fn mir_count_reg_mo(o: Opnd, r: i64) -> i64 {
     match o {
-        OpndR(x) => {
+        R(x) => {
             if x == r {
                 return 1
             }
             return 0
         }
-        OpndM(m) => {
+        M(m) => {
             n := 0
             if m.base != NOREG && m.base == r {
                 n += 1
@@ -507,28 +507,28 @@ fn mir_reg_name(r: i64, sz: u8) -> str {
 
 fn mir_opnd_str(o: Opnd, sz: u8) -> str {
     match o {
-        OpndNone => return ""
-        OpndR(r) => return mir_reg_name(r, sz)
-        OpndI(i) => return fmt(i)
-        OpndGAddr(g, d) => return fmt("&g", g, "+", d)
-        OpndFAddr(f) => return fmt("&f", f)
-        OpndM(m) => {
+        Opnd.None => return ""
+        R(r) => return mir_reg_name(r, sz)
+        I(i) => return fmt(i)
+        GAddr(g, d) => return fmt("&g", g, "+", d)
+        FAddr(f) => return fmt("&f", f)
+        M(m) => {
             s := "["
             match m.kind {
-                MemKindNormal => {}
-                MemKindGlobal => {
+                Normal => {}
+                Glob => {
                     s = fmt(s, "g", m.id, " ")
                 }
-                MemKindSlot => {
+                Slot => {
                     s = fmt(s, "slot", m.id, " ")
                 }
-                MemKindInArg => {
+                InArg => {
                     s = fmt(s, "inarg", m.id, " ")
                 }
-                MemKindOutArg => {
+                OutArg => {
                     s = fmt(s, "outarg", m.id, " ")
                 }
-                MemKindFConst => {
+                FConst => {
                     s = fmt(s, "fconst", m.id, " ")
                 }
             }
@@ -561,7 +561,7 @@ fn mir_print_mfunc(f: *MFunc) -> str {
             // the variant name without its `MOp` prefix, as `{:?}` prints it
             line := concat("    ", to_lower(fmt(i.op)[3..]))
             match i.op {
-                MOpJcc, MOpSetcc, MOpCmov => {
+                Jcc, Setcc, Cmov => {
                     line = fmt(line, "(cc", i.cc, ")")
                 }
                 _ => {}
@@ -569,7 +569,7 @@ fn mir_print_mfunc(f: *MFunc) -> str {
             line = fmt(line, i.sz, " ")
             a := mir_opnd_str(i.a, i.sz)
             bsz: u8 = i.sz
-            if i.op == MOpShl || i.op == MOpShr || i.op == MOpSar || i.op == MOpRol || i.op == MOpRor {
+            if i.op == Shl || i.op == Shr || i.op == Sar || i.op == Rol || i.op == Ror {
                 bsz = 1
             }
             bs := mir_opnd_str(i.b, bsz)
@@ -586,10 +586,10 @@ fn mir_print_mfunc(f: *MFunc) -> str {
             }
             line = concat(line, join(parts.items(), ", "))
             match i.op {
-                MOpJmp, MOpJcc => {
+                Jmp, Jcc => {
                     line = fmt(line, ".L", i.tgt)
                 }
-                MOpCall => {
+                Call => {
                     line = fmt(line, "f", i.tgt)
                 }
                 _ => {}

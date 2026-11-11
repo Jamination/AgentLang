@@ -5,29 +5,29 @@ struct Opts {
 }
 
 enum CV {
-    CVInt(i64),
-    CVFloat(f64),
-    CVBool(bool),
-    CVStr(str),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Str(str),
 }
 
 enum CState {
-    CStateBusy,
-    CStateDone(Opt[i64], CV),
-    CStateFailed,
+    Busy,
+    Done(Opt[i64], CV),
+    Failed,
 }
 
 enum ParamAbi {
-    ParamAbiScalar(T),
-    ParamAbiFlat(Vec[Leaf]),
-    ParamAbiByRef,
+    Scalar(T),
+    Flat(Vec[Leaf]),
+    ByRef,
 }
 
 enum RetAbi {
-    RetAbiNone,
-    RetAbiScalar(T),
-    RetAbiFlat(Vec[Leaf]),
-    RetAbiSRet,
+    None,
+    Scalar(T),
+    Flat(Vec[Leaf]),
+    SRet,
 }
 
 const MAX_FLAT = 4
@@ -226,35 +226,35 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
         cp: *ConstDecl
         gp: *GlobalDecl
         match decls[i] {
-            DeclFn(f) => {
+            Fn(f) => {
                 fp = new[FnDecl]()
                 *fp = f
                 name = f.name
                 pos = f.pos
                 kind = 1
             }
-            DeclStruct(s) => {
+            Struct(s) => {
                 sp = new[StructDecl]()
                 *sp = s
                 name = s.name
                 pos = s.pos
                 kind = 2
             }
-            DeclEnum(e) => {
+            Enum(e) => {
                 ep = new[EnumDecl]()
                 *ep = e
                 name = e.name
                 pos = e.pos
                 kind = 3
             }
-            DeclConst(c) => {
+            Const(c) => {
                 cp = new[ConstDecl]()
                 *cp = c
                 name = c.name
                 pos = c.pos
                 kind = 4
             }
-            DeclGlobal(g) => {
+            Glob(g) => {
                 gp = new[GlobalDecl]()
                 *gp = g
                 name = g.name
@@ -508,7 +508,7 @@ fn err(self: *Cx, pos: Pos, msg: str) {
 // ---------- types ----------
 fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
     match *t {
-        TypeAstName(n, args, pos) => {
+        Name(n, args, pos) => {
             if args.is_empty() {
                 et, eok := env.get(n)
                 if eok {
@@ -545,27 +545,27 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
             self.err(pos, fmt("unknown type `", n, "`", hint, self.priv_hint(n)))
             return T_ERR
         }
-        TypeAstPtr(e) => {
+        Ptr(e) => {
             et := self.resolve(e, env)
             if et == T_ERR {
                 return T_ERR
             }
             return self.types.ptr_to(et)
         }
-        TypeAstSlice(e) => {
+        Slice(e) => {
             et := self.resolve(e, env)
             if et == T_ERR {
                 return T_ERR
             }
             return self.types.slice(et)
         }
-        TypeAstArray(n, e) => {
+        Array(n, e) => {
             e2 := self.resolve(e, env)
             ln := -1
             match self.const_eval(n) {
                 Some(cv) => {
                     match cv {
-                        CVInt(v) => {
+                        Int(v) => {
                             if v >= 0 {
                                 ln = v
                             }
@@ -588,9 +588,9 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
                 self.err(n.pos, "array type too large (max 2 GiB)")
                 return T_ERR
             }
-            return self.types.intern(TyKArray(e2, ln))
+            return self.types.intern(TyK.Array(e2, ln))
         }
-        TypeAstFn(ps, r) => {
+        Fn(ps, r) => {
             pts := vec[i64]()
             for i in 0..ps.len {
                 pts.push(self.resolve(&ps[i], env))
@@ -605,9 +605,9 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
             if contains(&pts, T_ERR) || rt == T_ERR {
                 return T_ERR
             }
-            return self.types.intern(TyKFn(pts, rt))
+            return self.types.intern(TyK.Fn(pts, rt))
         }
-        TypeAstTuple(ts) => {
+        Tuple(ts) => {
             tys := vec[i64]()
             for i in 0..ts.len {
                 tys.push(self.resolve(&ts[i], env))
@@ -618,7 +618,7 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
             if tys.is_empty() {
                 return T_UNIT
             }
-            return self.types.intern(TyKTuple(tys))
+            return self.types.intern(TyK.Tuple(tys))
         }
     }
     return T_ERR
@@ -657,7 +657,7 @@ fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
         align: 1,
         state: 3,
     })
-    ty := self.types.intern(TyKStruct(sid))
+    ty := self.types.intern(Struct(sid))
     self.struct_insts.set((si, clone(targs).items()), ty)
     env := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
@@ -711,7 +711,7 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
         size: 8,
         state: if simple { 2 } else { 3 },
     })
-    ty := self.types.intern(TyKEnum(eid))
+    ty := self.types.intern(Enum(eid))
     self.enum_insts.set((ei, clone(targs).items()), ty)
     env := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
@@ -747,63 +747,63 @@ fn flush_layout_errors(self: *Cx, pos: Pos) {
 // ---------- ABI ----------
 fn abi_param(self: *Cx, t: i64) -> ParamAbi {
     if self.types.is_scalar(t) {
-        return ParamAbiScalar(self.types.scalar_ir(t).0)
+        return Scalar(self.types.scalar_ir(t).0)
     }
     if self.types.leaf_count(t) <= MAX_FLAT {
         l := vec[Leaf]()
         self.types.leaves(t, 0, &l)
-        return ParamAbiFlat(l)
+        return Flat(l)
     }
-    return ParamAbiByRef
+    return ByRef
 }
 
 fn abi_ret(self: *Cx, t: i64) -> RetAbi {
     if t == T_UNIT || t == T_NEVER || t == T_ERR {
-        return RetAbiNone
+        return RetAbi.None
     }
     if self.types.is_scalar(t) {
-        return RetAbiScalar(self.types.scalar_ir(t).0)
+        return Scalar(self.types.scalar_ir(t).0)
     }
     if self.types.leaf_count(t) <= MAX_FLAT {
         l := vec[Leaf]()
         self.types.leaves(t, 0, &l)
         if l.is_empty() {
-            return RetAbiNone
+            return RetAbi.None
         }
-        return RetAbiFlat(l)
+        return Flat(l)
     }
-    return RetAbiSRet
+    return SRet
 }
 
 // the IR parameters and results of a function with parameter types `ptys` and result `rty`
 fn fn_abi(self: *Cx, f: *Func, ptys: []i64, rty: i64) {
     match self.abi_ret(rty) {
-        RetAbiNone => {}
-        RetAbiScalar(t) => {
+        RetAbi.None => {}
+        Scalar(t) => {
             f.rets.push(t)
         }
-        RetAbiFlat(l) => {
+        Flat(l) => {
             for i in 0..l.len {
                 f.rets.push(l[i].t)
             }
         }
-        RetAbiSRet => {
-            f.params.push(TI64)
+        SRet => {
+            f.params.push(I64)
         }
     }
     for pi in 0..len(ptys) {
         pt := ptys[pi]
         match self.abi_param(pt) {
-            ParamAbiScalar(t) => {
+            Scalar(t) => {
                 f.params.push(t)
             }
-            ParamAbiFlat(l) => {
+            Flat(l) => {
                 for i in 0..l.len {
                     f.params.push(l[i].t)
                 }
             }
-            ParamAbiByRef => {
-                f.params.push(TI64)
+            ByRef => {
+                f.params.push(I64)
             }
         }
     }
@@ -956,22 +956,22 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
 // type of a constant initializer expression (for globals without annotation)
 fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match e.k {
-        EKInt(_) => return T_I64
-        EKFloat(_) => return T_F64
-        EKBool(_) => return T_BOOL
-        EKStr(_) => return T_STR
-        EKLit(t, _) => {
+        Int(_) => return T_I64
+        Float(_) => return T_F64
+        Bool(_) => return T_BOOL
+        Str(_) => return T_STR
+        Lit(t, _) => {
             env := map[str, i64]()
             return lower_opt_or(self.expr_type(t, &env), T_ERR)
         }
-        EKCall(c, _) => {
+        Call(c, _) => {
             env := map[str, i64]()
             match self.expr_type(c, &env) {
                 Some(t) => return t
                 None => {}
             }
         }
-        EKTuple(es) => {
+        Tuple(es) => {
             ts := vec[i64]()
             for i in 0..es.len {
                 t := self.const_type_of(&es[i])
@@ -980,9 +980,9 @@ fn const_type_of(self: *Cx, e: *Expr) -> i64 {
                 }
                 ts.push(t)
             }
-            return self.types.intern(TyKTuple(ts))
+            return self.types.intern(TyK.Tuple(ts))
         }
-        EKIdent(n) => {
+        Ident(n) => {
             if self.const_is_mem(n) {
                 match self.const_global(n) {
                     Some(g) => return g.0
@@ -995,10 +995,10 @@ fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match self.const_eval(e) {
         Some(cv) => {
             match cv {
-                CVInt(_) => return T_I64
-                CVFloat(_) => return T_F64
-                CVBool(_) => return T_BOOL
-                CVStr(_) => return T_STR
+                Int(_) => return T_I64
+                Float(_) => return T_F64
+                Bool(_) => return T_BOOL
+                Str(_) => return T_STR
             }
         }
         None => {}
@@ -1009,7 +1009,7 @@ fn const_type_of(self: *Cx, e: *Expr) -> i64 {
 // interpret an expression as a type (for literals, casts, generic args)
 fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
     match e.k {
-        EKIdent(n) => {
+        Ident(n) => {
             et, eok := env.get(n)
             if eok {
                 return Some(et)
@@ -1038,10 +1038,10 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
             }
             return None
         }
-        EKIndex(b, args) => {
+        Index(b, args) => {
             n: str
             match b.k {
-                EKIdent(bn) => {
+                Ident(bn) => {
                     n = bn
                 }
                 _ => return None
@@ -1070,11 +1070,11 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
             }
             panic("unwrap of None")
         }
-        EKTypeE(t) => {
+        TypeE(t) => {
             return Some(self.resolve(&t, env))
         }
-        EKUn(op, inner) => {
-            if op != UnOpDeref {
+        Un(op, inner) => {
+            if op != Deref {
                 return None
             }
             match self.expr_type(inner, env) {
@@ -1082,7 +1082,7 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
                 None => return None
             }
         }
-        EKTuple(es) => {
+        Tuple(es) => {
             ts := vec[i64]()
             for i in 0..es.len {
                 match self.expr_type(&es[i], env) {
@@ -1092,7 +1092,7 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
                     None => return None
                 }
             }
-            return Some(self.types.intern(TyKTuple(ts)))
+            return Some(self.types.intern(TyK.Tuple(ts)))
         }
         _ => {}
     }
@@ -1115,13 +1115,13 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
     self.const_kind.set(name, 0)
     mem := false
     match d.val.k {
-        EKLit(_, _) => {
+        Lit(_, _) => {
             mem = true
         }
-        EKTuple(_) => {
+        Tuple(_) => {
             mem = true
         }
-        EKCall(c, _) => {
+        Call(c, _) => {
             saved := self.errs.len
             save_scope := self.scope_prelude
             self.scope_prelude = self.internal_file(d.pos.file)
@@ -1129,13 +1129,13 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
             match self.expr_type(c, &env) {
                 Some(t) => {
                     match self.types.k(t) {
-                        TyKVec(_) => {
+                        Vec(_) => {
                             mem = true
                         }
-                        TyKQuat => {
+                        Quat => {
                             mem = true
                         }
-                        TyKMat4 => {
+                        Mat4 => {
                             mem = true
                         }
                         _ => {}
@@ -1146,7 +1146,7 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
             self.scope_prelude = save_scope
             self.errs.truncate(saved)
         }
-        EKIdent(n) => {
+        Ident(n) => {
             mem = n != name && self.const_is_mem(n)
         }
         _ => {}
@@ -1228,7 +1228,7 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
     }
     rel: str
     match args[0].k {
-        EKStr(s) => {
+        Str(s) => {
             rel = s
         }
         _ => {
@@ -1272,20 +1272,20 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
     st, has_st := self.const_vals.get(name)
     if has_st {
         match st {
-            CStateDone(t, v) => return Some((t, v))
-            CStateBusy => {
+            Done(t, v) => return Some((t, v))
+            Busy => {
                 bd, _ := self.const_decls.get(name)
                 self.err(bd.pos, fmt("constant `", name, "` depends on itself"))
                 return None
             }
-            CStateFailed => return None
+            Failed => return None
         }
     }
     d, has_decl := self.const_decls.get(name)
     if !has_decl {
         return None
     }
-    self.const_vals.set(d.name, CStateBusy)
+    self.const_vals.set(d.name, Busy)
     ty: Opt[i64] = None
     match d.ty {
         Some(t) => {
@@ -1303,51 +1303,51 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                     // typed constant: check/coerce
                     ok := false
                     match self.types.k(t) {
-                        TyKInt(bits, signed) => {
+                        Int(bits, signed) => {
                             match v0 {
-                                CVInt(i) => {
-                                    v = CVInt(lower_wrap_int(i, bits, signed))
+                                Int(i) => {
+                                    v = CV.Int(lower_wrap_int(i, bits, signed))
                                     ok = true
                                 }
                                 _ => {}
                             }
                         }
-                        TyKF64 => {
+                        F64 => {
                             match v0 {
-                                CVInt(i) => {
-                                    v = CVFloat(f64(i))
+                                Int(i) => {
+                                    v = Float(f64(i))
                                     ok = true
                                 }
-                                CVFloat(_) => {
+                                Float(_) => {
                                     ok = true
                                 }
                                 _ => {}
                             }
                         }
-                        TyKF32 => {
+                        F32 => {
                             match v0 {
-                                CVInt(i) => {
-                                    v = CVFloat(f64(i))
+                                Int(i) => {
+                                    v = Float(f64(i))
                                     ok = true
                                 }
-                                CVFloat(f) => {
-                                    v = CVFloat(f64(f32(f)))
-                                    ok = true
-                                }
-                                _ => {}
-                            }
-                        }
-                        TyKBool => {
-                            match v0 {
-                                CVBool(_) => {
+                                Float(f) => {
+                                    v = Float(f64(f32(f)))
                                     ok = true
                                 }
                                 _ => {}
                             }
                         }
-                        TyKSlice(et) => {
+                        Bool => {
                             match v0 {
-                                CVStr(_) => {
+                                Bool(_) => {
+                                    ok = true
+                                }
+                                _ => {}
+                            }
+                        }
+                        Slice(et) => {
+                            match v0 {
+                                Str(_) => {
                                     ok = et == T_U8
                                 }
                                 _ => {}
@@ -1361,14 +1361,14 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                 }
                 None => {}
             }
-            self.const_vals.set(d.name, CStateDone(ty, v))
+            self.const_vals.set(d.name, Done(ty, v))
             return Some((ty, v))
         }
         None => {
             if self.errs.len == nerr0 {
                 self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant"))
             }
-            self.const_vals.set(d.name, CStateFailed)
+            self.const_vals.set(d.name, Failed)
             return None
         }
     }
@@ -1378,43 +1378,43 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
 // integer (op) integer
 fn lower_const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
     match op {
-        BinOpAdd => return Some(CVInt(x + y))
-        BinOpSub => return Some(CVInt(x - y))
-        BinOpMul => return Some(CVInt(x * y))
-        BinOpDiv => {
+        Add => return Some(Int(x + y))
+        Sub => return Some(Int(x - y))
+        Mul => return Some(Int(x * y))
+        Div => {
             if y == 0 {
                 cx.err(pos, "division by zero in constant expression")
                 return None
             }
             if y == -1 {
                 // wrapping: MIN / -1 is MIN
-                return Some(CVInt(-x))
+                return Some(Int(-x))
             }
-            return Some(CVInt(x / y))
+            return Some(Int(x / y))
         }
-        BinOpRem => {
+        Rem => {
             if y == 0 {
                 cx.err(pos, "division by zero in constant expression")
                 return None
             }
             if y == -1 {
                 // wrapping: MIN % -1 is 0
-                return Some(CVInt(0))
+                return Some(Int(0))
             }
-            return Some(CVInt(x % y))
+            return Some(Int(x % y))
         }
-        BinOpAnd => return Some(CVInt(x & y))
-        BinOpOr => return Some(CVInt(x | y))
-        BinOpXor => return Some(CVInt(x ^ y))
+        And => return Some(Int(x & y))
+        Or => return Some(Int(x | y))
+        Xor => return Some(Int(x ^ y))
         // the shift count is taken modulo 64, as with wrapping_shl / wrapping_shr
-        BinOpShl => return Some(CVInt(x << (y & 63)))
-        BinOpShr => return Some(CVInt(x >> (y & 63)))
-        BinOpEq => return Some(CVBool(x == y))
-        BinOpNe => return Some(CVBool(x != y))
-        BinOpLt => return Some(CVBool(x < y))
-        BinOpLe => return Some(CVBool(x <= y))
-        BinOpGt => return Some(CVBool(x > y))
-        BinOpGe => return Some(CVBool(x >= y))
+        Shl => return Some(Int(x << (y & 63)))
+        Shr => return Some(Int(x >> (y & 63)))
+        Eq => return Some(Bool(x == y))
+        Ne => return Some(Bool(x != y))
+        Lt => return Some(Bool(x < y))
+        Le => return Some(Bool(x <= y))
+        Gt => return Some(Bool(x > y))
+        Ge => return Some(Bool(x >= y))
         _ => {}
     }
     return None
@@ -1425,8 +1425,8 @@ fn lower_const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
     match cx.const_eval(e) {
         Some(cv) => {
             match cv {
-                CVInt(i) => return (f64(i), true)
-                CVFloat(f) => return (f, true)
+                Int(i) => return (f64(i), true)
+                Float(f) => return (f, true)
                 _ => {}
             }
         }
@@ -1446,16 +1446,16 @@ fn lower_const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
         return None
     }
     match op {
-        BinOpAdd => return Some(CVFloat(x + y))
-        BinOpSub => return Some(CVFloat(x - y))
-        BinOpMul => return Some(CVFloat(x * y))
-        BinOpDiv => return Some(CVFloat(x / y))
-        BinOpEq => return Some(CVBool(x == y))
-        BinOpNe => return Some(CVBool(x != y))
-        BinOpLt => return Some(CVBool(x < y))
-        BinOpLe => return Some(CVBool(x <= y))
-        BinOpGt => return Some(CVBool(x > y))
-        BinOpGe => return Some(CVBool(x >= y))
+        Add => return Some(Float(x + y))
+        Sub => return Some(Float(x - y))
+        Mul => return Some(Float(x * y))
+        Div => return Some(Float(x / y))
+        Eq => return Some(Bool(x == y))
+        Ne => return Some(Bool(x != y))
+        Lt => return Some(Bool(x < y))
+        Le => return Some(Bool(x <= y))
+        Gt => return Some(Bool(x > y))
+        Ge => return Some(Bool(x >= y))
         _ => {}
     }
     return None
@@ -1463,11 +1463,11 @@ fn lower_const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
 
 fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
     match e.k {
-        EKInt(n) => return Some(CVInt(i64(n)))
-        EKFloat(f) => return Some(CVFloat(f))
-        EKBool(b) => return Some(CVBool(b))
-        EKStr(s) => return Some(CVStr(s))
-        EKIdent(n) => {
+        Int(n) => return Some(CV.Int(i64(n)))
+        Float(f) => return Some(CV.Float(f))
+        Bool(b) => return Some(CV.Bool(b))
+        Str(s) => return Some(CV.Str(s))
+        Ident(n) => {
             if self.const_decls.has(n) {
                 match self.const_named(n) {
                     Some(x) => return Some(x.1)
@@ -1476,26 +1476,26 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
             }
             return None
         }
-        EKUn(op, x) => {
+        Un(op, x) => {
             match self.const_eval(x) {
                 Some(v) => {
                     match v {
-                        CVInt(i) => {
-                            if op == UnOpNeg {
-                                return Some(CVInt(-i))
+                        Int(i) => {
+                            if op == Neg {
+                                return Some(CV.Int(-i))
                             }
-                            if op == UnOpBitNot {
-                                return Some(CVInt(~i))
-                            }
-                        }
-                        CVFloat(f) => {
-                            if op == UnOpNeg {
-                                return Some(CVFloat(-f))
+                            if op == BitNot {
+                                return Some(CV.Int(~i))
                             }
                         }
-                        CVBool(b) => {
-                            if op == UnOpNot {
-                                return Some(CVBool(!b))
+                        Float(f) => {
+                            if op == Neg {
+                                return Some(CV.Float(-f))
+                            }
+                        }
+                        Bool(b) => {
+                            if op == Not {
+                                return Some(CV.Bool(!b))
                             }
                         }
                         _ => {}
@@ -1505,7 +1505,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                 None => return None
             }
         }
-        EKBin(op, a, b) => {
+        Bin(op, a, b) => {
             x: CV
             match self.const_eval(a) {
                 Some(xv) => {
@@ -1521,28 +1521,28 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                 None => return None
             }
             match x {
-                CVInt(xi) => {
+                Int(xi) => {
                     match y {
-                        CVInt(yi) => return lower_const_bin_int(self, op, xi, yi, e.pos)
-                        CVFloat(_) => return lower_const_bin_float(self, op, a, b)
+                        Int(yi) => return lower_const_bin_int(self, op, xi, yi, e.pos)
+                        Float(_) => return lower_const_bin_float(self, op, a, b)
                         _ => return None
                     }
                 }
-                CVFloat(_) => {
+                Float(_) => {
                     match y {
-                        CVInt(_) => return lower_const_bin_float(self, op, a, b)
-                        CVFloat(_) => return lower_const_bin_float(self, op, a, b)
+                        Int(_) => return lower_const_bin_float(self, op, a, b)
+                        Float(_) => return lower_const_bin_float(self, op, a, b)
                         _ => return None
                     }
                 }
-                CVBool(xb) => {
+                Bool(xb) => {
                     match y {
-                        CVBool(yb) => {
+                        Bool(yb) => {
                             match op {
-                                BinOpLAnd => return Some(CVBool(xb && yb))
-                                BinOpLOr => return Some(CVBool(xb || yb))
-                                BinOpEq => return Some(CVBool(xb == yb))
-                                BinOpNe => return Some(CVBool(xb != yb))
+                                LAnd => return Some(CV.Bool(xb && yb))
+                                LOr => return Some(CV.Bool(xb || yb))
+                                Eq => return Some(CV.Bool(xb == yb))
+                                Ne => return Some(CV.Bool(xb != yb))
                                 _ => return None
                             }
                         }
@@ -1552,13 +1552,13 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                 _ => return None
             }
         }
-        EKCall(c, args) => {
+        Call(c, args) => {
             match c.k {
-                EKIdent(fname) => {
+                Ident(fname) => {
                     // embed("file"): the content of a file as a string constant
                     if fname == "embed" && !self.fn_names.has(fname) {
                         match self.embed_bytes(args.items(), e.pos) {
-                            Some(bytes) => return Some(CVStr(bytes))
+                            Some(bytes) => return Some(CV.Str(bytes))
                             None => return None
                         }
                     }
@@ -1583,24 +1583,24 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                     None => return None
                 }
                 match self.types.k(t) {
-                    TyKInt(bits, signed) => {
+                    Int(bits, signed) => {
                         match v {
-                            CVInt(i) => return Some(CVInt(lower_wrap_int(i, bits, signed)))
-                            CVFloat(f) => return Some(CVInt(lower_wrap_int(lower_f64_to_i64(f), bits, signed)))
+                            Int(i) => return Some(CV.Int(lower_wrap_int(i, bits, signed)))
+                            Float(f) => return Some(CV.Int(lower_wrap_int(lower_f64_to_i64(f), bits, signed)))
                             _ => return None
                         }
                     }
-                    TyKF64 => {
+                    F64 => {
                         match v {
-                            CVInt(i) => return Some(CVFloat(f64(i)))
-                            CVFloat(f) => return Some(CVFloat(f))
+                            Int(i) => return Some(CV.Float(f64(i)))
+                            Float(f) => return Some(CV.Float(f))
                             _ => return None
                         }
                     }
-                    TyKF32 => {
+                    F32 => {
                         match v {
-                            CVInt(i) => return Some(CVFloat(f64(f32(i))))
-                            CVFloat(f) => return Some(CVFloat(f64(f32(f))))
+                            Int(i) => return Some(CV.Float(f64(f32(i))))
+                            Float(f) => return Some(CV.Float(f64(f32(f))))
                             _ => return None
                         }
                     }
@@ -1609,10 +1609,10 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
             }
             if args.is_empty() {
                 match c.k {
-                    EKIndex(b, targs) => {
+                    Index(b, targs) => {
                         is_sizeof := false
                         match b.k {
-                            EKIdent(n) => {
+                            Ident(n) => {
                                 is_sizeof = n == "sizeof"
                             }
                             _ => {}
@@ -1620,7 +1620,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         if is_sizeof && targs.len == 1 {
                             env := map[str, i64]()
                             match self.expr_type(&targs[0], &env) {
-                                Some(t) => return Some(CVInt(self.types.size_of(t)))
+                                Some(t) => return Some(CV.Int(self.types.size_of(t)))
                                 None => return None
                             }
                         }
@@ -1640,9 +1640,9 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
 fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *Vec[(i64, RelocTarget)]) -> bool {
     k := self.types.k(ty)
     match e.k {
-        EKLit(te, items) => {
+        Lit(te, items) => {
             match k {
-                TyKArray(et, n) => {
+                Array(et, n) => {
                     env := map[str, i64]()
                     match self.expr_type(te, &env) {
                         Some(t) => {
@@ -1667,7 +1667,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                     }
                     return true
                 }
-                TyKStruct(sid) => {
+                Struct(sid) => {
                     env := map[str, i64]()
                     match self.expr_type(te, &env) {
                         Some(t) => {
@@ -1709,9 +1709,9 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                 _ => {}
             }
         }
-        EKTuple(es) => {
+        Tuple(es) => {
             match k {
-                TyKTuple(tys) => {
+                Tuple(tys) => {
                     if es.len != tys.len {
                         return false
                     }
@@ -1726,7 +1726,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                 _ => {}
             }
         }
-        EKIdent(n) => {
+        Ident(n) => {
             if self.const_is_mem(n) {
                 // another constant in read-only memory: copy its bytes
                 match self.const_global(n) {
@@ -1752,7 +1752,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                 }
             }
             match k {
-                TyKEnum(eid) => {
+                Enum(eid) => {
                     // a variant of an enum without data
                     vi := self.variant_of(self.types.enums[eid].decl, n)
                     if vi >= 0 && self.types.enums[eid].simple {
@@ -1761,7 +1761,7 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                     }
                     return false
                 }
-                TyKFn(ptys, rty) => {
+                Fn(ptys, rty) => {
                     // address of a (non-generic) function
                     di := -1
                     match self.find_fn(n) {
@@ -1781,36 +1781,36 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
                         self.err(e.pos, fmt("function `", n, "` does not have the type ", self.types.name(ty)))
                         return false
                     }
-                    relocs.push((off, RelocTargetFunc(fid)))
+                    relocs.push((off, Function(fid)))
                     return true
                 }
                 _ => {}
             }
         }
-        EKNil => {
+        Nil => {
             match k {
-                TyKPtr(_) => return true
-                TyKFn(_, _) => return true
+                Ptr(_) => return true
+                Fn(_, _) => return true
                 _ => {}
             }
         }
-        EKCall(c, args) => {
+        Call(c, args) => {
             // vec3(1.0, 2.0, 3.0) with constant components; mat4 from four constant columns
             is_vec := false
             n := 4
             et := T_F32
             es := 4
             match k {
-                TyKMat4 => {
+                Mat4 => {
                     is_vec = true
                     et = T_VEC4
                     es = 16
                 }
-                TyKVec(vn) => {
+                Vec(vn) => {
                     is_vec = true
                     n = vn
                 }
-                TyKQuat => {
+                Quat => {
                     is_vec = true
                 }
                 _ => {}
@@ -1846,56 +1846,56 @@ fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *V
         None => return false
     }
     match k {
-        TyKInt(bits, _) => {
+        Int(bits, _) => {
             match v {
-                CVInt(i) => {
+                Int(i) => {
                     lower_put_le(data, off, u64(i), bits / 8)
                     return true
                 }
                 _ => {}
             }
         }
-        TyKF32 => {
+        F32 => {
             match v {
-                CVFloat(f) => {
+                Float(f) => {
                     lower_put_le(data, off, u64(cast[u32](f32(f))), 4)
                     return true
                 }
-                CVInt(i) => {
+                Int(i) => {
                     lower_put_le(data, off, u64(cast[u32](f32(i))), 4)
                     return true
                 }
                 _ => {}
             }
         }
-        TyKF64 => {
+        F64 => {
             match v {
-                CVFloat(f) => {
+                Float(f) => {
                     lower_put_le(data, off, cast[u64](f), 8)
                     return true
                 }
-                CVInt(i) => {
+                Int(i) => {
                     lower_put_le(data, off, cast[u64](f64(i)), 8)
                     return true
                 }
                 _ => {}
             }
         }
-        TyKBool => {
+        Bool => {
             match v {
-                CVBool(b) => {
+                Bool(b) => {
                     data[off] = if b { u8(1) } else { u8(0) }
                     return true
                 }
                 _ => {}
             }
         }
-        TyKSlice(et) => {
+        Slice(et) => {
             match v {
-                CVStr(s) => {
+                Str(s) => {
                     if et == T_U8 {
                         g := self.string_global(s)
-                        relocs.push((off, RelocTargetGlobal(g, 0)))
+                        relocs.push((off, Glob(g, 0)))
                         lower_put_le(data, off + 8, u64(len(s)), 8)
                         return true
                     }
