@@ -2,3 +2,4 @@
 4:10: error: expected a closure literal `|a i64, b i64| bool { a < b }`
 5:10: error: expected a closure literal `|a i64, b i64| bool { a < b }`
 6:10: error: an anonymous function is written as a closure literal: `|a i64, b i64| bool { a < b }`
+8:9: error: a line cannot start with the binary operator `||` (end the previous line with it)

@@ -130,14 +130,14 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
     for i in 0..min(d.tparams.len, targs.len) {
         tenv.set(d.tparams.buf[i], targs.buf[i])
     }
-    lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, fmt("function `", d.name, "`"), d.pos, vec[(str, i64)]())
+    lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, vec[(str, i64)]())
 }
 
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
-// declared function, or the function of a closure literal. `caps` are the variables a
-// closure captures (name, type): the last IR parameter is then the environment, an array
-// of their addresses, and the names are declared in the outermost scope.
-fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], what str, pos Pos, caps Vec[(str, i64)]) {
+// declared function `name`, or the function of a closure literal (`name` is empty). `caps`
+// are the variables a closure captures (name, type): the last IR parameter is then the
+// environment, an array of their addresses, and the names are declared in the outermost scope.
+fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, caps Vec[(str, i64)]) {
     sig := cx.fn_sigs.buf[fid]
     ptys := sig.0
     rty := sig.1
@@ -222,6 +222,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
         } else if rty == T_UNIT {
             fx.terminate(TermRet(vec[i64]()))
         } else if v.ty == T_UNIT {
+            what := if name == "" { "the closure" } else { fmt("function `", name, "`") }
             fx.cx.err(body.end, fmt(what, " must return a value of type ", fx.cx.types.name(rty)))
             fx.terminate(TermTrap)
         } else {

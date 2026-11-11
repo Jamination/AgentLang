@@ -766,6 +766,12 @@ fn closure_expr(p *Parser, pos Pos) (Expr, bool) {
     p.i = start
     p.bars = save
     p.errs.truncate(nerr)
+    if start > 0 && (parser_tk_nl(p.toks.buf[start - 1].t) || parser_tk_p(p.toks.buf[start - 1].t, "{") || parser_tk_p(p.toks.buf[start - 1].t, ";")) {
+        // a statement that starts with `|` or `||` and is not a closure literal
+        op := if p.is_p("||") { "||" } else { "|" }
+        p.errs.push(Diag{pos: pos, msg: fmt("a line cannot start with the binary operator `", op, "` (end the previous line with it); a closure literal is written `|a i64, b i64| bool { a < b }`")})
+        return parser_fail[Expr]()
+    }
     t, ok := p.ty()
     p.bars = save
     if ok && !p.is_p("{") {

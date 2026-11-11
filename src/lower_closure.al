@@ -361,7 +361,7 @@ fn closure_lit(self *Fx, params *Vec[(str, TypeAst)], ret Opt[*TypeAst], body *B
     }
     self.cx.module.funcs.push(f)
     self.cx.fn_sigs.push((clone(&ptys), rty))
-    lower_fn_lower_body(self.cx, fid, params, body, self.tenv, "the closure", pos, caps)
+    lower_fn_lower_body(self.cx, fid, params, body, self.tenv, "", pos, caps)
     code := self.ins(OpFAddr, TI64, vec[i64](), fid)
     // where a plain function is expected, a literal without captures is one
     match expect {
