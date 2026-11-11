@@ -115,6 +115,11 @@ enum SK {
     SKAssert(Expr, Opt[Expr]),
     SKBlock(Block),
     SKDefer(Block),
+    // `name: for/while/loop ...`: the loop statement with its label
+    SKLabeled(str, *Stmt),
+    // `break name` / `continue name`
+    SKBreakTo(str),
+    SKContinueTo(str),
 }
 
 struct FnDecl {
@@ -174,6 +179,14 @@ struct TestDecl {
     pos Pos
 }
 
+// `type Name = T`: another name for the type `T`
+struct TypeDecl {
+    name str
+    ty TypeAst
+    pos Pos
+    is_priv bool
+}
+
 enum Decl {
     DeclFn(FnDecl),
     DeclStruct(StructDecl),
@@ -182,6 +195,7 @@ enum Decl {
     DeclGlobal(GlobalDecl),
     DeclTest(TestDecl),
     DeclUse(str, Pos),
+    DeclType(TypeDecl),
 }
 
 // the source forms of a list of types, separated by ", "

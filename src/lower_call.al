@@ -691,6 +691,47 @@ fn lower_call_eval_all(s *Fx, args []Expr) {
     }
 }
 
+// The receiver of a method call `recv.f(...)`: like `expr`, but a variable, field or element
+// stays a place also when its type is a scalar, so that `f` can be given its address if it
+// takes a pointer (`call_decl` loads the value at once if it does not).
+fn recv_val(self *Fx, recv *Expr) Val {
+    match recv.k {
+        EKField(b, name) => {
+            if name == "len" {
+                // the length of a slice or array, or a field called `len`
+                bv := self.lvalue_base(b)
+                match self.len_of(bv) {
+                    Some(v) => {
+                        return v
+                    }
+                    None => {}
+                }
+                match self.field_of(bv, name, recv.pos) {
+                    Some(p) => {
+                        return p
+                    }
+                    None => {
+                        return val_err()
+                    }
+                }
+            }
+        }
+        EKIndex(b, _) => {
+            // `f[T]`: an instantiation of a generic function, not an element
+            match b.k {
+                EKIdent(n) => {
+                    if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.global_decls.has(n) {
+                        return self.expr(recv, None)
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    return self.lvalue_base(recv)
+}
+
 fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
     match c.k {
         EKIdent(n) => {
@@ -818,7 +859,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                         }
                         self.cx.errs.truncate(saved)
                         if all {
-                            rv := self.expr(recv, None)
+                            rv := self.recv_val(recv)
                             if rv.ty == T_ERR {
                                 return val_err()
                             }
@@ -835,7 +876,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
             return self.call_indirect(fv, args, pos)
         }
         EKField(recv, name) => {
-            rv := self.expr(recv, None)
+            rv := self.recv_val(recv)
             if rv.ty == T_ERR {
                 return val_err()
             }
@@ -1035,6 +1076,18 @@ fn lower_call_param_accepts_adjust(s *Fx, is_recv bool, ty i64, t i64) bool {
     return is_recv && (lower_call_is_ptr_to(s.cx.types.k(t), ty) || lower_call_is_ptr_to(s.cx.types.k(ty), t))
 }
 
+// a type written in declaration `d`, resolved as `d`'s own file sees it (a prelude function
+// keeps meaning the prelude's types where the user shadows their names); errors are dropped
+fn lower_call_resolve_in(s *Fx, d *FnDecl, pt *TypeAst, env *Map[str, i64]) i64 {
+    saved := s.cx.errs.len
+    save_scope := s.cx.scope_prelude
+    s.cx.scope_prelude = s.cx.internal_file(d.pos.file)
+    t := s.cx.resolve(pt, env)
+    s.cx.scope_prelude = save_scope
+    s.cx.errs.truncate(saved)
+    return t
+}
+
 // unification binds the type parameters; the concrete parts are compared after resolution
 fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *TypeAst, ty i64) bool {
     env := lower_call_clone_env(base)
@@ -1044,9 +1097,7 @@ fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *Type
     if lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
         return true
     }
-    saved := s.cx.errs.len
-    t := s.cx.resolve(pt, &env)
-    s.cx.errs.truncate(saved)
+    t := lower_call_resolve_in(s, d, pt, &env)
     return t == ty
 }
 
@@ -1054,10 +1105,8 @@ fn lower_call_param_accepts_fits(s *Fx, d *FnDecl, base *Map[str, i64], pt *Type
 // (`explicit`: type arguments written at the call)
 fn param_accepts(self *Fx, d *FnDecl, pt *TypeAst, ty i64, is_recv bool, explicit Opt[[]i64]) bool {
     if d.tparams.len == 0 {
-        saved := self.cx.errs.len
         empty := map[str, i64]()
-        t := self.cx.resolve(pt, &empty)
-        self.cx.errs.truncate(saved)
+        t := lower_call_resolve_in(self, d, pt, &empty)
         return t == ty || lower_call_param_accepts_adjust(self, is_recv, ty, t)
     }
     base := map[str, i64]()
@@ -1100,10 +1149,8 @@ fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
     if lower_call_mentions_unbound(pt, d.tparams.items(), &empty) {
         return Some(2)
     }
-    saved := self.cx.errs.len
     empty2 := map[str, i64]()
-    t := self.cx.resolve(pt, &empty2)
-    self.cx.errs.truncate(saved)
+    t := lower_call_resolve_in(self, d, pt, &empty2)
     k := self.cx.types.k(t)
     is_i := self.cx.types.is_int(t)
     is_f := self.cx.types.is_float(t)
@@ -1293,10 +1340,8 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                     if d.tparams.len == 0 {
                         match d.ret {
                             Some(rt) => {
-                                saved := self.cx.errs.len
                                 empty := map[str, i64]()
-                                t := self.cx.resolve(&rt, &empty)
-                                self.cx.errs.truncate(saved)
+                                t := lower_call_resolve_in(self, d, &rt, &empty)
                                 if t == et {
                                     pick = di
                                     break
@@ -1358,6 +1403,8 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
     failed := false
     match recv {
         Some(rv) => {
+            // does the function take the address of the receiver (`*T` for a receiver `T`)?
+            by_ref := false
             if generic {
                 // try by value, then through a pointer in either direction
                 pt := &d.params.buf[0].1
@@ -1385,10 +1432,21 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
                     }
                     if ok {
                         env = e3
+                        by_ref = is_ptr_param
                     }
                 }
+            } else if rv.mem && rv.ty != T_ERR && self.cx.types.is_scalar(rv.ty) {
+                empty := map[str, i64]()
+                p0 := lower_call_resolve_in(self, d, &d.params.buf[0].1, &empty)
+                by_ref = lower_call_is_ptr_to(self.cx.types.k(p0), rv.ty)
             }
-            vals.buf[0] = Some(rv)
+            // a scalar receiver that is passed by value is read now, before the arguments
+            // are evaluated; one that is passed by pointer stays a place
+            rv0 := rv
+            if !by_ref {
+                rv0 = self.rvalue(rv)
+            }
+            vals.buf[0] = Some(rv0)
         }
         None => {}
     }
@@ -1431,7 +1489,8 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
                 exp = None
             } else {
-                t := self.cx.resolve(pt, &env)
+                // (errors in the parameter type are reported where the function is declared)
+                t := lower_call_resolve_in(self, d, pt, &env)
                 exp = Some(t)
             }
             v := self.expr(a, exp)
@@ -1500,11 +1559,24 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
             adjusted := false
             match self.cx.types.k(pt) {
                 TyKPtr(inner) => {
-                    if inner == v.ty && v.mem {
+                    if inner == v.ty && v.mem && is_some(v.lane) {
+                        self.err(pos, fmt("cannot pass a vector component by pointer to `", d.name, "` (copy it to a variable first)"))
+                        failed = true
+                        v = val_err()
+                        adjusted = true
+                    } else if inner == v.ty && v.mem && !v.ro {
                         if v.alias >> 4 != 0 {
                             self.cx.exposed.set(v.alias >> 4, true)
                         }
                         v = self.sval(pt, v.v)
+                        adjusted = true
+                    } else if inner == v.ty && v.ty != T_ERR {
+                        // not addressable (a computed value, a constant): the function
+                        // gets the address of a temporary copy
+                        t := self.temp(v.ty)
+                        tv := self.mval(v.ty, t)
+                        self.store(tv, v)
+                        v = self.sval(pt, t)
                         adjusted = true
                     }
                 }
@@ -1530,7 +1602,11 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b))
+            hint := ""
+            if lower_call_is_ptr_to(self.cx.types.k(pt), v.ty) {
+                hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
+            }
+            self.err(apos, fmt("argument `", d.params.buf[i].0, "` of `", d.name, "`: expected ", a, ", found ", b, hint))
             failed = true
         }
         final_vals.push(v)
@@ -1882,6 +1958,83 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
             r := self.ins(op, it, vec_of([]i64{s, c}), 0)
             return Some(self.sval(v.ty, r))
         }
+        "mulhi" => {
+            // the high half of the full (double-width) product of two integers of one type
+            if nargs != 2 {
+                self.err(pos, fmt("`", name, "` takes ", 2, " argument(s), got ", nargs))
+                return Some(val_err())
+            }
+            // an untyped literal takes the type of the other operand, else of the context
+            first := 0
+            if self.is_untyped(&args[0]) && !self.is_untyped(&args[1]) {
+                first = 1
+            }
+            var exp0 Opt[i64] = None
+            if self.is_untyped(&args[first]) {
+                match expect {
+                    Some(et) => {
+                        if self.cx.types.is_int(et) {
+                            exp0 = expect
+                        }
+                    }
+                    None => {}
+                }
+            }
+            v := self.expr(&args[first], exp0)
+            if v.ty == T_ERR {
+                return Some(val_err())
+            }
+            if !self.cx.types.is_int(v.ty) {
+                tn := self.tyname(v.ty)
+                self.err(args[first].pos, fmt("`mulhi` needs two integers of the same type, found ", tn))
+                return Some(val_err())
+            }
+            w := self.expr(&args[1 - first], Some(v.ty))
+            if w.ty == T_ERR {
+                return Some(val_err())
+            }
+            if w.ty != v.ty {
+                a := self.tyname(v.ty)
+                b := self.tyname(w.ty)
+                if first != 0 {
+                    a = self.tyname(w.ty)
+                    b = self.tyname(v.ty)
+                }
+                self.err(pos, fmt("`mulhi` needs two integers of the same type, found ", a, " and ", b, " (convert one explicitly, e.g. `", a, "(y)`)"))
+                return Some(val_err())
+            }
+            signed := self.cx.types.is_signed(v.ty)
+            it := self.irt(v.ty)
+            a := self.scalar(v)
+            b := self.scalar(w)
+            if it == TI64 {
+                var hop Op
+                if signed {
+                    hop = OpMulHiS
+                } else {
+                    hop = OpMulHiU
+                }
+                r := self.ins(hop, TI64, vec_of([]i64{a, b}), 0)
+                return Some(self.sval(v.ty, r))
+            }
+            // narrower types: the full product fits in 64 bits
+            var ext Op
+            var shr Op
+            if signed {
+                ext = OpSExt
+                shr = OpAShr
+            } else {
+                ext = OpZExt
+                shr = OpLShr
+            }
+            wa := self.ins(ext, TI64, vec_of([]i64{a}), 0)
+            wb := self.ins(ext, TI64, vec_of([]i64{b}), 0)
+            prod := self.ins(OpMul, TI64, vec_of([]i64{wa, wb}), 0)
+            bits := self.iconst(TI64, it.size() * 8)
+            hi := self.ins(shr, TI64, vec_of([]i64{prod, bits}), 0)
+            r := self.ins(OpTrunc, it, vec_of([]i64{hi}), 0)
+            return Some(self.sval(v.ty, r))
+        }
         "memcopy", "memfill" => {
             if nargs != 3 {
                 self.err(pos, fmt("`", name, "` takes ", 3, " argument(s), got ", nargs))
@@ -1918,40 +2071,14 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
         }
         "embed" => {
             // the bytes of a file, read at compile time (path relative to the source file)
-            if nargs != 1 {
-                self.err(pos, fmt("`", name, "` takes ", 1, " argument(s), got ", nargs))
-                return Some(val_err())
-            }
-            var rel str
-            match args[0].k {
-                EKStr(s) => {
-                    rel = s
+            match self.cx.embed_bytes(args, pos) {
+                Some(bytes) => {
+                    return Some(self.str_val(bytes))
                 }
-                _ => {
-                    self.err(args[0].pos, "`embed` takes a string literal path")
+                None => {
                     return Some(val_err())
                 }
             }
-            src := ""
-            if pos.file >= 0 && pos.file < self.cx.file_names.len {
-                src = self.cx.file_names.buf[pos.file]
-            }
-            dir := ""
-            if starts_with(src, "<") {
-                std_dir, have := env_get("ALC_STD_DIR")
-                if have {
-                    dir = std_dir
-                }
-            } else {
-                dir = lower_call_parent_dir(src)
-            }
-            path := lower_call_path_join(dir, rel)
-            bytes, ok := read_file(path)
-            if ok {
-                return Some(self.str_val(bytes))
-            }
-            self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(path)))
-            return Some(val_err())
         }
         "panic" => {
             if nargs != 1 {

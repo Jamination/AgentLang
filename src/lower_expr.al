@@ -116,7 +116,7 @@ fn is_untyped(self *Fx, e *Expr) bool {
             }
             d, has := self.cx.const_decls.get(n)
             if has && !is_some(d.ty) {
-                return true
+                return !self.cx.const_is_mem(n)
             }
             return self.cx.variants.has(n) && !self.cx.const_decls.has(n)
         }
@@ -423,6 +423,18 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
         None => {}
     }
     if self.cx.const_decls.has(n) {
+        if self.cx.const_is_mem(n) {
+            // an aggregate or vector constant: read from its read-only memory
+            match self.cx.const_global(n) {
+                Some(g) => {
+                    a := self.ins(OpGAddr, TI64, vec[i64](), g.1)
+                    m := self.mval(g.0, a)
+                    m.ro = true
+                    return self.rvalue(m)
+                }
+                None => { return val_err() }
+            }
+        }
         match self.cx.const_named(n) {
             Some(c) => { return self.const_val(c.0, c.1, expect, pos) }
             None => { return val_err() }
@@ -451,7 +463,7 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
         var no_args []Expr
         return self.construct_variant(vv.0, vv.1, no_args, expect, pos)
     }
-    if is_some(lower_builtin_type(n)) || self.tenv.has(n) || is_some(self.cx.find_struct(n)) {
+    if is_some(lower_builtin_type(n)) || self.tenv.has(n) || is_some(self.cx.find_struct(n)) || is_some(self.cx.find_alias(n)) {
         self.err(pos, fmt("type `", n, "` cannot be used as a value here"))
         return val_err()
     }
@@ -464,7 +476,54 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
     return val_err()
 }
 
+// the name of the constant that the place expression `e` is (a part of), if any
+fn const_root(self *Fx, e *Expr) Opt[str] {
+    match e.k {
+        EKIdent(n) => {
+            if !is_some(self.lookup(n)) && self.cx.const_decls.has(n) {
+                return Some(n)
+            }
+        }
+        EKField(b, _) => { return self.const_root(b) }
+        EKIndex(b, _) => { return self.const_root(b) }
+        _ => {}
+    }
+    return None
+}
+
+// "`TABLE` is a constant" for an attempt to modify (a part of) a constant: the constant
+// itself, its fields and elements, and what its strings point to are all read-only
+fn const_place_err(self *Fx, e *Expr, what str) {
+    match self.const_root(e) {
+        Some(n) => {
+            self.err(e.pos, fmt("`", n, "` is a constant: ", what, " (copy it to a variable, or declare it with `var` to make it a global variable)"))
+        }
+        None => {
+            self.err(e.pos, fmt("this is part of a constant: ", what))
+        }
+    }
+}
+
+// a place to assign to
 fn place(self *Fx, e *Expr) Opt[Val] {
+    if is_some(self.const_root(e)) {
+        self.const_place_err(e, "it cannot be assigned to")
+        return None
+    }
+    match self.place_raw(e) {
+        Some(p) => {
+            if p.ro {
+                self.const_place_err(e, "it cannot be assigned to")
+                return None
+            }
+            return Some(p)
+        }
+        None => {}
+    }
+    return None
+}
+
+fn place_raw(self *Fx, e *Expr) Opt[Val] {
     match e.k {
         EKIdent(n) => {
             match self.lookup(n) {
@@ -561,7 +620,19 @@ fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
     name := ast_plain(written)
     bv := self.auto_deref(base)
     match self.vec_field(bv, name, pos) {
-        Some(r) => { return r }
+        Some(r) => {
+            if bv.ro {
+                match r {
+                    Some(lane_v) => {
+                        rv := lane_v
+                        rv.ro = true
+                        return Some(rv)
+                    }
+                    None => {}
+                }
+            }
+            return r
+        }
         None => {}
     }
     match self.cx.types.k(bv.ty) {
@@ -583,6 +654,7 @@ fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
                 if self.cx.types.is_scalar(fty) {
                     v.alias = self.cx.types.field_alias(bv.ty, fi, fty)
                 }
+                v.ro = bv.ro
                 return Some(v)
             }
             tn := self.tyname(bv.ty)
@@ -603,6 +675,7 @@ fn field_of(self *Fx, base Val, written str, pos Pos) Opt[Val] {
                 if self.cx.types.is_scalar(tys.buf[i]) {
                     v.alias = self.cx.types.field_alias(bv.ty, i, tys.buf[i])
                 }
+                v.ro = bv.ro
                 return Some(v)
             }
             tn := self.tyname(bv.ty)
@@ -678,7 +751,14 @@ fn indexable(self *Fx, bv0 Val, pos Pos) Opt[(i64, i64, i64)] {
 fn index_place(self *Fx, b *Expr, idx *Expr, pos Pos) Opt[Val] {
     bv := self.lvalue_base(b)
     if is_some(self.cx.types.vec_lanes(bv.ty)) {
-        return self.vec_index(bv, idx, pos)
+        match self.vec_index(bv, idx, pos) {
+            Some(lane_v) => {
+                rv := lane_v
+                rv.ro = bv.ro
+                return Some(rv)
+            }
+            None => { return None }
+        }
     }
     var ptr_ i64
     var len_ i64
@@ -731,7 +811,16 @@ fn index_place(self *Fx, b *Expr, idx *Expr, pos Pos) Opt[Val] {
         off = self.ins(OpMul, TI64, vec_of([]i64{i, c}), 0)
     }
     a := self.ins(OpAdd, TI64, vec_of([]i64{ptr_, off}), 0)
-    return Some(self.mval(et, a))
+    ev := self.mval(et, a)
+    // the elements of an array (or matrix) constant are part of the constant
+    if bv.ro {
+        match self.cx.types.k(bv.ty) {
+            TyKArray(_, _) => { ev.ro = true }
+            TyKMat4 => { ev.ro = true }
+            _ => {}
+        }
+    }
+    return Some(ev)
 }
 
 fn slice_expr(self *Fx, b *Expr, lo Opt[*Expr], hi Opt[*Expr], pos Pos) Val {
@@ -890,8 +979,16 @@ fn unary(self *Fx, op UnOp, x *Expr, expect Opt[i64], pos Pos) Val {
                 self.err(pos, "cannot take the address of this expression (only variables, fields, elements and `&T{...}` literals)")
                 return val_err()
             }
-            match self.place(x) {
+            if is_some(self.const_root(x)) {
+                self.const_place_err(x, "its address cannot be taken")
+                return val_err()
+            }
+            match self.place_raw(x) {
                 Some(p) => {
+                    if p.ro {
+                        self.const_place_err(x, "its address cannot be taken")
+                        return val_err()
+                    }
                     if is_some(p.lane) {
                         self.err(pos, "cannot take the address of a vector component (copy it to a variable first)")
                         return val_err()

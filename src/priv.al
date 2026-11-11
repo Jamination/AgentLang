@@ -37,6 +37,7 @@ fn priv_decl_info(d *Decl) (str, i64, bool, Pos) {
         DeclEnum(e) => (e.name, 2, e.is_priv, e.pos)
         DeclConst(c) => (c.name, 2, c.is_priv, c.pos)
         DeclGlobal(g) => (g.name, 2, g.is_priv, g.pos)
+        DeclType(t) => (t.name, 2, t.is_priv, t.pos)
         DeclTest(t) => ("", 0, false, t.pos)
         DeclUse(path, pos) => ("", 0, false, pos)
     }
@@ -159,6 +160,11 @@ fn priv_rewrite(r *PrivCx, d Decl) Decl {
             g.ty = priv_opt_type(r, g.ty)
             g.init = priv_opt_expr(r, g.init)
             DeclGlobal(g)
+        }
+        DeclType(t) => {
+            t.name = priv_name(r, t.name)
+            priv_type(r, &t.ty)
+            DeclType(t)
         }
         DeclTest(t) => {
             priv_block(r, t.body)
@@ -434,6 +440,9 @@ fn priv_stmt(r *PrivCx, s *Stmt) bool {
             true
         }
         SKBreak => true
+        SKLabeled(label, st) => priv_stmt(r, st)
+        SKBreakTo(label) => true
+        SKContinueTo(label) => true
         SKContinue => true
         SKAssert(c, msg) => {
             var cc Expr = c

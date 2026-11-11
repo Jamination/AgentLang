@@ -1,0 +1,24 @@
+make_dir true 0 no error
+write true 0 no error
+read true 0 no error
+read missing false 2 no such file or directory
+read directory false 21 is a directory
+read below a file false 20 not a directory
+read /proc file true 0 no error
+write into missing directory false 2 no such file or directory
+write to a directory false 21 is a directory
+make_dir on a file false 17 file exists
+make_dir sub true 0 no error
+write true 0 no error
+remove_dir not empty false 39 directory not empty
+remove_file missing false 2 no such file or directory
+[] 2
+[a.txt, sub] 0
+load true 0 no error
+load missing false 2 no such file or directory
+read long path false 36 file name too long
+remove_file true 0 no error
+remove_file true 0 no error
+remove_dir true 0 no error
+remove_dir true 0 no error
+remove_dir again false 2 no such file or directory

@@ -5,10 +5,12 @@ struct Parser {
     i i64
     errs *Vec[Diag]
     no_lit bool
+    // inside the header of `if`, `while` or `for` (not `match`); only looked at with `no_lit`
+    hdr_stmt bool
 }
 
 fn parser_new(toks Vec[Token], errs *Vec[Diag]) Parser {
-    return Parser{toks: toks, i: 0, errs: errs, no_lit: false}
+    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_stmt: false}
 }
 
 // the failure result of a parsing function: (zero value, false)
@@ -68,6 +70,17 @@ fn parser_tk_id(t Tk) bool {
     match t {
         TkId(s) => {
             return true
+        }
+        _ => {}
+    }
+    return false
+}
+
+// is `t` the identifier `w`?
+fn parser_tk_word(t Tk, w str) bool {
+    match t {
+        TkId(s) => {
+            return s == w
         }
         _ => {}
     }
@@ -339,6 +352,11 @@ fn sync_decl(p *Parser) {
                     }
                 }
             }
+            TkId(s) => {
+                if depth <= 0 && s == "type" && p.i > 0 && parser_tk_nl(p.toks.buf[p.i - 1].t) {
+                    return
+                }
+            }
             _ => {}
         }
         p.bump()
@@ -419,6 +437,11 @@ fn parser_set_priv(d Decl, ppos Pos, errs *Vec[Diag]) Decl {
             g.is_priv = true
             g.pos = ppos
             DeclGlobal(g)
+        }
+        DeclType(t) => {
+            t.is_priv = true
+            t.pos = ppos
+            DeclType(t)
         }
         DeclTest(t) => d
         DeclUse(path, upos) => d
@@ -704,7 +727,26 @@ fn decl(p *Parser) (Decl, bool) {
             }
         }
     }
-    return p.err[Decl]("expected declaration (fn, struct, enum, const, var, test, use, extern, priv)")
+    // `type Name = T` (`type` is only special at the start of a declaration)
+    if parser_tk_word(p.peek(), "type") {
+        p.bump()
+        name, ok1 := p.ident()
+        if !ok1 {
+            return parser_fail[Decl]()
+        }
+        if p.is_p("[") {
+            return p.err[Decl]("a type alias cannot have type parameters: expected `=`")
+        }
+        if !p.expect_p("=") {
+            return parser_fail[Decl]()
+        }
+        at, ok2 := p.ty()
+        if !ok2 {
+            return parser_fail[Decl]()
+        }
+        return (DeclType(TypeDecl{name: name, ty: at, pos: pos}), true)
+    }
+    return p.err[Decl]("expected declaration (fn, struct, enum, type, const, var, test, use, extern, priv)")
 }
 
 // ---------- types ----------
@@ -889,17 +931,94 @@ fn sync_stmt(p *Parser) {
     }
 }
 
+// the scrutinee of a `match`
 fn header_expr(p *Parser) (Expr, bool) {
     save := p.no_lit
+    save_stmt := p.hdr_stmt
     p.no_lit = true
+    p.hdr_stmt = false
     e, ok := p.expr()
     p.no_lit = save
+    p.hdr_stmt = save_stmt
     return (e, ok)
+}
+
+// the condition of an `if` or `while`, or an expression of a `for` header
+fn stmt_header_expr(p *Parser) (Expr, bool) {
+    save := p.no_lit
+    save_stmt := p.hdr_stmt
+    p.no_lit = true
+    p.hdr_stmt = true
+    e, ok := p.expr()
+    p.no_lit = save
+    p.hdr_stmt = save_stmt
+    return (e, ok)
+}
+
+fn parser_tk_binop(t Tk) bool {
+    match t {
+        TkP(q) => {
+            match q {
+                "*", "/", "%", "+", "-", "<<", ">>", "&", "^", "|", "==", "!=", "<", "<=", ">", ">=", "&&", "||" => {
+                    return true
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    return false
+}
+
+// In a header (`if`, `while`, `for`, `match`) a `{` normally starts the body. With the
+// parser at a `{` that follows the type-like expression `e`, is it a `T{...}` literal?
+//  - yes if `e` is written as a type (`[]T`, `[N]T`): a type alone is not a value;
+//  - in the header of `if`, `while` and `for`: yes if the matching `}` is directly followed
+//    by `{` (that one starts the body), `.`, `[` or a binary operator; none of these can
+//    follow the body of such a statement;
+//  - after the scrutinee of a `match`: yes if the braces hold something but no `=>` of
+//    their own, which every match arm has.
+fn lit_in_header(p *Parser, e *Expr) bool {
+    match e.k {
+        EKTypeE(t) => {
+            return true
+        }
+        _ => {}
+    }
+    j := p.i
+    depth := 0
+    arrow := false
+    loop {
+        match p.toks.buf[j].t {
+            TkEof => {
+                return false
+            }
+            TkP(q) => {
+                if q == "{" {
+                    depth += 1
+                } else if q == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        break
+                    }
+                } else if q == "=>" && depth == 1 {
+                    arrow = true
+                }
+            }
+            _ => {}
+        }
+        j += 1
+    }
+    if !p.hdr_stmt {
+        return !arrow && j > p.i + 1
+    }
+    after := p.toks.buf[min(j + 1, p.toks.len - 1)].t
+    return parser_tk_p(after, "{") || parser_tk_p(after, ".") || parser_tk_p(after, "[") || parser_tk_binop(after)
 }
 
 fn if_stmt(p *Parser) ((Expr, Block, Opt[Block]), bool) {
     // `if` already consumed
-    c, ok1 := p.header_expr()
+    c, ok1 := p.stmt_header_expr()
     if !ok1 {
         return parser_fail[(Expr, Block, Opt[Block])]()
     }
@@ -980,7 +1099,7 @@ fn stmt_k(p *Parser) (SK, bool) {
         return (SKIf(r.0, r.1, r.2), true)
     }
     if p.eat_kw("while") {
-        c, ok1 := p.header_expr()
+        c, ok1 := p.stmt_header_expr()
         if !ok1 {
             return parser_fail[SK]()
         }
@@ -1013,20 +1132,20 @@ fn stmt_k(p *Parser) (SK, bool) {
         if !p.eat_kw("in") {
             return p.err[SK]("expected `in`")
         }
-        lo, ok3 := p.header_expr()
+        lo, ok3 := p.stmt_header_expr()
         if !ok3 {
             return parser_fail[SK]()
         }
         var hi Opt[Expr] = None
         incl := false
         if p.eat_p("..") {
-            h, ok4 := p.header_expr()
+            h, ok4 := p.stmt_header_expr()
             if !ok4 {
                 return parser_fail[SK]()
             }
             hi = Some(h)
         } else if p.eat_p("..=") {
-            h, ok4 := p.header_expr()
+            h, ok4 := p.stmt_header_expr()
             if !ok4 {
                 return parser_fail[SK]()
             }
@@ -1035,7 +1154,7 @@ fn stmt_k(p *Parser) (SK, bool) {
         }
         var step Opt[Expr] = None
         if p.eat_kw("by") {
-            st, ok5 := p.header_expr()
+            st, ok5 := p.stmt_header_expr()
             if !ok5 {
                 return parser_fail[SK]()
             }
@@ -1058,9 +1177,30 @@ fn stmt_k(p *Parser) (SK, bool) {
         return (SKReturn(Some(e)), true)
     }
     if p.eat_kw("break") {
+        // a label must be on the same line (a newline after `break` ends the statement)
+        match p.peek() {
+            TkId(label) => {
+                p.bump()
+                return (SKBreakTo(label), true)
+            }
+            _ => {}
+        }
+        if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+            return p.err[SK]("`break` leaves a loop and takes at most a loop label (`break outer`): expected end of statement")
+        }
         return (SKBreak, true)
     }
     if p.eat_kw("continue") {
+        match p.peek() {
+            TkId(label) => {
+                p.bump()
+                return (SKContinueTo(label), true)
+            }
+            _ => {}
+        }
+        if !(parser_tk_nl(p.peek()) || p.is_p(";") || p.is_p("}")) {
+            return p.err[SK]("`continue` takes at most a loop label (`continue outer`): expected end of statement")
+        }
         return (SKContinue, true)
     }
     if p.eat_kw("assert") {
@@ -1091,6 +1231,27 @@ fn stmt_k(p *Parser) (SK, bool) {
             return parser_fail[SK]()
         }
         return (SKBlock(b), true)
+    }
+    // a labelled loop: `name: for ...`, `name: while ...`, `name: loop ...`
+    if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ":") {
+        after := p.peek_at(2)
+        if parser_tk_kw(after, "for") || parser_tk_kw(after, "while") || parser_tk_kw(after, "loop") {
+            label, ok1 := p.ident()
+            if !ok1 {
+                return parser_fail[SK]()
+            }
+            p.bump()
+            inner, ok2 := p.stmt()
+            if !ok2 {
+                return parser_fail[SK]()
+            }
+            return (SKLabeled(label, parser_box(inner)), true)
+        }
+        if parser_tk_kw(after, "if") || parser_tk_kw(after, "match") || parser_tk_p(after, "{") {
+            p.bump()
+            p.bump()
+            return p.err[SK]("a label names a loop: expected `for`, `while` or `loop` after the label")
+        }
     }
     // multi-let: a, b := e
     if parser_tk_id(p.peek()) && parser_tk_p(p.peek_at(1), ",") {
@@ -1438,7 +1599,7 @@ fn postfix(p *Parser) (Expr, bool) {
                     return p.err[Expr]("expected field name")
                 }
             }
-        } else if p.is_p("{") && !p.no_lit && parser_typeish(&e) {
+        } else if p.is_p("{") && parser_typeish(&e) && (!p.no_lit || p.lit_in_header(&e)) {
             p.bump()
             save := p.no_lit
             p.no_lit = false

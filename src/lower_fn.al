@@ -7,6 +7,8 @@ struct Val {
     alias i64
     // for a place that is one f32 lane of a vector in memory: (lane, vector IR type)
     lane Opt[(i64, T)]
+    // a place inside a constant (read-only memory): not assignable, no address
+    ro bool
 }
 
 fn val_unit() Val {
@@ -44,6 +46,8 @@ struct Fx {
     sret Opt[i64]
     allocas Vec[i64]
     traps Map[(i64, i64), i64]
+    // labels of the enclosing labelled loops: (name, index of the loop in `loops`, line)
+    labels Vec[(str, i64, i64)]
 }
 
 fn lower_fn_str_less(a str, b str) bool {
@@ -81,6 +85,38 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
                 }
             }
         }
+        // two definitions of a name whose parameter types are the same once type aliases
+        // are resolved (the texts differ, so the declaration pass did not see it)
+        okeys := cx.fn_over.keys()
+        sort_by(okeys, lower_fn_str_less)
+        for n in okeys {
+            l, _ := cx.fn_over.get(n)
+            if l.len < 2 || !cx.fn_names.has(n) {
+                continue
+            }
+            for a in 1..l.len {
+                da := cx.fn_decls.buf[l.buf[a]]
+                if da.tparams.len != 0 || da.pos.file < check_from_file || cx.lazy_files.has(da.pos.file) {
+                    continue
+                }
+                fa, has_a := cx.fn_insts.get((l.buf[a], vec[i64]().items()))
+                if !has_a || contains(&cx.fn_sigs.buf[fa].0, T_ERR) {
+                    continue
+                }
+                for b in 0..a {
+                    db := cx.fn_decls.buf[l.buf[b]]
+                    if db.tparams.len != 0 {
+                        continue
+                    }
+                    fb, has_b := cx.fn_insts.get((l.buf[b], vec[i64]().items()))
+                    if has_b && cx.fn_sigs.buf[fa].0.items() == cx.fn_sigs.buf[fb].0.items() {
+                        at := cx.pos_str(db.pos)
+                        cx.err(da.pos, fmt("`", n, "` is already declared with these parameter types at ", at, " (", lower_new_sig(da), " and ", lower_new_sig(db), " are the same types)"))
+                        break
+                    }
+                }
+            }
+        }
         // and force evaluation of user constants / globals
         // (the names are visited in sorted order: the Rust source iterates a HashMap, whose
         // order is arbitrary)
@@ -107,6 +143,16 @@ fn lower_fn_lower_all(cx *Cx, entry str, check_from_file i64) {
         }
         for i in 0..gnames.len {
             cx.global(gnames.buf[i])
+        }
+        // and resolution of user type aliases
+        akeys := cx.alias_decls.keys()
+        sort_by(akeys, lower_fn_str_less)
+        for n in akeys {
+            d, _ := cx.alias_decls.get(n)
+            if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
+                cx.alias_type(d)
+                cx.flush_layout_errors(d.pos)
+            }
         }
     }
     // exposed scalar fields lose their private alias class
@@ -147,6 +193,7 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
         sret: None,
         allocas: vec[i64](),
         traps: map[(i64, i64), i64](),
+        labels: vec[(str, i64, i64)](),
     }
     fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
     fx.cur = fx.f.new_block()
@@ -586,6 +633,36 @@ fn lower_fn_break_continue(fx *Fx, pos Pos, is_break bool) {
     fx.dead = true
 }
 
+// `break label` / `continue label`
+fn lower_fn_break_continue_to(fx *Fx, pos Pos, is_break bool, label str) {
+    idx := -1
+    for i in fx.labels.len - 1..=0 by -1 {
+        if fx.labels.buf[i].0 == label {
+            idx = fx.labels.buf[i].1
+            break
+        }
+    }
+    word := if is_break { "break" } else { "continue" }
+    if idx < 0 || idx >= fx.loops.len {
+        if fx.labels.len == 0 {
+            fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (label a loop with `", label, ": for ...`, `", label, ": while ...` or `", label, ": loop ...`)"))
+        } else {
+            names := vec[str]()
+            for i in fx.labels.len - 1..=0 by -1 {
+                names.push(fmt("`", fx.labels.buf[i].0, "`"))
+            }
+            fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (labels in scope: ", join(names.items(), ", "), ")"))
+        }
+        return
+    }
+    l := fx.loops.buf[idx]
+    target := if is_break { l.brk } else { l.cont }
+    fx.run_defers_down_to(l.scope_depth)
+    fx.f.blocks.buf[fx.cur].term = TermJmp(target)
+    fx.cur = fx.f.new_block()
+    fx.dead = true
+}
+
 fn stmt(self *Fx, s *Stmt) {
     match s.k {
         SKExpr(e) => {
@@ -905,6 +982,23 @@ fn stmt(self *Fx, s *Stmt) {
             bp := new[Block]()
             *bp = b
             self.scopes.buf[self.scopes.len - 1].defers.push(bp)
+        }
+        SKLabeled(label, inner) => {
+            for i in 0..self.labels.len {
+                if self.labels.buf[i].0 == label {
+                    self.err(s.pos, fmt("loop label `", label, "` is already used by the enclosing loop at line ", self.labels.buf[i].2, " (give nested loops different labels)"))
+                }
+            }
+            // the loop statement pushes its entry of `loops` at the current length
+            self.labels.push((label, self.loops.len, s.pos.line))
+            self.stmt(inner)
+            self.labels.pop()
+        }
+        SKBreakTo(label) => {
+            lower_fn_break_continue_to(self, s.pos, true, label)
+        }
+        SKContinueTo(label) => {
+            lower_fn_break_continue_to(self, s.pos, false, label)
         }
     }
 }

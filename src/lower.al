@@ -75,6 +75,19 @@ struct Cx {
     // written name -> position of a `priv` declaration of it in some file (for the hint of
     // "unknown name" diagnostics)
     priv_decls Map[str, Pos]
+    // type aliases (`type Name = T`): visible declarations, the prelude's own, resolved
+    // targets, and how many resolutions of an alias are in progress
+    alias_decls Map[str, *TypeDecl]
+    p_alias_decls Map[str, *TypeDecl]
+    alias_tys Map[*TypeDecl, i64]
+    alias_depth Map[*TypeDecl, i64]
+    // constants: 1 = a scalar value (`const_vals`), 2 = an aggregate or vector in read-only
+    // memory (`const_mems`: type and global; type -1 while the initializer is evaluated),
+    // 0 = being classified
+    const_kind Map[str, i64]
+    const_mems Map[str, (i64, i64)]
+    // files read by `embed`, by path
+    embeds Map[str, str]
 }
 
 // for "unknown name" diagnostics: says that `n` exists as a private declaration of another file
@@ -191,6 +204,13 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         entry_file: 0xFFFF,
         lazy_files: map[i64, bool](),
         priv_decls: map[str, Pos](),
+        alias_decls: map[str, *TypeDecl](),
+        p_alias_decls: map[str, *TypeDecl](),
+        alias_tys: map[*TypeDecl, i64](),
+        alias_depth: map[*TypeDecl, i64](),
+        const_kind: map[str, i64](),
+        const_mems: map[str, (i64, i64)](),
+        embeds: map[str, str](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
@@ -198,7 +218,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
     for i in 0..len(decls) {
         var name str
         var pos Pos
-        // 1 = fn, 2 = struct, 3 = enum, 4 = const, 5 = global
+        // 1 = fn, 2 = struct, 3 = enum, 4 = const, 5 = global, 6 = type alias
         kind := 0
         // the declarations are copied to the heap once: the context keeps pointers to them
         var fp *FnDecl
@@ -206,6 +226,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         var ep *EnumDecl
         var cp *ConstDecl
         var gp *GlobalDecl
+        var tp *TypeDecl
         match decls[i] {
             DeclFn(f) => {
                 fp = new[FnDecl]()
@@ -241,6 +262,13 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
                 name = g.name
                 pos = g.pos
                 kind = 5
+            }
+            DeclType(t) => {
+                tp = new[TypeDecl]()
+                *tp = t
+                name = t.name
+                pos = t.pos
+                kind = 6
             }
             _ => {}
         }
@@ -283,9 +311,10 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
             } else if prev.file < np && pos.file >= np {
                 // a user declaration shadows a prelude declaration of the same name; types
                 // and values are looked up separately, so a function does not hide a type
-                if kind == 2 || kind == 3 {
+                if kind == 2 || kind == 3 || kind == 6 {
                     cx.struct_names.del(name)
                     cx.enum_names.del(name)
+                    cx.alias_decls.del(name)
                 } else {
                     cx.fn_names.del(name)
                     cx.const_decls.del(name)
@@ -341,6 +370,11 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
             cx.enum_decls.push(ep)
         } else if kind == 4 {
             cx.const_decls.set(name, cp)
+        } else if kind == 6 {
+            if pos.file < np {
+                cx.p_alias_decls.set(name, tp)
+            }
+            cx.alias_decls.set(name, tp)
         } else {
             cx.global_decls.set(name, gp)
         }
@@ -441,6 +475,50 @@ fn find_enum(self *Cx, n str) Opt[i64] {
     return None
 }
 
+// the type alias that `n` names
+fn find_alias(self *Cx, n str) Opt[*TypeDecl] {
+    if self.scope_prelude {
+        d, ok := self.p_alias_decls.get(n)
+        if ok {
+            return Some(d)
+        }
+        // the prelude's own structs and enums come before a user alias of the same name
+        if self.p_struct_names.has(n) || self.p_enum_names.has(n) {
+            return None
+        }
+    }
+    d, ok := self.alias_decls.get(n)
+    if ok {
+        return Some(d)
+    }
+    return None
+}
+
+// The type a type alias stands for. An alias may be reached again while its own target is
+// being resolved, through the fields of a struct or enum (`type List = *Node` with
+// `struct Node { next List }`): that second resolution ends at the struct, which is
+// registered by then. A third one means that the alias is defined in terms of itself.
+fn alias_type(self *Cx, d *TypeDecl) i64 {
+    known, found := self.alias_tys.get(d)
+    if found {
+        return known
+    }
+    depth := self.alias_depth.get_or(d, 0)
+    if depth >= 2 {
+        self.err(d.pos, fmt("type alias `", d.name, "` refers to itself (a recursive type needs a struct or enum: `struct ", d.name, " { ... }`)"))
+        return T_ERR
+    }
+    self.alias_depth.set(d, depth + 1)
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    env := map[str, i64]()
+    ty := self.resolve(&d.ty, &env)
+    self.scope_prelude = save_scope
+    self.alias_depth.set(d, depth)
+    self.alias_tys.set(d, ty)
+    return ty
+}
+
 fn internal_file(self *Cx, file i64) bool {
     return file < self.n_prelude || file == self.entry_file
 }
@@ -470,6 +548,16 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
                     Some(bt) => return bt
                     None => {}
                 }
+            }
+            match self.find_alias(n) {
+                Some(ad) => {
+                    if !args.is_empty() {
+                        self.err(pos, fmt("type alias `", n, "` takes no type arguments (it stands for ", ast_type_str(&ad.ty), ")"))
+                        return T_ERR
+                    }
+                    return self.alias_type(ad)
+                }
+                None => {}
             }
             targs := vec[i64]()
             for i in 0..args.len {
@@ -607,7 +695,7 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
         offsets: vec[i64](),
         size: 0,
         align: 1,
-        state: 0,
+        state: 3,
     })
     ty := self.types.intern(TyKStruct(sid))
     self.struct_insts.set((si, clone(targs).items()), ty)
@@ -631,6 +719,7 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
     }
     self.scope_prelude = save_scope
     self.types.structs.buf[sid].fields = fields
+    self.types.structs.buf[sid].state = 0
     return ty
 }
 
@@ -660,7 +749,7 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
         variants: vec[(str, Vec[i64])](),
         simple: simple,
         size: 8,
-        state: if simple { 2 } else { 0 },
+        state: if simple { 2 } else { 3 },
     })
     ty := self.types.intern(TyKEnum(eid))
     self.enum_insts.set((ei, clone(targs).items()), ty)
@@ -681,6 +770,9 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
     }
     self.scope_prelude = save_scope
     self.types.enums.buf[eid].variants = vars
+    if !simple {
+        self.types.enums.buf[eid].state = 0
+    }
     return ty
 }
 
@@ -909,7 +1001,29 @@ fn const_type_of(self *Cx, e *Expr) i64 {
         }
         EKCall(c, _) => {
             env := map[str, i64]()
-            return lower_opt_or(self.expr_type(c, &env), T_ERR)
+            match self.expr_type(c, &env) {
+                Some(t) => return t
+                None => {}
+            }
+        }
+        EKTuple(es) => {
+            ts := vec[i64]()
+            for i in 0..es.len {
+                t := self.const_type_of(&es.buf[i])
+                if t == T_ERR {
+                    return T_ERR
+                }
+                ts.push(t)
+            }
+            return self.types.intern(TyKTuple(ts))
+        }
+        EKIdent(n) => {
+            if self.const_is_mem(n) {
+                match self.const_global(n) {
+                    Some(g) => return g.0
+                    None => return T_ERR
+                }
+            }
         }
         _ => {}
     }
@@ -937,6 +1051,10 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
             }
             match lower_builtin_type(n) {
                 Some(bt) => return Some(bt)
+                None => {}
+            }
+            match self.find_alias(n) {
+                Some(ad) => return Some(self.alias_type(ad))
                 None => {}
             }
             match self.find_struct(n) {
@@ -1021,7 +1139,175 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
 }
 
 // ---------- constant evaluation ----------
+// Is constant `name` an aggregate or a vector, kept in read-only memory, rather than a
+// scalar value? Decided by the form of its initializer: a `T{...}` literal, a tuple, a
+// vector constructor, or the name of another such constant.
+fn const_is_mem(self *Cx, name str) bool {
+    k, known := self.const_kind.get(name)
+    if known {
+        return k == 2
+    }
+    d, has := self.const_decls.get(name)
+    if !has {
+        return false
+    }
+    self.const_kind.set(name, 0)
+    mem := false
+    match d.val.k {
+        EKLit(_, _) => {
+            mem = true
+        }
+        EKTuple(_) => {
+            mem = true
+        }
+        EKCall(c, _) => {
+            saved := self.errs.len
+            save_scope := self.scope_prelude
+            self.scope_prelude = self.internal_file(d.pos.file)
+            env := map[str, i64]()
+            match self.expr_type(c, &env) {
+                Some(t) => {
+                    match self.types.k(t) {
+                        TyKVec(_) => {
+                            mem = true
+                        }
+                        TyKQuat => {
+                            mem = true
+                        }
+                        TyKMat4 => {
+                            mem = true
+                        }
+                        _ => {}
+                    }
+                }
+                None => {}
+            }
+            self.scope_prelude = save_scope
+            self.errs.truncate(saved)
+        }
+        EKIdent(n) => {
+            mem = n != name && self.const_is_mem(n)
+        }
+        _ => {}
+    }
+    self.const_kind.set(name, if mem { 2 } else { 1 })
+    return mem
+}
+
+// the (type, global) of a constant that lives in read-only memory (see `const_is_mem`)
+fn const_global(self *Cx, name str) Opt[(i64, i64)] {
+    d, has_decl := self.const_decls.get(name)
+    if !has_decl {
+        return None
+    }
+    known, found := self.const_mems.get(name)
+    if found {
+        if known.0 == -1 {
+            self.err(d.pos, fmt("constant `", name, "` depends on itself"))
+            return None
+        }
+        if known.0 == T_ERR {
+            return None
+        }
+        return Some(known)
+    }
+    self.const_mems.set(name, (-1, 0))
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    ty := T_ERR
+    match d.ty {
+        Some(t) => {
+            env := map[str, i64]()
+            ty = self.resolve(&t, &env)
+        }
+        None => {
+            nerr := self.errs.len
+            ty = self.const_type_of(&d.val)
+            if ty == T_ERR && self.errs.len == nerr {
+                self.err(d.pos, fmt("cannot infer the type of constant `", name, "`: its value must be a compile-time constant of a known type (literals, other constants, function names, `T{...}` literals, tuples and vector constructors made of them)"))
+            }
+        }
+    }
+    self.flush_layout_errors(d.pos)
+    res := (T_ERR, 0)
+    if ty != T_ERR {
+        size := self.types.size_of(ty)
+        align := max(self.types.align_of(ty), 8)
+        data := vec_fill(size, u8(0))
+        relocs := vec[(i64, RelocTarget)]()
+        nerr := self.errs.len
+        if self.const_init(&d.val, ty, 0, &data, &relocs) {
+            gid := self.module.globals.len
+            self.module.globals.push(Global{name: d.name, size: size, align: align, data: Some(data), relocs: relocs, readonly: true})
+            res = (ty, gid)
+        } else if self.errs.len == nerr {
+            vt := self.const_type_of(&d.val)
+            self.errs.truncate(nerr)
+            if vt != T_ERR && vt != ty {
+                self.err(d.val.pos, fmt("constant `", name, "` is declared as ", self.types.name(ty), ", but its value has type ", self.types.name(vt)))
+            } else {
+                self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant of type ", self.types.name(ty), " (allowed: literals, other constants, function names, and `T{...}` literals, tuples and vector constructors made of them)"))
+            }
+        }
+    }
+    self.scope_prelude = save_scope
+    self.const_mems.set(name, res)
+    if res.0 == T_ERR {
+        return None
+    }
+    return Some(res)
+}
+
+// The bytes of the file that `embed(args)` at `pos` names (relative to the source file),
+// read once per path; None after reporting why not.
+fn embed_bytes(self *Cx, args []Expr, pos Pos) Opt[str] {
+    if len(args) != 1 {
+        self.err(pos, fmt("`embed` takes 1 argument(s), got ", len(args)))
+        return None
+    }
+    var rel str
+    match args[0].k {
+        EKStr(s) => {
+            rel = s
+        }
+        _ => {
+            self.err(args[0].pos, "`embed` takes a string literal path")
+            return None
+        }
+    }
+    src := ""
+    if pos.file >= 0 && pos.file < self.file_names.len {
+        src = self.file_names.buf[pos.file]
+    }
+    dir := ""
+    if starts_with(src, "<") {
+        std_dir, have := env_get("ALC_STD_DIR")
+        if have {
+            dir = std_dir
+        }
+    } else {
+        dir = lower_call_parent_dir(src)
+    }
+    path := lower_call_path_join(dir, rel)
+    cached, hit := self.embeds.get(path)
+    if hit {
+        return Some(cached)
+    }
+    bytes, ok := read_file(path)
+    if ok {
+        self.embeds.set(path, bytes)
+        return Some(bytes)
+    }
+    self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(path)))
+    return None
+}
+
 fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
+    if self.const_is_mem(name) {
+        // not a scalar value; evaluated here so that its errors are reported
+        self.const_global(name)
+        return None
+    }
     st, has_st := self.const_vals.get(name)
     if has_st {
         match st {
@@ -1047,6 +1333,7 @@ fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
         }
         None => {}
     }
+    nerr0 := self.errs.len
     match self.const_eval(&d.val) {
         Some(v0) => {
             v := v0
@@ -1117,7 +1404,9 @@ fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
             return Some((ty, v))
         }
         None => {
-            self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant"))
+            if self.errs.len == nerr0 {
+                self.err(d.val.pos, fmt("value of constant `", name, "` is not a compile-time constant"))
+            }
             self.const_vals.set(d.name, CStateFailed)
             return None
         }
@@ -1303,6 +1592,18 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
             }
         }
         EKCall(c, args) => {
+            match c.k {
+                EKIdent(fname) => {
+                    // embed("file"): the content of a file as a string constant
+                    if fname == "embed" && !self.fn_names.has(fname) {
+                        match self.embed_bytes(args.items(), e.pos) {
+                            Some(bytes) => return Some(CVStr(bytes))
+                            None => return None
+                        }
+                    }
+                }
+                _ => {}
+            }
             if args.len == 1 {
                 // numeric conversion of a constant: T(x); sizeof[T]()
                 env := map[str, i64]()
@@ -1447,8 +1748,58 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
                 _ => {}
             }
         }
-        EKIdent(n) => {
+        EKTuple(es) => {
             match k {
+                TyKTuple(tys) => {
+                    if es.len != tys.len {
+                        return false
+                    }
+                    offs := self.types.tuple_offsets(tys.items())
+                    for i in 0..es.len {
+                        if !self.const_init(&es.buf[i], tys.buf[i], off + offs.buf[i], data, relocs) {
+                            return false
+                        }
+                    }
+                    return true
+                }
+                _ => {}
+            }
+        }
+        EKIdent(n) => {
+            if self.const_is_mem(n) {
+                // another constant in read-only memory: copy its bytes
+                match self.const_global(n) {
+                    Some(g) => {
+                        if g.0 != ty {
+                            return false
+                        }
+                        match self.module.globals.buf[g.1].data {
+                            Some(src) => {
+                                for i in 0..src.len {
+                                    data.buf[off + i] = src.buf[i]
+                                }
+                            }
+                            None => {}
+                        }
+                        srel := self.module.globals.buf[g.1].relocs
+                        for i in 0..srel.len {
+                            relocs.push((off + srel.buf[i].0, srel.buf[i].1))
+                        }
+                        return true
+                    }
+                    None => return false
+                }
+            }
+            match k {
+                TyKEnum(eid) => {
+                    // a variant of an enum without data
+                    vv, is_variant := self.variants.get(n)
+                    if is_variant && self.types.enums.buf[eid].simple && self.types.enums.buf[eid].decl == vv.0 {
+                        lower_put_le(data, off, u64(vv.1), 8)
+                        return true
+                    }
+                    return false
+                }
                 TyKFn(ptys, rty) => {
                     // address of a (non-generic) function
                     di := -1

@@ -1,0 +1,37 @@
+0 no error
+read true 0 no error
+21
+read missing false 2 no such file or directory
+123 2
+read directory false 21 is a directory
+0
+read below a file false 20 not a directory
+read empty path false 2 no such file or directory
+read again true 0 no error
+write into missing directory false 2 no such file or directory
+write to a directory false 21 is a directory
+write true 0 no error
+read back true 0 no error
+hello
+read removed false 2 no such file or directory
+0 9 bad file descriptor
+0 no error
+1 operation not permitted
+2 no such file or directory
+5 input/output error
+9 bad file descriptor
+12 out of memory
+13 permission denied
+17 file exists
+20 not a directory
+21 is a directory
+22 invalid argument
+24 too many open files
+28 no space left on device
+30 read-only file system
+36 file name too long
+39 directory not empty
+40 too many levels of symbolic links
+77 os error 77
+4095 os error 4095
+-3 os error -3
