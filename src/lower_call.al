@@ -735,7 +735,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 "int", "float" => " (convert with a type name: `i64(x)`, `f64(x)`)"
                 _ => ""
             }
-            self.err(pos, fmt("unknown function `", n, "`", hint))
+            self.err(pos, fmt("unknown function `", n, "`", hint, self.cx.priv_hint(n)))
             lower_call_eval_all(self, args)
             return val_err()
         }
@@ -883,7 +883,7 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 }
             }
             tn := self.tyname(rv.ty)
-            self.err(pos, fmt("no function `", name, "` to call on ", tn, " (method calls `x.f(a)` mean `f(x, a)`)"))
+            self.err(pos, fmt("no function `", name, "` to call on ", tn, " (method calls `x.f(a)` mean `f(x, a)`)", self.cx.priv_hint(name)))
             return val_err()
         }
         EKTypeE(t) => {

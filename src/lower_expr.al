@@ -460,7 +460,7 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
         "self", "this" => " (methods are plain functions: name the receiver parameter explicitly)"
         _ => ""
     }
-    self.err(pos, fmt("unknown identifier `", n, "`", hint))
+    self.err(pos, fmt("unknown identifier `", n, "`", hint, self.cx.priv_hint(n)))
     return val_err()
 }
 
@@ -483,7 +483,7 @@ fn place(self *Fx, e *Expr) Opt[Val] {
             if self.cx.const_decls.has(n) || is_some(self.cx.find_fn(n)) {
                 self.err(e.pos, fmt("`", n, "` is not assignable"))
             } else {
-                self.err(e.pos, fmt("unknown variable `", n, "` (declare it with `:=`)"))
+                self.err(e.pos, fmt("unknown variable `", n, "` (declare it with `:=`)", self.cx.priv_hint(n)))
             }
             return None
         }
@@ -1517,7 +1517,13 @@ fn lit_type(self *Fx, te *Expr, expect Opt[i64]) Opt[i64] {
                     self.err(te.pos, fmt("generic struct `", n, "` needs type arguments here, e.g. `", n, "[i64]{...}`"))
                     return None
                 }
-                None => {}
+                None => {
+                    ph := self.cx.priv_hint(n)
+                    if len(ph) != 0 {
+                        self.err(te.pos, fmt("unknown type `", n, "`", ph))
+                        return None
+                    }
+                }
             }
         }
         _ => {}

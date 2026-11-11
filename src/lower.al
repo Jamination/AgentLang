@@ -72,6 +72,22 @@ struct Cx {
     // files whose declarations are only checked when something uses them
     lazy_files Map[i64, bool]
     n_prelude i64
+    // written name -> position of a `priv` declaration of it in some file (for the hint of
+    // "unknown name" diagnostics)
+    priv_decls Map[str, Pos]
+}
+
+// for "unknown name" diagnostics: says that `n` exists as a private declaration of another file
+fn priv_hint(self *Cx, n str) str {
+    pos, found := self.priv_decls.get(n)
+    if !found {
+        return ""
+    }
+    var fname str = "?"
+    if pos.file >= 0 && pos.file < self.file_names.len {
+        fname = self.file_names.buf[pos.file]
+    }
+    return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
 
 fn lower_builtin_type(name str) Opt[i64] {
@@ -174,6 +190,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         scope_prelude: false,
         entry_file: 0xFFFF,
         lazy_files: map[i64, bool](),
+        priv_decls: map[str, Pos](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
@@ -230,9 +247,12 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
         if kind == 0 {
             continue
         }
-        if is_some(lower_builtin_type(ast_plain(name))) {
+        if is_some(lower_builtin_type(name)) {
             cx.err(pos, fmt("`", name, "` is a builtin type name"))
             continue
+        }
+        if ast_is_private(name) && !cx.priv_decls.has(ast_plain(name)) {
+            cx.priv_decls.set(ast_plain(name), pos)
         }
         prev, has_prev := names.get(name)
         if has_prev {
@@ -474,7 +494,7 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
                 "void" => " (omit the result type instead)"
                 _ => ""
             }
-            self.err(pos, fmt("unknown type `", n, "`", hint))
+            self.err(pos, fmt("unknown type `", n, "`", hint, self.priv_hint(n)))
             return T_ERR
         }
         TypeAstPtr(e) => {

@@ -73,7 +73,9 @@ fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
                 errs.push(Diag{pos: pos, msg: fmt("`", name, "` is declared both with and without `priv` in this file (the other declaration is at line ", first.2, "): inside the file the name would be ambiguous; rename one of them")})
             }
         }
-        if is_private && !r.names.has(name) {
+        // a builtin type name is rejected as a declaration name anyway (cx_new): renaming it
+        // would only hide the type from the rest of the file
+        if is_private && !r.names.has(name) && !is_some(lower_builtin_type(name)) {
             r.names.set(name, fmt(name, "\x01", file))
         }
     }
