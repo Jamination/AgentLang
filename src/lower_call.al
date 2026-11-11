@@ -742,10 +742,14 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
         EKIdent(n) => {
             match self.lookup(n) {
                 Some(x) => {
-                    if x.0 < 0 {
+                    if x.0 < 0 && x.0 != LOWER_NESTED_OUTER {
                         return self.call_nested(-x.0 - 1, None, args, expect, pos)
                     }
                     fv := self.expr(c, None)
+                    if fv.ty == T_ERR {
+                        lower_call_eval_all(self, args)
+                        return val_err()
+                    }
                     return self.call_indirect(fv, args, pos)
                 }
                 None => {}
@@ -1439,7 +1443,7 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
 }
 
 // A call of the function declared by `d`: the top-level declaration `di`, or (`nest` >= 0)
-// the nested function `self.nested[nest]`, whose types are resolved already and which gets
+// the nested function `self.cx.nested[nest]`, whose types are resolved already and which gets
 // the addresses of the variables it uses as extra arguments.
 fn call_fn(self *Fx, d *FnDecl, di i64, nest i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Expr, expect Opt[i64], pos Pos, pre [](i64, Val)) Val {
     nrecv := if is_some(recv) { 1 } else { 0 }
@@ -1520,7 +1524,7 @@ fn call_fn(self *Fx, d *FnDecl, di i64, nest i64, explicit Opt[Vec[i64]], recv O
             } else if rv.mem && rv.ty != T_ERR && self.cx.types.is_scalar(rv.ty) {
                 p0 := T_ERR
                 if nest >= 0 {
-                    p0 = self.nested[nest].ptys[0]
+                    p0 = self.cx.nested[nest].ptys[0]
                 } else {
                     empty := map[str, i64]()
                     p0 = lower_call_resolve_in(self, d, &d.params[0].1, &empty)
@@ -1576,7 +1580,7 @@ fn call_fn(self *Fx, d *FnDecl, di i64, nest i64, explicit Opt[Vec[i64]], recv O
             if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
                 exp = None
             } else if nest >= 0 {
-                exp = Some(self.nested[nest].ptys[pi])
+                exp = Some(self.cx.nested[nest].ptys[pi])
             } else {
                 // (errors in the parameter type are reported where the function is declared)
                 t := lower_call_resolve_in(self, d, pt, &env)
@@ -1632,9 +1636,9 @@ fn call_fn(self *Fx, d *FnDecl, di i64, nest i64, explicit Opt[Vec[i64]], recv O
     var ptys Vec[i64]
     rty := T_UNIT
     if nest >= 0 {
-        fid = self.nested[nest].fid
-        ptys = clone(&self.nested[nest].ptys)
-        rty = self.nested[nest].rty
+        fid = self.cx.nested[nest].fid
+        ptys = clone(&self.cx.nested[nest].ptys)
+        rty = self.cx.nested[nest].rty
     } else {
         self.cx.inst_depth += 1
         if self.cx.inst_depth > 200 {
@@ -1711,15 +1715,6 @@ fn call_fn(self *Fx, d *FnDecl, di i64, nest i64, explicit Opt[Vec[i64]], recv O
     }
     if failed {
         return val_err()
-    }
-    if nest >= 0 {
-        // the addresses of the variables the nested function uses
-        for i in 0..self.nested[nest].caps.len {
-            c := self.nested[nest].caps[i]
-            pt := self.cx.types.ptr_to(c.ty)
-            ptys.push(pt)
-            final_vals.push(self.sval(pt, c.addr))
-        }
     }
     return self.emit_call(CalleeDirect(fid), ptys.items(), rty, final_vals)
 }

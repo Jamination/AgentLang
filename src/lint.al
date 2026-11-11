@@ -128,6 +128,7 @@ fn lint_expr(u *LintUse, e *Expr) bool {
             lint_block(u, &b)
         }
         EKTuple(es) => lint_exprs(u, &es)
+        EKFn(d) => true
         EKMatch(sc, arms) => {
             lint_expr(u, sc)
             for i in 0..arms.len {
@@ -229,8 +230,8 @@ fn lint_stmt(u *LintUse, s *Stmt) bool {
         SKLabeled(label, st) => lint_stmt(u, st)
         SKBreakTo(label) => true
         SKContinueTo(label) => true
-        // a use inside a nested function is a use
-        SKFn(d) => lint_block(u, &d.body)
+        // (a nested function does not see the variable)
+        SKFn(d) => true
     }
 }
 

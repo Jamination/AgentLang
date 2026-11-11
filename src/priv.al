@@ -334,6 +334,7 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
             priv_block(r, b)
         }
         EKTuple(es) => priv_exprs(r, &es)
+        EKFn(d) => priv_fn(r, d)
         EKMatch(sc, arms) => {
             priv_expr(r, sc)
             for i in 0..arms.len {

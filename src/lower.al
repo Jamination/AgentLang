@@ -93,6 +93,8 @@ struct Cx {
     p_variants Map[str, Vec[(i64, i64)]]
     // which layers declare a function, type, constant or global of a name: 1 = prelude, 2 = user
     decl_layers Map[str, i64]
+    // the nested and anonymous functions (lower_nested.al)
+    nested Vec[NestedFn]
 }
 
 // for "unknown name" diagnostics: says that `n` exists as a private declaration of another file

@@ -420,6 +420,7 @@ fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
             return self.mval(ty, t)
         }
         EKMatch(sc, arms) => { return self.match_expr(sc, arms.items(), true, expect, e.pos) }
+        EKFn(d) => { return self.nested_value(self.nested_lower(d)) }
     }
     return val_err()
 }
@@ -437,7 +438,7 @@ fn ident(self *Fx, n str, expect Opt[i64], pos Pos) Val {
     match self.lookup(n) {
         Some(x) => {
             if x.0 < 0 {
-                return self.nested_value(-x.0 - 1, pos)
+                return self.nested_ident(n, x.0, pos)
             }
             m := self.mval(x.0, x.1)
             return self.rvalue(m)
@@ -560,6 +561,10 @@ fn place_raw(self *Fx, e *Expr) Opt[Val] {
         EKIdent(n) => {
             match self.lookup(n) {
                 Some(x) => {
+                    if x.0 == LOWER_NESTED_OUTER {
+                        self.nested_outer_err(n, e.pos)
+                        return None
+                    }
                     if x.0 < 0 {
                         self.err(e.pos, fmt("`", n, "` is a nested function: it is not assignable"))
                         return None

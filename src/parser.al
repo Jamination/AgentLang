@@ -494,6 +494,75 @@ fn fn_rest(p *Parser, pos Pos, inl i64) (FnDecl, bool) {
     return (FnDecl{name: name, tparams: tparams, params: params, ret: ret, body: body, pos: pos, inl: inl, ext: None}, true)
 }
 
+// `fn (a A, b B) R` of an anonymous function; true if a `{` follows
+fn fn_header(p *Parser, params *Vec[(str, TypeAst)], ret *Opt[TypeAst]) bool {
+    p.bump()
+    if !p.eat_p("(") {
+        return false
+    }
+    while !p.is_p(")") {
+        if !parser_tk_id(p.peek()) {
+            return false
+        }
+        pn, ok1 := p.ident()
+        pt, ok2 := p.ty()
+        if !ok1 || !ok2 {
+            return false
+        }
+        params.push((pn, pt))
+        if !p.eat_p(",") {
+            break
+        }
+    }
+    if !p.eat_p(")") {
+        return false
+    }
+    if !p.is_p("{") {
+        if !p.starts_type() {
+            return false
+        }
+        rt, ok := p.ty()
+        if !ok {
+            return false
+        }
+        *ret = Some(rt)
+    }
+    return p.is_p("{")
+}
+
+// At `fn` where an expression starts: an anonymous function `fn(a A, b B) R { ... }`, or the
+// function type `fn(A, B) R` (a type argument, the type of a literal). It is an anonymous
+// function if the parameters have names and a body follows.
+fn fn_expr(p *Parser, pos Pos) (Expr, bool) {
+    if parser_tk_p(p.peek_at(1), "[") {
+        p.errs.push(Diag{pos: pos, msg: "an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a T) R { ... }`, or declare a generic function at the top level"})
+        return parser_fail[Expr]()
+    }
+    start := p.i
+    nerr := p.errs.len
+    params := vec[(str, TypeAst)]()
+    var ret Opt[TypeAst] = None
+    if p.fn_header(&params, &ret) {
+        body, ok := p.block()
+        if !ok {
+            return parser_fail[Expr]()
+        }
+        d := FnDecl{name: "", tparams: vec[str](), params: params, ret: ret, body: body, pos: pos, inl: 0, ext: None}
+        return (Expr{k: EKFn(parser_box(d)), pos: pos}, true)
+    }
+    p.i = start
+    p.errs.truncate(nerr)
+    t, ok := p.ty()
+    if !ok {
+        return parser_fail[Expr]()
+    }
+    if p.is_p("{") {
+        p.errs.push(Diag{pos: pos, msg: "an anonymous function names its parameters and gives each one a type, like any function: `fn(a i64, b i64) bool { a < b }` (`fn(A, B) R` alone is a function type)"})
+        return parser_fail[Expr]()
+    }
+    return (Expr{k: EKTypeE(t), pos: pos}, true)
+}
+
 fn decl(p *Parser) (Decl, bool) {
     if p.is_kw("priv") {
         return p.priv_decl()
@@ -1837,15 +1906,7 @@ fn primary(p *Parser) (Expr, bool) {
                 return (Expr{k: EKMatch(sb, r), pos: pos}, true)
             }
             if k == "fn" {
-                if parser_tk_p(p.peek_at(1), "(") && parser_tk_id(p.peek_at(2)) && (parser_tk_id(p.peek_at(3)) || parser_tk_p(p.peek_at(3), "*") || parser_tk_kw(p.peek_at(3), "fn")) {
-                    p.errs.push(Diag{pos: pos, msg: "there are no anonymous functions: declare a nested function with a name in the block (`fn less(a i64, b i64) bool { a < b }`) and use the name (`fn(A, B) R` is a function type)"})
-                    return parser_fail[Expr]()
-                }
-                t, ok := p.ty()
-                if !ok {
-                    return parser_fail[Expr]()
-                }
-                return (Expr{k: EKTypeE(t), pos: pos}, true)
+                return p.fn_expr(pos)
             }
         }
         TkP(q) => {

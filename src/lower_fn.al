@@ -51,15 +51,14 @@ struct Fx {
     // argument expressions that were evaluated ahead of their call (see `call_shared`):
     // `expr` yields the stored value instead of lowering the expression again
     memo Vec[(*Expr, Val)]
-    // the nested functions that can be called here (lower_nested.al); a name in `scopes`
-    // whose type slot is negative refers to the entry -(slot) - 1
-    nested Vec[NestedFn]
     // the blocks that are being lowered, outermost first
     blocks Vec[*Block]
-    // in a nested function: names declared after it in the enclosing function (name, line)
-    later Vec[(str, i64)]
-    // this is the body of a nested function
-    in_nested bool
+    // for the body of a nested or anonymous function (lower_nested.al): the function it is
+    // written in, which is being lowered at the same time; else nil
+    parent *Fx
+    // the nested and anonymous functions lowered for this function: (declaration, index in
+    // `cx.nested`)
+    nested_done Vec[(*FnDecl, i64)]
 }
 
 fn lower_fn_str_less(a str, b str) bool {
@@ -192,11 +191,9 @@ fn lower_fn_lower_fn(cx *Cx, fid i64, di i64, targs Vec[i64]) {
 }
 
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
-// top-level function (`nest` is nil) or a nested function. The IR parameters of a nested
-// function end with the addresses of the variables it uses of the enclosing function
-// (`nest.caps`); those names, and the nested functions it may call, are declared in the
-// outermost scope.
-fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, nest *NestCtx) {
+// top-level function (`parent` is nil), or a nested or anonymous function written in the
+// function that `parent` is lowering.
+fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block, tenv Map[str, i64], name str, pos Pos, parent *Fx) {
     sig := cx.fn_sigs[fid]
     ptys := sig.0
     rty := sig.1
@@ -215,6 +212,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
         allocas: vec[i64](),
         traps: map[(i64, i64), i64](),
         labels: vec[(str, i64, i64)](),
+        parent: parent,
     }
     fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
     fx.cur = fx.f.new_block()
@@ -258,38 +256,6 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
                 }
             }
         }
-    }
-    if nest != nil {
-        hidden := vec[i64]()
-        for i in 0..nest.caps.len {
-            c := nest.caps[i]
-            p := fx.ins(OpParam, TI64, vec[i64](), pi)
-            pi += 1
-            hidden.push(p)
-            if c.by_name && !fx.scopes[0].vars.has(c.name) {
-                fx.scopes[0].vars.set(c.name, (c.ty, p))
-            }
-        }
-        for i in 0..nest.imports.len {
-            // a nested function this one may call: what it needs is among the hidden parameters
-            imp := nest.imports[i]
-            mine := NestedFn{decl: imp.decl, shown: imp.shown, fid: imp.fid, ptys: imp.ptys, rty: imp.rty, caps: vec[Capture]()}
-            for j in 0..imp.caps.len {
-                c := imp.caps[j]
-                for k in 0..nest.caps.len {
-                    if nest.caps[k].addr == c.addr {
-                        mine.caps.push(Capture{name: c.name, ty: c.ty, addr: hidden[k], by_name: c.by_name})
-                        break
-                    }
-                }
-            }
-            if !fx.scopes[0].vars.has(imp.decl.name) {
-                fx.scopes[0].vars.set(imp.decl.name, (-(fx.nested.len + 1), 0))
-            }
-            fx.nested.push(mine)
-        }
-        fx.later = nest.later
-        fx.in_nested = true
     }
     want := rty != T_UNIT && rty != T_NEVER
     var expect Opt[i64] = None
@@ -571,12 +537,18 @@ fn run_defers_down_to(self *Fx, depth i64) {
     }
 }
 
+// A local name: (type, address) of a variable. A negative type slot is not a variable: a
+// nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
+// enclosing function, which a nested function cannot use.
 fn lookup(self *Fx, name str) Opt[(i64, i64)] {
     for si in self.scopes.len - 1..=0 by -1 {
         x, ok := self.scopes[si].vars.get(name)
         if ok {
             return Some(x)
         }
+    }
+    if self.parent != nil {
+        return lower_nested_outer(self.parent, name)
     }
     return None
 }
@@ -671,6 +643,7 @@ fn lower_fn_stmt_expr_kind(e *Expr) i64 {
         EKStr(_) => return 1
         EKBool(_) => return 1
         EKIdent(_) => return 1
+        EKFn(_) => return 1
         EKBin(op, _, _) => {
             if op == BinOpLAnd || op == BinOpLOr {
                 return 2
@@ -685,7 +658,7 @@ fn lower_fn_stmt_expr_kind(e *Expr) i64 {
 // `break` / `continue`
 fn lower_fn_break_continue(fx *Fx, pos Pos, is_break bool) {
     if fx.loops.len == 0 {
-        if fx.in_nested {
+        if fx.parent != nil {
             fx.err(pos, fmt("`break`/`continue` outside of a loop (the nested function `", fx.f.name, "` cannot leave a loop of the enclosing function: return a value and test it at the call)"))
         } else {
             fx.err(pos, "`break`/`continue` outside of a loop")
@@ -712,7 +685,7 @@ fn lower_fn_break_continue_to(fx *Fx, pos Pos, is_break bool, label str) {
     }
     word := if is_break { "break" } else { "continue" }
     if idx < 0 || idx >= fx.loops.len {
-        if fx.labels.len == 0 && fx.in_nested {
+        if fx.labels.len == 0 && fx.parent != nil {
             fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement in the nested function `", fx.f.name, "` (a nested function cannot leave a loop of the enclosing function: return a value and test it at the call)"))
         } else if fx.labels.len == 0 {
             fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (label a loop with `", label, ": for ...`, `", label, ": while ...` or `", label, ": loop ...`)"))

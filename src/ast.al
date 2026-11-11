@@ -72,6 +72,8 @@ enum EK {
     EKIf(*Expr, Block, Block),
     EKTuple(Vec[Expr]),
     EKMatch(*Expr, Vec[MatchArm]),
+    // anonymous function `fn(a A, b B) R { body }` (the declaration has an empty name)
+    EKFn(*FnDecl),
 }
 
 struct MatchArm {
