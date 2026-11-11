@@ -101,8 +101,8 @@ They are written with vector operators and compile to packed SSE code.
 ## Geometry
 
 ```
-struct Aabb { min vec3, max vec3 }      struct Ray { origin vec3, dir vec3 }
-struct Sphere { center vec3, radius f32 }   struct Plane { normal vec3, d f32 }   // dot(normal, p) == d
+Aabb :: struct { min: vec3, max: vec3 }      Ray :: struct { origin: vec3, dir: vec3 }
+Sphere :: struct { center: vec3, radius: f32 }   Plane :: struct { normal: vec3, d: f32 }   // dot(normal, p) == d
 ```
 
 | Functions | |
@@ -111,7 +111,7 @@ struct Sphere { center vec3, radius f32 }   struct Plane { normal vec3, d f32 } 
 | `intersects(aabb, aabb)` `intersects(sphere, sphere)` | touching counts |
 | `aabb_union(a, b)` | |
 | `closest_point(aabb \| sphere \| plane \| ray, p)` | |
-| `ray_hit(ray, aabb \| sphere \| plane) (f32, bool)` | distance along the ray (0 if it starts inside) and whether it hits |
+| `ray_hit(ray, aabb \| sphere \| plane) -> (f32, bool)` | distance along the ray (0 if it starts inside) and whether it hits |
 
 ## Easing (`f32`, t in 0..1)
 
@@ -121,7 +121,7 @@ ease_out_elastic ease_out_bounce ease_out_back`. All map 0 to 0 and 1 to 1.
 ## Colour
 
 `rgb_to_hsv(vec3) hsv_to_rgb(vec3)` (all components 0..1), `srgb_to_linear linear_to_srgb`
-(`f32` or `vec3`), `color_u32(vec4) u32` (RGBA8, red in the lowest byte, which is the byte
+(`f32` or `vec3`), `color_u32(vec4) -> u32` (RGBA8, red in the lowest byte, which is the byte
 order of an RGBA framebuffer) and `color_vec4(u32)`.
 
 ## Tests

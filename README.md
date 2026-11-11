@@ -15,18 +15,18 @@ AL is a small, statically typed, compiled language designed to be written by AI 
   collector, no borrow checker.
 
 ```
-enum Shape { Circle(f64), Rect(f64, f64) }
+Shape :: enum { Circle(f64), Rect(f64, f64) }
 
-fn area(s Shape) f64 {
+area :: (s: Shape) -> f64 {
     match s {
         Circle(r) => 3.14159 * r * r
         Rect(w, h) => w * h
     }
 }
 
-fn main() {
+main :: () {
     shapes := []Shape{Circle(1.0), Rect(2.0, 3.0), Circle(0.5)}
-    sort_by(shapes, fn(a Shape, b Shape) bool { area(a) > area(b) })
+    sort_by(shapes, (a: Shape, b: Shape) -> bool { area(a) > area(b) })
     for s in shapes {
         print(s, area(s))
     }

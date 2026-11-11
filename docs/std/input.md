@@ -53,9 +53,9 @@ letters and digits are consecutive: `KEY_A + 3 == KEY_D`, `KEY_0 + 7 == KEY_7`.
 ## Events
 
 ```
-enum EventKind { EventNone, EventClose, EventResize, EventFocus, EventUnfocus, EventKeyDown,
+EventKind :: enum { EventNone, EventClose, EventResize, EventFocus, EventUnfocus, EventKeyDown,
                  EventKeyUp, EventText, EventMouseMove, EventMouseDown, EventMouseUp, EventWheel }
-struct Event { kind EventKind, key i64, x i64, y i64, codepoint u32, mods u8, repeat bool }
+Event :: struct { kind: EventKind, key: i64, x: i64, y: i64, codepoint: u32, mods: u8, repeat: bool }
 ```
 
 | Kind | Fields |
@@ -71,78 +71,78 @@ struct Event { kind EventKind, key i64, x i64, y i64, codepoint u32, mods u8, re
 
 | Function | |
 |----------|---|
-| `push_event(q *EventQueue, e Event) bool` | append; false and `q.dropped += 1` when full |
-| `next_event(q *EventQueue) (Event, bool)` | remove the oldest; false when empty |
-| `clear_events(q *EventQueue)` | empty the queue |
+| `push_event(q: *EventQueue, e: Event) -> bool` | append; false and `q.dropped += 1` when full |
+| `next_event(q: *EventQueue) -> (Event, bool)` | remove the oldest; false when empty |
+| `clear_events(q: *EventQueue)` | empty the queue |
 
 `EventQueue` is a fixed ring buffer (`items`, `head`, `len`, `dropped`) of about 10 KB; keep
 it in a struct or allocate it with `new[EventQueue]()` rather than passing it by value.
 
 ## Input
 
-`struct Input` (zero value is ready to use) has public fields `keys`, `buttons` (state bits
+`Input :: struct` (zero value is ready to use) has public fields `keys`, `buttons` (state bits
 per key / mouse button), `mouse_x/y`, `mouse_dx/dy`, `wheel_x/y`, `focused`, `text`,
 `text_len` and `pad` (a `Gamepad`). Usually it is read through:
 
 | Function | |
 |----------|---|
-| `begin_frame(i *Input)` | start a new frame |
-| `feed(i *Input, e Event)` | apply one event |
-| `release_all(i *Input)` | release every held key and mouse button |
-| `key_down(i, key) bool` | the key is held |
-| `key_pressed(i, key) bool` | it went down this frame |
-| `key_released(i, key) bool` | it went up this frame |
-| `key_repeated(i, key) bool` | it auto-repeated this frame |
+| `begin_frame(i: *Input)` | start a new frame |
+| `feed(i: *Input, e: Event)` | apply one event |
+| `release_all(i: *Input)` | release every held key and mouse button |
+| `key_down(i, key) -> bool` | the key is held |
+| `key_pressed(i, key) -> bool` | it went down this frame |
+| `key_released(i, key) -> bool` | it went up this frame |
+| `key_repeated(i, key) -> bool` | it auto-repeated this frame |
 | `shift_down(i)`, `ctrl_down(i)`, `alt_down(i)` | either of the two modifier keys is held |
 | `mouse_down(i, button)`, `mouse_pressed(i, button)`, `mouse_released(i, button)` | the same for `MOUSE_*` buttons |
-| `mouse_pos(i) vec2` | pointer position in window pixels |
-| `mouse_delta(i) vec2` | pointer movement during this frame |
-| `wheel(i) vec2` | wheel steps during this frame |
-| `text(i) []u32` | code points typed this frame (view, valid until `begin_frame`) |
-| `text_utf8(i, buf []u8) str` | the same as UTF-8 written into `buf`; returns the used part |
-| `key_name(key) str` | `"A"`, `"Space"`, `"LShift"`, `"Kp7"`, ...; `"Unknown"` otherwise |
-| `key_from_name(name) i64` | inverse of `key_name`, ignoring letter case; `KEY_UNKNOWN` if none |
+| `mouse_pos(i) -> vec2` | pointer position in window pixels |
+| `mouse_delta(i) -> vec2` | pointer movement during this frame |
+| `wheel(i) -> vec2` | wheel steps during this frame |
+| `text(i) -> []u32` | code points typed this frame (view, valid until `begin_frame`) |
+| `text_utf8(i, buf: []u8) -> str` | the same as UTF-8 written into `buf`; returns the used part |
+| `key_name(key) -> str` | `"A"`, `"Space"`, `"LShift"`, `"Kp7"`, ...; `"Unknown"` otherwise |
+| `key_from_name(name) -> i64` | inverse of `key_name`, ignoring letter case; `KEY_UNKNOWN` if none |
 
 Unknown key or button numbers are never an error: queries return false, events are ignored.
 
 ## ActionMap
 
-An action is a small integer the game defines (`const ACT_JUMP = 4`). Any number of keys,
+An action is a small integer the game defines (`ACT_JUMP :: 4`). Any number of keys,
 mouse buttons and gamepad buttons can be bound to it; the game asks only about actions, and
 rebinding is a data change.
 
 | Function | |
 |----------|---|
-| `action_map() ActionMap` | an empty map |
-| `action(m, name str) i64` | id of a named action; registers the name on first use (ids count from 0 in registration order) |
-| `action_name(m, action) str` | the registered name, `""` if none |
+| `action_map() -> ActionMap` | an empty map |
+| `action(m, name: str) -> i64` | id of a named action; registers the name on first use (ids count from 0 in registration order) |
+| `action_name(m, action) -> str` | the registered name, `""` if none |
 | `bind_key(m, action, key)`, `bind_mouse(m, action, button)`, `bind_pad(m, action, button)` | add a binding |
 | `bind(m, action, source, code)` | the same with an explicit `BIND_*` source |
 | `unbind(m, action)` | remove all bindings of an action |
-| `action_down(m, i *Input, action) bool` | any bound input is held |
-| `action_pressed(m, i, action) bool` | any bound input went down this frame |
-| `action_released(m, i, action) bool` | a bound input went up this frame and none is held |
-| `action_axis(m, i, negative, positive) f32` | -1, 0 or 1 from two actions |
-| `action_vec2(m, i, left, right, down, up) vec2` | a direction of length 0 or 1 (diagonals normalized) |
+| `action_down(m, i: *Input, action) -> bool` | any bound input is held |
+| `action_pressed(m, i, action) -> bool` | any bound input went down this frame |
+| `action_released(m, i, action) -> bool` | a bound input went up this frame and none is held |
+| `action_axis(m, i, negative, positive) -> f32` | -1, 0 or 1 from two actions |
+| `action_vec2(m, i, left, right, down, up) -> vec2` | a direction of length 0 or 1 (diagonals normalized) |
 
 Use either your own constants or `action("name")` ids; if both are used for the same actions,
 register the names in the order of the constants. Gamepad bindings read `Input.pad`.
 
 ## Gamepad
 
-`struct Gamepad { fd, connected, buttons, axes }` reads the kernel joystick interface. Button
+`Gamepad :: struct { fd, connected, buttons, axes }` reads the kernel joystick interface. Button
 and axis numbers are those of the driver; the `PAD_*` constants match the common Xbox-style
 layout (xpad), other pads may differ. Triggers are axes from -1 (released) to 1.
 
 | Function | |
 |----------|---|
-| `gamepad_open(g *Gamepad, index i64) bool` | open `/dev/input/js<index>` non-blocking; false if absent |
-| `gamepad_poll(g) bool` | read all pending events; false once unplugged. Call after `begin_frame` / `poll(window)` each frame |
+| `gamepad_open(g: *Gamepad, index: i64) -> bool` | open `/dev/input/js<index>` non-blocking; false if absent |
+| `gamepad_poll(g) -> bool` | read all pending events; false once unplugged. Call after `begin_frame` / `poll(window)` each frame |
 | `gamepad_close(g)` | close and clear |
-| `gamepad_event(g, kind u8, number u8, value i16)` | apply one raw joystick event (what `gamepad_poll` does per event; useful for tests and replays) |
+| `gamepad_event(g, kind: u8, number: u8, value: i16)` | apply one raw joystick event (what `gamepad_poll` does per event; useful for tests and replays) |
 | `pad_down(g, button)`, `pad_pressed(g, button)`, `pad_released(g, button)` | button state |
-| `pad_axis(g, axis) f32` | axis in -1..1 (sticks: right / down positive) |
-| `pad_stick(g, axis_x, axis_y, deadzone f32) vec2` | two axes with a radial dead zone, rescaled to length 0..1 |
+| `pad_axis(g, axis) -> f32` | axis in -1..1 (sticks: right / down positive) |
+| `pad_stick(g, axis_x, axis_y, deadzone: f32) -> vec2` | two axes with a radial dead zone, rescaled to length 0..1 |
 
 `begin_frame` clears the pressed / released edges of `Input.pad` together with the keyboard's,
 so the pad embedded in the window's `Input` needs only `gamepad_open(&w.input.pad, 0)` once and
@@ -155,12 +155,12 @@ so the pad embedded in the window's `Input` needs only `gamepad_open(&w.input.pa
 // Action mapping on a scripted input sequence (no window needed).
 use std.input
 
-const ACT_LEFT = 0
-const ACT_RIGHT = 1
-const ACT_JUMP = 2
+ACT_LEFT :: 0
+ACT_RIGHT :: 1
+ACT_JUMP :: 2
 
-fn main() {
-    var inp Input
+main :: () {
+    inp: Input
     actions := action_map()
     actions.bind_key(ACT_LEFT, KEY_A)
     actions.bind_key(ACT_RIGHT, KEY_D)

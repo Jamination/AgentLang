@@ -8,7 +8,7 @@ libpng, no zlib, no libc, so programs using it stay static executables.
 // examples/image_demo.al
 use std.image
 
-fn main() {
+main :: () {
     img := image_new(256, 128, 4)
     for y in 0..img.h {
         for x in 0..img.w {
@@ -35,7 +35,7 @@ crc32 of the pixels: 282c2bf2
 ## Image
 
 ```
-struct Image { w i64, h i64, channels i64, pix []u8 }
+Image :: struct { w: i64, h: i64, channels: i64, pix: []u8 }
 ```
 
 Rows from top to bottom, pixels left to right, `channels` bytes per pixel: 1 = grey,
@@ -44,17 +44,17 @@ Rows from top to bottom, pixels left to right, `channels` bytes per pixel: 1 = g
 
 | Function | |
 |----------|---|
-| `image_new(w, h, channels) Image` | zeroed image (allocates `w * h * channels` bytes) |
-| `get(img, x, y, c) u8` / `set(&img, x, y, c, v)` | one channel |
-| `get(img, x, y) vec4` / `set(&img, x, y, vec4)` | a colour, components 0..1 (grey is spread, missing alpha is 1) |
-| `convert(img, channels) Image` | change the channel count (grey uses weights 77 / 150 / 29) |
+| `image_new(w, h, channels) -> Image` | zeroed image (allocates `w * h * channels` bytes) |
+| `get(img, x, y, c) -> u8` / `set(&img, x, y, c, v)` | one channel |
+| `get(img, x, y) -> vec4` / `set(&img, x, y, vec4)` | a colour, components 0..1 (grey is spread, missing alpha is 1) |
+| `convert(img, channels) -> Image` | change the channel count (grey uses weights 77 / 150 / 29) |
 | `flip_y(&img)` | in place; use it for APIs with a bottom-left origin |
-| `crop(img, x, y, w, h) Image` | a copy of a region |
+| `crop(img, x, y, w, h) -> Image` | a copy of a region |
 | `blit(&dst, src, x, y)` | copy `src` into `dst`, clipped at the edges |
 | `resize_nearest(img, w, h)` `resize_bilinear(img, w, h)` | |
 | `premultiply_alpha(&img)` | in place |
-| `generate_mipmap(img) Image` | half size, box filter |
-| `mipmap_chain(img) []Image` | the image and every level down to 1 x 1 |
+| `generate_mipmap(img) -> Image` | half size, box filter |
+| `mipmap_chain(img) -> []Image` | the image and every level down to 1 x 1 |
 
 Functions returning an `Image` allocate its pixels from the arena; load inside a
 `mark()` / `release()` scope when the image is temporary.
@@ -63,10 +63,10 @@ Functions returning an `Image` allocate its pixels from the arena; load inside a
 
 | Function | |
 |----------|---|
-| `image_load(path) (Image, bool)` | PNG or BMP, decided by the file's signature |
-| `image_decode(data []u8) (Image, bool)` | the same from memory (for `embed(...)`) |
-| `png_load` `png_decode` `png_save(path, img) bool` `png_encode(img) []u8` | |
-| `bmp_load` `bmp_decode` `bmp_save(path, img) bool` `bmp_encode(img) []u8` | |
+| `image_load(path) -> (Image, bool)` | PNG or BMP, decided by the file's signature |
+| `image_decode(data: []u8) -> (Image, bool)` | the same from memory (for `embed(...)`) |
+| `png_load` `png_decode` `png_save(path, img) -> bool` `png_encode(img) -> []u8` | |
+| `bmp_load` `bmp_decode` `bmp_save(path, img) -> bool` `bmp_encode(img) -> []u8` | |
 
 **PNG decoding** covers the whole format: colour types 0 / 2 / 3 / 4 / 6, bit depths 1 to 16
 (16-bit samples are reduced to 8), palettes with `tRNS` transparency, colour-key
@@ -87,11 +87,11 @@ BMPs are rejected.
 
 | Function | |
 |----------|---|
-| `inflate(data) ([]u8, bool)` / `deflate(data) []u8` | raw deflate streams |
-| `zlib_decompress(data) ([]u8, bool)` / `zlib_compress(data) []u8` | with the zlib header and Adler-32 |
-| `inflate_into(data, out) (i64, bool)` `zlib_decompress_into(data, out)` | into a buffer you provide (no allocation); returns the length |
-| `crc32(data) u32` `crc32(prev, data)` | the PNG / zip polynomial; the second form continues a running CRC |
-| `adler32(data) u32` `adler32(prev, data)` | |
+| `inflate(data) -> ([]u8, bool)` / `deflate(data) -> []u8` | raw deflate streams |
+| `zlib_decompress(data) -> ([]u8, bool)` / `zlib_compress(data) -> []u8` | with the zlib header and Adler-32 |
+| `inflate_into(data, out) -> (i64, bool)` `zlib_decompress_into(data, out)` | into a buffer you provide (no allocation); returns the length |
+| `crc32(data) -> u32` `crc32(prev, data)` | the PNG / zip polynomial; the second form continues a running CRC |
+| `adler32(data) -> u32` `adler32(prev, data)` | |
 
 ## Tests
 

@@ -20,7 +20,7 @@ Vulkan loader), which must be installed together with a driver.
 |---|----|
 | dispatchable handle: `VkInstance`, `VkPhysicalDevice`, `VkDevice`, `VkQueue`, `VkCommandBuffer` | `*u8` (`nil` = no handle) |
 | non-dispatchable handle: `VkBuffer`, `VkImage`, `VkPipeline`, `VkSurfaceKHR`, ... | `u64` (`0` or `VK_NULL_HANDLE` = no handle) |
-| enum (`VkFormat`, `VkResult`, `VkStructureType`, ...) | `i32`; values are constants with the C names: `const VK_FORMAT_R8G8B8A8_UNORM i32 = 37` |
+| enum (`VkFormat`, `VkResult`, `VkStructureType`, ...) | `i32`; values are constants with the C names: `VK_FORMAT_R8G8B8A8_UNORM : i32 : 37` |
 | flags (`VkImageUsageFlags`) and flag bits (`VK_IMAGE_USAGE_SAMPLED_BIT`) | `u32`; combine with `\|` |
 | 64-bit flags (`VkAccessFlags2`, `VkPipelineStageFlags2`, `VkFormatFeatureFlags2`) | `u64` |
 | `VkBool32` | `u32` (`VK_TRUE`, `VK_FALSE`) |
@@ -33,15 +33,15 @@ Vulkan loader), which must be installed together with a driver.
 | pointer to handle | `**u8` (dispatchable), `*u64` (non-dispatchable) |
 | fixed array member `float blendConstants[4]`, `char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE]` | `[4]f32`, `[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE]u8` |
 | array parameter `const float blendConstants[4]` | `*f32` |
-| union (`VkClearValue`, `VkClearColorValue`) | `struct { data [N]u32 }` of the union's size and alignment; build values with the helpers below |
+| union (`VkClearValue`, `VkClearColorValue`) | `struct { data: [N]u32 }` of the union's size and alignment; build values with the helpers below |
 | struct with bit-fields | not bound (a comment in `std/vk.al` names it; none in the current selection) |
-| command | `extern "libvulkan.so.1" fn vkXxx(...)` with the C parameter names |
+| command | `extern "libvulkan.so.1" vkXxx :: (...)` with the C parameter names |
 | `VK_API_VERSION_1_x`, `VK_NULL_HANDLE`, `VK_WHOLE_SIZE`, `VK_KHR_SWAPCHAIN_EXTENSION_NAME`, ... | constants (`u32`, `u64`, `str`) |
 | window-system types | `Display*`, `xcb_connection_t*`, `wl_display*`, `wl_surface*` are `*u8`; `Window`, `VisualID` are `u64`; `xcb_window_t`, `xcb_visualid_t` are `u32` |
 
 AL has no type aliases, so the C type of a field or parameter that became `i32`/`u32`/`u64`/`*u8`
 is kept as a comment: every struct field carries `// VkFormat`-style notes and every `extern` is
-preceded by its C prototype. `std/vk.al` is meant to be searched (`grep -n 'struct VkImageCreateInfo' -A 16 std/vk.al`).
+preceded by its C prototype. `std/vk.al` is meant to be searched (`grep -n 'VkImageCreateInfo :: struct' -A 16 std/vk.al`).
 
 A field or parameter whose name is an AL keyword would get a trailing underscore (none of the
 current names needs it). Struct names that are aliases in C (`VkPhysicalDeviceVariablePointerFeatures`)
@@ -50,9 +50,9 @@ are listed as comments only; use the name they point to.
 ## Passing things to Vulkan
 
 - **Handles** are plain values. Output handles are written through a pointer to a variable:
-  `var device *u8; vkCreateDevice(physical, &info, nil, &device)`,
-  `var image u64; vkCreateImage(device, &info, nil, &image)`.
-- **Structs** are passed by pointer (`&info`). `var s VkFoo` is zeroed, like `VkFoo s = {0}`.
+  `device: *u8; vkCreateDevice(physical, &info, nil, &device)`,
+  `image: u64; vkCreateImage(device, &info, nil, &image)`.
+- **Structs** are passed by pointer (`&info`). `s: VkFoo` is zeroed, like `VkFoo s = {0}`.
   Struct literals work as usual: `VkExtent3D{256, 256, 1}`, `VkAttachmentDescription{format: f, ...}`.
 - **Arrays**: use a local array and `ptr(array)` (or `&array[0]`), or a slice from `alloc`
   and `ptr(slice)`; the count goes into the matching `...Count` field as `u32`.
@@ -64,7 +64,7 @@ are listed as comments only; use the name they point to.
   then `info.ppEnabledExtensionNames = ptr(names)`.
 - **Unions**: `VkClearValue` and `VkClearColorValue` are opaque word arrays; create them with
   `vk_clear_color`, `vk_clear_depth`, ... (`pass_begin.pClearValues = &clear`).
-- **Mapped memory**: `var p *u8; vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &p)`, then
+- **Mapped memory**: `p: *u8; vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &p)`, then
   `memcopy(p, ptr(data), nbytes)` or `mkslice[u8](p, nbytes)`.
 - **Callbacks** (`pfnUserCallback`, allocation callbacks): an AL function with scalar/pointer
   parameters, stored with `cast[*u8](my_callback)` (see the debug messenger below).
@@ -74,7 +74,7 @@ are listed as comments only; use the name they point to.
   and are reached the C way, through `vkGetInstanceProcAddr` and a cast to a function type:
 
   ```
-  fn on_message(severity u32, kind u32, data *VkDebugUtilsMessengerCallbackDataEXT, user *u8) u32 {
+  on_message :: (severity: u32, kind: u32, data: *VkDebugUtilsMessengerCallbackDataEXT, user: *u8) -> u32 {
       print(from_cstr(data.pMessage))
       VK_FALSE
   }
@@ -83,9 +83,9 @@ are listed as comments only; use the name they point to.
   m.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
   m.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
   m.pfnUserCallback = cast[*u8](on_message)
-  create := cast[fn(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) i32](
+  create := cast[(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbacks, *u64) -> i32](
       vkGetInstanceProcAddr(instance, ptr("vkCreateDebugUtilsMessengerEXT")))
-  var messenger u64
+  messenger: u64
   vk_check(create(instance, &m, nil, &messenger), "vkCreateDebugUtilsMessengerEXT")
   ```
 
@@ -97,17 +97,17 @@ None of the bindings allocates. Vulkan commands return `i32` `VkResult` values a
 
 | Function | Purpose |
 |----------|---------|
-| `vk_check(result i32, what str)` | panics with `what: VK_ERROR_...` unless `result == VK_SUCCESS`. For calls that cannot fail in a correct program; test `result` yourself where failure is a run-time condition (instance/device creation, swapchain acquisition) |
-| `vk_result_name(result i32) str` | `"VK_SUCCESS"`, `"VK_ERROR_DEVICE_LOST"`, ...; no allocation |
-| `vk_make_version(major, minor, patch u32) u32` | packed version number, as `VK_MAKE_API_VERSION(0, ...)` |
+| `vk_check(result: i32, what: str)` | panics with `what: VK_ERROR_...` unless `result == VK_SUCCESS`. For calls that cannot fail in a correct program; test `result` yourself where failure is a run-time condition (instance/device creation, swapchain acquisition) |
+| `vk_result_name(result: i32) -> str` | `"VK_SUCCESS"`, `"VK_ERROR_DEVICE_LOST"`, ...; no allocation |
+| `vk_make_version(major, minor, patch: u32) -> u32` | packed version number, as `VK_MAKE_API_VERSION(0, ...)` |
 | `vk_version_major(v)`, `vk_version_minor(v)`, `vk_version_patch(v)` | unpack a version |
 | `vk_instance_create_info()`, `vk_device_create_info()`, `vk_buffer_create_info()`, ... | one constructor per struct that has an `sType`: returns the zeroed struct with `sType` set. The name is the struct name in snake case: `VkPipelineShaderStageCreateInfo` → `vk_pipeline_shader_stage_create_info()`, `VkXlibSurfaceCreateInfoKHR` → `vk_xlib_surface_create_info_khr()` |
-| `vk_clear_color(r, g, b, a f32) VkClearValue` | clear value of a float/normalised colour attachment |
-| `vk_clear_color_int(r, g, b, a i32)`, `vk_clear_color_uint(r, g, b, a u32)` | the same for integer formats |
-| `vk_clear_depth(depth f32, stencil u32) VkClearValue` | clear value of a depth/stencil attachment |
-| `vk_clear_color_value(r, g, b, a f32) VkClearColorValue` | for `vkCmdClearColorImage` |
-| `vk_find_memory_type(props *VkPhysicalDeviceMemoryProperties, type_bits u32, flags u32) (u32, bool)` | first memory type allowed by `memoryTypeBits` that has all the `VK_MEMORY_PROPERTY_...` flags |
-| `vk_create_shader_module(device *u8, code []u8) (u64, bool)` | shader module from SPIR-V bytes, typically `embed("x.spv")`. Uses temporary arena memory (released before returning) if the bytes are not 4-byte aligned |
+| `vk_clear_color(r, g, b, a: f32) -> VkClearValue` | clear value of a float/normalised colour attachment |
+| `vk_clear_color_int(r, g, b, a: i32)`, `vk_clear_color_uint(r, g, b, a: u32)` | the same for integer formats |
+| `vk_clear_depth(depth: f32, stencil: u32) -> VkClearValue` | clear value of a depth/stencil attachment |
+| `vk_clear_color_value(r, g, b, a: f32) -> VkClearColorValue` | for `vkCmdClearColorImage` |
+| `vk_find_memory_type(props: *VkPhysicalDeviceMemoryProperties, type_bits: u32, flags: u32) -> (u32, bool)` | first memory type allowed by `memoryTypeBits` that has all the `VK_MEMORY_PROPERTY_...` flags |
+| `vk_create_shader_module(device: *u8, code: []u8) -> (u64, bool)` | shader module from SPIR-V bytes, typically `embed("x.spv")`. Uses temporary arena memory (released before returning) if the bytes are not 4-byte aligned |
 
 Constant groups: `VK_API_VERSION_1_0` .. `VK_API_VERSION_1_3`, `VK_NULL_HANDLE`, the API constants
 (`VK_WHOLE_SIZE`, `VK_QUEUE_FAMILY_IGNORED`, `VK_SUBPASS_EXTERNAL`, `VK_MAX_...`), every enum and
@@ -119,8 +119,8 @@ extension `VK_..._EXTENSION_NAME` (`str`) and `VK_..._SPEC_VERSION`.
 ```
 use std.vk
 
-fn main() i64 {
-    var version u32
+main :: () -> i64 {
+    version: u32
     vk_check(vkEnumerateInstanceVersion(&version), "vkEnumerateInstanceVersion")
     print("loader:", vk_version_major(version), vk_version_minor(version))
 
@@ -129,18 +129,18 @@ fn main() i64 {
     app.apiVersion = VK_API_VERSION_1_0
     info := vk_instance_create_info()
     info.pApplicationInfo = &app
-    var instance *u8
+    instance: *u8
     r := vkCreateInstance(&info, nil, &instance)
     if r != VK_SUCCESS {
         print("no Vulkan:", vk_result_name(r))
         return 77
     }
 
-    var devices [8]*u8
-    var count u32 = 8
+    devices: [8]*u8
+    count: u32 = 8
     vkEnumeratePhysicalDevices(instance, &count, ptr(devices))
     for i in 0..i64(count) {
-        var props VkPhysicalDeviceProperties
+        props: VkPhysicalDeviceProperties
         vkGetPhysicalDeviceProperties(devices[i], &props)
         print(from_cstr(ptr(props.deviceName)), "api", vk_version_major(props.apiVersion),
             vk_version_minor(props.apiVersion), "max texture", props.limits.maxImageDimension2D)

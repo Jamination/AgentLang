@@ -25,11 +25,11 @@ Contents: [Quick tour](#quick-tour) · [Lexical structure](#lexical-structure) �
 ## Quick tour
 
 ```
-struct Point { x f64, y f64 }
+Point :: struct { x: f64, y: f64 }
 
-enum Shape { Circle(Point, f64), Rect(Point, Point), Empty }
+Shape :: enum { Circle(Point, f64), Rect(Point, Point), Empty }
 
-fn area(s Shape) f64 {
+area :: (s: Shape) -> f64 {
     match s {
         Circle(c, r) => 3.141592653589793 * r * r
         Rect(a, b) => (b.x - a.x) * (b.y - a.y)
@@ -37,7 +37,7 @@ fn area(s Shape) f64 {
     }
 }
 
-fn largest[T](items []T, less fn(T, T) bool) T {
+largest[T] :: (items: []T, less: (T, T) -> bool) -> T {
     best := items[0]
     for x in items {
         if less(best, x) {
@@ -47,9 +47,9 @@ fn largest[T](items []T, less fn(T, T) bool) T {
     best
 }
 
-fn main() {
+main :: () {
     shapes := []Shape{Circle(Point{0.0, 0.0}, 1.0), Rect(Point{0.0, 0.0}, Point{2.0, 3.0}), Empty}
-    print("largest:", largest(shapes, fn(a Shape, b Shape) bool { area(a) < area(b) }))
+    print("largest:", largest(shapes, (a: Shape, b: Shape) -> bool { area(a) < area(b) }))
     // largest: Rect(Point{x: 0.0, y: 0.0}, Point{x: 2.0, y: 3.0})
     counts := map[str, i64]()
     words := vec[str]()
@@ -58,10 +58,10 @@ fn main() {
         words.push(w)
     }
     often := 0
-    fn tally(w str) {                      // sees and changes the variables of main
-        if counts.get_or(w, 0) > 1 { often += 1 }
+    tally :: (w: str, counts: *Map[str, i64], often: *i64) {   // a nested function
+        if counts.get_or(w, 0) > 1 { *often += 1 }
     }
-    for w in words { tally(w) }
+    for w in words { tally(w, &counts, &often) }
     print(counts.get_or("a", 0), counts.len, words[1], often)   // 3 3 b 3
 }
 
@@ -83,9 +83,10 @@ alc test tour.al       # run the test blocks
 - **Statements end at a newline** (or `;`). A newline does *not* end a statement when the line
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
   A line cannot *start* with a binary operator.
-- Keywords: `fn struct enum const var test use priv if else while loop for in by return break
-  continue assert match defer inline noinline true false nil`. `type` is special only at the
-  start of a declaration and stays usable as an identifier.
+- Keywords: `struct enum test use priv extern inline noinline if else while loop for in by
+  return break continue assert match defer true false nil`; `fn`, `var` and `const` are reserved
+  words without a meaning. `type` is special only after the `::` of a declaration and stays
+  usable as an identifier.
 - Integer literals: `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17`, character literals `'a'`, `'\n'`,
   `'\x41'` (a character literal is an integer).
 - Float literals: `1.5`, `1e9`, `2.5e-3` (a digit is required on both sides of the point).
@@ -109,11 +110,11 @@ alc test tour.al       # run the test blocks
 | `[N]T` | array of `N` elements stored inline (`N` is a constant expression) |
 | `str` | another name for `[]u8` |
 | `(A, B, ...)` | tuple |
-| `fn(A, B) R` | function value: a plain code pointer (8 bytes, C-compatible) |
+| `(A, B) -> R` | function value: a plain code pointer (8 bytes, C-compatible); `(A) -> ()` returns nothing |
 | `Name`, `Name[T, U]` | struct or enum, possibly generic; or a type alias |
 
 There are no implicit conversions between types. Untyped numeric literals take the type the
-context asks for (`var x u8 = 200`, `x * 2`, `f(3)`); without context an integer literal is
+context asks for (`x: u8 = 200`, `x * 2`, `f(3)`); without context an integer literal is
 `i64` and a float literal is `f64`. An integer literal is accepted where a float is expected,
 and a literal next to an `f32` or a vector is an `f32` (`v * 2.0`, `x + 1`).
 
@@ -147,31 +148,37 @@ Layout follows the usual C rules (natural alignment); `sizeof[T]()` gives the si
 
 ## Declarations
 
-Top-level declarations can appear in any order.
+Top-level declarations can appear in any order. **A declaration starts with its name**:
+`name :: value` declares something fixed at compile time (a constant, a function, a `struct`,
+an `enum` or a `type` alias; it starts on the line of the `::`), `name : Type = value` a
+variable (the type or the value may be left out: `name := value`, `name: Type`). After `::`, a
+`(` starts a function if `name:` follows it, or `)` and then `->` or `{`; the result type
+follows `->`, and a function without a result has no arrow. Type parameters follow the name,
+modifiers stand in front of it. Inside a function only variables and functions can be declared.
 
 ```
-fn name(a i64, b f64) i64 { ... }          // function; omit the result type for "no value"
-fn pick[T](a T, b T) T { ... }             // generic function
-inline fn tiny(x i64) i64 { x + 1 }        // inlining hint; `noinline fn` forbids inlining
-struct Pair[A, B] { first A, second B }    // struct (fields separated by `,` or newlines)
-enum Color { Red, Green, Blue }            // enum without data: an integer-like value
-enum Tree[T] { Leaf(T), Node(*Tree[T], *Tree[T]) }   // enum with data ("tagged union")
-type Reg = i64                             // type alias: another name for a type
-const LIMIT = 1000                         // compile-time constant (untyped unless annotated)
-const MASK u32 = 0xFF00
-const TABLE = [4]i64{1, 2, 4, 8}           // aggregate constant, stored once in read-only memory
-const LOGO = embed("logo.bin")             // content of a file as a str, read at compile time
-var counter i64                            // global variable, zero-initialized
-var table = [4]i64{1, 2, 4, 8}             // global with a constant initializer
-var ops = [2]fn(i64) i64{double, negate}   //   (function names are constants too)
+name :: (a: i64, b: f64) -> i64 { ... }    // function; omit the result type for "no value"
+pick[T] :: (a: T, b: T) -> T { ... }       // generic function
+inline tiny :: (x: i64) -> i64 { x + 1 }   // inlining hint; `noinline` forbids inlining
+Pair[A, B] :: struct { first: A, second: B }  // struct (fields separated by `,` or newlines)
+Color :: enum { Red, Green, Blue }         // enum without data: an integer-like value
+Tree[T] :: enum { Leaf(T), Node(*Tree[T], *Tree[T]) }  // enum with data ("tagged union")
+Reg :: type i64                            // type alias: another name for a type
+LIMIT :: 1000                              // compile-time constant (untyped unless annotated)
+MASK : u32 : 0xFF00
+TABLE :: [4]i64{1, 2, 4, 8}                // aggregate constant, stored once in read-only memory
+LOGO :: embed("logo.bin")                  // content of a file as a str, read at compile time
+counter: i64                               // global variable, zero-initialized
+table := [4]i64{1, 2, 4, 8}                // global with a constant initializer
+ops := [2](i64) -> i64{double, negate}     //   (function names are constants too)
 test "name" { ... }                        // unit test, run by `alc test`
 use "other.al"                             // include another file (path relative to this file)
 use std.window                             // a module bundled with the compiler (see docs/STDLIB.md)
-extern "libc.so.6" fn getpid() i32         // a C function from a shared library (no body)
-priv fn helper(x i64) i64 { ... }          // `priv`: visible only inside this file (see below)
+extern "libc.so.6" getpid :: () -> i32     // a C function from a shared library (no body)
+priv helper :: (x: i64) -> i64 { ... }     // `priv`: visible only inside this file (see below)
 ```
 
-- The program starts at `fn main()`; `fn main() i64` returns the exit status.
+- The program starts at `main :: ()`; `main :: () -> i64` returns the exit status.
 - A function whose result type is `never` does not return (`exit`, `panic`).
 - All top-level names of a program share one namespace, whatever file they are in, except
   declarations marked [`priv`](#priv-file-private-declarations).
@@ -180,7 +187,8 @@ priv fn helper(x i64) i64 { ... }          // `priv`: visible only inside this f
 - A user declaration may reuse a standard-library name (for example your own `push` or `Vec`);
   the library keeps using its own definitions internally.
 - **Overloading**: a function name may be defined several times with different parameter types
-  (`fn area(c Circle) f32`, `fn area(r Rect) f32`, `fn length(v vec3) f32`, `fn length(v vec2) f32`).
+  (`area :: (c: Circle) -> f32` and `area :: (r: Rect) -> f32`; `length :: (v: vec3) -> f32` and
+  `length :: (v: vec2) -> f32`).
   A call looks at the receiver (`x.f()`) and then at the arguments from left to right until one
   definition is left: a typed argument must have the parameter's type, an untyped literal must
   be acceptable to it. If literals leave a tie, the definition whose parameters are the
@@ -195,18 +203,18 @@ priv fn helper(x i64) i64 { ... }          // `priv`: visible only inside this f
   argument as soon as it is evaluated; a call with as many arguments as a declared `print`
   takes evaluates all of them first). If exactly one non-generic function of the name is
   declared, its parameter types are the expected types of the arguments as in any call
-  (`f(Some(1))` builds an `Opt[u8]` for `fn f(o Opt[u8])`), and an argument that cannot be
+  (`f(Some(1))` builds an `Opt[u8]` for `f :: (o: Opt[u8])`), and an argument that cannot be
   built for that type is an error at the argument, not a reason to use the builtin. When
   nothing fits, the builtin's message is shown and names the declared candidates. Library
   code is not affected: inside the library `len`, `hash`, ... always mean the builtins.
 
   ```
-  struct Money { cents i64 }
+  Money :: struct { cents: i64 }
 
-  fn len(m Money) i64 { m.cents }                    // next to the builtin len
-  fn print(m Money) { put("$", m.cents / 100, ".", m.cents % 100, "\n") }
+  len :: (m: Money) -> i64 { m.cents }               // next to the builtin len
+  print :: (m: Money) { put("$", m.cents / 100, ".", m.cents % 100, "\n") }
 
-  fn main() {
+  main :: () {
       m := Money{250}
       xs := []i64{7, 8}
       print(len(m), len(xs), m.len(), xs.len())      // 250 2 250 2
@@ -223,11 +231,11 @@ Two enums may have variants of the same name, also an enum of the program and on
 library.
 
 ```
-enum Color { Red, Green, Blue }
-enum Light { Red, Amber, Green }
-enum Tree[T] { Leaf(T), Node(*Tree[T], *Tree[T]), Empty }
+Color :: enum { Red, Green, Blue }
+Light :: enum { Red, Amber, Green }
+Tree[T] :: enum { Leaf(T), Node(*Tree[T], *Tree[T]), Empty }
 
-fn next(l Light) Light {
+next :: (l: Light) -> Light {
     match l {
         Red => Green                    // pattern: the matched type decides
         Green => Amber
@@ -235,10 +243,10 @@ fn next(l Light) Light {
     }
 }
 
-fn main() {
+main :: () {
     a := Color.Red                      // qualified
     b := Blue                           // only Color has Blue
-    var c Light = Red                   // the declared type decides
+    c: Light = Red                      // the declared type decides
     lights := []Light{Red, Amber}       // element type of a typed literal
     l := Tree[i64].Leaf(1)              // type arguments written out
     m := Tree.Leaf("x")                 // inferred from the payload: Tree[str]
@@ -255,10 +263,10 @@ payload). It is allowed wherever a variant can be written, in expressions and pa
 
 1. A local variable of that name is the variable.
 2. If the **expected type** is an enum with a variant of that name, it is that variant. The
-   expected type is known for: a typed `var`, the right side of an assignment, an argument, a
-   returned value and the last expression of a function, a field of a struct literal, an
-   element of a typed array / slice / tuple literal, a payload value of a variant, and an
-   operand of `==` / `!=` whose other operand has a type.
+   expected type is known for: a variable declared with a type, the right side of an
+   assignment, an argument, a returned value and the last expression of a function, a field
+   of a struct literal, an element of a typed array / slice / tuple literal, a payload value
+   of a variant, and an operand of `==` / `!=` whose other operand has a type.
 3. Otherwise, if exactly one enum of the program has the variant, it is that one. Only if
    none has it are the library's enums searched in the same way (so a program's own `Some` /
    `None` hide the library's).
@@ -276,7 +284,7 @@ Name conflicts:
 - A variant cannot have the name of a function, constant, global, struct or enum of the
   program, and an enum cannot declare a variant twice.
 - A variant of the program may have the name of a library declaration; in the program the name
-  then means the variant (`enum Cmd { push, pop }`: `push` is `Cmd.push`; `v.push(1)` still
+  then means the variant (`Cmd :: enum { push, pop }`: `push` is `Cmd.push`; `v.push(1)` still
   calls the library function). Conversely a function, constant, global or type of the program
   hides a *library* variant of that name (`Opt.Some(x)` still reaches it).
 - In a call, the name of a builtin function or type stays the builtin (`len(x)`, `i64(x)`)
@@ -288,42 +296,42 @@ Name conflicts:
 
 ### Type aliases
 
-`type Name = T` gives the type `T` another name.
+`Name :: type T` gives the type `T` another name.
 
 - An alias is **transparent**: `Name` and `T` are the same type everywhere (assignment,
-  overloading, generic inference, `==`); diagnostics show the underlying type. `fn f(x Reg)`
-  next to `fn f(x i64)` is therefore a duplicate definition.
-- The name works wherever a type name does: `var x Name`, conversions `Name(x)`, literals
+  overloading, generic inference, `==`); diagnostics show the underlying type. `f :: (x: Reg)`
+  next to `f :: (x: i64)` is therefore a duplicate definition.
+- The name works wherever a type name does: `x: Name`, conversions `Name(x)`, literals
   `Name{...}`, type arguments `vec[Name]()`, `sizeof[Name]()`.
 - The target may be any type, also one declared later or one that refers back to the alias
-  through a struct or enum. An alias that refers to itself without one (`type A = *A`, or
+  through a struct or enum. An alias that refers to itself without one (`A :: type *A`, or
   through other aliases) is an error: a recursive type needs a struct or enum.
-- Aliases are not generic and take no type arguments (`type Pair[T] = ...`, `Reg[i64]` are errors).
+- Aliases are not generic and take no type arguments (`Pair[T] :: type ...`, `Reg[i64]` are errors).
 - An alias may reuse a library type name; its name must differ from every other declaration
   and enum variant of the program.
 
 ```
-type Reg = i64
-type List = *Node                          // may refer to later declarations
-struct Node { v Reg, next List }
+Reg :: type i64
+List :: type *Node                         // may refer to later declarations
+Node :: struct { v: Reg, next: List }
 
-fn main() {
+main :: () {
     l := &Node{v: 1, next: &Node{v: 2, next: nil}}
-    var plain i64 = l.next.v               // Reg is i64
+    plain: i64 = l.next.v                  // Reg is i64
     print(plain, Reg(3.7), sizeof[List]()) // 2 3 8
 }
 ```
 
 ### Constants
 
-A `const` is a compile-time constant. Its initialiser may be: number, `bool` and string
+A constant (`NAME :: value`) is known at compile time. Its value may be: number, `bool` and string
 constants and constant expressions of them; `T{...}` literals and tuples (nested as needed);
 `vec2/vec3/vec4/quat/mat4(...)` with constant components; names of non-generic functions (for
 elements of function type); `nil`; variants of enums without data (as elements or fields of a
 typed literal); `embed("file")`; names of other constants. Function calls are not constant.
-Global initialisers (`var x = ...`) follow the same rules and may name constants.
+Global initialisers (`x := ...`) follow the same rules and may name constants.
 
-- The type is taken from the value unless annotated (`const UNIT Point = Point{1, 1}`; a
+- The type is taken from the value unless annotated (`UNIT : Point : Point{1, 1}`; a
   mismatch is an error). A constant cannot depend on itself.
 - An aggregate (array, struct, tuple) or vector / matrix constant is stored once in read-only
   memory. It can be read as a whole or in part, indexed (bounds-checked), iterated, compared,
@@ -331,26 +339,27 @@ Global initialisers (`var x = ...`) follow the same rules and may name constants
   independent copy).
 - No constant can be modified: assigning to it or to a field / element of it, and `&` on it or
   on a part of it are compile errors (`` `TABLE` is a constant: it cannot be assigned to (copy
-  it to a variable, or declare it with `var` to make it a global variable)``). As the receiver
+  it to a variable, or declare it as `TABLE := value` or `TABLE: T = value` instead of `::` to
+  make it a global variable)``). As the receiver
   of a method call that takes a pointer, a constant is copied to a temporary.
 - `embed("file")` is the content of a file as a `str` constant. The path is relative to the
   source file that contains the call; the file is read once per path.
 
 ```
-struct Point { x i64, y i64 }
-struct Unit { name str, at Point, f fn(i64) i64 }
-enum Op { Add, Sub }
+Point :: struct { x: i64, y: i64 }
+Unit :: struct { name: str, at: Point, f: (i64) -> i64 }
+Op :: enum { Add, Sub }
 
-const N = 3
-const TABLE = [4]i64{1, 2, 4, 8}
-const UNITS = [2]Unit{Unit{"one", Point{0, 0}, double}, Unit{name: "two", at: Point{N, N * 2}, f: double}}
-const OPS = ([2]Op{Sub, Add}, "ops", vec3(0.0, 1.0, 0.0))
-const LOGO = embed("logo.bin")
-var table = TABLE                          // a global initialised from a constant
+N :: 3
+TABLE :: [4]i64{1, 2, 4, 8}
+UNITS :: [2]Unit{Unit{"one", Point{0, 0}, double}, Unit{name: "two", at: Point{N, N * 2}, f: double}}
+OPS :: ([2]Op{Sub, Add}, "ops", vec3(0.0, 1.0, 0.0))
+LOGO :: embed("logo.bin")
+table := TABLE                             // a global initialised from a constant
 
-fn double(x i64) i64 { x * 2 }
+double :: (x: i64) -> i64 { x * 2 }
 
-fn main() {
+main :: () {
     print(TABLE[2], UNITS[1].at.y, UNITS[0].f(21), OPS, len(LOGO))   // 4 6 42 ([Sub, Add], ops, vec3(0.0, 1.0, 0.0)) 5
     t := TABLE                             // an independent copy
     t[0] = 100
@@ -361,24 +370,24 @@ fn main() {
 
 ### `priv`: file-private declarations
 
-`priv` in front of `fn` (also `inline` / `noinline` / `extern` functions), `struct`, `enum`,
-`const`, `var` or `type` takes the declaration out of the program-wide namespace: it is
-visible only inside the file that contains it.
+`priv` in front of a top-level declaration (a function, also an `inline` / `noinline` /
+`extern` one, a struct, enum, type alias, constant or global variable) takes it out of the
+program-wide namespace: it is visible only inside the file that contains it.
 
 ```
 // stack.al
-priv const LIMIT = 2                       // only this file sees LIMIT, Slot, slots, find
-priv struct Slot { key str, val i64 }
-priv var slots Vec[Slot]
+priv LIMIT :: 2                            // only this file sees LIMIT, Slot, slots, find
+priv Slot :: struct { key: str, val: i64 }
+priv slots: Vec[Slot]
 
-priv fn find(key str) i64 {                // the library's find(s, sub) stays usable
+priv find :: (key: str) -> i64 {           // the library's find(s, sub) stays usable
     for i, s in slots {
         if s.key == key { return i }
     }
     -1
 }
 
-fn stack_set(key str, val i64) bool {      // public: the interface of the file
+stack_set :: (key: str, val: i64) -> bool {  // public: the interface of the file
     i := key.find()                        // method-call syntax finds private functions
     if i >= 0 {
         slots[i].val = val
@@ -388,22 +397,22 @@ fn stack_set(key str, val i64) bool {      // public: the interface of the file
     i >= 0
 }
 
-fn stack_dump() { print(slots[..], find("a=b", "=")) }
+stack_dump :: () { print(slots[..], find("a=b", "=")) }
 ```
 
 ```
 // main.al
 use "stack.al"
 
-priv const LIMIT = "none"                  // another LIMIT: each file has its own
-priv fn find(xs []i64, x i64) bool {
+priv LIMIT :: "none"                       // another LIMIT: each file has its own
+priv find :: (xs: []i64, x: i64) -> bool {
     for v in xs {
         if v == x { return true }
     }
     false
 }
 
-fn main() {
+main :: () {
     stack_set("a", 1)
     print(stack_set("a", 3), stack_set("b", 2), LIMIT, find([]i64{1, 2}, 2))   // true false none true
     stack_dump()                           // [Slot{key: a, val: 3}, Slot{key: b, val: 2}] 1
@@ -425,23 +434,24 @@ fn main() {
   definitions of `f` considers them together with the public ones (other files, then the
   library) as one overloaded name, with one addition: if a private definition fits the call,
   a public one is never chosen, not even one that would fit better. So a private
-  `fn min(a Meters, b Meters)` leaves `min(3, 4)` to the library, and a private
-  `fn max[T](a T, b T) T` replaces the library's `max` in its file completely. The same holds
-  for a private function used as a value.
+  `min :: (a: Meters, b: Meters)` leaves `min(3, 4)` to the library, and a private
+  `max[T] :: (a: T, b: T) -> T` replaces the library's `max` in its file completely. The same
+  holds for a private function used as a value.
 - **Builtins.** A private function named like a builtin (`len`, `hash`, `clone`, ...) is
   tried first in its file, and the builtin is used when it does not accept the arguments, as
-  for a public function: with `priv fn len(q Queue) i64`, `len("text")` is still the builtin.
+  for a public function: with `priv len :: (q: Queue) -> i64`, `len("text")` is still the
+  builtin.
 - **Fields and locals.** Field names and the field labels of struct literals are never private
   names; a field that holds a function is still called before a private function of that
   name. Local variables, parameters, `match` bindings and type parameters may have the name of
   a private declaration and shadow it.
-- **Enums.** `priv enum` makes the *type name* private. Its variants are never private: other
-  files can construct and match them by their bare names (not as `Enum.Variant`, which needs
-  the type name).
+- **Enums.** `priv` on an enum makes the *type name* private. Its variants are never private:
+  other files can construct and match them by their bare names (not as `Enum.Variant`, which
+  needs the type name).
 - **Generics.** A public generic function of another file that is instantiated with a private
   type is still checked in its own file: it cannot call the private functions of the file
   that uses it.
-- **Not allowed.** `priv fn main`, `priv test`, `priv use`; `priv` inside a function, on a
+- **Not allowed.** `priv main`, `priv test`, `priv use`; `priv` inside a function, on a
   struct field or on an enum variant.
 - Diagnostics, `print`, `--emit-ir` / `--emit-asm` and the executable's symbol table show
   private declarations under their written names (two files can produce the same struct name
@@ -456,8 +466,8 @@ although the library has internals of those names.
 
 ```
 x := expr                    // declare a new variable (type inferred)
-var x T                      // declare, zero-initialized
-var x T = expr               // declare with an explicit type
+x: T                         // declare, zero-initialized
+x: T = expr                  // declare with an explicit type
 a, b := pair()               // declare from a tuple
 a, b = b_and_a()             // assign to existing variables from a tuple
 x = expr                     // assign;  also  += -= *= /= %= &= |= ^= <<= >>=
@@ -477,14 +487,14 @@ break name    continue name                // leave / continue the enclosing loo
 assert cond                                // stops the program if false
 assert cond, "message"
 defer { ... }                              // runs when the enclosing block is left
-fn name(a T) R { ... }                     // nested function (see below)
+name :: (a: T) -> R { ... }                // nested function (see below)
 match value { ... }                        // see below
 { ... }                                    // nested block (new scope)
 ```
 
 - Variables are mutable. Declaring a name that already exists **in the same scope** is an
   error; inner scopes may shadow outer names. `_` discards a value (`_, ok := m.get(k)`).
-- The last expression of a function body is its result (`fn sq(x i64) i64 { x * x }`).
+- The last expression of a function body is its result (`sq :: (x: i64) -> i64 { x * x }`).
   The same holds for the branches of `if`/`match` used as expressions.
 - `defer` blocks run in reverse order when their scope ends, also on `break`, `continue` and
   `return` (the returned value is computed first).
@@ -505,7 +515,7 @@ match value { ... }                        // see below
   plain `break`). They take nothing but a label.
 
 ```
-fn main() {
+main :: () {
     next: for i in 2..20 {
         defer { put(".") }                   // runs on `continue next` and `break next` too
         for d in 2..i {
@@ -526,30 +536,31 @@ expression). Either way it is an ordinary function that happens to be declared t
 does not see the variables of the function around it.** What it needs is passed as a parameter.
 
 ```
-struct Item { name str, hp i64 }
+Item :: struct { name: str, hp: i64 }
 
-fn rank(items []Item, floor i64) i64 {
+rank :: (items: []Item, floor: i64) -> i64 {
     n := 0
-    fn keep(it Item, floor i64, n *i64) bool {     // state comes in as parameters
+    keep :: (it: Item, floor: i64, n: *i64) -> bool {  // state comes in as parameters
         if it.hp < floor { return false }          // returns from keep
         *n += 1
         true
     }
     for it in items { it.keep(floor, &n) }         // keep(it, floor, &n) or it.keep(floor, &n)
-    sort_by(items, fn(a Item, b Item) bool { a.hp > b.hp })    // anonymous function
+    sort_by(items, (a: Item, b: Item) -> bool { a.hp > b.hp })  // anonymous function
     n
 }
 ```
 
-- **Forms.** `fn name(params) Result { body }` as a statement; `fn(params) Result { body }` as
-  an expression. Neither has type parameters of its own or takes `inline` / `noinline` /
-  `priv` / `extern`. They may contain further nested functions.
+- **Forms.** `name :: (params) -> Result { body }` as a statement; `(params) -> Result { body }`
+  as an expression (without `-> Result` if there is none). Neither has type parameters of its
+  own or takes `inline` / `noinline` / `priv` / `extern`. They may contain further nested
+  functions.
 - **What the body sees.** Globals, constants, top-level functions, nested functions declared
   before it in the enclosing blocks, itself (recursion), and the type parameters of the
   enclosing function. Using a variable or parameter of an enclosing function is a compile
   error that names it: pass it as a parameter (`&x` if the function changes it). A callback
   that needs state takes it as a context argument, as in `sort_by(items, ctx, less)`.
-- **Value.** The name of a nested function, and an anonymous function, is a plain `fn(A) R`
+- **Value.** The name of a nested function, and an anonymous function, is a plain `(A) -> R`
   value: it can be called, passed, stored, returned, and given to C as a callback. It stays
   valid after the enclosing function has returned.
 - **Scope of the name.** From the declaration to the end of its block. There it hides
@@ -594,11 +605,11 @@ can have any type.
 | `&name` (only inside a variant or tuple pattern) | anything; binds `name` to a **pointer** (`*T`) to that part |
 
 ```
-enum Shape { Circle(f64), Rect(f64, f64), Empty }
-enum List { Cons(i64, *List), End }
-struct Account { id i64, balance i64 }
+Shape :: enum { Circle(f64), Rect(f64, f64), Empty }
+List :: enum { Cons(i64, *List), End }
+Account :: struct { id: i64, balance: i64 }
 
-fn describe(o Opt[Shape]) str {
+describe :: (o: Opt[Shape]) -> str {
     match o {
         Some(Circle(r)) if r > 10.0 => "big circle"      // nested pattern, guard
         Some(Circle(_)) => "circle"
@@ -608,7 +619,7 @@ fn describe(o Opt[Shape]) str {
     }
 }
 
-fn both(a Opt[i64], b Opt[i64]) i64 {
+both :: (a: Opt[i64], b: Opt[i64]) -> i64 {
     match (a, b) {
         (Some(x), Some(y)) => x + y
         (Some(x), None), (None, Some(x)) => x            // both alternatives bind x
@@ -616,7 +627,7 @@ fn both(a Opt[i64], b Opt[i64]) i64 {
     }
 }
 
-fn sum(l *List) i64 {
+sum :: (l: *List) -> i64 {
     match l {
         Cons(x, rest) => x + sum(rest)   // l is not nil and *l is a Cons
         End => 0
@@ -624,17 +635,17 @@ fn sum(l *List) i64 {
     }
 }
 
-fn deposit(o *Opt[Account], amount i64) {
+deposit :: (o: *Opt[Account], amount: i64) {
     match *o {
         Some(&acc) => { acc.balance += amount }          // acc is a *Account into *o
         None => {}
     }
 }
 
-fn main() {
+main :: () {
     end := End
     b := Cons(2, &end)
-    var acct Opt[Account] = Some(Account{id: 1, balance: 10})
+    acct: Opt[Account] = Some(Account{id: 1, balance: 10})
     deposit(&acct, 5)
     print(describe(Some(Rect(1.0, 1.0))), describe(None), both(None, Some(5)), sum(&b), acct)
     // square nothing 5 2 Some(Account{id: 1, balance: 15})
@@ -643,7 +654,7 @@ fn main() {
 
 - Sub-patterns nest to any depth: `Some(Circle(r))`, `(Some(a), None)`, `Node(Leaf(x), &rest)`.
 - **A name inside a variant or tuple pattern** is, in this order: a variant, if the type of
-  that part is an enum (or a pointer to one) that has it; a constant, if a `const` of that
+  that part is an enum (or a pointer to one) that has it; a constant, if one of that
   name exists; otherwise a new variable of the arm (it hides an outer variable; a variant of
   some *other* enum is a binding too). Anything else inside a pattern must be a compile-time
   constant: to compare with a variable, bind the part and use a guard
@@ -740,7 +751,7 @@ field `f` that holds a function, that is called instead; otherwise a
 [nested function](#nested-functions) `f` in scope comes before the top-level functions. Two
 adjustments apply to
 the receiver only, never to other arguments, also for overloaded and generic functions (a
-parameter `p *T` takes the address, a generic parameter `T` alone takes the receiver by value):
+parameter `p: *T` takes the address, a generic parameter `T` alone takes the receiver by value):
 
 - If `f` expects a `*T` and `x` is a `T`, the address of `x` is passed when `x` is
   **addressable** (a variable, parameter or global, a field, an element, a tuple element, a
@@ -759,17 +770,17 @@ The builtins that take a value first have a method form too: `len`, `clone`, `ha
 have none.
 
 ```
-struct Sel { count i64, ops [2]i64 }
+Sel :: struct { count: i64, ops: [2]i64 }
 
-fn incr(p *i64) { *p += 1 }
-fn go(self *Sel) i64 {
+incr :: (p: *i64) { *p += 1 }
+go :: (self: *Sel) -> i64 {
     self.count.incr()             // a field through a pointer
     self.ops[1].incr()            // an element
     self.count
 }
-fn make() i64 { 41 }
+make :: () -> i64 { 41 }
 
-fn main() {
+main :: () {
     x := 5
     x.incr()                      // passes &x
     s := Sel{}
@@ -785,14 +796,14 @@ compiled separately for each combination of types it is used with, and is type-c
 (like templates), so any operation that happens to be valid for the concrete type may be used.
 
 ```
-fn sum[T](xs []T) T {
-    var total T
+sum[T] :: (xs: []T) -> T {
+    total: T
     for x in xs { total += x }
     total
 }
 sum([]f64{1.5, 2.5})          // T inferred from the arguments
 alloc[u32](16)                // explicit type arguments
-var o Opt[i64] = None         // inferred from the expected type (Opt is a library enum)
+o: Opt[i64] = None            // inferred from the expected type (Opt is a library enum)
 ```
 
 ## Memory
@@ -829,20 +840,20 @@ step. Use a region for work whose temporary data should not stay: do the work in
 the result out with `clone`, reset it.
 
 ```
-region() Region                  // an empty region (the same as the zero value of Region)
-enter(r *Region)                 // allocations now come from r
+region() -> Region               // an empty region (the same as the zero value of Region)
+enter(r: *Region)                // allocations now come from r
 leave()                          // back to the arena that was in use before the matching enter
-reset(r *Region)                 // empties r: everything allocated from it is gone
-used(r *Region) i64              // bytes of r in use (sizes are rounded up to 16)
-region_free(r *Region)           // returns r's memory to the operating system
+reset(r: *Region)                // empties r: everything allocated from it is gone
+used(r: *Region) -> i64          // bytes of r in use (sizes are rounded up to 16)
+region_free(r: *Region)          // returns r's memory to the operating system
 ```
 
 ```
-struct Token { text str, line i64 }
+Token :: struct { text: str, line: i64 }
 
-var scratch Region                       // a global: its address never changes
+scratch: Region                          // a global: its address never changes
 
-fn longest(src str) Token {
+longest :: (src: str) -> Token {
     enter(&scratch)                      // everything below allocates from scratch
     toks := vec[Token]()
     for i, w in split(src, ' ') {
@@ -860,7 +871,7 @@ fn longest(src str) Token {
     result
 }
 
-fn main() {
+main :: () {
     print(longest("a bb cccc dd"), used(&scratch))   // Token{text: CCCC, line: 2} 0
     a := region()
     enter(&a)
@@ -917,10 +928,10 @@ first, then `clone`.
 | `*T`, function values | **the pointer itself: what it points to is shared** |
 
 ```
-struct Node { name str, kids []Node }
-struct Doc { root Node, words Vec[str], owner *Node }
+Node :: struct { name: str, kids: []Node }
+Doc :: struct { root: Node, words: Vec[str], owner: *Node }
 
-fn main() {
+main :: () {
     a := []i64{1, 2, 3}
     b := a                               // shares the elements
     c := clone(a)                        // its own elements
@@ -934,7 +945,7 @@ fn main() {
 }
 ```
 
-- Data that refers to itself through slices (`struct Node { kids []Node }`) is copied
+- Data that refers to itself through slices (`Node :: struct { kids: []Node }`) is copied
   completely. Data linked through pointers is not followed (`clone(p)` copies the pointer;
   `clone(*p)` the value): copy such structures by hand, or declare a `clone` function for the
   type (see builtin names in [Declarations](#declarations)).
@@ -981,22 +992,22 @@ undefined); `assert` and `panic` are kept.
 |---------|---------|
 | `print(a, b, ...)` | prints the values separated by spaces, then a newline; works for every type |
 | `put(a, b, ...)` | same without separators and newline |
-| `fmt(a, b, ...) str` | like `put`, but returns the text |
+| `fmt(a, b, ...) -> str` | like `put`, but returns the text |
 | `len(x)` | length of a slice, array, string or `Vec` |
-| `hash(x) u64` | hash of any value that supports `==` |
-| `clone(x) T` | independent deep copy of `x`, allocated from the arena in use (see [Memory](#clonex)) |
-| `sizeof[T]() i64` | size of `T` in bytes |
+| `hash(x) -> u64` | hash of any value that supports `==` |
+| `clone(x) -> T` | independent deep copy of `x`, allocated from the arena in use (see [Memory](#clonex)) |
+| `sizeof[T]() -> i64` | size of `T` in bytes |
 | `sqrt(x)`, `fabs(x)` | `f64` square root / absolute value |
 | `popcnt(x) ctz(x) clz(x) bswap(x)` | bit counting / byte swap on integers |
 | `rotl(x, n)`, `rotr(x, n)` | rotate |
 | `mulhi(a, b)` | high half of the double-width product of two integers of the same type (signed for `i8`..`i64`, unsigned for `u8`..`u64`); with `a * b` it gives the whole product. An untyped literal takes the type of the other operand; two literals the expected type, else `i64` |
-| `panic(msg str) never` | stop with a message |
-| `syscall(nr, a, b, ...) i64` | raw Linux system call (up to 6 arguments) |
+| `panic(msg: str) -> never` | stop with a message |
+| `syscall(nr, a, b, ...) -> i64` | raw Linux system call (up to 6 arguments) |
 | `cast[T](x)` | reinterpret: pointer↔pointer, pointer↔`i64`/`u64`, `f64`↔`i64`/`u64` bits, slice↔slice |
-| `ptr(s) *T` | pointer to the first element of a slice or array |
-| `mkslice[T](p, n) []T` | slice from a pointer (or address) and a length |
+| `ptr(s) -> *T` | pointer to the first element of a slice or array |
+| `mkslice[T](p, n) -> []T` | slice from a pointer (or address) and a length |
 | `memcopy(dst, src, nbytes)`, `memfill(dst, byte, nbytes)` | raw memory copy / fill |
-| `embed("file") str` | content of a file, read at compile time (see [Constants](#constants)) |
+| `embed("file") -> str` | content of a file, read at compile time (see [Constants](#constants)) |
 
 `print` renders: integers in decimal, floats as the shortest text that reads back exactly
 (`0.1`, `1e21`, `nan`), booleans as `true`/`false`, `str` as text, other slices and arrays as
@@ -1004,7 +1015,7 @@ undefined); `assert` and `panic` are kept.
 pointers as hexadecimal addresses.
 
 ```
-var big u64 = 0xFFFFFFFFFFFFFFFF
+big: u64 = 0xFFFFFFFFFFFFFFFF
 print(mulhi(big, big), mulhi(i64(-1), i64(1)), mulhi(u8(200), u8(200)))   // 18446744073709551614 -1 156
 ```
 
@@ -1013,35 +1024,35 @@ print(mulhi(big, big), mulhi(i64(-1), i64(1)), mulhi(u8(200), u8(200)))   // 184
 Output is buffered and flushed at exit (and before a panic).
 
 ```
-putc(c u8)                     putf(x f64, digits i64)        // fixed notation, like printf("%.Nf")
-fmtf(x f64, digits i64) str    flush()                        exit(code i64) never
+putc(c: u8)                      putf(x: f64, digits: i64)      // fixed notation, like printf("%.Nf")
+fmtf(x: f64, digits: i64) -> str flush()                        exit(code: i64) -> never
 
-alloc[T](n i64) []T            new[T]() *T                    mark() i64       release(m i64)
-region() Region                enter(r *Region)               leave()          reset(r *Region)
-used(r *Region) i64            region_free(r *Region)
+alloc[T](n: i64) -> []T          new[T]() -> *T                 mark() -> i64    release(m: i64)
+region() -> Region               enter(r: *Region)              leave()          reset(r: *Region)
+used(r: *Region) -> i64          region_free(r: *Region)
 
-min(a, b)   max(a, b)   abs(x)   swap(&a, &b)   floor(x)   ceil(x)   clock_ns() i64
-copy(dst []T, src []T) i64     fill(a []T, x T)
-sort(a []T)                                                   // ascending, needs `<`
-sort_by(a []T, less fn(T, T) bool)                            // stable
-sort_by(a []T, ctx C, less fn(C, T, T) bool)                  // `ctx` is handed to every comparison
+min(a, b)   max(a, b)   abs(x)   swap(&a, &b)   floor(x)   ceil(x)   clock_ns() -> i64
+copy(dst: []T, src: []T) -> i64  fill(a: []T, x: T)
+sort(a: []T)                                                  // ascending, needs `<`
+sort_by(a: []T, less: (T, T) -> bool)                         // stable
+sort_by(a: []T, ctx: C, less: (C, T, T) -> bool)              // `ctx` is handed to every comparison
 
 // strings (str = []u8; slicing gives views without copying)
-concat(a, b) str        find(s, sub) i64        starts_with(s, p)        ends_with(s, p)
-trim(s) str             split(s, sep u8) []str  lines(s) []str           cmp(a, b) i64
-join(parts []str, sep) str                      to_upper(s) str          to_lower(s) str
-pad_left(s, width, fill u8) str                 pad_right(s, width, fill u8) str
-hex(x u64) str
-parse_i64(s) (i64, bool)                        parse_f64(s) (f64, bool)
+concat(a, b) -> str     find(s, sub) -> i64     starts_with(s, p)        ends_with(s, p)
+trim(s) -> str          split(s, sep: u8) -> []str   lines(s) -> []str   cmp(a, b) -> i64
+join(parts: []str, sep) -> str                  to_upper(s) -> str       to_lower(s) -> str
+pad_left(s, width, fill: u8) -> str             pad_right(s, width, fill: u8) -> str
+hex(x: u64) -> str
+parse_i64(s) -> (i64, bool)                     parse_f64(s) -> (f64, bool)
 
 // Opt[T] { Some(T), None }: a value that may be absent;  Res[T] { Ok(T), Err(str) }: a value or an error message
-is_some(o) bool   is_none(o) bool   is_ok(r) bool   is_err(r) bool
-unwrap(o) T       unwrap(r) T       // the value; else "panic: unwrap of None" / "panic: unwrap of Err: <message>"
-or(o, default T) T                  or(r, default T) T             error(r) str    // the message, "" if Ok
+is_some(o) -> bool   is_none(o) -> bool   is_ok(r) -> bool   is_err(r) -> bool
+unwrap(o) -> T       unwrap(r) -> T       // the value; else "panic: unwrap of None" / "panic: unwrap of Err: <message>"
+or(o, default: T) -> T               or(r, default: T) -> T         error(r) -> str   // the message, "" if Ok
 
 // files and process
-read_all(fd i64) str            read_file(path) (str, bool)    write_file(path, data) bool
-io_error() i64                  error_text(e i64) str          args() []str
+read_all(fd: i64) -> str        read_file(path) -> (str, bool)   write_file(path, data) -> bool
+io_error() -> i64               error_text(e: i64) -> str        args() -> []str
 
 // Vec[T]: growable array
 v := vec[i64]()        v.push(x)        v.pop()        v.len  len(v)
@@ -1056,17 +1067,17 @@ m.has(k)               m.del(k)         m.len          m.keys()   // []K
 `alc sigs file.al -- std` prints every library signature.
 
 ```
-fn main() {
+main :: () {
     scores := []i64{70, 95, 80}
     order := []i64{0, 1, 2}
     // the comparison gets `scores` as its first argument
-    sort_by(order, scores, fn(scores []i64, a i64, b i64) bool { scores[a] > scores[b] })
+    sort_by(order, scores, (scores: []i64, a: i64, b: i64) -> bool { scores[a] > scores[b] })
     print(order)                           // [1, 2, 0]
 }
 ```
 
 ```
-fn parse_port(s str) Res[i64] {
+parse_port :: (s: str) -> Res[i64] {
     n, ok := parse_i64(s)
     if !ok {
         return Err(fmt("not a number: ", s))
@@ -1074,8 +1085,8 @@ fn parse_port(s str) Res[i64] {
     if n < 1 || n > 65535 { Err(fmt("port out of range: ", n)) } else { Ok(n) }
 }
 
-fn main() {
-    var at Opt[i64] = None                                   // the type gives None its T
+main :: () {
+    at: Opt[i64] = None                                      // the type gives None its T
     print(at.is_none(), at.or(-1), Some(1.5), Opt[u8].None)  // true -1 Some(1.5) None
     match parse_port("8080") {
         Ok(p) if p < 1024 => print("privileged port", p)
@@ -1124,8 +1135,8 @@ alc run file.al [-- args...]   compile and run
 alc test file.al               compile and run all `test` blocks (each in its own process);
                                prints ok/FAIL per test, exit status 1 if any failed
 alc check file.al              type-check only
-alc sigs file.al               one line per declaration: file:line: signature (`priv fn ...`,
-                               `type Name = T`; `-- std` adds the library's public declarations)
+alc sigs file.al               one line per declaration: file:line: signature (`priv f :: (a: A) -> R`,
+                               `Name :: type T`; `-- std` adds the library's public declarations)
 options: --unchecked  -O0  --json  --emit-ir  --emit-asm
 ```
 
@@ -1166,7 +1177,7 @@ the type).
 ## f32, vectors, matrices
 
 ```
-var x f32 = 1.5                  // literals adapt; f32 and f64 never mix implicitly
+x: f32 = 1.5                     // literals adapt; f32 and f64 never mix implicitly
 y := f32(n) * x + f32(d)         // conversions: f32(i), f32(f64), f64(f32), i64(f32) (truncates)
 a := vec3(1.0, 2.0, 3.0)         // constructors: components, one value for all lanes,
 b := vec3(0.5)                   //   or smaller vectors plus components: vec4(a, 1.0)
@@ -1193,8 +1204,8 @@ q := quat(0.0, 0.0, 0.0, 1.0)    // quat * quat composes, quat * vec3 rotates
 ## C interop
 
 ```
-extern "libc.so.6" fn getenv(name *u8) *u8
-extern "libm.so.6" fn cosf(x f32) f32
+extern "libc.so.6" getenv :: (name: *u8) -> *u8
+extern "libm.so.6" cosf :: (x: f32) -> f32
 
 home := from_cstr(getenv(ptr("HOME")))     // string literals are NUL-terminated in memory
 p := cstr(path)                            // NUL-terminated copy of any str
@@ -1204,33 +1215,33 @@ p := cstr(path)                            // NUL-terminated copy of any str
   C structs are passed by pointer (AL structs have C layout). C `int` is `i32`, `long`/`size_t`
   are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.
 - A plain AL function (also a nested or anonymous one)
-  can be passed where C expects a callback (`fn(*u8, *u8) i32`), as long as its parameters are
+  can be passed where C expects a callback (`(*u8, *u8) -> i32`), as long as its parameters are
   scalars. Code running on a foreign thread must not allocate.
 - A program that calls at least one `extern` function becomes a dynamically linked executable
   (the system loader maps the libraries at start-up); every other program stays a static,
   libc-free executable. Only the libraries of functions that are actually reachable are needed.
 - `embed("file.bin")` is the content of a file as a `str`, read at compile time (path relative
-  to the source file); it is a constant, so it can initialise a `const` or a global.
+  to the source file); it is a constant, so it can initialise another constant or a global.
 
 ## Grammar summary
 
 ```
 file      = { decl }
-decl      = ["priv"] ["inline" | "noinline"] "fn" IDENT [tparams] "(" [param {"," param}] ")" [type] block
-          | ["priv"] "extern" STRING "fn" IDENT "(" [param {"," param}] ")" [type]
-          | ["priv"] "struct" IDENT [tparams] "{" { IDENT type [","] } "}"
-          | ["priv"] "enum" IDENT [tparams] "{" { IDENT ["(" type {"," type} ")"] [","] } "}"
-          | ["priv"] "type" IDENT "=" type
-          | ["priv"] "const" IDENT [type] "=" expr
-          | ["priv"] "var" IDENT (type ["=" expr] | "=" expr)
+decl      = ["priv"] ["inline" | "noinline"] IDENT [tparams] "::" params ["->" type] block
+          | ["priv"] "extern" STRING IDENT "::" params ["->" type]
+          | ["priv"] IDENT [tparams] "::" "struct" "{" { IDENT ":" type [","] } "}"
+          | ["priv"] IDENT [tparams] "::" "enum" "{" { IDENT ["(" type {"," type} ")"] [","] } "}"
+          | ["priv"] IDENT "::" "type" type
+          | ["priv"] IDENT ("::" | ":" type ":") expr
+          | ["priv"] IDENT (":" type ["=" expr] | ":=" expr)
           | "test" STRING block
           | "use" (STRING | IDENT {"." IDENT})
 tparams   = "[" IDENT {"," IDENT} "]"
-param     = IDENT type
+params    = "(" [IDENT ":" type {"," IDENT ":" type}] ")"
 type      = IDENT ["[" type {"," type} "]"] | "*" type | "[" "]" type | "[" expr "]" type
-          | "fn" "(" [type {"," type}] ")" [type] | "(" type {"," type} ")"
+          | "(" [type {"," type}] ")" "->" (type | "(" ")") | "(" type {"," type} ")"
 block     = "{" { stmt } "}"
-stmt      = "var" IDENT (type ["=" expr] | "=" expr)
+stmt      = IDENT ":" type ["=" expr]
           | IDENT {"," IDENT} (":=" | "=") expr
           | expr [assignop expr]
           | "if" expr block ["else" (ifstmt | block)]
@@ -1238,13 +1249,13 @@ stmt      = "var" IDENT (type ["=" expr] | "=" expr)
                         | "for" IDENT ["," IDENT] "in" expr [(".." | "..=") expr] ["by" expr] block)
           | "return" [expr] | "break" [IDENT] | "continue" [IDENT]
           | "assert" expr ["," expr] | "defer" block | block
-          | "fn" IDENT "(" [param {"," param}] ")" [type] block
+          | IDENT "::" params ["->" type] block
 expr      = unary { binop unary }
 unary     = ("-" | "!" | "~" | "&" | "*") unary | postfix
 postfix   = primary { "(" [expr {"," expr}] ")" | "[" expr {"," expr} "]" | "[" [expr] ".." [expr] "]"
                     | "." (IDENT | INT) | "{" [field {"," field}] "}" }
 primary   = INT | FLOAT | STRING | CHAR | "true" | "false" | "nil" | IDENT | "(" expr {"," expr} ")"
-          | "fn" "(" [param {"," param}] ")" [type] block
+          | params ["->" type] block
           | "[" "]" type | "[" expr "]" type | "if" expr block "else" block
           | "match" expr "{" { pattern {"," pattern} ["if" expr] "=>" (block | stmt) } "}"
           | qual "." IDENT ["(" [expr {"," expr}] ")"]

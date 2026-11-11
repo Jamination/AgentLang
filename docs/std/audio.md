@@ -16,7 +16,7 @@ linked.
 ## Sound
 
 ```
-struct Sound { samples []f32, rate i64, channels i64 }
+Sound :: struct { samples: []f32, rate: i64, channels: i64 }
 ```
 
 Interleaved `f32` samples in -1..1, `channels` samples per frame, `rate` frames per second. A
@@ -24,20 +24,20 @@ Interleaved `f32` samples in -1..1, `channels` samples per frame, `rate` frames 
 
 | Function | |
 |----------|---|
-| `sound_new(rate, channels, frames) Sound` | silent sound to fill in (allocates) |
-| `frames(s Sound) i64` | number of frames |
-| `duration(s Sound) f32` | length in seconds |
-| `sound_tone(rate, freq f32, seconds f32, amp f32) Sound` | mono sine tone (allocates) |
-| `sound_noise(rate, seconds f32, amp f32, seed u64) Sound` | mono white noise; the same seed gives the same samples (allocates) |
+| `sound_new(rate, channels, frames) -> Sound` | silent sound to fill in (allocates) |
+| `frames(s: Sound) -> i64` | number of frames |
+| `duration(s: Sound) -> f32` | length in seconds |
+| `sound_tone(rate, freq: f32, seconds: f32, amp: f32) -> Sound` | mono sine tone (allocates) |
+| `sound_noise(rate, seconds: f32, amp: f32, seed: u64) -> Sound` | mono white noise; the same seed gives the same samples (allocates) |
 
 ## WAV
 
 | Function | |
 |----------|---|
-| `wav_decode(data str) (Sound, bool)` | decode a WAV file image (allocates the samples) |
-| `wav_load(path str) (Sound, bool)` | read and decode a file |
-| `wav_encode(s Sound, format i64) str` | encode as a WAV file image (allocates) |
-| `wav_save(path str, s Sound, format i64) bool` | encode and write a file |
+| `wav_decode(data: str) -> (Sound, bool)` | decode a WAV file image (allocates the samples) |
+| `wav_load(path: str) -> (Sound, bool)` | read and decode a file |
+| `wav_encode(s: Sound, format: i64) -> str` | encode as a WAV file image (allocates) |
+| `wav_save(path: str, s: Sound, format: i64) -> bool` | encode and write a file |
 
 Formats for encoding: `WAV_PCM8`, `WAV_PCM16`, `WAV_PCM24`, `WAV_PCM32`, `WAV_F32`.
 Decoding accepts integer PCM with 8, 16, 24 or 32 bits and IEEE float with 32 or 64 bits, any
@@ -57,17 +57,17 @@ m.mix(out, n)                                      // render the next n frames
 
 | Function | |
 |----------|---|
-| `mixer_new(rate, channels, max_voices) *Mixer` | create a mixer (allocates once) |
-| `play(m, s Sound, volume f32, pan f32, pitch f32, looped bool) VoiceId` | start a voice |
-| `valid(id VoiceId) bool` | the handle came from a successful `play` |
-| `playing(m, id) bool` | the voice is still in the pool (also while paused) |
+| `mixer_new(rate, channels, max_voices) -> *Mixer` | create a mixer (allocates once) |
+| `play(m, s: Sound, volume: f32, pan: f32, pitch: f32, looped: bool) -> VoiceId` | start a voice |
+| `valid(id: VoiceId) -> bool` | the handle came from a successful `play` |
+| `playing(m, id) -> bool` | the voice is still in the pool (also while paused) |
 | `stop(m, id)`, `stop_all(m)` | end a voice / all voices |
 | `set_volume(m, id, volume)`, `set_pan(m, id, pan)`, `set_pitch(m, id, pitch)` | change a playing voice |
-| `set_paused(m, id, paused bool)` | pause / resume, keeping the position |
+| `set_paused(m, id, paused: bool)` | pause / resume, keeping the position |
 | `set_master_volume(m, volume)` | gain of the whole mix (applied before clipping) |
-| `active_voices(m) i64` | voices in use |
-| `mix(m, out []f32, frames)` | render `frames` frames of interleaved `f32` into `out` |
-| `mix_i16(m, out []i16, frames)` | the same as signed 16-bit samples (rounded) |
+| `active_voices(m) -> i64` | voices in use |
+| `mix(m, out: []f32, frames)` | render `frames` frames of interleaved `f32` into `out` |
+| `mix_i16(m, out: []i16, frames)` | the same as signed 16-bit samples (rounded) |
 
 Behaviour:
 
@@ -94,10 +94,10 @@ Behaviour:
 
 | Function | |
 |----------|---|
-| `audio_open(rate, channels) (*AudioDevice, bool)` | open the default playback device, 16-bit, about 50 ms buffer |
-| `audio_open(name str, rate, channels, latency_ms) (*AudioDevice, bool)` | open a named ALSA device (`"default"`, `"hw:0"`, `"null"`) with a chosen buffer length |
-| `audio_pump(d, m *Mixer) i64` | mix and write as many frames as the device accepts right now; never waits |
-| `audio_write(d, m *Mixer, frames) i64` | mix and write exactly `frames` frames, waiting while the buffer is full |
+| `audio_open(rate, channels) -> (*AudioDevice, bool)` | open the default playback device, 16-bit, about 50 ms buffer |
+| `audio_open(name: str, rate, channels, latency_ms) -> (*AudioDevice, bool)` | open a named ALSA device (`"default"`, `"hw:0"`, `"null"`) with a chosen buffer length |
+| `audio_pump(d, m: *Mixer) -> i64` | mix and write as many frames as the device accepts right now; never waits |
+| `audio_write(d, m: *Mixer, frames) -> i64` | mix and write exactly `frames` frames, waiting while the buffer is full |
 | `audio_close(d)` | stop and close |
 
 `AudioDevice` fields: `rate`, `channels`, `buffer_frames` (device buffer = output latency),
@@ -141,7 +141,7 @@ while !w.should_close() {
 // Renders two seconds of mixed sound to a WAV file, then plays the same mix on a device.
 use std.audio
 
-fn main() {
+main :: () {
     note := sound_tone(48000, 440.0, 0.3, 0.5)
     hiss := sound_noise(48000, 0.2, 0.1, 7)
     mixer := mixer_new(48000, 2, 16)

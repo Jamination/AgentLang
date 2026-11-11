@@ -89,8 +89,8 @@ Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
   private one fits), and `priv_hint` (the "is declared `priv` in ..." hint). A new kind of
   declaration becomes private-capable with one case in `parser_set_priv` and one in
   `priv_decl_info` / `priv_rewrite`.
-- **Nested and anonymous functions** (`src/lower_nested.al`). `fn name(..) { }` inside a
-  block is the statement `SKFn`, `fn(..) { }` the expression `EKFn` (a `FnDecl` with an empty
+- **Nested and anonymous functions** (`src/lower_nested.al`). `name :: (..) { }` inside a
+  block is the statement `SKFn`, `(..) { }` the expression `EKFn` (a `FnDecl` with an empty
   name). Both become ordinary IR functions `outer.name` / `outer.fn@line:col`, lowered where
   they are written by `lower_fn_lower_body` with the type environment of the enclosing
   function (so once per instantiation of it); `Fx.nested_done` makes a declaration that is

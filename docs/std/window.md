@@ -19,11 +19,11 @@ if !ok { ... no display: run headless or exit ... }
 
 | `WindowDesc` field | |
 |--------------------|---|
-| `title str` | window title (UTF-8) |
-| `width`, `height i64` | size of the drawable area in pixels; 0 means 640 x 480 |
-| `resizable bool` | let the user resize the window (default: fixed size) |
-| `fullscreen bool` | start fullscreen |
-| `display str` | X display to connect to, e.g. `":1"`; empty means `$DISPLAY` |
+| `title: str` | window title (UTF-8) |
+| `width`, `height: i64` | size of the drawable area in pixels; 0 means 640 x 480 |
+| `resizable: bool` | let the user resize the window (default: fixed size) |
+| `fullscreen: bool` | start fullscreen |
+| `display: str` | X display to connect to, e.g. `":1"`; empty means `$DISPLAY` |
 
 `window_open` returns `(nil, false)` when the display cannot be reached (no X server,
 `DISPLAY` unset); it never aborts the program for that. The `Window` is allocated once from
@@ -33,20 +33,20 @@ the arena; no other window function allocates from the arena.
 
 | Function | |
 |----------|---|
-| `window_open(title str, width, height) (*Window, bool)` | open a fixed-size window on the default display |
-| `window_open(d WindowDesc) (*Window, bool)` | open a window as described |
+| `window_open(title: str, width, height) -> (*Window, bool)` | open a fixed-size window on the default display |
+| `window_open(d: WindowDesc) -> (*Window, bool)` | open a window as described |
 | `poll(w)` | start a new input frame and process all pending events; never blocks |
-| `next_event(w) (Event, bool)` | take the next event received by the last `poll` |
-| `should_close(w) bool` | the user asked to close the window (or it was closed) |
-| `size(w) (i64, i64)` | current width and height of the drawable area |
-| `set_title(w, title str)` | change the title |
-| `set_cursor_visible(w, visible bool)` | hide / show the mouse pointer over the window |
-| `set_fullscreen(w, on bool)` | switch between fullscreen and windowed |
-| `present(w, pixels []u8, pw, ph) bool` | show an RGBA8 framebuffer of `pw` x `ph` pixels |
-| `mouse_in_frame(w, pw, ph) vec2` | mouse position in pixels of a framebuffer shown with `present` |
+| `next_event(w) -> (Event, bool)` | take the next event received by the last `poll` |
+| `should_close(w) -> bool` | the user asked to close the window (or it was closed) |
+| `size(w) -> (i64, i64)` | current width and height of the drawable area |
+| `set_title(w, title: str)` | change the title |
+| `set_cursor_visible(w, visible: bool)` | hide / show the mouse pointer over the window |
+| `set_fullscreen(w, on: bool)` | switch between fullscreen and windowed |
+| `present(w, pixels: []u8, pw, ph) -> bool` | show an RGBA8 framebuffer of `pw` x `ph` pixels |
+| `mouse_in_frame(w, pw, ph) -> vec2` | mouse position in pixels of a framebuffer shown with `present` |
 | `close(w)` | destroy the window and disconnect |
-| `x11_display(w) *u8` | the Xlib `Display*` (nil after `close`) |
-| `x11_window(w) u64` | the X11 window id |
+| `x11_display(w) -> *u8` | the Xlib `Display*` (nil after `close`) |
+| `x11_window(w) -> u64` | the X11 window id |
 
 Public fields of `Window`: `input` (an `Input`, see [input.md](input.md)), `events` (the
 `EventQueue`), `width`, `height`, `closing`, `fullscreen`, `cursor_hidden`. The remaining
@@ -107,8 +107,8 @@ not a replacement for a GPU at 4K. There is no vertical sync on this path: pace 
 yourself (sleep, as in the example). `present` returns false for a closed window or a display
 that is not 24/32-bit true color.
 
-The pure helpers behind it are public: `fit_rect(dw, dh, sw, sh) (x, y, w, h)` (the centered
-aspect-preserving rectangle) and `blit_fit(dst []u32, dw, dh, src []u8, sw, sh, swap_rb)`
+The pure helpers behind it are public: `fit_rect(dw, dh, sw, sh) -> (x, y, w, h)` (the centered
+aspect-preserving rectangle) and `blit_fit(dst: []u32, dw, dh, src: []u8, sw, sh, swap_rb)`
 (scale + convert RGBA8 to packed 32-bit pixels).
 
 ### Vulkan
@@ -121,9 +121,9 @@ with a GPU swapchain on the same window.
 
 | Function | |
 |----------|---|
-| `key_from_keysym(ks u64) i64` | `KEY_*` code for an X11 keysym (`KEY_UNKNOWN` if none) |
-| `mods_from_x11(state u32) u8` | `MOD_*` bits for an X11 modifier mask |
-| `event_from_x11_button(button, pressed, x, y, mods) Event` | mouse / wheel event for an X11 button number |
+| `key_from_keysym(ks: u64) -> i64` | `KEY_*` code for an X11 keysym (`KEY_UNKNOWN` if none) |
+| `mods_from_x11(state: u32) -> u8` | `MOD_*` bits for an X11 modifier mask |
+| `event_from_x11_button(button, pressed, x, y, mods) -> Event` | mouse / wheel event for an X11 button number |
 
 `std.x11` (included by this module) declares the raw Xlib functions with their C names
 (`XOpenDisplay`, `XCreateSimpleWindow`, `XNextEvent`, `XPutImage`, `XInternAtom`, ...), the
@@ -161,33 +161,33 @@ The example below is a complete program and a recommended skeleton:
 use std.window
 use std.audio
 
-const FB_W = 320                         // framebuffer size; `present` scales it to the window
-const FB_H = 180
-const STEP_NS = 1_000_000_000 / 120      // the simulation runs at exactly 120 steps per second
-const STEP f32 = 1.0 / 120.0
+FB_W :: 320                              // framebuffer size; `present` scales it to the window
+FB_H :: 180
+STEP_NS :: 1_000_000_000 / 120           // the simulation runs at exactly 120 steps per second
+STEP : f32 : 1.0 / 120.0
 
-const ACT_LEFT = 0
-const ACT_RIGHT = 1
-const ACT_DOWN = 2
-const ACT_UP = 3
-const ACT_BEEP = 4
-const ACT_QUIT = 5
+ACT_LEFT :: 0
+ACT_RIGHT :: 1
+ACT_DOWN :: 2
+ACT_UP :: 3
+ACT_BEEP :: 4
+ACT_QUIT :: 5
 
 // What the player wants, sampled once per frame. Edge-triggered actions are latched until a
 // simulation step has consumed them, so they are neither lost nor seen twice.
-struct Controls {
-    dir vec2
-    beep bool
+Controls :: struct {
+    dir: vec2
+    beep: bool
 }
 
 // The whole game state: plain data, no globals.
-struct Game {
-    pos vec2
-    prev vec2        // position one step ago, for interpolated drawing
-    beeps i64
+Game :: struct {
+    pos: vec2
+    prev: vec2       // position one step ago, for interpolated drawing
+    beeps: i64
 }
 
-fn bindings() ActionMap {
+bindings :: () -> ActionMap {
     m := action_map()
     m.bind_key(ACT_LEFT, KEY_A)
     m.bind_key(ACT_LEFT, KEY_LEFT)
@@ -205,7 +205,7 @@ fn bindings() ActionMap {
 }
 
 // One fixed simulation step: the only place where the game state changes.
-fn step(g *Game, c *Controls, mixer *Mixer, beep Sound) {
+step :: (g: *Game, c: *Controls, mixer: *Mixer, beep: Sound) {
     g.prev = g.pos
     g.pos = g.pos + vec2(c.dir.x, -c.dir.y) * (90.0 * STEP)
     g.pos.x = fmin(fmax(g.pos.x, 0.0), f32(FB_W - 16))
@@ -219,7 +219,7 @@ fn step(g *Game, c *Controls, mixer *Mixer, beep Sound) {
 }
 
 // Draws the state `alpha` (0..1) of the way from the previous step to the current one.
-fn render(g *Game, fb []u8, alpha f32) {
+render :: (g: *Game, fb: []u8, alpha: f32) {
     for i in 0..FB_W * FB_H {
         fb[i * 4] = 24
         fb[i * 4 + 1] = 28
@@ -238,12 +238,12 @@ fn render(g *Game, fb []u8, alpha f32) {
     }
 }
 
-fn nap(ns i64) {
-    var ts = [2]i64{0, ns}
+nap :: (ns: i64) {
+    ts := [2]i64{0, ns}
     syscall(35, ptr(ts), 0)              // nanosleep
 }
 
-fn main() {
+main :: () {
     w, ok := window_open(WindowDesc{title: "AL game loop", width: 960, height: 540, resizable: true})
     if !ok {
         print("cannot open a window (no display?)")
@@ -255,7 +255,7 @@ fn main() {
     actions := bindings()
     gamepad_open(&w.input.pad, 0)        // optional; false if none is plugged in
     fb := alloc[u8](FB_W * FB_H * 4)
-    var controls Controls
+    controls: Controls
     game := Game{pos: vec2(152.0, 82.0), prev: vec2(152.0, 82.0)}
     max_frames := if len(args()) > 1 { parse_i64(args()[1]).0 } else { -1 }
     frames := 0

@@ -19,21 +19,21 @@ different game every run, and log the seed so that the run can be reproduced.
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Rng { s0 u64, s1 u64, s2 u64, s3 u64 }` | Generator state: 32 bytes, no pointers. Copying it forks the sequence; storing it in a save file resumes it. The all-zero state is invalid (always create it with `rng`). |
-| `rng(seed u64) Rng` | A generator determined by `seed`. The state is expanded from the seed with splitmix64, so nearby seeds (0, 1, 2) give unrelated sequences. |
-| `next_u64(r *Rng) u64` | The next 64 random bits. |
-| `next_u32(r *Rng) u32` | The next 32 random bits (high half of `next_u64`). |
-| `next_f32(r *Rng) f32` | Uniform in `[0, 1)`, 24 random bits. |
-| `next_f64(r *Rng) f64` | Uniform in `[0, 1)`, 53 random bits. |
-| `below(r *Rng, n u64) u64` | Unbiased integer in `[0, n)`; `n` must not be 0. |
-| `range(r *Rng, lo i64, hi i64) i64` | Unbiased integer in `[lo, hi)` (like `for i in lo..hi`); requires `lo < hi`. A die is `r.range(1, 7)`. |
-| `range(r *Rng, lo f32, hi f32) f32` | Uniform float in `[lo, hi)`. |
-| `chance(r *Rng, p f32) bool` | `true` with probability `p`. |
-| `shuffle[T](r *Rng, xs []T)` | Reorders `xs` in place, every permutation equally likely (Fisher-Yates). |
-| `pick[T](r *Rng, xs []T) T` | A uniformly chosen element; `xs` must not be empty. |
-| `unit_vec2(r *Rng) vec2`, `unit_vec3(r *Rng) vec3` | Uniformly distributed direction of length 1. |
-| `in_circle(r *Rng) vec2`, `in_sphere(r *Rng) vec3` | Uniformly distributed point inside the unit disc / unit ball; scale and offset as needed. |
-| `normal(r *Rng, mean f32, stddev f32) f32` | Normally (Gaussian) distributed value. |
+| `Rng :: struct { s0: u64, s1: u64, s2: u64, s3: u64 }` | Generator state: 32 bytes, no pointers. Copying it forks the sequence; storing it in a save file resumes it. The all-zero state is invalid (always create it with `rng`). |
+| `rng(seed: u64) -> Rng` | A generator determined by `seed`. The state is expanded from the seed with splitmix64, so nearby seeds (0, 1, 2) give unrelated sequences. |
+| `next_u64(r: *Rng) -> u64` | The next 64 random bits. |
+| `next_u32(r: *Rng) -> u32` | The next 32 random bits (high half of `next_u64`). |
+| `next_f32(r: *Rng) -> f32` | Uniform in `[0, 1)`, 24 random bits. |
+| `next_f64(r: *Rng) -> f64` | Uniform in `[0, 1)`, 53 random bits. |
+| `below(r: *Rng, n: u64) -> u64` | Unbiased integer in `[0, n)`; `n` must not be 0. |
+| `range(r: *Rng, lo: i64, hi: i64) -> i64` | Unbiased integer in `[lo, hi)` (like `for i in lo..hi`); requires `lo < hi`. A die is `r.range(1, 7)`. |
+| `range(r: *Rng, lo: f32, hi: f32) -> f32` | Uniform float in `[lo, hi)`. |
+| `chance(r: *Rng, p: f32) -> bool` | `true` with probability `p`. |
+| `shuffle[T](r: *Rng, xs: []T)` | Reorders `xs` in place, every permutation equally likely (Fisher-Yates). |
+| `pick[T](r: *Rng, xs: []T) -> T` | A uniformly chosen element; `xs` must not be empty. |
+| `unit_vec2(r: *Rng) -> vec2`, `unit_vec3(r: *Rng) -> vec3` | Uniformly distributed direction of length 1. |
+| `in_circle(r: *Rng) -> vec2`, `in_sphere(r: *Rng) -> vec3` | Uniformly distributed point inside the unit disc / unit ball; scale and offset as needed. |
+| `normal(r: *Rng, mean: f32, stddev: f32) -> f32` | Normally (Gaussian) distributed value. |
 
 All of these are methods in the usual sense: `r.range(0, 10)` is `range(&r, 0, 10)`. The two
 `range` functions are told apart by the argument types: integer arguments give an integer,
@@ -51,11 +51,11 @@ gameplay generator makes the simulation depend on what was drawn on screen.
 
 | Declaration | Description |
 |-------------|-------------|
-| `rand_seed(seed u64)` | Restarts the default generator from `seed`. |
-| `rand_u64() u64` | Next 64 bits. |
-| `rand_f32() f32` | Uniform in `[0, 1)`. |
-| `rand_range(lo i64, hi i64) i64` | Unbiased integer in `[lo, hi)`. |
-| `rand_range(lo f32, hi f32) f32` | Uniform float in `[lo, hi)`. |
+| `rand_seed(seed: u64)` | Restarts the default generator from `seed`. |
+| `rand_u64() -> u64` | Next 64 bits. |
+| `rand_f32() -> f32` | Uniform in `[0, 1)`. |
+| `rand_range(lo: i64, hi: i64) -> i64` | Unbiased integer in `[lo, hi)`. |
+| `rand_range(lo: f32, hi: f32) -> f32` | Uniform float in `[lo, hi)`. |
 
 The default generator starts in the state of `rng(0)`: a program that never calls `rand_seed`
 still behaves the same on every run. It is one hidden global, so prefer an explicit `Rng`
@@ -65,10 +65,10 @@ wherever order of use matters.
 
 | Declaration | Description |
 |-------------|-------------|
-| `noise2(x f32, y f32) f32`, `noise2(x f32, y f32, seed u32) f32` | 2D gradient ("Perlin") noise. Smooth, in `[-1, 1]` (mostly within ±0.7), exactly 0 at integer coordinates, about one bump per unit. |
-| `noise3(x f32, y f32, z f32) f32`, `noise3(x f32, y f32, z f32, seed u32) f32` | 3D gradient noise in `[-1, 1]`. Use `z` as time to animate a 2D field. |
-| `fbm2(x f32, y f32, octaves i64) f32`, `fbm2(x f32, y f32, octaves i64, seed u32) f32` | Fractal sum of `octaves` layers of `noise2`, each with twice the frequency and half the amplitude of the one before, normalized to `[-1, 1]`. 4 to 6 octaves give natural-looking terrain and clouds. |
-| `noise_hash(x i64, y i64, z i64, seed u32) u32` | The lattice hash behind the noise: a well-mixed 32-bit value for an integer point. Useful for per-tile randomness without storing anything (`noise_hash(tx, ty, 0, world_seed) % 4` picks a tile variant). |
+| `noise2(x: f32, y: f32) -> f32`, `noise2(x: f32, y: f32, seed: u32) -> f32` | 2D gradient ("Perlin") noise. Smooth, in `[-1, 1]` (mostly within ±0.7), exactly 0 at integer coordinates, about one bump per unit. |
+| `noise3(x: f32, y: f32, z: f32) -> f32`, `noise3(x: f32, y: f32, z: f32, seed: u32) -> f32` | 3D gradient noise in `[-1, 1]`. Use `z` as time to animate a 2D field. |
+| `fbm2(x: f32, y: f32, octaves: i64) -> f32`, `fbm2(x: f32, y: f32, octaves: i64, seed: u32) -> f32` | Fractal sum of `octaves` layers of `noise2`, each with twice the frequency and half the amplitude of the one before, normalized to `[-1, 1]`. 4 to 6 octaves give natural-looking terrain and clouds. |
+| `noise_hash(x: i64, y: i64, z: i64, seed: u32) -> u32` | The lattice hash behind the noise: a well-mixed 32-bit value for an integer point. Useful for per-tile randomness without storing anything (`noise_hash(tx, ty, 0, world_seed) % 4` picks a tile variant). |
 
 Noise is a pure function: the same arguments always give the same value, with no state and no
 set-up, so any part of an endless world can be generated in any order. `seed` selects an
@@ -90,10 +90,10 @@ output as needed (`n * 0.5 + 0.5` for `[0, 1]`).
 ## Example
 
 ```
-struct Loot { name str, weight i64 }
+Loot :: struct { name: str, weight: i64 }
 
 // weighted choice: walk the table until the roll is used up
-fn roll_loot(r *Rng, table []Loot) str {
+roll_loot :: (r: *Rng, table: []Loot) -> str {
     total := 0
     for l in table {
         total += l.weight
@@ -108,7 +108,7 @@ fn roll_loot(r *Rng, table []Loot) str {
     return ""
 }
 
-fn main() {
+main :: () {
     // one generator per subsystem: world generation does not disturb combat rolls
     world := rng(2024)
     combat := rng(7)

@@ -28,16 +28,16 @@ allocate from the arena in use (see [mem](mem.md)); wrap temporary work in
 
 | Declaration | Description |
 |-------------|-------------|
-| `file_exists(path str) bool` | True if `path` names an existing file or directory. |
-| `is_dir(path str) bool` | True if `path` names a directory. |
-| `file_size(path str) i64` | Size in bytes, or -1 if the file does not exist. |
-| `modified_time(path str) i64` | Time of the last modification in nanoseconds since 1970, or 0 if the file does not exist. Compare two readings to detect a change. |
-| `read_bytes(path str) ([]u8, bool)` | The whole file; `(empty, false)` if it cannot be opened or cannot be read (a directory, for example). One allocation of exactly the file size. Since `str` is `[]u8`, this also reads text. |
-| `write_bytes(path str, data []u8) bool` | Creates or replaces the file; `false` on failure. Does not create directories. |
-| `remove_file(path str) bool` | Deletes a file. |
-| `make_dir(path str) bool` | Creates a directory and any missing parents; true if the directory exists afterwards (also when it existed before). |
-| `remove_dir(path str) bool` | Deletes an empty directory. |
-| `list_dir(path str) []str` | Names of the entries of a directory, without `.` and `..`, sorted by byte value (so the order is the same on every machine); empty if the directory cannot be read. Names only: join them with the directory to open them. |
+| `file_exists(path: str) -> bool` | True if `path` names an existing file or directory. |
+| `is_dir(path: str) -> bool` | True if `path` names a directory. |
+| `file_size(path: str) -> i64` | Size in bytes, or -1 if the file does not exist. |
+| `modified_time(path: str) -> i64` | Time of the last modification in nanoseconds since 1970, or 0 if the file does not exist. Compare two readings to detect a change. |
+| `read_bytes(path: str) -> ([]u8, bool)` | The whole file; `(empty, false)` if it cannot be opened or cannot be read (a directory, for example). One allocation of exactly the file size. Since `str` is `[]u8`, this also reads text. |
+| `write_bytes(path: str, data: []u8) -> bool` | Creates or replaces the file; `false` on failure. Does not create directories. |
+| `remove_file(path: str) -> bool` | Deletes a file. |
+| `make_dir(path: str) -> bool` | Creates a directory and any missing parents; true if the directory exists afterwards (also when it existed before). |
+| `remove_dir(path: str) -> bool` | Deletes an empty directory. |
+| `list_dir(path: str) -> []str` | Names of the entries of a directory, without `.` and `..`, sorted by byte value (so the order is the same on every machine); empty if the directory cannot be read. Names only: join them with the directory to open them. |
 
 Typed data round-trips through the byte views of [mem](mem.md):
 `write_bytes(path, as_bytes(vertices))` and `from_bytes[Vertex](data)`.
@@ -49,22 +49,22 @@ views of their argument and do not allocate.
 
 | Declaration | Description | Examples |
 |-------------|-------------|----------|
-| `path_join(a str, b str) str` | `a` and `b` with exactly one `/` between them; `b` alone if `a` is empty or `b` is absolute. | `("a", "b")` → `a/b`, `("a/", "b")` → `a/b`, `("", "b")` → `b`, `("a", "/b")` → `/b` |
-| `path_dir(p str) str` | Everything before the last `/`. | `a/b/c.png` → `a/b`, `c.png` → empty, `/c` → `/` |
-| `path_base(p str) str` | The last component. | `a/b/c.png` → `c.png` |
-| `path_ext(p str) str` | Extension of the last component, without the dot. | `a/b/c.png` → `png`, `x.tar.gz` → `gz`, `Makefile` → empty, `.hidden` → empty |
-| `path_stem(p str) str` | The last component without its extension. | `a/b/c.png` → `c`, `x.tar.gz` → `x.tar` |
+| `path_join(a: str, b: str) -> str` | `a` and `b` with exactly one `/` between them; `b` alone if `a` is empty or `b` is absolute. | `("a", "b")` → `a/b`, `("a/", "b")` → `a/b`, `("", "b")` → `b`, `("a", "/b")` → `/b` |
+| `path_dir(p: str) -> str` | Everything before the last `/`. | `a/b/c.png` → `a/b`, `c.png` → empty, `/c` → `/` |
+| `path_base(p: str) -> str` | The last component. | `a/b/c.png` → `c.png` |
+| `path_ext(p: str) -> str` | Extension of the last component, without the dot. | `a/b/c.png` → `png`, `x.tar.gz` → `gz`, `Makefile` → empty, `.hidden` → empty |
+| `path_stem(p: str) -> str` | The last component without its extension. | `a/b/c.png` → `c`, `x.tar.gz` → `x.tar` |
 
 ## Asset loader
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Assets { root str, cache Map[str, Asset] }` | A root directory and the files loaded from it so far. |
-| `struct Asset { data []u8, mtime i64 }` | A cache entry: the bytes and the file's modification time when it was read. |
-| `assets_new(root str) Assets` | A loader for the files under `root` (`""` = the working directory). |
-| `load(a *Assets, name str) ([]u8, bool)` | The content of `root/name`. The first call reads the file; later calls return the same cached slice without touching the disk. `(empty, false)` if the file cannot be read. |
-| `reload(a *Assets, name str) ([]u8, bool)` | Reads the file again and replaces the cache entry. If reading fails, returns `(empty, false)` and keeps the old entry. |
-| `changed(a *Assets, name str) bool` | True if `name` was loaded and its file has a different modification time now. One `stat` call, no allocation. |
+| `Assets :: struct { root: str, cache: Map[str, Asset] }` | A root directory and the files loaded from it so far. |
+| `Asset :: struct { data: []u8, mtime: i64 }` | A cache entry: the bytes and the file's modification time when it was read. |
+| `assets_new(root: str) -> Assets` | A loader for the files under `root` (`""` = the working directory). |
+| `load(a: *Assets, name: str) -> ([]u8, bool)` | The content of `root/name`. The first call reads the file; later calls return the same cached slice without touching the disk. `(empty, false)` if the file cannot be read. |
+| `reload(a: *Assets, name: str) -> ([]u8, bool)` | Reads the file again and replaces the cache entry. If reading fails, returns `(empty, false)` and keeps the old entry. |
+| `changed(a: *Assets, name: str) -> bool` | True if `name` was loaded and its file has a different modification time now. One `stat` call, no allocation. |
 
 Names are paths relative to the root (`"levels/one.json"`). Loaded data is shared by everyone
 who asks for the same name: treat it as read-only. The cache only grows; data replaced by
@@ -99,14 +99,14 @@ A key that occurs twice keeps its last value.
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Config { values Map[str, str], keys Vec[str] }` | `keys`: every key once, in file order (`c.keys.items()`). `values`: key → text. |
-| `config_parse(text str) Config` | Parses config text. Values are views into `text`, which must stay alive as long as the `Config`. |
-| `config_load(path str) (Config, bool)` | Reads and parses a file; an empty config and `false` if it cannot be read. |
-| `has(c *Config, key str) bool` | True if the key is present. |
-| `get_str(c *Config, key str, default str) str` | The value as text. |
-| `get_i64(c *Config, key str, default i64) i64` | The value as a decimal integer. |
-| `get_f64(c *Config, key str, default f64) f64` | The value as a number. |
-| `get_bool(c *Config, key str, default bool) bool` | `true`/`yes`/`on`/`1` or `false`/`no`/`off`/`0` (lower case). |
+| `Config :: struct { values: Map[str, str], keys: Vec[str] }` | `keys`: every key once, in file order (`c.keys.items()`). `values`: key → text. |
+| `config_parse(text: str) -> Config` | Parses config text. Values are views into `text`, which must stay alive as long as the `Config`. |
+| `config_load(path: str) -> (Config, bool)` | Reads and parses a file; an empty config and `false` if it cannot be read. |
+| `has(c: *Config, key: str) -> bool` | True if the key is present. |
+| `get_str(c: *Config, key: str, default: str) -> str` | The value as text. |
+| `get_i64(c: *Config, key: str, default: i64) -> i64` | The value as a decimal integer. |
+| `get_f64(c: *Config, key: str, default: f64) -> f64` | The value as a number. |
+| `get_bool(c: *Config, key: str, default: bool) -> bool` | `true`/`yes`/`on`/`1` or `false`/`no`/`off`/`0` (lower case). |
 
 Every getter returns `default` when the key is missing or its text does not parse as the
 requested type, so a settings file only needs to list what differs from the defaults.
@@ -115,18 +115,18 @@ requested type, so a settings file only needs to list what differs from the defa
 
 | Declaration | Description |
 |-------------|-------------|
-| `enum JsonKind { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }` | The kind of a value. |
-| `struct Json { kind JsonKind, num f64, text str, key str, items []Json }` | One value. `num`: the number, or 1.0/0.0 for true/false. `text`: the string, or the number as written. `key`: the member name when the value is a member of an object. `items`: the elements of an array or the members of an object, in document order, stored contiguously. |
-| `json_parse(text str) (*Json, bool)` | Parses a complete document; `(nil, false)` if it is not valid JSON. |
-| `json_error_line(text str) i64` | The 1-based line of the first syntax error, or 0 if the text is valid. For error messages after `json_parse` failed. |
-| `get(v *Json, key str) *Json` | The member `key` of an object; `nil` if `v` is not an object or has no such member. |
-| `at(v *Json, i i64) *Json` | Element `i` of an array (or member `i` of an object); `nil` if out of range. |
-| `count(v *Json) i64` | Number of elements or members; 0 for anything else. |
-| `as_str(v *Json, default str) str` | The string, or `default` if `v` is not a string. |
-| `as_f64(v *Json, default f64) f64` | The number, or `default` if `v` is not a number. |
-| `as_i64(v *Json, default i64) i64` | The number as an integer: exact for integer literals (all 64 bits), truncated toward zero otherwise. |
-| `as_bool(v *Json, default bool) bool` | The boolean, or `default` if `v` is not a boolean. |
-| `is_null(v *Json) bool` | True if `v` is a JSON `null` (false for `nil`, i.e. for a missing value). |
+| `JsonKind :: enum { JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject }` | The kind of a value. |
+| `Json :: struct { kind: JsonKind, num: f64, text: str, key: str, items: []Json }` | One value. `num`: the number, or 1.0/0.0 for true/false. `text`: the string, or the number as written. `key`: the member name when the value is a member of an object. `items`: the elements of an array or the members of an object, in document order, stored contiguously. |
+| `json_parse(text: str) -> (*Json, bool)` | Parses a complete document; `(nil, false)` if it is not valid JSON. |
+| `json_error_line(text: str) -> i64` | The 1-based line of the first syntax error, or 0 if the text is valid. For error messages after `json_parse` failed. |
+| `get(v: *Json, key: str) -> *Json` | The member `key` of an object; `nil` if `v` is not an object or has no such member. |
+| `at(v: *Json, i: i64) -> *Json` | Element `i` of an array (or member `i` of an object); `nil` if out of range. |
+| `count(v: *Json) -> i64` | Number of elements or members; 0 for anything else. |
+| `as_str(v: *Json, default: str) -> str` | The string, or `default` if `v` is not a string. |
+| `as_f64(v: *Json, default: f64) -> f64` | The number, or `default` if `v` is not a number. |
+| `as_i64(v: *Json, default: i64) -> i64` | The number as an integer: exact for integer literals (all 64 bits), truncated toward zero otherwise. |
+| `as_bool(v: *Json, default: bool) -> bool` | The boolean, or `default` if `v` is not a boolean. |
+| `is_null(v: *Json) -> bool` | True if `v` is a JSON `null` (false for `nil`, i.e. for a missing value). |
 
 Every accessor accepts `nil` and values of the wrong kind, so a lookup can be written as one
 chain and checked once, at the end, through the default:
@@ -152,9 +152,9 @@ few values and throw the tree away, parse between `mark()` and `release()`.
 ```
 use std.asset
 
-struct Settings { title str, width i64, height i64, vsync bool, volume f64 }
+Settings :: struct { title: str, width: i64, height: i64, vsync: bool, volume: f64 }
 
-fn load_settings(a *Assets) Settings {
+load_settings :: (a: *Assets) -> Settings {
     text, _ := a.load("settings.ini")            // a missing file gives the defaults below
     c := config_parse(text)
     return Settings{
@@ -166,7 +166,7 @@ fn load_settings(a *Assets) Settings {
     }
 }
 
-fn main() {
+main :: () {
     // set up a small asset directory (a real game ships these files)
     root := "tmp/asset_example"
     make_dir(path_join(root, "levels"))

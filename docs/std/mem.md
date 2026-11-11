@@ -64,7 +64,7 @@ zeroed when it is handed out again.
   arena in use is not the one of the matching frame_begin` otherwise.
 
 ```
-var level Region                               // lives until the level is unloaded
+level: Region                                  // lives until the level is unloaded
 
 enter(&level)
 load_level(&game)                              // everything it allocates is level memory
@@ -81,12 +81,12 @@ reset(&level)                                  // unload: independent of all mar
 
 | Declaration | Description |
 |-------------|-------------|
-| `kb(n i64) i64`, `mb(n i64) i64` | `n` kibibytes / mebibytes in bytes: `arena_new(mb(4))`. |
-| `mem_used() i64` | Bytes in use in the arena that allocations currently come from (the main arena, or the innermost entered `Region`; `used(&r)` asks a particular region). Print the difference across a frame or a level to find leaks: it must return to the same value. |
-| `as_bytes[T](s []T) []u8` | The memory of a slice as bytes (a view, nothing is copied): for writing typed data to files, hashing, uploading to a GPU. |
-| `from_bytes[T](b []u8) []T` | The reverse view: `from_bytes[Vertex](data)`. Trailing bytes that do not fill a `T` are dropped. `b` must be suitably aligned for `T` (memory from `alloc` and `read_bytes` is). |
-| `zero[T](p *T)` | Sets the value `p` points to to all zero bytes. |
-| `zero[T](s []T)` | Sets every element of `s` to all zero bytes. |
+| `kb(n: i64) -> i64`, `mb(n: i64) -> i64` | `n` kibibytes / mebibytes in bytes: `arena_new(mb(4))`. |
+| `mem_used() -> i64` | Bytes in use in the arena that allocations currently come from (the main arena, or the innermost entered `Region`; `used(&r)` asks a particular region). Print the difference across a frame or a level to find leaks: it must return to the same value. |
+| `as_bytes[T](s: []T) -> []u8` | The memory of a slice as bytes (a view, nothing is copied): for writing typed data to files, hashing, uploading to a GPU. |
+| `from_bytes[T](b: []u8) -> []T` | The reverse view: `from_bytes[Vertex](data)`. Trailing bytes that do not fill a `T` are dropped. `b` must be suitably aligned for `T` (memory from `alloc` and `read_bytes` is). |
+| `zero[T](p: *T)` | Sets the value `p` points to to all zero bytes. |
+| `zero[T](s: []T)` | Sets every element of `s` to all zero bytes. |
 
 ## Frame scopes
 
@@ -121,14 +121,14 @@ temporary work of unknown size, and for everything that allocates implicitly, us
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Arena { base i64, cur i64, end i64, dirty i64 }` | Addresses of the block and the cursor (`dirty` is internal: how far old data reaches). |
-| `arena_new(bytes i64) Arena` | An arena of `bytes` bytes carved from the arena in use. It lives as long as that memory: releasing a mark taken *before* `arena_new` (or resetting the region it was carved from) frees the whole arena. |
-| `arena_of(buf []u8) Arena` | An arena over storage you provide, for example a global `var buf [65536]u8`: memory outside every arena. |
-| `alloc[T](a *Arena, n i64) []T` | `n` zeroed elements from the arena: `alloc[f32](&a, 256)` or `a.alloc[f32](256)`. |
-| `new[T](a *Arena) *T` | One zeroed `T` from the arena. |
-| `mark(a *Arena) i64`, `release(a *Arena, m i64)` | Like `mark()`/`release(m)`, for this arena. |
-| `reset(a *Arena)` | Gives back everything allocated from the arena. |
-| `used(a *Arena) i64`, `remaining(a *Arena) i64` | Bytes handed out / still available. |
+| `Arena :: struct { base: i64, cur: i64, end: i64, dirty: i64 }` | Addresses of the block and the cursor (`dirty` is internal: how far old data reaches). |
+| `arena_new(bytes: i64) -> Arena` | An arena of `bytes` bytes carved from the arena in use. It lives as long as that memory: releasing a mark taken *before* `arena_new` (or resetting the region it was carved from) frees the whole arena. |
+| `arena_of(buf: []u8) -> Arena` | An arena over storage you provide, for example a global `buf: [65536]u8`: memory outside every arena. |
+| `alloc[T](a: *Arena, n: i64) -> []T` | `n` zeroed elements from the arena: `alloc[f32](&a, 256)` or `a.alloc[f32](256)`. |
+| `new[T](a: *Arena) -> *T` | One zeroed `T` from the arena. |
+| `mark(a: *Arena) -> i64`, `release(a: *Arena, m: i64)` | Like `mark()`/`release(m)`, for this arena. |
+| `reset(a: *Arena)` | Gives back everything allocated from the arena. |
+| `used(a: *Arena) -> i64`, `remaining(a: *Arena) -> i64` | Bytes handed out / still available. |
 
 Allocations are zero-initialized and 16-byte aligned (sizes are rounded up to 16), exactly
 like `alloc` and `new`. Asking for more than `remaining` is a programming error and stops the
@@ -137,8 +137,8 @@ program with `panic: arena exhausted`: size the arena for its worst case, and ch
 
 The standard containers (`Vec`, `Map`, `fmt`, `concat`) never allocate from an `Arena`: they
 use the arena in use (the main arena or the entered `Region`); an `Arena` serves your own
-`alloc`/`new` calls. `reset(a *Arena)` and `used(a *Arena)` have the same names as the
-`Region` functions `reset(r *Region)` and `used(r *Region)`; the argument type selects.
+`alloc`/`new` calls. `reset(a: *Arena)` and `used(a: *Arena)` have the same names as the
+`Region` functions `reset(r: *Region)` and `used(r: *Region)`; the argument type selects.
 
 ## Pool and Handle
 
@@ -147,17 +147,17 @@ free list, objects never move, and each object is named by a `Handle`.
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Handle { idx u32, gen u32 }` | Slot index plus generation. The zero `Handle{}` is never valid and means "none"; handles compare with `==`. |
-| `struct Pool[T] { items []T, gens []u32, free []u32, len i64, used i64, nfree i64, growable bool }` | `items`: the slots. `len`: number of live objects. `used`: number of slots that were ever occupied (the live objects are among `items[0..used]`). The rest is internal. |
-| `pool_new[T](cap i64) Pool[T]` | A pool with room for exactly `cap` objects. Allocates once; no later operation allocates. |
-| `pool_growable[T](cap i64) Pool[T]` | A pool that doubles its storage when full. Growing allocates and moves the objects (handles stay valid, pointers do not), and the old storage stays in the arena. |
-| `insert[T](p *Pool[T], v T) Handle` | Stores `v` and returns its handle; the zero `Handle` if a fixed-capacity pool is full. |
-| `get[T](p *Pool[T], h Handle) *T` | The object, or `nil` if `h` is stale (the object was removed) or zero. |
-| `is_valid[T](p *Pool[T], h Handle) bool` | True if `h` names an object that is still in the pool. |
-| `remove[T](p *Pool[T], h Handle) bool` | Removes the object; `false` if the handle was stale. |
-| `is_live[T](p *Pool[T], i i64) bool` | True if slot `i` (`0 <= i < p.used`) holds an object. |
-| `handle_at[T](p *Pool[T], i i64) Handle` | The handle of the object in slot `i`. |
-| `clear[T](p *Pool[T])` | Removes every object; all handles become stale, the capacity is kept. |
+| `Handle :: struct { idx: u32, gen: u32 }` | Slot index plus generation. The zero `Handle{}` is never valid and means "none"; handles compare with `==`. |
+| `Pool[T] :: struct { items: []T, gens: []u32, free: []u32, len: i64, used: i64, nfree: i64, growable: bool }` | `items`: the slots. `len`: number of live objects. `used`: number of slots that were ever occupied (the live objects are among `items[0..used]`). The rest is internal. |
+| `pool_new[T](cap: i64) -> Pool[T]` | A pool with room for exactly `cap` objects. Allocates once; no later operation allocates. |
+| `pool_growable[T](cap: i64) -> Pool[T]` | A pool that doubles its storage when full. Growing allocates and moves the objects (handles stay valid, pointers do not), and the old storage stays in the arena. |
+| `insert[T](p: *Pool[T], v: T) -> Handle` | Stores `v` and returns its handle; the zero `Handle` if a fixed-capacity pool is full. |
+| `get[T](p: *Pool[T], h: Handle) -> *T` | The object, or `nil` if `h` is stale (the object was removed) or zero. |
+| `is_valid[T](p: *Pool[T], h: Handle) -> bool` | True if `h` names an object that is still in the pool. |
+| `remove[T](p: *Pool[T], h: Handle) -> bool` | Removes the object; `false` if the handle was stale. |
+| `is_live[T](p: *Pool[T], i: i64) -> bool` | True if slot `i` (`0 <= i < p.used`) holds an object. |
+| `handle_at[T](p: *Pool[T], i: i64) -> Handle` | The handle of the object in slot `i`. |
+| `clear[T](p: *Pool[T])` | Removes every object; all handles become stale, the capacity is kept. |
 
 **Why handles instead of pointers.** A pointer to a removed object silently points at whatever
 is stored there next. A handle carries the slot's generation at the time of `insert`; the
@@ -193,21 +193,21 @@ shows a whole entity, the whole world can be dumped with `as_bytes(pool.items)`,
 behaviour is a new field plus a new loop.
 
 ```
-enum Kind { Player, Enemy, Bullet, Pickup }
+Kind :: enum { Player, Enemy, Bullet, Pickup }
 
 // one struct for every kind of entity; fields a kind does not need stay zero
-struct Entity {
-    kind Kind
-    pos vec2
-    vel vec2
-    hp i64
-    target Handle       // zero Handle = none
-    ttl f32             // seconds to live, 0 = forever
+Entity :: struct {
+    kind: Kind
+    pos: vec2
+    vel: vec2
+    hp: i64
+    target: Handle      // zero Handle = none
+    ttl: f32            // seconds to live, 0 = forever
 }
 
-struct World { ents Pool[Entity], player Handle, score i64 }
+World :: struct { ents: Pool[Entity], player: Handle, score: i64 }
 
-fn move_system(w *World, dt f32) {
+move_system :: (w: *World, dt: f32) {
     for i in 0..w.ents.used {
         if w.ents.is_live(i) {
             e := &w.ents.items[i]
@@ -217,7 +217,7 @@ fn move_system(w *World, dt f32) {
 }
 
 // enemies walk toward their target; a target that died is seen as nil
-fn chase_system(w *World) {
+chase_system :: (w: *World) {
     for i in 0..w.ents.used {
         if !w.ents.is_live(i) || w.ents.items[i].kind != Enemy {
             continue
@@ -229,7 +229,7 @@ fn chase_system(w *World) {
 }
 
 // bullets expire; removing inside the loop is fine because slots never move
-fn expire_system(w *World, dt f32) {
+expire_system :: (w: *World, dt: f32) {
     for i in 0..w.ents.used {
         if !w.ents.is_live(i) || w.ents.items[i].ttl == 0.0 {
             continue
@@ -242,7 +242,7 @@ fn expire_system(w *World, dt f32) {
     }
 }
 
-fn main() {
+main :: () {
     w := World{ents: pool_new[Entity](1024)}
     w.player = w.ents.insert(Entity{kind: Player, pos: vec2(10.0, 0.0), hp: 3})
     enemy := w.ents.insert(Entity{kind: Enemy, pos: vec2(0.0, 0.0), hp: 1, target: w.player})
@@ -278,7 +278,7 @@ Guidelines:
 - Per-kind data that is large or rare (an inventory, an AI plan) goes into its own pool or
   array, and the entity keeps a `Handle` or an index to it.
 - When kinds really are disjoint, an `enum` with data works as the payload:
-  `enum Body { Ship(ShipData), Rock(f32), Shot(Handle) }` as a field of the entity, taken apart
+  `Body :: enum { Ship(ShipData), Rock(f32), Shot(Handle) }` as a field of the entity, taken apart
   with `match`. Start with plain fields; reach for the enum when the struct gets confusing.
 - A system that only concerns a few entities does not need its own storage either: skip the
   others with `continue`. If profiling shows a hot loop over a sparse kind, keep the handles
@@ -293,14 +293,14 @@ A fixed-capacity first-in-first-out queue. Nothing allocates after `ring_new`.
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Ring[T] { buf []T, head i64, len i64 }` | `len`: number of queued elements. The capacity is `len(r.buf)`. |
-| `ring_new[T](cap i64) Ring[T]` | An empty ring with room for `cap` elements. |
-| `push[T](r *Ring[T], x T) bool` | Appends at the back; `false` (nothing stored) if the ring is full. |
-| `push_overwrite[T](r *Ring[T], x T)` | Appends at the back, dropping the oldest element if full: the ring keeps the last `cap` values (frame times, a trail, an undo history). |
-| `pop[T](r *Ring[T]) (T, bool)` | Removes and returns the oldest element; `(zero value, false)` if empty. |
-| `at[T](r *Ring[T], i i64) T` | The `i`-th oldest element without removing it (`0 <= i < r.len`). |
-| `is_full[T](r *Ring[T]) bool` | True if `push` would fail. |
-| `clear[T](r *Ring[T])` | Removes all elements. |
+| `Ring[T] :: struct { buf: []T, head: i64, len: i64 }` | `len`: number of queued elements. The capacity is `len(r.buf)`. |
+| `ring_new[T](cap: i64) -> Ring[T]` | An empty ring with room for `cap` elements. |
+| `push[T](r: *Ring[T], x: T) -> bool` | Appends at the back; `false` (nothing stored) if the ring is full. |
+| `push_overwrite[T](r: *Ring[T], x: T)` | Appends at the back, dropping the oldest element if full: the ring keeps the last `cap` values (frame times, a trail, an undo history). |
+| `pop[T](r: *Ring[T]) -> (T, bool)` | Removes and returns the oldest element; `(zero value, false)` if empty. |
+| `at[T](r: *Ring[T], i: i64) -> T` | The `i`-th oldest element without removing it (`0 <= i < r.len`). |
+| `is_full[T](r: *Ring[T]) -> bool` | True if `push` would fail. |
+| `clear[T](r: *Ring[T])` | Removes all elements. |
 
 An event queue between systems is a ring that producers `push` to and one consumer drains:
 `loop { ev, ok := events.pop(); if !ok { break }; handle(ev) }`.
@@ -313,14 +313,14 @@ array for iteration.
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct SparseSet { dense []u32, sparse []u32, len i64 }` | `dense[0..len]` are the members, in unspecified order; `sparse[id]` is the position of `id` in `dense`. |
-| `sparse_set(cap i64) SparseSet` | An empty set sized for ids below `cap` and up to `cap` members. It grows (allocating) if a larger id or more members are inserted. |
-| `insert(s *SparseSet, id u32) i64` | Adds `id`; returns its position in `dense` (also if it was a member already). |
-| `remove(s *SparseSet, id u32) i64` | Removes `id` by moving the last member into its place. Returns the position that was refilled, or -1 if `id` was not a member. |
-| `has(s *SparseSet, id u32) bool` | Membership test. |
-| `index_of(s *SparseSet, id u32) i64` | Position of `id` in `dense`, or -1. |
-| `items(s *SparseSet) []u32` | The members as a slice (a view, valid until the set changes). |
-| `clear(s *SparseSet)` | Removes all members (constant time). |
+| `SparseSet :: struct { dense: []u32, sparse: []u32, len: i64 }` | `dense[0..len]` are the members, in unspecified order; `sparse[id]` is the position of `id` in `dense`. |
+| `sparse_set(cap: i64) -> SparseSet` | An empty set sized for ids below `cap` and up to `cap` members. It grows (allocating) if a larger id or more members are inserted. |
+| `insert(s: *SparseSet, id: u32) -> i64` | Adds `id`; returns its position in `dense` (also if it was a member already). |
+| `remove(s: *SparseSet, id: u32) -> i64` | Removes `id` by moving the last member into its place. Returns the position that was refilled, or -1 if `id` was not a member. |
+| `has(s: *SparseSet, id: u32) -> bool` | Membership test. |
+| `index_of(s: *SparseSet, id: u32) -> i64` | Position of `id` in `dense`, or -1. |
+| `items(s: *SparseSet) -> []u32` | The members as a slice (a view, valid until the set changes). |
+| `clear(s: *SparseSet)` | Removes all members (constant time). |
 
 Memory is 4 bytes per possible id plus 4 bytes per member. The positions returned by `insert`
 and `remove` let a parallel array carry a value per member, kept dense:
@@ -337,11 +337,11 @@ The three lifetimes in one program: pools and a private arena for the whole run,
 level, a frame scope per frame. The numbers at the end show that nothing is left behind.
 
 ```
-struct Tile { kind u8, height u8 }
-struct Level { tiles []Tile, w i64, h i64, name str }
-struct Bullet { pos vec2, vel vec2, damage i64 }
+Tile :: struct { kind: u8, height: u8 }
+Level :: struct { tiles: []Tile, w: i64, h: i64, name: str }
+Bullet :: struct { pos: vec2, vel: vec2, damage: i64 }
 
-fn load_level(n i64) Level {
+load_level :: (n: i64) -> Level {
     lv := Level{w: 64 * n, h: 64, name: fmt("level ", n)}
     lv.tiles = alloc[Tile](lv.w * lv.h)
     for i in 0..len(lv.tiles) {
@@ -350,7 +350,7 @@ fn load_level(n i64) Level {
     return lv
 }
 
-fn main() {
+main :: () {
     // 1. program lifetime: allocated once, never released
     bullets := pool_new[Bullet](256)
     events := ring_new[str](16)
