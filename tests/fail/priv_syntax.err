@@ -1,0 +1,5 @@
+tests/fail/priv_syntax.al:2:6: error: `priv` is written once in front of a declaration, found keyword `priv`
+tests/fail/priv_syntax.al:4:6: error: expected declaration (fn, struct, enum, const, var, test, use, extern, priv), found number
+tests/fail/priv_syntax.al:9:5: error: `priv` applies to top-level declarations only (`priv fn`, `priv struct`, `priv enum`, `priv const`, `priv var`); a local declaration is visible only in its block anyway, found keyword `priv`
+tests/fail/priv_syntax.al:13:5: error: a struct field cannot be `priv` (only top-level declarations can): write `priv struct` to make the whole struct private, found keyword `priv`
+tests/fail/priv_syntax.al:17:5: error: an enum variant cannot be `priv` (only top-level declarations can): write `priv enum` to make the enum type private, found keyword `priv`

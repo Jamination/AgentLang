@@ -1,0 +1,5 @@
+ok   private function and struct
+ok   private generic
+ok   private name as local
+FAIL failing with a private call
+1 test(s) failed

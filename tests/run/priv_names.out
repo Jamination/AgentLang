@@ -1,0 +1,15 @@
+1003 1.5 1 a
+2 2 3 3 4 Box[i64]{v: 21, count: 3} 99
+2 q 2.5 Box[Vec2i]{v: Vec2i{x: 1, y: 2}, count: 1}
+Box[str]{v: <21>, count: 3} 10.5 <21> 21
+15 21 7 2
+42 -1 1
+3 77 77
+4 -3
+0 1 7
+1005 N small other
+[0, 0, 0, 9] [5, 0, 0, 0] 16 64
+-4 16 16 -8
+[Vec2i{x: 1, y: 0}, Vec2i{x: 2, y: 0}, Vec2i{x: 3, y: 0}]
+3 true false Vec2i{x: 3, y: 4} Box[str]{v: w, count: 1} found true true
+43 Vec2i{x: 1, y: 2}

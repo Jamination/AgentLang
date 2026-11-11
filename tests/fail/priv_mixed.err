@@ -1,0 +1,6 @@
+tests/fail/priv_mixed.al:3:1: error: function `area` is defined both with and without `priv` in this file (the other definition is at line 2): the definitions of one name in a file are all private or all public; write `priv` in front of every one, or of none
+tests/fail/priv_mixed.al:6:1: error: function `scale` is defined both with and without `priv` in this file (the other definition is at line 5): the definitions of one name in a file are all private or all public; write `priv` in front of every one, or of none
+tests/fail/priv_mixed.al:7:1: error: function `scale` is defined both with and without `priv` in this file (the other definition is at line 5): the definitions of one name in a file are all private or all public; write `priv` in front of every one, or of none
+tests/fail/priv_mixed.al:10:1: error: `LIMIT` is declared both with and without `priv` in this file (the other declaration is at line 9): inside the file the name would be ambiguous; rename one of them
+tests/fail/priv_mixed.al:13:1: error: `Point` is declared both with and without `priv` in this file (the other declaration is at line 12): inside the file the name would be ambiguous; rename one of them
+tests/fail/priv_mixed.al:17:1: error: enum variant `Red` conflicts with the `priv` declaration `Red` of this file (variants are never private); rename one of them

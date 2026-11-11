@@ -396,23 +396,28 @@ fn parser_set_priv(d Decl, ppos Pos, errs *Vec[Diag]) Decl {
                 errs.push(Diag{pos: ppos, msg: "`fn main` cannot be `priv`: it is where the program starts, which is outside this file; remove `priv`"})
             } else {
                 f.is_priv = true
+                f.pos = ppos
             }
             DeclFn(f)
         }
         DeclStruct(s) => {
             s.is_priv = true
+            s.pos = ppos
             DeclStruct(s)
         }
         DeclEnum(e) => {
             e.is_priv = true
+            e.pos = ppos
             DeclEnum(e)
         }
         DeclConst(c) => {
             c.is_priv = true
+            c.pos = ppos
             DeclConst(c)
         }
         DeclGlobal(g) => {
             g.is_priv = true
+            g.pos = ppos
             DeclGlobal(g)
         }
         DeclTest(t) => d
@@ -547,6 +552,9 @@ fn decl(p *Parser) (Decl, bool) {
             if p.eat_p("}") {
                 break
             }
+            if p.is_kw("priv") {
+                return p.err[Decl]("a struct field cannot be `priv` (only top-level declarations can): write `priv struct` to make the whole struct private")
+            }
             fname, ok3 := p.ident()
             if !ok3 {
                 return parser_fail[Decl]()
@@ -577,6 +585,9 @@ fn decl(p *Parser) (Decl, bool) {
             p.skip_nl()
             if p.eat_p("}") {
                 break
+            }
+            if p.is_kw("priv") {
+                return p.err[Decl]("an enum variant cannot be `priv` (only top-level declarations can): write `priv enum` to make the enum type private")
             }
             vname, ok3 := p.ident()
             if !ok3 {
@@ -935,6 +946,9 @@ fn stmt(p *Parser) (Stmt, bool) {
 }
 
 fn stmt_k(p *Parser) (SK, bool) {
+    if p.is_kw("priv") {
+        return p.err[SK]("`priv` applies to top-level declarations only (`priv fn`, `priv struct`, `priv enum`, `priv const`, `priv var`); a local declaration is visible only in its block anyway")
+    }
     if p.eat_kw("var") {
         name, ok1 := p.ident()
         if !ok1 {

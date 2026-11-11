@@ -1,0 +1,13 @@
+tests/fail/priv_dup.al:3:1: error: `dup` is already declared with these parameter types at tests/fail/priv_dup.al:2:1
+tests/fail/priv_dup.al:5:1: error: `g1` is already declared at tests/fail/priv_dup.al:4:1
+tests/fail/priv_dup.al:7:1: error: `i32` is a builtin type name
+tests/fail/priv_dup.al:13:18: error: Pair has no field `c`
+tests/fail/priv_dup.al:14:6: error: Pair has no field `zap` (fields: a, b)
+tests/fail/priv_dup.al:15:5: error: `K` is not assignable
+tests/fail/priv_dup.al:16:18: error: type mismatch: expected Pair, found i64
+tests/fail/priv_dup.al:17:9: error: function `half(x)` expects 1 argument(s), got 2
+tests/fail/priv_dup.al:18:10: error: argument `x` of `half`: expected i64, found str
+tests/fail/priv_dup.al:19:15: error: no definition of `pick` takes 1 argument(s); candidates: pick(T, T); pick(*Rng, []T)
+tests/fail/priv_dup.al:20:14: error: no function `nothing` to call on Pair (method calls `x.f(a)` mean `f(x, a)`)
+tests/fail/priv_dup.al:21:10: error: function `pick` cannot be used as a value here: it is generic or overloaded; write `pick[T]` or give the destination a function type
+tests/fail/priv_dup.al:22:11: error: function `half(x)` expects 1 argument(s), got 2

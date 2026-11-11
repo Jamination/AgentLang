@@ -575,10 +575,6 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
 
 // is a declaration shown by `alc sigs <file> -- std`?
 fn main_sigs_visible(d *Decl) bool {
-    // private declarations of the library cannot be used from outside
-    if priv_decl_info(d).2 {
-        return false
-    }
     match *d {
         DeclFn(f) => {
             return !starts_with(f.name, "__")
@@ -619,7 +615,10 @@ fn main_real_main() i64 {
         sdecls := vec[Decl]()
         if from == 0 {
             for x in 0..src.decls.len {
-                if main_sigs_visible(&src.decls.buf[x]) {
+                // private declarations of the library cannot be used from outside
+                info := priv_decl_info(&src.decls.buf[x])
+                lib_private := info.2 && (info.3.file < n_prelude || contains(&src.std_files, info.3.file))
+                if main_sigs_visible(&src.decls.buf[x]) && !lib_private {
                     sdecls.push(src.decls.buf[x])
                 }
             }
