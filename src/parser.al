@@ -1077,8 +1077,14 @@ fn stmt_k(p *Parser) (SK, bool) {
     if p.is_kw("priv") {
         return p.err[SK]("`priv` applies to top-level declarations only (`priv fn`, `priv struct`, `priv enum`, `priv const`, `priv var`); a local declaration is visible only in its block anyway")
     }
-    if p.is_kw("inline") || p.is_kw("noinline") || p.is_kw("extern") {
-        return p.err[SK]("a nested function is declared with `fn name(...) { ... }` only: `inline`, `noinline` and `extern` apply to top-level functions")
+    match p.peek() {
+        TkKw(k) => {
+            if k == "inline" || k == "noinline" || k == "extern" {
+                p.errs.push(Diag{pos: p.pos(), msg: fmt("`", k, "` applies to top-level functions only: a nested function is declared as `fn name(...) { ... }`")})
+                return parser_fail[SK]()
+            }
+        }
+        _ => {}
     }
     if p.is_kw("fn") && parser_tk_id(p.peek_at(1)) {
         // a nested function

@@ -376,7 +376,7 @@ fn nested_method(self *Fx, name str) i64 {
 fn nested_hint(self *Fx, n str, pos Pos) str {
     for i in 0..self.later.len {
         if self.later[i].0 == n {
-            return fmt(": `", n, "` is declared at line ", self.later[i].1, ", after the nested function `", self.f.name, "`, which sees only what is declared before it (move the declaration of `", n, "` above the function, or pass the value as a parameter)")
+            return fmt(": `", n, "` is declared at line ", self.later[i].1, ", after the nested function `", self.f.name, "`, which sees only what is declared before it (declare `", n, "` above the function, or pass it as a parameter)")
         }
     }
     for bi in self.blocks.len - 1..=0 by -1 {

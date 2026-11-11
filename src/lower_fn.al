@@ -58,6 +58,8 @@ struct Fx {
     blocks Vec[*Block]
     // in a nested function: names declared after it in the enclosing function (name, line)
     later Vec[(str, i64)]
+    // this is the body of a nested function
+    in_nested bool
 }
 
 fn lower_fn_str_less(a str, b str) bool {
@@ -287,6 +289,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
             fx.nested.push(mine)
         }
         fx.later = nest.later
+        fx.in_nested = true
     }
     want := rty != T_UNIT && rty != T_NEVER
     var expect Opt[i64] = None
@@ -682,7 +685,11 @@ fn lower_fn_stmt_expr_kind(e *Expr) i64 {
 // `break` / `continue`
 fn lower_fn_break_continue(fx *Fx, pos Pos, is_break bool) {
     if fx.loops.len == 0 {
-        fx.err(pos, "`break`/`continue` outside of a loop")
+        if fx.in_nested {
+            fx.err(pos, fmt("`break`/`continue` outside of a loop (the nested function `", fx.f.name, "` cannot leave a loop of the enclosing function: return a value and test it at the call)"))
+        } else {
+            fx.err(pos, "`break`/`continue` outside of a loop")
+        }
         return
     }
     l := fx.loops[fx.loops.len - 1]
@@ -705,7 +712,9 @@ fn lower_fn_break_continue_to(fx *Fx, pos Pos, is_break bool, label str) {
     }
     word := if is_break { "break" } else { "continue" }
     if idx < 0 || idx >= fx.loops.len {
-        if fx.labels.len == 0 {
+        if fx.labels.len == 0 && fx.in_nested {
+            fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement in the nested function `", fx.f.name, "` (a nested function cannot leave a loop of the enclosing function: return a value and test it at the call)"))
+        } else if fx.labels.len == 0 {
             fx.err(pos, fmt("`", word, " ", label, "`: there is no loop labelled `", label, "` around this statement (label a loop with `", label, ": for ...`, `", label, ": while ...` or `", label, ": loop ...`)"))
         } else {
             names := vec[str]()
