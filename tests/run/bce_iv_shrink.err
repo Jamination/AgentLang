@@ -1,0 +1,1 @@
+panic: index out of bounds at tests/run/bce_iv_shrink.al:13
