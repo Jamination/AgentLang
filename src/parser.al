@@ -5,10 +5,12 @@ struct Parser {
     i i64
     errs *Vec[Diag]
     no_lit bool
+    // inside the header of `if`, `while` or `for` (not `match`); only looked at with `no_lit`
+    hdr_stmt bool
 }
 
 fn parser_new(toks Vec[Token], errs *Vec[Diag]) Parser {
-    return Parser{toks: toks, i: 0, errs: errs, no_lit: false}
+    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_stmt: false}
 }
 
 // the failure result of a parsing function: (zero value, false)
@@ -855,17 +857,94 @@ fn sync_stmt(p *Parser) {
     }
 }
 
+// the scrutinee of a `match`
 fn header_expr(p *Parser) (Expr, bool) {
     save := p.no_lit
+    save_stmt := p.hdr_stmt
     p.no_lit = true
+    p.hdr_stmt = false
     e, ok := p.expr()
     p.no_lit = save
+    p.hdr_stmt = save_stmt
     return (e, ok)
+}
+
+// the condition of an `if` or `while`, or an expression of a `for` header
+fn stmt_header_expr(p *Parser) (Expr, bool) {
+    save := p.no_lit
+    save_stmt := p.hdr_stmt
+    p.no_lit = true
+    p.hdr_stmt = true
+    e, ok := p.expr()
+    p.no_lit = save
+    p.hdr_stmt = save_stmt
+    return (e, ok)
+}
+
+fn parser_tk_binop(t Tk) bool {
+    match t {
+        TkP(q) => {
+            match q {
+                "*", "/", "%", "+", "-", "<<", ">>", "&", "^", "|", "==", "!=", "<", "<=", ">", ">=", "&&", "||" => {
+                    return true
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    return false
+}
+
+// In a header (`if`, `while`, `for`, `match`) a `{` normally starts the body. With the
+// parser at a `{` that follows the type-like expression `e`, is it a `T{...}` literal?
+//  - yes if `e` is written as a type (`[]T`, `[N]T`): a type alone is not a value;
+//  - in the header of `if`, `while` and `for`: yes if the matching `}` is directly followed
+//    by `{` (that one starts the body), `.`, `[` or a binary operator; none of these can
+//    follow the body of such a statement;
+//  - after the scrutinee of a `match`: yes if the braces hold something but no `=>` of
+//    their own, which every match arm has.
+fn lit_in_header(p *Parser, e *Expr) bool {
+    match e.k {
+        EKTypeE(t) => {
+            return true
+        }
+        _ => {}
+    }
+    j := p.i
+    depth := 0
+    arrow := false
+    loop {
+        match p.toks.buf[j].t {
+            TkEof => {
+                return false
+            }
+            TkP(q) => {
+                if q == "{" {
+                    depth += 1
+                } else if q == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        break
+                    }
+                } else if q == "=>" && depth == 1 {
+                    arrow = true
+                }
+            }
+            _ => {}
+        }
+        j += 1
+    }
+    if !p.hdr_stmt {
+        return !arrow && j > p.i + 1
+    }
+    after := p.toks.buf[min(j + 1, p.toks.len - 1)].t
+    return parser_tk_p(after, "{") || parser_tk_p(after, ".") || parser_tk_p(after, "[") || parser_tk_binop(after)
 }
 
 fn if_stmt(p *Parser) ((Expr, Block, Opt[Block]), bool) {
     // `if` already consumed
-    c, ok1 := p.header_expr()
+    c, ok1 := p.stmt_header_expr()
     if !ok1 {
         return parser_fail[(Expr, Block, Opt[Block])]()
     }
@@ -943,7 +1022,7 @@ fn stmt_k(p *Parser) (SK, bool) {
         return (SKIf(r.0, r.1, r.2), true)
     }
     if p.eat_kw("while") {
-        c, ok1 := p.header_expr()
+        c, ok1 := p.stmt_header_expr()
         if !ok1 {
             return parser_fail[SK]()
         }
@@ -976,20 +1055,20 @@ fn stmt_k(p *Parser) (SK, bool) {
         if !p.eat_kw("in") {
             return p.err[SK]("expected `in`")
         }
-        lo, ok3 := p.header_expr()
+        lo, ok3 := p.stmt_header_expr()
         if !ok3 {
             return parser_fail[SK]()
         }
         var hi Opt[Expr] = None
         incl := false
         if p.eat_p("..") {
-            h, ok4 := p.header_expr()
+            h, ok4 := p.stmt_header_expr()
             if !ok4 {
                 return parser_fail[SK]()
             }
             hi = Some(h)
         } else if p.eat_p("..=") {
-            h, ok4 := p.header_expr()
+            h, ok4 := p.stmt_header_expr()
             if !ok4 {
                 return parser_fail[SK]()
             }
@@ -998,7 +1077,7 @@ fn stmt_k(p *Parser) (SK, bool) {
         }
         var step Opt[Expr] = None
         if p.eat_kw("by") {
-            st, ok5 := p.header_expr()
+            st, ok5 := p.stmt_header_expr()
             if !ok5 {
                 return parser_fail[SK]()
             }
@@ -1443,7 +1522,7 @@ fn postfix(p *Parser) (Expr, bool) {
                     return p.err[Expr]("expected field name")
                 }
             }
-        } else if p.is_p("{") && !p.no_lit && parser_typeish(&e) {
+        } else if p.is_p("{") && parser_typeish(&e) && (!p.no_lit || p.lit_in_header(&e)) {
             p.bump()
             save := p.no_lit
             p.no_lit = false
