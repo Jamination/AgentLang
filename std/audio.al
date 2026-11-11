@@ -7,20 +7,20 @@ use std.alsa
 // ---- sounds ----
 
 // Decoded audio: interleaved f32 samples in -1..1, `channels` per frame, `rate` frames per second.
-struct Sound {
-    samples []f32
-    rate i64
-    channels i64
+Sound :: struct {
+    samples: []f32
+    rate: i64
+    channels: i64
 }
 
 // A silent sound of `frames` frames to fill in (allocates the samples).
-fn sound_new(rate i64, channels i64, frames i64) Sound {
+sound_new :: (rate: i64, channels: i64, frames: i64) -> Sound {
     assert rate > 0 && channels > 0 && frames >= 0, "sound_new: bad format"
     Sound{alloc[f32](frames * channels), rate, channels}
 }
 
 // Number of frames (samples per channel).
-fn frames(s Sound) i64 {
+frames :: (s: Sound) -> i64 {
     if s.channels <= 0 {
         return 0
     }
@@ -28,7 +28,7 @@ fn frames(s Sound) i64 {
 }
 
 // Length in seconds.
-fn duration(s Sound) f32 {
+duration :: (s: Sound) -> f32 {
     if s.rate <= 0 {
         return 0.0
     }
@@ -36,7 +36,7 @@ fn duration(s Sound) f32 {
 }
 
 // sin(2 pi t) for t in turns; accurate to about 1e-11.
-fn audio_sin_turns(t f64) f64 {
+audio_sin_turns :: (t: f64) -> f64 {
     r := (t - floor(t + 0.5)) * 6.283185307179586
     if r > 1.5707963267948966 {
         r = 3.141592653589793 - r
@@ -49,7 +49,7 @@ fn audio_sin_turns(t f64) f64 {
 }
 
 // A mono sine tone of `freq` Hz with peak amplitude `amp` (allocates).
-fn sound_tone(rate i64, freq f32, seconds f32, amp f32) Sound {
+sound_tone :: (rate: i64, freq: f32, seconds: f32, amp: f32) -> Sound {
     s := sound_new(rate, 1, i64(seconds * f32(rate)))
     cycles := f64(freq) / f64(rate)
     for i in 0..len(s.samples) {
@@ -59,7 +59,7 @@ fn sound_tone(rate i64, freq f32, seconds f32, amp f32) Sound {
 }
 
 // Mono white noise in -amp..amp from a seed; the same seed gives the same sound (allocates).
-fn sound_noise(rate i64, seconds f32, amp f32, seed u64) Sound {
+sound_noise :: (rate: i64, seconds: f32, amp: f32, seed: u64) -> Sound {
     s := sound_new(rate, 1, i64(seconds * f32(rate)))
     x := seed * 0x9E3779B97F4A7C15 + 0xD1B54A32D192ED03
     for i in 0..len(s.samples) {
@@ -75,32 +75,32 @@ fn sound_noise(rate i64, seconds f32, amp f32, seed u64) Sound {
 // ---- WAV files ----
 
 // sample formats for wav_encode / wav_save
-const WAV_PCM8 = 1
-const WAV_PCM16 = 2
-const WAV_PCM24 = 3
-const WAV_PCM32 = 4
-const WAV_F32 = 5
+WAV_PCM8 :: 1
+WAV_PCM16 :: 2
+WAV_PCM24 :: 3
+WAV_PCM32 :: 4
+WAV_F32 :: 5
 
-fn audio_u16(d str, at i64) i64 {
+audio_u16 :: (d: str, at: i64) -> i64 {
     i64(d[at]) | i64(d[at + 1]) << 8
 }
 
-fn audio_u32(d str, at i64) i64 {
+audio_u32 :: (d: str, at: i64) -> i64 {
     audio_u16(d, at) | audio_u16(d, at + 2) << 16
 }
 
-fn audio_put16(d []u8, at i64, v i64) {
+audio_put16 :: (d: []u8, at: i64, v: i64) {
     d[at] = u8(v)
     d[at + 1] = u8(v >> 8)
 }
 
-fn audio_put32(d []u8, at i64, v i64) {
+audio_put32 :: (d: []u8, at: i64, v: i64) {
     audio_put16(d, at, v)
     audio_put16(d, at + 2, v >> 16)
 }
 
 // x * scale rounded to the nearest integer and limited to lo..hi
-fn audio_quantize(x f32, scale f64, lo i64, hi i64) i64 {
+audio_quantize :: (x: f32, scale: f64, lo: i64, hi: i64) -> i64 {
     v := i64(floor(f64(x) * scale + 0.5))
     min(max(v, lo), hi)
 }
@@ -108,8 +108,8 @@ fn audio_quantize(x f32, scale f64, lo i64, hi i64) i64 {
 // Decodes a RIFF/WAVE file image: PCM with 8, 16, 24 or 32 bits, or 32/64-bit float, any
 // channel count (also WAVE_FORMAT_EXTENSIBLE). False if the data is not such a file.
 // Allocates the samples.
-fn wav_decode(data str) (Sound, bool) {
-    var none Sound
+wav_decode :: (data: str) -> (Sound, bool) {
+    none: Sound
     if len(data) < 12 || data[..4] != "RIFF" || data[8..12] != "WAVE" {
         return (none, false)
     }
@@ -142,7 +142,7 @@ fn wav_decode(data str) (Sound, bool) {
             s := Sound{alloc[f32](n), rate, channels}
             for i in 0..n {
                 p := body + i * bytes
-                var v f32
+                v: f32
                 if bits == 8 {
                     v = f32(i64(data[p]) - 128) / 128.0
                 } else if bits == 16 {
@@ -167,7 +167,7 @@ fn wav_decode(data str) (Sound, bool) {
 
 // Encodes a sound as a WAV file image in the given sample format (WAV_PCM8 .. WAV_F32);
 // integer formats round to nearest and clip to -1..1. Allocates the result.
-fn wav_encode(s Sound, format i64) str {
+wav_encode :: (s: Sound, format: i64) -> str {
     assert format >= WAV_PCM8 && format <= WAV_F32, "wav_encode: unknown format"
     bytes := if format == WAV_F32 { 4 } else { format }
     n := len(s.samples)
@@ -203,17 +203,17 @@ fn wav_encode(s Sound, format i64) str {
 }
 
 // Reads and decodes a WAV file; false if it is missing or not a supported WAV. Allocates.
-fn wav_load(path str) (Sound, bool) {
+wav_load :: (path: str) -> (Sound, bool) {
     data, ok := read_file(path)
     if !ok {
-        var none Sound
+        none: Sound
         return (none, false)
     }
     wav_decode(data)
 }
 
 // Writes a sound as a WAV file in the given sample format; false if the file cannot be written.
-fn wav_save(path str, s Sound, format i64) bool {
+wav_save :: (path: str, s: Sound, format: i64) -> bool {
     m := mark()
     ok := write_file(path, wav_encode(s, format))
     release(m)
@@ -223,42 +223,42 @@ fn wav_save(path str, s Sound, format i64) bool {
 // ---- mixer ----
 
 // frames mixed per pass through the mixer's scratch buffer when producing i16 output
-const AUDIO_CHUNK_FRAMES = 1024
+AUDIO_CHUNK_FRAMES :: 1024
 
 // Handle of a playing voice. The zero value and handles of finished voices are invalid;
 // using them is harmless (the calls do nothing).
-struct VoiceId {
-    index i32
-    serial u32
+VoiceId :: struct {
+    index: i32
+    serial: u32
 }
 
 // One slot of the voice pool. `pos` and `step` are source frames in 32.32 fixed point.
-struct Voice {
-    sound Sound
-    pos i64
-    step i64
-    volume f32
-    pan f32
-    serial u32
-    active bool
-    looped bool
-    paused bool
+Voice :: struct {
+    sound: Sound
+    pos: i64
+    step: i64
+    volume: f32
+    pan: f32
+    serial: u32
+    active: bool
+    looped: bool
+    paused: bool
 }
 
 // Software mixer: sums the playing voices into an output stream of `rate` Hz with `channels`
 // (1 or 2) channels.
-struct Mixer {
-    rate i64
-    channels i64
-    master f32
-    voices []Voice
-    serial u32
-    scratch []f32
+Mixer :: struct {
+    rate: i64
+    channels: i64
+    master: f32
+    voices: []Voice
+    serial: u32
+    scratch: []f32
 }
 
 // A mixer for the given output format with room for `max_voices` simultaneous sounds.
 // Allocates once; play / mix never allocate.
-fn mixer_new(rate i64, channels i64, max_voices i64) *Mixer {
+mixer_new :: (rate: i64, channels: i64, max_voices: i64) -> *Mixer {
     assert rate > 0 && (channels == 1 || channels == 2) && max_voices > 0, "mixer_new: bad format"
     m := new[Mixer]()
     m.rate = rate
@@ -269,7 +269,7 @@ fn mixer_new(rate i64, channels i64, max_voices i64) *Mixer {
     m
 }
 
-fn audio_step(m *Mixer, s Sound, pitch f32) i64 {
+audio_step :: (m: *Mixer, s: Sound, pitch: f32) -> i64 {
     i64(f64(fmax(pitch, 0.0)) * f64(s.rate) / f64(m.rate) * 4294967296.0)
 }
 
@@ -277,7 +277,7 @@ fn audio_step(m *Mixer, s Sound, pitch f32) i64 {
 // speed factor (1 = original; resampled with linear interpolation), `looped` repeats forever.
 // The Sound's samples are referenced, not copied. Returns an invalid VoiceId (see `valid`)
 // when all voices are busy or the sound is empty.
-fn play(m *Mixer, s Sound, volume f32, pan f32, pitch f32, looped bool) VoiceId {
+play :: (m: *Mixer, s: Sound, volume: f32, pan: f32, pitch: f32, looped: bool) -> VoiceId {
     if frames(s) == 0 || s.rate <= 0 {
         return VoiceId{}
     }
@@ -292,7 +292,7 @@ fn play(m *Mixer, s Sound, volume f32, pan f32, pitch f32, looped bool) VoiceId 
     VoiceId{}
 }
 
-fn audio_voice(m *Mixer, id VoiceId) *Voice {
+audio_voice :: (m: *Mixer, id: VoiceId) -> *Voice {
     i := i64(id.index)
     if id.serial == 0 || i < 0 || i >= len(m.voices) {
         return nil
@@ -305,17 +305,17 @@ fn audio_voice(m *Mixer, id VoiceId) *Voice {
 }
 
 // True if the handle came from a successful `play` (the voice may have finished since).
-fn valid(id VoiceId) bool {
+valid :: (id: VoiceId) -> bool {
     id.serial != 0
 }
 
 // True while the voice is still in the pool (playing or paused).
-fn playing(m *Mixer, id VoiceId) bool {
+playing :: (m: *Mixer, id: VoiceId) -> bool {
     audio_voice(m, id) != nil
 }
 
 // Stops a voice and frees its slot.
-fn stop(m *Mixer, id VoiceId) {
+stop :: (m: *Mixer, id: VoiceId) {
     v := audio_voice(m, id)
     if v != nil {
         v.active = false
@@ -323,14 +323,14 @@ fn stop(m *Mixer, id VoiceId) {
 }
 
 // Stops every voice.
-fn stop_all(m *Mixer) {
+stop_all :: (m: *Mixer) {
     for i in 0..len(m.voices) {
         m.voices[i].active = false
     }
 }
 
 // Sets the linear gain of a voice.
-fn set_volume(m *Mixer, id VoiceId, volume f32) {
+set_volume :: (m: *Mixer, id: VoiceId, volume: f32) {
     v := audio_voice(m, id)
     if v != nil {
         v.volume = volume
@@ -338,7 +338,7 @@ fn set_volume(m *Mixer, id VoiceId, volume f32) {
 }
 
 // Sets the stereo position of a voice: -1 (left) .. 1 (right).
-fn set_pan(m *Mixer, id VoiceId, pan f32) {
+set_pan :: (m: *Mixer, id: VoiceId, pan: f32) {
     v := audio_voice(m, id)
     if v != nil {
         v.pan = pan
@@ -346,7 +346,7 @@ fn set_pan(m *Mixer, id VoiceId, pan f32) {
 }
 
 // Sets the playback speed factor of a voice.
-fn set_pitch(m *Mixer, id VoiceId, pitch f32) {
+set_pitch :: (m: *Mixer, id: VoiceId, pitch: f32) {
     v := audio_voice(m, id)
     if v != nil {
         v.step = audio_step(m, v.sound, pitch)
@@ -354,7 +354,7 @@ fn set_pitch(m *Mixer, id VoiceId, pitch f32) {
 }
 
 // Pauses or resumes a voice (a paused voice keeps its slot and position).
-fn set_paused(m *Mixer, id VoiceId, paused bool) {
+set_paused :: (m: *Mixer, id: VoiceId, paused: bool) {
     v := audio_voice(m, id)
     if v != nil {
         v.paused = paused
@@ -362,12 +362,12 @@ fn set_paused(m *Mixer, id VoiceId, paused bool) {
 }
 
 // Sets the gain applied to the whole mix (before clipping).
-fn set_master_volume(m *Mixer, volume f32) {
+set_master_volume :: (m: *Mixer, volume: f32) {
     m.master = volume
 }
 
 // Number of voices in use.
-fn active_voices(m *Mixer) i64 {
+active_voices :: (m: *Mixer) -> i64 {
     n := 0
     for i in 0..len(m.voices) {
         if m.voices[i].active {
@@ -378,7 +378,7 @@ fn active_voices(m *Mixer) i64 {
 }
 
 // adds `count` output frames of one voice to `out` and advances it
-fn audio_mix_voice(m *Mixer, v *Voice, out []f32, count i64) {
+audio_mix_voice :: (m: *Mixer, v: *Voice, out: []f32, count: i64) {
     src := v.sound.samples
     ch := v.sound.channels
     right := min(ch, 2) - 1
@@ -430,7 +430,7 @@ fn audio_mix_voice(m *Mixer, v *Voice, out []f32, count i64) {
 // Renders the next `count` frames into `out` (interleaved, count * channels samples, replaced
 // not added) and advances all voices; the sum is clipped to -1..1. Voices that reach their end
 // free their slot.
-fn mix(m *Mixer, out []f32, count i64) {
+mix :: (m: *Mixer, out: []f32, count: i64) {
     total := count * m.channels
     assert len(out) >= total, "mix: output buffer too small"
     out = out[..total]
@@ -447,7 +447,7 @@ fn mix(m *Mixer, out []f32, count i64) {
 }
 
 // Like `mix`, producing signed 16-bit samples (rounded to nearest).
-fn mix_i16(m *Mixer, out []i16, count i64) {
+mix_i16 :: (m: *Mixer, out: []i16, count: i64) {
     assert len(out) >= count * m.channels, "mix_i16: output buffer too small"
     done := 0
     while done < count {
@@ -465,33 +465,33 @@ fn mix_i16(m *Mixer, out []i16, count i64) {
 
 // An open playback device. `buffer_frames` is the device buffer (the output latency),
 // `underruns` counts recovered stalls.
-struct AudioDevice {
-    pcm *u8
-    rate i64
-    channels i64
-    buffer_frames i64
-    period_frames i64
-    underruns i64
-    buf []i16
+AudioDevice :: struct {
+    pcm: *u8
+    rate: i64
+    channels: i64
+    buffer_frames: i64
+    period_frames: i64
+    underruns: i64
+    buf: []i16
 }
 
 // Opens the default playback device for 16-bit output with about 50 ms of buffering; false if
 // there is no usable device. Allocates the device once.
-fn audio_open(rate i64, channels i64) (*AudioDevice, bool) {
+audio_open :: (rate: i64, channels: i64) -> (*AudioDevice, bool) {
     audio_open("default", rate, channels, 50)
 }
 
 // Opens the ALSA device `name` ("default", "null", "hw:0", ...) with `latency_ms` of buffering.
-fn audio_open(name str, rate i64, channels i64, latency_ms i64) (*AudioDevice, bool) {
-    var pcm *u8 = nil
+audio_open :: (name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDevice, bool) {
+    pcm: *u8 = nil
     mk := mark()
     err := snd_pcm_open(&pcm, cstr(name), SND_PCM_STREAM_PLAYBACK, 0)
     release(mk)
     if err < 0 {
         return (nil, false)
     }
-    var buffer u64
-    var period u64
+    buffer: u64
+    period: u64
     if snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, u32(channels), u32(rate), 1, u32(latency_ms * 1000)) < 0 ||
         snd_pcm_get_params(pcm, &buffer, &period) < 0 {
         snd_pcm_close(pcm)
@@ -510,7 +510,7 @@ fn audio_open(name str, rate i64, channels i64, latency_ms i64) (*AudioDevice, b
 // Mixes the next `count` frames and writes them to the device, waiting while the device
 // buffer is full (so it paces a loop to real time). Returns the frames written (fewer only if
 // the device failed). Does nothing for a nil device.
-fn audio_write(d *AudioDevice, m *Mixer, count i64) i64 {
+audio_write :: (d: *AudioDevice, m: *Mixer, count: i64) -> i64 {
     if d == nil || d.pcm == nil {
         return 0
     }
@@ -538,7 +538,7 @@ fn audio_write(d *AudioDevice, m *Mixer, count i64) i64 {
 
 // Tops the device buffer up with as many frames as it accepts right now, without waiting.
 // Call it once per frame; returns the frames written. Does nothing for a nil device.
-fn audio_pump(d *AudioDevice, m *Mixer) i64 {
+audio_pump :: (d: *AudioDevice, m: *Mixer) -> i64 {
     if d == nil || d.pcm == nil {
         return 0
     }
@@ -557,7 +557,7 @@ fn audio_pump(d *AudioDevice, m *Mixer) i64 {
 }
 
 // Stops playback at once and closes the device.
-fn audio_close(d *AudioDevice) {
+audio_close :: (d: *AudioDevice) {
     if d == nil || d.pcm == nil {
         return
     }

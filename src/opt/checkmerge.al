@@ -3,7 +3,7 @@
 // becomes a single check of the largest index at the position of the first one. A failing
 // later check would end the program anyway and nothing observable happens in between.
 
-fn checkmerge_is_trap_block(f *Func, b i64) bool {
+checkmerge_is_trap_block :: (f: *Func, b: i64) -> bool {
     if !eq(f.blocks[b].term, TermTrap) {
         return false
     }
@@ -16,7 +16,7 @@ fn checkmerge_is_trap_block(f *Func, b i64) bool {
 }
 
 // (len value, constant index) of a check condition `len >u k` / `k <u len`
-fn checkmerge_const_check(f *Func, c i64) Opt[(i64, i64)] {
+checkmerge_const_check :: (f: *Func, c: i64) -> Opt[(i64, i64)] {
     i := &f.insts[c]
     if i.op == OpUgt {
         match f.is_const(i.args[1]) {
@@ -33,7 +33,7 @@ fn checkmerge_const_check(f *Func, c i64) Opt[(i64, i64)] {
     return None
 }
 
-fn checkmerge_run(f *Func) bool {
+checkmerge_run :: (f: *Func) -> bool {
     preds := f.preds()
     changed := false
     rpo := f.rpo()

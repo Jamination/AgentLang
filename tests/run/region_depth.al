@@ -1,5 +1,5 @@
 // at most 64 regions can be entered at the same time
-fn main() {
+main :: () {
     rs := alloc[Region](65)
     for i in 0..65 {
         if i == 64 {

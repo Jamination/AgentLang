@@ -1,20 +1,20 @@
 // Redundant load elimination, store-to-load forwarding and local dead store elimination.
 
-struct LoadelimAvail {
-    ptr i64,
-    mref_addr Addr,
-    size i64,
-    class i64,
-    ty T,
-    val i64,
-    pending_store Opt[i64], // a store not yet observed by any possible reader
+LoadelimAvail :: struct {
+    ptr: i64,
+    mref_addr: Addr,
+    size: i64,
+    class: i64,
+    ty: T,
+    val: i64,
+    pending_store: Opt[i64], // a store not yet observed by any possible reader
 }
 
-fn loadelim_mr(a *LoadelimAvail) MemRef {
+loadelim_mr :: (a: *LoadelimAvail) -> MemRef {
     return MemRef{addr: a.mref_addr, size: a.size, class: a.class, ptr: a.ptr}
 }
 
-fn loadelim_run_find(repl []i64, v0 i64) i64 {
+loadelim_run_find :: (repl: []i64, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -22,14 +22,14 @@ fn loadelim_run_find(repl []i64, v0 i64) i64 {
     return v
 }
 
-fn loadelim_run(f *Func) bool {
+loadelim_run :: (f: *Func) -> bool {
     cfg := cfg_new(f)
     esc := alias_escaped_allocas(f)
     repl := vec_fill(f.insts.len, NOV)
     dead := vec_fill(f.insts.len, false)
     changed := false
     // state at the end of each block, reused by a child that has that block as its only predecessor
-    var no_state Opt[Vec[LoadelimAvail]] = None
+    no_state: Opt[Vec[LoadelimAvail]] = None
     out_state := vec_fill(f.blocks.len, no_state)
     for b in cfg.rpo.items() {
         st := vec[LoadelimAvail]()
@@ -58,7 +58,7 @@ fn loadelim_run(f *Func) bool {
             if op == OpLoad {
                 m := alias_memref(f, v)
                 ty := f.insts[v].ty
-                var hit Opt[i64] = None
+                hit: Opt[i64] = None
                 for k in 0..st.len {
                     a := &st[k]
                     if a.ty == ty {

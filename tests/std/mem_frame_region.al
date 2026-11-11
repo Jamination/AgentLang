@@ -1,7 +1,7 @@
 // a frame scope must be closed in the arena it was opened in
-var r Region
+r: Region
 
-fn main() {
+main :: () {
     frame_begin()
     alloc[u8](100)
     enter(&r)

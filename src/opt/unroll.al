@@ -1,24 +1,24 @@
 // Full unrolling of loops with a small constant trip count.
 
-const MAX_TRIP = 16
-const MAX_UNROLLED_SIZE = 640
+MAX_TRIP :: 16
+MAX_UNROLLED_SIZE :: 640
 
-struct UnrollPlan {
-    blocks Vec[i64],
-    header i64,
-    latch i64,
-    pre i64,
-    exit i64,
+UnrollPlan :: struct {
+    blocks: Vec[i64],
+    header: i64,
+    latch: i64,
+    pre: i64,
+    exit: i64,
     // number of copies of the body
-    trip i64,
+    trip: i64,
     // true: the loop disappears; false: the copies form a loop again (trip count is a multiple)
-    full bool,
+    full: bool,
 }
 
-const MAX_PARTIAL_SIZE = 400
+MAX_PARTIAL_SIZE :: 400
 
 // the closure `back_of` of analyze: the back-edge input of a header phi, or NOV
-fn unroll_analyze_back_of(f *Func, ph i64, latch i64) i64 {
+unroll_analyze_back_of :: (f: *Func, ph: i64, latch: i64) -> i64 {
     i := &f.insts[ph]
     n := min(i.pb.len, i.args.len)
     for k in 0..n {
@@ -30,7 +30,7 @@ fn unroll_analyze_back_of(f *Func, ph i64, latch i64) i64 {
 }
 
 // the leading phis of block `h`
-fn unroll_header_phis(f *Func, h i64) Vec[i64] {
+unroll_header_phis :: (f: *Func, h: i64) -> Vec[i64] {
     hphis := vec[i64]()
     for v in f.blocks[h].insts.items() {
         if f.insts[v].op != OpPhi {
@@ -41,7 +41,7 @@ fn unroll_header_phis(f *Func, h i64) Vec[i64] {
     return hphis
 }
 
-fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
+unroll_analyze :: (f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[UnrollPlan] {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -102,7 +102,7 @@ fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
     if pi.op != OpPhi || pi.args.len != 2 || !contains(&f.blocks[h].insts, phi) {
         return None
     }
-    var start_opt Opt[i64] = None
+    start_opt: Opt[i64] = None
     back := NOV
     for k in 0..pi.pb.len {
         pb := pi.pb[k]
@@ -201,20 +201,20 @@ fn unroll_analyze(f *Func, cfg *Cfg, loops *Loops, li i64) Opt[UnrollPlan] {
 }
 
 // phi_in[&ph]
-fn unroll_phi_in_at(phi_in *Map[i64, (i64, i64)], ph i64) (i64, i64) {
+unroll_phi_in_at :: (phi_in: *Map[i64, (i64, i64)], ph: i64) -> (i64, i64) {
     x, found := phi_in.get(ph)
     assert found, "unroll: phi not in map"
     return x
 }
 
 // bmap[&b]
-fn unroll_bmap_at(bmap *Map[i64, i64], b i64) i64 {
+unroll_bmap_at :: (bmap: *Map[i64, i64], b: i64) -> i64 {
     nb, found := bmap.get(b)
     assert found, "unroll: block not in map"
     return nb
 }
 
-fn unroll_apply(f *Func, p *UnrollPlan) {
+unroll_apply :: (f: *Func, p: *UnrollPlan) {
     n0 := f.insts.len
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
@@ -225,11 +225,11 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
     def_block_v := f.block_of()
     def_block := def_block_v.items()
     // is v an original value (below n0) defined inside the loop?
-    fn loop_def(v i64, n0 i64, def_block []i64, in_loop []bool) bool {
+    loop_def :: (v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> bool {
         v < n0 && def_block[v] != 0xFFFFFFFF && in_loop[def_block[v]]
     }
     // the copy of v in the iteration that `m` describes
-    fn look(m *Vec[i64], v i64, n0 i64, def_block []i64, in_loop []bool) i64 {
+    look :: (m: *Vec[i64], v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> i64 {
         if loop_def(v, n0, def_block, in_loop) {
             return m[v]
         }
@@ -425,7 +425,7 @@ fn unroll_apply(f *Func, p *UnrollPlan) {
     f.apply_repl(&repl)
 }
 
-fn unroll_run(f *Func) bool {
+unroll_run :: (f: *Func) -> bool {
     changed := false
     for it in 0..64 {
         if f.size() > 8000 {
@@ -435,7 +435,7 @@ fn unroll_run(f *Func) bool {
         cfg := cfg_new(f)
         loops := loops_new(f, &cfg)
         order := licm_loop_order(&loops)
-        var plan Opt[UnrollPlan] = None
+        plan: Opt[UnrollPlan] = None
         for li in order.items() {
             match unroll_analyze(f, &cfg, &loops, li) {
                 Some(p) => {

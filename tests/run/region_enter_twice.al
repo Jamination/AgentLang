@@ -1,5 +1,5 @@
 // entering a region that is already entered is an error (also when it is not the innermost)
-fn main() {
+main :: () {
     a := region()
     b := region()
     enter(&a)

@@ -2,19 +2,19 @@
 use "priv/shapes.al"
 use "priv/queue.al"
 
-priv struct Ctx { n i64, tag str }
-priv enum Mode { MainFast, MainSlow }
-priv const LIMIT = 10
-priv var counter i64
-priv var table = [3]i64{1, 2, 3}
+priv Ctx :: struct { n: i64, tag: str }
+priv Mode :: enum { MainFast, MainSlow }
+priv LIMIT :: 10
+priv counter: i64
+priv table := [3]i64{1, 2, 3}
 
-priv fn find(c Ctx, x i64) i64 { c.n + x }
-priv fn find(c *Ctx, s str) str { concat(c.tag, s) }
-priv fn bump() i64 {
+priv find :: (c: Ctx, x: i64) -> i64 { c.n + x }
+priv find :: (c: *Ctx, s: str) -> str { concat(c.tag, s) }
+priv bump :: () -> i64 {
     counter += 1
     counter
 }
-priv fn describe(m Mode) str {
+priv describe :: (m: Mode) -> str {
     match m {
         MainFast => "fast"
         MainSlow => "slow"
@@ -22,9 +22,9 @@ priv fn describe(m Mode) str {
 }
 
 // public, overloaded by private definitions of the other files
-fn show(x i64) str { fmt("main-int:", x) }
+show :: (x: i64) -> str { fmt("main-int:", x) }
 
-fn main() {
+main :: () {
     c := Ctx{n: 5, tag: "main-"}
     print(c, c.find(1), find(c, 2), c.find("x"))
     print(LIMIT, bump(), bump(), counter, table[2])

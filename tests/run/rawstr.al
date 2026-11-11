@@ -1,6 +1,6 @@
-const SRC = `line "one"
+SRC :: `line "one"
   two\n`
-fn main() {
+main :: () {
     print(len(SRC), SRC)
     big := alloc[u8](5000)
     fill(big, 'x')

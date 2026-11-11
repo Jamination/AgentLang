@@ -1,9 +1,9 @@
 // Helpers shared by the compiler sources: optional values, Vec and Map conveniences,
 // environment and process access.
 
-enum Opt[T] { Some(T), None }
+Opt[T] :: enum { Some(T), None }
 
-fn is_some[T](o Opt[T]) bool {
+is_some[T] :: (o: Opt[T]) -> bool {
     match o {
         Some(x) => true
         None => false
@@ -12,7 +12,7 @@ fn is_some[T](o Opt[T]) bool {
 
 // ---------- Vec ----------
 // a Vec holding a copy of the elements of s
-fn vec_of[T](s []T) Vec[T] {
+vec_of[T] :: (s: []T) -> Vec[T] {
     n := len(s)
     buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
     memcopy(ptr(buf), ptr(s), n * sizeof[T]())
@@ -20,13 +20,13 @@ fn vec_of[T](s []T) Vec[T] {
 }
 
 // Vecs of one and two elements without an intermediate slice
-fn vec_one[T](a T) Vec[T] {
+vec_one[T] :: (a: T) -> Vec[T] {
     buf := mkslice[T](__alloc_raw(sizeof[T]()), 1)
     buf[0] = a
     return Vec[T]{buf: buf, len: 1}
 }
 
-fn vec_two[T](a T, b T) Vec[T] {
+vec_two[T] :: (a: T, b: T) -> Vec[T] {
     buf := mkslice[T](__alloc_raw(2 * sizeof[T]()), 2)
     buf[0] = a
     buf[1] = b
@@ -34,7 +34,7 @@ fn vec_two[T](a T, b T) Vec[T] {
 }
 
 // a Vec of n copies of x
-fn vec_fill[T](n i64, x T) Vec[T] {
+vec_fill[T] :: (n: i64, x: T) -> Vec[T] {
     buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
     for i in 0..n {
         buf[i] = x
@@ -43,41 +43,41 @@ fn vec_fill[T](n i64, x T) Vec[T] {
 }
 
 // an independent copy (assigning a Vec shares its buffer)
-fn clone[T](v Vec[T]) Vec[T] {
+clone[T] :: (v: Vec[T]) -> Vec[T] {
     return vec_of(v.buf[..v.len])
 }
 
-fn clone[T](v *Vec[T]) Vec[T] {
+clone[T] :: (v: *Vec[T]) -> Vec[T] {
     return vec_of(v.buf[..v.len])
 }
 
 // element i, bounds-checked against the length (v.buf[i] is only checked against the capacity)
-inline fn at[T](v *Vec[T], i i64) T {
+inline at[T] :: (v: *Vec[T], i: i64) -> T {
     assert i >= 0 && i < v.len, "Vec index out of range"
     return v.buf[i]
 }
 
-fn last[T](v *Vec[T]) T {
+last[T] :: (v: *Vec[T]) -> T {
     assert v.len > 0, "last of an empty Vec"
     return v.buf[v.len - 1]
 }
 
-fn is_empty[T](v *Vec[T]) bool {
+is_empty[T] :: (v: *Vec[T]) -> bool {
     return v.len == 0
 }
 
-fn clear[T](v *Vec[T]) {
+clear[T] :: (v: *Vec[T]) {
     v.len = 0
 }
 
-fn truncate[T](v *Vec[T], n i64) {
+truncate[T] :: (v: *Vec[T], n: i64) {
     if n < v.len {
         v.len = n
     }
 }
 
 // grows (with copies of x) or shrinks to exactly n elements
-fn resize[T](v *Vec[T], n i64, x T) {
+resize[T] :: (v: *Vec[T], n: i64, x: T) {
     reserve(v, n)
     for i in v.len..n {
         v.buf[i] = x
@@ -85,14 +85,14 @@ fn resize[T](v *Vec[T], n i64, x T) {
     v.len = n
 }
 
-fn extend[T](v *Vec[T], s []T) {
+extend[T] :: (v: *Vec[T], s: []T) {
     reserve(v, v.len + len(s))
     memcopy(cast[i64](ptr(v.buf)) + v.len * sizeof[T](), ptr(s), len(s) * sizeof[T]())
     v.len += len(s)
 }
 
 // inserts x before position i
-fn insert[T](v *Vec[T], i i64, x T) {
+insert[T] :: (v: *Vec[T], i: i64, x: T) {
     assert i >= 0 && i <= v.len, "Vec insert position out of range"
     push(v, x)
     k := v.len - 1
@@ -104,7 +104,7 @@ fn insert[T](v *Vec[T], i i64, x T) {
 }
 
 // removes and returns element i, keeping the order of the rest
-fn remove[T](v *Vec[T], i i64) T {
+remove[T] :: (v: *Vec[T], i: i64) -> T {
     assert i >= 0 && i < v.len, "Vec remove position out of range"
     x := v.buf[i]
     for k in i..v.len - 1 {
@@ -115,7 +115,7 @@ fn remove[T](v *Vec[T], i i64) T {
 }
 
 // removes and returns element i, moving the last element into its place
-fn swap_remove[T](v *Vec[T], i i64) T {
+swap_remove[T] :: (v: *Vec[T], i: i64) -> T {
     assert i >= 0 && i < v.len, "Vec swap_remove position out of range"
     x := v.buf[i]
     v.len -= 1
@@ -124,7 +124,7 @@ fn swap_remove[T](v *Vec[T], i i64) T {
 }
 
 // position of the first element equal to x, or -1
-fn index_of[T](s []T, x T) i64 {
+index_of[T] :: (s: []T, x: T) -> i64 {
     for i, y in s {
         if y == x {
             return i
@@ -133,15 +133,15 @@ fn index_of[T](s []T, x T) i64 {
     return -1
 }
 
-fn contains[T](s []T, x T) bool {
+contains[T] :: (s: []T, x: T) -> bool {
     return index_of(s, x) >= 0
 }
 
-fn contains[T](v *Vec[T], x T) bool {
+contains[T] :: (v: *Vec[T], x: T) -> bool {
     return index_of(v.buf[..v.len], x) >= 0
 }
 
-fn reverse[T](s []T) {
+reverse[T] :: (s: []T) {
     i := 0
     j := len(s) - 1
     while i < j {
@@ -154,7 +154,7 @@ fn reverse[T](s []T) {
 }
 
 // removes adjacent duplicates (use after sort)
-fn dedup[T](v *Vec[T]) {
+dedup[T] :: (v: *Vec[T]) {
     if v.len == 0 {
         return
     }
@@ -170,33 +170,33 @@ fn dedup[T](v *Vec[T]) {
 
 // ---------- Map ----------
 // removes every entry
-fn clear[K, V](m *Map[K, V]) {
+clear[K, V] :: (m: *Map[K, V]) {
     *m = map[K, V]()
 }
 
 // ---------- text ----------
 // an independent copy of s
-fn str_copy(s str) str {
+str_copy :: (s: str) -> str {
     out := alloc[u8](len(s))
     memcopy(ptr(out), ptr(s), len(s))
     return out
 }
 
-fn is_digit(c u8) bool {
+is_digit :: (c: u8) -> bool {
     return c >= '0' && c <= '9'
 }
 
-fn is_alpha(c u8) bool {
+is_alpha :: (c: u8) -> bool {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-fn is_alnum(c u8) bool {
+is_alnum :: (c: u8) -> bool {
     return is_digit(c) || is_alpha(c)
 }
 
 // ---------- process ----------
 // the value of an environment variable; ("", false) if it is not set
-fn env_get(name str) (str, bool) {
+env_get :: (name: str) -> (str, bool) {
     envp := cast[*i64](__argv + 8 * (__argc + 1))
     i := 0
     while envp[i] != 0 {
@@ -214,19 +214,19 @@ fn env_get(name str) (str, bool) {
 }
 
 // writes to standard error
-fn eprint(s str) {
+eprint :: (s: str) {
     flush()
     __write_all(2, cast[i64](ptr(s)), len(s))
 }
 
 // marks a file as executable (mode 0755)
-fn make_executable(path str) bool {
+make_executable :: (path: str) -> bool {
     return syscall(90, cstr(path), 0o755) == 0
 }
 
 // runs a program with arguments and the current environment, waits for it and returns its
 // exit code (128 + signal number if a signal ended it, -1 if it could not be started)
-fn run_program(path str, argv []str) i64 {
+run_program :: (path: str, argv: []str) -> i64 {
     flush()
     cargs := alloc[i64](len(argv) + 2)
     cargs[0] = cast[i64](cstr(path))
@@ -242,7 +242,7 @@ fn run_program(path str, argv []str) i64 {
         syscall(59, cargs[0], ptr(cargs), envp)
         syscall(231, 127)
     }
-    var status [1]i64
+    status: [1]i64
     loop {
         r := syscall(61, pid, ptr(status), 0, 0)
         if r == -4 {
@@ -262,8 +262,8 @@ fn run_program(path str, argv []str) i64 {
 
 // Deep recursion needs a big stack: if the stack limit is below `bytes`, raise it and start
 // the program again (the limit only applies to a new process image). Call first in main.
-fn ensure_stack(bytes i64) {
-    var lim [2]i64
+ensure_stack :: (bytes: i64) {
+    lim: [2]i64
     if syscall(97, 3, ptr(lim)) != 0 {
         return
     }
@@ -312,18 +312,18 @@ fn ensure_stack(bytes i64) {
 //            use counts). scratch_on() / scratch_off() bracket their construction and
 //            scratch_reset() at the top of the next round discards them. Nothing reachable
 //            from the function may be allocated between scratch_on() and scratch_off().
-var base_work Region
-var base_scratch Region
-var base_working bool
-var base_scratching bool
+base_work: Region
+base_scratch: Region
+base_working: bool
+base_scratching: bool
 
-fn work_begin() {
+work_begin :: () {
     assert !base_working, "work_begin: already working"
     base_working = true
     enter(&base_work)
 }
 
-fn work_end() {
+work_end :: () {
     assert base_working && !base_scratching, "work_end without work_begin"
     base_working = false
     leave()
@@ -332,33 +332,33 @@ fn work_end() {
 }
 
 // allocate from the main arena for a moment while working (for results that must stay)
-fn work_pause() {
+work_pause :: () {
     assert base_working && !base_scratching, "work_pause without work_begin"
     leave()
 }
 
-fn work_resume() {
+work_resume :: () {
     enter(&base_work)
 }
 
-fn scratch_on() {
+scratch_on :: () {
     assert !base_scratching, "scratch_on: already on"
     base_scratching = true
     enter(&base_scratch)
 }
 
-fn scratch_off() {
+scratch_off :: () {
     assert base_scratching, "scratch_off without scratch_on"
     base_scratching = false
     leave()
 }
 
-fn scratch_reset() {
+scratch_reset :: () {
     assert !base_scratching, "scratch_reset while the scratch region is in use"
     reset(&base_scratch)
 }
 
 // the largest size the work region has had, in bytes (not to be called while working)
-fn work_peak() i64 {
+work_peak :: () -> i64 {
     return max(base_work.hwm, base_work.cur) - base_work.base
 }

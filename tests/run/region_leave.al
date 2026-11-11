@@ -1,5 +1,5 @@
 // leave() needs a matching enter()
-fn main() {
+main :: () {
     a := region()
     enter(&a)
     leave()

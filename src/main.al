@@ -37,13 +37,13 @@ use "lower_mem.al"
 
 // `embed` is only accepted inside a function: PRELUDE and STD_MODULES are globals that
 // main_load_embedded fills once, first thing in main.
-var PRELUDE str
+PRELUDE: str
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
-var STD_MODULES Vec[(str, str)]
+STD_MODULES: Vec[(str, str)]
 
-fn main_load_embedded() {
+main_load_embedded :: () {
     PRELUDE = embed("prelude.al")
     STD_MODULES = vec[(str, str)]()
     STD_MODULES.push(("math", embed("../std/math.al")))
@@ -64,11 +64,11 @@ fn main_load_embedded() {
 }
 
 // modules that are loaded into every program
-var CORE_MODULES = [4]str{"math", "rand", "time", "mem"}
+CORE_MODULES := [4]str{"math", "rand", "time", "mem"}
 
 // ---------- paths (std::path in the Rust source) ----------
 // Path::join
-fn main_path_join(dir str, p str) str {
+main_path_join :: (dir: str, p: str) -> str {
     if starts_with(p, "/") || len(dir) == 0 {
         return p
     }
@@ -80,7 +80,7 @@ fn main_path_join(dir str, p str) str {
 
 // the components of a path as Rust's Path compares them: a leading "/" is a component,
 // empty components and "." are dropped, except a "." at the start of a relative path
-fn main_path_comps(p str) Vec[str] {
+main_path_comps :: (p: str) -> Vec[str] {
     out := vec[str]()
     if starts_with(p, "/") {
         out.push("/")
@@ -101,7 +101,7 @@ fn main_path_comps(p str) Vec[str] {
 }
 
 // the path without trailing separators and trailing "." components
-fn main_path_trim(p str) str {
+main_path_trim :: (p: str) -> str {
     n := len(p)
     loop {
         if n > 1 && p[n - 1] == '/' {
@@ -116,7 +116,7 @@ fn main_path_trim(p str) str {
 }
 
 // Path::file_name: the last component, unless the path ends in ".." or has none
-fn main_path_file_name(p str) Opt[str] {
+main_path_file_name :: (p: str) -> Opt[str] {
     t := main_path_trim(p)
     k := len(t)
     while k > 0 && t[k - 1] != '/' {
@@ -130,7 +130,7 @@ fn main_path_file_name(p str) Opt[str] {
 }
 
 // Path::parent: the path without its last component
-fn main_path_parent(p str) Opt[str] {
+main_path_parent :: (p: str) -> Opt[str] {
     t := main_path_trim(p)
     if len(t) == 0 || t == "/" {
         return None
@@ -147,7 +147,7 @@ fn main_path_parent(p str) Opt[str] {
 }
 
 // Path::file_stem: the file name without its last extension
-fn main_path_file_stem(p str) Opt[str] {
+main_path_file_stem :: (p: str) -> Opt[str] {
     match main_path_file_name(p) {
         Some(name) => {
             k := len(name) - 1
@@ -167,7 +167,7 @@ fn main_path_file_stem(p str) Opt[str] {
 
 // std::fs::canonicalize, as far as the driver needs it (to recognise a file that is included
 // twice): the absolute path with "." and ".." resolved textually; symbolic links are kept
-fn main_canonical(path str) str {
+main_canonical :: (path: str) -> str {
     full := path
     if !starts_with(path, "/") {
         buf := alloc[u8](4096)
@@ -194,7 +194,7 @@ fn main_canonical(path str) str {
 }
 
 // the text of std::io::Error for an errno
-fn main_os_error(errno i64) str {
+main_os_error :: (errno: i64) -> str {
     text := match errno {
         1 => "Operation not permitted"
         2 => "No such file or directory"
@@ -219,13 +219,13 @@ fn main_os_error(errno i64) str {
 }
 
 // std::fs::read_to_string: (text, error); the error text is empty on success
-fn main_read_to_string(path str) (str, str) {
+main_read_to_string :: (path: str) -> (str, str) {
     // read_file does not say why it failed: look at the file first
     fd := syscall(2, cstr(path), 0, 0)
     if fd < 0 {
         return ("", main_os_error(-fd))
     }
-    var probe [1]u8
+    probe: [1]u8
     r := syscall(0, fd, ptr(probe), 0)
     syscall(3, fd)
     if r < 0 && r != -4 {
@@ -238,7 +238,7 @@ fn main_read_to_string(path str) (str, str) {
     return (text, "")
 }
 
-fn main_std_text(name str) Opt[str] {
+main_std_text :: (name: str) -> Opt[str] {
     mi := -1
     for i in 0..STD_MODULES.len {
         if STD_MODULES[i].0 == name {
@@ -259,25 +259,25 @@ fn main_std_text(name str) Opt[str] {
     return Some(STD_MODULES[mi].1)
 }
 
-struct Args {
-    cmd str
-    input str
-    output Opt[str]
-    emit_ir bool
-    emit_asm bool
-    unchecked bool
-    opt i64
-    rest Vec[str]
+Args :: struct {
+    cmd: str
+    input: str
+    output: Opt[str]
+    emit_ir: bool
+    emit_asm: bool
+    unchecked: bool
+    opt: i64
+    rest: Vec[str]
 }
 
-fn main_usage() never {
+main_usage :: () -> never {
     eprint(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
         "options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
 }
 
-fn main_parse_args() Args {
+main_parse_args :: () -> Args {
     all := args()
     av := vec[str]()
     for i in 1..len(all) {
@@ -332,15 +332,15 @@ fn main_parse_args() Args {
     return a
 }
 
-struct Sources {
-    names Vec[str]
-    decls Vec[Decl]
-    errs Vec[Diag]
-    seen Map[str, bool]
-    std_files Vec[i64]
+Sources :: struct {
+    names: Vec[str]
+    decls: Vec[Decl]
+    errs: Vec[Diag]
+    seen: Map[str, bool]
+    std_files: Vec[i64]
 }
 
-fn add_text(self *Sources, name str, text str, dir Opt[str]) {
+add_text :: (self: *Sources, name: str, text: str, dir: Opt[str]) {
     file := self.names.len
     self.names.push(name)
     toks := lexer_lex(text, file, &self.errs)
@@ -385,7 +385,7 @@ fn add_text(self *Sources, name str, text str, dir Opt[str]) {
     }
 }
 
-fn add_file(self *Sources, path str, from Opt[Pos]) {
+add_file :: (self: *Sources, path: str, from: Opt[Pos]) {
     // canonicalize fails for a file that does not exist: the path is then used as it is
     canon := path
     if syscall(21, cstr(path), 0) == 0 {
@@ -410,9 +410,9 @@ fn add_file(self *Sources, path str, from Opt[Pos]) {
     }
 }
 
-var main_json bool
+main_json: bool
 
-fn main_json_str(s str) str {
+main_json_str :: (s: str) -> str {
     o := vec[u8]()
     o.push('"')
     for c in s {
@@ -433,7 +433,7 @@ fn main_json_str(s str) str {
 }
 
 // sort key (file, line, col)
-fn main_report_less(a Diag, b Diag) bool {
+main_report_less :: (a: Diag, b: Diag) -> bool {
     if a.pos.file != b.pos.file {
         return a.pos.file < b.pos.file
     }
@@ -444,14 +444,14 @@ fn main_report_less(a Diag, b Diag) bool {
 }
 
 // names.get(file) or "?"
-fn main_file_name(names *Vec[str], file i64) str {
+main_file_name :: (names: *Vec[str], file: i64) -> str {
     if file >= 0 && file < names.len {
         return names[file]
     }
     return "?"
 }
 
-fn main_report(names *Vec[str], errs *Vec[Diag]) bool {
+main_report :: (names: *Vec[str], errs: *Vec[Diag]) -> bool {
     if errs.is_empty() {
         return false
     }
@@ -485,7 +485,7 @@ fn main_report(names *Vec[str], errs *Vec[Diag]) bool {
     return true
 }
 
-fn main_print_sigs_tp(t *Vec[str]) str {
+main_print_sigs_tp :: (t: *Vec[str]) -> str {
     if t.is_empty() {
         return ""
     }
@@ -493,7 +493,7 @@ fn main_print_sigs_tp(t *Vec[str]) str {
 }
 
 // " <type>" of an optional type annotation, or nothing
-fn main_print_sigs_opt_ty(t *Opt[TypeAst]) str {
+main_print_sigs_opt_ty :: (t: *Opt[TypeAst]) -> str {
     match *t {
         Some(ty) => {
             return fmt(" ", ast_type_str(&ty))
@@ -504,7 +504,7 @@ fn main_print_sigs_opt_ty(t *Opt[TypeAst]) str {
 }
 
 // "name type, name type"
-fn main_print_sigs_fields(fs *Vec[(str, TypeAst)]) str {
+main_print_sigs_fields :: (fs: *Vec[(str, TypeAst)]) -> str {
     parts := vec[str]()
     for x in 0..fs.len {
         parts.push(fmt(fs[x].0, " ", ast_type_str(&fs[x].1)))
@@ -513,7 +513,7 @@ fn main_print_sigs_fields(fs *Vec[(str, TypeAst)]) str {
 }
 
 // "priv " in front of the signature of a private declaration
-fn main_sigs_priv(name str) str {
+main_sigs_priv :: (name: str) -> str {
     if ast_is_private(name) {
         return "priv "
     }
@@ -521,9 +521,9 @@ fn main_sigs_priv(name str) str {
 }
 
 // `alc sigs`: one line per declaration, for a quick overview of a file
-fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
+main_print_sigs :: (names: *Vec[str], decls: []Decl, from_file: i64) {
     for d in decls {
-        var pos Pos
+        pos: Pos
         text := ""
         match d {
             DeclFn(f) => {
@@ -582,7 +582,7 @@ fn main_print_sigs(names *Vec[str], decls []Decl, from_file i64) {
 }
 
 // is a declaration shown by `alc sigs <file> -- std`?
-fn main_sigs_visible(d *Decl) bool {
+main_sigs_visible :: (d: *Decl) -> bool {
     match *d {
         DeclFn(f) => {
             return !starts_with(f.name, "__")
@@ -595,7 +595,7 @@ fn main_sigs_visible(d *Decl) bool {
     return true
 }
 
-fn main_real_main() i64 {
+main_real_main :: () -> i64 {
     ar := main_parse_args()
     test_mode := ar.cmd == "test"
     if !(ar.cmd == "build" || ar.cmd == "run" || ar.cmd == "test" || ar.cmd == "check" || ar.cmd == "sigs") {
@@ -776,7 +776,7 @@ fn main_real_main() i64 {
     return 0
 }
 
-fn main() i64 {
+main :: () -> i64 {
     // deep recursion in the frontend and SSA construction: use a big stack
     ensure_stack(1 << 30)
     main_t0 = clock_ns()
@@ -784,11 +784,11 @@ fn main() i64 {
     return main_real_main()
 }
 
-var main_t0 i64
+main_t0: i64
 
 // ALC_DEBUG=mem: memory in use and time since the start after each phase, and the largest
 // size of the work heap
-fn main_mem(phase str) {
+main_mem :: (phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
         eprint(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - main_t0) / 1000000, " ms\n"))

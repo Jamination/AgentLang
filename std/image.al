@@ -3,9 +3,9 @@
 
 // ---------- checksums ----------
 // slicing-by-8 tables for crc32, filled on first use
-priv var crc_tab [2048]u32
+priv crc_tab: [2048]u32
 
-priv fn crc_init() {
+priv crc_init :: () {
     for i in 0..256 {
         c := u32(i)
         for k in 0..8 {
@@ -22,12 +22,12 @@ priv fn crc_init() {
     }
 }
 
-priv inline fn load64(addr i64) u64 {
+priv inline load64 :: (addr: i64) -> u64 {
     cast[*u64](addr)[0]
 }
 
 // CRC-32 (the PNG / zip / gzip polynomial) of data, continuing from the CRC `prev` of the bytes before it
-fn crc32(prev u32, data []u8) u32 {
+crc32 :: (prev: u32, data: []u8) -> u32 {
     if crc_tab[1] == 0 {
         crc_init()
     }
@@ -51,12 +51,12 @@ fn crc32(prev u32, data []u8) u32 {
 }
 
 // CRC-32 of data
-fn crc32(data []u8) u32 {
+crc32 :: (data: []u8) -> u32 {
     crc32(u32(0), data)
 }
 
 // Adler-32 (the zlib checksum) of data, continuing from the checksum `prev` of the bytes before it (1 for none)
-fn adler32(prev u32, data []u8) u32 {
+adler32 :: (prev: u32, data: []u8) -> u32 {
     a := u64(prev & 0xFFFF)
     b := u64(prev >> 16)
     n := len(data)
@@ -76,86 +76,86 @@ fn adler32(prev u32, data []u8) u32 {
 }
 
 // Adler-32 of data
-fn adler32(data []u8) u32 {
+adler32 :: (data: []u8) -> u32 {
     adler32(u32(1), data)
 }
 
 // ---------- byte order helpers ----------
-priv inline fn be16(d []u8, i i64) i64 {
+priv inline be16 :: (d: []u8, i: i64) -> i64 {
     i64(d[i]) << 8 | i64(d[i + 1])
 }
 
-priv inline fn be32(d []u8, i i64) i64 {
+priv inline be32 :: (d: []u8, i: i64) -> i64 {
     i64(d[i]) << 24 | i64(d[i + 1]) << 16 | i64(d[i + 2]) << 8 | i64(d[i + 3])
 }
 
-priv inline fn le16(d []u8, i i64) i64 {
+priv inline le16 :: (d: []u8, i: i64) -> i64 {
     i64(d[i]) | i64(d[i + 1]) << 8
 }
 
-priv inline fn le32(d []u8, i i64) i64 {
+priv inline le32 :: (d: []u8, i: i64) -> i64 {
     i64(d[i]) | i64(d[i + 1]) << 8 | i64(d[i + 2]) << 16 | i64(d[i + 3]) << 24
 }
 
-priv fn put_be32(d []u8, i i64, v i64) {
+priv put_be32 :: (d: []u8, i: i64, v: i64) {
     d[i] = u8(v >> 24)
     d[i + 1] = u8(v >> 16)
     d[i + 2] = u8(v >> 8)
     d[i + 3] = u8(v)
 }
 
-priv fn put_le16(d []u8, i i64, v i64) {
+priv put_le16 :: (d: []u8, i: i64, v: i64) {
     d[i] = u8(v)
     d[i + 1] = u8(v >> 8)
 }
 
-priv fn put_le32(d []u8, i i64, v i64) {
+priv put_le32 :: (d: []u8, i: i64, v: i64) {
     put_le16(d, i, v)
     put_le16(d, i + 2, v >> 16)
 }
 
 // ---------- inflate ----------
-priv var LEN_BASE = [29]u16{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
-priv var LEN_EXTRA = [29]u8{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
-priv var DIST_BASE = [30]u16{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577}
-priv var DIST_EXTRA = [30]u8{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13}
-priv var CL_ORDER = [19]u8{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
+priv LEN_BASE := [29]u16{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
+priv LEN_EXTRA := [29]u8{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
+priv DIST_BASE := [30]u16{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577}
+priv DIST_EXTRA := [30]u8{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13}
+priv CL_ORDER := [19]u8{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
 
 // Decoding table entries: bits 0-7 code bits to consume, bits 8-12 number of extra bits (or the
 // index bits of a subtable), bits 16-31 literal / base value / subtable offset, and the flags:
-priv const F_SUB u32 = 0x2000      // pointer to a subtable for codes longer than the root index
-priv const F_BASE u32 = 0x4000     // length or distance: base value plus extra bits
-priv const F_END u32 = 0x8000      // end of block (value 0) or invalid code (value 1)
-priv const BAD_CODE u32 = 0x18000
-priv const LIT_ROOT = 10
-priv const DIST_ROOT = 8
+priv F_SUB : u32 : 0x2000          // pointer to a subtable for codes longer than the root index
+priv F_BASE : u32 : 0x4000         // length or distance: base value plus extra bits
+priv F_END : u32 : 0x8000          // end of block (value 0) or invalid code (value 1)
+priv BAD_CODE : u32 : 0x18000
+priv LIT_ROOT :: 10
+priv DIST_ROOT :: 8
 
 // kind of code a decoding table is built for
-priv const K_LIT = 0
-priv const K_DIST = 1
-priv const K_LENS = 2
+priv K_LIT :: 0
+priv K_DIST :: 1
+priv K_LENS :: 2
 
-priv struct Inflate {
-    src []u8
-    pos i64          // next byte of src that is not in bitbuf
-    bitbuf u64
-    bitcnt i64       // valid bits in bitbuf; negative after reading past the end of src
-    out []u8
-    n i64            // bytes written to out
-    grow bool        // out may be replaced by a larger buffer
-    lit [1334]u32    // enough for 288 symbols, 10 root bits, 15-bit codes
-    dist [402]u32    // enough for 32 symbols, 8 root bits, 15-bit codes
+priv Inflate :: struct {
+    src: []u8
+    pos: i64         // next byte of src that is not in bitbuf
+    bitbuf: u64
+    bitcnt: i64      // valid bits in bitbuf; negative after reading past the end of src
+    out: []u8
+    n: i64           // bytes written to out
+    grow: bool       // out may be replaced by a larger buffer
+    lit: [1334]u32   // enough for 288 symbols, 10 root bits, 15-bit codes
+    dist: [402]u32   // enough for 32 symbols, 8 root bits, 15-bit codes
 }
 
 // the low n (1..16) bits of x in reverse order
-priv inline fn rev_bits(x i64, n i64) i64 {
+priv inline rev_bits :: (x: i64, n: i64) -> i64 {
     x = (x & 0x5555) << 1 | (x >> 1 & 0x5555)
     x = (x & 0x3333) << 2 | (x >> 2 & 0x3333)
     x = (x & 0x0F0F) << 4 | (x >> 4 & 0x0F0F)
     ((x & 0xFF) << 8 | (x >> 8 & 0xFF)) >> (16 - n)
 }
 
-priv fn huff_entry(sym i64, kind i64) u32 {
+priv huff_entry :: (sym: i64, kind: i64) -> u32 {
     if kind == K_LIT {
         if sym < 256 {
             return u32(sym) << 16
@@ -180,8 +180,8 @@ priv fn huff_entry(sym i64, kind i64) u32 {
 // Fills `tab` for the canonical Huffman code with the given code lengths: codes are looked up
 // by their first `root` bits (LSB first), longer ones continue in a subtable. Like zlib, it
 // rejects over-subscribed codes and incomplete ones other than a single 1-bit code.
-priv fn huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
-    var count [16]i64
+priv huff_build :: (tab: []u32, lens: []u8, root: i64, kind: i64) -> bool {
+    count: [16]i64
     for l in lens {
         count[l] += 1
     }
@@ -208,11 +208,11 @@ priv fn huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
         fill(tab[..size], BAD_CODE)
     }
     // symbols ordered by code length, then by value: the order of their canonical codes
-    var offs [17]i64
+    offs: [17]i64
     for l in 1..16 {
         offs[l + 1] = offs[l] + count[l]
     }
-    var sorted [288]u16
+    sorted: [288]u16
     for s in 0..len(lens) {
         l := lens[s]
         if l != 0 {
@@ -275,7 +275,7 @@ priv fn huff_build(tab []u32, lens []u8, root i64, kind i64) bool {
 }
 
 // moves whole bytes from src into the bit buffer
-priv fn refill(s *Inflate) {
+priv refill :: (s: *Inflate) {
     while s.bitcnt <= 56 && s.pos < len(s.src) {
         s.bitbuf |= u64(s.src[s.pos]) << s.bitcnt
         s.pos += 1
@@ -285,7 +285,7 @@ priv fn refill(s *Inflate) {
 
 // Takes the next n (at most 32) bits. Past the end of the input it yields zeros and leaves
 // bitcnt negative, which the callers check once per block or symbol.
-priv fn take_bits(s *Inflate, n i64) i64 {
+priv take_bits :: (s: *Inflate, n: i64) -> i64 {
     if s.bitcnt < n {
         refill(s)
     }
@@ -296,7 +296,7 @@ priv fn take_bits(s *Inflate, n i64) i64 {
 }
 
 // makes room for n more output bytes; false if the output buffer is fixed and full
-priv fn out_room(s *Inflate, n i64) bool {
+priv out_room :: (s: *Inflate, n: i64) -> bool {
     if s.n + n <= len(s.out) {
         return true
     }
@@ -309,7 +309,7 @@ priv fn out_room(s *Inflate, n i64) bool {
     true
 }
 
-priv fn inflate_stored(s *Inflate) bool {
+priv inflate_stored :: (s: *Inflate) -> bool {
     if s.bitcnt < 0 {
         return false
     }
@@ -335,22 +335,22 @@ priv fn inflate_stored(s *Inflate) bool {
 }
 
 // reads the code lengths of a dynamic block and builds both decoding tables
-priv fn inflate_dynamic(s *Inflate) bool {
+priv inflate_dynamic :: (s: *Inflate) -> bool {
     hlit := take_bits(s, 5) + 257
     hdist := take_bits(s, 5) + 1
     hclen := take_bits(s, 4) + 4
     if hlit > 286 || hdist > 30 {
         return false
     }
-    var cl [19]u8
+    cl: [19]u8
     for i in 0..hclen {
         cl[CL_ORDER[i]] = u8(take_bits(s, 3))
     }
-    var cltab [128]u32
+    cltab: [128]u32
     if !huff_build(cltab[..], cl[..], 7, K_LENS) {
         return false
     }
-    var lens [316]u8
+    lens: [316]u8
     total := hlit + hdist
     i := 0
     while i < total {
@@ -370,7 +370,7 @@ priv fn inflate_dynamic(s *Inflate) bool {
             i += 1
             continue
         }
-        var val u8 = 0
+        val: u8 = 0
         rep := 0
         if sym == 16 {
             if i == 0 {
@@ -398,7 +398,7 @@ priv fn inflate_dynamic(s *Inflate) bool {
 }
 
 // decodes the symbols of one Huffman-coded block with the tables in s
-priv fn inflate_codes(s *Inflate) bool {
+priv inflate_codes :: (s: *Inflate) -> bool {
     src := s.src
     in_n := len(src)
     in_p := cast[i64](ptr(src))
@@ -509,7 +509,7 @@ priv fn inflate_codes(s *Inflate) bool {
 }
 
 // decodes all blocks of a deflate stream starting at s.pos
-priv fn inflate_run(s *Inflate) bool {
+priv inflate_run :: (s: *Inflate) -> bool {
     loop {
         final := take_bits(s, 1)
         kind := take_bits(s, 2)
@@ -518,7 +518,7 @@ priv fn inflate_run(s *Inflate) bool {
                 return false
             }
         } else if kind == 1 {
-            var lens [320]u8
+            lens: [320]u8
             fill(lens[..144], 8)
             fill(lens[144..256], 9)
             fill(lens[256..280], 7)
@@ -542,7 +542,7 @@ priv fn inflate_run(s *Inflate) bool {
 }
 
 // checks the zlib header, inflates, and verifies the Adler-32 that follows the deflate stream
-priv fn zlib_run(s *Inflate) bool {
+priv zlib_run :: (s: *Inflate) -> bool {
     d := s.src
     if len(d) < 6 || d[0] & 15 != 8 || d[0] >> 4 > 7 || d[1] & 0x20 != 0 || be16(d, 0) % 31 != 0 {
         return false
@@ -557,8 +557,8 @@ priv fn zlib_run(s *Inflate) bool {
 
 // Decompresses a raw deflate stream (RFC 1951) into a new buffer. Allocates: the buffer is
 // doubled as needed, so up to twice the result size stays behind in the arena.
-fn inflate(data []u8) ([]u8, bool) {
-    var s Inflate
+inflate :: (data: []u8) -> ([]u8, bool) {
+    s: Inflate
     s.src = data
     s.out = alloc[u8](len(data) * 4 + 4096)
     s.grow = true
@@ -568,8 +568,8 @@ fn inflate(data []u8) ([]u8, bool) {
 
 // Decompresses a raw deflate stream into `out` without allocating. Returns the number of bytes
 // written; false if the stream is malformed or does not fit.
-fn inflate_into(data []u8, out []u8) (i64, bool) {
-    var s Inflate
+inflate_into :: (data: []u8, out: []u8) -> (i64, bool) {
+    s: Inflate
     s.src = data
     s.out = out
     ok := inflate_run(&s)
@@ -577,8 +577,8 @@ fn inflate_into(data []u8, out []u8) (i64, bool) {
 }
 
 // Decompresses a zlib stream (RFC 1950) into a new buffer and verifies its Adler-32. Allocates like inflate.
-fn zlib_decompress(data []u8) ([]u8, bool) {
-    var s Inflate
+zlib_decompress :: (data: []u8) -> ([]u8, bool) {
+    s: Inflate
     s.src = data
     s.out = alloc[u8](len(data) * 4 + 4096)
     s.grow = true
@@ -588,8 +588,8 @@ fn zlib_decompress(data []u8) ([]u8, bool) {
 
 // Decompresses a zlib stream into `out` without allocating and verifies its Adler-32. Returns
 // the number of bytes written; false if the stream is malformed or does not fit.
-fn zlib_decompress_into(data []u8, out []u8) (i64, bool) {
-    var s Inflate
+zlib_decompress_into :: (data: []u8, out: []u8) -> (i64, bool) {
+    s: Inflate
     s.src = data
     s.out = out
     ok := zlib_run(&s)
@@ -597,26 +597,26 @@ fn zlib_decompress_into(data []u8, out []u8) (i64, bool) {
 }
 
 // ---------- deflate ----------
-priv const BLOCK_SYMS = 32768      // symbols per block
-priv const MAX_CHAIN = 128         // hash chain entries examined per position
-priv const GOOD_LEN = 8            // a pending match this long quarters the chain limit
-priv const MAX_LAZY = 16           // a pending match this long is taken without looking further
-priv const NICE_LEN = 128          // a match this long ends the search
+priv BLOCK_SYMS :: 32768           // symbols per block
+priv MAX_CHAIN :: 128              // hash chain entries examined per position
+priv GOOD_LEN :: 8                 // a pending match this long quarters the chain limit
+priv MAX_LAZY :: 16                // a pending match this long is taken without looking further
+priv NICE_LEN :: 128               // a match this long ends the search
 
-priv struct BitWriter { buf []u8, n i64, acc u64, cnt i64 }
+priv BitWriter :: struct { buf: []u8, n: i64, acc: u64, cnt: i64 }
 
-priv struct Deflate {
-    w *BitWriter
-    src []u8
-    syms []u32       // literal byte, or match length | distance << 9
-    nsym i64
-    start i64        // first byte of src covered by syms
-    lfreq [288]i64
-    dfreq [32]i64
+priv Deflate :: struct {
+    w: *BitWriter
+    src: []u8
+    syms: []u32      // literal byte, or match length | distance << 9
+    nsym: i64
+    start: i64       // first byte of src covered by syms
+    lfreq: [288]i64
+    dfreq: [32]i64
 }
 
 // appends the low nbits (at most 32) bits of v
-priv inline fn put_bits(w *BitWriter, v i64, nbits i64) {
+priv inline put_bits :: (w: *BitWriter, v: i64, nbits: i64) {
     w.acc |= u64(v) << w.cnt
     w.cnt += nbits
     if w.cnt >= 32 {
@@ -628,7 +628,7 @@ priv inline fn put_bits(w *BitWriter, v i64, nbits i64) {
 }
 
 // pads with zero bits to the next byte boundary
-priv fn flush_bits(w *BitWriter) {
+priv flush_bits :: (w: *BitWriter) {
     while w.cnt > 0 {
         w.buf[w.n] = u8(w.acc)
         w.n += 1
@@ -639,7 +639,7 @@ priv fn flush_bits(w *BitWriter) {
 }
 
 // index (0..28) of the length code for a match length 3..258
-priv inline fn len_code(length i64) i64 {
+priv inline len_code :: (length: i64) -> i64 {
     l := length - 3
     if l < 8 {
         return l
@@ -652,7 +652,7 @@ priv inline fn len_code(length i64) i64 {
 }
 
 // distance code (0..29) for a distance 1..32768
-priv inline fn dist_code(dist i64) i64 {
+priv inline dist_code :: (dist: i64) -> i64 {
     d := dist - 1
     if d < 4 {
         return d
@@ -663,8 +663,8 @@ priv inline fn dist_code(dist i64) i64 {
 
 // Code lengths (0 for unused symbols, at most maxlen) of a minimum-redundancy prefix code for
 // the given frequencies. At least two symbols get a code, so the code is always complete.
-priv fn huff_lengths(freq []i64, lens []u8, maxlen i64) {
-    var key [288]i64
+priv huff_lengths :: (freq: []i64, lens: []u8, maxlen: i64) {
+    key: [288]i64
     n := 0
     for s in 0..len(freq) {
         lens[s] = 0
@@ -683,7 +683,7 @@ priv fn huff_lengths(freq []i64, lens []u8, maxlen i64) {
     }
     sort(key[..n])
     // Moffat and Katajainen's in-place algorithm: a[i] becomes the code length of the i-th rarest symbol
-    var a [288]i64
+    a: [288]i64
     for i in 0..n {
         a[i] = key[i] >> 9
     }
@@ -732,7 +732,7 @@ priv fn huff_lengths(freq []i64, lens []u8, maxlen i64) {
         used = 0
     }
     // limit the lengths: move codes down from maxlen until the code fits again
-    var count [16]i64
+    count: [16]i64
     for i in 0..n {
         count[min(a[i], maxlen)] += 1
     }
@@ -760,13 +760,13 @@ priv fn huff_lengths(freq []i64, lens []u8, maxlen i64) {
 }
 
 // canonical codes for the given lengths, bit-reversed so that they can be written LSB first
-priv fn huff_codes(lens []u8, codes []u16) {
-    var count [16]i64
+priv huff_codes :: (lens: []u8, codes: []u16) {
+    count: [16]i64
     for l in lens {
         count[l] += 1
     }
     count[0] = 0
-    var next [16]i64
+    next: [16]i64
     code := 0
     for b in 1..16 {
         code = (code + count[b - 1]) << 1
@@ -783,12 +783,12 @@ priv fn huff_codes(lens []u8, codes []u16) {
 
 // Writes the pending symbols, which cover src[d.start..end], as one block: stored, fixed or
 // dynamic Huffman, whichever is smallest.
-priv fn flush_block(d *Deflate, end i64, final bool) {
+priv flush_block :: (d: *Deflate, end: i64, final: bool) {
     w := d.w
     last := if final { 1 } else { 0 }
     d.lfreq[256] = 1
-    var llen [288]u8
-    var dlen [32]u8
+    llen: [288]u8
+    dlen: [32]u8
     huff_lengths(d.lfreq[..286], llen[..286], 15)
     huff_lengths(d.dfreq[..30], dlen[..30], 15)
     hlit := 286
@@ -800,13 +800,13 @@ priv fn flush_block(d *Deflate, end i64, final bool) {
         hdist -= 1
     }
     // run-length code the two length lists: symbol | repeat count bits << 8
-    var all [316]u8
+    all: [316]u8
     copy(all[..hlit], llen[..hlit])
     copy(all[hlit..hlit + hdist], dlen[..hdist])
     total := hlit + hdist
-    var rle [316]u16
+    rle: [316]u16
     nrle := 0
-    var clfreq [19]i64
+    clfreq: [19]i64
     i := 0
     while i < total {
         v := all[i]
@@ -842,14 +842,14 @@ priv fn flush_block(d *Deflate, end i64, final bool) {
             run -= 1
         }
     }
-    var cllen [19]u8
+    cllen: [19]u8
     huff_lengths(clfreq[..], cllen[..], 7)
     hclen := 19
     while hclen > 4 && cllen[CL_ORDER[hclen - 1]] == 0 {
         hclen -= 1
     }
     // exact sizes in bits of the three encodings
-    var flen [288]u8
+    flen: [288]u8
     fill(flen[..144], 8)
     fill(flen[144..256], 9)
     fill(flen[256..280], 7)
@@ -900,7 +900,7 @@ priv fn flush_block(d *Deflate, end i64, final bool) {
             for k in 0..hclen {
                 put_bits(w, i64(cllen[CL_ORDER[k]]), 3)
             }
-            var clcode [19]u16
+            clcode: [19]u16
             huff_codes(cllen[..], clcode[..])
             for k in 0..nrle {
                 sym := i64(rle[k] & 255)
@@ -910,8 +910,8 @@ priv fn flush_block(d *Deflate, end i64, final bool) {
                 }
             }
         }
-        var lcode [288]u16
-        var dcode [32]u16
+        lcode: [288]u16
+        dcode: [32]u16
         huff_codes(llen[..], lcode[..])
         huff_codes(dlen[..], dcode[..])
         for k in 0..d.nsym {
@@ -938,7 +938,7 @@ priv fn flush_block(d *Deflate, end i64, final bool) {
 }
 
 // number of equal bytes (at most maxlen) at addresses a and b
-priv inline fn match_len(a i64, b i64, maxlen i64) i64 {
+priv inline match_len :: (a: i64, b: i64, maxlen: i64) -> i64 {
     l := 0
     while l + 8 <= maxlen {
         x := load64(a + l) ^ load64(b + l)
@@ -954,20 +954,20 @@ priv inline fn match_len(a i64, b i64, maxlen i64) i64 {
 }
 
 // hash of the three bytes at src[i]
-priv inline fn hash3(src []u8, i i64) i64 {
+priv inline hash3 :: (src: []u8, i: i64) -> i64 {
     i64((u32(src[i]) | u32(src[i + 1]) << 8 | u32(src[i + 2]) << 16) * 0x9E3779B1 >> 17)
 }
 
 // an upper limit for the deflate stream of n bytes: stored blocks plus their headers
-priv inline fn deflate_bound(n i64) i64 {
+priv inline deflate_bound :: (n: i64) -> i64 {
     n + (n >> 10) + 64
 }
 
 // Appends the deflate stream for src to w, whose buffer must have deflate_bound(len(src))
 // bytes of room. LZ77 with hash chains and lazy matching; working memory is released again.
-priv fn deflate_body(w *BitWriter, src []u8) {
+priv deflate_body :: (w: *BitWriter, src: []u8) {
     m := mark()
-    var d Deflate
+    d: Deflate
     d.w = w
     d.src = src
     d.syms = alloc[u32](BLOCK_SYMS)
@@ -1061,16 +1061,16 @@ priv fn deflate_body(w *BitWriter, src []u8) {
 
 // Compresses data into a raw deflate stream (RFC 1951). Allocates the result; it is never
 // more than len(data) / 1024 + 64 bytes longer than data.
-fn deflate(data []u8) []u8 {
-    var w BitWriter
+deflate :: (data: []u8) -> []u8 {
+    w: BitWriter
     w.buf = alloc[u8](deflate_bound(len(data)))
     deflate_body(&w, data)
     w.buf[..w.n]
 }
 
 // Compresses data into a zlib stream (RFC 1950: header, deflate stream, Adler-32). Allocates the result.
-fn zlib_compress(data []u8) []u8 {
-    var w BitWriter
+zlib_compress :: (data: []u8) -> []u8 {
+    w: BitWriter
     w.buf = alloc[u8](deflate_bound(len(data)) + 6)
     w.buf[0] = 0x78
     w.buf[1] = 0x9C
@@ -1083,30 +1083,30 @@ fn zlib_compress(data []u8) []u8 {
 // ---------- images ----------
 // An 8-bit image. `channels` bytes per pixel: 1 grey, 2 grey + alpha, 3 RGB, 4 RGBA. Rows run
 // from the top down without padding: pixel (x, y) starts at pix[(y * w + x) * channels].
-struct Image { w i64, h i64, channels i64, pix []u8 }
+Image :: struct { w: i64, h: i64, channels: i64, pix: []u8 }
 
 // limits of the decoders: larger dimensions or decoded sizes are rejected
-priv const MAX_DIM = 1 << 24
-priv const MAX_BYTES = 1 << 31
+priv MAX_DIM :: 1 << 24
+priv MAX_BYTES :: 1 << 31
 
 // a new image with every byte zero (allocates w * h * channels bytes)
-fn image_new(w i64, h i64, channels i64) Image {
+image_new :: (w: i64, h: i64, channels: i64) -> Image {
     assert w >= 0 && h >= 0 && channels >= 1 && channels <= 4, "image_new: bad size or channel count"
     Image{w, h, channels, alloc[u8](w * h * channels)}
 }
 
 // channel c of the pixel at (x, y)
-inline fn get(img Image, x i64, y i64, c i64) u8 {
+inline get :: (img: Image, x: i64, y: i64, c: i64) -> u8 {
     img.pix[(y * img.w + x) * img.channels + c]
 }
 
 // sets channel c of the pixel at (x, y)
-inline fn set(img *Image, x i64, y i64, c i64, v u8) {
+inline set :: (img: *Image, x: i64, y: i64, c: i64, v: u8) {
     img.pix[(y * img.w + x) * img.channels + c] = v
 }
 
 // the pixel starting at pix[i] as red, green, blue, alpha (grey is spread, missing alpha is 255)
-priv inline fn rgba(img Image, i i64) (u8, u8, u8, u8) {
+priv inline rgba :: (img: Image, i: i64) -> (u8, u8, u8, u8) {
     p := img.pix
     match img.channels {
         1 => (p[i], p[i], p[i], u8(255))
@@ -1117,12 +1117,12 @@ priv inline fn rgba(img Image, i i64) (u8, u8, u8, u8) {
 }
 
 // grey value of a colour, with the integer weights 77 / 150 / 29 for red / green / blue
-priv inline fn luma(r u8, g u8, b u8) u8 {
+priv inline luma :: (r: u8, g: u8, b: u8) -> u8 {
     u8((i64(r) * 77 + i64(g) * 150 + i64(b) * 29) >> 8)
 }
 
 // stores a colour in the pixel starting at pix[i]: 1 and 2 channel images keep its grey value
-priv inline fn set_rgba(img Image, i i64, r u8, g u8, b u8, a u8) {
+priv inline set_rgba :: (img: Image, i: i64, r: u8, g: u8, b: u8, a: u8) {
     p := img.pix
     if img.channels >= 3 {
         p[i] = r
@@ -1137,20 +1137,20 @@ priv inline fn set_rgba(img Image, i i64, r u8, g u8, b u8, a u8) {
 }
 
 // the pixel at (x, y) as an RGBA colour with components 0..1
-fn get(img Image, x i64, y i64) vec4 {
+get :: (img: Image, x: i64, y: i64) -> vec4 {
     r, g, b, a := rgba(img, (y * img.w + x) * img.channels)
     vec4(f32(r), f32(g), f32(b), f32(a)) / 255.0
 }
 
 // sets the pixel at (x, y) from an RGBA colour with components 0..1 (clamped, rounded to 8 bits)
-fn set(img *Image, x i64, y i64, col vec4) {
+set :: (img: *Image, x: i64, y: i64, col: vec4) {
     c := fmin(fmax(col, vec4(0.0)), vec4(1.0)) * 255.0 + vec4(0.5)
     set_rgba(*img, (y * img.w + x) * img.channels, u8(i64(c.x)), u8(i64(c.y)), u8(i64(c.z)), u8(i64(c.w)))
 }
 
 // The image with another channel count (allocates; returns img itself if it already has that
 // many). Grey spreads to RGB, RGB becomes grey by its luma, new alpha is 255, dropped alpha is lost.
-fn convert(img Image, channels i64) Image {
+convert :: (img: Image, channels: i64) -> Image {
     if channels == img.channels {
         return img
     }
@@ -1163,7 +1163,7 @@ fn convert(img Image, channels i64) Image {
 }
 
 // mirrors the image top to bottom in place
-fn flip_y(img *Image) {
+flip_y :: (img: *Image) {
     stride := img.w * img.channels
     for y in 0..img.h / 2 {
         a := img.pix[y * stride..(y + 1) * stride]
@@ -1177,7 +1177,7 @@ fn flip_y(img *Image) {
 }
 
 // a copy of the w x h rectangle at (x, y), clipped to the image (allocates)
-fn crop(img Image, x i64, y i64, w i64, h i64) Image {
+crop :: (img: Image, x: i64, y: i64, w: i64, h: i64) -> Image {
     x0 := max(x, 0)
     y0 := max(y, 0)
     out := image_new(max(min(x + w, img.w) - x0, 0), max(min(y + h, img.h) - y0, 0), img.channels)
@@ -1186,7 +1186,7 @@ fn crop(img Image, x i64, y i64, w i64, h i64) Image {
 }
 
 // copies src into dst with its top-left corner at (x, y), clipped to dst; both need the same channel count
-fn blit(dst *Image, src Image, x i64, y i64) {
+blit :: (dst: *Image, src: Image, x: i64, y: i64) {
     assert dst.channels == src.channels, "blit: channel counts differ"
     ch := src.channels
     x0 := max(x, 0)
@@ -1201,7 +1201,7 @@ fn blit(dst *Image, src Image, x i64, y i64) {
 }
 
 // the image scaled to w x h by picking the nearest source pixel (allocates)
-fn resize_nearest(img Image, w i64, h i64) Image {
+resize_nearest :: (img: Image, w: i64, h: i64) -> Image {
     ch := img.channels
     out := image_new(w, h, ch)
     if img.w == 0 || img.h == 0 {
@@ -1222,7 +1222,7 @@ fn resize_nearest(img Image, w i64, h i64) Image {
 }
 
 // position of the centre of destination pixel i in a source of sn pixels, in 1/256 pixel units
-priv inline fn src_pos(i i64, sn i64, dn i64) i64 {
+priv inline src_pos :: (i: i64, sn: i64, dn: i64) -> i64 {
     max(0, min((2 * i + 1) * sn * 128 / dn - 128, (sn - 1) * 256))
 }
 
@@ -1230,7 +1230,7 @@ priv inline fn src_pos(i i64, sn i64, dn i64) i64 {
 // channels are filtered alike: premultiply alpha first if transparent pixels have arbitrary colours.
 // The arithmetic is fixed-point, so results are identical on every machine. When shrinking by
 // more than 2x, average with generate_mipmap first to avoid aliasing.
-fn resize_bilinear(img Image, w i64, h i64) Image {
+resize_bilinear :: (img: Image, w: i64, h: i64) -> Image {
     ch := img.channels
     out := image_new(w, h, ch)
     if img.w == 0 || img.h == 0 {
@@ -1264,7 +1264,7 @@ fn resize_bilinear(img Image, w i64, h i64) Image {
 }
 
 // multiplies the colour channels by alpha (rounded) in place; images without alpha are unchanged
-fn premultiply_alpha(img *Image) {
+premultiply_alpha :: (img: *Image) {
     ch := img.channels
     if ch != 2 && ch != 4 {
         return
@@ -1281,7 +1281,7 @@ fn premultiply_alpha(img *Image) {
 // The next mipmap level (allocates): half the width and height, rounded down but at least 1,
 // each pixel the rounded average of a 2x2 block (box filter). The last column / row of an odd
 // size is dropped.
-fn generate_mipmap(img Image) Image {
+generate_mipmap :: (img: Image) -> Image {
     ch := img.channels
     out := image_new(max(img.w / 2, 1), max(img.h / 2, 1), ch)
     if img.w == 0 || img.h == 0 {
@@ -1306,7 +1306,7 @@ fn generate_mipmap(img Image) Image {
 }
 
 // the whole mipmap chain (allocates): element 0 is img itself, the last one is 1 x 1
-fn mipmap_chain(img Image) []Image {
+mipmap_chain :: (img: Image) -> []Image {
     n := 1
     while max(img.w, img.h) >> n > 0 {
         n += 1
@@ -1320,23 +1320,23 @@ fn mipmap_chain(img Image) []Image {
 }
 
 // ---------- PNG ----------
-priv struct Png {
-    w i64
-    h i64
-    depth i64        // bits per sample
-    ctype i64        // colour type: 0 grey, 2 RGB, 3 palette, 4 grey + alpha, 6 RGBA
-    interlace i64
-    nin i64          // samples per pixel in the file
-    channels i64     // bytes per pixel of the decoded image
-    npal i64
-    trns bool        // grey or RGB with a transparent colour, or a palette with alpha
-    key [4]i64       // the transparent colour (grey or RGB samples)
-    pal [1024]u8     // palette as RGBA
+priv Png :: struct {
+    w: i64
+    h: i64
+    depth: i64       // bits per sample
+    ctype: i64       // colour type: 0 grey, 2 RGB, 3 palette, 4 grey + alpha, 6 RGBA
+    interlace: i64
+    nin: i64         // samples per pixel in the file
+    channels: i64    // bytes per pixel of the decoded image
+    npal: i64
+    trns: bool       // grey or RGB with a transparent colour, or a palette with alpha
+    key: [4]i64      // the transparent colour (grey or RGB samples)
+    pal: [1024]u8    // palette as RGBA
 }
 
 // The Paeth predictor: whichever of left, up, up-left is closest to left + up - up-left (ties
 // in that order). Written as two selects so that it compiles without branches.
-priv inline fn paeth(a i64, b i64, c i64) i64 {
+priv inline paeth :: (a: i64, b: i64, c: i64) -> i64 {
     pa := abs(b - c)
     pb := abs(a - c)
     pc := abs(a + b - 2 * c)
@@ -1346,7 +1346,7 @@ priv inline fn paeth(a i64, b i64, c i64) i64 {
 
 // Reverses the scanline filter `ft`: reads the filtered bytes src, writes the row to cur (which
 // may be the same memory); prev is the row above, bpp the bytes per complete pixel.
-priv fn png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
+priv png_unfilter :: (ft: u8, cur: []u8, src: []u8, prev: []u8, bpp: i64) -> bool {
     n := len(cur)
     if ft == 0 {
         if ptr(cur) != ptr(src) {
@@ -1384,7 +1384,7 @@ priv fn png_unfilter(ft u8, cur []u8, src []u8, prev []u8, bpp i64) bool {
 }
 
 // sample i of an unfiltered row with `depth` bits per sample
-priv inline fn png_sample(row []u8, i i64, depth i64) i64 {
+priv inline png_sample :: (row: []u8, i: i64, depth: i64) -> i64 {
     if depth == 8 {
         return i64(row[i])
     }
@@ -1396,7 +1396,7 @@ priv inline fn png_sample(row []u8, i i64, depth i64) i64 {
 
 // Converts w pixels of an unfiltered row to 8-bit pixels in dst: applies the palette and the
 // transparent colour, scales 1/2/4-bit grey to 0..255 and keeps the high byte of 16-bit samples.
-priv fn png_expand(p *Png, row []u8, dst []u8, w i64) bool {
+priv png_expand :: (p: *Png, row: []u8, dst: []u8, w: i64) -> bool {
     depth := p.depth
     scale := if depth < 8 { 255 / ((1 << depth) - 1) } else { 1 }
     o := 0
@@ -1426,17 +1426,17 @@ priv fn png_expand(p *Png, row []u8, dst []u8, w i64) bool {
 }
 
 // width or height of an Adam7 pass: the pixels start, start + step, ... below n
-priv inline fn pass_size(n i64, start i64, step i64) i64 {
+priv inline pass_size :: (n: i64, start: i64, step: i64) -> i64 {
     (n - start + step - 1) / step
 }
 
-priv var ADAM7_X = [7]u8{0, 4, 0, 2, 0, 1, 0}
-priv var ADAM7_Y = [7]u8{0, 0, 4, 0, 2, 0, 1}
-priv var ADAM7_DX = [7]u8{8, 8, 4, 4, 2, 2, 1}
-priv var ADAM7_DY = [7]u8{8, 8, 8, 4, 4, 2, 2}
+priv ADAM7_X := [7]u8{0, 4, 0, 2, 0, 1, 0}
+priv ADAM7_Y := [7]u8{0, 0, 4, 0, 2, 0, 1}
+priv ADAM7_DX := [7]u8{8, 8, 4, 4, 2, 2, 1}
+priv ADAM7_DY := [7]u8{8, 8, 8, 4, 4, 2, 2}
 
 // bytes of the inflated image data: every scanline of every pass plus its filter byte
-priv fn png_raw_size(p *Png) i64 {
+priv png_raw_size :: (p: *Png) -> i64 {
     bits := p.nin * p.depth
     if p.interlace == 0 {
         return p.h * (1 + (p.w * bits + 7) / 8)
@@ -1453,7 +1453,7 @@ priv fn png_raw_size(p *Png) i64 {
 }
 
 // unfilters the inflated data `raw` in place and writes the pixels to pix
-priv fn png_rows(p *Png, raw []u8, pix []u8) bool {
+priv png_rows :: (p: *Png, raw: []u8, pix: []u8) -> bool {
     bits := p.nin * p.depth
     bpp := max(bits / 8, 1)
     ch := p.channels
@@ -1505,7 +1505,7 @@ priv fn png_rows(p *Png, raw []u8, pix []u8) bool {
 }
 
 // reads and checks the IHDR fields at data[at..at + 13]
-priv fn png_header(p *Png, data []u8, at i64) bool {
+priv png_header :: (p: *Png, data: []u8, at: i64) -> bool {
     p.w = be32(data, at)
     p.h = be32(data, at + 4)
     p.depth = i64(data[at + 8])
@@ -1531,9 +1531,9 @@ priv fn png_header(p *Png, data []u8, at i64) bool {
 // channels as stored in the file; palettes are expanded to RGB, or RGBA with a tRNS chunk, and
 // 16-bit samples keep their high byte. Returns false for anything malformed. Allocates only
 // the pixels (working memory is released again).
-fn png_decode(data []u8) (Image, bool) {
-    var none Image
-    var p Png
+png_decode :: (data: []u8) -> (Image, bool) {
+    none: Image
+    p: Png
     n := len(data)
     if n < 57 || data[..8] != "\x89PNG\r\n\x1a\n" {
         return (none, false)
@@ -1640,7 +1640,7 @@ fn png_decode(data []u8) (Image, bool) {
 
 // Filters the row cur with filter type ft into dst (prev is the row above); returns the sum of
 // the filtered bytes taken as signed values, the usual measure of how well a filter fits.
-priv fn png_filter(ft i64, dst []u8, cur []u8, prev []u8, bpp i64) i64 {
+priv png_filter :: (ft: i64, dst: []u8, cur: []u8, prev: []u8, bpp: i64) -> i64 {
     sum := 0
     for i in 0..len(cur) {
         a := if i >= bpp { i64(cur[i - bpp]) } else { 0 }
@@ -1660,7 +1660,7 @@ priv fn png_filter(ft i64, dst []u8, cur []u8, prev []u8, bpp i64) i64 {
 }
 
 // writes the length and CRC of the chunk whose type and data are out[at + 4..end]; returns the offset after it
-priv fn png_seal(out []u8, at i64, end i64) i64 {
+priv png_seal :: (out: []u8, at: i64, end: i64) -> i64 {
     put_be32(out, at, end - at - 8)
     put_be32(out, end, i64(crc32(out[at + 4..end])))
     end + 4
@@ -1669,7 +1669,7 @@ priv fn png_seal(out []u8, at i64, end i64) i64 {
 // Encodes an image as a PNG file in memory (allocates the result): 8 bits per sample, colour
 // type by channel count, the best of the five filters chosen per scanline, deflate-compressed.
 // The image must not be empty.
-fn png_encode(img Image) []u8 {
+png_encode :: (img: Image) -> []u8 {
     assert img.w > 0 && img.h > 0, "png_encode: empty image"
     ch := img.channels
     stride := img.w * ch
@@ -1707,7 +1707,7 @@ fn png_encode(img Image) []u8 {
     }
     at := png_seal(out, 8, 29)
     copy(out[at + 4..], "IDAT\x78\x9C")
-    var w BitWriter
+    w: BitWriter
     w.buf = out
     w.n = at + 10
     deflate_body(&w, raw)
@@ -1721,14 +1721,14 @@ fn png_encode(img Image) []u8 {
 
 // ---------- BMP ----------
 // the bits of v selected by mask, scaled to 0..255
-priv inline fn bmp_field(v i64, mask i64) u8 {
+priv inline bmp_field :: (v: i64, mask: i64) -> u8 {
     m := mask >> ctz(mask)
     x := (v & mask) >> ctz(mask)
     u8(if m == 255 { x } else { (x * 255 + (m >> 1)) / m })
 }
 
 // true if mask is a single run of 1 bits
-priv inline fn bmp_mask_ok(mask i64) bool {
+priv inline bmp_mask_ok :: (mask: i64) -> bool {
     m := mask >> ctz(mask)
     mask != 0 && m & (m + 1) == 0
 }
@@ -1738,8 +1738,8 @@ priv inline fn bmp_mask_ok(mask i64) bool {
 // header. Palettised and 24-bit images give 3 channels; 32-bit images give 4 (alpha 255
 // everywhere if the file stores none), or 3 if its bit fields define no alpha. Returns false
 // for anything else. Allocates only the pixels.
-fn bmp_decode(data []u8) (Image, bool) {
-    var none Image
+bmp_decode :: (data: []u8) -> (Image, bool) {
+    none: Image
     n := len(data)
     if n < 54 || data[0] != 'B' || data[1] != 'M' {
         return (none, false)
@@ -1844,7 +1844,7 @@ fn bmp_decode(data []u8) (Image, bool) {
 
 // Encodes an image as a BMP file in memory (allocates the result): 24-bit for 1 and 3 channels,
 // 32-bit with an alpha mask (V4 header) for 2 and 4 channels. The image must not be empty.
-fn bmp_encode(img Image) []u8 {
+bmp_encode :: (img: Image) -> []u8 {
     assert img.w > 0 && img.h > 0, "bmp_encode: empty image"
     alpha := img.channels == 2 || img.channels == 4
     bytes := if alpha { 4 } else { 3 }
@@ -1892,7 +1892,7 @@ fn bmp_encode(img Image) []u8 {
 
 // ---------- files ----------
 // decodes a PNG or BMP file held in memory, told apart by its signature
-fn image_decode(data []u8) (Image, bool) {
+image_decode :: (data: []u8) -> (Image, bool) {
     if len(data) >= 2 && data[0] == 'B' && data[1] == 'M' {
         return bmp_decode(data)
     }
@@ -1900,37 +1900,37 @@ fn image_decode(data []u8) (Image, bool) {
 }
 
 // Loads a PNG or BMP file. Allocates the pixels; the file's bytes stay in the arena too.
-fn image_load(path str) (Image, bool) {
+image_load :: (path: str) -> (Image, bool) {
     data, ok := read_file(path)
     if !ok {
-        var none Image
+        none: Image
         return (none, false)
     }
     image_decode(data)
 }
 
 // Loads a PNG file (see png_decode). Allocates the pixels; the file's bytes stay in the arena too.
-fn png_load(path str) (Image, bool) {
+png_load :: (path: str) -> (Image, bool) {
     data, ok := read_file(path)
     if !ok {
-        var none Image
+        none: Image
         return (none, false)
     }
     png_decode(data)
 }
 
 // Loads a BMP file (see bmp_decode). Allocates the pixels; the file's bytes stay in the arena too.
-fn bmp_load(path str) (Image, bool) {
+bmp_load :: (path: str) -> (Image, bool) {
     data, ok := read_file(path)
     if !ok {
-        var none Image
+        none: Image
         return (none, false)
     }
     bmp_decode(data)
 }
 
 // writes the image as a PNG file; false if the file cannot be written (leaves nothing in the arena)
-fn png_save(path str, img Image) bool {
+png_save :: (path: str, img: Image) -> bool {
     m := mark()
     ok := write_file(path, png_encode(img))
     release(m)
@@ -1938,7 +1938,7 @@ fn png_save(path str, img Image) bool {
 }
 
 // writes the image as a BMP file; false if the file cannot be written (leaves nothing in the arena)
-fn bmp_save(path str, img Image) bool {
+bmp_save :: (path: str, img: Image) -> bool {
     m := mark()
     ok := write_file(path, bmp_encode(img))
     release(m)

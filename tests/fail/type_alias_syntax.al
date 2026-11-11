@@ -2,7 +2,7 @@
 type H[T] = Vec[T]
 type = i64
 type J i64
-fn main() {
+main :: () {
     // `type` is an ordinary identifier everywhere else
     type := 3
     print(type)

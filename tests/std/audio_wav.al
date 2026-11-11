@@ -1,13 +1,13 @@
 // std.audio: WAV encode / decode round trips in every sample format, generators, bad input.
 use std.audio
 
-fn put3(x f32) {
+put3 :: (x: f32) {
     putf(f64(x), 5)
     put(" ")
 }
 
-fn checksum(d str) u64 {
-    var h u64 = 1469598103934665603
+checksum :: (d: str) -> u64 {
+    h: u64 = 1469598103934665603
     for b in d {
         h = (h ^ u64(b)) * 1099511628211
     }
@@ -15,15 +15,15 @@ fn checksum(d str) u64 {
 }
 
 // largest absolute difference between two sounds
-fn max_diff(a Sound, b Sound) f32 {
-    var d f32 = 0.0
+max_diff :: (a: Sound, b: Sound) -> f32 {
+    d: f32 = 0.0
     for i in 0..len(a.samples) {
         d = fmax(d, fabs(a.samples[i] - b.samples[i]))
     }
     d
 }
 
-fn main() {
+main :: () {
     // generators
     t := sound_tone(8000, 1000.0, 0.004, 0.5)
     print(frames(t), t.rate, t.channels)
@@ -36,9 +36,9 @@ fn main() {
     n1 := sound_noise(8000, 0.5, 0.25, 1)
     n2 := sound_noise(8000, 0.5, 0.25, 1)
     n3 := sound_noise(8000, 0.5, 0.25, 2)
-    var lo f32 = 1.0
-    var hi f32 = -1.0
-    var mean f64 = 0.0
+    lo: f32 = 1.0
+    hi: f32 = -1.0
+    mean: f64 = 0.0
     for x in n1.samples {
         lo = fmin(lo, x)
         hi = fmax(hi, x)

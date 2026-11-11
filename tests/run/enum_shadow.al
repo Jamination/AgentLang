@@ -1,14 +1,14 @@
 // Names shared between variants, builtins, and declarations of the program and the library.
 // declarations of the program hide the bare names of the library's variants
-fn Some(x i64) i64 { x * 2 }
-const None = 7
-struct Ok { v i64 }
+Some :: (x: i64) -> i64 { x * 2 }
+None :: 7
+Ok :: struct { v: i64 }
 // variants with the names of builtin functions and types
-enum Ty { i64, f64, str, bool, len, print, hash(i64), vec3 }
-enum Color { Red, Green }
-enum W { A(i64), B(Color) }
+Ty :: enum { i64, f64, str, bool, len, print, hash(i64), vec3 }
+Color :: enum { Red, Green }
+W :: enum { A(i64), B(Color) }
 
-fn name(t Ty) str {
+name :: (t: Ty) -> str {
     match t {
         i64 => "i64"
         f64 => "f64"
@@ -21,9 +21,9 @@ fn name(t Ty) str {
     }
 }
 
-fn main() {
+main :: () {
     print(Some(4), None, Ok{v: 1})
-    var o Opt[i64] = Opt.Some(3)
+    o: Opt[i64] = Opt.Some(3)
     print(o, Opt[i64].None, Res[i64].Ok(5), Res[i64].Err("e").error())
     // in a pattern the matched type decides, whatever else has the name
     match o {
@@ -45,7 +45,7 @@ fn main() {
     // builtins stay callable; without a call the names are the variants
     xs := []i64{1, 2, 3}
     t := i64
-    var u Ty = print
+    u: Ty = print
     h := Ty.hash(4)
     print(len(xs), i64(2.5), hash(7) != 0, name(t), name(u), name(len), name(h), name(f64), vec3(1.0, 2.0, 3.0))
     print(t, u, h, Ty.vec3, Ty.str)

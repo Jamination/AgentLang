@@ -1,13 +1,13 @@
-noinline fn id8(x i8) i8 { x }
-noinline fn idu8(x u8) u8 { x }
-noinline fn id16(x i16) i16 { x }
-noinline fn idu16(x u16) u16 { x }
-noinline fn id32(x i32) i32 { x }
-noinline fn idu32(x u32) u32 { x }
-noinline fn id64(x i64) i64 { x }
-noinline fn idu64(x u64) u64 { x }
+noinline id8 :: (x: i8) -> i8 { x }
+noinline idu8 :: (x: u8) -> u8 { x }
+noinline id16 :: (x: i16) -> i16 { x }
+noinline idu16 :: (x: u16) -> u16 { x }
+noinline id32 :: (x: i32) -> i32 { x }
+noinline idu32 :: (x: u32) -> u32 { x }
+noinline id64 :: (x: i64) -> i64 { x }
+noinline idu64 :: (x: u64) -> u64 { x }
 
-fn main() {
+main :: () {
     // wrap-around in every width (values pass through calls so nothing is folded)
     a8 := id8(100)
     b8 := id8(50)
@@ -37,9 +37,9 @@ fn main() {
     w := i64(a8) * i64(a16) + i64(a32)
     print(w, i64(au8) + 1, f64(a8) / 3.0)
     // constants adapt to the other operand
-    var m u8 = 3
+    m: u8 = 3
     m = m * 100 + 50
-    var n i16 = 300
+    n: i16 = 300
     n = n * 200 - 1
     print(m, n, 0x7F + 1, 0b1010, 0o17, 1_000_000, 'A' + 1, '\n', '\x41')
 }

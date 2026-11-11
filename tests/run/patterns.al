@@ -1,18 +1,18 @@
 // match: nested patterns, guards, alternatives with bindings, tuple patterns, `&name`.
-enum Shape { Circle(f64), Rect(f64, f64), Empty }
-enum Color { Red, Green, Blue }
-enum Tree { Leaf(i64), Node(*Tree, *Tree), Nil }
-enum Pair { Two(i64, i64), Single(i64) }
-enum Tok { Num(i64), Word(str), Flag(bool), Ratio(f64), Byte(u8), Ptr(*i64), Sym(Color) }
-enum Wrap { W(P, Opt[Color]), Z }
-enum Big { Arr([100]i64), Small(i64) }
-enum Cell { Full(P, str), Free }
-struct P { x i64, y i64 }
-struct Holder { name str, slot Opt[P] }
-const LIMIT = 10
-const NAME = "ada"
+Shape :: enum { Circle(f64), Rect(f64, f64), Empty }
+Color :: enum { Red, Green, Blue }
+Tree :: enum { Leaf(i64), Node(*Tree, *Tree), Nil }
+Pair :: enum { Two(i64, i64), Single(i64) }
+Tok :: enum { Num(i64), Word(str), Flag(bool), Ratio(f64), Byte(u8), Ptr(*i64), Sym(Color) }
+Wrap :: enum { W(P, Opt[Color]), Z }
+Big :: enum { Arr([100]i64), Small(i64) }
+Cell :: enum { Full(P, str), Free }
+P :: struct { x: i64, y: i64 }
+Holder :: struct { name: str, slot: Opt[P] }
+LIMIT :: 10
+NAME :: "ada"
 
-fn describe(o Opt[Shape]) str {
+describe :: (o: Opt[Shape]) -> str {
     // nested variant patterns cover Opt[Shape] together: no `_` arm is needed
     match o {
         Some(Circle(r)) if r > 10.0 => fmt("big circle ", r)
@@ -24,7 +24,7 @@ fn describe(o Opt[Shape]) str {
     }
 }
 
-fn pair(p Pair) str {
+pair :: (p: Pair) -> str {
     match p {
         Two(0, _) => "zero first"
         Two(_, 0) => "zero second"
@@ -36,7 +36,7 @@ fn pair(p Pair) str {
     }
 }
 
-fn both(a Opt[i64], b Opt[i64]) i64 {
+both :: (a: Opt[i64], b: Opt[i64]) -> i64 {
     match (a, b) {
         (Some(x), Some(y)) => x + y
         (Some(x), None), (None, Some(x)) => x
@@ -44,7 +44,7 @@ fn both(a Opt[i64], b Opt[i64]) i64 {
     }
 }
 
-fn classify(t (i64, str, bool)) str {
+classify :: (t: (i64, str, bool)) -> str {
     match t {
         (0, _, _) => "zero"
         (_, "hi", true) => "greeting"
@@ -53,7 +53,7 @@ fn classify(t (i64, str, bool)) str {
     }
 }
 
-fn tok(t Tok) str {
+tok :: (t: Tok) -> str {
     match t {
         Num(0) => "zero"
         Num(-1) => "minus one"
@@ -77,7 +77,7 @@ fn tok(t Tok) str {
     }
 }
 
-fn depth(t *Tree) i64 {
+depth :: (t: *Tree) -> i64 {
     match *t {
         Nil => 0
         Leaf(_) => 1
@@ -86,7 +86,7 @@ fn depth(t *Tree) i64 {
 }
 
 // adds `d` to every leaf, in place
-fn add(t *Tree, d i64) {
+add :: (t: *Tree, d: i64) {
     match *t {
         Leaf(&n) => { *n += d }
         Node(l, r) => {
@@ -97,7 +97,7 @@ fn add(t *Tree, d i64) {
     }
 }
 
-fn sum(t *Tree) i64 {
+sum :: (t: *Tree) -> i64 {
     match *t {
         Leaf(n) => n
         Node(l, r) => sum(l) + sum(r)
@@ -105,7 +105,7 @@ fn sum(t *Tree) i64 {
     }
 }
 
-fn wrap(w Wrap) str {
+wrap :: (w: Wrap) -> str {
     match w {
         W(p, Some(Red)) => fmt("red at ", p.x, ",", p.y)
         W(p, Some(c)) => fmt(c, " at ", p)
@@ -114,24 +114,24 @@ fn wrap(w Wrap) str {
     }
 }
 
-fn pick[T](o Opt[T], d T) T {
+pick[T] :: (o: Opt[T], d: T) -> T {
     match o {
         Some(x) => x
         None => d
     }
 }
 
-fn first_or[T](o Opt[(T, T)], d T) T {
+first_or[T] :: (o: Opt[(T, T)], d: T) -> T {
     match o {
         Some((a, _)) => a
         None => d
     }
 }
 
-fn mk() Opt[P] { Some(P{1, 2}) }
-fn scaled(p P, k i64) i64 { p.x * k }
+mk :: () -> Opt[P] { Some(P{1, 2}) }
+scaled :: (p: P, k: i64) -> i64 { p.x * k }
 
-fn colour_pair(p (Color, Color)) i64 {
+colour_pair :: (p: (Color, Color)) -> i64 {
     match p {
         (Red, _) => 1
         (_, Red) => 2
@@ -140,7 +140,7 @@ fn colour_pair(p (Color, Color)) i64 {
     }
 }
 
-fn bools(t (bool, bool)) str {
+bools :: (t: (bool, bool)) -> str {
     match t {
         (true, true) => "both"
         (true, false), (false, true) => "one"
@@ -148,19 +148,19 @@ fn bools(t (bool, bool)) str {
     }
 }
 
-var state Opt[P]
-fn clobber() bool {
+state: Opt[P]
+clobber :: () -> bool {
     state = None
     false
 }
 
-var calls i64
-fn tick() bool {
+calls: i64
+tick :: () -> bool {
     calls += 1
     calls % 2 == 0
 }
 
-fn main() {
+main :: () {
     print(describe(Some(Circle(11.0))), describe(Some(Circle(1.0))), describe(Some(Rect(2.0, 2.0))), describe(Some(Rect(2.0, 3.0))), describe(Some(Shape.Empty)), describe(None))
     print(pair(Two(0, 5)), pair(Two(5, 0)), pair(Two(10, 7)), pair(Two(4, 4)), pair(Two(-3, 2)), pair(Single(-1)), pair(Two(1, 2)), pair(Single(9)))
     print(both(Some(1), Some(2)), both(Some(5), None), both(None, Some(7)), both(None, None))
@@ -180,7 +180,7 @@ fn main() {
     add(&root, 10)
     print(depth(&root), sum(&root), l1, l2, l3)
 
-    var o Opt[i64] = Some(41)
+    o: Opt[i64] = Some(41)
     match o {
         Some(&v) => { *v += 1 }
         None => {}
@@ -258,7 +258,7 @@ fn main() {
     print(pick(Some("s"), "d"), pick(Opt[f64].None, 2.5), first_or(Some((1, 2)), 0), first_or(Opt[(i64, i64)].None, 9))
 
     // large payloads are copied or referenced as a whole
-    var arr [100]i64
+    arr: [100]i64
     for i in 0..100 {
         arr[i] = i
     }

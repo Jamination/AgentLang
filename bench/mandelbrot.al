@@ -1,8 +1,8 @@
-fn main() {
+main :: () {
     w := 3000
     h := 3000
     bit_num := 0
-    var byte_acc u8 = 0
+    byte_acc: u8 = 0
     iter := 50
     limit := 2.0
     put("P4\n", w, " ", h, "\n")

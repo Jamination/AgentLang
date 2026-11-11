@@ -1,18 +1,18 @@
 // Loops whose index checks can never fail (`for i in k..n` indexing something of length n):
 // the checks are removed, also when the body calls functions or leaves the loop early.
-var log Vec[i64]
+log: Vec[i64]
 
-fn note(x i64) {
+note :: (x: i64) {
     log.push(x)
 }
 
-fn each(s []i64) {
+each :: (s: []i64) {
     for i in 0..len(s) {
         note(s[i])
     }
 }
 
-fn each_from(s []i64, skip bool) i64 {
+each_from :: (s: []i64, skip: bool) -> i64 {
     n := 0
     for i in 2..len(s) {
         if skip && s[i] == 40 {
@@ -27,7 +27,7 @@ fn each_from(s []i64, skip bool) i64 {
     n
 }
 
-fn find(s []str, w str) i64 {
+find :: (s: []str, w: str) -> i64 {
     for i in 0..len(s) {
         if s[i] == w {
             return i
@@ -36,7 +36,7 @@ fn find(s []str, w str) i64 {
     return -1
 }
 
-fn total(v *Vec[i64]) i64 {
+total :: (v: *Vec[i64]) -> i64 {
     t := 0
     for i in 0..v.len {
         t += v[i]
@@ -44,13 +44,13 @@ fn total(v *Vec[i64]) i64 {
     t
 }
 
-fn scale(v *Vec[f64], k f64) {
+scale :: (v: *Vec[f64], k: f64) {
     for i in 0..len(v) {
         v[i] *= k
     }
 }
 
-fn pairs(s []i64) i64 {
+pairs :: (s: []i64) -> i64 {
     t := 0
     for i in 0..len(s) {
         for j in 0..len(s) {
@@ -62,7 +62,7 @@ fn pairs(s []i64) i64 {
 }
 
 // the loop bound is not the length: the check stays (and passes here)
-fn first(s []i64, n i64) i64 {
+first :: (s: []i64, n: i64) -> i64 {
     t := 0
     for i in 0..n {
         t += s[i]
@@ -71,7 +71,7 @@ fn first(s []i64, n i64) i64 {
     t
 }
 
-fn main() {
+main :: () {
     s := []i64{10, 20, 30, 40, 50, 60, 70}
     each(s)
     print(log[..])
@@ -88,7 +88,7 @@ fn main() {
     scale(&f, 2.0)
     log.len = 0
     print(total(&v), f[..], pairs(s[..3]), first(s, 3), log.len)
-    var none []i64
+    none: []i64
     each(none)
     print(total(&log) > 0)
 }

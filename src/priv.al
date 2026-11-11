@@ -21,16 +21,16 @@
 // The walkers below return a value from a `match` over every variant, which makes the match
 // exhaustive: a new AST variant does not compile until it is handled here.
 
-struct PrivCx {
+PrivCx :: struct {
     // written name -> internal name, for every private declaration of the file
-    names Map[str, str]
+    names: Map[str, str]
     // the same for private functions only (method-call syntax `x.f(..)`)
-    methods Map[str, str]
+    methods: Map[str, str]
 }
 
 // (name, kind, private, position) of a declaration; kind 0 = declares no name,
 // 1 = function, 2 = any other kind
-fn priv_decl_info(d *Decl) (str, i64, bool, Pos) {
+priv_decl_info :: (d: *Decl) -> (str, i64, bool, Pos) {
     return match *d {
         DeclFn(f) => (f.name, 1, f.is_priv, f.pos)
         DeclStruct(s) => (s.name, 2, s.is_priv, s.pos)
@@ -44,7 +44,7 @@ fn priv_decl_info(d *Decl) (str, i64, bool, Pos) {
 }
 
 // Renames the private declarations of one file (number `file`) and their uses.
-fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
+priv_apply :: (decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
     any := false
     for i in 0..decls.len {
         info := priv_decl_info(&decls[i])
@@ -106,7 +106,7 @@ fn priv_apply(decls *Vec[Decl], file i64, errs *Vec[Diag]) {
     }
 }
 
-fn priv_name(r *PrivCx, n str) str {
+priv_name :: (r: *PrivCx, n: str) -> str {
     nn, found := r.names.get(n)
     if found {
         return nn
@@ -114,14 +114,14 @@ fn priv_name(r *PrivCx, n str) str {
     return n
 }
 
-fn priv_names(r *PrivCx, v *Vec[str]) {
+priv_names :: (r: *PrivCx, v: *Vec[str]) {
     for i in 0..v.len {
         v[i] = priv_name(r, v[i])
     }
 }
 
 // a function, top-level or nested: its name, parameters, types and body
-fn priv_fn(r *PrivCx, f *FnDecl) bool {
+priv_fn :: (r: *PrivCx, f: *FnDecl) -> bool {
     f.name = priv_name(r, f.name)
     priv_names(r, &f.tparams)
     for i in 0..f.params.len {
@@ -132,7 +132,7 @@ fn priv_fn(r *PrivCx, f *FnDecl) bool {
     return priv_block(r, f.body)
 }
 
-fn priv_rewrite(r *PrivCx, d Decl) Decl {
+priv_rewrite :: (r: *PrivCx, d: Decl) -> Decl {
     return match d {
         DeclFn(f) => {
             priv_fn(r, &f)
@@ -179,14 +179,14 @@ fn priv_rewrite(r *PrivCx, d Decl) Decl {
     }
 }
 
-fn priv_types(r *PrivCx, ts *Vec[TypeAst]) bool {
+priv_types :: (r: *PrivCx, ts: *Vec[TypeAst]) -> bool {
     for i in 0..ts.len {
         priv_type(r, &ts[i])
     }
     return true
 }
 
-fn priv_type(r *PrivCx, t *TypeAst) bool {
+priv_type :: (r: *PrivCx, t: *TypeAst) -> bool {
     return match *t {
         TypeAstName(n, args, pos) => {
             priv_types(r, &args)
@@ -213,10 +213,10 @@ fn priv_type(r *PrivCx, t *TypeAst) bool {
     }
 }
 
-fn priv_opt_type(r *PrivCx, o Opt[TypeAst]) Opt[TypeAst] {
+priv_opt_type :: (r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
     match o {
         Some(t) => {
-            var tt TypeAst = t
+            tt: TypeAst = t
             priv_type(r, &tt)
             return Some(tt)
         }
@@ -225,10 +225,10 @@ fn priv_opt_type(r *PrivCx, o Opt[TypeAst]) Opt[TypeAst] {
     return o
 }
 
-fn priv_opt_expr(r *PrivCx, o Opt[Expr]) Opt[Expr] {
+priv_opt_expr :: (r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
     match o {
         Some(e) => {
-            var ee Expr = e
+            ee: Expr = e
             priv_expr(r, &ee)
             return Some(ee)
         }
@@ -237,7 +237,7 @@ fn priv_opt_expr(r *PrivCx, o Opt[Expr]) Opt[Expr] {
     return o
 }
 
-fn priv_opt_pexpr(r *PrivCx, o Opt[*Expr]) bool {
+priv_opt_pexpr :: (r: *PrivCx, o: Opt[*Expr]) -> bool {
     match o {
         Some(e) => {
             return priv_expr(r, e)
@@ -247,7 +247,7 @@ fn priv_opt_pexpr(r *PrivCx, o Opt[*Expr]) bool {
     return true
 }
 
-fn priv_exprs(r *PrivCx, es *Vec[Expr]) bool {
+priv_exprs :: (r: *PrivCx, es: *Vec[Expr]) -> bool {
     for i in 0..es.len {
         priv_expr(r, &es[i])
     }
@@ -256,7 +256,7 @@ fn priv_exprs(r *PrivCx, es *Vec[Expr]) bool {
 
 // the callee of a call: `x.f(..)` and `x.f[T](..)` name the function `f` if one is private
 // in this file (lowering still prefers a field `f` that holds a function)
-fn priv_callee(r *PrivCx, c *Expr) bool {
+priv_callee :: (r: *PrivCx, c: *Expr) -> bool {
     match c.k {
         EKField(recv, name) => {
             priv_expr(r, recv)
@@ -280,7 +280,7 @@ fn priv_callee(r *PrivCx, c *Expr) bool {
     return priv_expr(r, c)
 }
 
-fn priv_expr(r *PrivCx, e *Expr) bool {
+priv_expr :: (r: *PrivCx, e: *Expr) -> bool {
     return match e.k {
         EKInt(v) => true
         EKFloat(v) => true
@@ -323,7 +323,7 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
             true
         }
         EKTypeE(t) => {
-            var tt TypeAst = t
+            tt: TypeAst = t
             priv_type(r, &tt)
             e.k = EKTypeE(tt)
             true
@@ -355,11 +355,11 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
     }
 }
 
-fn priv_pat(r *PrivCx, p *Pat) bool {
+priv_pat :: (r: *PrivCx, p: *Pat) -> bool {
     return match *p {
         PatWild => true
         PatConst(e) => {
-            var ee Expr = e
+            ee: Expr = e
             priv_expr(r, &ee)
             *p = PatConst(ee)
             true
@@ -406,31 +406,31 @@ fn priv_pat(r *PrivCx, p *Pat) bool {
 }
 
 // the statements are rewritten in place: a Block copy shares their storage
-fn priv_block(r *PrivCx, b Block) bool {
+priv_block :: (r: *PrivCx, b: Block) -> bool {
     for i in 0..b.stmts.len {
         priv_stmt(r, &b.stmts[i])
     }
     return true
 }
 
-fn priv_stmt(r *PrivCx, s *Stmt) bool {
+priv_stmt :: (r: *PrivCx, s: *Stmt) -> bool {
     return match s.k {
         SKExpr(e) => {
-            var ee Expr = e
+            ee: Expr = e
             priv_expr(r, &ee)
             s.k = SKExpr(ee)
             true
         }
         SKLet(names, e) => {
             priv_names(r, &names)
-            var ee Expr = e
+            ee: Expr = e
             priv_expr(r, &ee)
             s.k = SKLet(names, ee)
             true
         }
         SKMultiAssign(lhs, e) => {
             priv_exprs(r, &lhs)
-            var ee Expr = e
+            ee: Expr = e
             priv_expr(r, &ee)
             s.k = SKMultiAssign(lhs, ee)
             true
@@ -440,15 +440,15 @@ fn priv_stmt(r *PrivCx, s *Stmt) bool {
             true
         }
         SKAssign(a, op, b) => {
-            var aa Expr = a
-            var bb Expr = b
+            aa: Expr = a
+            bb: Expr = b
             priv_expr(r, &aa)
             priv_expr(r, &bb)
             s.k = SKAssign(aa, op, bb)
             true
         }
         SKIf(c, then, els) => {
-            var cc Expr = c
+            cc: Expr = c
             priv_expr(r, &cc)
             priv_block(r, then)
             match els {
@@ -461,21 +461,21 @@ fn priv_stmt(r *PrivCx, s *Stmt) bool {
             true
         }
         SKWhile(c, body) => {
-            var cc Expr = c
+            cc: Expr = c
             priv_expr(r, &cc)
             s.k = SKWhile(cc, body)
             priv_block(r, body)
         }
         SKLoop(body) => priv_block(r, body)
         SKFor(v1, v2, lo, hi, incl, step, body) => {
-            var v2n Opt[str] = v2
+            v2n: Opt[str] = v2
             match v2 {
                 Some(n2) => {
                     v2n = Some(priv_name(r, n2))
                 }
                 None => {}
             }
-            var ll Expr = lo
+            ll: Expr = lo
             priv_expr(r, &ll)
             s.k = SKFor(priv_name(r, v1), v2n, ll, priv_opt_expr(r, hi), incl, priv_opt_expr(r, step), body)
             priv_block(r, body)
@@ -490,7 +490,7 @@ fn priv_stmt(r *PrivCx, s *Stmt) bool {
         SKContinueTo(label) => true
         SKContinue => true
         SKAssert(c, msg) => {
-            var cc Expr = c
+            cc: Expr = c
             priv_expr(r, &cc)
             s.k = SKAssert(cc, priv_opt_expr(r, msg))
             true

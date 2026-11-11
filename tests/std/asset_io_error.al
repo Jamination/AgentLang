@@ -1,16 +1,16 @@
 // std.asset: io_error() after read_bytes / write_bytes and the directory functions
 use std.asset
 
-fn report(what str, ok bool) {
+report :: (what: str, ok: bool) {
     print(what, ok, io_error(), error_text(io_error()))
 }
 
-fn can_read(path str) bool {
+can_read :: (path: str) -> bool {
     data, ok := read_bytes(path)
     return ok && len(data) >= 0
 }
 
-fn main() {
+main :: () {
     d := fmt("tmp/asset_io_error_", syscall(39))
     remove_file(path_join(d, "a.txt"))
     remove_file(path_join(d, "sub/b.txt"))

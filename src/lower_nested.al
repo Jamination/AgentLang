@@ -14,22 +14,22 @@
 // continues there, finds the nested functions, and reports a variable as LOWER_NESTED_OUTER.
 
 // a nested or anonymous function
-struct NestedFn {
-    decl *FnDecl
+NestedFn :: struct {
+    decl: *FnDecl
     // the name in diagnostics, the IR and the symbol table
-    shown str
+    shown: str
     // -1: the declaration has errors (uses of the name are not reported again)
-    fid i64
-    ptys Vec[i64]
-    rty i64
+    fid: i64
+    ptys: Vec[i64]
+    rty: i64
 }
 
 // the type slot `lookup` reports for a variable of an enclosing function
-const LOWER_NESTED_OUTER = -0x4000000000000000
+LOWER_NESTED_OUTER :: -0x4000000000000000
 
 // The name `name` as seen from a function nested in `p`: a nested function of `p` (or of a
 // function around it) is visible, a variable is LOWER_NESTED_OUTER.
-fn lower_nested_outer(p *Fx, name str) Opt[(i64, i64)] {
+lower_nested_outer :: (p: *Fx, name: str) -> Opt[(i64, i64)] {
     fx := p
     while fx != nil {
         for si in fx.scopes.len - 1..=0 by -1 {
@@ -47,7 +47,7 @@ fn lower_nested_outer(p *Fx, name str) Opt[(i64, i64)] {
 }
 
 // the nested function that the name `n` means here: its index in `cx.nested`, or -1
-fn nested_named(self *Fx, n str) i64 {
+nested_named :: (self: *Fx, n: str) -> i64 {
     match self.lookup(n) {
         Some(x) => {
             if x.0 < 0 && x.0 != LOWER_NESTED_OUTER {
@@ -60,7 +60,7 @@ fn nested_named(self *Fx, n str) i64 {
 }
 
 // the nested function that a method call `x.name(..)` means, or -1
-fn nested_method(self *Fx, name str) i64 {
+nested_method :: (self: *Fx, name: str) -> i64 {
     if self.cx.nested.len == 0 {
         return -1
     }
@@ -84,7 +84,7 @@ fn nested_method(self *Fx, name str) i64 {
 // ---------- diagnostics ----------
 // "`n` is a variable of the enclosing function": reported once per name; afterwards the name
 // is an erroneous local of this function
-fn nested_outer_err(self *Fx, n str, pos Pos) {
+nested_outer_err :: (self: *Fx, n: str, pos: Pos) {
     owner := ""
     fx := self.parent
     while fx != nil && owner == "" {
@@ -101,19 +101,19 @@ fn nested_outer_err(self *Fx, n str, pos Pos) {
 }
 
 // the rule and the way out, for a nested function that uses the variable `n` of its surroundings
-fn lower_nested_rule(fx *Fx, n str) str {
+lower_nested_rule :: (fx: *Fx, n: str) -> str {
     kind := if find(fx.f.name, ".fn@") >= 0 { "anonymous" } else { "nested" }
     return fmt(": the ", kind, " function `", fx.f.name, "` does not see the variables of the function around it. Pass `", n, "` as a parameter (`&", n, "` if the function must change it); a callback that needs state takes a context argument, like `sort_by(items, ctx, less)`")
 }
 
-fn lower_nested_after(a Pos, b Pos) bool {
+lower_nested_after :: (a: Pos, b: Pos) -> bool {
     return a.line > b.line || (a.line == b.line && a.col > b.col)
 }
 
 // For an unknown name: the note that it is a nested function declared later, or (inside a
 // nested function) a variable of an enclosing function that is declared further down; ""
 // if neither is the reason.
-fn nested_hint(self *Fx, n str, pos Pos) str {
+nested_hint :: (self: *Fx, n: str, pos: Pos) -> str {
     fx := self
     while fx != nil {
         for bi in fx.blocks.len - 1..=0 by -1 {
@@ -166,7 +166,7 @@ fn nested_hint(self *Fx, n str, pos Pos) str {
 // that is lowered again (a `defer` block on another way out, a loop condition) gets the same
 // function. A named one is entered into the innermost scope before its body is lowered, so
 // that it can call itself.
-fn nested_lower(self *Fx, d *FnDecl) i64 {
+nested_lower :: (self: *Fx, d: *FnDecl) -> i64 {
     for i in 0..self.nested_done.len {
         if self.nested_done[i].0 == d {
             return self.nested_done[i].1
@@ -218,7 +218,7 @@ fn nested_lower(self *Fx, d *FnDecl) i64 {
 }
 
 // the statement `fn name(params) R { body }`
-fn nested_fn(self *Fx, d *FnDecl) {
+nested_fn :: (self: *Fx, d: *FnDecl) {
     top := self.scopes.len - 1
     if self.scopes[top].vars.has(d.name) {
         self.err(d.pos, fmt("`", d.name, "` is already declared in this scope: a nested function needs a name that no variable or other nested function of its block has (nested functions cannot be overloaded)"))
@@ -230,7 +230,7 @@ fn nested_fn(self *Fx, d *FnDecl) {
 
 // ---------- uses ----------
 // `name(args)` or `recv.name(args)` of the nested function `idx`
-fn call_nested(self *Fx, idx i64, recv Opt[Val], args []Expr, expect Opt[i64], pos Pos) Val {
+call_nested :: (self: *Fx, idx: i64, recv: Opt[Val], args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     if self.cx.nested[idx].fid < 0 {
         lower_call_eval_all(self, args)
         return val_err()
@@ -239,7 +239,7 @@ fn call_nested(self *Fx, idx i64, recv Opt[Val], args []Expr, expect Opt[i64], p
 }
 
 // the nested or anonymous function `idx` as a value
-fn nested_value(self *Fx, idx i64) Val {
+nested_value :: (self: *Fx, idx: i64) -> Val {
     nf := self.cx.nested[idx]
     if nf.fid < 0 {
         return val_err()
@@ -251,7 +251,7 @@ fn nested_value(self *Fx, idx i64) Val {
 
 // a local name that is not a variable of this function, used as a value: a nested function,
 // or a variable of an enclosing function
-fn nested_ident(self *Fx, n str, slot i64, pos Pos) Val {
+nested_ident :: (self: *Fx, n: str, slot: i64, pos: Pos) -> Val {
     if slot == LOWER_NESTED_OUTER {
         self.nested_outer_err(n, pos)
         return val_err()

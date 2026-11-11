@@ -1,14 +1,14 @@
 // vector, quaternion and matrix functions of the math library
-var fails i64
+fails: i64
 
-fn ok(name str, c bool) {
+ok :: (name: str, c: bool) {
     if !c {
         fails += 1
         print("FAILED:", name)
     }
 }
 
-fn main() {
+main :: () {
     x := vec3(1.0, 0.0, 0.0)
     y := vec3(0.0, 1.0, 0.0)
     z := vec3(0.0, 0.0, 1.0)

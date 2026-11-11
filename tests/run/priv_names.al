@@ -1,44 +1,44 @@
 // `priv` declarations inside one file: shadowing of the library, generics, method calls,
 // locals of the same name, function values, constants in types and patterns.
 
-priv struct Vec2i { x i64, y i64 }
-priv struct Box[T] { v T, count i64 }
-priv struct Node { val i64, next *Node }
-priv struct Handler { run fn(i64) i64, base i64 }
-priv enum Tree { Leaf(i64), Fork(*Tree, *Tree) }
-priv const N = 4
-priv const NAME = "names"
-priv const HALF f64 = 0.5
-priv var grid [N]i64
-priv var ops = [2]fn(i64) i64{twice, negate}
-priv var origin = Vec2i{x: 1, y: 2}
+priv Vec2i :: struct { x: i64, y: i64 }
+priv Box[T] :: struct { v: T, count: i64 }
+priv Node :: struct { val: i64, next: *Node }
+priv Handler :: struct { run: (i64) -> i64, base: i64 }
+priv Tree :: enum { Leaf(i64), Fork(*Tree, *Tree) }
+priv N :: 4
+priv NAME :: "names"
+priv HALF : f64 : 0.5
+priv grid: [N]i64
+priv ops := [2](i64) -> i64{twice, negate}
+priv origin := Vec2i{x: 1, y: 2}
 
 // shadows of library functions: the private one wins where it fits
-priv fn min(a i64, b i64) i64 { 1000 + a + b }
-priv fn max[T](a T, b T) T { a }
-priv fn push(b *Box[i64], x i64) {
+priv min :: (a: i64, b: i64) -> i64 { 1000 + a + b }
+priv max[T] :: (a: T, b: T) -> T { a }
+priv push :: (b: *Box[i64], x: i64) {
     b.v += x
     b.count += 1
 }
-priv fn size(b Box[i64]) i64 { b.count }
+priv size :: (b: Box[i64]) -> i64 { b.count }
 // a builtin is replaced in this file, as a public function of its name would replace it
-priv fn popcnt(x i64) i64 { 99 }
+priv popcnt :: (x: i64) -> i64 { 99 }
 
-priv inline fn twice(x i64) i64 { x * 2 }
-priv noinline fn negate(x i64) i64 { -x }
-priv fn run(h Handler, x i64) i64 { -1 }
-priv fn count(b Box[str]) i64 { 77 }
+priv inline twice :: (x: i64) -> i64 { x * 2 }
+priv noinline negate :: (x: i64) -> i64 { -x }
+priv run :: (h: Handler, x: i64) -> i64 { -1 }
+priv count :: (b: Box[str]) -> i64 { 77 }
 
 // generic private functions and structs
-priv fn pick[T](a T, b T) T { b }
-priv fn wrap[T](v T) Box[T] { Box[T]{v: v, count: 1} }
-priv fn unwrap[T](b Box[T]) T { b.v }
-priv fn convert[T, U](b Box[T], f fn(T) U) Box[U] { Box[U]{v: f(b.v), count: b.count} }
+priv pick[T] :: (a: T, b: T) -> T { b }
+priv wrap[T] :: (v: T) -> Box[T] { Box[T]{v: v, count: 1} }
+priv unwrap[T] :: (b: Box[T]) -> T { b.v }
+priv convert[T, U] :: (b: Box[T], f: (T) -> U) -> Box[U] { Box[U]{v: f(b.v), count: b.count} }
 
 // overloads, all private
-priv fn area(v Vec2i) i64 { v.x * v.y }
-priv fn area(b Box[i64]) i64 { b.v }
-priv fn area(t *Tree) i64 {
+priv area :: (v: Vec2i) -> i64 { v.x * v.y }
+priv area :: (b: Box[i64]) -> i64 { b.v }
+priv area :: (t: *Tree) -> i64 {
     match *t {
         Leaf(v) => v
         Fork(l, r) => area(l) + area(r)
@@ -46,17 +46,17 @@ priv fn area(t *Tree) i64 {
 }
 
 // recursion through private names
-priv fn sum(n *Node) i64 {
+priv sum :: (n: *Node) -> i64 {
     if n == nil { 0 } else { n.val + sum(n.next) }
 }
-priv fn even(n i64) bool { if n == 0 { true } else { odd(n - 1) } }
-priv fn odd(n i64) bool { if n == 0 { false } else { even(n - 1) } }
+priv even :: (n: i64) -> bool { if n == 0 { true } else { odd(n - 1) } }
+priv odd :: (n: i64) -> bool { if n == 0 { false } else { even(n - 1) } }
 
-priv fn less(a Vec2i, b Vec2i) bool { a.x < b.x }
-priv fn to_text(x i64) str { fmt("<", x, ">") }
-priv fn to_float(x i64) f64 { f64(x) }
-priv fn both() (Vec2i, Box[str]) { (Vec2i{3, 4}, wrap("w")) }
-priv fn kind(x i64) str {
+priv less :: (a: Vec2i, b: Vec2i) -> bool { a.x < b.x }
+priv to_text :: (x: i64) -> str { fmt("<", x, ">") }
+priv to_float :: (x: i64) -> f64 { f64(x) }
+priv both :: () -> (Vec2i, Box[str]) { (Vec2i{3, 4}, wrap("w")) }
+priv kind :: (x: i64) -> str {
     match x {
         N => "N"
         0, 1 => "small"
@@ -64,7 +64,7 @@ priv fn kind(x i64) str {
     }
 }
 
-fn main() {
+main :: () {
     // library names: private definitions first, the library's for other types
     print(min(1, 2), min(1.5, 2.5), max(1, 2), max("a", "b"))
     v := vec[i64]()
@@ -107,12 +107,12 @@ fn main() {
     print(min(2, 3), kind(N), kind(1), kind(9))
 
     // constants in types, globals, function values
-    var local [N]i64
+    local: [N]i64
     grid[N - 1] = 9
     local[0] = len(NAME)
     print(grid, local, sizeof[Vec2i](), sizeof[[N]Vec2i]())
     f := negate
-    var g fn(i64) i64 = twice2
+    g: (i64) -> i64 = twice2
     print(f(4), g(4), ops[0](8), ops[1](8))
     pts := []Vec2i{Vec2i{3, 0}, Vec2i{1, 0}, Vec2i{2, 0}}
     sort_by(pts, less)
@@ -132,16 +132,16 @@ fn main() {
     statements()
 }
 
-priv var depth i64
-priv fn enter() i64 {
+priv depth: i64
+priv enter :: () -> i64 {
     depth += 1
     depth
 }
-priv fn leave() { depth -= 1 }
-priv fn pair() (i64, str) { (N, NAME) }
+priv leave :: () { depth -= 1 }
+priv pair :: () -> (i64, str) { (N, NAME) }
 
 // private names in every kind of statement and expression
-priv fn statements() {
+priv statements :: () {
     xs := []i64{10, 20, 30, 40, 50, 60}
     print(xs[1..N], xs[..N - 2], xs[N..], -N, !even(N), ~N, (N, NAME).0)
     {
@@ -152,8 +152,8 @@ priv fn statements() {
     print("depth", depth)
     assert N == 4, NAME
     assert even(N)
-    var a i64
-    var s str
+    a: i64
+    s: str
     a, s = pair()
     c, d := pair()
     print(a, s, c, d)
@@ -174,7 +174,7 @@ priv fn statements() {
         put(j, " ")
     }
     e := if even(i) { NAME } else { "odd" }
-    var w Vec2i = origin
+    w: Vec2i = origin
     w.x += N
     *(&w.y) = area(w)
     pw := &w
@@ -189,4 +189,4 @@ priv fn statements() {
     print(r, N)
 }
 
-priv fn twice2(x i64) i64 { twice(twice(x)) }
+priv twice2 :: (x: i64) -> i64 { twice(twice(x)) }

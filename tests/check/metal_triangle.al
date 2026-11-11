@@ -5,12 +5,12 @@
 // reports that its libraries are not Linux libraries. See docs/std/metal.md.
 use std.metal
 
-const WIDTH = 800.0
-const HEIGHT = 600.0
+WIDTH :: 800.0
+HEIGHT :: 600.0
 
-struct Vertex { pos vec2, color vec3 }
+Vertex :: struct { pos: vec2, color: vec3 }
 
-const SHADERS = `
+SHADERS :: `
 #include <metal_stdlib>
 using namespace metal;
 
@@ -36,22 +36,22 @@ fragment float4 fragment_main(VertexOut in [[stage_in]]) {
 }
 `
 
-struct App {
-    app *NSApplication
-    window *NSWindow
-    layer *CAMetalLayer
-    device *MTLDevice
-    queue *MTLCommandQueue
-    pipeline *MTLRenderPipelineState
-    vertices *MTLBuffer
-    frames i64
+App :: struct {
+    app: *NSApplication
+    window: *NSWindow
+    layer: *CAMetalLayer
+    device: *MTLDevice
+    queue: *MTLCommandQueue
+    pipeline: *MTLRenderPipelineState
+    vertices: *MTLBuffer
+    frames: i64
 }
 
-fn fail(what str, err *NSError) never {
+fail :: (what: str, err: *NSError) -> never {
     panic(fmt(what, ": ", ns_error_text(err)))
 }
 
-fn open_window(a *App) {
+open_window :: (a: *App) {
     a.app = ns_app()
     a.app.ns_set_activation_policy(NSApplicationActivationPolicyRegular)
     style := NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
@@ -70,8 +70,8 @@ fn open_window(a *App) {
     a.app.ns_activate()
 }
 
-fn make_pipeline(a *App) {
-    var err *NSError
+make_pipeline :: (a: *App) {
+    err: *NSError
     library := a.device.mtl_new_library_with_source(SHADERS, &err)
     if library == nil {
         fail("shader compilation", err)
@@ -100,7 +100,7 @@ fn make_pipeline(a *App) {
     objc_release(library)
 }
 
-fn make_vertices(a *App) {
+make_vertices :: (a: *App) {
     tri := [3]Vertex{
         Vertex{pos: vec2(0.0, 0.6), color: vec3(1.0, 0.0, 0.0)},
         Vertex{pos: vec2(-0.6, -0.6), color: vec3(0.0, 1.0, 0.0)},
@@ -111,7 +111,7 @@ fn make_vertices(a *App) {
 }
 
 // Handles pending events; false when the window was closed or Escape was pressed.
-fn pump_events(a *App) bool {
+pump_events :: (a: *App) -> bool {
     loop {
         e := a.app.ns_next_event(false)
         if e == nil {
@@ -125,7 +125,7 @@ fn pump_events(a *App) bool {
     return a.window.ns_is_visible()
 }
 
-fn draw(a *App) {
+draw :: (a: *App) {
     drawable := a.layer.ca_next_drawable()
     if drawable == nil {
         return
@@ -151,9 +151,9 @@ fn draw(a *App) {
     a.frames += 1
 }
 
-fn main() {
+main :: () {
     NSApplicationLoad()
-    var a App
+    a: App
     a.device = mtl_create_system_default_device()
     if a.device == nil {
         panic("this machine has no Metal device")

@@ -1,5 +1,5 @@
 // A camera looking at a spinning cube corner: the math library end to end.
-fn main() {
+main :: () {
     eye := vec3(3.0, 2.0, 5.0)
     view := look_at(eye, vec3(0.0), vec3(0.0, 1.0, 0.0))
     proj := perspective(radians(60.0), 16.0 / 9.0, 0.1, 100.0)

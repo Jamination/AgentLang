@@ -2,7 +2,7 @@
 // short, invalid header field, invalid deflate stream, ...): the decoders must return false.
 use std.image
 
-fn main() {
+main :: () {
     list, ok := read_file("tests/std/data/img_bad.txt")
     assert ok, "fixture list missing"
     for name in lines(list) {

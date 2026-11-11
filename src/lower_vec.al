@@ -1,7 +1,7 @@
 // Lowering of the built-in f32 vector types: vec2 / vec3 / vec4 / quat (one xmm value each)
 // and mat4 (four vec4 columns in memory).
 
-fn lower_vec_lane_of(c u8) Opt[i64] {
+lower_vec_lane_of :: (c: u8) -> Opt[i64] {
     match c {
         'x', 'r' => return Some(0)
         'y', 'g' => return Some(1)
@@ -12,12 +12,12 @@ fn lower_vec_lane_of(c u8) Opt[i64] {
     return None
 }
 
-fn is_vecish(self *Fx, t i64) bool {
+is_vecish :: (self: *Fx, t: i64) -> bool {
     return is_some(self.cx.types.vec_lanes(t)) || t == T_MAT4
 }
 
 // the float type an untyped literal takes in a context expecting `expect`
-fn float_expect(self *Fx, expect Opt[i64]) i64 {
+float_expect :: (self: *Fx, expect: Opt[i64]) -> i64 {
     match expect {
         Some(t) => {
             if t == T_F32 || self.is_vecish(t) {
@@ -29,7 +29,7 @@ fn float_expect(self *Fx, expect Opt[i64]) i64 {
     return T_F64
 }
 
-fn fconst_ty(self *Fx, ty i64, f f64) Val {
+fconst_ty :: (self: *Fx, ty: i64, f: f64) -> Val {
     if ty == T_F32 {
         v := self.ins(OpFConst, TF32, vec[i64](), i64(cast[u32](f32(f))))
         return self.sval(T_F32, v)
@@ -39,7 +39,7 @@ fn fconst_ty(self *Fx, ty i64, f f64) Val {
     }
 }
 
-fn fx_vec_ty(n i64) i64 {
+fx_vec_ty :: (n: i64) -> i64 {
     match n {
         2 => return T_VEC2
         3 => return T_VEC3
@@ -49,7 +49,7 @@ fn fx_vec_ty(n i64) i64 {
 }
 
 // like `expr`, but a variable / field / element of scalar type stays a place (not loaded)
-fn lvalue_base(self *Fx, b *Expr) Val {
+lvalue_base :: (self: *Fx, b: *Expr) -> Val {
     match b.k {
         EKIdent(n) => {
             match self.lookup(n) {
@@ -107,9 +107,9 @@ fn lvalue_base(self *Fx, b *Expr) Val {
 }
 
 // `.x`, `.xyz`, ... on a vector; None when `bv` is not a vector
-fn vec_field(self *Fx, bv0 Val, name str, pos Pos) Opt[Opt[Val]] {
+vec_field :: (self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
     bv := bv0
-    var no_val Opt[Val] = None
+    no_val: Opt[Val] = None
     match self.cx.types.k(bv.ty) {
         TyKPtr(t) => {
             if is_some(self.cx.types.vec_lanes(t)) {
@@ -119,7 +119,7 @@ fn vec_field(self *Fx, bv0 Val, name str, pos Pos) Opt[Opt[Val]] {
         }
         _ => {}
     }
-    var n i64
+    n: i64
     match self.cx.types.vec_lanes(bv.ty) {
         Some(vn) => {
             n = vn
@@ -174,8 +174,8 @@ fn vec_field(self *Fx, bv0 Val, name str, pos Pos) Opt[Opt[Val]] {
 }
 
 // v[i] on a vector: a lane place for constant i, an f32 in memory otherwise
-fn vec_index(self *Fx, bv Val, idx *Expr, pos Pos) Opt[Val] {
-    var n i64
+vec_index :: (self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
+    n: i64
     match self.cx.types.vec_lanes(bv.ty) {
         Some(vn) => {
             n = vn
@@ -215,7 +215,7 @@ fn vec_index(self *Fx, bv Val, idx *Expr, pos Pos) Opt[Val] {
         self.check(c, 0, pos)
     }
     // a run-time lane: go through memory
-    var base i64
+    base: i64
     if bv.mem && !is_some(bv.lane) {
         base = bv.v
     } else {
@@ -232,7 +232,7 @@ fn vec_index(self *Fx, bv Val, idx *Expr, pos Pos) Opt[Val] {
     return Some(p)
 }
 
-fn vec_eq(self *Fx, l Val, r Val, n i64) i64 {
+vec_eq :: (self: *Fx, l: Val, r: Val, n: i64) -> i64 {
     x := self.scalar(l)
     y := self.scalar(r)
     acc := NOV
@@ -250,7 +250,7 @@ fn vec_eq(self *Fx, l Val, r Val, n i64) i64 {
 }
 
 // the operator is not defined for these operand types
-fn lower_vec_vec_binary_bad(s *Fx, l Val, r Val, pos Pos) Opt[Val] {
+lower_vec_vec_binary_bad :: (s: *Fx, l: Val, r: Val, pos: Pos) -> Opt[Val] {
     a := s.tyname(l.ty)
     b := s.tyname(r.ty)
     s.err(pos, fmt("this operator is not defined for ", a, " and ", b))
@@ -258,7 +258,7 @@ fn lower_vec_vec_binary_bad(s *Fx, l Val, r Val, pos Pos) Opt[Val] {
 }
 
 // binary operators with a vector, quaternion or matrix operand; None for other types
-fn vec_binary(self *Fx, op BinOp, l Val, r Val, pos Pos) Opt[Val] {
+vec_binary :: (self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
     ln := self.cx.types.vec_lanes(l.ty)
     rn := self.cx.types.vec_lanes(r.ty)
     if !is_some(ln) && !is_some(rn) && l.ty != T_MAT4 && r.ty != T_MAT4 {
@@ -304,7 +304,7 @@ fn vec_binary(self *Fx, op BinOp, l Val, r Val, pos Pos) Opt[Val] {
         if l.ty != r.ty {
             return lower_vec_vec_binary_bad(self, l, r, pos)
         }
-        var lanes i64
+        lanes: i64
         match ln {
             Some(k) => {
                 lanes = k
@@ -318,7 +318,7 @@ fn vec_binary(self *Fx, op BinOp, l Val, r Val, pos Pos) Opt[Val] {
         }
         return Some(self.sval(T_BOOL, e))
     }
-    var o Op
+    o: Op
     match op {
         BinOpAdd => {
             o = OpFAdd
@@ -335,9 +335,9 @@ fn vec_binary(self *Fx, op BinOp, l Val, r Val, pos Pos) Opt[Val] {
         _ => return lower_vec_vec_binary_bad(self, l, r, pos)
     }
     // vector op vector, vector op f32, f32 op vector
-    var ty i64
-    var a i64
-    var b i64
+    ty: i64
+    a: i64
+    b: i64
     if l.ty == r.ty {
         ty = l.ty
         a = self.scalar(l)
@@ -366,7 +366,7 @@ fn vec_binary(self *Fx, op BinOp, l Val, r Val, pos Pos) Opt[Val] {
 }
 
 // vec2(..) / vec3(..) / vec4(..) / quat(..) / mat4(..)
-fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
+vec_construct :: (self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
     tn := self.tyname(to)
     vals := vec[(Val, Pos)]()
     for i in 0..len(args) {
@@ -405,7 +405,7 @@ fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
         }
         return self.mval(T_MAT4, t)
     }
-    var n i64
+    n: i64
     match self.cx.types.vec_lanes(to) {
         Some(vn) => {
             n = vn
@@ -466,7 +466,7 @@ fn vec_construct(self *Fx, to i64, args []Expr, pos Pos) Val {
 }
 
 // print a vector / matrix
-fn put_vec(self *Fx, v Val, pos Pos) {
+put_vec :: (self: *Fx, v: Val, pos: Pos) {
     if v.ty == T_MAT4 {
         self.put_lit_pub("mat4(", pos)
         for c in 0..4 {
@@ -480,7 +480,7 @@ fn put_vec(self *Fx, v Val, pos Pos) {
         self.put_lit_pub(")", pos)
         return
     }
-    var n i64
+    n: i64
     match self.cx.types.vec_lanes(v.ty) {
         Some(vn) => {
             n = vn

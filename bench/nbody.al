@@ -1,10 +1,10 @@
-const PI = 3.141592653589793
-const SOLAR_MASS = 4.0 * PI * PI
-const DAYS_PER_YEAR = 365.24
+PI :: 3.141592653589793
+SOLAR_MASS :: 4.0 * PI * PI
+DAYS_PER_YEAR :: 365.24
 
-struct Body { x f64, y f64, z f64, vx f64, vy f64, vz f64, mass f64 }
+Body :: struct { x: f64, y: f64, z: f64, vx: f64, vy: f64, vz: f64, mass: f64 }
 
-fn advance(b []Body, dt f64) {
+advance :: (b: []Body, dt: f64) {
     n := len(b)
     for i in 0..n {
         for j in i + 1..n {
@@ -28,7 +28,7 @@ fn advance(b []Body, dt f64) {
     }
 }
 
-fn energy(b []Body) f64 {
+energy :: (b: []Body) -> f64 {
     n := len(b)
     e := 0.0
     for i in 0..n {
@@ -43,7 +43,7 @@ fn energy(b []Body) f64 {
     e
 }
 
-fn offset_momentum(b []Body) {
+offset_momentum :: (b: []Body) {
     px := 0.0
     py := 0.0
     pz := 0.0
@@ -57,8 +57,8 @@ fn offset_momentum(b []Body) {
     b[0].vz = -pz / SOLAR_MASS
 }
 
-fn main() {
-    var bodies [5]Body
+main :: () {
+    bodies: [5]Body
     bodies[0] = Body{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, SOLAR_MASS}
     bodies[1] = Body{4.84143144246472090e+00, -1.16032004402742839e+00, -1.03622044471123109e-01, 1.66007664274403694e-03 * DAYS_PER_YEAR, 7.69901118419740425e-03 * DAYS_PER_YEAR, -6.90460016972063023e-05 * DAYS_PER_YEAR, 9.54791938424326609e-04 * SOLAR_MASS}
     bodies[2] = Body{8.34336671824457987e+00, 4.12479856412430479e+00, -4.03523417114321381e-01, -2.76742510726862411e-03 * DAYS_PER_YEAR, 4.99852801234917238e-03 * DAYS_PER_YEAR, 2.30417297573763929e-05 * DAYS_PER_YEAR, 2.85885980666130812e-04 * SOLAR_MASS}

@@ -1,18 +1,18 @@
-struct Box[T] { v T }
-enum Opt[T] { Some(T), None }
-fn ident[T](x T) T { x }
-fn make[T]() Box[T] { Box[T]{v: 0} }
-fn pick[T](a T, b T) T { a }
-fn area(s Shape) f64 {
+Box[T] :: struct { v: T }
+Opt[T] :: enum { Some(T), None }
+ident[T] :: (x: T) -> T { x }
+make[T] :: () -> Box[T] { Box[T]{v: 0} }
+pick[T] :: (a: T, b: T) -> T { a }
+area :: (s: Shape) -> f64 {
     match s {
         Circle(r) => r * r
     }
 }
-enum Shape { Circle(f64), Square(f64) }
-fn main() {
+Shape :: enum { Circle(f64), Square(f64) }
+main :: () {
     a := make()
     b := pick(1, "x")
-    var o Opt = None
+    o: Opt = None
     c := None
     d := Box{v: 1}
     e := ident[i64, i64](1)
@@ -21,7 +21,7 @@ fn main() {
     h := 5
     h()
     i := h.x
-    var j [3]i64
+    j: [3]i64
     j[5] = 1
     k := j + 1
     break

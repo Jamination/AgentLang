@@ -1,8 +1,8 @@
-enum Tok { Num(i64), Plus, Times, LParen, RParen, End }
+Tok :: enum { Num(i64), Plus, Times, LParen, RParen, End }
 
-struct Lexer { src str, pos i64 }
+Lexer :: struct { src: str, pos: i64 }
 
-fn next(lx *Lexer) Tok {
+next :: (lx: *Lexer) -> Tok {
     while lx.pos < len(lx.src) && lx.src[lx.pos] == ' ' {
         lx.pos += 1
     }
@@ -26,13 +26,13 @@ fn next(lx *Lexer) Tok {
     Num(n)
 }
 
-struct Parser { lx Lexer, cur Tok }
+Parser :: struct { lx: Lexer, cur: Tok }
 
-fn advance(p *Parser) {
+advance :: (p: *Parser) {
     p.cur = next(&p.lx)
 }
 
-fn primary(p *Parser) i64 {
+primary :: (p: *Parser) -> i64 {
     match p.cur {
         Num(n) => {
             advance(p)
@@ -48,7 +48,7 @@ fn primary(p *Parser) i64 {
     }
 }
 
-fn term(p *Parser) i64 {
+term :: (p: *Parser) -> i64 {
     v := primary(p)
     loop {
         match p.cur {
@@ -62,7 +62,7 @@ fn term(p *Parser) i64 {
     v
 }
 
-fn expr(p *Parser) i64 {
+expr :: (p: *Parser) -> i64 {
     v := term(p)
     loop {
         match p.cur {
@@ -75,13 +75,13 @@ fn expr(p *Parser) i64 {
     }
 }
 
-fn eval(s str) i64 {
+eval :: (s: str) -> i64 {
     p := Parser{lx: Lexer{s, 0}, cur: End}
     advance(&p)
     expr(&p)
 }
 
-fn classify(n i64) str {
+classify :: (n: i64) -> str {
     match n % 15 {
         0 => "fizzbuzz"
         3, 6, 9, 12 => "fizz"
@@ -90,7 +90,7 @@ fn classify(n i64) str {
     }
 }
 
-fn first_neg(a []i64) i64 {
+first_neg :: (a: []i64) -> i64 {
     for i, x in a {
         if x < 0 {
             return i
@@ -99,7 +99,7 @@ fn first_neg(a []i64) i64 {
     -1
 }
 
-fn main() {
+main :: () {
     print(eval("1 + 2 * 3"), eval("(1 + 2) * 3"), eval("2 * (3 + 4) * 5 + 6"), eval("42"))
     for i in 9..=15 {
         put(classify(i), " ")

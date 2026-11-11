@@ -6,8 +6,8 @@
 // compiled hides a variant of the other layer with the same name.
 
 // index of the variant `n` of enum declaration `ei`, or -1
-fn variant_of(self *Cx, ei i64, n str) i64 {
-    var l Vec[(i64, i64)]
+variant_of :: (self: *Cx, ei: i64, n: str) -> i64 {
+    l: Vec[(i64, i64)]
     has := false
     if self.enum_decls[ei].pos.file < self.n_prelude {
         l, has = self.p_variants.get(n)
@@ -25,7 +25,7 @@ fn variant_of(self *Cx, ei i64, n str) i64 {
 }
 
 // "A, B, C": the variants of an enum declaration, for diagnostics
-fn lower_match_variant_list(cx *Cx, ei i64) str {
+lower_match_variant_list :: (cx: *Cx, ei: i64) -> str {
     d := cx.enum_decls[ei]
     parts := vec[str]()
     for i in 0..d.variants.len {
@@ -40,7 +40,7 @@ fn lower_match_variant_list(cx *Cx, ei i64) str {
 
 // The enum that the name `n` denotes as the qualifier of `n.Variant`, or -1. An enum of the
 // other layer is hidden by a declaration of this layer with the same name.
-fn qual_enum_name(self *Cx, n str) i64 {
+qual_enum_name :: (self: *Cx, n: str) -> i64 {
     match self.find_enum(n) {
         Some(ei) => {
             own := (self.enum_decls[ei].pos.file < self.n_prelude) == self.scope_prelude
@@ -61,15 +61,15 @@ fn qual_enum_name(self *Cx, n str) i64 {
 // a variant, (_, _, 2) if several enums have it and the expected type does not decide,
 // (_, _, 0) if `n` is not a variant here. Order: the expected enum; the enums of the layer
 // being compiled; the enums of the other layer.
-fn bare_variant(self *Fx, n str, expect Opt[i64]) (i64, i64, i64) {
+bare_variant :: (self: *Fx, n: str, expect: Opt[i64]) -> (i64, i64, i64) {
     cx := self.cx
     ul, uhas := cx.variants.get(n)
     pl, phas := cx.p_variants.get(n)
     if !uhas && !phas {
         return (0, 0, 0)
     }
-    var own Vec[(i64, i64)]
-    var other Vec[(i64, i64)]
+    own: Vec[(i64, i64)]
+    other: Vec[(i64, i64)]
     own_has := uhas
     other_has := phas
     bit := 2
@@ -120,7 +120,7 @@ fn bare_variant(self *Fx, n str, expect Opt[i64]) (i64, i64, i64) {
 }
 
 // the diagnostic for a bare variant name that several enums have
-fn variant_ambiguous(self *Fx, n str, pos Pos) {
+variant_ambiguous :: (self: *Fx, n: str, pos: Pos) {
     cx := self.cx
     ul, uhas := cx.variants.get(n)
     pl, phas := cx.p_variants.get(n)
@@ -142,7 +142,7 @@ fn variant_ambiguous(self *Fx, n str, pos Pos) {
 // variant, `Enum.Variant` of a generic enum without type arguments, or `Variant(..)` of a
 // name that several enums have), its name; otherwise "". Such an operand or argument is
 // typed by its context, like a literal.
-fn variant_ref(self *Fx, e *Expr) str {
+variant_ref :: (self: *Fx, e: *Expr) -> str {
     match e.k {
         EKIdent(n) => {
             if !is_some(self.lookup(n)) && self.bare_variant(n, None).2 != 0 {
@@ -177,7 +177,7 @@ fn variant_ref(self *Fx, e *Expr) str {
 
 // Does `b` name an enum, as in `Enum.Variant` / `Enum[T].Variant`? (enum declaration or -1,
 // the enum type if the qualifier fixes it: -1 for a generic enum without type arguments)
-fn qual_enum(self *Fx, b *Expr) (i64, i64) {
+qual_enum :: (self: *Fx, b: *Expr) -> (i64, i64) {
     match b.k {
         EKIdent(n) => {
             ei := self.cx.qual_enum_name(n)
@@ -216,7 +216,7 @@ fn qual_enum(self *Fx, b *Expr) (i64, i64) {
 }
 
 // `Enum.Variant` / `Enum.Variant(args)`: `ety` is the type the qualifier fixes, or -1
-fn qual_variant(self *Fx, ei i64, ety i64, name str, args []Expr, expect Opt[i64], pos Pos) Val {
+qual_variant :: (self: *Fx, ei: i64, ety: i64, name: str, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     if ety == T_ERR {
         lower_call_eval_all(self, args)
         return val_err()
@@ -236,42 +236,42 @@ fn qual_variant(self *Fx, ei i64, ety i64, name str, args []Expr, expect Opt[i64
 }
 
 // ---------- patterns ----------
-const RP_ERR = 0
-const RP_WILD = 1
-const RP_BIND = 2
-const RP_REF = 3
-const RP_CONST = 4
-const RP_VARIANT = 5
-const RP_TUPLE = 6
+RP_ERR :: 0
+RP_WILD :: 1
+RP_BIND :: 2
+RP_REF :: 3
+RP_CONST :: 4
+RP_VARIANT :: 5
+RP_TUPLE :: 6
 // a variant or tuple pattern that looks through a pointer: one sub-pattern, for the target
-const RP_DEREF = 7
+RP_DEREF :: 7
 
 // A pattern after it was checked against the type of the part of the value it looks at.
-struct RPat {
-    k i64
+RPat :: struct {
+    k: i64
     // type of the matched part
-    ty i64
-    pos Pos
+    ty: i64
+    pos: Pos
     // RP_BIND, RP_REF: the variable
-    name str
+    name: str
     // RP_CONST: the constant
-    e *Expr
+    e: *Expr
     // RP_VARIANT: index of the variant
-    vi i64
+    vi: i64
     // RP_VARIANT: one per payload field; RP_TUPLE: one per element
-    subs Vec[RPat]
+    subs: Vec[RPat]
     // can fail to match
-    refutable bool
+    refutable: bool
     // number of variables it binds
-    nbinds i64
+    nbinds: i64
 }
 
-fn lower_match_err(ty i64, pos Pos) RPat {
+lower_match_err :: (ty: i64, pos: Pos) -> RPat {
     return RPat{k: RP_ERR, ty: ty, pos: pos}
 }
 
 // is a pattern expression a compile-time constant?
-fn lower_match_is_const(s *Fx, e *Expr) bool {
+lower_match_is_const :: (s: *Fx, e: *Expr) -> bool {
     match e.k {
         EKInt(_) => return true
         EKFloat(_) => return true
@@ -287,12 +287,12 @@ fn lower_match_is_const(s *Fx, e *Expr) bool {
 }
 
 // does the name `n` denote anything in an expression?
-fn lower_match_known(s *Fx, n str) bool {
+lower_match_known :: (s: *Fx, n: str) -> bool {
     return is_some(s.lookup(n)) || s.cx.const_decls.has(n) || s.cx.global_decls.has(n) || s.cx.fn_names.has(n) || s.bare_variant(n, None).2 != 0
 }
 
 // the enum (index into the type table's enums) of a type, or -1
-fn lower_match_enum_of(s *Fx, ty i64) i64 {
+lower_match_enum_of :: (s: *Fx, ty: i64) -> i64 {
     match s.cx.types.k(ty) {
         TyKEnum(e) => return e
         _ => {}
@@ -301,7 +301,7 @@ fn lower_match_enum_of(s *Fx, ty i64) i64 {
 }
 
 // does a variant or tuple pattern have a sub-pattern that can fail?
-fn lower_match_subs_refutable(rp *RPat) bool {
+lower_match_subs_refutable :: (rp: *RPat) -> bool {
     for i in 0..rp.subs.len {
         if rp.subs[i].refutable {
             return true
@@ -311,7 +311,7 @@ fn lower_match_subs_refutable(rp *RPat) bool {
 }
 
 // resolves the sub-patterns `subs` of `r` against the types `tys`
-fn lower_match_subs(s *Fx, r RPat, subs *Vec[Pat], tys *Vec[i64]) RPat {
+lower_match_subs :: (s: *Fx, r: RPat, subs: *Vec[Pat], tys: *Vec[i64]) -> RPat {
     out := r
     out.subs = Vec[RPat]{buf: alloc[RPat](subs.len), len: 0}
     bad := false
@@ -333,7 +333,7 @@ fn lower_match_subs(s *Fx, r RPat, subs *Vec[Pat], tys *Vec[i64]) RPat {
 }
 
 // `Variant`, `Variant(subs)`, `Enum.Variant`, `Enum.Variant(subs)` matched against `ty`
-fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr], ty i64, pos Pos) RPat {
+pat_variant :: (self: *Fx, name: str, subs: *Vec[Pat], parens: bool, qual: Opt[*Expr], ty: i64, pos: Pos) -> RPat {
     if ty == T_ERR {
         return lower_match_err(ty, pos)
     }
@@ -395,7 +395,7 @@ fn pat_variant(self *Fx, name str, subs *Vec[Pat], parens bool, qual Opt[*Expr],
 
 // Would the pattern `p` look inside a value of type `ty` (pointers removed): a tuple
 // pattern for a tuple, a variant pattern or the name of a variant for an enum?
-fn lower_match_structural(s *Fx, p *Pat, ty i64) bool {
+lower_match_structural :: (s: *Fx, p: *Pat, ty: i64) -> bool {
     t := ty
     loop {
         match s.cx.types.k(t) {
@@ -457,7 +457,7 @@ fn lower_match_structural(s *Fx, p *Pat, ty i64) bool {
 
 // Checks the pattern `p` against the type `ty` of the part it matches. `top`: the pattern
 // is an alternative of an arm (not inside a variant or tuple pattern).
-fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
+pat_resolve :: (self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
     // a variant or tuple pattern matches through a pointer: the pointer must not be nil
     // and its target must match
     match self.cx.types.k(ty) {
@@ -497,7 +497,7 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
             if ty == T_ERR {
                 return lower_match_err(ty, pos)
             }
-            var tys Vec[i64]
+            tys: Vec[i64]
             is_tuple := false
             match self.cx.types.k(ty) {
                 TyKTuple(ts) => {
@@ -517,7 +517,7 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
             return lower_match_subs(self, RPat{k: RP_TUPLE, ty: ty, pos: pos}, &subs, &tys)
         }
         PatVariant(name, subs, pos, full) => {
-            var qual Opt[*Expr] = None
+            qual: Opt[*Expr] = None
             match full {
                 Some(fe) => {
                     // Enum.Variant(..): `fe` is a call of the field `Variant` of `Enum`
@@ -546,8 +546,8 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
         PatConst(e) => {
             eid := lower_match_enum_of(self, ty)
             const_name := false
-            var none Vec[Pat]
-            var no_qual Opt[*Expr] = None
+            none: Vec[Pat]
+            no_qual: Opt[*Expr] = None
             match e.k {
                 EKIdent(n) => {
                     if eid >= 0 {
@@ -608,7 +608,7 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
 }
 
 // the variables a pattern binds, in source order: (name, type, position)
-fn lower_match_collect(s *Fx, rp *RPat, out *Vec[(str, i64, Pos)]) {
+lower_match_collect :: (s: *Fx, rp: *RPat, out: *Vec[(str, i64, Pos)]) {
     if rp.nbinds == 0 {
         return
     }
@@ -633,7 +633,7 @@ fn lower_match_collect(s *Fx, rp *RPat, out *Vec[(str, i64, Pos)]) {
 
 // the names a pattern may bind, read off its source form (used after an error in the
 // pattern, so that the arm's body does not report them as unknown)
-fn lower_match_names(s *Fx, p *Pat, top bool, out *Vec[str]) {
+lower_match_names :: (s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
     match *p {
         PatRef(n, _) => {
             out.push(n)
@@ -667,7 +667,7 @@ fn lower_match_names(s *Fx, p *Pat, top bool, out *Vec[str]) {
 }
 
 // does a pattern contain `&name`?
-fn lower_match_has_ref(p *Pat) bool {
+lower_match_has_ref :: (p: *Pat) -> bool {
     match *p {
         PatRef(_, _) => return true
         PatTuple(subs, _) => {
@@ -690,7 +690,7 @@ fn lower_match_has_ref(p *Pat) bool {
 }
 
 // offsets of the parts that the sub-patterns of a variant or tuple pattern look at
-fn pat_offsets(self *Fx, rp *RPat) Vec[i64] {
+pat_offsets :: (self: *Fx, rp: *RPat) -> Vec[i64] {
     if rp.k == RP_VARIANT {
         return self.cx.types.variant_offsets(lower_match_enum_of(self, rp.ty), rp.vi)
     }
@@ -705,7 +705,7 @@ fn pat_offsets(self *Fx, rp *RPat) Vec[i64] {
 
 // The part of `part` that sub-pattern `i` of `rp` looks at, and whether it lies in the
 // payload of an enum (payload memory is read with the "any" alias class).
-fn pat_part(self *Fx, rp *RPat, offs *Vec[i64], part Val, payload bool, i i64) (Val, bool) {
+pat_part :: (self: *Fx, rp: *RPat, offs: *Vec[i64], part: Val, payload: bool, i: i64) -> (Val, bool) {
     sty := rp.subs[i].ty
     a := self.add_off(part.v, offs[i])
     v := self.mval(sty, a)
@@ -721,8 +721,8 @@ fn pat_part(self *Fx, rp *RPat, offs *Vec[i64], part Val, payload bool, i i64) (
 }
 
 // the value of a constant pattern, with the type of the part it is compared with
-fn pat_const_val(self *Fx, rp *RPat, top bool) Val {
-    var pv Val
+pat_const_val :: (self: *Fx, rp: *RPat, top: bool) -> Val {
+    pv: Val
     is_nil := false
     match rp.e.k {
         EKNil => {
@@ -758,7 +758,7 @@ fn pat_const_val(self *Fx, rp *RPat, top bool) Val {
 }
 
 // Emits the tests of the refutable sub-patterns of a variant or tuple pattern.
-fn pat_test_subs(self *Fx, rp *RPat, part Val, payload bool, ok_b i64, fail_b i64) {
+pat_test_subs :: (self: *Fx, rp: *RPat, part: Val, payload: bool, ok_b: i64, fail_b: i64) {
     last := -1
     for i in 0..rp.subs.len {
         if rp.subs[i].refutable {
@@ -782,7 +782,7 @@ fn pat_test_subs(self *Fx, rp *RPat, part Val, payload bool, ok_b i64, fail_b i6
 // Emits the test of pattern `rp` against `part` and ends the current block: control goes to
 // `ok_b` if the pattern matches and to `fail_b` if not. `key`: the tag or scalar value of
 // the part if it is already loaded (the scrutinee), else NOV.
-fn pat_test(self *Fx, rp *RPat, part Val, payload bool, key i64, top bool, ok_b i64, fail_b i64) {
+pat_test :: (self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: bool, ok_b: i64, fail_b: i64) {
     if rp.k == RP_ERR {
         self.jmp(fail_b)
         return
@@ -854,7 +854,7 @@ fn pat_test(self *Fx, rp *RPat, part Val, payload bool, key i64, top bool, ok_b 
 }
 
 // copies `ty` out of enum payload memory at `src` to `dst`
-fn copy_any(self *Fx, dst i64, src i64, ty i64) {
+copy_any :: (self: *Fx, dst: i64, src: i64, ty: i64) {
     lvs := vec[Leaf]()
     self.cx.types.leaves(ty, 0, &lvs)
     if lvs.len > 64 {
@@ -873,7 +873,7 @@ fn copy_any(self *Fx, dst i64, src i64, ty i64) {
 }
 
 // the variable of an arm with several alternatives that holds the binding `name`
-fn lower_match_slot(slots *Vec[(str, i64, i64)], name str) i64 {
+lower_match_slot :: (slots: *Vec[(str, i64, i64)], name: str) -> i64 {
     for i in 0..slots.len {
         if slots[i].0 == name {
             return slots[i].2
@@ -885,7 +885,7 @@ fn lower_match_slot(slots *Vec[(str, i64, i64)], name str) i64 {
 // Creates the variables of the bindings of `rp` after it matched `part`: `name` is a copy
 // of its part, `&name` a pointer to it. With `use_slots` the variables exist already (the
 // arm has several alternatives) and only receive their values.
-fn pat_bind(self *Fx, rp *RPat, part Val, payload bool, slots *Vec[(str, i64, i64)], use_slots bool) {
+pat_bind :: (self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(str, i64, i64)], use_slots: bool) {
     if rp.nbinds == 0 || rp.k == RP_ERR {
         return
     }
@@ -902,7 +902,7 @@ fn pat_bind(self *Fx, rp *RPat, part Val, payload bool, slots *Vec[(str, i64, i6
             }
             return
         }
-        var tmp Val
+        tmp: Val
         if payload {
             tmp = self.load_any(part.v, rp.ty)
         } else {
@@ -919,7 +919,7 @@ fn pat_bind(self *Fx, rp *RPat, part Val, payload bool, slots *Vec[(str, i64, i6
             self.cx.exposed.set(part.alias >> 4, true)
         }
         pt := self.cx.types.ptr_to(rp.ty)
-        var a i64
+        a: i64
         if use_slots {
             a = lower_match_slot(slots, rp.name)
             if a == NOV {
@@ -951,7 +951,7 @@ fn pat_bind(self *Fx, rp *RPat, part Val, payload bool, slots *Vec[(str, i64, i6
 }
 
 // is a pattern the constant `nil`?
-fn lower_match_is_nil(rp *RPat) bool {
+lower_match_is_nil :: (rp: *RPat) -> bool {
     if rp.k != RP_CONST {
         return false
     }
@@ -963,7 +963,7 @@ fn lower_match_is_nil(rp *RPat) bool {
 }
 
 // the value of a `true` / `false` pattern: 1 / 0, or -1 for anything else
-fn lower_match_bool_pat(s *Fx, rp *RPat) i64 {
+lower_match_bool_pat :: (s: *Fx, rp: *RPat) -> i64 {
     if rp.k != RP_CONST {
         return -1
     }
@@ -987,13 +987,13 @@ fn lower_match_bool_pat(s *Fx, rp *RPat) i64 {
 // ---------- exhaustiveness ----------
 // Patterns that always match the part they look at (a pattern with an error counts as one,
 // so that it does not cause a second diagnostic).
-fn lower_match_is_wild(p *RPat) bool {
+lower_match_is_wild :: (p: *RPat) -> bool {
     return p.k == RP_WILD || p.k == RP_BIND || p.k == RP_REF || p.k == RP_ERR
 }
 
 // the row `r` with its first pattern replaced by that pattern's sub-patterns (`n` wildcards
 // if it is a wildcard)
-fn lower_match_expand(r *Vec[*RPat], n i64, wild *RPat) Vec[*RPat] {
+lower_match_expand :: (r: *Vec[*RPat], n: i64, wild: *RPat) -> Vec[*RPat] {
     p := r[0]
     out := vec[*RPat]()
     if lower_match_is_wild(p) {
@@ -1012,7 +1012,7 @@ fn lower_match_expand(r *Vec[*RPat], n i64, wild *RPat) Vec[*RPat] {
 }
 
 // the witness `head(w[0], .., w[n-1])` followed by the rest of `w`
-fn lower_match_witness(head str, w *Vec[str], n i64, parens bool) Vec[str] {
+lower_match_witness :: (head: str, w: *Vec[str], n: i64, parens: bool) -> Vec[str] {
     out := vec[str]()
     if parens {
         out.push(fmt(head, "(", join(w[..n], ", "), ")"))
@@ -1027,7 +1027,7 @@ fn lower_match_witness(head str, w *Vec[str], n i64, parens bool) Vec[str] {
 
 // The rows of `rows` that can match a value whose first part is variant `vi` of enum `eid`,
 // checked against that variant's fields and the remaining columns.
-fn lower_match_uncovered_variant(s *Fx, rows *Vec[Vec[*RPat]], rest *Vec[i64], eid i64, vi i64, wild *RPat) (Vec[str], bool) {
+lower_match_uncovered_variant :: (s: *Fx, rows: *Vec[Vec[*RPat]], rest: *Vec[i64], eid: i64, vi: i64, wild: *RPat) -> (Vec[str], bool) {
     ptys := clone(s.cx.types.enums[eid].variants[vi].1)
     sub := vec[Vec[*RPat]]()
     for i in 0..rows.len {
@@ -1050,7 +1050,7 @@ fn lower_match_uncovered_variant(s *Fx, rows *Vec[Vec[*RPat]], rest *Vec[i64], e
 // Is there a value (one part per column, of the types `tys`) that no row of patterns
 // matches? If so, such a value is returned in pattern form, one text per column.
 // (The usual algorithm: split on the constructors of the first column.)
-fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat) (Vec[str], bool) {
+lower_match_uncovered :: (s: *Fx, rows: *Vec[Vec[*RPat]], tys: *Vec[i64], wild: *RPat) -> (Vec[str], bool) {
     if tys.len == 0 {
         return (vec[str](), rows.len == 0)
     }
@@ -1067,7 +1067,7 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
         }
         return (vec[str](), false)
     }
-    var elems Vec[i64]
+    elems: Vec[i64]
     is_tuple := false
     match s.cx.types.k(t) {
         TyKTuple(ts) => {
@@ -1161,7 +1161,7 @@ fn lower_match_uncovered(s *Fx, rows *Vec[Vec[*RPat]], tys *Vec[i64], wild *RPat
 
 // What a match on a value of type `ty` with the pattern rows `rows` (one pattern each) does
 // not cover, in pattern form: for an enum one entry per variant that is not fully covered.
-fn lower_match_missing(s *Fx, rows *Vec[Vec[*RPat]], ty i64) Vec[str] {
+lower_match_missing :: (s: *Fx, rows: *Vec[Vec[*RPat]], ty: i64) -> Vec[str] {
     out := vec[str]()
     wild := new[RPat]()
     wild.k = RP_WILD
@@ -1215,13 +1215,13 @@ fn lower_match_missing(s *Fx, rows *Vec[Vec[*RPat]], ty i64) Vec[str] {
 }
 
 // ---------- match ----------
-fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], pos Pos) Val {
+match_expr :: (self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i64], pos: Pos) -> Val {
     sv := self.expr(sc, None)
     if sv.ty == T_ERR {
         return val_err()
     }
     sk := self.cx.types.k(sv.ty)
-    var enum_id Opt[i64] = None
+    enum_id: Opt[i64] = None
     is_tuple := false
     match sk {
         TyKEnum(e) => { enum_id = Some(e) }
@@ -1234,7 +1234,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         None => {}
     }
     // scrutinee: scalar value, or tag for payload enums
-    var key i64
+    key: i64
     if payload_enum {
         key = self.load_raw(sv.v, TI64, AK_ANY)
     } else if self.cx.types.is_scalar(sv.ty) {
@@ -1285,7 +1285,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
         }
     }
     bj := self.new_block()
-    var slot Opt[Val] = None
+    slot: Opt[Val] = None
     all_dead := true
     has_wild := false
     covered := vec[bool]()
@@ -1546,7 +1546,7 @@ fn match_expr(self *Fx, sc *Expr, arms []MatchArm, want bool, expect Opt[i64], p
 
 // A note for a mismatch between two different types that print the same: a type of the
 // program has the name of a type of the standard library (for example its own `Opt`).
-fn lower_match_same_name(a str, b str) str {
+lower_match_same_name :: (a: str, b: str) -> str {
     if a != b {
         return ""
     }
@@ -1554,7 +1554,7 @@ fn lower_match_same_name(a str, b str) str {
 }
 
 // names that a call resolves before it looks for a variant: builtin functions and types
-fn lower_match_builtin_name(n str) bool {
+lower_match_builtin_name :: (n: str) -> bool {
     match n {
         "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => return true
         "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed" => return true

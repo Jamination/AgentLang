@@ -4,7 +4,7 @@
 // pixels independently of this decoder.
 use std.image
 
-fn main() {
+main :: () {
     list, ok := read_file("tests/std/data/img_png.txt")
     assert ok, "fixture list missing"
     for name in lines(list) {

@@ -1,7 +1,7 @@
 // Opt[T] and Res[T] of the standard library.
-struct Account { id i64, owner str }
+Account :: struct { id: i64, owner: str }
 
-fn find(a []i64, x i64) Opt[i64] {
+find :: (a: []i64, x: i64) -> Opt[i64] {
     for i, v in a {
         if v == x {
             return Some(i)
@@ -10,7 +10,7 @@ fn find(a []i64, x i64) Opt[i64] {
     None
 }
 
-fn parse(s str) Res[i64] {
+parse :: (s: str) -> Res[i64] {
     v, ok := parse_i64(s)
     if !ok {
         return Err(fmt("not a number: ", s))
@@ -18,14 +18,14 @@ fn parse(s str) Res[i64] {
     Ok(v)
 }
 
-fn half(n i64) Res[i64] {
+half :: (n: i64) -> Res[i64] {
     if n % 2 != 0 {
         return Err("odd")
     }
     return Ok(n / 2)
 }
 
-fn quarter(s str) Res[i64] {
+quarter :: (s: str) -> Res[i64] {
     match parse(s) {
         Ok(n) => {
             match half(n) {
@@ -37,7 +37,7 @@ fn quarter(s str) Res[i64] {
     }
 }
 
-fn lookup(accounts []Account, id i64) Opt[*Account] {
+lookup :: (accounts: []Account, id: i64) -> Opt[*Account] {
     for i in 0..len(accounts) {
         if accounts[i].id == id {
             return Some(&accounts[i])
@@ -46,14 +46,14 @@ fn lookup(accounts []Account, id i64) Opt[*Account] {
     return None
 }
 
-fn first[T](xs []T) Opt[T] {
+first[T] :: (xs: []T) -> Opt[T] {
     if len(xs) == 0 {
         return None
     }
     Some(xs[0])
 }
 
-fn describe(o Opt[Res[i64]]) str {
+describe :: (o: Opt[Res[i64]]) -> str {
     match o {
         Some(Ok(0)) => "zero"
         Some(Ok(n)) => fmt("ok ", n)
@@ -62,7 +62,7 @@ fn describe(o Opt[Res[i64]]) str {
     }
 }
 
-fn main() {
+main :: () {
     a := []i64{5, 8, 13}
     r := find(a, 8)
     q := find(a, 9)
@@ -79,12 +79,12 @@ fn main() {
         Err(msg) => print("error:", msg)
     }
     // construction: inferred from the payload, from the expected type, or written out
-    var o Opt[str] = None
+    o: Opt[str] = None
     o = Some("text")
     x := Some(2.5)
     y := Opt[u8].Some(7)
     z := Res[bool].Err("no")
-    var w Res[(i64, str)] = Ok((1, "one"))
+    w: Res[(i64, str)] = Ok((1, "one"))
     print(o, x, y, z, w, Opt.Some(1), Res[i64].Ok(2))
     // generic code, pointers, nesting
     print(first([]str{"a", "b"}), first(a[..0]), first([]f64{1.5}).or(0.0))

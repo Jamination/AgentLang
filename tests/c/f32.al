@@ -1,26 +1,26 @@
 // f32 semantics checked against C: prints the same bytes as tests/c/f32.c built with clang -O2.
-var state u32 = 12345
+state: u32 = 12345
 
-fn next() u32 {
+next :: () -> u32 {
     state = state * 1664525 + 1013904223
     return state
 }
 
-fn bits(x f32) str {
+bits :: (x: f32) -> str {
     return hex(u64(cast[u32](x)))
 }
 
-fn b01(c bool) i64 {
+b01 :: (c: bool) -> i64 {
     if c { 1 } else { 0 }
 }
 
-fn main() {
+main :: () {
     vals := [12]f32{0.0, 1.0, -1.0, 0.1, 3.14159274, 1e-20, 1e20, 16777216.0, 16777217.0, 0.333333343, -2.5, 123456.789}
     for i in 0..12 {
         for j in 0..12 {
             a := vals[i]
             b := vals[j]
-            var q f32 = 0.0
+            q: f32 = 0.0
             if b != 0.0 {
                 q = a / b
             }
@@ -55,8 +55,8 @@ fn main() {
     for i in 0..6 {
         print(i64(fs[i]), i32(fs[i]))
     }
-    var acc u32 = 0
-    var sum f32 = 0.0
+    acc: u32 = 0
+    sum: f32 = 0.0
     for i in 0..20000 {
         a := cast[f32](next() & 0x7fffffff)
         b := cast[f32](next())
@@ -80,7 +80,7 @@ fn main() {
     put(hex(u64(acc)), " ", bits(sum), " ")
     putf(f64(sum), 6)
     put("\n")
-    var h f32 = 0.0
+    h: f32 = 0.0
     for i in 1..=100000 {
         h += 1.0 / f32(i)
     }

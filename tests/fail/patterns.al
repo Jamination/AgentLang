@@ -1,9 +1,9 @@
-enum Shape { Circle(f64), Rect(f64, f64), Empty }
-enum Color { Red, Green, Blue }
-struct P { x i64, y i64 }
-enum W { A(P), B(i64, str), C }
-const K = 3
-fn main() {
+Shape :: enum { Circle(f64), Rect(f64, f64), Empty }
+Color :: enum { Red, Green, Blue }
+P :: struct { x: i64, y: i64 }
+W :: enum { A(P), B(i64, str), C }
+K :: 3
+main :: () {
     s := Circle(1.0)
     w := B(1, "x")
     lim := 5
@@ -69,7 +69,7 @@ fn main() {
         (Rect(_, _), _) => 2
         (Empty, _) => 3
     }
-    var o Opt[Color] = None
+    o: Opt[Color] = None
     q3 := match o {
         Some(Red) => 1
         Some(Green) => 2

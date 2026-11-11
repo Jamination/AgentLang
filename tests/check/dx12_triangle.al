@@ -6,40 +6,40 @@
 // for the GPU with a fence, and a clean-up that releases every COM object.
 use std.dx12
 
-const WIDTH = 1280
-const HEIGHT = 720
-const FRAME_COUNT = 2
+WIDTH :: 1280
+HEIGHT :: 720
+FRAME_COUNT :: 2
 
-struct Vertex {
-    position vec3
-    color vec4
+Vertex :: struct {
+    position: vec3
+    color: vec4
 }
 
-struct App {
-    hwnd *u8
-    factory *IDXGIFactory4
-    device *ID3D12Device
-    queue *ID3D12CommandQueue
-    swap_chain *IDXGISwapChain3
-    rtv_heap *ID3D12DescriptorHeap
-    rtv_size u32
-    render_targets [FRAME_COUNT]*ID3D12Resource
-    allocator *ID3D12CommandAllocator
-    list *ID3D12GraphicsCommandList
-    root_signature *ID3D12RootSignature
-    pipeline *ID3D12PipelineState
-    vertex_buffer *ID3D12Resource
-    vertex_view D3D12_VERTEX_BUFFER_VIEW
-    fence *ID3D12Fence
-    fence_event *u8
-    fence_value u64
-    frame_index u32
-    ticks_per_second i64
-    start_ticks i64
+App :: struct {
+    hwnd: *u8
+    factory: *IDXGIFactory4
+    device: *ID3D12Device
+    queue: *ID3D12CommandQueue
+    swap_chain: *IDXGISwapChain3
+    rtv_heap: *ID3D12DescriptorHeap
+    rtv_size: u32
+    render_targets: [FRAME_COUNT]*ID3D12Resource
+    allocator: *ID3D12CommandAllocator
+    list: *ID3D12GraphicsCommandList
+    root_signature: *ID3D12RootSignature
+    pipeline: *ID3D12PipelineState
+    vertex_buffer: *ID3D12Resource
+    vertex_view: D3D12_VERTEX_BUFFER_VIEW
+    fence: *ID3D12Fence
+    fence_event: *u8
+    fence_value: u64
+    frame_index: u32
+    ticks_per_second: i64
+    start_ticks: i64
 }
 
 // HLSL for both stages; the angle and the aspect ratio arrive as root constants.
-const SHADER = `
+SHADER :: `
 cbuffer Params : register(b0) { float angle; float aspect; };
 struct PSInput { float4 position : SV_POSITION; float4 color : COLOR; };
 
@@ -54,7 +54,7 @@ PSInput VSMain(float3 position : POSITION, float4 color : COLOR) {
 float4 PSMain(PSInput input) : SV_TARGET { return input.color; }
 `
 
-fn window_proc(hwnd *u8, msg u32, wparam u64, lparam i64) i64 {
+window_proc :: (hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64 {
     if msg == WM_DESTROY {
         PostQuitMessage(0)
         return 0
@@ -66,7 +66,7 @@ fn window_proc(hwnd *u8, msg u32, wparam u64, lparam i64) i64 {
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
-fn create_window(title str) *u8 {
+create_window :: (title: str) -> *u8 {
     instance := GetModuleHandleW(nil)
     class_name := utf16("ALTriangleWindow")
     class := WNDCLASSEXW{
@@ -88,14 +88,14 @@ fn create_window(title str) *u8 {
 }
 
 // The first hardware adapter that supports Direct3D 12 (nil: let D3D12CreateDevice choose).
-fn pick_adapter(factory *IDXGIFactory4) *IDXGIAdapter1 {
-    var index u32
+pick_adapter :: (factory: *IDXGIFactory4) -> *IDXGIAdapter1 {
+    index: u32
     loop {
-        var adapter *IDXGIAdapter1
+        adapter: *IDXGIAdapter1
         if factory.EnumAdapters1(index, &adapter) == DXGI_ERROR_NOT_FOUND {
             return nil
         }
-        var desc DXGI_ADAPTER_DESC1
+        desc: DXGI_ADAPTER_DESC1
         adapter.GetDesc1(&desc)
         software := desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE != 0
         if !software && SUCCEEDED(D3D12CreateDevice(cast[*IUnknown](adapter), D3D_FEATURE_LEVEL_11_0, &IID_ID3D12Device, nil)) {
@@ -106,10 +106,10 @@ fn pick_adapter(factory *IDXGIFactory4) *IDXGIAdapter1 {
     }
 }
 
-fn create_device(app *App, debug bool) {
-    var factory_flags u32
+create_device :: (app: *App, debug: bool) {
+    factory_flags: u32
     if debug {
-        var layer *ID3D12Debug
+        layer: *ID3D12Debug
         if SUCCEEDED(D3D12GetDebugInterface(&IID_ID3D12Debug, ppv(&layer))) {
             layer.EnableDebugLayer()
             factory_flags |= DXGI_CREATE_FACTORY_DEBUG
@@ -127,7 +127,7 @@ fn create_device(app *App, debug bool) {
     dx_check(app.device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, &IID_ID3D12CommandAllocator, &app.allocator), "CreateCommandAllocator")
 }
 
-fn create_swap_chain(app *App) {
+create_swap_chain :: (app: *App) {
     desc := DXGI_SWAP_CHAIN_DESC1{
         Width: WIDTH,
         Height: HEIGHT,
@@ -138,7 +138,7 @@ fn create_swap_chain(app *App) {
         SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
     }
     // the swap chain presents through the command queue, not the device
-    var swap_chain *IDXGISwapChain1
+    swap_chain: *IDXGISwapChain1
     dx_check(app.factory.CreateSwapChainForHwnd(cast[*IUnknown](app.queue), app.hwnd, &desc, nil, nil, &swap_chain), "CreateSwapChainForHwnd")
     dx_check(swap_chain.QueryInterface(&IID_IDXGISwapChain3, &app.swap_chain), "IDXGISwapChain3")
     com_release(&swap_chain)
@@ -158,9 +158,9 @@ fn create_swap_chain(app *App) {
 }
 
 // Compiles one entry point of the HLSL source; the compiler's messages are printed on failure.
-fn compile_shader(source str, entry str, target str) *ID3DBlob {
-    var code *ID3DBlob
-    var errors *ID3DBlob
+compile_shader :: (source: str, entry: str, target: str) -> *ID3DBlob {
+    code: *ID3DBlob
+    errors: *ID3DBlob
     hr := D3DCompile(ptr(source), u64(len(source)), ptr("triangle.hlsl"), nil, nil, cstr(entry), cstr(target),
         D3DCOMPILE_ENABLE_STRICTNESS, 0, &code, &errors)
     if FAILED(hr) {
@@ -173,9 +173,9 @@ fn compile_shader(source str, entry str, target str) *ID3DBlob {
     code
 }
 
-fn create_pipeline(app *App) {
+create_pipeline :: (app: *App) {
     // root signature: two 32-bit constants (angle, aspect) for the vertex shader
-    var param D3D12_ROOT_PARAMETER
+    param: D3D12_ROOT_PARAMETER
     param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
     param.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
     constants := param.u_Constants()
@@ -186,8 +186,8 @@ fn create_pipeline(app *App) {
         pParameters: &param,
         Flags: D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
     }
-    var signature *ID3DBlob
-    var errors *ID3DBlob
+    signature: *ID3DBlob
+    errors: *ID3DBlob
     dx_check(D3D12SerializeRootSignature(&root_desc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &errors), "D3D12SerializeRootSignature")
     dx_check(app.device.CreateRootSignature(0, signature.GetBufferPointer(), signature.GetBufferSize(), &IID_ID3D12RootSignature, &app.root_signature), "CreateRootSignature")
     com_release(&signature)
@@ -202,7 +202,7 @@ fn create_pipeline(app *App) {
         D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R32G32B32A32_FLOAT, AlignedByteOffset: 12,
             InputSlotClass: D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA},
     }
-    var desc D3D12_GRAPHICS_PIPELINE_STATE_DESC
+    desc: D3D12_GRAPHICS_PIPELINE_STATE_DESC
     desc.pRootSignature = app.root_signature
     desc.VS = D3D12_SHADER_BYTECODE{vs.GetBufferPointer(), vs.GetBufferSize()}
     desc.PS = D3D12_SHADER_BYTECODE{ps.GetBufferPointer(), ps.GetBufferSize()}
@@ -225,7 +225,7 @@ fn create_pipeline(app *App) {
     dx_check(app.list.Close(), "Close")
 }
 
-fn create_vertex_buffer(app *App) {
+create_vertex_buffer :: (app: *App) {
     vertices := [3]Vertex{
         Vertex{vec3(0.0, 0.5, 0.0), vec4(1.0, 0.0, 0.0, 1.0)},
         Vertex{vec3(0.45, -0.5, 0.0), vec4(0.0, 1.0, 0.0, 1.0)},
@@ -245,7 +245,7 @@ fn create_vertex_buffer(app *App) {
     }
     dx_check(app.device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ, nil,
         &IID_ID3D12Resource, &app.vertex_buffer), "CreateCommittedResource")
-    var mapped *u8
+    mapped: *u8
     no_read := D3D12_RANGE{0, 0}
     dx_check(app.vertex_buffer.Map(0, &no_read, &mapped), "Map")
     memcopy(mapped, ptr(vertices), i64(size))
@@ -254,7 +254,7 @@ fn create_vertex_buffer(app *App) {
 }
 
 // Blocks until the GPU has finished everything submitted so far.
-fn wait_for_gpu(app *App) {
+wait_for_gpu :: (app: *App) {
     app.fence_value += 1
     dx_check(app.queue.Signal(app.fence, app.fence_value), "Signal")
     if app.fence.GetCompletedValue() < app.fence_value {
@@ -263,8 +263,8 @@ fn wait_for_gpu(app *App) {
     }
 }
 
-fn transition(resource *ID3D12Resource, before u32, after u32) D3D12_RESOURCE_BARRIER {
-    var barrier D3D12_RESOURCE_BARRIER
+transition :: (resource: *ID3D12Resource, before: u32, after: u32) -> D3D12_RESOURCE_BARRIER {
+    barrier: D3D12_RESOURCE_BARRIER
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
     t := barrier.u_Transition()
     t.pResource = resource
@@ -274,13 +274,13 @@ fn transition(resource *ID3D12Resource, before u32, after u32) D3D12_RESOURCE_BA
     barrier
 }
 
-fn seconds(app *App) f32 {
-    var now i64
+seconds :: (app: *App) -> f32 {
+    now: i64
     QueryPerformanceCounter(&now)
     f32(f64(now - app.start_ticks) / f64(app.ticks_per_second))
 }
 
-fn render(app *App) {
+render :: (app: *App) {
     dx_check(app.allocator.Reset(), "allocator Reset")
     dx_check(app.list.Reset(app.allocator, app.pipeline), "list Reset")
     list := app.list
@@ -315,7 +315,7 @@ fn render(app *App) {
     app.frame_index = app.swap_chain.GetCurrentBackBufferIndex()
 }
 
-fn destroy(app *App) {
+destroy :: (app: *App) {
     wait_for_gpu(app)
     CloseHandle(app.fence_event)
     com_release(&app.fence)
@@ -334,8 +334,8 @@ fn destroy(app *App) {
     com_release(&app.factory)
 }
 
-fn main() {
-    var app App
+main :: () {
+    app: App
     app.hwnd = create_window("AL Direct3D 12 triangle")
     create_device(&app, true)
     create_swap_chain(&app)
@@ -348,7 +348,7 @@ fn main() {
     QueryPerformanceFrequency(&app.ticks_per_second)
     QueryPerformanceCounter(&app.start_ticks)
 
-    var msg MSG
+    msg: MSG
     while msg.message != WM_QUIT {
         if PeekMessageW(&msg, nil, 0, 0, PM_REMOVE) != 0 {
             TranslateMessage(&msg)

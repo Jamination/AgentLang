@@ -1,7 +1,7 @@
 // Variant and tuple patterns look through pointers; nil matches no such pattern.
-enum Tree { Leaf(i64), Node(*Tree, *Tree), Empty }
-enum List { Cons(i64, *List), End }
-fn sum(t *Tree) i64 {
+Tree :: enum { Leaf(i64), Node(*Tree, *Tree), Empty }
+List :: enum { Cons(i64, *List), End }
+sum :: (t: *Tree) -> i64 {
     match t {
         nil => 0
         Leaf(n) => n
@@ -9,7 +9,7 @@ fn sum(t *Tree) i64 {
         Empty => 0
     }
 }
-fn shape(t *Tree) str {
+shape :: (t: *Tree) -> str {
     match t {
         Node(Leaf(a), Leaf(b)) => fmt("two leaves ", a, " ", b)
         Node(Leaf(a), &rest) => fmt("leaf ", a, " and more: ", *rest != nil)
@@ -21,7 +21,7 @@ fn shape(t *Tree) str {
         nil => "nil"
     }
 }
-fn bump(t *Tree) {
+bump :: (t: *Tree) {
     match t {
         Leaf(&n) => { *n += 100 }
         Node(l, r) => {
@@ -31,13 +31,13 @@ fn bump(t *Tree) {
         _ => {}
     }
 }
-fn second(l *List) Opt[i64] {
+second :: (l: *List) -> Opt[i64] {
     match l {
         Cons(_, Cons(x, _)) => Some(x)
         _ => None
     }
 }
-fn len2(l *List) i64 {
+len2 :: (l: *List) -> i64 {
     n := 0
     cur := l
     loop {
@@ -52,20 +52,20 @@ fn len2(l *List) i64 {
     }
     n
 }
-fn pp(p **Tree) str {
+pp :: (p: **Tree) -> str {
     match p {
         Leaf(n) => fmt("pp leaf ", n)
         _ => "pp other"
     }
 }
-fn tup(p *(i64, Opt[i64])) i64 {
+tup :: (p: *(i64, Opt[i64])) -> i64 {
     match p {
         (a, Some(b)) => a + b
         (a, None) => a
         nil => -1
     }
 }
-fn main() {
+main :: () {
     a := Leaf(1)
     b := Leaf(2)
     e := Tree.Empty
@@ -75,7 +75,7 @@ fn main() {
     h := Node(nil, &a)
     ee := Node(&e, &e2)
     en := Node(&e, &n)
-    var z *Tree
+    z: *Tree
     print(sum(&m), sum(nil), sum(&e))
     print(shape(&n), shape(&m), shape(&h), shape(&ee), shape(&en), shape(&a), shape(&e), shape(z))
     bump(&m)

@@ -6,51 +6,51 @@ use std.libc
 
 // How to create a window. Zero fields mean: untitled, 640x480, fixed size, windowed, the
 // display named by $DISPLAY.
-struct WindowDesc {
-    title str
-    width i64
-    height i64
-    resizable bool
-    fullscreen bool
-    display str
+WindowDesc :: struct {
+    title: str
+    width: i64
+    height: i64
+    resizable: bool
+    fullscreen: bool
+    display: str
 }
 
 // An open window. `input` is the state for the current frame, `events` what the last poll
 // received; the other fields are the X11 handles and should be read through the accessors.
-struct Window {
-    input Input
-    events EventQueue
-    width i64
-    height i64
-    closing bool
-    fullscreen bool
-    cursor_hidden bool
-    dpy *u8
-    win u64
-    screen i32
-    depth i32
-    visual *u8
-    gc *u8
-    im *u8
-    ic *u8
-    wm_protocols u64
-    wm_delete u64
-    net_wm_state u64
-    net_wm_state_fullscreen u64
-    net_wm_name u64
-    utf8_string u64
-    blank_cursor u64
-    image *u8
-    image_data *u8
-    image_w i64
-    image_h i64
-    swap_rb bool
+Window :: struct {
+    input: Input
+    events: EventQueue
+    width: i64
+    height: i64
+    closing: bool
+    fullscreen: bool
+    cursor_hidden: bool
+    dpy: *u8
+    win: u64
+    screen: i32
+    depth: i32
+    visual: *u8
+    gc: *u8
+    im: *u8
+    ic: *u8
+    wm_protocols: u64
+    wm_delete: u64
+    net_wm_state: u64
+    net_wm_state_fullscreen: u64
+    net_wm_name: u64
+    utf8_string: u64
+    blank_cursor: u64
+    image: *u8
+    image_data: *u8
+    image_w: i64
+    image_h: i64
+    swap_rb: bool
 }
 
 // ---- pure helpers (no display needed) ----
 
 // Key code (KEY_*) for an X11 keysym; KEY_UNKNOWN for keys without a code.
-fn key_from_keysym(ks u64) i64 {
+key_from_keysym :: (ks: u64) -> i64 {
     k := i64(ks)
     if k >= 'a' && k <= 'z' {
         return KEY_A + k - 'a'
@@ -129,8 +129,8 @@ fn key_from_keysym(ks u64) i64 {
 }
 
 // Event.mods bits (MOD_*) for an X11 modifier state mask.
-fn mods_from_x11(state u32) u8 {
-    var m u8 = 0
+mods_from_x11 :: (state: u32) -> u8 {
+    m: u8 = 0
     if state & X_SHIFT_MASK != 0 {
         m |= MOD_SHIFT
     }
@@ -148,7 +148,7 @@ fn mods_from_x11(state u32) u8 {
 
 // Translates an X11 pointer button number into an event at (x, y): a MOUSE_* press / release,
 // or a wheel step for buttons 4..7 (kind EventNone for wheel releases and unknown buttons).
-fn event_from_x11_button(button i64, pressed bool, x i64, y i64, mods u8) Event {
+event_from_x11_button :: (button: i64, pressed: bool, x: i64, y: i64, mods: u8) -> Event {
     kind := if pressed { EventMouseDown } else { EventMouseUp }
     match button {
         1 => Event{kind: kind, key: MOUSE_LEFT, x: x, y: y, mods: mods}
@@ -165,7 +165,7 @@ fn event_from_x11_button(button i64, pressed bool, x i64, y i64, mods u8) Event 
 }
 
 // The largest centered rectangle (x, y, w, h) with the aspect ratio sw:sh inside dw x dh.
-fn fit_rect(dw i64, dh i64, sw i64, sh i64) (i64, i64, i64, i64) {
+fit_rect :: (dw: i64, dh: i64, sw: i64, sh: i64) -> (i64, i64, i64, i64) {
     if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
         return (0, 0, 0, 0)
     }
@@ -183,7 +183,7 @@ fn fit_rect(dw i64, dh i64, sw i64, sh i64) (i64, i64, i64, i64) {
 // Scales the RGBA8 image `src` (sw x sh) into the 32-bit pixel buffer `dst` (dw x dh),
 // nearest neighbour, aspect preserved and centered, the rest black. Pixels are written as
 // 0x00RRGGBB when swap_rb is set (the usual X11 layout), else as 0x00BBGGRR.
-fn blit_fit(dst []u32, dw i64, dh i64, src []u8, sw i64, sh i64, swap_rb bool) {
+blit_fit :: (dst: []u32, dw: i64, dh: i64, src: []u8, sw: i64, sh: i64, swap_rb: bool) {
     rx, ry, rw, rh := fit_rect(dw, dh, sw, sh)
     assert len(dst) >= dw * dh && len(src) >= sw * sh * 4, "blit_fit: buffer too small"
     if rw == 0 {
@@ -214,7 +214,7 @@ fn blit_fit(dst []u32, dw i64, dh i64, src []u8, sw i64, sh i64, swap_rb bool) {
     }
 }
 
-fn window_utf8_next(buf []u8, pos *i64) u32 {
+window_utf8_next :: (buf: []u8, pos: *i64) -> u32 {
     i := *pos
     c := u32(buf[i])
     n := if c < 0x80 { 0 } else if c < 0xE0 { 1 } else if c < 0xF0 { 2 } else { 3 }
@@ -240,17 +240,17 @@ fn window_utf8_next(buf []u8, pos *i64) u32 {
 // ---- window ----
 
 // Opens a fixed-size window with a title on the default display; false if there is no display.
-fn window_open(title str, width i64, height i64) (*Window, bool) {
+window_open :: (title: str, width: i64, height: i64) -> (*Window, bool) {
     window_open(WindowDesc{title: title, width: width, height: height})
 }
 
 // Opens a window as described; (nil, false) if the display cannot be reached. Allocates the
 // Window once (arena); later calls on the window do not allocate from the arena.
-fn window_open(d WindowDesc) (*Window, bool) {
+window_open :: (d: WindowDesc) -> (*Window, bool) {
     setlocale(X_LC_CTYPE, ptr(""))
     XSetLocaleModifiers(ptr(""))
     m := mark()
-    var name *u8 = nil
+    name: *u8 = nil
     if len(d.display) > 0 {
         name = cstr(d.display)
     }
@@ -281,7 +281,7 @@ fn window_open(d WindowDesc) (*Window, bool) {
         X_FOCUS_CHANGE_MASK | X_EXPOSURE_MASK)
     XkbSetDetectableAutoRepeat(dpy, 1, nil)
     if !d.resizable {
-        var hints XSizeHints
+        hints: XSizeHints
         hints.flags = X_P_MIN_SIZE | X_P_MAX_SIZE
         hints.min_width = i32(w.width)
         hints.max_width = i32(w.width)
@@ -306,7 +306,7 @@ fn window_open(d WindowDesc) (*Window, bool) {
 }
 
 // Sets the window title (UTF-8).
-fn set_title(w *Window, title str) {
+set_title :: (w: *Window, title: str) {
     if w.dpy == nil {
         return
     }
@@ -317,12 +317,12 @@ fn set_title(w *Window, title str) {
     XFlush(w.dpy)
 }
 
-fn window_emit(w *Window, e Event) {
+window_emit :: (w: *Window, e: Event) {
     push_event(&w.events, e)
     feed(&w.input, e)
 }
 
-fn window_key_event(w *Window, ev *XEvent, pressed bool) {
+window_key_event :: (w: *Window, ev: *XEvent, pressed: bool) {
     key := key_from_keysym(XLookupKeysym(ev, 0))
     mods := mods_from_x11(x_event_state(ev))
     if !pressed {
@@ -330,12 +330,12 @@ fn window_key_event(w *Window, ev *XEvent, pressed bool) {
         return
     }
     window_emit(w, Event{kind: EventKeyDown, key: key, mods: mods, repeat: key_down(&w.input, key)})
-    var buf [64]u8
-    var ks u64
+    buf: [64]u8
+    ks: u64
     n := 0
     utf8 := w.ic != nil
     if utf8 {
-        var status i32
+        status: i32
         n = i64(Xutf8LookupString(w.ic, ev, ptr(buf), 64, &ks, &status))
         if status != X_LOOKUP_CHARS && status != X_LOOKUP_BOTH {
             n = 0
@@ -345,7 +345,7 @@ fn window_key_event(w *Window, ev *XEvent, pressed bool) {
     }
     pos := 0
     while pos < n {
-        var c u32
+        c: u32
         if utf8 {
             c = window_utf8_next(buf[..n], &pos)
         } else {
@@ -361,13 +361,13 @@ fn window_key_event(w *Window, ev *XEvent, pressed bool) {
 // Starts a new input frame and processes every pending window event: updates `w.input`,
 // refills the event queue (events of the previous poll are discarded) and the size / close
 // state. Never blocks. Call it once at the top of every frame.
-fn poll(w *Window) {
+poll :: (w: *Window) {
     begin_frame(&w.input)
     clear_events(&w.events)
     if w.dpy == nil {
         return
     }
-    var ev XEvent
+    ev: XEvent
     while XPending(w.dpy) > 0 {
         XNextEvent(w.dpy, &ev)
         if XFilterEvent(&ev, 0) != 0 {
@@ -419,23 +419,23 @@ fn poll(w *Window) {
 }
 
 // Removes and returns the oldest event received by the last poll; false when there is none.
-fn next_event(w *Window) (Event, bool) {
+next_event :: (w: *Window) -> (Event, bool) {
     next_event(&w.events)
 }
 
 // True once the user asked to close the window (or after close). Set `w.closing = true` to
 // leave the main loop from game code.
-fn should_close(w *Window) bool {
+should_close :: (w: *Window) -> bool {
     w.closing
 }
 
 // Current size of the drawable area in pixels: (width, height).
-fn size(w *Window) (i64, i64) {
+size :: (w: *Window) -> (i64, i64) {
     (w.width, w.height)
 }
 
 // Shows or hides the mouse pointer while it is over the window.
-fn set_cursor_visible(w *Window, visible bool) {
+set_cursor_visible :: (w: *Window, visible: bool) {
     if w.dpy == nil || visible != w.cursor_hidden {
         return
     }
@@ -443,8 +443,8 @@ fn set_cursor_visible(w *Window, visible bool) {
         XUndefineCursor(w.dpy, w.win)
     } else {
         if w.blank_cursor == 0 {
-            var zero u64
-            var color XColor
+            zero: u64
+            color: XColor
             pixmap := XCreateBitmapFromData(w.dpy, w.win, cast[*u8](&zero), 1, 1)
             w.blank_cursor = XCreatePixmapCursor(w.dpy, pixmap, pixmap, &color, &color, 0, 0)
             XFreePixmap(w.dpy, pixmap)
@@ -457,18 +457,18 @@ fn set_cursor_visible(w *Window, visible bool) {
 
 // Asks the window manager to make the window fullscreen (borderless, covering the screen) or
 // windowed again; the new size arrives as an EventResize in a later poll.
-fn set_fullscreen(w *Window, on bool) {
+set_fullscreen :: (w: *Window, on: bool) {
     if w.dpy == nil || on == w.fullscreen {
         return
     }
-    var ev XEvent
+    ev: XEvent
     x_client_message(&ev, w.win, w.net_wm_state, if on { 1 } else { 0 }, w.net_wm_state_fullscreen, 0, 1, 0)
     XSendEvent(w.dpy, XRootWindow(w.dpy, w.screen), 0, X_SUBSTRUCTURE_NOTIFY_MASK | X_SUBSTRUCTURE_REDIRECT_MASK, &ev)
     XFlush(w.dpy)
     w.fullscreen = on
 }
 
-fn window_free_image(w *Window) {
+window_free_image :: (w: *Window) {
     if w.image != nil {
         free(w.image_data)
         XFree(w.image)
@@ -482,7 +482,7 @@ fn window_free_image(w *Window) {
 // ratio, centered, black bars around it. Alpha is ignored. False if the window is closed or the
 // display is not a 24/32-bit true-color one. Keeps a window-sized conversion buffer (C heap,
 // reallocated only when the window size changes).
-fn present(w *Window, pixels []u8, pw i64, ph i64) bool {
+present :: (w: *Window, pixels: []u8, pw: i64, ph: i64) -> bool {
     if w.dpy == nil || w.depth < 24 || x_visual_class(w.visual) != X_TRUE_COLOR || w.width <= 0 || w.height <= 0 {
         return false
     }
@@ -508,7 +508,7 @@ fn present(w *Window, pixels []u8, pw i64, ph i64) bool {
 
 // The mouse position in framebuffer pixels of a `pw` x `ph` image shown with `present`
 // (outside 0..pw / 0..ph when the pointer is over the bars).
-fn mouse_in_frame(w *Window, pw i64, ph i64) vec2 {
+mouse_in_frame :: (w: *Window, pw: i64, ph: i64) -> vec2 {
     rx, ry, rw, rh := fit_rect(w.width, w.height, pw, ph)
     if rw == 0 {
         return vec2(0.0)
@@ -518,7 +518,7 @@ fn mouse_in_frame(w *Window, pw i64, ph i64) vec2 {
 
 // Destroys the window and disconnects from the display; the Window stays valid as a closed
 // window (should_close is true, other calls do nothing).
-fn close(w *Window) {
+close :: (w: *Window) {
     w.closing = true
     if w.dpy == nil {
         return
@@ -542,11 +542,11 @@ fn close(w *Window) {
 }
 
 // The Xlib `Display*` of the window (for VkXlibSurfaceCreateInfoKHR.dpy); nil once closed.
-fn x11_display(w *Window) *u8 {
+x11_display :: (w: *Window) -> *u8 {
     w.dpy
 }
 
 // The X11 window id (for VkXlibSurfaceCreateInfoKHR.window).
-fn x11_window(w *Window) u64 {
+x11_window :: (w: *Window) -> u64 {
     w.win
 }

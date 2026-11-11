@@ -1,14 +1,14 @@
 // io_error(): the OS error number of the most recent failed file operation; error_text(e)
-fn report(what str, ok bool) {
+report :: (what: str, ok: bool) {
     print(what, ok, io_error(), error_text(io_error()))
 }
 
-fn can_read(path str) bool {
+can_read :: (path: str) -> bool {
     data, ok := read_file(path)
     return ok && len(data) >= 0
 }
 
-fn main() {
+main :: () {
     print(io_error(), error_text(io_error()))
     data, ok := read_file("tests/run/data/const_embed.txt")
     report("read", ok)

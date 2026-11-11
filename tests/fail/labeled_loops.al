@@ -1,5 +1,5 @@
 // labelled loop errors: unknown label, duplicate label in nested loops
-fn f(n i64) {
+f :: (n: i64) {
     for i in 0..n {
         break nowhere
     }
@@ -23,6 +23,6 @@ fn f(n i64) {
     break done
 }
 
-fn main() {
+main :: () {
     f(3)
 }

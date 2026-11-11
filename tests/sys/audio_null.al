@@ -1,7 +1,7 @@
 // std.audio device layer against ALSA's "null" PCM (discards the samples, needs no sound card).
 use std.audio
 
-fn main() {
+main :: () {
     _, missing := audio_open("al-test-no-such-pcm-device", 48000, 2, 50)
     print("unknown device opens:", missing)
     dev, ok := audio_open("null", 48000, 2, 50)
@@ -27,7 +27,7 @@ fn main() {
     print(m.playing(beep), m.playing(hum), dev.underruns)
     audio_close(dev)
     // a closed or missing device is a no-op, so a game runs unchanged without sound
-    var none *AudioDevice = nil
+    none: *AudioDevice = nil
     print(audio_write(dev, m, 100), audio_pump(dev, m), audio_write(none, m, 100), audio_pump(none, m))
     audio_close(dev)
     audio_close(none)

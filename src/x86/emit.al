@@ -1,51 +1,51 @@
 // Frame layout, final peepholes, x86-64 encoding and branch relaxation.
 
-enum RelocKind {
+RelocKind :: enum {
     RelocKindAbs32Global(i64),
     RelocKindAbs32Func(i64),
     RelocKindRel32Func(i64),
     RelocKindAbs32FConst(i64), // module float pool index
 }
 
-struct Reloc {
-    off i64
-    kind RelocKind
-    addend i32
+Reloc :: struct {
+    off: i64
+    kind: RelocKind
+    addend: i32
 }
 
-struct Code {
-    bytes Vec[u8]
-    relocs Vec[Reloc]
+Code :: struct {
+    bytes: Vec[u8]
+    relocs: Vec[Reloc]
 }
 
-struct EmitFrame {
-    slot_off Vec[i32]
-    size i32
-    npush i32
+EmitFrame :: struct {
+    slot_off: Vec[i32]
+    size: i32
+    npush: i32
 }
 
-struct EmitRM {
-    is_reg bool
-    reg u8
-    base i8
-    idx i8
-    scale u8
-    disp i32
-    reloc Opt[RelocKind]
+EmitRM :: struct {
+    is_reg: bool
+    reg: u8
+    base: i8
+    idx: i8
+    scale: u8
+    disp: i32
+    reloc: Opt[RelocKind]
 }
 
-fn emit_rm_reg(r i64) EmitRM {
+emit_rm_reg :: (r: i64) -> EmitRM {
     return EmitRM{is_reg: true, reg: u8(r & 15), base: -1, idx: -1, scale: 1, disp: 0, reloc: None}
 }
 
-struct EmitEnc {
-    out Vec[u8]
-    relocs Vec[Reloc]
-    frame *EmitFrame
-    fpool []i64 // function-local fconst index -> module pool index
+EmitEnc :: struct {
+    out: Vec[u8]
+    relocs: Vec[Reloc]
+    frame: *EmitFrame
+    fpool: []i64 // function-local fconst index -> module pool index
 }
 
-fn rm_mem(self *EmitEnc, m *Mem) EmitRM {
+rm_mem :: (self: *EmitEnc, m: *Mem) -> EmitRM {
     r := EmitRM{is_reg: false, reg: 0, base: -1, idx: -1, scale: u8(m.scale), disp: i32(m.disp), reloc: None}
     if i64(m.base) != NOREG {
         r.base = i8(m.base)
@@ -77,7 +77,7 @@ fn rm_mem(self *EmitEnc, m *Mem) EmitRM {
     return r
 }
 
-fn rm(self *EmitEnc, o Opnd) EmitRM {
+rm :: (self: *EmitEnc, o: Opnd) -> EmitRM {
     match o {
         OpndR(r) => {
             return emit_rm_reg(i64(r))
@@ -91,7 +91,7 @@ fn rm(self *EmitEnc, o Opnd) EmitRM {
 }
 
 // [prefix66] [mandatory prefix] [REX] opcode modrm [sib] [disp]
-fn op(self *EmitEnc, p66 bool, pfx u8, w bool, opc []u8, reg u8, rm *EmitRM, force_rex bool) {
+op :: (self: *EmitEnc, p66: bool, pfx: u8, w: bool, opc: []u8, reg: u8, rm: *EmitRM, force_rex: bool) {
     if p66 {
         self.out.push(0x66)
     }
@@ -99,8 +99,8 @@ fn op(self *EmitEnc, p66 bool, pfx u8, w bool, opc []u8, reg u8, rm *EmitRM, for
         self.out.push(pfx)
     }
     r_bit := (reg >> 3) & 1
-    var x_bit u8 = 0
-    var b_bit u8 = 0
+    x_bit: u8 = 0
+    b_bit: u8 = 0
     if rm.is_reg {
         b_bit = (rm.reg >> 3) & 1
     } else {
@@ -117,7 +117,7 @@ fn op(self *EmitEnc, p66 bool, pfx u8, w bool, opc []u8, reg u8, rm *EmitRM, for
         self.out.push(0xC0 | regf | (rm.reg & 7))
         return
     }
-    var scale_bits u8 = match rm.scale {
+    scale_bits: u8 = match rm.scale {
         2 => 1
         4 => 2
         8 => 3
@@ -127,14 +127,14 @@ fn op(self *EmitEnc, p66 bool, pfx u8, w bool, opc []u8, reg u8, rm *EmitRM, for
     if rm.base < 0 {
         // [disp32] or [idx*scale + disp32]
         self.out.push(regf | 4)
-        var idx u8 = if rm.idx >= 0 { u8(rm.idx) & 7 } else { 4 }
+        idx: u8 = if rm.idx >= 0 { u8(rm.idx) & 7 } else { 4 }
         self.out.push((scale_bits << 6) | (idx << 3) | 5)
         self.disp32(rm)
         return
     }
     base := u8(rm.base) & 7
     need_sib := rm.idx >= 0 || base == 4
-    var md u8 = 2
+    md: u8 = 2
     dsz := 4
     if has_reloc {
         md = 2
@@ -151,7 +151,7 @@ fn op(self *EmitEnc, p66 bool, pfx u8, w bool, opc []u8, reg u8, rm *EmitRM, for
     }
     if need_sib {
         self.out.push((md << 6) | regf | 4)
-        var idx u8 = if rm.idx >= 0 { u8(rm.idx) & 7 } else { 4 }
+        idx: u8 = if rm.idx >= 0 { u8(rm.idx) & 7 } else { 4 }
         self.out.push((scale_bits << 6) | (idx << 3) | base)
     } else {
         self.out.push((md << 6) | regf | base)
@@ -164,7 +164,7 @@ fn op(self *EmitEnc, p66 bool, pfx u8, w bool, opc []u8, reg u8, rm *EmitRM, for
 }
 
 // the four bytes of x, least significant first
-fn emit_put_le32(out *Vec[u8], x i32) {
+emit_put_le32 :: (out: *Vec[u8], x: i32) {
     u := u32(x)
     out.push(u8(u))
     out.push(u8(u >> 8))
@@ -172,7 +172,7 @@ fn emit_put_le32(out *Vec[u8], x i32) {
     out.push(u8(u >> 24))
 }
 
-fn disp32(self *EmitEnc, rm *EmitRM) {
+disp32 :: (self: *EmitEnc, rm: *EmitRM) {
     match rm.reloc {
         Some(k) => {
             self.relocs.push(Reloc{off: self.out.len, kind: k, addend: rm.disp})
@@ -185,7 +185,7 @@ fn disp32(self *EmitEnc, rm *EmitRM) {
 }
 
 // the low n bytes of k, least significant first
-fn imm(self *EmitEnc, k i64, n i64) {
+imm :: (self: *EmitEnc, k: i64, n: i64) {
     u := u64(k)
     for j in 0..n {
         self.out.push(u8(u >> u64(8 * j)))
@@ -193,7 +193,7 @@ fn imm(self *EmitEnc, k i64, n i64) {
 }
 
 // mandatory prefix of an SSE operation by operand size: scalar double, scalar single, packed single
-fn emit_fp_pfx(sz u8) u8 {
+emit_fp_pfx :: (sz: u8) -> u8 {
     return match sz {
         4 => 0xF3
         16 => 0
@@ -201,7 +201,7 @@ fn emit_fp_pfx(sz u8) u8 {
     }
 }
 
-fn emit_byte_reg_needs_rex(o Opnd) bool {
+emit_byte_reg_needs_rex :: (o: Opnd) -> bool {
     match o {
         OpndR(r) => {
             return i64(r) >= 4 && i64(r) < 8
@@ -211,7 +211,7 @@ fn emit_byte_reg_needs_rex(o Opnd) bool {
     return false
 }
 
-fn emit_reg_of(o Opnd) i64 {
+emit_reg_of :: (o: Opnd) -> i64 {
     match o {
         OpndR(r) => {
             return i64(r)
@@ -222,14 +222,14 @@ fn emit_reg_of(o Opnd) i64 {
 }
 
 // operand shapes for the `match (&i.a, &i.b)` dispatch of the Rust encoder
-const EMIT_K_NONE = 0
-const EMIT_K_R = 1
-const EMIT_K_I = 2
-const EMIT_K_M = 3
-const EMIT_K_GADDR = 4
-const EMIT_K_FADDR = 5
+EMIT_K_NONE :: 0
+EMIT_K_R :: 1
+EMIT_K_I :: 2
+EMIT_K_M :: 3
+EMIT_K_GADDR :: 4
+EMIT_K_FADDR :: 5
 
-fn emit_kind(o Opnd) i64 {
+emit_kind :: (o: Opnd) -> i64 {
     return match o {
         OpndNone => EMIT_K_NONE
         OpndR(r) => EMIT_K_R
@@ -241,7 +241,7 @@ fn emit_kind(o Opnd) i64 {
 }
 
 // the immediate of an Opnd::I (only called when the shape is known)
-fn emit_imm_of(o Opnd) i64 {
+emit_imm_of :: (o: Opnd) -> i64 {
     match o {
         OpndI(k) => {
             return k
@@ -252,7 +252,7 @@ fn emit_imm_of(o Opnd) i64 {
 }
 
 // relocation of a symbol address operand: (kind, addend)
-fn emit_addr_reloc(o Opnd) (RelocKind, i32) {
+emit_addr_reloc :: (o: Opnd) -> (RelocKind, i32) {
     match o {
         OpndGAddr(g, off) => {
             return (RelocKindAbs32Global(i64(g)), i32(off))
@@ -265,7 +265,7 @@ fn emit_addr_reloc(o Opnd) (RelocKind, i32) {
     panic("unreachable")
 }
 
-fn emit_enc_inst(e *EmitEnc, i *MInst) {
+emit_enc_inst :: (e: *EmitEnc, i: *MInst) {
     sz := u8(i.sz)
     w := sz == 8
     p66 := sz == 2
@@ -366,7 +366,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             e.op(false, 0, w, []u8{0x8D}, u8(d & 15), &rm, false)
         }
         MOpAdd, MOpSub, MOpAnd, MOpOr, MOpXor, MOpCmp => {
-            var n u8 = match i.op {
+            n: u8 = match i.op {
                 MOpAdd => 0
                 MOpOr => 1
                 MOpAnd => 4
@@ -392,13 +392,13 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
                 d := emit_reg_of(i.a)
                 rm := e.rm(i.b)
                 force := sz == 1 && emit_byte_reg_needs_rex(i.a)
-                var lo u8 = if sz == 1 { 2 } else { 3 }
+                lo: u8 = if sz == 1 { 2 } else { 3 }
                 e.op(p66, 0, w, []u8{(n << 3) | lo}, u8(d & 15), &rm, force)
             } else if kb == EMIT_K_R {
                 s := emit_reg_of(i.b)
                 rm := e.rm(i.a)
                 force := sz == 1 && (emit_byte_reg_needs_rex(i.a) || emit_byte_reg_needs_rex(i.b))
-                var lo u8 = if sz == 1 { 0 } else { 1 }
+                lo: u8 = if sz == 1 { 0 } else { 1 }
                 e.op(p66, 0, w, []u8{(n << 3) | lo}, u8(s & 15), &rm, force)
             } else {
                 panic(fmt("encoder: bad alu ", *i))
@@ -441,7 +441,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             }
         }
         MOpNeg, MOpNot, MOpIdiv, MOpDiv, MOpMul1, MOpImul1 => {
-            var n u8 = match i.op {
+            n: u8 = match i.op {
                 MOpNot => 2
                 MOpNeg => 3
                 MOpMul1 => 4
@@ -454,7 +454,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             e.op(p66, 0, w, []u8{if sz == 1 { 0xF6 } else { 0xF7 }}, n, &rm, force)
         }
         MOpShl, MOpShr, MOpSar, MOpRol, MOpRor => {
-            var n u8 = match i.op {
+            n: u8 = match i.op {
                 MOpRol => 0
                 MOpRor => 1
                 MOpShl => 4
@@ -524,7 +524,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             }
         }
         MOpAddsd, MOpSubsd, MOpMulsd, MOpDivsd, MOpSqrtsd, MOpMinsd, MOpMaxsd => {
-            var o u8 = match i.op {
+            o: u8 = match i.op {
                 MOpAddsd => 0x58
                 MOpMulsd => 0x59
                 MOpSubsd => 0x5C
@@ -563,7 +563,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             e.op(false, 0, false, []u8{0x0F, 0x14}, u8(d & 15), &rm, false)
         }
         MOpUcomisd, MOpXorpd, MOpAndpd => {
-            var o u8 = match i.op {
+            o: u8 = match i.op {
                 MOpUcomisd => 0x2E
                 MOpXorpd => 0x57
                 _ => 0x54
@@ -605,7 +605,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             e.out.push(0xC8 | (d & 7))
         }
         MOpPopcnt, MOpTzcnt, MOpLzcnt => {
-            var o u8 = match i.op {
+            o: u8 = match i.op {
                 MOpPopcnt => 0xB8
                 MOpTzcnt => 0xBC
                 _ => 0xBD
@@ -619,7 +619,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
             if r >= 8 {
                 e.out.push(0x41)
             }
-            var base u8 = if i.op == MOpPush { 0x50 } else { 0x58 }
+            base: u8 = if i.op == MOpPush { 0x50 } else { 0x58 }
             e.out.push(base | (r & 7))
         }
         MOpZero => {
@@ -635,7 +635,7 @@ fn emit_enc_inst(e *EmitEnc, i *MInst) {
     }
 }
 
-fn emit_sets_flags(op MOp) bool {
+emit_sets_flags :: (op: MOp) -> bool {
     return op == MOpAdd || op == MOpSub || op == MOpAnd || op == MOpOr || op == MOpXor || op == MOpCmp || op == MOpTest ||
         op == MOpImul || op == MOpImul3 || op == MOpNeg || op == MOpShl || op == MOpShr || op == MOpSar || op == MOpRol ||
         op == MOpRor || op == MOpIdiv || op == MOpDiv || op == MOpMul1 || op == MOpImul1 || op == MOpUcomisd ||
@@ -643,11 +643,11 @@ fn emit_sets_flags(op MOp) bool {
         op == MOpSyscall || op == MOpBswap
 }
 
-fn emit_reads_flags(op MOp) bool {
+emit_reads_flags :: (op: MOp) -> bool {
     return op == MOpJcc || op == MOpSetcc || op == MOpCmov
 }
 
-fn emit_peephole_resolve(b0 i64, fwd *Vec[i64]) i64 {
+emit_peephole_resolve :: (b0: i64, fwd: *Vec[i64]) -> i64 {
     b := b0
     n := 0
     while fwd[b] != b && n < 64 {
@@ -658,8 +658,8 @@ fn emit_peephole_resolve(b0 i64, fwd *Vec[i64]) i64 {
 }
 
 // the `add` replacement of step 3 of the peephole for a `lea`, if there is one
-fn emit_peephole_lea_add(i *MInst) Opt[Opnd] {
-    var add Opt[Opnd] = None
+emit_peephole_lea_add :: (i: *MInst) -> Opt[Opnd] {
+    add: Opt[Opnd] = None
     if i.op == MOpLea {
         match i.a {
             OpndR(d0) => {
@@ -688,7 +688,7 @@ fn emit_peephole_lea_add(i *MInst) Opt[Opnd] {
 }
 
 // post-allocation cleanups that depend on the final layout
-fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
+emit_peephole :: (mf: *MFunc, layout: *Vec[i64]) {
     nb := mf.blocks.len
     // 1. thread jumps through blocks that only contain `jmp X`
     fwd := vec[i64]()
@@ -801,15 +801,15 @@ fn emit_peephole(mf *MFunc, layout *Vec[i64]) {
     }
 }
 
-enum EmitItem {
+EmitItem :: enum {
     EmitItemBytes(Vec[u8], Vec[Reloc]),
     EmitItemJump(Opt[u8], i64, bool), // cc, tgt, long
     EmitItemAlign(i64),
 }
 
-fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
+emit_emit :: (mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     // frame layout
-    var off i32 = 8 * i32(mf.out_args)
+    off: i32 = 8 * i32(mf.out_args)
     slot_off := vec[i32]()
     for sl in mf.slots.items() {
         a := i32(min(max(i64(sl.1), 1), 16))
@@ -876,7 +876,7 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
                     enc.out = vec[u8]()
                     enc.relocs = vec[Reloc]()
                 }
-                var cc Opt[u8] = None
+                cc: Opt[u8] = None
                 if i.op == MOpJcc {
                     cc = Some(u8(i.cc))
                 }
@@ -959,7 +959,7 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
                     }
                 } else {
                     d := t - (offs[k] + 2)
-                    var opc u8 = match cc {
+                    opc: u8 = match cc {
                         Some(c) => 0x70 | c
                         None => 0xEB
                     }
@@ -977,7 +977,7 @@ fn emit_emit(mf *MFunc, alloc *Alloc, layout0 []i64, fpool []i64) Code {
 }
 
 // padding in front of an aligned block; long paddings are not worth executing
-fn emit_align_pad(o i64, a i64) i64 {
+emit_align_pad :: (o: i64, a: i64) -> i64 {
     p := (a - o % a) % a
     if p > 10 {
         return 0
@@ -985,7 +985,7 @@ fn emit_align_pad(o i64, a i64) i64 {
     return p
 }
 
-fn emit_nops_seq(k i64) []u8 {
+emit_nops_seq :: (k: i64) -> []u8 {
     return match k {
         1 => []u8{0x90}
         2 => []u8{0x66, 0x90}
@@ -999,7 +999,7 @@ fn emit_nops_seq(k i64) []u8 {
     }
 }
 
-fn emit_nops(out *Vec[u8], n0 i64) {
+emit_nops :: (out: *Vec[u8], n0: i64) {
     n := n0
     while n > 0 {
         k := min(n, 9)

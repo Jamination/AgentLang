@@ -1,7 +1,7 @@
 // `main` and `test` blocks cannot be private.
-priv fn helper() i64 { 1 }
+priv helper :: () -> i64 { 1 }
 
-priv fn main() {
+priv main :: () {
     print(helper())
 }
 

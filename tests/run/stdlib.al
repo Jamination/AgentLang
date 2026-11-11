@@ -1,10 +1,10 @@
-struct Pt { x i64, y i64 }
+Pt :: struct { x: i64, y: i64 }
 
-fn by_len(a str, b str) bool {
+by_len :: (a: str, b: str) -> bool {
     len(a) < len(b)
 }
 
-fn main() {
+main :: () {
     // Vec
     v := vec[i64]()
     for i in 0..20 {
@@ -43,12 +43,12 @@ fn main() {
     g, _ := grid.get(Pt{5, 5})
     print(grid.len, g, grid.has(Pt{36, 10}), grid.has(Pt{37, 0}))
     big := map[u64, u64]()
-    var x u64 = 1
+    x: u64 = 1
     for i in 0..5000 {
         x = x * 6364136223846793005 + 1442695040888963407
         big.set(x >> 40, u64(i))
     }
-    var total u64 = 0
+    total: u64 = 0
     ks := big.keys()
     for k in ks {
         total += big.get_or(k, 0)

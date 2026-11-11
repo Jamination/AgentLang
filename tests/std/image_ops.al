@@ -1,9 +1,9 @@
 // std.image: encoders (round trips through the decoders), compression, pixel operations
 use std.image
 
-var fails i64
+fails: i64
 
-fn ok(name str, c bool) {
+ok :: (name: str, c: bool) {
     if !c {
         fails += 1
         print("FAILED:", name)
@@ -11,7 +11,7 @@ fn ok(name str, c bool) {
 }
 
 // a picture with smooth and noisy parts, deterministic
-fn picture(w i64, h i64, channels i64) Image {
+picture :: (w: i64, h: i64, channels: i64) -> Image {
     img := image_new(w, h, channels)
     r := rng(99)
     for y in 0..h {
@@ -28,11 +28,11 @@ fn picture(w i64, h i64, channels i64) Image {
     return img
 }
 
-fn same(a Image, b Image) bool {
+same :: (a: Image, b: Image) -> bool {
     return a.w == b.w && a.h == b.h && a.channels == b.channels && a.pix == b.pix
 }
 
-fn main() {
+main :: () {
     // PNG round trip for every channel count and awkward sizes
     sizes := [4]i64{1, 7, 64, 131}
     for ch in 1..=4 {

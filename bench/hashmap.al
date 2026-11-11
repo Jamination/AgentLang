@@ -1,16 +1,16 @@
-struct Entry { key u64, val u64 }
-struct Map { e []Entry, len u64 }
+Entry :: struct { key: u64, val: u64 }
+Map :: struct { e: []Entry, len: u64 }
 
-fn hash(k u64) u64 {
+hash :: (k: u64) -> u64 {
     (k * 0x9E3779B97F4A7C15) >> 32
 }
 
-fn map_init(m *Map, cap u64) {
+map_init :: (m: *Map, cap: u64) {
     m.e = alloc[Entry](i64(cap))
     m.len = 0
 }
 
-fn map_grow(m *Map) {
+map_grow :: (m: *Map) {
     old := m.e
     map_init(m, u64(len(old)) * 2)
     for en in old {
@@ -21,7 +21,7 @@ fn map_grow(m *Map) {
 }
 
 // find the value slot of key, inserting it if missing
-fn map_slot(m *Map, key u64) *u64 {
+map_slot :: (m: *Map, key: u64) -> *u64 {
     if (m.len + 1) * 4 > u64(len(m.e)) * 3 {
         map_grow(m)
     }
@@ -41,7 +41,7 @@ fn map_slot(m *Map, key u64) *u64 {
     }
 }
 
-fn map_get(m *Map, key u64) (u64, bool) {
+map_get :: (m: *Map, key: u64) -> (u64, bool) {
     mask := u64(len(m.e) - 1)
     i := hash(key) & mask
     loop {
@@ -56,17 +56,17 @@ fn map_get(m *Map, key u64) (u64, bool) {
     }
 }
 
-fn main() {
-    var m Map
+main :: () {
+    m: Map
     map_init(&m, 16)
-    var seed u64 = 42
+    seed: u64 = 42
     for i in 0..u64(5000000) {
         seed = seed * 6364136223846793005 + 1442695040888963407
         key := (seed >> 33) % 3000000 + 1
         *map_slot(&m, key) += i
     }
-    var hits u64 = 0
-    var sum u64 = 0
+    hits: u64 = 0
+    sum: u64 = 0
     for i in 0..10000000 {
         seed = seed * 6364136223846793005 + 1442695040888963407
         key := (seed >> 33) % 6000000 + 1

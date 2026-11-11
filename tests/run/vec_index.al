@@ -1,16 +1,16 @@
 // Vec[T] as an indexable value: v[i] as a place, slices, iteration, len(v).
-struct P { x i64, y i64 }
-struct Grid { cells Vec[Vec[i64]], w i64 }
+P :: struct { x: i64, y: i64 }
+Grid :: struct { cells: Vec[Vec[i64]], w: i64 }
 
-fn total[T](v *Vec[T]) T {
-    var s T
+total[T] :: (v: *Vec[T]) -> T {
+    s: T
     for x in v {
         s += x
     }
     s
 }
 
-fn sum_idx(v *Vec[i64]) i64 {
+sum_idx :: (v: *Vec[i64]) -> i64 {
     s := 0
     for i in 0..v.len {
         s += v[i]
@@ -18,11 +18,11 @@ fn sum_idx(v *Vec[i64]) i64 {
     s
 }
 
-fn last_two[T](v Vec[T]) []T {
+last_two[T] :: (v: Vec[T]) -> []T {
     return v[len(v) - 2..]
 }
 
-fn squares(n i64) Vec[i64] {
+squares :: (n: i64) -> Vec[i64] {
     v := vec[i64]()
     for i in 0..n {
         v.push(i * i)
@@ -30,7 +30,7 @@ fn squares(n i64) Vec[i64] {
     v
 }
 
-fn find_first[T](v *Vec[T], x T) i64 {
+find_first[T] :: (v: *Vec[T], x: T) -> i64 {
     for i, y in v {
         if y == x {
             return i
@@ -39,13 +39,13 @@ fn find_first[T](v *Vec[T], x T) i64 {
     return -1
 }
 
-fn bump(p *i64) {
+bump :: (p: *i64) {
     *p += 1
 }
 
-var gv Vec[str]
+gv: Vec[str]
 
-fn main() {
+main :: () {
     v := squares(10)
     // reading
     print(v[0], v[3], v[9], len(v), v.len, v.len())
@@ -148,7 +148,7 @@ fn main() {
     bs[0] = 'H'
     print(bs[..], bs[1..].len)
     // empty and zero-valued Vecs
-    var z Vec[i64]
+    z: Vec[i64]
     e := vec[i64]()
     cnt := 0
     for x in z {

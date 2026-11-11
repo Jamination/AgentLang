@@ -1,6 +1,6 @@
 // Constant folding, algebraic simplification, strength reduction and CFG simplification.
 
-fn simplify_mask(bits i64) u64 {
+simplify_mask :: (bits: i64) -> u64 {
     if bits >= 64 {
         return ~u64(0)
     }
@@ -8,8 +8,8 @@ fn simplify_mask(bits i64) u64 {
 }
 
 // (value, true) for Some(value), (zero, false) for None
-fn simplify_unopt[T](o Opt[T]) (T, bool) {
-    var z T
+simplify_unopt[T] :: (o: Opt[T]) -> (T, bool) {
+    z: T
     match o {
         Some(x) => { return (x, true) }
         None => {}
@@ -18,7 +18,7 @@ fn simplify_unopt[T](o Opt[T]) (T, bool) {
 }
 
 // `o == Some(k)`
-fn simplify_opt_is(o Opt[i64], k i64) bool {
+simplify_opt_is :: (o: Opt[i64], k: i64) -> bool {
     match o {
         Some(x) => { return x == k }
         None => {}
@@ -26,12 +26,12 @@ fn simplify_opt_is(o Opt[i64], k i64) bool {
     return false
 }
 
-fn simplify_is_pow2(x u64) bool {
+simplify_is_pow2 :: (x: u64) -> bool {
     return x != 0 && x & (x - 1) == 0
 }
 
 // `k.unsigned_abs()`
-fn simplify_uabs(k i64) u64 {
+simplify_uabs :: (k: i64) -> u64 {
     if k < 0 {
         return u64(0 - k)
     }
@@ -39,7 +39,7 @@ fn simplify_uabs(k i64) u64 {
 }
 
 // high 64 bits of the unsigned 128-bit product a * b
-fn simplify_mulhu(a u64, b u64) u64 {
+simplify_mulhu :: (a: u64, b: u64) -> u64 {
     a0 := a & 0xFFFFFFFF
     a1 := a >> 32
     b0 := b & 0xFFFFFFFF
@@ -53,7 +53,7 @@ fn simplify_mulhu(a u64, b u64) u64 {
 }
 
 // high 64 bits of the signed 128-bit product a * b
-fn simplify_mulhs(a i64, b i64) i64 {
+simplify_mulhs :: (a: i64, b: i64) -> i64 {
     h := simplify_mulhu(u64(a), u64(b))
     if a < 0 {
         h -= u64(b)
@@ -65,7 +65,7 @@ fn simplify_mulhs(a i64, b i64) i64 {
 }
 
 // low 64 bits of the 128-bit value hi:lo shifted right by `bits` (arithmetic when signed)
-fn simplify_shr128(lo u64, hi u64, bits i64, signed bool) i64 {
+simplify_shr128 :: (lo: u64, hi: u64, bits: i64, signed: bool) -> i64 {
     s := bits & 127
     if s == 0 {
         return i64(lo)
@@ -82,13 +82,13 @@ fn simplify_shr128(lo u64, hi u64, bits i64, signed bool) i64 {
     return i64(hi >> (s - 64))
 }
 
-fn simplify_fold_bin(op Op, ty T, a i64, b i64) Opt[i64] {
+simplify_fold_bin :: (op: Op, ty: T, a: i64, b: i64) -> Opt[i64] {
     bits := i64(ty.bits())
     m := simplify_mask(bits)
     ua := u64(a) & m
     ub := u64(b) & m
     sh := i64(u32(u64(b) & (u64(bits) - 1)))
-    var r i64
+    r: i64
     match op {
         OpAdd => { r = a + b }
         OpSub => { r = a - b }
@@ -147,7 +147,7 @@ fn simplify_fold_bin(op Op, ty T, a i64, b i64) Opt[i64] {
 }
 
 // i64::wrapping_div: MIN / -1 is MIN
-fn simplify_wrapping_div(a i64, b i64) i64 {
+simplify_wrapping_div :: (a: i64, b: i64) -> i64 {
     if b == -1 {
         return 0 - a
     }
@@ -155,14 +155,14 @@ fn simplify_wrapping_div(a i64, b i64) i64 {
 }
 
 // i64::wrapping_rem: MIN % -1 is 0
-fn simplify_wrapping_rem(a i64, b i64) i64 {
+simplify_wrapping_rem :: (a: i64, b: i64) -> i64 {
     if b == -1 {
         return 0
     }
     return a % b
 }
 
-fn simplify_fold_icmp(op Op, ty T, a i64, b i64) Opt[bool] {
+simplify_fold_icmp :: (op: Op, ty: T, a: i64, b: i64) -> Opt[bool] {
     m := simplify_mask(i64(ty.bits()))
     ua := u64(a) & m
     ub := u64(b) & m
@@ -183,19 +183,19 @@ fn simplify_fold_icmp(op Op, ty T, a i64, b i64) Opt[bool] {
 }
 
 // `new` is a builtin: the field is `new_insts`
-struct SimplifyCtx {
-    f *Func
-    new_insts Vec[i64]
-    changed bool
-    uses Vec[i64]
+SimplifyCtx :: struct {
+    f: *Func
+    new_insts: Vec[i64]
+    changed: bool
+    uses: Vec[i64]
 }
 
-fn c(self *SimplifyCtx, v i64) Opt[i64] {
+c :: (self: *SimplifyCtx, v: i64) -> Opt[i64] {
     return self.f.is_const(v)
 }
 
 // scalar float constants only (vector constants are never folded)
-fn fc(self *SimplifyCtx, v i64) Opt[f64] {
+fc :: (self: *SimplifyCtx, v: i64) -> Opt[f64] {
     i := &self.f.insts[v]
     if i.op == OpFConst && i.ty == TF64 {
         return Some(cast[f64](u64(i.k)))
@@ -207,27 +207,27 @@ fn fc(self *SimplifyCtx, v i64) Opt[f64] {
 
 // bits of the constant r in type ty; f32 results are computed in f64 and rounded once,
 // which is exact for + - * / sqrt
-fn simplify_ctx_fbits(ty T, r f64) i64 {
+simplify_ctx_fbits :: (ty: T, r: f64) -> i64 {
     if ty == TF32 {
         return i64(cast[u32](f32(r)))
     }
     return i64(cast[u64](r))
 }
 
-fn konst(self *SimplifyCtx, ty T, k i64) i64 {
+konst :: (self: *SimplifyCtx, ty: T, k: i64) -> i64 {
     v := self.f.mk(OpConst, ty, vec[i64](), ir_canon(ty, k))
     self.new_insts.push(v)
     return v
 }
 
-fn mk(self *SimplifyCtx, op Op, ty T, args Vec[i64]) i64 {
+mk :: (self: *SimplifyCtx, op: Op, ty: T, args: Vec[i64]) -> i64 {
     v := self.f.mk(op, ty, args, 0)
     self.new_insts.push(v)
     return v
 }
 
 // rewrite v in place
-fn set(self *SimplifyCtx, v i64, op Op, args Vec[i64], k i64) {
+set :: (self: *SimplifyCtx, v: i64, op: Op, args: Vec[i64], k: i64) {
     i := self.f.im(v)
     i.op = op
     i.args = args
@@ -236,26 +236,26 @@ fn set(self *SimplifyCtx, v i64, op Op, args Vec[i64], k i64) {
     self.changed = true
 }
 
-fn set_const(self *SimplifyCtx, v i64, k i64) {
+set_const :: (self: *SimplifyCtx, v: i64, k: i64) {
     ty := self.f.insts[v].ty
     self.set(v, OpConst, vec[i64](), ir_canon(ty, k))
 }
 
-fn op(self *SimplifyCtx, v i64) Op {
+op :: (self: *SimplifyCtx, v: i64) -> Op {
     return self.f.insts[v].op
 }
 
-fn simplify_simplify_small(k i64) bool {
+simplify_simplify_small :: (k: i64) -> bool {
     return k >= i64(i32(0x80000000)) && k <= 0x7FFFFFFF
 }
 
-fn simplify_simplify_is_not(s *SimplifyCtx, n i64, x i64) bool {
+simplify_simplify_is_not :: (s: *SimplifyCtx, n: i64, x: i64) -> bool {
     ni := s.f.insts[n]
     return ni.op == OpXor && simplify_opt_is(s.c(ni.args[1]), -1) && ni.args[0] == x
 }
 
 // returns Some(w) when v should be replaced by the existing value w
-fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
+simplify :: (self: *SimplifyCtx, v: i64) -> Opt[i64] {
     inst := self.f.insts[v]
     ty := inst.ty
     op := inst.op
@@ -355,7 +355,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
                     }
                 } else if (op == OpSDiv || op == OpSRem) && k != 0 && k != -1 && (ty == TI64 || ty == TI32) &&
                     k != i64(0x8000000000000000) && !(ty == TI32 && k == i64(i32(0x80000000))) {
-                    var q i64
+                    q: i64
                     if simplify_is_pow2(simplify_uabs(k)) {
                         // (a + ((a >> bits-1) >>> (bits - s))) >> s, negated for negative divisors
                         s := i64(ctz(simplify_uabs(k)))
@@ -531,7 +531,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             if hx {
                 y, hy := simplify_unopt(self.fc(inst.args[1]))
                 if hy {
-                    var r f64
+                    r: f64
                     if op == OpFAdd {
                         r = x + y
                     } else if op == OpFSub {
@@ -549,7 +549,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
         OpFNeg, OpFAbs, OpFSqrt => {
             x, hx := simplify_unopt(self.fc(inst.args[0]))
             if hx {
-                var r f64
+                r: f64
                 if op == OpFNeg {
                     r = -x
                 } else if op == OpFAbs {
@@ -653,7 +653,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
             if hx {
                 y, hy := simplify_unopt(self.fc(inst.args[1]))
                 if hy {
-                    var r bool
+                    r: bool
                     if op == OpFEq {
                         r = x == y
                     } else if op == OpFNe {
@@ -710,7 +710,7 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
         OpSIToF => {
             x, hx := simplify_unopt(self.c(inst.args[0]))
             if hx {
-                var fbits i64
+                fbits: i64
                 if ty == TF32 {
                     fbits = i64(cast[u32](f32(x)))
                 } else {
@@ -778,17 +778,17 @@ fn simplify(self *SimplifyCtx, v i64) Opt[i64] {
 }
 
 // `x.is_finite()`
-fn simplify_is_finite(x f64) bool {
+simplify_is_finite :: (x: f64) -> bool {
     return (cast[u64](x) >> 52) & 0x7FF != 0x7FF
 }
 
-fn simplify_masked_by_is_len_m1(s *SimplifyCtx, lenv i64, m i64) bool {
+simplify_masked_by_is_len_m1 :: (s: *SimplifyCtx, lenv: i64, m: i64) -> bool {
     mi := s.f.insts[m]
     return mi.op == OpAdd && mi.args[0] == lenv && simplify_opt_is(s.c(mi.args[1]), -1)
 }
 
 // is v always of the form (x & (len - 1)), directly or through phis?
-fn masked_by(self *SimplifyCtx, v i64, lenv i64, depth i64, root i64) bool {
+masked_by :: (self: *SimplifyCtx, v: i64, lenv: i64, depth: i64, root: i64) -> bool {
     i := self.f.insts[v]
     if i.op == OpAnd {
         return simplify_masked_by_is_len_m1(self, lenv, i.args[0]) || simplify_masked_by_is_len_m1(self, lenv, i.args[1])
@@ -805,7 +805,7 @@ fn masked_by(self *SimplifyCtx, v i64, lenv i64, depth i64, root i64) bool {
 }
 
 // `a.saturating_sub(b)` on unsigned counts
-fn simplify_sat_sub(a i64, b i64) i64 {
+simplify_sat_sub :: (a: i64, b: i64) -> i64 {
     if a > b {
         return a - b
     }
@@ -813,7 +813,7 @@ fn simplify_sat_sub(a i64, b i64) i64 {
 }
 
 // upper bound on the number of significant bits of an unsigned value
-fn ubits(self *SimplifyCtx, v i64, depth i64) i64 {
+ubits :: (self: *SimplifyCtx, v: i64, depth: i64) -> i64 {
     i := self.f.insts[v]
     tb := max(i64(i.ty.bits()), 1)
     if depth == 0 {
@@ -857,7 +857,7 @@ fn ubits(self *SimplifyCtx, v i64, depth i64) i64 {
     return min(r, tb)
 }
 
-fn simplify_match_rotate_is_complement(s *SimplifyCtx, bits i64, m i64, n i64) bool {
+simplify_match_rotate_is_complement :: (s: *SimplifyCtx, bits: i64, m: i64, n: i64) -> bool {
     mi := s.f.insts[m]
     if !(mi.op == OpSub && mi.args[1] == n) {
         return false
@@ -869,12 +869,12 @@ fn simplify_match_rotate_is_complement(s *SimplifyCtx, bits i64, m i64, n i64) b
     return false
 }
 
-fn match_rotate(self *SimplifyCtx, a i64, b i64, ty T) Opt[(Op, i64, i64)] {
+match_rotate :: (self: *SimplifyCtx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
     bits := i64(ty.bits())
     ai := self.f.insts[a]
     bi := self.f.insts[b]
-    var shr Inst
-    var shl Inst
+    shr: Inst
+    shl: Inst
     if ai.op == OpLShr && bi.op == OpShl {
         shr = ai
         shl = bi
@@ -913,7 +913,7 @@ fn match_rotate(self *SimplifyCtx, a i64, b i64, ty T) Opt[(Op, i64, i64)] {
 // unsigned division by a constant (Hacker's Delight, magicu)
 // The Rust code computes in u128; every value fits 64 bits (or is reduced modulo 2^w right
 // away), so this uses wrapping u64 arithmetic.
-fn udiv_magic(self *SimplifyCtx, n i64, ty T, d u64) i64 {
+udiv_magic :: (self: *SimplifyCtx, n: i64, ty: T, d: u64) -> i64 {
     w := i64(ty.bits())
     // a dividend known to be narrow needs only one multiplication and one shift
     nb := self.ubits(n, 6)
@@ -996,7 +996,7 @@ fn udiv_magic(self *SimplifyCtx, n i64, ty T, d u64) i64 {
 
 // signed division by a constant (Hacker's Delight, magic)
 // u128 in the Rust code; all values fit 64 bits.
-fn sdiv_magic(self *SimplifyCtx, n i64, ty T, d i64) i64 {
+sdiv_magic :: (self: *SimplifyCtx, n: i64, ty: T, d: i64) -> i64 {
     w := i64(ty.bits())
     two_w1 := u64(1) << (w - 1)
     ad := simplify_uabs(d)
@@ -1052,7 +1052,7 @@ fn sdiv_magic(self *SimplifyCtx, n i64, ty T, d i64) i64 {
     return self.mk(OpAdd, ty, vec_of([]i64{q, sign}))
 }
 
-fn simplify_fold_insts_find(repl *Vec[i64], v0 i64) i64 {
+simplify_fold_insts_find :: (repl: *Vec[i64], v0: i64) -> i64 {
     v := v0
     while v < repl.len && repl[v] != NOV {
         v = repl[v]
@@ -1060,7 +1060,7 @@ fn simplify_fold_insts_find(repl *Vec[i64], v0 i64) i64 {
     return v
 }
 
-fn simplify_fold_insts(f *Func) bool {
+simplify_fold_insts :: (f: *Func) -> bool {
     rpo := f.rpo()
     repl := vec_fill(f.insts.len, NOV)
     uses := f.use_counts()
@@ -1098,7 +1098,7 @@ fn simplify_fold_insts(f *Func) bool {
 }
 
 // `fix` of step 5: the replacement of a value defined in b
-fn simplify_simplify_cfg_fix(a i64, def_block *Vec[i64], b i64, binsts *Vec[i64], side_t bool, repl_t *Vec[i64], repl_e *Vec[i64]) i64 {
+simplify_simplify_cfg_fix :: (a: i64, def_block: *Vec[i64], b: i64, binsts: *Vec[i64], side_t: bool, repl_t: *Vec[i64], repl_e: *Vec[i64]) -> i64 {
     if a < def_block.len && def_block[a] == b {
         k := index_of(binsts.items(), a)
         assert k >= 0
@@ -1111,7 +1111,7 @@ fn simplify_simplify_cfg_fix(a i64, def_block *Vec[i64], b i64, binsts *Vec[i64]
 }
 
 // `side` of step 6: the block x is a tiny side-effect-free arm; returns where it jumps to
-fn simplify_simplify_cfg_side(f *Func, preds *Vec[Vec[i64]], x i64) Opt[i64] {
+simplify_simplify_cfg_side :: (f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[i64] {
     if x == 0 || preds[x].len != 1 {
         return None
     }
@@ -1141,7 +1141,7 @@ fn simplify_simplify_cfg_side(f *Func, preds *Vec[Vec[i64]], x i64) Opt[i64] {
 }
 
 // all instructions of the block are phis
-fn simplify_all_phis(f *Func, binsts *Vec[i64]) bool {
+simplify_all_phis :: (f: *Func, binsts: *Vec[i64]) -> bool {
     for v in binsts.items() {
         if f.insts[v].op != OpPhi {
             return false
@@ -1151,7 +1151,7 @@ fn simplify_all_phis(f *Func, binsts *Vec[i64]) bool {
 }
 
 // redirect the edge p -> from to p -> to
-fn simplify_retarget(f *Func, p i64, from i64, to i64) {
+simplify_retarget :: (f: *Func, p: i64, from: i64, to: i64) {
     match f.blocks[p].term {
         TermJmp(x) => {
             if x == from {
@@ -1173,7 +1173,7 @@ fn simplify_retarget(f *Func, p i64, from i64, to i64) {
     }
 }
 
-fn simplify_simplify_cfg(f *Func) bool {
+simplify_simplify_cfg :: (f: *Func) -> bool {
     changed := false
     // 1. fold constant / degenerate branches
     for b in 0..f.blocks.len {
@@ -1778,8 +1778,8 @@ fn simplify_simplify_cfg(f *Func) bool {
             }
             j1, h1 := simplify_unopt(simplify_simplify_cfg_side(f, &preds, t))
             j2, h2 := simplify_unopt(simplify_simplify_cfg_side(f, &preds, e))
-            var tb Opt[i64] = None
-            var eb Opt[i64] = None
+            tb: Opt[i64] = None
+            eb: Opt[i64] = None
             j := 0
             if h1 && h2 && j1 == j2 && j1 != t && j1 != e {
                 tb = Some(t)
@@ -1901,7 +1901,7 @@ fn simplify_simplify_cfg(f *Func) bool {
     return changed
 }
 
-fn simplify_run(f *Func) bool {
+simplify_run :: (f: *Func) -> bool {
     any := false
     for it in 0..50 {
         ch := false

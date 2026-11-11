@@ -1,5 +1,5 @@
 // std.time: clocks, sleeping, FrameClock, FixedStep, Timer
-fn main() {
+main :: () {
     // real clocks: only loose facts
     t0 := time_now()
     n0 := time_ns()

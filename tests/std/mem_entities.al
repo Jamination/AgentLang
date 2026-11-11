@@ -1,18 +1,18 @@
 // std.mem: the fat-struct entity pattern at scale. 100000 entities in one Pool, systems are
 // plain loops over the slots; entities die and are replaced while the simulation runs.
-enum Kind { Rock, Ship, Shot }
+Kind :: enum { Rock, Ship, Shot }
 
-struct Entity {
-    kind Kind
-    pos vec3
-    vel vec3
-    life f32
-    target Handle
+Entity :: struct {
+    kind: Kind
+    pos: vec3
+    vel: vec3
+    life: f32
+    target: Handle
 }
 
-struct World { ents Pool[Entity], rng Rng, spawned i64, died i64 }
+World :: struct { ents: Pool[Entity], rng: Rng, spawned: i64, died: i64 }
 
-fn spawn(w *World) Handle {
+spawn :: (w: *World) -> Handle {
     k := w.rng.range(0, 3)
     e := Entity{
         kind: if k == 0 { Rock } else if k == 1 { Ship } else { Shot },
@@ -24,7 +24,7 @@ fn spawn(w *World) Handle {
     return w.ents.insert(e)
 }
 
-fn move_system(w *World, dt f32) {
+move_system :: (w: *World, dt: f32) {
     es := w.ents.items
     for i in 0..w.ents.used {
         if w.ents.is_live(i) {
@@ -33,7 +33,7 @@ fn move_system(w *World, dt f32) {
     }
 }
 
-fn life_system(w *World, dt f32) {
+life_system :: (w: *World, dt: f32) {
     for i in 0..w.ents.used {
         if !w.ents.is_live(i) {
             continue
@@ -50,7 +50,7 @@ fn life_system(w *World, dt f32) {
 }
 
 // ships steer toward their target; a dead target is noticed through its stale handle
-fn steer_system(w *World, dt f32) {
+steer_system :: (w: *World, dt: f32) {
     for i in 0..w.ents.used {
         if !w.ents.is_live(i) || w.ents.items[i].kind != Ship {
             continue
@@ -65,13 +65,13 @@ fn steer_system(w *World, dt f32) {
     }
 }
 
-fn main() {
+main :: () {
     n := 100000
     w := World{ents: pool_new[Entity](n), rng: rng(2024)}
     for i in 0..n {
         spawn(&w)
     }
-    var dt f32 = 1.0 / 60.0
+    dt: f32 = 1.0 / 60.0
     for step in 0..100 {
         move_system(&w, dt)
         steer_system(&w, dt)

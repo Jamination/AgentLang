@@ -1,18 +1,18 @@
-struct Cat { n i64 }
-struct Dog { n i64 }
-fn speak(c Cat) str { "meow" }
-fn speak(d Dog) str { "woof" }
-fn speak(x i64) str { "int" }
-fn speak(x f32) str { "f32" }
-fn area(a vec2) f32 { a.x * a.y }
-fn area(r f32) f32 { r * r * 3.0 }
-fn bump(c *Cat) { c.n += 1 }
-fn bump(d *Dog) { d.n += 10 }
-fn min(a vec3, b vec3) vec3 { fmin(a, b) }
-fn main() {
+Cat :: struct { n: i64 }
+Dog :: struct { n: i64 }
+speak :: (c: Cat) -> str { "meow" }
+speak :: (d: Dog) -> str { "woof" }
+speak :: (x: i64) -> str { "int" }
+speak :: (x: f32) -> str { "f32" }
+area :: (a: vec2) -> f32 { a.x * a.y }
+area :: (r: f32) -> f32 { r * r * 3.0 }
+bump :: (c: *Cat) { c.n += 1 }
+bump :: (d: *Dog) { d.n += 10 }
+min :: (a: vec3, b: vec3) -> vec3 { fmin(a, b) }
+main :: () {
     c := Cat{n: 1}
     d := Dog{n: 2}
-    var f f32 = 2.0
+    f: f32 = 2.0
     print(speak(c), speak(d), speak(3), speak(f), c.speak(), d.speak())
     print(area(vec2(2.0, 3.0)), area(f), f.area())
     c.bump()

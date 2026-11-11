@@ -1,8 +1,8 @@
-fn main() {
+main :: () {
     x := (1 + 2
     y := 3
 }
-fn g() {
+g :: () {
     if x > { }
 }
 fn h(a i64 b i64) { }

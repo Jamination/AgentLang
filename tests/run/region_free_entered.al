@@ -1,5 +1,5 @@
 // a region cannot be freed while it is entered
-fn main() {
+main :: () {
     a := region()
     enter(&a)
     xs := alloc[i64](4)

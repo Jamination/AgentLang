@@ -1,4 +1,4 @@
-var K = [64]u32{
+K := [64]u32{
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
     0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -9,12 +9,12 @@ var K = [64]u32{
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 }
 
-fn rotr(x u32, n u32) u32 {
+rotr :: (x: u32, n: u32) -> u32 {
     (x >> n) | (x << (32 - n))
 }
 
-fn sha256_block(st []u32, p []u8) {
-    var w [64]u32
+sha256_block :: (st: []u32, p: []u8) {
+    w: [64]u32
     for i in 0..16 {
         w[i] = (u32(p[4 * i]) << 24) | (u32(p[4 * i + 1]) << 16) | (u32(p[4 * i + 2]) << 8) | u32(p[4 * i + 3])
     }
@@ -58,13 +58,13 @@ fn sha256_block(st []u32, p []u8) {
 }
 
 // hash of a message whose length is a multiple of 64 bytes
-fn sha256(data []u8, out []u8) {
+sha256 :: (data: []u8, out: []u8) {
     st := [8]u32{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
     n := len(data)
     for off in 0..n by 64 {
         sha256_block(st[..], data[off..off + 64])
     }
-    var pad [64]u8
+    pad: [64]u8
     pad[0] = 0x80
     bits := u64(n) * 8
     for i in 0..8 {
@@ -79,19 +79,19 @@ fn sha256(data []u8, out []u8) {
     }
 }
 
-fn hex(d u8) u8 {
+hex :: (d: u8) -> u8 {
     if d < 10 { d + '0' } else { d - 10 + 'a' }
 }
 
-fn main() {
+main :: () {
     n := 1 << 20
     buf := alloc[u8](n)
-    var seed u32 = 12345
+    seed: u32 = 12345
     for i in 0..n {
         seed = seed * 1664525 + 1013904223
         buf[i] = u8(seed >> 24)
     }
-    var digest [32]u8
+    digest: [32]u8
     for round in 0..200 {
         sha256(buf, digest[..])
         for i in 0..32 {

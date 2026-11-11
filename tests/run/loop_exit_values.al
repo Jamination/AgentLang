@@ -1,5 +1,5 @@
 // values derived from loop counters and used after the loop
-fn main() {
+main :: () {
     x := 0
     y := 100
     for i in 0..64 {
@@ -28,7 +28,7 @@ fn main() {
         k += 1
     }
     print(k, s, s - k)
-    var arr [8]i64
+    arr: [8]i64
     j := 0
     for i in 0..8 {
         arr[i] = i * i

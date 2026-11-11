@@ -1,7 +1,7 @@
 // CFG cleanup and dead code elimination.
 
 // remove phi inputs from non-predecessors, drop unreachable blocks' contents
-fn cleanup_prune_unreachable(f *Func) bool {
+cleanup_prune_unreachable :: (f: *Func) -> bool {
     rpo := f.rpo()
     reach := vec_fill(f.blocks.len, false)
     for b in rpo.items() {
@@ -39,7 +39,7 @@ fn cleanup_prune_unreachable(f *Func) bool {
 }
 
 // `term != Term::None`
-fn cleanup_term_is_none(t Term) bool {
+cleanup_term_is_none :: (t: Term) -> bool {
     match t {
         TermNone => { return true }
         _ => {}
@@ -47,11 +47,11 @@ fn cleanup_term_is_none(t Term) bool {
     return false
 }
 
-fn cleanup_is_root(op Op) bool {
+cleanup_is_root :: (op: Op) -> bool {
     return op == OpStore || op == OpCall || op == OpCallInd || op == OpSyscall || op == OpMemCpy || op == OpMemSet
 }
 
-fn cleanup_dce(f *Func) bool {
+cleanup_dce :: (f: *Func) -> bool {
     n := f.insts.len
     live := vec_fill(n, false)
     work := vec[i64]()
@@ -112,7 +112,7 @@ fn cleanup_dce(f *Func) bool {
     return changed
 }
 
-fn cleanup_trivial_phis_res(repl *Vec[i64], v0 i64) i64 {
+cleanup_trivial_phis_res :: (repl: *Vec[i64], v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
         v = repl[v]
@@ -121,7 +121,7 @@ fn cleanup_trivial_phis_res(repl *Vec[i64], v0 i64) i64 {
 }
 
 // remove phis whose inputs are all the same value
-fn cleanup_trivial_phis(f *Func) bool {
+cleanup_trivial_phis :: (f: *Func) -> bool {
     repl := vec_fill(f.insts.len, NOV)
     any := false
     loop {

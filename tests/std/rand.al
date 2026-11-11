@@ -1,9 +1,9 @@
 // std.rand: generator, distributions, default generator
-fn near(x f64, target f64, tol f64) bool {
+near :: (x: f64, target: f64, tol: f64) -> bool {
     return fabs(x - target) <= tol
 }
 
-fn main() {
+main :: () {
     // exact sequence of xoshiro256** seeded through splitmix64
     r := rng(0)
     print(r.next_u64(), r.next_u64(), r.next_u64())
@@ -36,7 +36,7 @@ fn main() {
     print("floats in [0,1)", in_range, "means", near(sum32 / f64(n), 0.5, 0.005), near(sum64 / f64(n), 0.5, 0.005))
 
     // integer ranges: every value, nothing else, flat histogram
-    var hist [6]i64
+    hist: [6]i64
     for i in 0..60000 {
         hist[r.range(-2, 4) + 2] += 1
     }
@@ -81,7 +81,7 @@ fn main() {
     copy(sorted, xs)
     sort(sorted)
     print(sorted)
-    var first [10]i64
+    first: [10]i64
     for i in 0..50000 {
         for k in 0..10 {
             xs[k] = k

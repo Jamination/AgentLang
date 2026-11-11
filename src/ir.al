@@ -1,8 +1,8 @@
 // SSA intermediate representation.
 
-const NOV = 0xFFFFFFFF
+NOV :: 0xFFFFFFFF
 
-enum T {
+T :: enum {
     TVoid,
     TI8,
     TI16,
@@ -16,7 +16,7 @@ enum T {
     TV4,
 }
 
-fn size(self T) i64 {
+size :: (self: T) -> i64 {
     match self {
         TVoid => 0
         TI8 => 1
@@ -28,24 +28,24 @@ fn size(self T) i64 {
     }
 }
 
-fn bits(self T) i64 {
+bits :: (self: T) -> i64 {
     return self.size() * 8
 }
 
-fn is_int(self T) bool {
+is_int :: (self: T) -> bool {
     return self == TI8 || self == TI16 || self == TI32 || self == TI64
 }
 
 // lives in an xmm register
-fn is_fp(self T) bool {
+is_fp :: (self: T) -> bool {
     return self == TF32 || self == TF64 || self == TV2 || self == TV3 || self == TV4
 }
 
-fn is_vec(self T) bool {
+is_vec :: (self: T) -> bool {
     return self == TV2 || self == TV3 || self == TV4
 }
 
-fn name(self T) str {
+name :: (self: T) -> str {
     match self {
         TVoid => "void"
         TI8 => "i8"
@@ -60,7 +60,7 @@ fn name(self T) str {
     }
 }
 
-enum Op {
+Op :: enum {
     OpConst,  // k = value (sign-extended to i64, canonical for type)
     OpFConst, // k = f64 bits (f32 bits for F32; vectors: only 0)
     OpParam,  // k = index
@@ -139,21 +139,21 @@ enum Op {
     OpClz,
 }
 
-fn is_cmp(self Op) bool {
+is_cmp :: (self: Op) -> bool {
     match self {
         OpEq, OpNe, OpSlt, OpSle, OpSgt, OpSge, OpUlt, OpUle, OpUgt, OpUge, OpFEq, OpFNe, OpFLt, OpFLe, OpFGt, OpFGe => true
         _ => false
     }
 }
 
-fn is_icmp(self Op) bool {
+is_icmp :: (self: Op) -> bool {
     match self {
         OpEq, OpNe, OpSlt, OpSle, OpSgt, OpSge, OpUlt, OpUle, OpUgt, OpUge => true
         _ => false
     }
 }
 
-fn is_commutative(self Op) bool {
+is_commutative :: (self: Op) -> bool {
     match self {
         OpAdd, OpMul, OpAnd, OpOr, OpXor, OpFAdd, OpFMul, OpEq, OpNe, OpFEq, OpFNe, OpMulHiS, OpMulHiU => true
         _ => false
@@ -161,14 +161,14 @@ fn is_commutative(self Op) bool {
 }
 
 // no side effects, no memory dependence, cannot trap
-fn is_pure(self Op) bool {
+is_pure :: (self: Op) -> bool {
     match self {
         OpParam, OpAlloca, OpSDiv, OpUDiv, OpSRem, OpURem, OpLoad, OpStore, OpCall, OpCallInd, OpSyscall, OpProj, OpPhi, OpMemCpy, OpMemSet => false
         _ => true
     }
 }
 
-fn swap_cmp(self Op) Op {
+swap_cmp :: (self: Op) -> Op {
     match self {
         OpSlt => OpSgt
         OpSle => OpSge
@@ -187,7 +187,7 @@ fn swap_cmp(self Op) Op {
 }
 
 // integer compare negation (not valid for float compares because of NaN)
-fn negate_icmp(self Op) Op {
+negate_icmp :: (self: Op) -> Op {
     match self {
         OpEq => OpNe
         OpNe => OpEq
@@ -203,21 +203,21 @@ fn negate_icmp(self Op) Op {
     }
 }
 
-struct Inst {
-    op Op
-    ty T
-    args Vec[i64]
-    k i64
-    aux i64
-    pb Vec[i64] // phi predecessor blocks, parallel to args
+Inst :: struct {
+    op: Op
+    ty: T
+    args: Vec[i64]
+    k: i64
+    aux: i64
+    pb: Vec[i64] // phi predecessor blocks, parallel to args
 }
 
 // an independent copy (args and pb are not shared)
-fn clone(i *Inst) Inst {
+clone :: (i: *Inst) -> Inst {
     return Inst{op: i.op, ty: i.ty, args: clone(&i.args), k: i.k, aux: i.aux, pb: clone(&i.pb)}
 }
 
-enum Term {
+Term :: enum {
     TermNone,
     TermJmp(i64),
     TermBr(i64, i64, i64),
@@ -226,7 +226,7 @@ enum Term {
 }
 
 // Term equality (PartialEq in the Rust source)
-fn eq(a Term, b Term) bool {
+eq :: (a: Term, b: Term) -> bool {
     match a {
         TermNone => {
             match b {
@@ -262,37 +262,37 @@ fn eq(a Term, b Term) bool {
 }
 
 // an independent copy (the value list of Ret is not shared)
-fn clone(t Term) Term {
+clone :: (t: Term) -> Term {
     match t {
         TermRet(vs) => return TermRet(clone(&vs))
         _ => return t
     }
 }
 
-struct BlockData {
-    insts Vec[i64]
-    term Term
+BlockData :: struct {
+    insts: Vec[i64]
+    term: Term
 }
 
-fn clone(b *BlockData) BlockData {
+clone :: (b: *BlockData) -> BlockData {
     return BlockData{insts: clone(&b.insts), term: clone(b.term)}
 }
 
-struct Func {
-    name str
-    params Vec[T]
-    rets Vec[T]
-    insts Vec[Inst]
-    blocks Vec[BlockData]
-    inl i64 // `inline` in the Rust source (an AL keyword): 1 = always, -1 = never, 0 = auto
-    noreturn bool
-    lowered bool
+Func :: struct {
+    name: str
+    params: Vec[T]
+    rets: Vec[T]
+    insts: Vec[Inst]
+    blocks: Vec[BlockData]
+    inl: i64 // `inline` in the Rust source (an AL keyword): 1 = always, -1 = never, 0 = auto
+    noreturn: bool
+    lowered: bool
     // a C function in a shared library: index into Module::externs
-    ext Opt[i64]
+    ext: Opt[i64]
 }
 
 // a deep copy
-fn clone(f *Func) Func {
+clone :: (f: *Func) -> Func {
     insts := vec[Inst]()
     for i in 0..f.insts.len {
         insts.push(clone(&f.insts[i]))
@@ -314,22 +314,22 @@ fn clone(f *Func) Func {
     }
 }
 
-enum RelocTarget {
+RelocTarget :: enum {
     RelocTargetGlobal(i64, i64),
     RelocTargetFunc(i64),
 }
 
-struct Global {
-    name str
-    size i64
-    align i64
-    data Opt[Vec[u8]]
-    relocs Vec[(i64, RelocTarget)]
-    readonly bool
+Global :: struct {
+    name: str
+    size: i64
+    align: i64
+    data: Opt[Vec[u8]]
+    relocs: Vec[(i64, RelocTarget)]
+    readonly: bool
 }
 
-fn clone(g *Global) Global {
-    var data Opt[Vec[u8]] = None
+clone :: (g: *Global) -> Global {
+    data: Opt[Vec[u8]] = None
     match g.data {
         Some(d) => {
             data = Some(clone(&d))
@@ -339,22 +339,22 @@ fn clone(g *Global) Global {
     return Global{name: g.name, size: g.size, align: g.align, data: data, relocs: clone(&g.relocs), readonly: g.readonly}
 }
 
-struct Module {
-    funcs Vec[Func]
-    globals Vec[Global]
-    entry i64
-    externs Vec[ExternFn]
+Module :: struct {
+    funcs: Vec[Func]
+    globals: Vec[Global]
+    entry: i64
+    externs: Vec[ExternFn]
 }
 
 // An imported C function: calls load its address from the 8-byte global `got`, which the
 // dynamic loader fills in.
-struct ExternFn {
-    name str
-    lib str
-    got i64
+ExternFn :: struct {
+    name: str
+    lib: str
+    got: i64
 }
 
-fn ir_canon(ty T, k i64) i64 {
+ir_canon :: (ty: T, k: i64) -> i64 {
     match ty {
         TI8 => i64(i8(k))
         TI16 => i64(i16(k))
@@ -363,7 +363,7 @@ fn ir_canon(ty T, k i64) i64 {
     }
 }
 
-fn func_new(name str) Func {
+func_new :: (name: str) -> Func {
     return Func{
         name: name,
         params: vec[T](),
@@ -378,7 +378,7 @@ fn func_new(name str) Func {
 }
 
 // n empty lists (each with its own buffer)
-fn ir_lists(n i64) Vec[Vec[i64]] {
+ir_lists :: (n: i64) -> Vec[Vec[i64]] {
     p := vec[Vec[i64]]()
     for i in 0..n {
         p.push(vec[i64]())
@@ -386,28 +386,28 @@ fn ir_lists(n i64) Vec[Vec[i64]] {
     return p
 }
 
-fn new_block(self *Func) i64 {
+new_block :: (self: *Func) -> i64 {
     self.blocks.push(BlockData{insts: vec[i64](), term: TermNone})
     return self.blocks.len - 1
 }
 
-fn mk(self *Func, op Op, ty T, args Vec[i64], k i64) i64 {
+mk :: (self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     self.insts.push(Inst{op: op, ty: ty, args: args, k: k, aux: 0, pb: vec[i64]()})
     return self.insts.len - 1
 }
 
-fn push(self *Func, b i64, op Op, ty T, args Vec[i64], k i64) i64 {
+push :: (self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.mk(op, ty, args, k)
     self.blocks[b].insts.push(v)
     return v
 }
 
 // pointer to instruction v (stale after the next mk / push)
-fn im(self *Func, v i64) *Inst {
+im :: (self: *Func, v: i64) -> *Inst {
     return &self.insts[v]
 }
 
-fn is_const(self *Func, v i64) Opt[i64] {
+is_const :: (self: *Func, v: i64) -> Opt[i64] {
     i := &self.insts[v]
     if i.op == OpConst {
         return Some(i.k)
@@ -416,7 +416,7 @@ fn is_const(self *Func, v i64) Opt[i64] {
     }
 }
 
-fn succs(self *Func, b i64) Vec[i64] {
+succs :: (self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
         TermJmp(t) => return vec_one(t)
         TermBr(c, t, f) => {
@@ -430,7 +430,7 @@ fn succs(self *Func, b i64) Vec[i64] {
     }
 }
 
-fn preds(self *Func) Vec[Vec[i64]] {
+preds :: (self: *Func) -> Vec[Vec[i64]] {
     p := ir_lists(self.blocks.len)
     for b in 0..self.blocks.len {
         ss := self.succs(b)
@@ -442,7 +442,7 @@ fn preds(self *Func) Vec[Vec[i64]] {
 }
 
 // reverse postorder of reachable blocks
-fn rpo(self *Func) Vec[i64] {
+rpo :: (self: *Func) -> Vec[i64] {
     n := self.blocks.len
     seen := vec_fill(n, false)
     post := vec[i64]()
@@ -470,7 +470,7 @@ fn rpo(self *Func) Vec[i64] {
     return post
 }
 
-fn term_uses(self *Func, b i64) Vec[i64] {
+term_uses :: (self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
         TermBr(c, t, e) => return vec_of([]i64{c})
         TermRet(v) => return clone(&v)
@@ -478,7 +478,7 @@ fn term_uses(self *Func, b i64) Vec[i64] {
     }
 }
 
-fn use_counts(self *Func) Vec[i64] {
+use_counts :: (self: *Func) -> Vec[i64] {
     c := vec_fill(self.insts.len, 0)
     for bi in 0..self.blocks.len {
         b := &self.blocks[bi]
@@ -502,7 +502,7 @@ fn use_counts(self *Func) Vec[i64] {
     return c
 }
 
-fn ir_apply_repl_find(map *Vec[i64], v i64) i64 {
+ir_apply_repl_find :: (map: *Vec[i64], v: i64) -> i64 {
     r := v
     while map[r] != NOV {
         r = map[r]
@@ -517,7 +517,7 @@ fn ir_apply_repl_find(map *Vec[i64], v i64) i64 {
 }
 
 // apply a replacement map (map[v] = replacement or NOV) to all uses
-fn apply_repl(self *Func, map *Vec[i64]) {
+apply_repl :: (self: *Func, map: *Vec[i64]) {
     if map.len < self.insts.len {
         map.resize(self.insts.len, NOV)
     }
@@ -550,7 +550,7 @@ fn apply_repl(self *Func, map *Vec[i64]) {
     }
 }
 
-fn block_of(self *Func) Vec[i64] {
+block_of :: (self: *Func) -> Vec[i64] {
     bo := vec_fill(self.insts.len, 0xFFFFFFFF)
     for bi in 0..self.blocks.len {
         for v in self.blocks[bi].insts.items() {
@@ -560,7 +560,7 @@ fn block_of(self *Func) Vec[i64] {
     return bo
 }
 
-fn size(self *Func) i64 {
+size :: (self: *Func) -> i64 {
     n := 0
     for bi in 0..self.blocks.len {
         n += self.blocks[bi].insts.len + 1
@@ -569,17 +569,17 @@ fn size(self *Func) i64 {
 }
 
 // ---------- CFG analysis ----------
-struct Cfg {
-    rpo Vec[i64]
-    rpo_idx Vec[i64]
-    preds Vec[Vec[i64]]
-    idom Vec[i64]
-    children Vec[Vec[i64]]
-    pre Vec[i64]
-    post Vec[i64]
+Cfg :: struct {
+    rpo: Vec[i64]
+    rpo_idx: Vec[i64]
+    preds: Vec[Vec[i64]]
+    idom: Vec[i64]
+    children: Vec[Vec[i64]]
+    pre: Vec[i64]
+    post: Vec[i64]
 }
 
-fn cfg_new(f *Func) Cfg {
+cfg_new :: (f: *Func) -> Cfg {
     n := f.blocks.len
     rpo := f.rpo()
     rpo_idx := vec_fill(n, 0xFFFFFFFF)
@@ -657,32 +657,32 @@ fn cfg_new(f *Func) Cfg {
     return Cfg{rpo: rpo, rpo_idx: rpo_idx, preds: preds, idom: idom, children: children, pre: pre, post: post}
 }
 
-fn reachable(self *Cfg, b i64) bool {
+reachable :: (self: *Cfg, b: i64) -> bool {
     return self.rpo_idx[b] != 0xFFFFFFFF
 }
 
 // a dominates b (reflexive)
-fn dom(self *Cfg, a i64, b i64) bool {
+dom :: (self: *Cfg, a: i64, b: i64) -> bool {
     return self.pre[a] <= self.pre[b] && self.post[b] <= self.post[a]
 }
 
-struct Loop {
-    header i64
-    blocks Vec[i64]
-    latches Vec[i64]
-    parent Opt[i64]
-    depth i64
+Loop :: struct {
+    header: i64
+    blocks: Vec[i64]
+    latches: Vec[i64]
+    parent: Opt[i64]
+    depth: i64
 }
 
-struct Loops {
-    loops Vec[Loop]
-    loop_of Vec[Opt[i64]] // innermost loop per block
+Loops :: struct {
+    loops: Vec[Loop]
+    loop_of: Vec[Opt[i64]] // innermost loop per block
 }
 
-fn loops_new(f *Func, cfg *Cfg) Loops {
+loops_new :: (f: *Func, cfg: *Cfg) -> Loops {
     n := f.blocks.len
     loops := vec[Loop]()
-    var none Opt[i64] = None
+    none: Opt[i64] = None
     by_header := vec_fill(n, none)
     for b in cfg.rpo.items() {
         ss := f.succs(b)
@@ -760,14 +760,14 @@ fn loops_new(f *Func, cfg *Cfg) Loops {
     return Loops{loops: loops, loop_of: loop_of}
 }
 
-fn depth(self *Loops, b i64) i64 {
+depth :: (self: *Loops, b: i64) -> i64 {
     match self.loop_of[b] {
         Some(l) => return self.loops[l].depth
         None => return 0
     }
 }
 
-fn contains(self *Loops, li i64, b i64) bool {
+contains :: (self: *Loops, li: i64, b: i64) -> bool {
     cur := self.loop_of[b]
     loop {
         match cur {
@@ -788,7 +788,7 @@ fn contains(self *Loops, li i64, b i64) bool {
 // ---------- printer ----------
 // The text Rust's `{:?}` gives for a float, from AL's shortest round-trip text `s`
 // (`fmt(x)`): same digits, but exponent notation below 1e-4 and from 1e16 on, and `NaN`.
-fn ir_float_debug(s str) str {
+ir_float_debug :: (s: str) -> str {
     if s == "nan" || s == "-nan" {
         return "NaN"
     }
@@ -855,7 +855,7 @@ fn ir_float_debug(s str) str {
     return fmt(sign, d[..e10], ".", d[e10..])
 }
 
-fn ir_print_func(f *Func, m Opt[*Module]) str {
+ir_print_func :: (f: *Func, m: Opt[*Module]) -> str {
     s := vec[str]()
     ps := vec[str]()
     for t in f.params.items() {
@@ -958,7 +958,7 @@ fn ir_print_func(f *Func, m Opt[*Module]) str {
 
 // ---------- verifier (debugging aid: ALC_DEBUG=verify) ----------
 // returns "" if the function is well formed, otherwise the description of the first problem
-fn ir_verify(f *Func) str {
+ir_verify :: (f: *Func) -> str {
     cfg := cfg_new(f)
     n := f.insts.len
     def_block := vec_fill(n, 0xFFFFFFFF)

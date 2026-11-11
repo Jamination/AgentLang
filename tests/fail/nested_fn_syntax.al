@@ -1,5 +1,5 @@
 // nested and anonymous functions: declarations that are not allowed
-fn main() {
+main :: () {
     inline fn a() {}
     noinline fn b() {}
     priv fn c() {}

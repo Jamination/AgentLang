@@ -1,7 +1,7 @@
 // std.mem: Pool with generational handles, Ring, SparseSet
-struct Mob { name str, hp i64 }
+Mob :: struct { name: str, hp: i64 }
 
-fn main() {
+main :: () {
     // fixed-capacity pool
     p := pool_new[Mob](3)
     a := p.insert(Mob{"orc", 10})

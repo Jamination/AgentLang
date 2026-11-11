@@ -1,17 +1,17 @@
 // AST for AL.
 
-struct Pos {
-    file i64
-    line i64
-    col i64
+Pos :: struct {
+    file: i64
+    line: i64
+    col: i64
 }
 
-struct Diag {
-    pos Pos
-    msg str
+Diag :: struct {
+    pos: Pos
+    msg: str
 }
 
-enum TypeAst {
+TypeAst :: enum {
     TypeAstName(str, Vec[TypeAst], Pos),
     TypeAstPtr(*TypeAst),
     TypeAstSlice(*TypeAst),
@@ -20,7 +20,7 @@ enum TypeAst {
     TypeAstTuple(Vec[TypeAst]),
 }
 
-enum UnOp {
+UnOp :: enum {
     UnOpNeg,
     UnOpNot,
     UnOpBitNot,
@@ -28,7 +28,7 @@ enum UnOp {
     UnOpDeref,
 }
 
-enum BinOp {
+BinOp :: enum {
     BinOpAdd,
     BinOpSub,
     BinOpMul,
@@ -49,12 +49,12 @@ enum BinOp {
     BinOpLOr,
 }
 
-struct Expr {
-    k EK
-    pos Pos
+Expr :: struct {
+    k: EK
+    pos: Pos
 }
 
-enum EK {
+EK :: enum {
     EKInt(u64),
     EKFloat(f64),
     EKStr(str),
@@ -76,15 +76,15 @@ enum EK {
     EKFn(*FnDecl),
 }
 
-struct MatchArm {
-    pats Vec[Pat]
-    body Block
-    pos Pos
+MatchArm :: struct {
+    pats: Vec[Pat]
+    body: Block
+    pos: Pos
     // `if cond` after the patterns: the arm is taken only if it holds
-    guard Opt[*Expr]
+    guard: Opt[*Expr]
 }
 
-enum Pat {
+Pat :: enum {
     PatWild,
     // an expression: a constant (int, string, named constant, ...). A bare name or
     // `Enum.Variant` is resolved when the match is lowered: a data-less variant of the
@@ -100,17 +100,17 @@ enum Pat {
     PatRef(str, Pos),
 }
 
-struct Block {
-    stmts Vec[Stmt]
-    end Pos
+Block :: struct {
+    stmts: Vec[Stmt]
+    end: Pos
 }
 
-struct Stmt {
-    k SK
-    pos Pos
+Stmt :: struct {
+    k: SK
+    pos: Pos
 }
 
-enum SK {
+SK :: enum {
     SKExpr(Expr),
     SKLet(Vec[str], Expr),
     SKMultiAssign(Vec[Expr], Expr),
@@ -136,72 +136,72 @@ enum SK {
     SKFn(*FnDecl),
 }
 
-struct FnDecl {
-    name str
-    tparams Vec[str]
-    params Vec[(str, TypeAst)]
-    ret Opt[TypeAst]
-    body Block
-    pos Pos
+FnDecl :: struct {
+    name: str
+    tparams: Vec[str]
+    params: Vec[(str, TypeAst)]
+    ret: Opt[TypeAst]
+    body: Block
+    pos: Pos
     // `inline` in the Rust source (a keyword in AL)
-    inl i64 // 1 = always inline, -1 = never, 0 = auto
+    inl: i64 // 1 = always inline, -1 = never, 0 = auto
     // `extern "lib" fn`: a C function in the named shared library (no body)
-    ext Opt[str]
+    ext: Opt[str]
     // declared with `priv`: visible only in its own file (see priv.al)
-    is_priv bool
+    is_priv: bool
 }
 
-struct StructDecl {
-    name str
-    tparams Vec[str]
-    fields Vec[(str, TypeAst)]
-    pos Pos
+StructDecl :: struct {
+    name: str
+    tparams: Vec[str]
+    fields: Vec[(str, TypeAst)]
+    pos: Pos
     // declared with `priv`: visible only in its own file (see priv.al)
-    is_priv bool
+    is_priv: bool
 }
 
-struct EnumDecl {
-    name str
-    tparams Vec[str]
-    variants Vec[(str, Vec[TypeAst])]
-    pos Pos
+EnumDecl :: struct {
+    name: str
+    tparams: Vec[str]
+    variants: Vec[(str, Vec[TypeAst])]
+    pos: Pos
     // declared with `priv`: visible only in its own file (see priv.al)
-    is_priv bool
+    is_priv: bool
 }
 
-struct ConstDecl {
-    name str
-    ty Opt[TypeAst]
-    val Expr
-    pos Pos
+ConstDecl :: struct {
+    name: str
+    ty: Opt[TypeAst]
+    val: Expr
+    pos: Pos
     // declared with `priv`: visible only in its own file (see priv.al)
-    is_priv bool
+    is_priv: bool
 }
 
-struct GlobalDecl {
-    name str
-    ty Opt[TypeAst]
-    init Opt[Expr]
-    pos Pos
+GlobalDecl :: struct {
+    name: str
+    ty: Opt[TypeAst]
+    init: Opt[Expr]
+    pos: Pos
     // declared with `priv`: visible only in its own file (see priv.al)
-    is_priv bool
+    is_priv: bool
 }
 
-struct TestDecl {
-    name str
-    body Block
-    pos Pos
+TestDecl :: struct {
+    name: str
+    body: Block
+    pos: Pos
 }
 
 // `type Name = T`: another name for the type `T`
-struct TypeDecl {
-    name str
-    ty TypeAst
-    pos Pos
-    is_priv bool
+TypeDecl :: struct {
+    name: str
+    ty: TypeAst
+    pos: Pos
+    is_priv: bool
 }
 
-enum Decl {
+Decl :: enum {
     DeclFn(FnDecl),
     DeclStruct(StructDecl),
     DeclEnum(EnumDecl),
@@ -213,7 +213,7 @@ enum Decl {
 }
 
 // the source forms of a list of types, separated by ", "
-fn ast_type_str_list(ts *Vec[TypeAst]) str {
+ast_type_str_list :: (ts: *Vec[TypeAst]) -> str {
     parts := vec[str]()
     for i in 0..ts.len {
         parts.push(ast_type_str(&ts[i]))
@@ -222,7 +222,7 @@ fn ast_type_str_list(ts *Vec[TypeAst]) str {
 }
 
 // source form of a type (for signatures in diagnostics and `alc sigs`)
-fn ast_type_str(t *TypeAst) str {
+ast_type_str :: (t: *TypeAst) -> str {
     match *t {
         TypeAstName(n, args, _) => {
             if args.is_empty() {
@@ -238,7 +238,7 @@ fn ast_type_str(t *TypeAst) str {
             return fmt("[]", ast_type_str(e))
         }
         TypeAstArray(n, e) => {
-            var len str = "_"
+            len: str = "_"
             match n.k {
                 EKInt(k) => {
                     len = fmt(k)
@@ -270,7 +270,7 @@ fn ast_type_str(t *TypeAst) str {
 
 // A `priv` declaration `name` of file number `k` is known to the compiler as `name`, the byte
 // 1 and `k` in decimal (see priv.al). ast_plain gives the name as it was written.
-fn ast_plain(name str) str {
+ast_plain :: (name: str) -> str {
     i := len(name)
     while i > 0 && name[i - 1] >= '0' && name[i - 1] <= '9' {
         i -= 1
@@ -282,12 +282,12 @@ fn ast_plain(name str) str {
 }
 
 // is this the internal name of a `priv` declaration?
-fn ast_is_private(name str) bool {
+ast_is_private :: (name: str) -> bool {
     return len(ast_plain(name)) != len(name)
 }
 
 // a text for the user (a diagnostic, a signature): every internal name in it as it was written
-fn ast_plain_text(s str) str {
+ast_plain_text :: (s: str) -> str {
     first := -1
     for i in 0..len(s) {
         if s[i] == 1 {

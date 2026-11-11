@@ -1,5 +1,5 @@
 // mulhi(a, b): the high half of the full product, signed or unsigned, for every integer width
-fn ref_u64(a u64, b u64) u64 {
+ref_u64 :: (a: u64, b: u64) -> u64 {
     a0 := a & 0xFFFFFFFF
     a1 := a >> 32
     b0 := b & 0xFFFFFFFF
@@ -9,7 +9,7 @@ fn ref_u64(a u64, b u64) u64 {
     a1 * b1 + (t >> 32) + (u >> 32)
 }
 
-fn ref_i64(a i64, b i64) i64 {
+ref_i64 :: (a: i64, b: i64) -> i64 {
     h := i64(ref_u64(u64(a), u64(b)))
     if a < 0 {
         h -= b
@@ -20,32 +20,32 @@ fn ref_i64(a i64, b i64) i64 {
     h
 }
 
-var seed u64 = 0x9E3779B97F4A7C15
+seed: u64 = 0x9E3779B97F4A7C15
 
-fn rnd() u64 {
+rnd :: () -> u64 {
     seed ^= seed << 13
     seed ^= seed >> 7
     seed ^= seed << 17
     seed
 }
 
-fn hi_generic[T](a T, b T) T { mulhi(a, b) }
+hi_generic[T] :: (a: T, b: T) -> T { mulhi(a, b) }
 
-struct Fx { v i32 }
-fn scale(f Fx, k i32) i32 { mulhi(f.v, k) }
+Fx :: struct { v: i32 }
+scale :: (f: Fx, k: i32) -> i32 { mulhi(f.v, k) }
 
-const C64 = 0x123456789ABCDEF
-const BIG u64 = 0xFFFFFFFFFFFFFFFF
+C64 :: 0x123456789ABCDEF
+BIG : u64 : 0xFFFFFFFFFFFFFFFF
 
-fn main() {
+main :: () {
     // constant operands (folded) and typical values
     print(mulhi(u64(1) << 63, u64(4)), mulhi(BIG, BIG), mulhi(i64(-1), i64(-1)), mulhi(i64(-1), i64(1)), mulhi(C64, C64))
     print(mulhi(u8(200), u8(200)), mulhi(i8(-100), i8(100)), mulhi(u16(65535), u16(65535)), mulhi(i16(-32768), i16(-32768)))
     print(mulhi(u32(0xFFFFFFFF), u32(0xFFFFFFFF)), mulhi(i32(-2147483648), i32(2147483647)), mulhi(i32(-2147483648), i32(-2147483648)))
     // an untyped literal takes the type of the other operand, or of the destination
-    var x u32 = 3000000000
-    var y u8 = mulhi(200, 3)
-    var z i16 = mulhi(-300, 300)
+    x: u32 = 3000000000
+    y: u8 = mulhi(200, 3)
+    z: i16 = mulhi(-300, 300)
     print(mulhi(x, 4), mulhi(4, x), y, z, mulhi(1 << 40, 1 << 40))
     // division by 10 through a multiplication
     n := u64(1234567890123456789)

@@ -1,14 +1,14 @@
 // std.input: key / mouse state machine, text queue, event queue, key names, gamepad events.
 use std.input
 
-fn key(kind EventKind, k i64) Event { Event{kind: kind, key: k} }
+key :: (kind: EventKind, k: i64) -> Event { Event{kind: kind, key: k} }
 
-fn show(i *Input, k i64) {
+show :: (i: *Input, k: i64) {
     print(key_name(k), i.key_down(k), i.key_pressed(k), i.key_released(k), i.key_repeated(k))
 }
 
-fn main() {
-    var i Input
+main :: () {
+    i: Input
     // frame 1: press A, tap B (down and up within the frame)
     i.begin_frame()
     i.feed(key(EventKeyDown, KEY_A))
@@ -71,10 +71,10 @@ fn main() {
     i.feed(Event{kind: EventText, codepoint: 0xE9})
     i.feed(Event{kind: EventText, codepoint: 0x20AC})
     i.feed(Event{kind: EventText, codepoint: 0x1F600})
-    var buf [16]u8
+    buf: [16]u8
     t := i.text_utf8(buf[..])
     print(i.text(), len(t), t)
-    var small [4]u8
+    small: [4]u8
     print(len(i.text_utf8(small[..])))
     for k in 0..40 {
         i.feed(Event{kind: EventText, codepoint: 'x'})
@@ -154,6 +154,6 @@ fn main() {
     putf(f64(s.x), 3)
     print()
     // no device with this number: open fails, poll reports disconnected
-    var none Gamepad
+    none: Gamepad
     print(gamepad_open(&none, 987654), gamepad_poll(&none), none.connected)
 }

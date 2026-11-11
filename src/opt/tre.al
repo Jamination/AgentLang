@@ -2,14 +2,14 @@
 //     return x + f(args)        (also *, &, |, ^ on integers)
 // which becomes a loop that carries the pending operation in an accumulator.
 
-struct TreSite {
-    block i64,
-    call i64,
+TreSite :: struct {
+    block: i64,
+    call: i64,
     // accumulator form: (combining instruction, the other operand)
-    acc Opt[(i64, i64)],
+    acc: Opt[(i64, i64)],
 }
 
-fn tre_identity(op Op) Opt[i64] {
+tre_identity :: (op: Op) -> Opt[i64] {
     if op == OpAdd || op == OpOr || op == OpXor {
         return Some(0)
     }
@@ -23,7 +23,7 @@ fn tre_identity(op Op) Opt[i64] {
 }
 
 // acc_op.is_none() || acc_op == Some(op)
-fn tre_none_or_same(acc_op Opt[Op], op Op) bool {
+tre_none_or_same :: (acc_op: Opt[Op], op: Op) -> bool {
     match acc_op {
         Some(o) => return o == op
         None => {}
@@ -31,7 +31,7 @@ fn tre_none_or_same(acc_op Opt[Op], op Op) bool {
     return true
 }
 
-fn tre_run(f *Func, fid i64) bool {
+tre_run :: (f: *Func, fid: i64) -> bool {
     if f.rets.len > 1 {
         return false
     }
@@ -44,7 +44,7 @@ fn tre_run(f *Func, fid i64) bool {
     uses := f.use_counts()
     rpo := f.rpo()
     sites := vec[TreSite]()
-    var acc_op Opt[Op] = None
+    acc_op: Opt[Op] = None
     for b in rpo.items() {
         rv := vec[i64]()
         match f.blocks[b].term {
@@ -138,7 +138,7 @@ fn tre_run(f *Func, fid i64) bool {
         head.push(phi)
         pphi.push((k, p, phi))
     }
-    var acc_phi Opt[i64] = None
+    acc_phi: Opt[i64] = None
     match acc_op {
         Some(op) => {
             idk := 0
@@ -177,7 +177,7 @@ fn tre_run(f *Func, fid i64) bool {
         b := s.block
         call_args := clone(&f.insts[s.call].args)
         // new accumulator value
-        var new_acc Opt[i64] = None
+        new_acc: Opt[i64] = None
         match acc_phi {
             Some(ap) => {
                 match s.acc {

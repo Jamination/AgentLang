@@ -4,10 +4,10 @@
 // compiler), vtable sizes, the helpers, and calls through a COM vtable built in AL.
 use std.dx12
 
-var checked i64
-var wrong i64
+checked: i64
+wrong: i64
 
-fn chk(got i64, want i64, what str) {
+chk :: (got: i64, want: i64, what: str) {
     checked += 1
     if got != want {
         wrong += 1
@@ -16,9 +16,9 @@ fn chk(got i64, want i64, what str) {
 }
 
 // A COM object implemented in AL: the vtable layout of ID3DBlob with a reference count.
-struct FakeBlob { vt *ID3DBlobVtbl, refs u32, data str }
+FakeBlob :: struct { vt: *ID3DBlobVtbl, refs: u32, data: str }
 
-fn fake_query(self *ID3DBlob, riid *GUID, out **u8) i32 {
+fake_query :: (self: *ID3DBlob, riid: *GUID, out: **u8) -> i32 {
     if *riid == IID_ID3DBlob || *riid == IID_IUnknown {
         *out = cast[*u8](self)
         cast[*FakeBlob](self).refs += 1
@@ -28,23 +28,23 @@ fn fake_query(self *ID3DBlob, riid *GUID, out **u8) i32 {
     E_NOINTERFACE
 }
 
-fn fake_addref(self *ID3DBlob) u32 {
+fake_addref :: (self: *ID3DBlob) -> u32 {
     b := cast[*FakeBlob](self)
     b.refs += 1
     b.refs
 }
 
-fn fake_release(self *ID3DBlob) u32 {
+fake_release :: (self: *ID3DBlob) -> u32 {
     b := cast[*FakeBlob](self)
     b.refs -= 1
     b.refs
 }
 
-fn fake_pointer(self *ID3DBlob) *u8 { ptr(cast[*FakeBlob](self).data) }
+fake_pointer :: (self: *ID3DBlob) -> *u8 { ptr(cast[*FakeBlob](self).data) }
 
-fn fake_size(self *ID3DBlob) u64 { u64(len(cast[*FakeBlob](self).data)) }
+fake_size :: (self: *ID3DBlob) -> u64 { u64(len(cast[*FakeBlob](self).data)) }
 
-fn helpers() {
+helpers :: () {
     print("S_OK", SUCCEEDED(S_OK), FAILED(S_OK), "S_FALSE", SUCCEEDED(S_FALSE), "E_FAIL", SUCCEEDED(E_FAIL), FAILED(E_FAIL))
     print("DXGI_ERROR_DEVICE_REMOVED", hex(u64(u32(DXGI_ERROR_DEVICE_REMOVED))), FAILED(DXGI_ERROR_DEVICE_REMOVED))
     dx_check(S_OK, "nothing")
@@ -54,20 +54,20 @@ fn helpers() {
     print("consts", D3D12_COMMAND_LIST_TYPE_DIRECT, D3D_FEATURE_LEVEL_12_0, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING, DXGI_USAGE_RENDER_TARGET_OUTPUT)
 
     // unions: the accessors view the same bytes
-    var barrier D3D12_RESOURCE_BARRIER
+    barrier: D3D12_RESOURCE_BARRIER
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
     t := barrier.u_Transition()
     t.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
     t.StateBefore = D3D12_RESOURCE_STATE_PRESENT
     t.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET
     print("barrier", cast[i64](barrier.u_Aliasing()) - cast[i64](&barrier), barrier.u_Transition().Subresource, barrier.u_Transition().StateAfter)
-    var clear D3D12_CLEAR_VALUE
+    clear: D3D12_CLEAR_VALUE
     color := clear.u_Color()
     color[2] = 0.5
     print("clear", clear.u_Color()[2], clear.u_DepthStencil().Depth)
 
     // calls through a vtable
-    var vt ID3DBlobVtbl
+    vt: ID3DBlobVtbl
     vt.QueryInterface = fake_query
     vt.AddRef = fake_addref
     vt.Release = fake_release
@@ -76,8 +76,8 @@ fn helpers() {
     fake := FakeBlob{&vt, 1, "shader bytes"}
     blob := cast[*ID3DBlob](&fake)
     print("blob", blob.GetBufferSize(), blob_bytes(blob), blob.AddRef(), blob.Release())
-    var unknown *IUnknown
-    var device *ID3D12Device
+    unknown: *IUnknown
+    device: *ID3D12Device
     print("query", blob.QueryInterface(&IID_IUnknown, &unknown) == S_OK, unknown == cast[*IUnknown](blob), fake.refs,
         blob.QueryInterface(&IID_ID3D12Device, &device) == E_NOINTERFACE, device == nil)
     com_release(&unknown)
@@ -85,7 +85,7 @@ fn helpers() {
     print("release", unknown == nil, fake.refs)
 }
 
-fn layouts_0(b *u8) {
+layouts_0 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[GUID](), 16, "GUID")
     chk(cast[i64](&cast[*GUID](b).Data1) - a, 0, "GUID.Data1")
@@ -221,7 +221,7 @@ fn layouts_0(b *u8) {
     chk(cast[i64](&cast[*DXGI_ADAPTER_DESC1](b).Flags) - a, 304, "DXGI_ADAPTER_DESC1.Flags")
 }
 
-fn layouts_1(b *u8) {
+layouts_1 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[DXGI_DISPLAY_COLOR_SPACE](), 192, "DXGI_DISPLAY_COLOR_SPACE")
     chk(cast[i64](&cast[*DXGI_DISPLAY_COLOR_SPACE](b).PrimaryCoordinates) - a, 0, "DXGI_DISPLAY_COLOR_SPACE.PrimaryCoordinates")
@@ -382,7 +382,7 @@ fn layouts_1(b *u8) {
     chk(cast[i64](&cast[*D3D12_RECT](b).bottom) - a, 12, "D3D12_RECT.bottom")
 }
 
-fn layouts_2(b *u8) {
+layouts_2 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_BOX](), 24, "D3D12_BOX")
     chk(cast[i64](&cast[*D3D12_BOX](b).left) - a, 0, "D3D12_BOX.left")
@@ -505,7 +505,7 @@ fn layouts_2(b *u8) {
     chk(cast[i64](&cast[*D3D12_PACKED_MIP_INFO](b).StartTileIndexInOverallResource) - a, 8, "D3D12_PACKED_MIP_INFO.StartTileIndexInOverallResource")
 }
 
-fn layouts_3(b *u8) {
+layouts_3 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_RESOURCE_TRANSITION_BARRIER](), 24, "D3D12_RESOURCE_TRANSITION_BARRIER")
     chk(cast[i64](&cast[*D3D12_RESOURCE_TRANSITION_BARRIER](b).pResource) - a, 0, "D3D12_RESOURCE_TRANSITION_BARRIER.pResource")
@@ -633,7 +633,7 @@ fn layouts_3(b *u8) {
     chk(cast[i64](&cast[*D3D12_VERSIONED_ROOT_SIGNATURE_DESC](b).u) - a, 8, "D3D12_VERSIONED_ROOT_SIGNATURE_DESC.u")
 }
 
-fn layouts_4(b *u8) {
+layouts_4 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_DESCRIPTOR_HEAP_DESC](), 16, "D3D12_DESCRIPTOR_HEAP_DESC")
     chk(cast[i64](&cast[*D3D12_DESCRIPTOR_HEAP_DESC](b).Type) - a, 0, "D3D12_DESCRIPTOR_HEAP_DESC.Type")
@@ -735,7 +735,7 @@ fn layouts_4(b *u8) {
     chk(cast[i64](&cast[*D3D12_TEX1D_ARRAY_RTV](b).ArraySize) - a, 8, "D3D12_TEX1D_ARRAY_RTV.ArraySize")
 }
 
-fn layouts_5(b *u8) {
+layouts_5 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_TEX2D_RTV](), 8, "D3D12_TEX2D_RTV")
     chk(cast[i64](&cast[*D3D12_TEX2D_RTV](b).MipSlice) - a, 0, "D3D12_TEX2D_RTV.MipSlice")
@@ -861,7 +861,7 @@ fn layouts_5(b *u8) {
     chk(cast[i64](&cast[*D3D12_STREAM_OUTPUT_DESC](b).RasterizedStream) - a, 28, "D3D12_STREAM_OUTPUT_DESC.RasterizedStream")
 }
 
-fn layouts_6(b *u8) {
+layouts_6 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_INPUT_ELEMENT_DESC](), 32, "D3D12_INPUT_ELEMENT_DESC")
     chk(cast[i64](&cast[*D3D12_INPUT_ELEMENT_DESC](b).SemanticName) - a, 0, "D3D12_INPUT_ELEMENT_DESC.SemanticName")
@@ -978,7 +978,7 @@ fn layouts_6(b *u8) {
     chk(cast[i64](&cast[*D3D12_FEATURE_DATA_SERIALIZATION](b).HeapSerializationTier) - a, 4, "D3D12_FEATURE_DATA_SERIALIZATION.HeapSerializationTier")
 }
 
-fn layouts_7(b *u8) {
+layouts_7 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_FEATURE_DATA_CROSS_NODE](), 8, "D3D12_FEATURE_DATA_CROSS_NODE")
     chk(cast[i64](&cast[*D3D12_FEATURE_DATA_CROSS_NODE](b).SharingTier) - a, 0, "D3D12_FEATURE_DATA_CROSS_NODE.SharingTier")
@@ -1076,7 +1076,7 @@ fn layouts_7(b *u8) {
     chk(cast[i64](&cast[*D3D12_DISCARD_REGION](b).NumSubresources) - a, 20, "D3D12_DISCARD_REGION.NumSubresources")
 }
 
-fn layouts_8(b *u8) {
+layouts_8 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_QUERY_DATA_PIPELINE_STATISTICS](), 88, "D3D12_QUERY_DATA_PIPELINE_STATISTICS")
     chk(cast[i64](&cast[*D3D12_QUERY_DATA_PIPELINE_STATISTICS](b).IAVertices) - a, 0, "D3D12_QUERY_DATA_PIPELINE_STATISTICS.IAVertices")
@@ -1179,7 +1179,7 @@ fn layouts_8(b *u8) {
     chk(cast[i64](&cast[*D3D12_DXIL_SUBOBJECT_TO_EXPORTS_ASSOCIATION](b).pExports) - a, 16, "D3D12_DXIL_SUBOBJECT_TO_EXPORTS_ASSOCIATION.pExports")
 }
 
-fn layouts_9(b *u8) {
+layouts_9 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_HIT_GROUP_DESC](), 40, "D3D12_HIT_GROUP_DESC")
     chk(cast[i64](&cast[*D3D12_HIT_GROUP_DESC](b).HitGroupExport) - a, 0, "D3D12_HIT_GROUP_DESC.HitGroupExport")
@@ -1282,7 +1282,7 @@ fn layouts_9(b *u8) {
     chk(cast[i64](&cast[*D3D12_AUTO_BREADCRUMB_NODE](b).pNext) - a, 72, "D3D12_AUTO_BREADCRUMB_NODE.pNext")
 }
 
-fn layouts_10(b *u8) {
+layouts_10 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_DRED_BREADCRUMB_CONTEXT](), 16, "D3D12_DRED_BREADCRUMB_CONTEXT")
     chk(cast[i64](&cast[*D3D12_DRED_BREADCRUMB_CONTEXT](b).BreadcrumbIndex) - a, 0, "D3D12_DRED_BREADCRUMB_CONTEXT.BreadcrumbIndex")
@@ -1392,7 +1392,7 @@ fn layouts_10(b *u8) {
     chk(cast[i64](&cast[*D3D12_RENDER_PASS_DEPTH_STENCIL_DESC](b).StencilEndingAccess) - a, 112, "D3D12_RENDER_PASS_DEPTH_STENCIL_DESC.StencilEndingAccess")
 }
 
-fn layouts_11(b *u8) {
+layouts_11 :: (b: *u8) {
     a := cast[i64](b)
     chk(sizeof[D3D12_DISPATCH_RAYS_DESC](), 104, "D3D12_DISPATCH_RAYS_DESC")
     chk(cast[i64](&cast[*D3D12_DISPATCH_RAYS_DESC](b).RayGenerationShaderRecord) - a, 0, "D3D12_DISPATCH_RAYS_DESC.RayGenerationShaderRecord")
@@ -1477,7 +1477,7 @@ fn layouts_11(b *u8) {
     chk(cast[i64](&cast[*D3D12_INFO_QUEUE_FILTER](b).DenyList) - a, 48, "D3D12_INFO_QUEUE_FILTER.DenyList")
 }
 
-fn vtables() {
+vtables :: () {
     chk(sizeof[IUnknownVtbl](), 24, "IUnknownVtbl")
     chk(sizeof[ID3DBlobVtbl](), 40, "ID3DBlobVtbl")
     chk(sizeof[ID3DDestructionNotifierVtbl](), 40, "ID3DDestructionNotifierVtbl")
@@ -1604,153 +1604,125 @@ fn vtables() {
     chk(sizeof[ID3D12InfoQueue1Vtbl](), 320, "ID3D12InfoQueue1Vtbl")
 }
 
-fn instantiate(o **IUnknown) {
+instantiate :: (o: **IUnknown) {
     {
-        var x *IUnknown
+        x: *IUnknown
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3DBlob
+        x: *ID3DBlob
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3DDestructionNotifier
+        x: *ID3DDestructionNotifier
         x.QueryInterface(nil, o)
     }
     {
-        var x *IDXGIObject
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGIDeviceSubObject
+        x: *IDXGIObject
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
-        x.GetDevice(nil, o)
     }
     {
-        var x *IDXGIResource
+        x: *IDXGIDeviceSubObject
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *IDXGIKeyedMutex
+        x: *IDXGIResource
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *IDXGISurface
+        x: *IDXGIKeyedMutex
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *IDXGISurface1
+        x: *IDXGISurface
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *IDXGIOutput
+        x: *IDXGISurface1
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+        x.GetDevice(nil, o)
+    }
+    {
+        x: *IDXGIOutput
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIAdapter
+        x: *IDXGIAdapter
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGISwapChain
+        x: *IDXGISwapChain
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
         x.GetBuffer(0, nil, o)
     }
     {
-        var x *IDXGIFactory
+        x: *IDXGIFactory
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIDevice
+        x: *IDXGIDevice
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIAdapter1
+        x: *IDXGIAdapter1
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIDevice1
+        x: *IDXGIDevice1
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIFactory1
+        x: *IDXGIFactory1
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIOutputDuplication
+        x: *IDXGIOutputDuplication
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGISurface2
+        x: *IDXGISurface2
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
         x.GetResource(nil, o, nil)
     }
     {
-        var x *IDXGIResource1
+        x: *IDXGIResource1
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *IDXGIDisplayControl
+        x: *IDXGIDisplayControl
         x.QueryInterface(nil, o)
     }
     {
-        var x *IDXGIDevice2
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGISwapChain1
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-        x.GetDevice(nil, o)
-        x.GetBuffer(0, nil, o)
-        x.GetCoreWindow(nil, o)
-    }
-    {
-        var x *IDXGIFactory2
+        x: *IDXGIDevice2
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIAdapter2
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGIOutput1
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGIDevice3
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGISwapChain2
+        x: *IDXGISwapChain1
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
@@ -1758,34 +1730,27 @@ fn instantiate(o **IUnknown) {
         x.GetCoreWindow(nil, o)
     }
     {
-        var x *IDXGIOutput2
+        x: *IDXGIFactory2
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIFactory3
+        x: *IDXGIAdapter2
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIDecodeSwapChain
-        x.QueryInterface(nil, o)
-    }
-    {
-        var x *IDXGIFactoryMedia
-        x.QueryInterface(nil, o)
-    }
-    {
-        var x *IDXGISwapChainMedia
-        x.QueryInterface(nil, o)
-    }
-    {
-        var x *IDXGIOutput3
+        x: *IDXGIOutput1
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGISwapChain3
+        x: *IDXGIDevice3
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+    }
+    {
+        x: *IDXGISwapChain2
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
@@ -1793,29 +1758,64 @@ fn instantiate(o **IUnknown) {
         x.GetCoreWindow(nil, o)
     }
     {
-        var x *IDXGIOutput4
+        x: *IDXGIOutput2
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIFactory4
+        x: *IDXGIFactory3
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+    }
+    {
+        x: *IDXGIDecodeSwapChain
+        x.QueryInterface(nil, o)
+    }
+    {
+        x: *IDXGIFactoryMedia
+        x.QueryInterface(nil, o)
+    }
+    {
+        x: *IDXGISwapChainMedia
+        x.QueryInterface(nil, o)
+    }
+    {
+        x: *IDXGIOutput3
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+    }
+    {
+        x: *IDXGISwapChain3
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+        x.GetDevice(nil, o)
+        x.GetBuffer(0, nil, o)
+        x.GetCoreWindow(nil, o)
+    }
+    {
+        x: *IDXGIOutput4
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+    }
+    {
+        x: *IDXGIFactory4
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.EnumAdapterByLuid(LUID{}, nil, o)
         x.EnumWarpAdapter(nil, o)
     }
     {
-        var x *IDXGIAdapter3
+        x: *IDXGIAdapter3
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIOutput5
+        x: *IDXGIOutput5
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGISwapChain4
+        x: *IDXGISwapChain4
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.GetDevice(nil, o)
@@ -1823,37 +1823,29 @@ fn instantiate(o **IUnknown) {
         x.GetCoreWindow(nil, o)
     }
     {
-        var x *IDXGIDevice4
+        x: *IDXGIDevice4
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
     }
     {
-        var x *IDXGIFactory5
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-        x.EnumAdapterByLuid(LUID{}, nil, o)
-        x.EnumWarpAdapter(nil, o)
-    }
-    {
-        var x *IDXGIAdapter4
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGIOutput6
-        x.QueryInterface(nil, o)
-        x.GetParent(nil, o)
-    }
-    {
-        var x *IDXGIFactory6
+        x: *IDXGIFactory5
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.EnumAdapterByLuid(LUID{}, nil, o)
         x.EnumWarpAdapter(nil, o)
-        x.EnumAdapterByGpuPreference(0, 0, nil, o)
     }
     {
-        var x *IDXGIFactory7
+        x: *IDXGIAdapter4
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+    }
+    {
+        x: *IDXGIOutput6
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+    }
+    {
+        x: *IDXGIFactory6
         x.QueryInterface(nil, o)
         x.GetParent(nil, o)
         x.EnumAdapterByLuid(LUID{}, nil, o)
@@ -1861,125 +1853,133 @@ fn instantiate(o **IUnknown) {
         x.EnumAdapterByGpuPreference(0, 0, nil, o)
     }
     {
-        var x *IDXGIInfoQueue
+        x: *IDXGIFactory7
+        x.QueryInterface(nil, o)
+        x.GetParent(nil, o)
+        x.EnumAdapterByLuid(LUID{}, nil, o)
+        x.EnumWarpAdapter(nil, o)
+        x.EnumAdapterByGpuPreference(0, 0, nil, o)
+    }
+    {
+        x: *IDXGIInfoQueue
         x.QueryInterface(nil, o)
     }
     {
-        var x *IDXGIDebug
+        x: *IDXGIDebug
         x.QueryInterface(nil, o)
     }
     {
-        var x *IDXGIDebug1
+        x: *IDXGIDebug1
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Object
+        x: *ID3D12Object
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DeviceChild
-        x.QueryInterface(nil, o)
-        x.GetDevice(nil, o)
-    }
-    {
-        var x *ID3D12Pageable
-        x.QueryInterface(nil, o)
-        x.GetDevice(nil, o)
-    }
-    {
-        var x *ID3D12Heap
+        x: *ID3D12DeviceChild
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12Resource
+        x: *ID3D12Pageable
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12CommandList
+        x: *ID3D12Heap
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12DescriptorHeap
+        x: *ID3D12Resource
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12QueryHeap
+        x: *ID3D12CommandList
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12CommandSignature
+        x: *ID3D12DescriptorHeap
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList
+        x: *ID3D12QueryHeap
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList1
+        x: *ID3D12CommandSignature
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList2
+        x: *ID3D12GraphicsCommandList
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12ProtectedSession
+        x: *ID3D12GraphicsCommandList1
+        x.QueryInterface(nil, o)
+        x.GetDevice(nil, o)
+    }
+    {
+        x: *ID3D12GraphicsCommandList2
+        x.QueryInterface(nil, o)
+        x.GetDevice(nil, o)
+    }
+    {
+        x: *ID3D12ProtectedSession
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.GetStatusFence(nil, o)
     }
     {
-        var x *ID3D12ProtectedResourceSession
+        x: *ID3D12ProtectedResourceSession
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.GetStatusFence(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList3
+        x: *ID3D12GraphicsCommandList3
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12CommandQueue
+        x: *ID3D12CommandQueue
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12RootSignature
+        x: *ID3D12RootSignature
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12PipelineState
+        x: *ID3D12PipelineState
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12Fence
+        x: *ID3D12Fence
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12Fence1
+        x: *ID3D12Fence1
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12CommandAllocator
+        x: *ID3D12CommandAllocator
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12Device
+        x: *ID3D12Device
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -1998,14 +1998,14 @@ fn instantiate(o **IUnknown) {
         x.CreateCommandSignature(nil, nil, nil, o)
     }
     {
-        var x *ID3D12PipelineLibrary
+        x: *ID3D12PipelineLibrary
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.LoadGraphicsPipeline(nil, nil, nil, o)
         x.LoadComputePipeline(nil, nil, nil, o)
     }
     {
-        var x *ID3D12PipelineLibrary1
+        x: *ID3D12PipelineLibrary1
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.LoadGraphicsPipeline(nil, nil, nil, o)
@@ -2013,7 +2013,7 @@ fn instantiate(o **IUnknown) {
         x.LoadPipeline(nil, nil, nil, o)
     }
     {
-        var x *ID3D12Device1
+        x: *ID3D12Device1
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2033,7 +2033,7 @@ fn instantiate(o **IUnknown) {
         x.CreatePipelineLibrary(nil, 0, nil, o)
     }
     {
-        var x *ID3D12Device2
+        x: *ID3D12Device2
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2054,7 +2054,7 @@ fn instantiate(o **IUnknown) {
         x.CreatePipelineState(nil, nil, o)
     }
     {
-        var x *ID3D12Device3
+        x: *ID3D12Device3
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2077,15 +2077,15 @@ fn instantiate(o **IUnknown) {
         x.OpenExistingHeapFromFileMapping(nil, nil, o)
     }
     {
-        var x *ID3D12RootSignatureDeserializer
+        x: *ID3D12RootSignatureDeserializer
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12VersionedRootSignatureDeserializer
+        x: *ID3D12VersionedRootSignatureDeserializer
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Device4
+        x: *ID3D12Device4
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2113,31 +2113,31 @@ fn instantiate(o **IUnknown) {
         x.CreateReservedResource1(nil, 0, nil, nil, nil, o)
     }
     {
-        var x *ID3D12LifetimeOwner
+        x: *ID3D12LifetimeOwner
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12SwapChainAssistant
+        x: *ID3D12SwapChainAssistant
         x.QueryInterface(nil, o)
         x.GetSwapChainObject(nil, o)
         x.GetCurrentResourceAndCommandQueue(nil, o, nil, o)
     }
     {
-        var x *ID3D12LifetimeTracker
+        x: *ID3D12LifetimeTracker
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12StateObject
+        x: *ID3D12StateObject
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12StateObjectProperties
+        x: *ID3D12StateObjectProperties
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Device5
+        x: *ID3D12Device5
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2168,27 +2168,27 @@ fn instantiate(o **IUnknown) {
         x.CreateStateObject(nil, nil, o)
     }
     {
-        var x *ID3D12DeviceRemovedExtendedDataSettings
+        x: *ID3D12DeviceRemovedExtendedDataSettings
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DeviceRemovedExtendedDataSettings1
+        x: *ID3D12DeviceRemovedExtendedDataSettings1
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DeviceRemovedExtendedData
+        x: *ID3D12DeviceRemovedExtendedData
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DeviceRemovedExtendedData1
+        x: *ID3D12DeviceRemovedExtendedData1
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DeviceRemovedExtendedData2
+        x: *ID3D12DeviceRemovedExtendedData2
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Device6
+        x: *ID3D12Device6
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2219,13 +2219,13 @@ fn instantiate(o **IUnknown) {
         x.CreateStateObject(nil, nil, o)
     }
     {
-        var x *ID3D12ProtectedResourceSession1
+        x: *ID3D12ProtectedResourceSession1
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.GetStatusFence(nil, o)
     }
     {
-        var x *ID3D12Device7
+        x: *ID3D12Device7
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2258,7 +2258,7 @@ fn instantiate(o **IUnknown) {
         x.CreateProtectedResourceSession1(nil, nil, o)
     }
     {
-        var x *ID3D12Device8
+        x: *ID3D12Device8
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2293,40 +2293,40 @@ fn instantiate(o **IUnknown) {
         x.CreatePlacedResource1(nil, 0, nil, 0, nil, nil, o)
     }
     {
-        var x *ID3D12Resource1
+        x: *ID3D12Resource1
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.GetProtectedResourceSession(nil, o)
     }
     {
-        var x *ID3D12Resource2
+        x: *ID3D12Resource2
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.GetProtectedResourceSession(nil, o)
     }
     {
-        var x *ID3D12Heap1
+        x: *ID3D12Heap1
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
         x.GetProtectedResourceSession(nil, o)
     }
     {
-        var x *ID3D12MetaCommand
+        x: *ID3D12MetaCommand
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList4
+        x: *ID3D12GraphicsCommandList4
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12ShaderCacheSession
+        x: *ID3D12ShaderCacheSession
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12Device9
+        x: *ID3D12Device9
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2363,7 +2363,7 @@ fn instantiate(o **IUnknown) {
         x.CreateCommandQueue1(nil, nil, nil, o)
     }
     {
-        var x *ID3D12Device10
+        x: *ID3D12Device10
         x.QueryInterface(nil, o)
         x.CreateCommandQueue(nil, nil, o)
         x.CreateCommandAllocator(0, nil, o)
@@ -2403,99 +2403,99 @@ fn instantiate(o **IUnknown) {
         x.CreateReservedResource2(nil, 0, nil, nil, 0, nil, nil, o)
     }
     {
-        var x *ID3D12VirtualizationGuestDevice
+        x: *ID3D12VirtualizationGuestDevice
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Tools
+        x: *ID3D12Tools
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12SDKConfiguration
+        x: *ID3D12SDKConfiguration
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12SDKConfiguration1
+        x: *ID3D12SDKConfiguration1
         x.QueryInterface(nil, o)
         x.CreateDeviceFactory(0, nil, nil, o)
     }
     {
-        var x *ID3D12DeviceFactory
+        x: *ID3D12DeviceFactory
         x.QueryInterface(nil, o)
         x.GetConfigurationInterface(nil, nil, o)
         x.CreateDevice(nil, 0, nil, o)
     }
     {
-        var x *ID3D12DeviceConfiguration
+        x: *ID3D12DeviceConfiguration
         x.QueryInterface(nil, o)
         x.CreateVersionedRootSignatureDeserializer(nil, 0, nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList5
+        x: *ID3D12GraphicsCommandList5
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList6
+        x: *ID3D12GraphicsCommandList6
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12GraphicsCommandList7
+        x: *ID3D12GraphicsCommandList7
         x.QueryInterface(nil, o)
         x.GetDevice(nil, o)
     }
     {
-        var x *ID3D12Debug
+        x: *ID3D12Debug
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Debug1
+        x: *ID3D12Debug1
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Debug2
+        x: *ID3D12Debug2
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Debug3
+        x: *ID3D12Debug3
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Debug4
+        x: *ID3D12Debug4
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12Debug5
+        x: *ID3D12Debug5
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DebugDevice
+        x: *ID3D12DebugDevice
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DebugDevice1
+        x: *ID3D12DebugDevice1
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12DebugDevice2
+        x: *ID3D12DebugDevice2
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12SharingContract
+        x: *ID3D12SharingContract
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12InfoQueue
+        x: *ID3D12InfoQueue
         x.QueryInterface(nil, o)
     }
     {
-        var x *ID3D12InfoQueue1
+        x: *ID3D12InfoQueue1
         x.QueryInterface(nil, o)
     }
 }
 
-fn main() {
+main :: () {
     helpers()
     scratch := alloc[u8](8192)
     layouts_0(ptr(scratch))

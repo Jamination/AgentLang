@@ -1,4 +1,4 @@
-fn quicksort(a []i64, lo i64, hi i64) {
+quicksort :: (a: []i64, lo: i64, hi: i64) {
     p := a[(lo + hi) / 2]
     i := lo
     j := hi
@@ -25,16 +25,16 @@ fn quicksort(a []i64, lo i64, hi i64) {
     }
 }
 
-fn main() i64 {
+main :: () -> i64 {
     n := 5000000
     a := alloc[i64](n)
-    var seed u64 = 88172645463325252
+    seed: u64 = 88172645463325252
     for i in 0..n {
         seed = seed * 6364136223846793005 + 1442695040888963407
         a[i] = i64(seed >> 16)
     }
     quicksort(a, 0, n - 1)
-    var sum u64 = 0
+    sum: u64 = 0
     for i in 0..n {
         if i > 0 && a[i - 1] > a[i] {
             put("not sorted at ", i, "\n")

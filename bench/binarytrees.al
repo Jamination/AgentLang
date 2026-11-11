@@ -1,20 +1,20 @@
-struct Node { left *Node, right *Node }
+Node :: struct { left: *Node, right: *Node }
 
-fn item_check(t *Node) i64 {
+item_check :: (t: *Node) -> i64 {
     if t.left == nil {
         return 1
     }
     1 + item_check(t.left) + item_check(t.right)
 }
 
-fn bottom_up(depth i64) *Node {
+bottom_up :: (depth: i64) -> *Node {
     if depth > 0 {
         return &Node{bottom_up(depth - 1), bottom_up(depth - 1)}
     }
     &Node{nil, nil}
 }
 
-fn main() {
+main :: () {
     n := 20
     min_depth := 4
     max_depth := if min_depth + 2 > n { min_depth + 2 } else { n }

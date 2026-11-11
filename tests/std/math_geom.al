@@ -1,14 +1,14 @@
 // geometry tests, easing curves and colour helpers of the math library
-var fails i64
+fails: i64
 
-fn ok(name str, c bool) {
+ok :: (name: str, c: bool) {
     if !c {
         fails += 1
         print("FAILED:", name)
     }
 }
 
-fn main() {
+main :: () {
     box := Aabb{min: vec3(-1.0), max: vec3(1.0)}
     far := Aabb{min: vec3(2.0, 0.0, 0.0), max: vec3(5.0, 1.0, 1.0)}
     touch := Aabb{min: vec3(1.0, -1.0, -1.0), max: vec3(3.0, 0.0, 0.0)}
@@ -44,7 +44,7 @@ fn main() {
     ok("ray plane", hitp && tp == 5.0 && !hitp2 && !hitp3)
 
     // ---- easing: every curve starts at 0 and ends at 1 ----
-    curves := [9]fn(f32) f32{ease_in_quad, ease_out_quad, ease_in_out_quad, ease_in_cubic, ease_out_cubic, ease_in_out_cubic, ease_out_elastic, ease_out_bounce, ease_out_back}
+    curves := [9](f32) -> f32{ease_in_quad, ease_out_quad, ease_in_out_quad, ease_in_cubic, ease_out_cubic, ease_in_out_cubic, ease_out_elastic, ease_out_bounce, ease_out_back}
     for i, f in curves {
         ok(fmt("ease ends ", i), approx_eq(f(0.0), 0.0) && approx_eq(f(1.0), 1.0))
     }
@@ -53,7 +53,7 @@ fn main() {
     mono := true
     for i in 0..5 {
         f := curves[i]
-        var prev f32 = 0.0
+        prev: f32 = 0.0
         for k in 1..=100 {
             v := f(f32(k) / 100.0)
             mono = mono && v >= prev
@@ -75,7 +75,7 @@ fn main() {
         trip = trip && approx_eq(hsv_to_rgb(rgb_to_hsv(c)), c, 0.00001) && approx_eq(linear_to_srgb(srgb_to_linear(c)), c, 0.00001)
     }
     ok("colour round trips", trip)
-    var half f32 = 0.5
+    half: f32 = 0.5
     ok("srgb", srgb_to_linear(half - half) == 0.0 && approx_eq(srgb_to_linear(half + half), 1.0) && approx_eq(srgb_to_linear(half), 0.21404114) && approx_eq(linear_to_srgb(half), 0.7353569) && approx_eq(srgb_to_linear(half / 20.0), 0.0019349845))
     ok("pack", color_u32(vec4(1.0, 0.5, 0.0, 1.0)) == 0xFF0080FF && color_u32(vec4(2.0, -1.0, 0.25, 0.0)) == 0x004000FF && color_u32(vec4(0.0)) == 0 && color_u32(vec4(1.0)) == 0xFFFFFFFF)
     ok("unpack", approx_eq(color_vec4(0xFF0080FF), vec4(1.0, 0.5019608, 0.0, 1.0)) && color_u32(color_vec4(0x12345678)) == 0x12345678)

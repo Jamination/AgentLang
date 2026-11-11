@@ -1,11 +1,11 @@
 // Regions: independent arenas for temporary work; results are copied out with clone.
-struct Item { name str, tags []str, n i64 }
-struct Report { title str, items Vec[Item], by_name Map[str, i64] }
+Item :: struct { name: str, tags: []str, n: i64 }
+Report :: struct { title: str, items: Vec[Item], by_name: Map[str, i64] }
 
-var tmp Region
-var inner Region
+tmp: Region
+inner: Region
 
-fn build(n i64) Vec[Item] {
+build :: (n: i64) -> Vec[Item] {
     v := vec[Item]()
     for i in 0..n {
         v.push(Item{fmt("item", i), []str{fmt("t", i), "x"}, i})
@@ -15,7 +15,7 @@ fn build(n i64) Vec[Item] {
 
 // temporary work in `tmp`, scratch tables in `inner` (nested); the result is copied to the
 // arena of the caller
-fn work(n i64) Report {
+work :: (n: i64) -> Report {
     enter(&tmp)
     r := Report{fmt("report of ", n), build(n), map[str, i64]()}
     enter(&inner)
@@ -40,7 +40,7 @@ fn work(n i64) Report {
 }
 
 // fills memory with a pattern
-fn dirty(n i64) i64 {
+dirty :: (n: i64) -> i64 {
     a := alloc[u64](n)
     for i in 0..n {
         a[i] = 0xFFFFFFFFFFFFFFFF
@@ -48,7 +48,7 @@ fn dirty(n i64) i64 {
     return cast[i64](ptr(a))
 }
 
-fn all_zero(a []u64) bool {
+all_zero :: (a: []u64) -> bool {
     for x in a {
         if x != 0 {
             return false
@@ -57,9 +57,9 @@ fn all_zero(a []u64) bool {
     true
 }
 
-fn main() {
+main :: () {
     r := region()
-    var z Region
+    z: Region
     print(used(&r), used(&z), used(&tmp), mem_used())
 
     // nested regions, data copied out by clone

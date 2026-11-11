@@ -1,13 +1,13 @@
 // std.rand: hash-based gradient noise
-fn main() {
+main :: () {
     print(noise_hash(0, 0, 0, 0), noise_hash(1, 0, 0, 0), noise_hash(0, 1, 0, 0), noise_hash(0, 0, 1, 0), noise_hash(0, 0, 0, 1), noise_hash(-1, -1, -1, 0))
 
     // zero on the lattice, bounded, deterministic, uses a good part of its range
     lattice := true
     bounded := true
     repeat := true
-    var lo f32 = 1.0
-    var hi f32 = -1.0
+    lo: f32 = 1.0
+    hi: f32 = -1.0
     sum := 0.0
     for iy in -40..40 {
         for ix in -40..40 {
@@ -50,10 +50,10 @@ fn main() {
     // 3D noise and fbm stay in range
     ok3 := true
     okf := true
-    var lo3 f32 = 1.0
-    var hi3 f32 = -1.0
-    var lof f32 = 1.0
-    var hif f32 = -1.0
+    lo3: f32 = 1.0
+    hi3: f32 = -1.0
+    lof: f32 = 1.0
+    hif: f32 = -1.0
     for i in 0..20000 {
         x := f32(i % 200) * 0.137
         y := f32(i / 200) * 0.291

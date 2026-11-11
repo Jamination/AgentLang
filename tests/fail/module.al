@@ -1,2 +1,2 @@
 use std.nosuch
-fn main() {}
+main :: () {}

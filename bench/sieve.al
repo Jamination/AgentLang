@@ -1,4 +1,4 @@
-fn main() {
+main :: () {
     n := 60000000
     composite := alloc[u8](n + 1)
     i := 2

@@ -1,13 +1,13 @@
 // Private declarations of another file are unknown names here.
 use "priv/lib.al"
 
-priv fn owner_secret() i64 { 1 }
-priv const OWNER_LIMIT = 2
+priv owner_secret :: () -> i64 { 1 }
+priv OWNER_LIMIT :: 2
 
-fn main() {
+main :: () {
     c := Ctx{"x"}
-    var d Ctx
-    var m Mode
+    d: Ctx
+    m: Mode
     print(LIMIT)
     print(bump())
     counter = 1

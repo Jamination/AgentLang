@@ -1,19 +1,19 @@
 // clone(x): an independent deep copy of any value. Every copy below is changed afterwards and
 // the original is printed to show that nothing is shared.
-struct P { x i64, y f64 }
-struct Named { name str, tags []str, pos P }
-struct Node { val i64, kids []Node }
-struct Wrap[T] { item T, list []T }
-struct Table { rows Vec[Named], index Map[str, i64], grid [2][]i64 }
-struct Link { val i64, next *Link }
-enum Color { Red, Green, Blue }
-enum Shape { Dot, Circle(P, f64), Poly([]P), Label(str, i64) }
-enum Tree { Leaf(i64), Fork([]Tree) }
-enum Opt[T] { Some(T), None }
+P :: struct { x: i64, y: f64 }
+Named :: struct { name: str, tags: []str, pos: P }
+Node :: struct { val: i64, kids: []Node }
+Wrap[T] :: struct { item: T, list: []T }
+Table :: struct { rows: Vec[Named], index: Map[str, i64], grid: [2][]i64 }
+Link :: struct { val: i64, next: *Link }
+Color :: enum { Red, Green, Blue }
+Shape :: enum { Dot, Circle(P, f64), Poly([]P), Label(str, i64) }
+Tree :: enum { Leaf(i64), Fork([]Tree) }
+Opt[T] :: enum { Some(T), None }
 
-fn twice(x i64) i64 { x * 2 }
+twice :: (x: i64) -> i64 { x * 2 }
 
-fn depth(n *Node) i64 {
+depth :: (n: *Node) -> i64 {
     d := 0
     for k in n.kids {
         d = max(d, depth(&k))
@@ -21,7 +21,7 @@ fn depth(n *Node) i64 {
     d + 1
 }
 
-fn sum(t Tree) i64 {
+sum :: (t: Tree) -> i64 {
     match t {
         Leaf(v) => v
         Fork(ks) => {
@@ -34,11 +34,11 @@ fn sum(t Tree) i64 {
     }
 }
 
-fn copy_of[T](x T) T {
+copy_of[T] :: (x: T) -> T {
     return clone(x)
 }
 
-fn main() {
+main :: () {
     // scalars: the value itself
     i := 42
     f := 2.5
@@ -60,7 +60,7 @@ fn main() {
     nested := [][]i64{[]i64{1, 2}, []i64{3}}
     n2 := clone(nested)
     n2[0][1] = 20
-    var empty []i64
+    empty: []i64
     print(s, s2, xs, ys, words, w2, nested, n2, len(clone(empty)), len(clone("")))
 
     // arrays, tuples, structs: member by member
@@ -99,13 +99,13 @@ fn main() {
     sh2[0] = Label("new", 1)
     print(sh)
     print(sh2)
-    var o Opt[[]i64] = Some([]i64{5, 6})
+    o: Opt[[]i64] = Some([]i64{5, 6})
     o2 := clone(o)
     match o2 {
         Some(a) => { a[0] = 50 }
         None => {}
     }
-    var none Opt[str] = None
+    none: Opt[str] = None
     print(o, o2, clone(none))
 
     // recursive data through slices
@@ -140,7 +140,7 @@ fn main() {
     nums2.push(5)
     nums.push(50)
     print(nums[..], nums2[..])
-    var zv Vec[str]
+    zv: Vec[str]
     zv2 := clone(zv)
     zv2.push("x")
     print(zv.len, zv2.len)
@@ -160,7 +160,7 @@ fn main() {
     counts2.set(7, 0)
     counts2.del(8)
     print(counts.get_or(7, -1), counts2.get_or(7, -1), counts.len, counts2.len, counts2.get_or(99, -1))
-    var zm Map[str, i64]
+    zm: Map[str, i64]
     zm2 := clone(zm)
     zm2.set("k", 1)
     print(zm.len, zm2.len)

@@ -1,11 +1,11 @@
 // word frequencies of standard input: `alc run examples/wordfreq.al < file`
-struct Entry { word str, count i64 }
+Entry :: struct { word: str, count: i64 }
 
-fn more(a Entry, b Entry) bool {
+more :: (a: Entry, b: Entry) -> bool {
     a.count > b.count || (a.count == b.count && cmp(a.word, b.word) < 0)
 }
 
-fn main() {
+main :: () {
     text := read_all(0)
     counts := map[str, i64]()
     start := -1

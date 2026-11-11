@@ -2,7 +2,7 @@
 
 // predecessors of the header `h` of loop `li` that are outside the loop
 // (cfg.preds[h].iter().copied().filter(|p| !loops.contains(li, *p)).collect())
-fn licm_outside_preds(cfg *Cfg, loops *Loops, li i64, h i64) Vec[i64] {
+licm_outside_preds :: (cfg: *Cfg, loops: *Loops, li: i64, h: i64) -> Vec[i64] {
     outside := vec[i64]()
     for p in cfg.preds[h].items() {
         if !loops.contains(li, p) {
@@ -14,7 +14,7 @@ fn licm_outside_preds(cfg *Cfg, loops *Loops, li i64, h i64) Vec[i64] {
 
 // loop indices, deepest loops first; stable like Rust's sort_by
 // (order.sort_by(|a, b| loops.loops[*b].depth.cmp(&loops.loops[*a].depth)))
-fn licm_loop_order(loops *Loops) Vec[i64] {
+licm_loop_order :: (loops: *Loops) -> Vec[i64] {
     order := vec[i64]()
     for li in 0..loops.loops.len {
         order.push(li)
@@ -28,7 +28,7 @@ fn licm_loop_order(loops *Loops) Vec[i64] {
     return order
 }
 
-fn licm_make_preheaders(f *Func) bool {
+licm_make_preheaders :: (f: *Func) -> bool {
     cfg := cfg_new(f)
     loops := loops_new(f, &cfg)
     changed := false
@@ -117,7 +117,7 @@ fn licm_make_preheaders(f *Func) bool {
 }
 
 // exiting.iter().all(|e| cfg.dom(b, *e)) && l.latches.iter().all(|t| cfg.dom(b, *t))
-fn licm_run_guaranteed(cfg *Cfg, exiting []i64, latches []i64, b i64) bool {
+licm_run_guaranteed :: (cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> bool {
     for e in exiting {
         if !cfg.dom(b, e) {
             return false
@@ -131,7 +131,7 @@ fn licm_run_guaranteed(cfg *Cfg, exiting []i64, latches []i64, b i64) bool {
     return true
 }
 
-fn licm_run(f *Func) bool {
+licm_run :: (f: *Func) -> bool {
     changed := licm_make_preheaders(f)
     cfg := cfg_new(f)
     loops := loops_new(f, &cfg)

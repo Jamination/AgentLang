@@ -1,33 +1,33 @@
 // AL runtime prelude. Compiled together with every program.
 
-var __heap_cur i64
-var __heap_end i64
-var __heap_base i64
-var __heap_hwm i64
-var __argc i64
-var __argv i64
-var __obuf [65536]u8
-var __olen i64
-var __tests_failed i64
+__heap_cur: i64
+__heap_end: i64
+__heap_base: i64
+__heap_hwm: i64
+__argc: i64
+__argv: i64
+__obuf: [65536]u8
+__olen: i64
+__tests_failed: i64
 
-var __sigstack [32768]u8
+__sigstack: [32768]u8
 
-noinline fn __on_fault(sig i64) never {
+noinline __on_fault :: (sig: i64) -> never {
     if sig == 8 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
     __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
 }
 
-fn __rt_init(sp i64) {
+__rt_init :: (sp: i64) {
     __argc = cast[*i64](sp)[0]
     __argv = sp + 8
     // report crashes as panics: handlers run on their own stack so that stack overflow works too
-    var ss [3]i64
+    ss: [3]i64
     ss[0] = cast[i64](ptr(__sigstack))
     ss[2] = 32768
     syscall(131, ptr(ss), 0)
-    var sa [4]i64
+    sa: [4]i64
     sa[0] = cast[i64](__on_fault)
     // SA_ONSTACK | SA_RESTORER | SA_NODEFER
     sa[1] = 0x08000000 | 0x04000000 | 0x40000000
@@ -38,12 +38,12 @@ fn __rt_init(sp i64) {
 }
 
 // ---------- process ----------
-fn exit(code i64) never {
+exit :: (code: i64) -> never {
     flush()
     syscall(231, code)
 }
 
-fn __write_all(fd i64, p i64, n i64) {
+__write_all :: (fd: i64, p: i64, n: i64) {
     while n > 0 {
         r := syscall(1, fd, p, n)
         if r <= 0 {
@@ -57,11 +57,11 @@ fn __write_all(fd i64, p i64, n i64) {
     }
 }
 
-fn __err(s str) {
+__err :: (s: str) {
     __write_all(2, cast[i64](ptr(s)), len(s))
 }
 
-fn __die(kind str, loc str, msg str) never {
+__die :: (kind: str, loc: str, msg: str) -> never {
     flush()
     __err(kind)
     __err(loc)
@@ -73,23 +73,23 @@ fn __die(kind str, loc str, msg str) never {
     syscall(231, 1)
 }
 
-noinline fn __bounds_fail(loc str) never {
+noinline __bounds_fail :: (loc: str) -> never {
     __die("panic: index out of bounds at ", loc, "")
 }
 
-noinline fn __div_fail(loc str) never {
+noinline __div_fail :: (loc: str) -> never {
     __die("panic: division by zero at ", loc, "")
 }
 
-noinline fn __step_fail(loc str) never {
+noinline __step_fail :: (loc: str) -> never {
     __die("panic: loop step must be positive at ", loc, "")
 }
 
-noinline fn __assert_fail(loc str, msg str) never {
+noinline __assert_fail :: (loc: str, msg: str) -> never {
     __die("assertion failed at ", loc, if msg == "assertion failed" { "" } else { msg })
 }
 
-noinline fn __panic(loc str, msg str) never {
+noinline __panic :: (loc: str, msg: str) -> never {
     __die("panic at ", loc, msg)
 }
 
@@ -98,13 +98,13 @@ noinline fn __panic(loc str, msg str) never {
 // __heap_hwm. A program starts in the main arena; enter(&r) makes a Region the arena in use.
 // The state of an arena that is not in use is kept in its Region struct (the main arena's in
 // __heap_main), so the allocation paths below never look at regions.
-struct Region { cur i64, end i64, base i64, hwm i64 }
+Region :: struct { cur: i64, end: i64, base: i64, hwm: i64 }
 
-var __heap_main Region
-var __region_stack [64]*Region
-var __region_depth i64
+__heap_main: Region
+__region_stack: [64]*Region
+__region_depth: i64
 
-noinline fn __heap_grow(n i64) i64 {
+noinline __heap_grow :: (n: i64) -> i64 {
     if __heap_base == 0 {
         // address space is reserved on the first allocation, memory is committed by use: 64 GiB
         // for the main arena, 16 GiB for a region (thousands of regions fit), less if refused
@@ -130,7 +130,7 @@ noinline fn __heap_grow(n i64) i64 {
 }
 
 // uninitialized memory, 16-byte aligned; never freed individually (see mark/release)
-inline fn __alloc_raw(n i64) i64 {
+inline __alloc_raw :: (n: i64) -> i64 {
     n = (n + 15) & ~15
     p := __heap_cur
     e := p + n
@@ -142,7 +142,7 @@ inline fn __alloc_raw(n i64) i64 {
 }
 
 // zeroed memory: only memory that was handed out before (below the high-water mark) is dirty
-inline fn __alloc(n i64) i64 {
+inline __alloc :: (n: i64) -> i64 {
     p := __alloc_raw(n)
     if p < __heap_hwm {
         d := __heap_hwm - p
@@ -151,23 +151,23 @@ inline fn __alloc(n i64) i64 {
     return p
 }
 
-fn alloc[T](n i64) []T {
+alloc[T] :: (n: i64) -> []T {
     if n < 0 {
         __die("panic: negative allocation size", "", "")
     }
     return mkslice[T](__alloc(n * sizeof[T]()), n)
 }
 
-fn new[T]() *T {
+new[T] :: () -> *T {
     return cast[*T](__alloc(sizeof[T]()))
 }
 
 // arena control: everything allocated after mark() is released by release()
-fn mark() i64 {
+mark :: () -> i64 {
     return __heap_cur
 }
 
-fn release(m i64) {
+release :: (m: i64) {
     // a mark taken before the first allocation (the heap is mapped lazily) means "everything"
     if m == 0 {
         m = __heap_base
@@ -185,18 +185,18 @@ fn release(m i64) {
 // and the matching leave() everything that allocates (alloc, new, Vec, Map, fmt, slice
 // literals, clone, ...) takes its memory from r; reset(&r) empties it in one step. A region
 // is used through a pointer and must not be copied while it holds memory or is entered.
-fn region() Region {
+region :: () -> Region {
     return Region{}
 }
 
-fn __region_save(r *Region) {
+__region_save :: (r: *Region) {
     r.cur = __heap_cur
     r.end = __heap_end
     r.base = __heap_base
     r.hwm = __heap_hwm
 }
 
-fn __region_load(r *Region) {
+__region_load :: (r: *Region) {
     __heap_cur = r.cur
     __heap_end = r.end
     __heap_base = r.base
@@ -204,14 +204,14 @@ fn __region_load(r *Region) {
 }
 
 // the arena in use: the innermost entered region, or the main arena
-fn __region_top() *Region {
+__region_top :: () -> *Region {
     if __region_depth == 0 {
         return &__heap_main
     }
     return __region_stack[__region_depth - 1]
 }
 
-fn __region_entered(r *Region) bool {
+__region_entered :: (r: *Region) -> bool {
     for i in 0..__region_depth {
         if __region_stack[i] == r {
             return true
@@ -221,7 +221,7 @@ fn __region_entered(r *Region) bool {
 }
 
 // allocations now come from r, until the matching leave(); calls nest up to 64 deep
-fn enter(r *Region) {
+enter :: (r: *Region) {
     if __region_depth == 64 {
         __die("panic: enter: more than 64 regions are entered (is a leave() missing?)", "", "")
     }
@@ -235,7 +235,7 @@ fn enter(r *Region) {
 }
 
 // back to the arena that was in use before the matching enter()
-fn leave() {
+leave :: () {
     if __region_depth == 0 {
         __die("panic: leave without enter", "", "")
     }
@@ -246,7 +246,7 @@ fn leave() {
 
 // empties r: everything allocated from it is gone. Its memory is kept and handed out again
 // (zeroed) by later allocations. r may be the region in use.
-fn reset(r *Region) {
+reset :: (r: *Region) {
     if __region_depth > 0 && __region_stack[__region_depth - 1] == r {
         if __heap_cur > __heap_hwm {
             __heap_hwm = __heap_cur
@@ -261,7 +261,7 @@ fn reset(r *Region) {
 }
 
 // bytes of r in use
-fn used(r *Region) i64 {
+used :: (r: *Region) -> i64 {
     if __region_depth > 0 && __region_stack[__region_depth - 1] == r {
         return __heap_cur - __heap_base
     }
@@ -270,7 +270,7 @@ fn used(r *Region) i64 {
 
 // gives the memory of r back to the operating system; r is empty afterwards and can be used
 // again. The region must not be entered.
-fn region_free(r *Region) {
+region_free :: (r: *Region) {
     if __region_entered(r) {
         __die("panic: region_free: this region is entered (leave() first)", "", "")
     }
@@ -281,14 +281,14 @@ fn region_free(r *Region) {
 }
 
 // ---------- output ----------
-fn flush() {
+flush :: () {
     if __olen > 0 {
         __write_all(1, cast[i64](ptr(__obuf)), __olen)
         __olen = 0
     }
 }
 
-fn __put_str(s str) {
+__put_str :: (s: str) {
     if __cap_on != 0 {
         __cap_put(s)
         return
@@ -305,9 +305,9 @@ fn __put_str(s str) {
     __olen += n
 }
 
-fn putc(c u8) {
+putc :: (c: u8) {
     if __cap_on != 0 {
-        var one [1]u8
+        one: [1]u8
         one[0] = c
         __cap_put(one[..])
         return
@@ -319,8 +319,8 @@ fn putc(c u8) {
     __olen += 1
 }
 
-fn __put_u64(x u64) {
-    var b [24]u8
+__put_u64 :: (x: u64) {
+    b: [24]u8
     i := 24
     loop {
         i -= 1
@@ -333,7 +333,7 @@ fn __put_u64(x u64) {
     __put_str(b[i..24])
 }
 
-fn __put_i64(x i64) {
+__put_i64 :: (x: i64) {
     if x < 0 {
         putc('-')
         __put_u64(u64(0) - u64(x))
@@ -342,7 +342,7 @@ fn __put_i64(x i64) {
     }
 }
 
-fn __put_bool(b bool) {
+__put_bool :: (b: bool) {
     if b {
         __put_str("true")
     } else {
@@ -350,8 +350,8 @@ fn __put_bool(b bool) {
     }
 }
 
-fn __put_ptr(x i64) {
-    var b [18]u8
+__put_ptr :: (x: i64) {
+    b: [18]u8
     i := 18
     v := u64(x)
     loop {
@@ -373,8 +373,8 @@ fn __put_ptr(x i64) {
 // ---------- exact float formatting ----------
 // Exact decimal digits of m * 2^e written to buf (no leading/trailing zeros).
 // Returns (n, pos): value = 0.d1..dn * 10^pos.
-fn __dec_expand(m u64, e i64, buf []u8) (i64, i64) {
-    var limbs [40]u32
+__dec_expand :: (m: u64, e: i64, buf: []u8) -> (i64, i64) {
+    limbs: [40]u32
     n := 0
     pos := 0
     if m == 0 {
@@ -389,13 +389,13 @@ fn __dec_expand(m u64, e i64, buf []u8) (i64, i64) {
         limbs[w + 1] = u32(t)
         limbs[w + 2] = u32(t >> 32)
         nl := w + 3
-        var tmp [340]u8
+        tmp: [340]u8
         tn := 0
         while nl > 0 && limbs[nl - 1] == 0 {
             nl -= 1
         }
         while nl > 0 {
-            var rem u64 = 0
+            rem: u64 = 0
             i := nl - 1
             while i >= 0 {
                 cur := (rem << 32) | u64(limbs[i])
@@ -426,14 +426,14 @@ fn __dec_expand(m u64, e i64, buf []u8) (i64, i64) {
         return (n, tn)
     }
     k := -e
-    var ip u64 = 0
+    ip: u64 = 0
     fr := m
     if k < 64 {
         ip = m >> u64(k)
         fr = m & ((u64(1) << u64(k)) - 1)
     }
     if ip != 0 {
-        var tmp [24]u8
+        tmp: [24]u8
         tn := 0
         while ip != 0 {
             tmp[tn] = u8(ip % 10) + '0'
@@ -453,7 +453,7 @@ fn __dec_expand(m u64, e i64, buf []u8) (i64, i64) {
     limbs[1] = u32(fr >> 32)
     nonzero := fr != 0
     while nonzero {
-        var carry u64 = 0
+        carry: u64 = 0
         for i in 0..nl {
             cur := u64(limbs[i]) * 10 + carry
             limbs[i] = u32(cur)
@@ -483,7 +483,7 @@ fn __dec_expand(m u64, e i64, buf []u8) (i64, i64) {
 }
 
 // (mantissa, exponent) with value = m * 2^e; class: 0 finite, 1 inf, 2 nan
-fn __f64_parts(x f64) (u64, i64, i64) {
+__f64_parts :: (x: f64) -> (u64, i64, i64) {
     bits := cast[u64](x)
     ex := i64((bits >> 52) & 2047)
     man := bits & 0xFFFFFFFFFFFFF
@@ -496,7 +496,7 @@ fn __f64_parts(x f64) (u64, i64, i64) {
     return (man | (u64(1) << 52), ex - 1075, 0)
 }
 
-fn __copy_str(out []u8, o i64, s str) i64 {
+__copy_str :: (out: []u8, o: i64, s: str) -> i64 {
     for c in s {
         out[o] = c
         o += 1
@@ -505,7 +505,7 @@ fn __copy_str(out []u8, o i64, s str) i64 {
 }
 
 // printf("%.*f") semantics: exact value, round half to even. Returns the length written to out.
-fn __fmt_fixed(x f64, prec i64, out []u8) i64 {
+__fmt_fixed :: (x: f64, prec: i64, out: []u8) -> i64 {
     if prec < 0 {
         prec = 0
     }
@@ -525,7 +525,7 @@ fn __fmt_fixed(x f64, prec i64, out []u8) i64 {
     if cls == 1 {
         return __copy_str(out, o, "inf")
     }
-    var d [1600]u8
+    d: [1600]u8
     n, pos := __dec_expand(m, e, d[..])
     keep := pos + prec
     up := false
@@ -584,7 +584,7 @@ fn __fmt_fixed(x f64, prec i64, out []u8) i64 {
     return o
 }
 
-fn __dec_cmp(a []u8, an i64, ap i64, b []u8, bn i64, bp i64) i64 {
+__dec_cmp :: (a: []u8, an: i64, ap: i64, b: []u8, bn: i64, bp: i64) -> i64 {
     if ap != bp {
         return if ap < bp { -1 } else { 1 }
     }
@@ -600,13 +600,13 @@ fn __dec_cmp(a []u8, an i64, ap i64, b []u8, bn i64, bp i64) i64 {
 }
 
 // shortest decimal that parses back to exactly x. Returns the length written to out.
-fn __fmt_shortest(x f64, out []u8) i64 {
+__fmt_shortest :: (x: f64, out: []u8) -> i64 {
     m, e, cls := __f64_parts(x)
     neg := (cast[u64](x) >> 63) != 0
     return __fmt_short_parts(neg, m, e, cls, m == (u64(1) << 52) && e > -1074, out)
 }
 
-fn __fmt_shortest32(x f32, out []u8) i64 {
+__fmt_shortest32 :: (x: f32, out: []u8) -> i64 {
     bits := cast[u32](x)
     ex := i64((bits >> 23) & 255)
     man := u64(bits & 0x7FFFFF)
@@ -621,7 +621,7 @@ fn __fmt_shortest32(x f32, out []u8) i64 {
 }
 
 // value = m * 2^e; `closer`: the gap to the next smaller float is half the usual one
-fn __fmt_short_parts(neg bool, m u64, e i64, cls i64, closer bool, out []u8) i64 {
+__fmt_short_parts :: (neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u8) -> i64 {
     o := 0
     if cls == 2 {
         return __copy_str(out, o, "nan")
@@ -636,9 +636,9 @@ fn __fmt_short_parts(neg bool, m u64, e i64, cls i64, closer bool, out []u8) i64
     if m == 0 {
         return __copy_str(out, o, "0.0")
     }
-    var d [1100]u8
-    var dh [1100]u8
-    var dl [1100]u8
+    d: [1100]u8
+    dh: [1100]u8
+    dl: [1100]u8
     n, pos := __dec_expand(m, e, d[..])
     nh, ph := __dec_expand(2 * m + 1, e - 1, dh[..])
     nl := 0
@@ -649,7 +649,7 @@ fn __fmt_short_parts(neg bool, m u64, e i64, cls i64, closer bool, out []u8) i64
         nl, pl = __dec_expand(2 * m - 1, e - 1, dl[..])
     }
     even := (m & 1) == 0
-    var c [24]u8
+    c: [24]u8
     cn := 0
     cp := 0
     for p in 1..19 {
@@ -740,7 +740,7 @@ fn __fmt_short_parts(neg bool, m u64, e i64, cls i64, closer bool, out []u8) i64
         o += 1
         ex = -ex
     }
-    var t [8]u8
+    t: [8]u8
     tn := 0
     loop {
         t[tn] = u8(ex % 10) + '0'
@@ -757,27 +757,27 @@ fn __fmt_short_parts(neg bool, m u64, e i64, cls i64, closer bool, out []u8) i64
     return o
 }
 
-fn __put_f32(x f32) {
-    var b [40]u8
+__put_f32 :: (x: f32) {
+    b: [40]u8
     n := __fmt_shortest32(x, b[..])
     __put_str(b[..n])
 }
 
 // ---------- matrix / quaternion operators ----------
-fn __mat4_mulv(m mat4, v vec4) vec4 {
+__mat4_mulv :: (m: mat4, v: vec4) -> vec4 {
     return m[0] * v.x + m[1] * v.y + m[2] * v.z + m[3] * v.w
 }
 
-fn __mat4_mul(a mat4, b mat4) mat4 {
+__mat4_mul :: (a: mat4, b: mat4) -> mat4 {
     return mat4(__mat4_mulv(a, b[0]), __mat4_mulv(a, b[1]), __mat4_mulv(a, b[2]), __mat4_mulv(a, b[3]))
 }
 
-fn __mat4_diag(s f32) mat4 {
+__mat4_diag :: (s: f32) -> mat4 {
     return mat4(vec4(s, 0.0, 0.0, 0.0), vec4(0.0, s, 0.0, 0.0), vec4(0.0, 0.0, s, 0.0), vec4(0.0, 0.0, 0.0, s))
 }
 
 // Hamilton product; components are (x, y, z, w) with w the scalar part
-fn __quat_mul(a quat, b quat) quat {
+__quat_mul :: (a: quat, b: quat) -> quat {
     return quat(
         a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
         a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
@@ -786,27 +786,27 @@ fn __quat_mul(a quat, b quat) quat {
 }
 
 // rotate v by the unit quaternion q: v + 2w(u x v) + 2 u x (u x v)
-fn __quat_rotate(q quat, v vec3) vec3 {
+__quat_rotate :: (q: quat, v: vec3) -> vec3 {
     u := q.xyz
     t := (u.yzx * v.zxy - u.zxy * v.yzx) * 2.0
     return v + t * q.w + (u.yzx * t.zxy - u.zxy * t.yzx)
 }
 
-fn __put_f64(x f64) {
-    var b [40]u8
+__put_f64 :: (x: f64) {
+    b: [40]u8
     n := __fmt_shortest(x, b[..])
     __put_str(b[..n])
 }
 
 // print x with exactly `prec` digits after the decimal point (like printf "%.Nf")
-fn putf(x f64, prec i64) {
-    var b [800]u8
+putf :: (x: f64, prec: i64) {
+    b: [800]u8
     n := __fmt_fixed(x, prec, b[..])
     __put_str(b[..n])
 }
 
-fn fmtf(x f64, prec i64) str {
-    var b [800]u8
+fmtf :: (x: f64, prec: i64) -> str {
+    b: [800]u8
     n := __fmt_fixed(x, prec, b[..])
     s := alloc[u8](n)
     for i in 0..n {
@@ -815,7 +815,7 @@ fn fmtf(x f64, prec i64) str {
     return s
 }
 
-fn __put_slice[T](s []T) {
+__put_slice[T] :: (s: []T) {
     putc('[')
     for i, x in s {
         if i > 0 {
@@ -826,7 +826,7 @@ fn __put_slice[T](s []T) {
     putc(']')
 }
 
-fn __str_eq(a str, b str) bool {
+__str_eq :: (a: str, b: str) -> bool {
     n := len(a)
     if n != len(b) {
         return false
@@ -840,14 +840,14 @@ fn __str_eq(a str, b str) bool {
 }
 
 // ---------- tests ----------
-fn __run_test(name str, f fn()) {
+__run_test :: (name: str, f: () -> ()) {
     flush()
     pid := syscall(57)
     if pid == 0 {
         f()
         exit(0)
     }
-    var status i32
+    status: i32
     syscall(61, pid, &status, 0, 0)
     if status == 0 {
         put("ok   ", name, "\n")
@@ -858,7 +858,7 @@ fn __run_test(name str, f fn()) {
     flush()
 }
 
-fn __tests_done() i64 {
+__tests_done :: () -> i64 {
     if __tests_failed > 0 {
         put(__tests_failed, " test(s) failed\n")
         return 1
@@ -869,13 +869,13 @@ fn __tests_done() i64 {
 // ---------- capture output into a string: fmt(...) ----------
 // The capture buffer lives outside the arena (release() must not take it away): a static block
 // first, then mappings of its own.
-var __cap_on i64
-var __cap_static [1024]u8
-var __cap_buf []u8
-var __cap_len i64
+__cap_on: i64
+__cap_static: [1024]u8
+__cap_buf: []u8
+__cap_len: i64
 
 // captures nest: each fmt() takes the text appended after its starting position
-fn __cap_begin() i64 {
+__cap_begin :: () -> i64 {
     if len(__cap_buf) == 0 {
         __cap_buf = __cap_static[..]
     }
@@ -883,7 +883,7 @@ fn __cap_begin() i64 {
     return __cap_len
 }
 
-fn __cap_put(s str) {
+__cap_put :: (s: str) {
     n := len(s)
     if __cap_len + n > len(__cap_buf) {
         cap := len(__cap_buf) * 2
@@ -905,7 +905,7 @@ fn __cap_put(s str) {
     __cap_len += n
 }
 
-fn __cap_end(start i64) str {
+__cap_end :: (start: i64) -> str {
     n := __cap_len - start
     out := alloc[u8](n)
     memcopy(ptr(out), cast[i64](ptr(__cap_buf)) + start, n)
@@ -915,33 +915,33 @@ fn __cap_end(start i64) str {
 }
 
 // ---------- hashing and equality helpers ----------
-fn __hash_u64(x u64) u64 {
+__hash_u64 :: (x: u64) -> u64 {
     x = (x ^ (x >> 33)) * 0xff51afd7ed558ccd
     x = (x ^ (x >> 33)) * 0xc4ceb9fe1a85ec53
     return x ^ (x >> 33)
 }
 
-fn __hash_str(s str) u64 {
-    var h u64 = 0xcbf29ce484222325
+__hash_str :: (s: str) -> u64 {
+    h: u64 = 0xcbf29ce484222325
     for c in s {
         h = (h ^ u64(c)) * 0x100000001b3
     }
     return __hash_u64(h)
 }
 
-fn __hash_mix(a u64, b u64) u64 {
+__hash_mix :: (a: u64, b: u64) -> u64 {
     return __hash_u64(a ^ (b + 0x9e3779b97f4a7c15 + (a << 6) + (a >> 2)))
 }
 
-fn __hash_slice[T](s []T) u64 {
-    var h u64 = u64(len(s))
+__hash_slice[T] :: (s: []T) -> u64 {
+    h: u64 = u64(len(s))
     for x in s {
         h = __hash_mix(h, hash(x))
     }
     return h
 }
 
-fn __slice_eq[T](a []T, b []T) bool {
+__slice_eq[T] :: (a: []T, b: []T) -> bool {
     if len(a) != len(b) {
         return false
     }
@@ -954,37 +954,37 @@ fn __slice_eq[T](a []T, b []T) bool {
 }
 
 // ---------- small generic helpers ----------
-fn min[T](a T, b T) T {
+min[T] :: (a: T, b: T) -> T {
     if b < a { b } else { a }
 }
 
-fn max[T](a T, b T) T {
+max[T] :: (a: T, b: T) -> T {
     if b > a { b } else { a }
 }
 
-fn abs[T](x T) T {
+abs[T] :: (x: T) -> T {
     if x < 0 { -x } else { x }
 }
 
-fn swap[T](a *T, b *T) {
+swap[T] :: (a: *T, b: *T) {
     t := *a
     *a = *b
     *b = t
 }
 
-fn copy[T](dst []T, src []T) i64 {
+copy[T] :: (dst: []T, src: []T) -> i64 {
     n := min(len(dst), len(src))
     memcopy(ptr(dst), ptr(src), n * sizeof[T]())
     return n
 }
 
-fn fill[T](a []T, x T) {
+fill[T] :: (a: []T, x: T) {
     for i in 0..len(a) {
         a[i] = x
     }
 }
 
-fn floor(x f64) f64 {
+floor :: (x: f64) -> f64 {
     if x != x || fabs(x) >= 4503599627370496.0 {
         return x
     }
@@ -992,7 +992,7 @@ fn floor(x f64) f64 {
     if t > x { t - 1.0 } else { t }
 }
 
-fn ceil(x f64) f64 {
+ceil :: (x: f64) -> f64 {
     if x != x || fabs(x) >= 4503599627370496.0 {
         return x
     }
@@ -1000,20 +1000,20 @@ fn ceil(x f64) f64 {
     if t < x { t + 1.0 } else { t }
 }
 
-fn clock_ns() i64 {
-    var ts [2]i64
+clock_ns :: () -> i64 {
+    ts: [2]i64
     syscall(228, 1, ptr(ts))
     return ts[0] * 1000000000 + ts[1]
 }
 
 // ---------- growable vector ----------
-struct Vec[T] { buf []T, len i64 }
+Vec[T] :: struct { buf: []T, len: i64 }
 
-fn vec[T]() Vec[T] {
+vec[T] :: () -> Vec[T] {
     return Vec[T]{buf: mkslice[T](__heap_cur, 0), len: 0}
 }
 
-fn reserve[T](v *Vec[T], n i64) {
+reserve[T] :: (v: *Vec[T], n: i64) {
     if n > len(v.buf) {
         cap := max(len(v.buf) * 2, max(n, 8))
         // the spare capacity is never read before it is written: no need to zero it
@@ -1023,7 +1023,7 @@ fn reserve[T](v *Vec[T], n i64) {
     }
 }
 
-fn push[T](v *Vec[T], x T) {
+push[T] :: (v: *Vec[T], x: T) {
     if v.len == len(v.buf) {
         reserve(v, v.len + 1)
     }
@@ -1031,7 +1031,7 @@ fn push[T](v *Vec[T], x T) {
     v.len += 1
 }
 
-fn pop[T](v *Vec[T]) T {
+pop[T] :: (v: *Vec[T]) -> T {
     if v.len == 0 {
         __die("panic: pop from an empty Vec", "", "")
     }
@@ -1040,18 +1040,18 @@ fn pop[T](v *Vec[T]) T {
 }
 
 // the live elements of a Vec as a slice (valid until the next push that grows it)
-fn items[T](v *Vec[T]) []T {
+items[T] :: (v: *Vec[T]) -> []T {
     return v.buf[..v.len]
 }
 
 // ---------- hash map (open addressing, linear probing) ----------
-struct Map[K, V] { keys []K, vals []V, state []u8, len i64, used i64 }
+Map[K, V] :: struct { keys: []K, vals: []V, state: []u8, len: i64, used: i64 }
 
-fn map[K, V]() Map[K, V] {
+map[K, V] :: () -> Map[K, V] {
     return Map[K, V]{keys: alloc[K](0), vals: alloc[V](0), state: alloc[u8](0), len: 0, used: 0}
 }
 
-fn __map_find[K, V](m *Map[K, V], k K) i64 {
+__map_find[K, V] :: (m: *Map[K, V], k: K) -> i64 {
     n := len(m.state)
     if n == 0 {
         return -1
@@ -1070,7 +1070,7 @@ fn __map_find[K, V](m *Map[K, V], k K) i64 {
     }
 }
 
-fn __map_grow[K, V](m *Map[K, V]) {
+__map_grow[K, V] :: (m: *Map[K, V]) {
     old_keys := m.keys
     old_vals := m.vals
     old_state := m.state
@@ -1091,7 +1091,7 @@ fn __map_grow[K, V](m *Map[K, V]) {
     }
 }
 
-fn set[K, V](m *Map[K, V], k K, v V) {
+set[K, V] :: (m: *Map[K, V], k: K, v: V) {
     if (m.used + 1) * 4 > len(m.state) * 3 {
         __map_grow(m)
     }
@@ -1123,17 +1123,17 @@ fn set[K, V](m *Map[K, V], k K, v V) {
     m.len += 1
 }
 
-fn get[K, V](m *Map[K, V], k K) (V, bool) {
+get[K, V] :: (m: *Map[K, V], k: K) -> (V, bool) {
     i := __map_find(m, k)
     if i < 0 {
-        var zero V
+        zero: V
         return (zero, false)
     }
     return (m.vals[i], true)
 }
 
 // the value stored for k, or `default` when k is missing
-fn get_or[K, V](m *Map[K, V], k K, default V) V {
+get_or[K, V] :: (m: *Map[K, V], k: K, default: V) -> V {
     i := __map_find(m, k)
     if i < 0 {
         return default
@@ -1141,11 +1141,11 @@ fn get_or[K, V](m *Map[K, V], k K, default V) V {
     return m.vals[i]
 }
 
-fn has[K, V](m *Map[K, V], k K) bool {
+has[K, V] :: (m: *Map[K, V], k: K) -> bool {
     return __map_find(m, k) >= 0
 }
 
-fn del[K, V](m *Map[K, V], k K) bool {
+del[K, V] :: (m: *Map[K, V], k: K) -> bool {
     i := __map_find(m, k)
     if i < 0 {
         return false
@@ -1156,7 +1156,7 @@ fn del[K, V](m *Map[K, V], k K) bool {
 }
 
 // all keys, in unspecified order
-fn keys[K, V](m *Map[K, V]) []K {
+keys[K, V] :: (m: *Map[K, V]) -> []K {
     out := alloc[K](m.len)
     n := 0
     for i in 0..len(m.state) {
@@ -1173,14 +1173,14 @@ fn keys[K, V](m *Map[K, V]) []K {
 // storage. All copies are allocated from the arena in use.
 
 // a slice of elements that own nothing: one allocation, one memory copy
-fn __clone_plain[T](s []T) []T {
+__clone_plain[T] :: (s: []T) -> []T {
     n := len(s)
     out := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
     memcopy(ptr(out), ptr(s), n * sizeof[T]())
     return out
 }
 
-fn __clone_slice[T](s []T) []T {
+__clone_slice[T] :: (s: []T) -> []T {
     n := len(s)
     out := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
     for i in 0..n {
@@ -1190,23 +1190,23 @@ fn __clone_slice[T](s []T) []T {
 }
 
 // the elements of an array, cloned into another array of the same length
-fn __clone_elems[T](dst []T, src []T) {
+__clone_elems[T] :: (dst: []T, src: []T) {
     for i in 0..len(src) {
         dst[i] = clone(src[i])
     }
 }
 
 // a Vec with the same live elements; the spare capacity (uninitialised memory) is not copied
-fn __clone_vec_plain[T](v Vec[T]) Vec[T] {
+__clone_vec_plain[T] :: (v: Vec[T]) -> Vec[T] {
     return Vec[T]{buf: __clone_plain(v[..]), len: v.len}
 }
 
-fn __clone_vec[T](v Vec[T]) Vec[T] {
+__clone_vec[T] :: (v: Vec[T]) -> Vec[T] {
     return Vec[T]{buf: __clone_slice(v[..]), len: v.len}
 }
 
 // the keys or values of a Map: only occupied slots hold a value (`plain`: T owns no storage)
-fn __clone_slots[T](s []T, state []u8, plain bool) []T {
+__clone_slots[T] :: (s: []T, state: []u8, plain: bool) -> []T {
     if plain {
         return __clone_plain(s)
     }
@@ -1219,7 +1219,7 @@ fn __clone_slots[T](s []T, state []u8, plain bool) []T {
     return out
 }
 
-fn __clone_map[K, V](m *Map[K, V], kplain bool, vplain bool) Map[K, V] {
+__clone_map[K, V] :: (m: *Map[K, V], kplain: bool, vplain: bool) -> Map[K, V] {
     return Map[K, V]{
         keys: __clone_slots(m.keys, m.state, kplain),
         vals: __clone_slots(m.vals, m.state, vplain),
@@ -1230,7 +1230,7 @@ fn __clone_map[K, V](m *Map[K, V], kplain bool, vplain bool) Map[K, V] {
 }
 
 // ---------- sorting ----------
-fn __sort_range[T](a []T, lo i64, hi i64) {
+__sort_range[T] :: (a: []T, lo: i64, hi: i64) {
     while hi - lo > 16 {
         p := a[lo + (hi - lo) / 2]
         i := lo
@@ -1271,12 +1271,12 @@ fn __sort_range[T](a []T, lo i64, hi i64) {
 }
 
 // ascending sort of numbers (anything comparable with `<`)
-fn sort[T](a []T) {
+sort[T] :: (a: []T) {
     __sort_range(a, 0, len(a) - 1)
 }
 
 // stable merge sort with a user-supplied "less than"
-fn sort_by[T](a []T, less fn(T, T) bool) {
+sort_by[T] :: (a: []T, less: (T, T) -> bool) {
     n := len(a)
     if n < 2 {
         return
@@ -1329,7 +1329,7 @@ fn sort_by[T](a []T, less fn(T, T) bool) {
 
 // the same with a context value that is handed to every comparison (the state a
 // comparison needs, since a function value cannot refer to local variables)
-fn sort_by[T, C](a []T, ctx C, less fn(C, T, T) bool) {
+sort_by[T, C] :: (a: []T, ctx: C, less: (C, T, T) -> bool) {
     n := len(a)
     if n < 2 {
         return
@@ -1381,7 +1381,7 @@ fn sort_by[T, C](a []T, ctx C, less fn(C, T, T) bool) {
 }
 
 // ---------- strings ----------
-fn concat(a str, b str) str {
+concat :: (a: str, b: str) -> str {
     out := alloc[u8](len(a) + len(b))
     memcopy(ptr(out), ptr(a), len(a))
     memcopy(cast[i64](ptr(out)) + len(a), ptr(b), len(b))
@@ -1389,7 +1389,7 @@ fn concat(a str, b str) str {
 }
 
 // index of the first occurrence of sub in s, or -1
-fn find(s str, sub str) i64 {
+find :: (s: str, sub: str) -> i64 {
     n := len(s)
     m := len(sub)
     if m == 0 {
@@ -1405,19 +1405,19 @@ fn find(s str, sub str) i64 {
     return -1
 }
 
-fn starts_with(s str, p str) bool {
+starts_with :: (s: str, p: str) -> bool {
     return len(s) >= len(p) && s[..len(p)] == p
 }
 
-fn ends_with(s str, p str) bool {
+ends_with :: (s: str, p: str) -> bool {
     return len(s) >= len(p) && s[len(s) - len(p)..] == p
 }
 
-fn __is_space(c u8) bool {
+__is_space :: (c: u8) -> bool {
     return c == ' ' || c == '\n' || c == '\t' || c == '\r'
 }
 
-fn trim(s str) str {
+trim :: (s: str) -> str {
     lo := 0
     hi := len(s)
     while lo < hi && __is_space(s[lo]) {
@@ -1430,7 +1430,7 @@ fn trim(s str) str {
 }
 
 // pieces of s between occurrences of sep (views into s, no copying)
-fn split(s str, sep u8) []str {
+split :: (s: str, sep: u8) -> []str {
     n := 1
     for c in s {
         if c == sep {
@@ -1451,7 +1451,7 @@ fn split(s str, sep u8) []str {
     return out
 }
 
-fn lines(s str) []str {
+lines :: (s: str) -> []str {
     if len(s) > 0 && s[len(s) - 1] == '\n' {
         return split(s[..len(s) - 1], '\n')
     }
@@ -1459,7 +1459,7 @@ fn lines(s str) []str {
 }
 
 // lexicographic comparison: negative, zero or positive
-fn cmp(a str, b str) i64 {
+cmp :: (a: str, b: str) -> i64 {
     n := min(len(a), len(b))
     for i in 0..n {
         if a[i] != b[i] {
@@ -1469,7 +1469,7 @@ fn cmp(a str, b str) i64 {
     return len(a) - len(b)
 }
 
-fn parse_i64(s str) (i64, bool) {
+parse_i64 :: (s: str) -> (i64, bool) {
     n := len(s)
     i := 0
     neg := false
@@ -1480,7 +1480,7 @@ fn parse_i64(s str) (i64, bool) {
     if i == n {
         return (0, false)
     }
-    var v u64 = 0
+    v: u64 = 0
     while i < n {
         c := s[i]
         if c < '0' || c > '9' {
@@ -1496,10 +1496,10 @@ fn parse_i64(s str) (i64, bool) {
 }
 
 // ---- exact decimal to binary conversion: big integers as little-endian u32 limbs ----
-const __BIG_LIMBS = 224
+__BIG_LIMBS :: 224
 
-fn __big_mul_small(a []u32, n i64, k u32) i64 {
-    var carry u64 = 0
+__big_mul_small :: (a: []u32, n: i64, k: u32) -> i64 {
+    carry: u64 = 0
     for i in 0..n {
         t := u64(a[i]) * u64(k) + carry
         a[i] = u32(t)
@@ -1512,8 +1512,8 @@ fn __big_mul_small(a []u32, n i64, k u32) i64 {
     return n
 }
 
-fn __big_add_small(a []u32, n i64, k u32) i64 {
-    var carry u64 = u64(k)
+__big_add_small :: (a: []u32, n: i64, k: u32) -> i64 {
+    carry: u64 = u64(k)
     i := 0
     while carry != 0 {
         if i == n {
@@ -1528,12 +1528,12 @@ fn __big_add_small(a []u32, n i64, k u32) i64 {
     return n
 }
 
-fn __big_mul_pow10(a []u32, n i64, e i64) i64 {
+__big_mul_pow10 :: (a: []u32, n: i64, e: i64) -> i64 {
     while e >= 9 {
         n = __big_mul_small(a, n, 1000000000)
         e -= 9
     }
-    var k u32 = 1
+    k: u32 = 1
     while e > 0 {
         k = k * 10
         e -= 1
@@ -1544,7 +1544,7 @@ fn __big_mul_pow10(a []u32, n i64, e i64) i64 {
     return n
 }
 
-fn __big_shl(a []u32, n i64, bits i64) i64 {
+__big_shl :: (a: []u32, n: i64, bits: i64) -> i64 {
     if n == 0 || bits == 0 {
         return n
     }
@@ -1569,7 +1569,7 @@ fn __big_shl(a []u32, n i64, bits i64) i64 {
     return n
 }
 
-fn __big_cmp(a []u32, an i64, b []u32, bn i64) i64 {
+__big_cmp :: (a: []u32, an: i64, b: []u32, bn: i64) -> i64 {
     if an != bn {
         return if an < bn { -1 } else { 1 }
     }
@@ -1585,9 +1585,9 @@ fn __big_cmp(a []u32, an i64, b []u32, bn i64) i64 {
 
 // compares the decimal value num * 10^e10 (num: n limbs, already multiplied by 10^e10 when
 // e10 > 0) with mm * 2^q
-fn __dec_cmp_bin(num []u32, n i64, e10 i64, mm u64, q i64) i64 {
-    var a [__BIG_LIMBS]u32
-    var b [__BIG_LIMBS]u32
+__dec_cmp_bin :: (num: []u32, n: i64, e10: i64, mm: u64, q: i64) -> i64 {
+    a: [__BIG_LIMBS]u32
+    b: [__BIG_LIMBS]u32
     for i in 0..n {
         a[i] = num[i]
     }
@@ -1608,7 +1608,7 @@ fn __dec_cmp_bin(num []u32, n i64, e10 i64, mm u64, q i64) i64 {
 
 // decimal text to the nearest f64 (ties to even), exactly as a C compiler reads a literal:
 // [+-] digits [. digits] [e [+-] digits]; (0, false) if s is not a number
-fn parse_f64(s str) (f64, bool) {
+parse_f64 :: (s: str) -> (f64, bool) {
     n := len(s)
     i := 0
     neg := false
@@ -1617,9 +1617,9 @@ fn parse_f64(s str) (f64, bool) {
         i = 1
     }
     // significant digits as a big integer (at most 800 are kept; more only set a sticky digit)
-    var num [__BIG_LIMBS]u32
+    num: [__BIG_LIMBS]u32
     nn := 0
-    var mant u64 = 0
+    mant: u64 = 0
     digits := 0
     mdigits := 0
     exp10 := 0
@@ -1729,7 +1729,7 @@ fn parse_f64(s str) (f64, bool) {
         x = if mexp < 0 { x / scale } else { x * scale }
         e -= step
     }
-    var bits u64 = cast[u64](x)
+    bits: u64 = cast[u64](x)
     if bits >= 0x7FF0000000000000 {
         bits = 0x7FEFFFFFFFFFFFFF
     }
@@ -1774,17 +1774,17 @@ fn parse_f64(s str) (f64, bool) {
 }
 
 // ---------- files and arguments ----------
-fn __cstr(s str) i64 {
+__cstr :: (s: str) -> i64 {
     p := __alloc(len(s) + 1)
     memcopy(p, ptr(s), len(s))
     return p
 }
 
 // the error number of the most recent failed file operation (0 after a success)
-var __io_errno i64
+__io_errno: i64
 
 // records the outcome of a system call: a negative result is `-errno`; returns `r`
-fn __io_result(r i64) i64 {
+__io_result :: (r: i64) -> i64 {
     if r < 0 {
         __io_errno = -r
     } else {
@@ -1796,12 +1796,12 @@ fn __io_result(r i64) i64 {
 // The OS error number (Linux errno) of the most recent failed file operation of the library
 // (`read_file`, `write_file`, `read_all`, and the file functions of std.asset); 0 if the
 // most recent one succeeded. Read it right after the call that returned `false`.
-fn io_error() i64 {
+io_error :: () -> i64 {
     return __io_errno
 }
 
 // a short text for an OS error number, e.g. for `io_error()`
-fn error_text(e i64) str {
+error_text :: (e: i64) -> str {
     match e {
         0 => return "no error"
         1 => return "operation not permitted"
@@ -1840,7 +1840,7 @@ fn error_text(e i64) str {
 
 // everything readable from a file descriptor (0 = standard input); what was read before an
 // error is returned, and `io_error()` tells whether there was one
-fn read_all(fd i64) str {
+read_all :: (fd: i64) -> str {
     buf := alloc[u8](65536)
     n := 0
     loop {
@@ -1863,7 +1863,7 @@ fn read_all(fd i64) str {
 }
 
 // the content of a file; ("", false) if it cannot be opened or read (see `io_error()`)
-fn read_file(path str) (str, bool) {
+read_file :: (path: str) -> (str, bool) {
     fd := __io_result(syscall(2, __cstr(path), 0, 0))
     if fd < 0 {
         return ("", false)
@@ -1877,7 +1877,7 @@ fn read_file(path str) (str, bool) {
 }
 
 // creates or replaces a file; false if that failed (see `io_error()`)
-fn write_file(path str, data str) bool {
+write_file :: (path: str, data: str) -> bool {
     // O_WRONLY|O_CREAT|O_TRUNC, mode 0644
     fd := __io_result(syscall(2, __cstr(path), 577, 420))
     if fd < 0 {
@@ -1905,7 +1905,7 @@ fn write_file(path str, data str) bool {
 }
 
 // command line arguments (args()[0] is the program name)
-fn args() []str {
+args :: () -> []str {
     out := alloc[str](__argc)
     for i in 0..__argc {
         p := cast[*i64](__argv)[i]
@@ -1920,7 +1920,7 @@ fn args() []str {
 
 // ---------- text helpers ----------
 // s right-aligned in a field of `width` characters (padded on the left with `fill`)
-fn pad_left(s str, width i64, fill u8) str {
+pad_left :: (s: str, width: i64, fill: u8) -> str {
     if len(s) >= width {
         return s
     }
@@ -1934,7 +1934,7 @@ fn pad_left(s str, width i64, fill u8) str {
 }
 
 // s left-aligned in a field of `width` characters
-fn pad_right(s str, width i64, fill u8) str {
+pad_right :: (s: str, width: i64, fill: u8) -> str {
     if len(s) >= width {
         return s
     }
@@ -1947,8 +1947,8 @@ fn pad_right(s str, width i64, fill u8) str {
 }
 
 // lower-case hexadecimal digits of x (no prefix)
-fn hex(x u64) str {
-    var b [16]u8
+hex :: (x: u64) -> str {
+    b: [16]u8
     i := 16
     loop {
         i -= 1
@@ -1964,7 +1964,7 @@ fn hex(x u64) str {
     return out
 }
 
-fn to_upper(s str) str {
+to_upper :: (s: str) -> str {
     out := alloc[u8](len(s))
     for i, c in s {
         out[i] = if c >= 'a' && c <= 'z' { c - 32 } else { c }
@@ -1972,7 +1972,7 @@ fn to_upper(s str) str {
     return out
 }
 
-fn to_lower(s str) str {
+to_lower :: (s: str) -> str {
     out := alloc[u8](len(s))
     for i, c in s {
         out[i] = if c >= 'A' && c <= 'Z' { c + 32 } else { c }
@@ -1981,7 +1981,7 @@ fn to_lower(s str) str {
 }
 
 // concatenation of all parts with sep between them
-fn join(parts []str, sep str) str {
+join :: (parts: []str, sep: str) -> str {
     n := 0
     for p in parts {
         n += len(p)
@@ -2004,12 +2004,12 @@ fn join(parts []str, sep str) str {
 
 // a NUL-terminated copy of s, for C functions (string literals are NUL-terminated already:
 // `ptr("literal")` can be passed directly)
-fn cstr(s str) *u8 {
+cstr :: (s: str) -> *u8 {
     return cast[*u8](__cstr(s))
 }
 
 // the text of a NUL-terminated C string (not copied)
-fn from_cstr(p *u8) str {
+from_cstr :: (p: *u8) -> str {
     if p == nil {
         return ""
     }
@@ -2022,19 +2022,19 @@ fn from_cstr(p *u8) str {
 
 // ---------- optional values and results ----------
 // a value that may be absent
-enum Opt[T] { Some(T), None }
+Opt[T] :: enum { Some(T), None }
 
 // a value, or the message of the error that prevented it
-enum Res[T] { Ok(T), Err(str) }
+Res[T] :: enum { Ok(T), Err(str) }
 
-fn is_some[T](o Opt[T]) bool {
+is_some[T] :: (o: Opt[T]) -> bool {
     match o {
         Some(_) => true
         None => false
     }
 }
 
-fn is_none[T](o Opt[T]) bool {
+is_none[T] :: (o: Opt[T]) -> bool {
     match o {
         Some(_) => false
         None => true
@@ -2042,7 +2042,7 @@ fn is_none[T](o Opt[T]) bool {
 }
 
 // the value of `o`; stops the program if there is none
-fn unwrap[T](o Opt[T]) T {
+unwrap[T] :: (o: Opt[T]) -> T {
     match o {
         Some(x) => { return x }
         None => {}
@@ -2051,21 +2051,21 @@ fn unwrap[T](o Opt[T]) T {
 }
 
 // the value of `o`, or `default` if there is none
-fn or[T](o Opt[T], default T) T {
+or[T] :: (o: Opt[T], default: T) -> T {
     match o {
         Some(x) => x
         None => default
     }
 }
 
-fn is_ok[T](r Res[T]) bool {
+is_ok[T] :: (r: Res[T]) -> bool {
     match r {
         Ok(_) => true
         Err(_) => false
     }
 }
 
-fn is_err[T](r Res[T]) bool {
+is_err[T] :: (r: Res[T]) -> bool {
     match r {
         Ok(_) => false
         Err(_) => true
@@ -2073,7 +2073,7 @@ fn is_err[T](r Res[T]) bool {
 }
 
 // the value of `r`; stops the program with the error message if it is an error
-fn unwrap[T](r Res[T]) T {
+unwrap[T] :: (r: Res[T]) -> T {
     match r {
         Ok(x) => { return x }
         Err(e) => { __die("panic: unwrap of Err: ", e, "") }
@@ -2081,7 +2081,7 @@ fn unwrap[T](r Res[T]) T {
 }
 
 // the value of `r`, or `default` if it is an error
-fn or[T](r Res[T], default T) T {
+or[T] :: (r: Res[T], default: T) -> T {
     match r {
         Ok(x) => x
         Err(_) => default
@@ -2089,7 +2089,7 @@ fn or[T](r Res[T], default T) T {
 }
 
 // the error message of `r` ("" if it is not an error)
-fn error[T](r Res[T]) str {
+error[T] :: (r: Res[T]) -> str {
     match r {
         Ok(_) => ""
         Err(e) => e

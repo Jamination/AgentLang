@@ -1,116 +1,116 @@
 // Semantic analysis + lowering context: declarations, type resolution, constants, globals, instances.
 
-struct Opts {
-    checks bool
+Opts :: struct {
+    checks: bool
 }
 
-enum CV {
+CV :: enum {
     CVInt(i64),
     CVFloat(f64),
     CVBool(bool),
     CVStr(str),
 }
 
-enum CState {
+CState :: enum {
     CStateBusy,
     CStateDone(Opt[i64], CV),
     CStateFailed,
 }
 
-enum ParamAbi {
+ParamAbi :: enum {
     ParamAbiScalar(T),
     ParamAbiFlat(Vec[Leaf]),
     ParamAbiByRef,
 }
 
-enum RetAbi {
+RetAbi :: enum {
     RetAbiNone,
     RetAbiScalar(T),
     RetAbiFlat(Vec[Leaf]),
     RetAbiSRet,
 }
 
-const MAX_FLAT = 4
+MAX_FLAT :: 4
 
-struct Cx {
-    types Types
-    module Module
-    errs Vec[Diag]
-    opts Opts
-    file_names Vec[str]
-    fn_decls Vec[*FnDecl]
-    fn_names Map[str, i64]
-    struct_decls Vec[*StructDecl]
-    struct_names Map[str, i64]
-    enum_decls Vec[*EnumDecl]
-    enum_names Map[str, i64]
+Cx :: struct {
+    types: Types
+    module: Module
+    errs: Vec[Diag]
+    opts: Opts
+    file_names: Vec[str]
+    fn_decls: Vec[*FnDecl]
+    fn_names: Map[str, i64]
+    struct_decls: Vec[*StructDecl]
+    struct_names: Map[str, i64]
+    enum_decls: Vec[*EnumDecl]
+    enum_names: Map[str, i64]
     // user enums' variants by name: (enum declaration, variant index) of every enum that has one
-    variants Map[str, Vec[(i64, i64)]]
-    const_decls Map[str, *ConstDecl]
-    const_vals Map[str, CState]
-    global_decls Map[str, *GlobalDecl]
-    globals Map[str, (i64, i64)]
+    variants: Map[str, Vec[(i64, i64)]]
+    const_decls: Map[str, *ConstDecl]
+    const_vals: Map[str, CState]
+    global_decls: Map[str, *GlobalDecl]
+    globals: Map[str, (i64, i64)]
     // instance tables: the key is (declaration index, type arguments as a slice that is never
     // modified afterwards)
-    struct_insts Map[(i64, []i64), i64]
-    enum_insts Map[(i64, []i64), i64]
-    fn_insts Map[(i64, []i64), i64]
-    fn_sigs Vec[(Vec[i64], i64)]
-    work Vec[(i64, i64, Vec[i64])]
-    strings Map[str, i64]
-    exposed Map[i64, bool]
-    inst_depth i64
+    struct_insts: Map[(i64, []i64), i64]
+    enum_insts: Map[(i64, []i64), i64]
+    fn_insts: Map[(i64, []i64), i64]
+    fn_sigs: Vec[(Vec[i64], i64)]
+    work: Vec[(i64, i64, Vec[i64])]
+    strings: Map[str, i64]
+    exposed: Map[i64, bool]
+    inst_depth: i64
     // names declared by the prelude: prelude code always sees these, user code may shadow them
-    p_fn_names Map[str, i64]
+    p_fn_names: Map[str, i64]
     // every definition of a function name (overloads), per layer, in declaration order
-    fn_over Map[str, Vec[i64]]
-    p_fn_over Map[str, Vec[i64]]
-    p_struct_names Map[str, i64]
-    p_enum_names Map[str, i64]
+    fn_over: Map[str, Vec[i64]]
+    p_fn_over: Map[str, Vec[i64]]
+    p_struct_names: Map[str, i64]
+    p_enum_names: Map[str, i64]
     // true while resolving names on behalf of prelude code
-    scope_prelude bool
-    entry_file i64
+    scope_prelude: bool
+    entry_file: i64
     // files whose declarations are only checked when something uses them
-    lazy_files Map[i64, bool]
-    n_prelude i64
+    lazy_files: Map[i64, bool]
+    n_prelude: i64
     // written name -> position of a `priv` declaration of it in some file (for the hint of
     // "unknown name" diagnostics)
-    priv_decls Map[str, Pos]
+    priv_decls: Map[str, Pos]
     // type aliases (`type Name = T`): visible declarations, the prelude's own, resolved
     // targets, and how many resolutions of an alias are in progress
-    alias_decls Map[str, *TypeDecl]
-    p_alias_decls Map[str, *TypeDecl]
-    alias_tys Map[*TypeDecl, i64]
-    alias_depth Map[*TypeDecl, i64]
+    alias_decls: Map[str, *TypeDecl]
+    p_alias_decls: Map[str, *TypeDecl]
+    alias_tys: Map[*TypeDecl, i64]
+    alias_depth: Map[*TypeDecl, i64]
     // constants: 1 = a scalar value (`const_vals`), 2 = an aggregate or vector in read-only
     // memory (`const_mems`: type and global; type -1 while the initializer is evaluated),
     // 0 = being classified
-    const_kind Map[str, i64]
-    const_mems Map[str, (i64, i64)]
+    const_kind: Map[str, i64]
+    const_mems: Map[str, (i64, i64)]
     // files read by `embed`, by path
-    embeds Map[str, str]
+    embeds: Map[str, str]
     // the same for the enums of the prelude (see lower_match.al for the lookup rules)
-    p_variants Map[str, Vec[(i64, i64)]]
+    p_variants: Map[str, Vec[(i64, i64)]]
     // which layers declare a function, type, constant or global of a name: 1 = prelude, 2 = user
-    decl_layers Map[str, i64]
+    decl_layers: Map[str, i64]
     // the nested and anonymous functions (lower_nested.al)
-    nested Vec[NestedFn]
+    nested: Vec[NestedFn]
 }
 
 // for "unknown name" diagnostics: says that `n` exists as a private declaration of another file
-fn priv_hint(self *Cx, n str) str {
+priv_hint :: (self: *Cx, n: str) -> str {
     pos, found := self.priv_decls.get(n)
     if !found {
         return ""
     }
-    var fname str = "?"
+    fname: str = "?"
     if pos.file >= 0 && pos.file < self.file_names.len {
         fname = self.file_names[pos.file]
     }
     return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
 
-fn lower_builtin_type(name str) Opt[i64] {
+lower_builtin_type :: (name: str) -> Opt[i64] {
     match name {
         "i8" => return Some(T_I8)
         "i16" => return Some(T_I16)
@@ -136,7 +136,7 @@ fn lower_builtin_type(name str) Opt[i64] {
 }
 
 // the value of an optional type, or `d`
-fn lower_opt_or(o Opt[i64], d i64) i64 {
+lower_opt_or :: (o: Opt[i64], d: i64) -> i64 {
     match o {
         Some(t) => return t
         None => return d
@@ -144,7 +144,7 @@ fn lower_opt_or(o Opt[i64], d i64) i64 {
 }
 
 // `f as i64` of the Rust source: saturating, NaN gives 0
-fn lower_f64_to_i64(f f64) i64 {
+lower_f64_to_i64 :: (f: f64) -> i64 {
     if f != f {
         return 0
     }
@@ -158,14 +158,14 @@ fn lower_f64_to_i64(f f64) i64 {
 }
 
 // the low `n` bytes of `x`, little-endian, into `data` at `off`
-fn lower_put_le(data *Vec[u8], off i64, x u64, n i64) {
+lower_put_le :: (data: *Vec[u8], off: i64, x: u64, n: i64) {
     for j in 0..n {
         data[off + j] = u8(x >> u64(8 * j))
     }
 }
 
 // parameter types of a function declaration as text (to detect duplicate overloads)
-fn lower_new_sig(g *FnDecl) str {
+lower_new_sig :: (g: *FnDecl) -> str {
     parts := vec[str]()
     for i in 0..g.params.len {
         parts.push(ast_type_str(&g.params[i].1))
@@ -174,7 +174,7 @@ fn lower_new_sig(g *FnDecl) str {
 }
 
 // files with an index below `n_prelude` form the always-present core library
-fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
+cx_new :: (decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx {
     np := n_prelude
     cx := Cx{
         n_prelude: n_prelude,
@@ -225,17 +225,17 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
     // is the visible declaration of a name a function?
     names_fn := map[str, bool]()
     for i in 0..len(decls) {
-        var name str
-        var pos Pos
+        name: str
+        pos: Pos
         // 1 = fn, 2 = struct, 3 = enum, 4 = const, 5 = global, 6 = type alias
         kind := 0
         // the declarations are copied to the heap once: the context keeps pointers to them
-        var fp *FnDecl
-        var sp *StructDecl
-        var ep *EnumDecl
-        var cp *ConstDecl
-        var gp *GlobalDecl
-        var tp *TypeDecl
+        fp: *FnDecl
+        sp: *StructDecl
+        ep: *EnumDecl
+        cp: *ConstDecl
+        gp: *GlobalDecl
+        tp: *TypeDecl
         match decls[i] {
             DeclFn(f) => {
                 fp = new[FnDecl]()
@@ -296,7 +296,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
             was_fn, was_known := names_fn.get(name)
             if kind == 1 && was_known && was_fn {
                 // another definition of a function name: an overload, chosen by argument type
-                var l Vec[i64]
+                l: Vec[i64]
                 has_layer := false
                 if pos.file < np {
                     l, has_layer = cx.p_fn_over.get(name)
@@ -411,7 +411,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
                 cx.err(e.pos, fmt("enum `", e.name, "` declares the variant `", vn, "` twice"))
                 continue
             }
-            var l Vec[(i64, i64)]
+            l: Vec[(i64, i64)]
             has_l := false
             if layer == 1 {
                 l, has_l = cx.p_variants.get(vn)
@@ -432,7 +432,7 @@ fn cx_new(decls []Decl, file_names Vec[str], opts Opts, n_prelude i64) Cx {
     return cx
 }
 
-fn find_fn(self *Cx, n str) Opt[i64] {
+find_fn :: (self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude {
         i, ok := self.p_fn_names.get(n)
         if ok {
@@ -447,7 +447,7 @@ fn find_fn(self *Cx, n str) Opt[i64] {
 }
 
 // all definitions a call to `n` may resolve to: user definitions first, then the prelude's
-fn fn_candidates(self *Cx, n str) Vec[i64] {
+fn_candidates :: (self: *Cx, n: str) -> Vec[i64] {
     v := self.fn_candidates_of(n)
     // a private function (see priv.al): the public definitions of the written name follow
     if v.len != 0 && ast_is_private(n) {
@@ -457,7 +457,7 @@ fn fn_candidates(self *Cx, n str) Vec[i64] {
     return v
 }
 
-fn fn_candidates_of(self *Cx, n str) Vec[i64] {
+fn_candidates_of :: (self: *Cx, n: str) -> Vec[i64] {
     v := vec[i64]()
     if self.scope_prelude {
         // prelude code sees its own definitions; the synthesized entry also reaches user code
@@ -485,7 +485,7 @@ fn fn_candidates_of(self *Cx, n str) Vec[i64] {
     return v
 }
 
-fn find_struct(self *Cx, n str) Opt[i64] {
+find_struct :: (self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude {
         i, ok := self.p_struct_names.get(n)
         if ok {
@@ -499,7 +499,7 @@ fn find_struct(self *Cx, n str) Opt[i64] {
     return None
 }
 
-fn find_enum(self *Cx, n str) Opt[i64] {
+find_enum :: (self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude {
         i, ok := self.p_enum_names.get(n)
         if ok {
@@ -514,7 +514,7 @@ fn find_enum(self *Cx, n str) Opt[i64] {
 }
 
 // the type alias that `n` names
-fn find_alias(self *Cx, n str) Opt[*TypeDecl] {
+find_alias :: (self: *Cx, n: str) -> Opt[*TypeDecl] {
     if self.scope_prelude {
         d, ok := self.p_alias_decls.get(n)
         if ok {
@@ -536,7 +536,7 @@ fn find_alias(self *Cx, n str) Opt[*TypeDecl] {
 // being resolved, through the fields of a struct or enum (`type List = *Node` with
 // `struct Node { next List }`): that second resolution ends at the struct, which is
 // registered by then. A third one means that the alias is defined in terms of itself.
-fn alias_type(self *Cx, d *TypeDecl) i64 {
+alias_type :: (self: *Cx, d: *TypeDecl) -> i64 {
     known, found := self.alias_tys.get(d)
     if found {
         return known
@@ -557,24 +557,24 @@ fn alias_type(self *Cx, d *TypeDecl) i64 {
     return ty
 }
 
-fn internal_file(self *Cx, file i64) bool {
+internal_file :: (self: *Cx, file: i64) -> bool {
     return file < self.n_prelude || file == self.entry_file
 }
 
-fn pos_str(self *Cx, p Pos) str {
-    var fname str = "?"
+pos_str :: (self: *Cx, p: Pos) -> str {
+    fname: str = "?"
     if p.file >= 0 && p.file < self.file_names.len {
         fname = self.file_names[p.file]
     }
     return fmt(fname, ":", p.line, ":", p.col)
 }
 
-fn err(self *Cx, pos Pos, msg str) {
+err :: (self: *Cx, pos: Pos, msg: str) {
     self.errs.push(Diag{pos: pos, msg: msg})
 }
 
 // ---------- types ----------
-fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
+resolve :: (self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
     match *t {
         TypeAstName(n, args, pos) => {
             if args.is_empty() {
@@ -702,7 +702,7 @@ fn resolve(self *Cx, t *TypeAst, env *Map[str, i64]) i64 {
     return T_ERR
 }
 
-fn inst_name(self *Cx, base str, targs []i64) str {
+inst_name :: (self: *Cx, base: str, targs: []i64) -> str {
     if len(targs) == 0 {
         return base
     }
@@ -713,7 +713,7 @@ fn inst_name(self *Cx, base str, targs []i64) str {
     return fmt(base, "[", join(parts.items(), ", "), "]")
 }
 
-fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
+inst_struct :: (self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
     d := self.struct_decls[si]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("struct `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
@@ -761,7 +761,7 @@ fn inst_struct(self *Cx, si i64, targs Vec[i64], pos Pos) i64 {
     return ty
 }
 
-fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
+inst_enum :: (self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     d := self.enum_decls[ei]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("enum `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
@@ -814,7 +814,7 @@ fn inst_enum(self *Cx, ei i64, targs Vec[i64], pos Pos) i64 {
     return ty
 }
 
-fn flush_layout_errors(self *Cx, pos Pos) {
+flush_layout_errors :: (self: *Cx, pos: Pos) {
     errs := self.types.layout_errors
     self.types.layout_errors = vec[str]()
     for i in 0..errs.len {
@@ -823,7 +823,7 @@ fn flush_layout_errors(self *Cx, pos Pos) {
 }
 
 // ---------- ABI ----------
-fn abi_param(self *Cx, t i64) ParamAbi {
+abi_param :: (self: *Cx, t: i64) -> ParamAbi {
     if self.types.is_scalar(t) {
         return ParamAbiScalar(self.types.scalar_ir(t).0)
     }
@@ -835,7 +835,7 @@ fn abi_param(self *Cx, t i64) ParamAbi {
     return ParamAbiByRef
 }
 
-fn abi_ret(self *Cx, t i64) RetAbi {
+abi_ret :: (self: *Cx, t: i64) -> RetAbi {
     if t == T_UNIT || t == T_NEVER || t == T_ERR {
         return RetAbiNone
     }
@@ -854,7 +854,7 @@ fn abi_ret(self *Cx, t i64) RetAbi {
 }
 
 // the IR parameters and results of a function with parameter types `ptys` and result `rty`
-fn fn_abi(self *Cx, f *Func, ptys []i64, rty i64) {
+fn_abi :: (self: *Cx, f: *Func, ptys: []i64, rty: i64) {
     match self.abi_ret(rty) {
         RetAbiNone => {}
         RetAbiScalar(t) => {
@@ -888,7 +888,7 @@ fn fn_abi(self *Cx, f *Func, ptys []i64, rty i64) {
 }
 
 // ---------- function instances ----------
-fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
+inst_fn :: (self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     known, found := self.fn_insts.get((di, targs.items()))
     if found {
         return known
@@ -951,7 +951,7 @@ fn inst_fn(self *Cx, di i64, targs Vec[i64]) i64 {
 }
 
 // ---------- strings / globals ----------
-fn string_global(self *Cx, s str) i64 {
+string_global :: (self: *Cx, s: str) -> i64 {
     known, found := self.strings.get(s)
     if found {
         return known
@@ -969,7 +969,7 @@ fn string_global(self *Cx, s str) i64 {
     return gid
 }
 
-fn global(self *Cx, name str) Opt[(i64, i64)] {
+global :: (self: *Cx, name: str) -> Opt[(i64, i64)] {
     known, found := self.globals.get(name)
     if found {
         return Some(known)
@@ -1032,7 +1032,7 @@ fn global(self *Cx, name str) Opt[(i64, i64)] {
 }
 
 // type of a constant initializer expression (for globals without annotation)
-fn const_type_of(self *Cx, e *Expr) i64 {
+const_type_of :: (self: *Cx, e: *Expr) -> i64 {
     match e.k {
         EKInt(_) => return T_I64
         EKFloat(_) => return T_F64
@@ -1085,7 +1085,7 @@ fn const_type_of(self *Cx, e *Expr) i64 {
 }
 
 // interpret an expression as a type (for literals, casts, generic args)
-fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
+expr_type :: (self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
     match e.k {
         EKIdent(n) => {
             et, eok := env.get(n)
@@ -1121,7 +1121,7 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
             return None
         }
         EKIndex(b, args) => {
-            var n str
+            n: str
             match b.k {
                 EKIdent(bn) => {
                     n = bn
@@ -1185,7 +1185,7 @@ fn expr_type(self *Cx, e *Expr, env *Map[str, i64]) Opt[i64] {
 // Is constant `name` an aggregate or a vector, kept in read-only memory, rather than a
 // scalar value? Decided by the form of its initializer: a `T{...}` literal, a tuple, a
 // vector constructor, or the name of another such constant.
-fn const_is_mem(self *Cx, name str) bool {
+const_is_mem :: (self: *Cx, name: str) -> bool {
     k, known := self.const_kind.get(name)
     if known {
         return k == 2
@@ -1238,7 +1238,7 @@ fn const_is_mem(self *Cx, name str) bool {
 }
 
 // the (type, global) of a constant that lives in read-only memory (see `const_is_mem`)
-fn const_global(self *Cx, name str) Opt[(i64, i64)] {
+const_global :: (self: *Cx, name: str) -> Opt[(i64, i64)] {
     d, has_decl := self.const_decls.get(name)
     if !has_decl {
         return None
@@ -1303,12 +1303,12 @@ fn const_global(self *Cx, name str) Opt[(i64, i64)] {
 
 // The bytes of the file that `embed(args)` at `pos` names (relative to the source file),
 // read once per path; None after reporting why not.
-fn embed_bytes(self *Cx, args []Expr, pos Pos) Opt[str] {
+embed_bytes :: (self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
     if len(args) != 1 {
         self.err(pos, fmt("`embed` takes 1 argument(s), got ", len(args)))
         return None
     }
-    var rel str
+    rel: str
     match args[0].k {
         EKStr(s) => {
             rel = s
@@ -1345,7 +1345,7 @@ fn embed_bytes(self *Cx, args []Expr, pos Pos) Opt[str] {
     return None
 }
 
-fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
+const_named :: (self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
     if self.const_is_mem(name) {
         // not a scalar value; evaluated here so that its errors are reported
         self.const_global(name)
@@ -1368,7 +1368,7 @@ fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
         return None
     }
     self.const_vals.set(d.name, CStateBusy)
-    var ty Opt[i64] = None
+    ty: Opt[i64] = None
     match d.ty {
         Some(t) => {
             env := map[str, i64]()
@@ -1458,7 +1458,7 @@ fn const_named(self *Cx, name str) Opt[(Opt[i64], CV)] {
 }
 
 // integer (op) integer
-fn lower_const_bin_int(cx *Cx, op BinOp, x i64, y i64, pos Pos) Opt[CV] {
+lower_const_bin_int :: (cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
     match op {
         BinOpAdd => return Some(CVInt(x + y))
         BinOpSub => return Some(CVInt(x - y))
@@ -1503,7 +1503,7 @@ fn lower_const_bin_int(cx *Cx, op BinOp, x i64, y i64, pos Pos) Opt[CV] {
 }
 
 // the operand of a mixed / float operation as a float: (value, ok)
-fn lower_const_float_operand(cx *Cx, e *Expr) (f64, bool) {
+lower_const_float_operand :: (cx: *Cx, e: *Expr) -> (f64, bool) {
     match cx.const_eval(e) {
         Some(cv) => {
             match cv {
@@ -1518,7 +1518,7 @@ fn lower_const_float_operand(cx *Cx, e *Expr) (f64, bool) {
 }
 
 // float (op) float, with integers converted; the operands are evaluated again
-fn lower_const_bin_float(cx *Cx, op BinOp, a *Expr, b *Expr) Opt[CV] {
+lower_const_bin_float :: (cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
     x, xok := lower_const_float_operand(cx, a)
     if !xok {
         return None
@@ -1543,7 +1543,7 @@ fn lower_const_bin_float(cx *Cx, op BinOp, a *Expr, b *Expr) Opt[CV] {
     return None
 }
 
-fn const_eval(self *Cx, e *Expr) Opt[CV] {
+const_eval :: (self: *Cx, e: *Expr) -> Opt[CV] {
     match e.k {
         EKInt(n) => return Some(CVInt(i64(n)))
         EKFloat(f) => return Some(CVFloat(f))
@@ -1588,14 +1588,14 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
             }
         }
         EKBin(op, a, b) => {
-            var x CV
+            x: CV
             match self.const_eval(a) {
                 Some(xv) => {
                     x = xv
                 }
                 None => return None
             }
-            var y CV
+            y: CV
             match self.const_eval(b) {
                 Some(yv) => {
                     y = yv
@@ -1650,14 +1650,14 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
             if args.len == 1 {
                 // numeric conversion of a constant: T(x); sizeof[T]()
                 env := map[str, i64]()
-                var t i64
+                t: i64
                 match self.expr_type(c, &env) {
                     Some(ct) => {
                         t = ct
                     }
                     None => return None
                 }
-                var v CV
+                v: CV
                 match self.const_eval(&args[0]) {
                     Some(av) => {
                         v = av
@@ -1719,7 +1719,7 @@ fn const_eval(self *Cx, e *Expr) Opt[CV] {
 }
 
 // write a constant initializer into `data` at `off`
-fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i64, RelocTarget)]) bool {
+const_init :: (self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], relocs: *Vec[(i64, RelocTarget)]) -> bool {
     k := self.types.k(ty)
     match e.k {
         EKLit(te, items) => {
@@ -1920,7 +1920,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
         }
         _ => {}
     }
-    var v CV
+    v: CV
     match self.const_eval(e) {
         Some(cv) => {
             v = cv
@@ -1990,7 +1990,7 @@ fn const_init(self *Cx, e *Expr, ty i64, off i64, data *Vec[u8], relocs *Vec[(i6
     return false
 }
 
-fn lower_wrap_int(v i64, bits i64, signed bool) i64 {
+lower_wrap_int :: (v: i64, bits: i64, signed: bool) -> i64 {
     if signed {
         match bits {
             8 => return i64(i8(v))

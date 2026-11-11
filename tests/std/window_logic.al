@@ -2,9 +2,9 @@
 // XEvent accessors and the framebuffer fit + conversion used by `present`.
 use std.window
 
-fn px(v u32) str { pad_left(hex(u64(v)), 6, '0') }
+px :: (v: u32) -> str { pad_left(hex(u64(v)), 6, '0') }
 
-fn dump(dst []u32, w i64, h i64) {
+dump :: (dst: []u32, w: i64, h: i64) {
     for y in 0..h {
         for x in 0..w {
             put(px(dst[y * w + x]), " ")
@@ -13,7 +13,7 @@ fn dump(dst []u32, w i64, h i64) {
     }
 }
 
-fn main() {
+main :: () {
     // keysyms -> key codes
     print(key_name(key_from_keysym('a')), key_name(key_from_keysym('Z')), key_name(key_from_keysym('0')), key_name(key_from_keysym('9')))
     syms := []u64{0x20, 0xFF1B, 0xFF0D, 0xFF09, 0xFF08, 0xFF51, 0xFF52, 0xFF53, 0xFF54, 0xFFE1, 0xFFE2, 0xFFE3, 0xFFE4,
@@ -24,7 +24,7 @@ fn main() {
     print()
     print(key_from_keysym(0xFFFF) == KEY_DELETE, key_from_keysym(0xFF63) == KEY_INSERT, key_from_keysym(0x1008FF11), key_from_keysym(0xE9), key_from_keysym(0))
     // every key code is reachable from some keysym
-    var seen [KEY_COUNT]bool
+    seen: [KEY_COUNT]bool
     for s in 0..0x10000 {
         seen[key_from_keysym(u64(s))] = true
     }
@@ -46,7 +46,7 @@ fn main() {
     }
 
     // XEvent accessors: layout of the C union
-    var ev XEvent
+    ev: XEvent
     x_client_message(&ev, 0x1234, 77, 5, 6, 7, 8, 9)
     print(sizeof[XEvent](), sizeof[XSizeHints](), sizeof[XColor]())
     print(x_event_type(&ev) == X_CLIENT_MESSAGE, x_event_window(&ev), x_event_message_type(&ev), x_event_message_data(&ev, 0), x_event_message_data(&ev, 4))
@@ -101,7 +101,7 @@ fn main() {
     }
     big := alloc[u32](211 * 97)
     blit_fit(big, 211, 97, grad, gw, gh, true)
-    var sum u64 = 0
+    sum: u64 = 0
     black := 0
     for i, p in big {
         sum = sum * 31 + u64(p) + u64(i)

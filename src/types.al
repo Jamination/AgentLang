@@ -1,6 +1,6 @@
 // Type table: interned semantic types, layout, scalar leaves.
 
-enum TyK {
+TyK :: enum {
     TyKErr,
     TyKUnit,
     TyKBool,
@@ -20,77 +20,77 @@ enum TyK {
     TyKNever,
 }
 
-const T_ERR = 0
-const T_UNIT = 1
-const T_BOOL = 2
-const T_I8 = 3
-const T_I16 = 4
-const T_I32 = 5
-const T_I64 = 6
-const T_U8 = 7
-const T_U16 = 8
-const T_U32 = 9
-const T_U64 = 10
-const T_F64 = 11
-const T_F32 = 12
-const T_STR = 13
-const T_NEVER = 14
-const T_VEC2 = 15
-const T_VEC3 = 16
-const T_VEC4 = 17
-const T_QUAT = 18
-const T_MAT4 = 19
+T_ERR :: 0
+T_UNIT :: 1
+T_BOOL :: 2
+T_I8 :: 3
+T_I16 :: 4
+T_I32 :: 5
+T_I64 :: 6
+T_U8 :: 7
+T_U16 :: 8
+T_U32 :: 9
+T_U64 :: 10
+T_F64 :: 11
+T_F32 :: 12
+T_STR :: 13
+T_NEVER :: 14
+T_VEC2 :: 15
+T_VEC3 :: 16
+T_VEC4 :: 17
+T_QUAT :: 18
+T_MAT4 :: 19
 
-struct StructInfo {
-    name str
-    decl i64
-    targs Vec[i64]
-    fields Vec[(str, i64)]
-    offsets Vec[i64]
-    size i64
-    align i64
+StructInfo :: struct {
+    name: str
+    decl: i64
+    targs: Vec[i64]
+    fields: Vec[(str, i64)]
+    offsets: Vec[i64]
+    size: i64
+    align: i64
     // 0 = layout pending, 1 = in progress, 2 = done, 3 = the fields are not known yet
     // (the type is being instantiated; its size reads as 0 until then)
-    state i64
+    state: i64
 }
 
-struct EnumInfo {
-    name str
-    decl i64
-    targs Vec[i64]
-    variants Vec[(str, Vec[i64])]
-    simple bool
-    size i64
-    state i64
+EnumInfo :: struct {
+    name: str
+    decl: i64
+    targs: Vec[i64]
+    variants: Vec[(str, Vec[i64])]
+    simple: bool
+    size: i64
+    state: i64
 }
 
-struct Leaf {
-    off i64
-    t T
-    alias i64
+Leaf :: struct {
+    off: i64
+    t: T
+    alias: i64
 }
 
-struct Types {
-    kinds Vec[TyK]
+Types :: struct {
+    kinds: Vec[TyK]
     // HashMap<TyK, Ty> in the Rust source: keyed by the canonical text of the kind (types_key)
-    map Map[str, i64]
-    structs Vec[StructInfo]
-    enums Vec[EnumInfo]
-    field_ids Map[(i64, i64), i64]
-    next_field_id i64
-    layout_errors Vec[str]
+    map: Map[str, i64]
+    structs: Vec[StructInfo]
+    enums: Vec[EnumInfo]
+    field_ids: Map[(i64, i64), i64]
+    next_field_id: i64
+    layout_errors: Vec[str]
 }
 
-const AK_ANY = 0
-const AK_I16 = 1
-const AK_I32 = 2
-const AK_I64 = 3
-const AK_F64 = 4
-const AK_PTR = 5
-const AK_F32 = 6
-const AK_VEC = 7
+AK_ANY :: 0
+AK_I16 :: 1
+AK_I32 :: 2
+AK_I64 :: 3
+AK_F64 :: 4
+AK_PTR :: 5
+AK_F32 :: 6
+AK_VEC :: 7
 
-fn types_may_alias_class(a i64, b i64) bool {
+types_may_alias_class :: (a: i64, b: i64) -> bool {
     ka := a & 15
     kb := b & 15
     if ka == AK_ANY || kb == AK_ANY {
@@ -105,7 +105,7 @@ fn types_may_alias_class(a i64, b i64) bool {
 }
 
 // canonical text of a kind: equal kinds have equal keys and different kinds different keys
-fn types_key(k TyK) str {
+types_key :: (k: TyK) -> str {
     match k {
         TyKErr => return "E"
         TyKUnit => return "U"
@@ -139,7 +139,7 @@ fn types_key(k TyK) str {
     }
 }
 
-fn types_new() Types {
+types_new :: () -> Types {
     t := Types{
         kinds: vec[TyK](),
         map: map[str, i64](),
@@ -175,7 +175,7 @@ fn types_new() Types {
     return t
 }
 
-fn intern(self *Types, k TyK) i64 {
+intern :: (self: *Types, k: TyK) -> i64 {
     key := types_key(k)
     t, found := self.map.get(key)
     if found {
@@ -188,7 +188,7 @@ fn intern(self *Types, k TyK) i64 {
 }
 
 // the kind with its own type lists (the table must not share a buffer with the caller)
-fn types_kind_copy(k TyK) TyK {
+types_kind_copy :: (k: TyK) -> TyK {
     match k {
         TyKTuple(v) => return TyKTuple(clone(&v))
         TyKFn(p, r) => return TyKFn(clone(&p), r)
@@ -196,16 +196,16 @@ fn types_kind_copy(k TyK) TyK {
     }
 }
 
-fn k(self *Types, t i64) TyK {
+k :: (self: *Types, t: i64) -> TyK {
     return self.kinds[t]
 }
 
-fn is_float(self *Types, t i64) bool {
+is_float :: (self: *Types, t: i64) -> bool {
     return t == T_F64 || t == T_F32
 }
 
 // vec2 / vec3 / vec4 / quat: the number of f32 lanes
-fn vec_lanes(self *Types, t i64) Opt[i64] {
+vec_lanes :: (self: *Types, t: i64) -> Opt[i64] {
     match self.k(t) {
         TyKVec(n) => return Some(n)
         TyKQuat => return Some(4)
@@ -214,29 +214,29 @@ fn vec_lanes(self *Types, t i64) Opt[i64] {
 }
 
 // `Types::ptr` in the Rust source (a function named `ptr` would hide the builtin)
-fn ptr_to(self *Types, t i64) i64 {
+ptr_to :: (self: *Types, t: i64) -> i64 {
     return self.intern(TyKPtr(t))
 }
 
-fn slice(self *Types, t i64) i64 {
+slice :: (self: *Types, t: i64) -> i64 {
     return self.intern(TyKSlice(t))
 }
 
-fn is_int(self *Types, t i64) bool {
+is_int :: (self: *Types, t: i64) -> bool {
     match self.k(t) {
         TyKInt(b, s) => return true
         _ => return false
     }
 }
 
-fn is_signed(self *Types, t i64) bool {
+is_signed :: (self: *Types, t: i64) -> bool {
     match self.k(t) {
         TyKInt(b, s) => return s
         _ => return false
     }
 }
 
-fn is_scalar(self *Types, t i64) bool {
+is_scalar :: (self: *Types, t: i64) -> bool {
     match self.k(t) {
         TyKBool, TyKF64, TyKF32, TyKQuat => return true
         TyKInt(b, s) => return true
@@ -248,7 +248,7 @@ fn is_scalar(self *Types, t i64) bool {
     }
 }
 
-fn types_names(self *Types, v Vec[i64]) str {
+types_names :: (self: *Types, v: Vec[i64]) -> str {
     parts := vec[str]()
     for t in v.items() {
         parts.push(self.name(t))
@@ -256,7 +256,7 @@ fn types_names(self *Types, v Vec[i64]) str {
     return join(parts.items(), ", ")
 }
 
-fn name(self *Types, t i64) str {
+name :: (self: *Types, t: i64) -> str {
     match self.k(t) {
         TyKErr => return "<error>"
         TyKUnit => return "()"
@@ -291,7 +291,7 @@ fn name(self *Types, t i64) str {
     }
 }
 
-fn layout_fields(self *Types, tys []i64) (Vec[i64], i64, i64) {
+layout_fields :: (self: *Types, tys: []i64) -> (Vec[i64], i64, i64) {
     off := 0
     align := 1
     offs := vec[i64]()
@@ -307,7 +307,7 @@ fn layout_fields(self *Types, tys []i64) (Vec[i64], i64, i64) {
     return (offs, size, align)
 }
 
-fn layout_struct(self *Types, sid i64) {
+layout_struct :: (self: *Types, sid: i64) {
     st := self.structs[sid].state
     if st == 2 || st == 3 {
         return
@@ -340,7 +340,7 @@ fn layout_struct(self *Types, sid i64) {
     s.state = 2
 }
 
-fn layout_enum(self *Types, eid i64) {
+layout_enum :: (self: *Types, eid: i64) {
     st := self.enums[eid].state
     if st == 2 || st == 3 {
         return
@@ -372,7 +372,7 @@ fn layout_enum(self *Types, eid i64) {
 }
 
 // offsets of payload fields of a variant, relative to the enum start
-fn variant_offsets(self *Types, eid i64, var_ i64) Vec[i64] {
+variant_offsets :: (self: *Types, eid: i64, var_: i64) -> Vec[i64] {
     tys := clone(&self.enums[eid].variants[var_].1)
     offs, s, a := self.layout_fields(tys.items())
     out := vec[i64]()
@@ -382,11 +382,11 @@ fn variant_offsets(self *Types, eid i64, var_ i64) Vec[i64] {
     return out
 }
 
-fn tuple_offsets(self *Types, tys []i64) Vec[i64] {
+tuple_offsets :: (self: *Types, tys: []i64) -> Vec[i64] {
     return self.layout_fields(tys).0
 }
 
-fn size_of(self *Types, t i64) i64 {
+size_of :: (self: *Types, t: i64) -> i64 {
     match self.k(t) {
         TyKErr, TyKUnit, TyKNever => return 0
         TyKBool => return 1
@@ -419,7 +419,7 @@ fn size_of(self *Types, t i64) i64 {
     }
 }
 
-fn align_of(self *Types, t i64) i64 {
+align_of :: (self: *Types, t: i64) -> i64 {
     match self.k(t) {
         TyKErr, TyKUnit, TyKNever => return 1
         TyKBool => return 1
@@ -440,7 +440,7 @@ fn align_of(self *Types, t i64) i64 {
     }
 }
 
-fn field_id(self *Types, owner i64, idx i64) i64 {
+field_id :: (self: *Types, owner: i64, idx: i64) -> i64 {
     f0, found := self.field_ids.get((owner, idx))
     if found {
         return f0
@@ -452,7 +452,7 @@ fn field_id(self *Types, owner i64, idx i64) i64 {
 }
 
 // IR type + alias kind of a scalar type
-fn scalar_ir(self *Types, t i64) (T, i64) {
+scalar_ir :: (self: *Types, t: i64) -> (T, i64) {
     match self.k(t) {
         TyKBool => return (TI8, AK_ANY)
         TyKInt(b, s) => {
@@ -487,7 +487,7 @@ fn scalar_ir(self *Types, t i64) (T, i64) {
 }
 
 // alias class for a scalar of type `t` that is field `idx` of aggregate `owner`
-fn field_alias(self *Types, owner i64, idx i64, t i64) i64 {
+field_alias :: (self: *Types, owner: i64, idx: i64, t: i64) -> i64 {
     it, k := self.scalar_ir(t)
     if k == AK_ANY {
         return 0
@@ -496,13 +496,13 @@ fn field_alias(self *Types, owner i64, idx i64, t i64) i64 {
 }
 
 // a scalar type: one leaf at `base`
-fn types_leaves_scalar(self *Types, t i64, base i64, out *Vec[Leaf]) {
+types_leaves_scalar :: (self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
     it, k := self.scalar_ir(t)
     out.push(Leaf{off: base, t: it, alias: k})
 }
 
 // the fields `tys` (at offsets `offs`) of the struct or tuple `t`
-fn types_leaves_fields(self *Types, t i64, tys []i64, offs []i64, base i64, out *Vec[Leaf]) {
+types_leaves_fields :: (self: *Types, t: i64, tys: []i64, offs: []i64, base: i64, out: *Vec[Leaf]) {
     for i, ft in tys {
         if self.is_scalar(ft) {
             it, k := self.scalar_ir(ft)
@@ -514,7 +514,7 @@ fn types_leaves_fields(self *Types, t i64, tys []i64, offs []i64, base i64, out 
     }
 }
 
-fn leaves(self *Types, t i64, base i64, out *Vec[Leaf]) {
+leaves :: (self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
     match self.k(t) {
         TyKErr, TyKUnit, TyKNever => {}
         TyKMat4 => {
@@ -570,11 +570,11 @@ fn leaves(self *Types, t i64, base i64, out *Vec[Leaf]) {
     }
 }
 
-const TYPES_COUNT_MAX = 0x7FFFFFFFFFFFFFFF
+TYPES_COUNT_MAX :: 0x7FFFFFFFFFFFFFFF
 
 // saturating arithmetic on non-negative counts (u64 saturating_mul / saturating_add in the
 // Rust source; here the ceiling is the largest i64)
-fn types_sat_mul(a i64, b i64) i64 {
+types_sat_mul :: (a: i64, b: i64) -> i64 {
     if a == 0 || b == 0 {
         return 0
     }
@@ -584,7 +584,7 @@ fn types_sat_mul(a i64, b i64) i64 {
     return a * b
 }
 
-fn types_sat_add(a i64, b i64) i64 {
+types_sat_add :: (a: i64, b: i64) -> i64 {
     if a > TYPES_COUNT_MAX - b {
         return TYPES_COUNT_MAX
     }
@@ -592,7 +592,7 @@ fn types_sat_add(a i64, b i64) i64 {
 }
 
 // number of leaves without materializing huge arrays
-fn leaf_count(self *Types, t i64) i64 {
+leaf_count :: (self: *Types, t: i64) -> i64 {
     match self.k(t) {
         TyKArray(e, n) => return types_sat_mul(self.leaf_count(e), n)
         TyKStruct(s) => {

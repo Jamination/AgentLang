@@ -1,14 +1,14 @@
 type_alias.al:2:1: error: type alias `A` refers to itself
 type_alias.al:4:1: error: type alias `C` refers to itself
 type_alias.al:5:1: error: type alias `D` refers to itself
-type_alias.al:6:10: error: unknown type `Nope`
+type_alias.al:6:11: error: unknown type `Nope`
 type_alias.al:8:1: error: `Reg` is already declared at tests/fail/type_alias.al:7:1
 type_alias.al:10:1: error: `Dup` is already declared at tests/fail/type_alias.al:9:1
 type_alias.al:12:1: error: `Fun` is already declared at tests/fail/type_alias.al:11:1
 type_alias.al:13:1: error: `i32` is a builtin type name
-type_alias.al:14:10: error: type alias `Reg` takes no type arguments (it stands for i64)
+type_alias.al:14:11: error: type alias `Reg` takes no type arguments (it stands for i64)
 type_alias.al:15:1: error: enum variant `Red` conflicts with another declaration
-type_alias.al:23:17: error: type mismatch: expected i64, found str
+type_alias.al:23:14: error: type mismatch: expected i64, found str
 type_alias.al:24:10: error: type `Reg` cannot be used as a value here
 type_alias.al:25:11: error: argument `t` of `takes`: expected str, found i64
 type_alias.al:27:6: error: [4]i64 has no field `nope`

@@ -2,12 +2,12 @@
 
 // debugging aid: ALC_DISABLE=pass1,pass2 switches optimization passes off
 // the environment switches, read once
-var opt_env_read bool
-var opt_env_debug str
-var opt_env_disable str
-var opt_env_has_disable bool
+opt_env_read: bool
+opt_env_debug: str
+opt_env_disable: str
+opt_env_has_disable: bool
 
-fn opt_read_env() {
+opt_read_env :: () {
     if !opt_env_read {
         opt_env_read = true
         d, has_d := env_get("ALC_DEBUG")
@@ -18,7 +18,7 @@ fn opt_read_env() {
     }
 }
 
-fn opt_enabled(name str) bool {
+opt_enabled :: (name: str) -> bool {
     opt_read_env()
     if opt_env_has_disable {
         for x in split(opt_env_disable, ',') {
@@ -30,7 +30,7 @@ fn opt_enabled(name str) bool {
     }
     return true
 }
-fn opt_trace(what str, f *Func) {
+opt_trace :: (what: str, f: *Func) {
     opt_read_env()
     v := opt_env_debug
     if v == "trace" {
@@ -45,7 +45,7 @@ fn opt_trace(what str, f *Func) {
     }
 }
 
-fn opt_local_opt(f *Func, level i64) {
+opt_local_opt :: (f: *Func, level: i64) {
     opt_trace("local_opt", f)
     cleanup_prune_unreachable(f)
     mem2reg_run(f)
@@ -144,7 +144,7 @@ fn opt_local_opt(f *Func, level i64) {
     opt_trace("end-local-opt", f)
 }
 
-fn opt_optimize(m *Module, level i64) {
+opt_optimize :: (m: *Module, level: i64) {
     n := m.funcs.len
     for fid in 0..n {
         f := &m.funcs[fid]

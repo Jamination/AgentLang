@@ -9,32 +9,32 @@
 // tri.frag, compiled to SPIR-V ahead of time and embedded into the executable.
 use std.vk
 
-const SIZE u32 = 256
-const FORMAT i32 = VK_FORMAT_R8G8B8A8_UNORM
+SIZE : u32 : 256
+FORMAT : i32 : VK_FORMAT_R8G8B8A8_UNORM
 
 // The device and what is needed to allocate from it and submit to it.
-struct Gpu {
-    instance *u8
-    physical *u8
-    device *u8
-    queue *u8
-    family u32
-    memory VkPhysicalDeviceMemoryProperties
+Gpu :: struct {
+    instance: *u8
+    physical: *u8
+    device: *u8
+    queue: *u8
+    family: u32
+    memory: VkPhysicalDeviceMemoryProperties
 }
 
 // The offscreen colour attachment.
-struct Target {
-    image u64
-    memory u64
-    view u64
-    render_pass u64
-    framebuffer u64
+Target :: struct {
+    image: u64
+    memory: u64
+    view: u64
+    render_pass: u64
+    framebuffer: u64
 }
 
 // Creates an instance and a device on the first GPU that has a graphics queue. The text result
 // is empty on success and says what is missing otherwise.
-fn open_gpu() (Gpu, str) {
-    var g Gpu
+open_gpu :: () -> (Gpu, str) {
+    g: Gpu
     app := vk_application_info()
     app.pApplicationName = ptr("vk_triangle")
     app.apiVersion = VK_API_VERSION_1_0
@@ -45,12 +45,12 @@ fn open_gpu() (Gpu, str) {
         return (g, fmt("vkCreateInstance: ", vk_result_name(r)))
     }
 
-    var devices [8]*u8
-    var count u32 = 8
+    devices: [8]*u8
+    count: u32 = 8
     vkEnumeratePhysicalDevices(g.instance, &count, ptr(devices))
     for d in 0..i64(count) {
-        var families [16]VkQueueFamilyProperties
-        var n u32 = 16
+        families: [16]VkQueueFamilyProperties
+        n: u32 = 16
         vkGetPhysicalDeviceQueueFamilyProperties(devices[d], &n, ptr(families))
         for f in 0..i64(n) {
             if g.physical == nil && families[f].queueFlags & VK_QUEUE_GRAPHICS_BIT != 0 {
@@ -64,7 +64,7 @@ fn open_gpu() (Gpu, str) {
         return (g, "no physical device with a graphics queue")
     }
 
-    var priority f32 = 1.0
+    priority: f32 = 1.0
     queue_info := vk_device_queue_create_info()
     queue_info.queueFamilyIndex = g.family
     queue_info.queueCount = 1
@@ -83,26 +83,26 @@ fn open_gpu() (Gpu, str) {
 }
 
 // Allocates device memory that satisfies `req` and has the property `flags`.
-fn allocate(g *Gpu, req *VkMemoryRequirements, flags u32) u64 {
+allocate :: (g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
     index, ok := vk_find_memory_type(&g.memory, req.memoryTypeBits, flags)
     assert ok, "no suitable memory type"
     info := vk_memory_allocate_info()
     info.allocationSize = req.size
     info.memoryTypeIndex = index
-    var memory u64
+    memory: u64
     vk_check(vkAllocateMemory(g.device, &info, nil, &memory), "vkAllocateMemory")
     memory
 }
 
 // Creates a buffer backed by host-visible memory; returns (buffer, memory).
-fn create_buffer(g *Gpu, size u64, usage u32) (u64, u64) {
+create_buffer :: (g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
     info := vk_buffer_create_info()
     info.size = size
     info.usage = usage
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    var buffer u64
+    buffer: u64
     vk_check(vkCreateBuffer(g.device, &info, nil, &buffer), "vkCreateBuffer")
-    var req VkMemoryRequirements
+    req: VkMemoryRequirements
     vkGetBufferMemoryRequirements(g.device, buffer, &req)
     memory := allocate(g, &req, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
     vk_check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory")
@@ -111,8 +111,8 @@ fn create_buffer(g *Gpu, size u64, usage u32) (u64, u64) {
 
 // Creates the colour image, its view, a render pass that clears it and leaves it ready to be
 // copied from, and the framebuffer.
-fn create_target(g *Gpu) Target {
-    var t Target
+create_target :: (g: *Gpu) -> Target {
+    t: Target
     image_info := vk_image_create_info()
     image_info.imageType = VK_IMAGE_TYPE_2D
     image_info.format = FORMAT
@@ -124,7 +124,7 @@ fn create_target(g *Gpu) Target {
     image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     vk_check(vkCreateImage(g.device, &image_info, nil, &t.image), "vkCreateImage")
-    var req VkMemoryRequirements
+    req: VkMemoryRequirements
     vkGetImageMemoryRequirements(g.device, t.image, &req)
     t.memory = allocate(g, &req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     vk_check(vkBindImageMemory(g.device, t.image, t.memory, 0), "vkBindImageMemory")
@@ -183,12 +183,12 @@ fn create_target(g *Gpu) Target {
 
 // Creates the graphics pipeline: two shader stages, vertices of (vec2 position, vec3 colour),
 // a fixed viewport covering the image, no culling, no blending. Returns (pipeline, layout).
-fn create_pipeline(g *Gpu, render_pass u64) (u64, u64) {
+create_pipeline :: (g: *Gpu, render_pass: u64) -> (u64, u64) {
     vert, vert_ok := vk_create_shader_module(g.device, embed("../tests/sys/data/tri.vert.spv"))
     frag, frag_ok := vk_create_shader_module(g.device, embed("../tests/sys/data/tri.frag.spv"))
     assert vert_ok && frag_ok, "shader module creation failed"
 
-    var stages [2]VkPipelineShaderStageCreateInfo
+    stages: [2]VkPipelineShaderStageCreateInfo
     stages[0] = vk_pipeline_shader_stage_create_info()
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT
     stages[0].module = vert
@@ -199,7 +199,7 @@ fn create_pipeline(g *Gpu, render_pass u64) (u64, u64) {
     stages[1].pName = ptr("main")
 
     binding := VkVertexInputBindingDescription{0, 20, VK_VERTEX_INPUT_RATE_VERTEX}
-    var attributes [2]VkVertexInputAttributeDescription
+    attributes: [2]VkVertexInputAttributeDescription
     attributes[0] = VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}
     attributes[1] = VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32_SFLOAT, 8}
     vertex_input := vk_pipeline_vertex_input_state_create_info()
@@ -237,7 +237,7 @@ fn create_pipeline(g *Gpu, render_pass u64) (u64, u64) {
     blend.pAttachments = &blend_attachment
 
     layout_info := vk_pipeline_layout_create_info()
-    var layout u64
+    layout: u64
     vk_check(vkCreatePipelineLayout(g.device, &layout_info, nil, &layout), "vkCreatePipelineLayout")
 
     info := vk_graphics_pipeline_create_info()
@@ -251,7 +251,7 @@ fn create_pipeline(g *Gpu, render_pass u64) (u64, u64) {
     info.pColorBlendState = &blend
     info.layout = layout
     info.renderPass = render_pass
-    var pipeline u64
+    pipeline: u64
     vk_check(vkCreateGraphicsPipelines(g.device, 0, 1, &info, nil, &pipeline), "vkCreateGraphicsPipelines")
     vkDestroyShaderModule(g.device, vert, nil)
     vkDestroyShaderModule(g.device, frag, nil)
@@ -259,7 +259,7 @@ fn create_pipeline(g *Gpu, render_pass u64) (u64, u64) {
 }
 
 // Writes tightly packed RGBA pixels (row 0 = top) as a 24-bit BMP file.
-fn write_bmp(path str, rgba []u8, width i64, height i64) bool {
+write_bmp :: (path: str, rgba: []u8, width: i64, height: i64) -> bool {
     row := (width * 3 + 3) / 4 * 4
     data := alloc[u8](54 + row * height)
     header := [6]i64{54 + row * height, 0, 54, 40, width, height}
@@ -282,7 +282,7 @@ fn write_bmp(path str, rgba []u8, width i64, height i64) bool {
     write_file(path, data)
 }
 
-fn main() i64 {
+main :: () -> i64 {
     g, problem := open_gpu()
     if problem.len != 0 {
         print("cannot use Vulkan:", problem)
@@ -299,7 +299,7 @@ fn main() i64 {
     }
     vertex_bytes := u64(sizeof[[15]f32]())
     vertex_buffer, vertex_memory := create_buffer(&g, vertex_bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
-    var mapped *u8
+    mapped: *u8
     vk_check(vkMapMemory(g.device, vertex_memory, 0, VK_WHOLE_SIZE, 0, &mapped), "vkMapMemory")
     memcopy(mapped, ptr(vertices), i64(vertex_bytes))
     vkUnmapMemory(g.device, vertex_memory)
@@ -309,13 +309,13 @@ fn main() i64 {
 
     pool_info := vk_command_pool_create_info()
     pool_info.queueFamilyIndex = g.family
-    var pool u64
+    pool: u64
     vk_check(vkCreateCommandPool(g.device, &pool_info, nil, &pool), "vkCreateCommandPool")
     alloc_info := vk_command_buffer_allocate_info()
     alloc_info.commandPool = pool
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
     alloc_info.commandBufferCount = 1
-    var cmd *u8
+    cmd: *u8
     vk_check(vkAllocateCommandBuffers(g.device, &alloc_info, &cmd), "vkAllocateCommandBuffers")
 
     // record: clear, draw the triangle, copy the image into the read-back buffer
@@ -331,7 +331,7 @@ fn main() i64 {
     pass_begin.pClearValues = &clear
     vkCmdBeginRenderPass(cmd, &pass_begin, VK_SUBPASS_CONTENTS_INLINE)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline)
-    var offset u64 = 0
+    offset: u64 = 0
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer, &offset)
     vkCmdDraw(cmd, 3, 1, 0, 0)
     vkCmdEndRenderPass(cmd)

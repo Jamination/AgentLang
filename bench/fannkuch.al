@@ -1,10 +1,10 @@
-fn fannkuch(n i32) i32 {
-    var perm [16]i32
-    var perm1 [16]i32
-    var count [16]i32
-    var maxflips i32 = 0
-    var checksum i32 = 0
-    var permcount i32 = 0
+fannkuch :: (n: i32) -> i32 {
+    perm: [16]i32
+    perm1: [16]i32
+    count: [16]i32
+    maxflips: i32 = 0
+    checksum: i32 = 0
+    permcount: i32 = 0
     r := n
     for i in 0..n {
         perm1[i] = i
@@ -17,7 +17,7 @@ fn fannkuch(n i32) i32 {
         for i in 0..n {
             perm[i] = perm1[i]
         }
-        var flips i32 = 0
+        flips: i32 = 0
         loop {
             k := perm[0]
             if k == 0 {
@@ -55,6 +55,6 @@ fn fannkuch(n i32) i32 {
     }
 }
 
-fn main() {
+main :: () {
     fannkuch(10)
 }

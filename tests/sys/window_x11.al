@@ -3,7 +3,7 @@
 // presents frames, polls events and closes again.
 use std.window
 
-fn main() {
+main :: () {
     display := from_cstr(getenv(ptr("AL_TEST_DISPLAY")))
     if len(display) == 0 {
         print("AL_TEST_DISPLAY is not set")
@@ -46,7 +46,7 @@ fn main() {
         if w.present(fb, 64, 48) {
             presented += 1
         }
-        var ts = [2]i64{0, 10_000_000}
+        ts := [2]i64{0, 10_000_000}
         syscall(35, ptr(ts), 0)
     }
     width, height = w.size()
