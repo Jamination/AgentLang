@@ -1,6 +1,6 @@
-4:5: error: the nested function `id` cannot have type parameters of its own (`[U]`): it may use the type parameters of the enclosing function
-10:17: error: the nested function `addk` uses the variable `k` of the enclosing function, so it is not a function value: call it directly (`addk(...)`), or pass what it needs as parameters
-11:10: error: the nested function `addk` uses the variable `k` of the enclosing function
+4:5: error: the nested function `gen[i64].id` cannot have type parameters of its own (`[U]`): it may use the type parameters of the enclosing function
+10:17: error: the nested function `main.addk` uses the variable `k` of the enclosing function, so it is not a function value: call it directly (`addk(...)`), or pass what it needs as parameters
+11:10: error: the nested function `main.addk` uses the variable `k` of the enclosing function
 12:5: error: `addk` is already declared in this scope: a nested function needs a name that no variable or other nested function of its block has
 13:5: error: `k` is already declared in this scope
 14:10: error: unknown function `early`: the nested function `early` is declared at line 15, after this use
@@ -12,9 +12,9 @@
 30:12: error: argument `b` of `two`: expected i64, found str
 31:5: error: `addk` is a nested function: it is not assignable
 32:14: error: the nested function `addk` takes no type arguments
-33:22: error: function `noret` must return a value of type i64
-35:26: error: the nested function `fwd` uses the variable `k` of the enclosing function, so it is not a function value
+33:22: error: function `main.noret` must return a value of type i64
+35:26: error: the nested function `main.fwd` uses the variable `k` of the enclosing function, so it is not a function value
 37:5: error: `i64` is a builtin type name
 38:32: error: unknown function `later_fn`: `later_fn` is declared at line 39, after the nested function `main.calls_later`
-42:11: error: the nested function `both` uses the variables `j`, `k` of the enclosing function, so it is not a function value
+42:11: error: the nested function `main.both` uses the variables `j`, `k` of the enclosing function, so it is not a function value
 46:10: error: unknown function `local`

@@ -27,6 +27,8 @@ struct Capture {
 // a nested function as seen from a function that can call it
 struct NestedFn {
     decl *FnDecl
+    // the name for diagnostics, the IR and the symbol table: `outer.name`
+    shown str
     // -1: the declaration has errors (uses of the name are not reported again)
     fid i64
     // the declared parameter types and the result type
@@ -436,7 +438,7 @@ fn nested_later(self *Fx, after Pos) Vec[(str, i64)] {
 // the name `d.name` means a nested function that cannot be used (its declaration has errors)
 fn lower_nested_broken(fx *Fx, d *FnDecl) {
     idx := fx.nested.len
-    fx.nested.push(NestedFn{decl: d, fid: -1, ptys: vec[i64](), rty: T_ERR, caps: vec[Capture]()})
+    fx.nested.push(NestedFn{decl: d, shown: "", fid: -1, ptys: vec[i64](), rty: T_ERR, caps: vec[Capture]()})
     fx.scopes[fx.scopes.len - 1].vars.set(d.name, (-(idx + 1), 0))
 }
 
@@ -449,7 +451,7 @@ fn nested_fn(self *Fx, d *FnDecl) {
         return
     }
     if d.tparams.len != 0 {
-        self.err(d.pos, fmt("the nested function `", name, "` cannot have type parameters of its own (`[", join(d.tparams.items(), ", "), "]`): it may use the type parameters of the enclosing function; a generic function is declared at the top level"))
+        self.err(d.pos, fmt("the nested function `", self.f.name, ".", name, "` cannot have type parameters of its own (`[", join(d.tparams.items(), ", "), "]`): it may use the type parameters of the enclosing function; a generic function is declared at the top level"))
         lower_nested_broken(self, d)
         return
     }
@@ -490,7 +492,8 @@ fn nested_fn(self *Fx, d *FnDecl) {
             None => {}
         }
     }
-    me := NestedFn{decl: d, fid: self.cx.module.funcs.len, ptys: ptys, rty: rty, caps: caps}
+    shown := fmt(self.f.name, ".", ast_plain(name))
+    me := NestedFn{decl: d, shown: shown, fid: self.cx.module.funcs.len, ptys: ptys, rty: rty, caps: caps}
     nest := NestCtx{caps: caps, imports: vec_one(me), later: self.nested_later(d.pos)}
     for i in 0..w.fns.len {
         h := self.nested[w.fns[i]]
@@ -518,7 +521,7 @@ fn nested_fn(self *Fx, d *FnDecl) {
     for i in 0..caps.len {
         full.push(self.cx.types.ptr_to(caps[i].ty))
     }
-    f := func_new(fmt(self.f.name, ".", ast_plain(name)))
+    f := func_new(shown)
     f.noreturn = rty == T_NEVER
     // a call that is not inlined keeps every variable the function uses in memory in the
     // caller: worth more code than for an ordinary function
@@ -528,7 +531,7 @@ fn nested_fn(self *Fx, d *FnDecl) {
     self.cx.fn_abi(&f, full.items(), rty)
     self.cx.module.funcs.push(f)
     self.cx.fn_sigs.push((full, rty))
-    lower_fn_lower_body(self.cx, me.fid, &d.params, &d.body, self.tenv, name, d.pos, &nest)
+    lower_fn_lower_body(self.cx, me.fid, &d.params, &d.body, self.tenv, shown, d.pos, &nest)
     idx := self.nested.len
     self.nested.push(me)
     self.scopes[top].vars.set(name, (-(idx + 1), 0))
@@ -556,7 +559,7 @@ fn nested_value(self *Fx, idx i64, pos Pos) Val {
             names.push(fmt("`", nf.caps[i].name, "`"))
         }
         what := if names.len == 1 { "variable" } else { "variables" }
-        self.err(pos, fmt("the nested function `", nf.decl.name, "` uses the ", what, " ", join(names.items(), ", "), " of the enclosing function, so it is not a function value: call it directly (`", nf.decl.name, "(...)`), or pass what it needs as parameters (a callback that needs state takes it as a context argument, like `sort_by(items, ctx, less)`)"))
+        self.err(pos, fmt("the nested function `", nf.shown, "` uses the ", what, " ", join(names.items(), ", "), " of the enclosing function, so it is not a function value: call it directly (`", nf.decl.name, "(...)`), or pass what it needs as parameters (a callback that needs state takes it as a context argument, like `sort_by(items, ctx, less)`)"))
         return val_err()
     }
     ty := self.cx.types.intern(TyKFn(clone(&nf.ptys), nf.rty))

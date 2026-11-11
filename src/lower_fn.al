@@ -273,7 +273,7 @@ fn lower_fn_lower_body(cx *Cx, fid i64, params *Vec[(str, TypeAst)], body *Block
         for i in 0..nest.imports.len {
             // a nested function this one may call: what it needs is among the hidden parameters
             imp := nest.imports[i]
-            mine := NestedFn{decl: imp.decl, fid: imp.fid, ptys: imp.ptys, rty: imp.rty, caps: vec[Capture]()}
+            mine := NestedFn{decl: imp.decl, shown: imp.shown, fid: imp.fid, ptys: imp.ptys, rty: imp.rty, caps: vec[Capture]()}
             for j in 0..imp.caps.len {
                 c := imp.caps[j]
                 for k in 0..nest.caps.len {
