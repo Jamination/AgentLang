@@ -1,0 +1,6 @@
+mulhi.al:5:16: error: `mulhi` needs two integers of the same type, found i64 and u32 (convert one explicitly, e.g. `i64(y)`)
+mulhi.al:6:17: error: `mulhi` needs two integers of the same type, found f64
+mulhi.al:7:16: error: `mulhi` takes 2 argument(s), got 1
+mulhi.al:8:17: error: `mulhi` needs two integers of the same type, found str
+mulhi.al:9:20: error: integer literal 5000000000 does not fit in u32
+mulhi.al:11:20: error: `mulhi` needs two integers of the same type, found f64

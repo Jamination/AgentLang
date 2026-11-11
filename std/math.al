@@ -337,17 +337,6 @@ inline fn __trunc32(x f64) f64 {
     cast[f64](cast[u64](x) & 0xFFFFFFFF00000000)
 }
 
-// high 64 bits of the 128-bit product a * b
-fn __mulhi(a u64, b u64) u64 {
-    a0 := a & 0xFFFFFFFF
-    a1 := a >> 32
-    b0 := b & 0xFFFFFFFF
-    b1 := b >> 32
-    t := a1 * b0 + ((a0 * b0) >> 32)
-    u := a0 * b1 + (t & 0xFFFFFFFF)
-    a1 * b1 + (t >> 32) + (u >> 32)
-}
-
 // Payne-Hanek reduction for finite |x| >= 2^20: x = n * pi/2 + (hi + lo), |hi| <= pi/4;
 // returns (n mod 4, hi, lo). Exact integer arithmetic on the 192 digits of 2/pi that matter.
 fn __rem_pio2_big(x f64) (i64, f64, f64) {
@@ -368,8 +357,8 @@ fn __rem_pio2_big(x f64) (i64, f64, f64) {
     }
     // p = m * (w2:w1:w0) mod 2^192 = (|x| * 2/pi mod 4) * 2^190
     p0 := m * w0
-    p1 := __mulhi(m, w0) + m * w1
-    p2 := __mulhi(m, w1) + m * w2
+    p1 := mulhi(m, w0) + m * w1
+    p2 := mulhi(m, w1) + m * w2
     if p1 < m * w1 {
         p2 += 1
     }

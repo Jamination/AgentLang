@@ -1875,6 +1875,83 @@ fn builtin(self *Fx, name str, targs Opt[[]i64], args []Expr, expect Opt[i64], p
             r := self.ins(op, it, vec_of([]i64{s, c}), 0)
             return Some(self.sval(v.ty, r))
         }
+        "mulhi" => {
+            // the high half of the full (double-width) product of two integers of one type
+            if nargs != 2 {
+                self.err(pos, fmt("`", name, "` takes ", 2, " argument(s), got ", nargs))
+                return Some(val_err())
+            }
+            // an untyped literal takes the type of the other operand, else of the context
+            first := 0
+            if self.is_untyped(&args[0]) && !self.is_untyped(&args[1]) {
+                first = 1
+            }
+            var exp0 Opt[i64] = None
+            if self.is_untyped(&args[first]) {
+                match expect {
+                    Some(et) => {
+                        if self.cx.types.is_int(et) {
+                            exp0 = expect
+                        }
+                    }
+                    None => {}
+                }
+            }
+            v := self.expr(&args[first], exp0)
+            if v.ty == T_ERR {
+                return Some(val_err())
+            }
+            if !self.cx.types.is_int(v.ty) {
+                tn := self.tyname(v.ty)
+                self.err(args[first].pos, fmt("`mulhi` needs two integers of the same type, found ", tn))
+                return Some(val_err())
+            }
+            w := self.expr(&args[1 - first], Some(v.ty))
+            if w.ty == T_ERR {
+                return Some(val_err())
+            }
+            if w.ty != v.ty {
+                a := self.tyname(v.ty)
+                b := self.tyname(w.ty)
+                if first != 0 {
+                    a = self.tyname(w.ty)
+                    b = self.tyname(v.ty)
+                }
+                self.err(pos, fmt("`mulhi` needs two integers of the same type, found ", a, " and ", b, " (convert one explicitly, e.g. `", a, "(y)`)"))
+                return Some(val_err())
+            }
+            signed := self.cx.types.is_signed(v.ty)
+            it := self.irt(v.ty)
+            a := self.scalar(v)
+            b := self.scalar(w)
+            if it == TI64 {
+                var hop Op
+                if signed {
+                    hop = OpMulHiS
+                } else {
+                    hop = OpMulHiU
+                }
+                r := self.ins(hop, TI64, vec_of([]i64{a, b}), 0)
+                return Some(self.sval(v.ty, r))
+            }
+            // narrower types: the full product fits in 64 bits
+            var ext Op
+            var shr Op
+            if signed {
+                ext = OpSExt
+                shr = OpAShr
+            } else {
+                ext = OpZExt
+                shr = OpLShr
+            }
+            wa := self.ins(ext, TI64, vec_of([]i64{a}), 0)
+            wb := self.ins(ext, TI64, vec_of([]i64{b}), 0)
+            prod := self.ins(OpMul, TI64, vec_of([]i64{wa, wb}), 0)
+            bits := self.iconst(TI64, it.size() * 8)
+            hi := self.ins(shr, TI64, vec_of([]i64{prod, bits}), 0)
+            r := self.ins(OpTrunc, it, vec_of([]i64{hi}), 0)
+            return Some(self.sval(v.ty, r))
+        }
         "memcopy", "memfill" => {
             if nargs != 3 {
                 self.err(pos, fmt("`", name, "` takes ", 3, " argument(s), got ", nargs))
