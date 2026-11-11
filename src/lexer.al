@@ -76,10 +76,6 @@ fn lexer_parse_u64(text str) (u64, bool) {
     return (v, true)
 }
 
-fn lexer_pos(file i64, line i64, at i64, line_start i64) Pos {
-    return Pos{file: file, line: line, col: i64(u16(at - line_start + 1))}
-}
-
 fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
     s := src
     i := 0
@@ -88,6 +84,10 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
     out := vec[Token]()
     // bracket stack: '(' / '[' suppress newlines, '{' enables them
     stack := vec[u8]()
+    // the position of the character at `i`
+    fn here() Pos {
+        Pos{file: file, line: line, col: i64(u16(i - line_start + 1))}
+    }
     while i < len(s) {
         c := s[i]
         if c == '\n' {
@@ -118,7 +118,7 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
                     }
                 }
                 if term {
-                    out.push(Token{t: TkNl, pos: lexer_pos(file, line, i, line_start)})
+                    out.push(Token{t: TkNl, pos: here()})
                 }
             }
             i += 1
@@ -136,7 +136,7 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
             }
             continue
         }
-        p := lexer_pos(file, line, i, line_start)
+        p := here()
         if is_alpha(c) || c == '_' {
             st := i
             while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
@@ -353,7 +353,7 @@ fn lexer_lex(src str, file i64, errs *Vec[Diag]) Vec[Token] {
             i += 1
         }
     }
-    p := lexer_pos(file, line, i, line_start)
+    p := here()
     if out.len > 0 {
         last_nl := false
         match out[out.len - 1].t {

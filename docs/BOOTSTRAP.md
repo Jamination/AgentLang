@@ -99,8 +99,10 @@ Compiling the compiler (about 29,000 lines) takes about 3.5 s and 0.6 GB.
   as their addresses. A nested function that calls another one (or itself) takes over the
   callee's captures and passes them on; captures are identified by their address value, not
   by name. Calls go through `call_fn`, the same code as calls of top-level functions, so they
-  are direct calls: the inliner treats them like any other, and after inlining the captured
-  variables are promoted to registers again. A nested function without captures is a plain
+  are direct calls: the inliner treats them like any other (a nested function with captures
+  carries the `inline` hint, because a call that is not inlined keeps those variables in
+  memory in the caller), and after inlining the captured variables are promoted to registers
+  again. A nested function without captures is a plain
   function value; one with captures cannot be used as a value, so no address of a local
   outlives its call that way. The walk that finds what a body uses is exhaustive over the
   AST enums: a new `EK` / `SK` / `Pat` variant does not compile until it is handled there

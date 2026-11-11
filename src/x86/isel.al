@@ -8,31 +8,6 @@ struct ExitAlias {
     header i64
 }
 
-fn isel_split_critical_edges_is_hphi(f *Func, def_block *Vec[i64], header i64, v i64) bool {
-    return f.insts[v].op == OpPhi && def_block[v] == header
-}
-
-// operands folded into the compare are evaluated after the copies: they must not
-// depend on a header phi through anything that gets folded (addresses, test operands)
-fn isel_split_critical_edges_tree_has(f *Func, v i64, depth i64, def_block *Vec[i64], header i64) bool {
-    if isel_split_critical_edges_is_hphi(f, def_block, header, v) {
-        return true
-    }
-    i := &f.insts[v]
-    if !(i.op == OpAdd || i.op == OpSub || i.op == OpShl || i.op == OpMul || i.op == OpLoad || i.op == OpAnd) {
-        return false
-    }
-    if depth == 0 {
-        return true
-    }
-    for a in i.args.items() {
-        if isel_split_critical_edges_tree_has(f, a, depth - 1, def_block, header) {
-            return true
-        }
-    }
-    return false
-}
-
 fn isel_term_is_trap(t Term) bool {
     match t {
         TermTrap => true
@@ -78,20 +53,43 @@ fn isel_split_critical_edges_analyze(f *Func, cfg *Cfg, loops *Loops, def_block 
         return (none, false)
     }
     // the branch condition (and what gets folded into it) must not read the header phis
+    fn is_hphi(v i64) bool {
+        f.insts[v].op == OpPhi && def_block[v] == header
+    }
+    // operands folded into the compare are evaluated after the copies: they must not
+    // depend on a header phi through anything that gets folded (addresses, test operands)
+    fn tree_has(v i64, depth i64) bool {
+        if is_hphi(v) {
+            return true
+        }
+        i := &f.insts[v]
+        if !(i.op == OpAdd || i.op == OpSub || i.op == OpShl || i.op == OpMul || i.op == OpLoad || i.op == OpAnd) {
+            return false
+        }
+        if depth == 0 {
+            return true
+        }
+        for a in i.args.items() {
+            if tree_has(a, depth - 1) {
+                return true
+            }
+        }
+        return false
+    }
     ci := &f.insts[c]
-    if isel_split_critical_edges_is_hphi(f, def_block, header, c) {
+    if is_hphi(c) {
         return (none, false)
     }
     if ci.op.is_cmp() {
         for a in ci.args.items() {
-            if isel_split_critical_edges_is_hphi(f, def_block, header, a) {
+            if is_hphi(a) {
                 return (none, false)
             }
         }
     }
     for a in ci.args.items() {
         ai := &f.insts[a]
-        if (ai.op == OpAnd || ai.op == OpLoad) && isel_split_critical_edges_tree_has(f, a, 12, def_block, header) {
+        if (ai.op == OpAnd || ai.op == OpLoad) && tree_has(a, 12) {
             return (none, false)
         }
     }

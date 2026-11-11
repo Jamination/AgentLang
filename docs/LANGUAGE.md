@@ -571,9 +571,11 @@ fn depth(n i64) i64 {
   a variable can only be called (`f(x)`, `x.f()`); using its name as a value is an error. A
   callback that needs state gets it as a parameter, as with `sort_by(items, ctx, less)`.
 - **Cost.** A nested function is compiled as an ordinary function that receives the addresses
-  of the variables it uses as extra arguments, and is inlined like any other; there is no
-  allocation and nothing to keep alive. Diagnostics, `--emit-ir` and the symbol table name it
-  `outer.name`.
+  of the variables it uses as extra arguments; there is no allocation and nothing to keep
+  alive. Small ones are inlined, and the variables are then ordinary locals in registers. If a
+  nested function is not inlined (it is large or recursive, or the enclosing function is very
+  large), the variables it uses live in memory for the whole enclosing function. Diagnostics,
+  `--emit-ir` and the symbol table name it `outer.name`.
 
 ### match
 

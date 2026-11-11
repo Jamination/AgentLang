@@ -6,6 +6,9 @@ struct Keys { keys []i64, desc bool }
 
 fn apply(f fn(i64) i64, x i64) i64 { f(x) }
 
+priv const tally = 3
+priv fn helper(x i64) i64 { x + 100 }
+
 // lowered once per instantiation, with T known
 fn gsum[T](xs []T, zero T) T {
     acc := zero
@@ -73,6 +76,12 @@ fn main() {
     fn inc(x *i64) { *x += n }
     n.inc()
     print(n)
+
+    // nested functions with the names of `priv` declarations of the file
+    seen := 0
+    fn tally(x i64) i64 { seen += 1; x + 3 }
+    fn helper(x i64) i64 { x + seen }
+    print(tally(1), 2.tally(), helper(1), 2.helper(), seen)
 
     // state for a callback is passed as a context
     keys := []i64{50, 10, 40, 20, 30}

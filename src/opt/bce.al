@@ -279,25 +279,6 @@ fn bce_clone_at(f *Func, pre i64, v i64, iv_phi i64, at i64, in_loop []bool, def
     return f.push(pre, i.op, i.ty, args, i.k)
 }
 
-// the closure `add_check` of hoist_in_loop (h: the loop header)
-fn bce_hoist_in_loop_add_check(f *Func, cur *i64, cond i64, trap i64, h i64) {
-    nb := f.new_block()
-    f.blocks[nb].term = TermJmp(h)
-    f.blocks[*cur].term = TermBr(cond, nb, trap)
-    *cur = nb
-}
-
-// the closure `build` of hoist_in_loop
-// computations go into `pre` (it dominates the whole chain)
-fn bce_hoist_in_loop_build(f *Func, at i64, pre i64, a *BceAffine, iv *BceIv, in_loop []bool, def_block []i64) i64 {
-    inner := bce_clone_at(f, pre, a.inner, iv.phi, at, in_loop, def_block)
-    match a.ext {
-        Some(op) => return f.push(pre, op, TI64, vec_of([]i64{inner}), 0)
-        None => {}
-    }
-    return inner
-}
-
 fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
     l := &loops.loops[li]
     h := l.header
@@ -429,6 +410,23 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
     }
     // build the chain of hoisted checks: pre -> n1 -> ... -> header
     cur := pre
+    // one more check at the end of the chain
+    fn add_check(cond i64, trap i64) {
+        nb := f.new_block()
+        f.blocks[nb].term = TermJmp(h)
+        f.blocks[cur].term = TermBr(cond, nb, trap)
+        cur = nb
+    }
+    // the index expression `a` for the value `at` of the induction variable; the
+    // computations go into `pre` (it dominates the whole chain)
+    fn index_at(at i64, a *BceAffine) i64 {
+        inner := bce_clone_at(f, pre, a.inner, iv.phi, at, in_loop, def_block)
+        match a.ext {
+            Some(op) => return f.push(pre, op, TI64, vec_of([]i64{inner}), 0)
+            None => {}
+        }
+        return inner
+    }
     for ci in 0..cands.len {
         cand := cands[ci]
         b := cand.0
@@ -438,12 +436,12 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
         ln := cand.5
         match cand.6 {
             BceKindInvariant => {
-                bce_hoist_in_loop_add_check(f, &cur, c, trap, h)
+                add_check(c, trap)
             }
             BceKindAffine(a) => {
                 assert has_iv
-                e_first := bce_hoist_in_loop_build(f, iv.start, pre, &a, &iv, in_loop, def_block)
-                e_last := bce_hoist_in_loop_build(f, last_eff, pre, &a, &iv, in_loop, def_block)
+                e_first := index_at(iv.start, &a)
+                e_last := index_at(last_eff, &a)
                 c1 := f.push(pre, OpUlt, TI8, vec_of([]i64{e_first, ln}), 0)
                 c2 := f.push(pre, OpUlt, TI8, vec_of([]i64{e_last, ln}), 0)
                 dir := bce_signum(a.coef) * bce_signum(iv.step)
@@ -453,9 +451,9 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
                 } else {
                     c3 = f.push(pre, OpUle, TI8, vec_of([]i64{e_last, e_first}), 0)
                 }
-                bce_hoist_in_loop_add_check(f, &cur, c1, trap, h)
-                bce_hoist_in_loop_add_check(f, &cur, c2, trap, h)
-                bce_hoist_in_loop_add_check(f, &cur, c3, trap, h)
+                add_check(c1, trap)
+                add_check(c2, trap)
+                add_check(c3, trap)
                 if abs(a.coef) > 1 {
                     // the trip count must be small enough that coef * iv cannot wrap; when it is
                     // not, some access is out of bounds anyway
@@ -467,7 +465,7 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
                     }
                     lim := f.push(pre, OpConst, TI64, vec[i64](), 9223372036854775807 / abs(a.coef))
                     c4 := f.push(pre, OpUle, TI8, vec_of([]i64{d, lim}), 0)
-                    bce_hoist_in_loop_add_check(f, &cur, c4, trap, h)
+                    add_check(c4, trap)
                 }
             }
         }

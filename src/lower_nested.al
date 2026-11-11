@@ -520,6 +520,11 @@ fn nested_fn(self *Fx, d *FnDecl) {
     }
     f := func_new(fmt(self.f.name, ".", ast_plain(name)))
     f.noreturn = rty == T_NEVER
+    // a call that is not inlined keeps every variable the function uses in memory in the
+    // caller: worth more code than for an ordinary function
+    if caps.len != 0 {
+        f.inl = 1
+    }
     self.cx.fn_abi(&f, full.items(), rty)
     self.cx.module.funcs.push(f)
     self.cx.fn_sigs.push((full, rty))
