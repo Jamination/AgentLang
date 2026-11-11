@@ -16,3 +16,5 @@
 25:16: error: cannot infer the type of `nil` here
 26:12: error: type mismatch: expected i64, found str
 27:10: error: cannot take the address of this expression
+32:20: error: type mismatch: expected i64, found str (argument 1 of the declared `hash(Opt[i64])`)
+33:14: error: `hash` takes 1 argument(s), got 2 (the declared functions do not accept these arguments either: hash(Opt[i64]))

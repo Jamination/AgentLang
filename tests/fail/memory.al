@@ -26,3 +26,9 @@ fn main() {
     v[0] = "s"
     r := &v[..]
 }
+enum Opt[T] { Some(T), None }
+fn hash(o Opt[i64]) i64 { 1 }
+fn later() {
+    a := hash(Some("s"))
+    b := hash(None, 1)
+}

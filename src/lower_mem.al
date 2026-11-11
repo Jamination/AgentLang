@@ -82,16 +82,11 @@ fn decl_accepts(self *Fx, d *FnDecl, explicit Opt[Vec[i64]], recv Opt[Val], args
         }
         None => {}
     }
+    // typed arguments first: they bind the type parameters (as in `call_decl`)
     for i in 0..len(args) {
         pt := &d.params.buf[nrecv + i].1
         ty := tys[i]
-        if ty < 0 {
-            if !is_some(self.literal_fit(d, nrecv + i, &args[i])) {
-                return false
-            }
-            continue
-        }
-        if ty == T_NEVER {
+        if ty < 0 || ty == T_NEVER {
             continue
         }
         if generic {
@@ -109,7 +104,107 @@ fn decl_accepts(self *Fx, d *FnDecl, explicit Opt[Vec[i64]], recv Opt[Val], args
             return false
         }
     }
+    // then the untyped literals: each must be acceptable to the type of its parameter
+    for i in 0..len(args) {
+        if tys[i] >= 0 {
+            continue
+        }
+        pt := &d.params.buf[nrecv + i].1
+        a := &args[i]
+        if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
+            // a literal binds a type parameter to its default type, when it has one
+            dt := lower_mem_literal_type(self, a)
+            if dt < 0 || !self.unify(pt, dt, d.tparams.items(), &env) {
+                return false
+            }
+            continue
+        }
+        saved := self.cx.errs.len
+        t := self.cx.resolve(pt, &env)
+        self.cx.errs.truncate(saved)
+        if !lower_mem_literal_ok(self, a, t) {
+            return false
+        }
+    }
     return true
+}
+
+// can the untyped literal (or constant) `a` be a value of type `t`?
+fn lower_mem_literal_ok(s *Fx, a *Expr, t i64) bool {
+    k := s.cx.types.k(t)
+    match a.k {
+        EKNil => {
+            return lower_call_is_ptr(k) || lower_call_is_fn(k) || lower_call_is_slice(k)
+        }
+        EKIdent(n) => {
+            ev, is_variant := s.cx.variants.get(n)
+            if is_variant && !s.cx.const_decls.has(n) {
+                match k {
+                    TyKEnum(eid) => {
+                        return s.cx.types.enums.buf[eid].decl == ev.0
+                    }
+                    _ => {}
+                }
+                return false
+            }
+        }
+        _ => {}
+    }
+    match s.cx.const_eval(a) {
+        Some(cv) => {
+            match cv {
+                CVStr(_) => {
+                    return t == T_STR
+                }
+                CVBool(_) => {
+                    return t == T_BOOL
+                }
+                CVFloat(_) => {
+                    return s.cx.types.is_float(t)
+                }
+                CVInt(_) => {}
+            }
+        }
+        None => {}
+    }
+    return s.cx.types.is_int(t) || s.cx.types.is_float(t)
+}
+
+// the type an untyped literal (or constant) takes without context; -1 if it has none
+fn lower_mem_literal_type(s *Fx, a *Expr) i64 {
+    match a.k {
+        EKNil => {
+            return -1
+        }
+        EKIdent(n) => {
+            ev, is_variant := s.cx.variants.get(n)
+            if is_variant && !s.cx.const_decls.has(n) {
+                if s.cx.enum_decls.buf[ev.0].tparams.len != 0 {
+                    return -1
+                }
+                return s.cx.inst_enum(ev.0, vec[i64](), a.pos)
+            }
+        }
+        _ => {}
+    }
+    match s.cx.const_eval(a) {
+        Some(cv) => {
+            match cv {
+                CVStr(_) => {
+                    return T_STR
+                }
+                CVBool(_) => {
+                    return T_BOOL
+                }
+                CVFloat(_) => {
+                    return T_F64
+                }
+                CVInt(_) => {}
+            }
+        }
+        None => {}
+    }
+    return T_I64
 }
 
 // A call of a name that is a builtin and may also be declared as a function. The declared
@@ -183,7 +278,13 @@ fn call_shared(self *Fx, name str, cands0 Vec[i64], explicit Opt[Vec[i64]], recv
                     }
                 }
             }
+            nerr := self.cx.errs.len
             v := self.expr(a, exp)
+            if is_some(exp) && self.cx.errs.len > nerr {
+                // the argument was typed for the one declared function: name it
+                e := &self.cx.errs.buf[nerr]
+                e.msg = fmt(e.msg, " (argument ", i + 1, " of the declared `", lower_call_call_overloaded_sigs(self, alive.items()), "`)")
+            }
             v = self.stabilize(v, args[i + 1..])
             self.memo.push((a, v))
             tys.push(v.ty)
