@@ -1,0 +1,653 @@
+// Lowering of the memory features: calls of names shared by a builtin and declared functions,
+// the library's `Vec` as an indexable value, and the builtin `clone`.
+
+// ---------- names that are builtins ----------
+// every name `builtin` (lower_call.al) answers to
+fn lower_mem_is_builtin(name str) bool {
+    match name {
+        "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => return true
+        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed", "panic" => return true
+        "fmt", "hash", "put", "print", "clone", "mulhi" => return true
+        _ => {}
+    }
+    return false
+}
+
+// builtins that can be called as a method: `x.f(a)` means `f(x, a)`
+fn lower_mem_is_method_builtin(name str) bool {
+    match name {
+        "len", "clone", "hash", "ptr", "sqrt", "fabs", "fmin", "fmax" => return true
+        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr" => return true
+        _ => {}
+    }
+    return false
+}
+
+// Would `call_decl` accept these arguments for declaration `d`? `tys[i]` is the type of
+// argument i, or -1 for an untyped literal (which is not evaluated).
+fn decl_accepts(self *Fx, d *FnDecl, explicit Opt[Vec[i64]], recv Opt[Val], args []Expr, tys []i64) bool {
+    nrecv := if is_some(recv) { 1 } else { 0 }
+    if d.params.len != len(args) + nrecv {
+        return false
+    }
+    generic := d.tparams.len != 0
+    env := map[str, i64]()
+    match explicit {
+        Some(t) => {
+            if t.len != d.tparams.len {
+                return false
+            }
+            for j in 0..t.len {
+                env.set(d.tparams.buf[j], t.buf[j])
+            }
+        }
+        None => {}
+    }
+    match recv {
+        Some(rv) => {
+            pt := &d.params.buf[0].1
+            if !self.param_accepts(d, pt, rv.ty, true, lower_call_as_slice(explicit)) {
+                return false
+            }
+            if generic {
+                // bind the type parameters the way `call_decl` does: by value, then through
+                // a pointer in either direction
+                e2 := lower_call_clone_env(&env)
+                if self.unify(pt, rv.ty, d.tparams.items(), &e2) {
+                    env = e2
+                } else {
+                    e3 := lower_call_clone_env(&env)
+                    ok := false
+                    is_ptr_param := false
+                    match *pt {
+                        TypeAstPtr(inner) => {
+                            is_ptr_param = true
+                            ok = self.unify(inner, rv.ty, d.tparams.items(), &e3)
+                        }
+                        _ => {}
+                    }
+                    if !is_ptr_param {
+                        match self.cx.types.k(rv.ty) {
+                            TyKPtr(t) => {
+                                ok = self.unify(pt, t, d.tparams.items(), &e3)
+                            }
+                            _ => {}
+                        }
+                    }
+                    if ok {
+                        env = e3
+                    }
+                }
+            }
+        }
+        None => {}
+    }
+    // typed arguments first: they bind the type parameters (as in `call_decl`)
+    for i in 0..len(args) {
+        pt := &d.params.buf[nrecv + i].1
+        ty := tys[i]
+        if ty < 0 || ty == T_NEVER {
+            continue
+        }
+        if generic {
+            if !self.unify(pt, ty, d.tparams.items(), &env) {
+                return false
+            }
+            if lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
+                continue
+            }
+        }
+        saved := self.cx.errs.len
+        t := self.cx.resolve(pt, &env)
+        self.cx.errs.truncate(saved)
+        if t != ty {
+            return false
+        }
+    }
+    // then the untyped literals: each must be acceptable to the type of its parameter
+    for i in 0..len(args) {
+        if tys[i] >= 0 {
+            continue
+        }
+        pt := &d.params.buf[nrecv + i].1
+        a := &args[i]
+        if generic && lower_call_mentions_unbound(pt, d.tparams.items(), &env) {
+            // a literal binds a type parameter to its default type, when it has one
+            dt := lower_mem_literal_type(self, a)
+            if dt < 0 || !self.unify(pt, dt, d.tparams.items(), &env) {
+                return false
+            }
+            continue
+        }
+        saved := self.cx.errs.len
+        t := self.cx.resolve(pt, &env)
+        self.cx.errs.truncate(saved)
+        if !lower_mem_literal_ok(self, a, t) {
+            return false
+        }
+    }
+    return true
+}
+
+// can the untyped literal (or constant) `a` be a value of type `t`?
+fn lower_mem_literal_ok(s *Fx, a *Expr, t i64) bool {
+    k := s.cx.types.k(t)
+    match a.k {
+        EKNil => {
+            return lower_call_is_ptr(k) || lower_call_is_fn(k) || lower_call_is_slice(k)
+        }
+        EKIdent(n) => {
+            ev, is_variant := s.cx.variants.get(n)
+            if is_variant && !s.cx.const_decls.has(n) {
+                match k {
+                    TyKEnum(eid) => {
+                        return s.cx.types.enums.buf[eid].decl == ev.0
+                    }
+                    _ => {}
+                }
+                return false
+            }
+        }
+        _ => {}
+    }
+    match s.cx.const_eval(a) {
+        Some(cv) => {
+            match cv {
+                CVStr(_) => {
+                    return t == T_STR
+                }
+                CVBool(_) => {
+                    return t == T_BOOL
+                }
+                CVFloat(_) => {
+                    return s.cx.types.is_float(t)
+                }
+                CVInt(_) => {}
+            }
+        }
+        None => {}
+    }
+    return s.cx.types.is_int(t) || s.cx.types.is_float(t)
+}
+
+// the type an untyped literal (or constant) takes without context; -1 if it has none
+fn lower_mem_literal_type(s *Fx, a *Expr) i64 {
+    match a.k {
+        EKNil => {
+            return -1
+        }
+        EKIdent(n) => {
+            ev, is_variant := s.cx.variants.get(n)
+            if is_variant && !s.cx.const_decls.has(n) {
+                if s.cx.enum_decls.buf[ev.0].tparams.len != 0 {
+                    return -1
+                }
+                return s.cx.inst_enum(ev.0, vec[i64](), a.pos)
+            }
+        }
+        _ => {}
+    }
+    match s.cx.const_eval(a) {
+        Some(cv) => {
+            match cv {
+                CVStr(_) => {
+                    return T_STR
+                }
+                CVBool(_) => {
+                    return T_BOOL
+                }
+                CVFloat(_) => {
+                    return T_F64
+                }
+                CVInt(_) => {}
+            }
+        }
+        None => {}
+    }
+    return T_I64
+}
+
+// A call of a name that is a builtin and may also be declared as a function. The declared
+// functions are tried by the usual rules; when none of them accepts the arguments (their
+// number or their types), the builtin is used. `recv` / `recv_e`: the receiver of a method
+// call and its expression.
+//
+// The typed arguments must be evaluated to know their types, and they must be evaluated only
+// once: their values are remembered in `memo`, where the code that finally lowers the call
+// (`call_decl`, `call_overloaded` or `builtin`) finds them.
+fn call_shared(self *Fx, name str, cands0 Vec[i64], explicit Opt[Vec[i64]], recv Opt[Val], recv_e *Expr, args0 []Expr, expect Opt[i64], pos Pos) Val {
+    cands := cands0
+    if self.cx.scope_prelude && !self.cx.p_fn_over.has(name) {
+        // library code means the builtin, whatever the program declares under this name
+        cands = vec[i64]()
+    }
+    nrecv := 0
+    args := args0
+    var all []Expr
+    match recv {
+        Some(rv) => {
+            // the builtin takes the receiver as its first argument
+            nrecv = 1
+            all = alloc[Expr](len(args0) + 1)
+            all[0] = *recv_e
+            for i in 0..len(args0) {
+                all[i + 1] = args0[i]
+            }
+            args = all[1..]
+        }
+        None => {}
+    }
+    alive := vec[i64]()
+    for ci in 0..cands.len {
+        d := self.cx.fn_decls.buf[cands.buf[ci]]
+        targs_ok := true
+        match explicit {
+            Some(t) => {
+                targs_ok = t.len == d.tparams.len
+            }
+            None => {}
+        }
+        if targs_ok && d.params.len == len(args) + nrecv {
+            if nrecv == 1 && !self.param_accepts(d, &d.params.buf[0].1, lower_call_unwrap(recv).ty, true, lower_call_as_slice(explicit)) {
+                continue
+            }
+            alive.push(cands.buf[ci])
+        }
+    }
+    memo_mark := self.memo.len
+    if alive.len != 0 {
+        tys := vec[i64]()
+        failed := false
+        for i in 0..len(args) {
+            a := &args[i]
+            if self.is_untyped(a) {
+                tys.push(-1)
+                continue
+            }
+            // a single definition that is not generic tells the type its parameter expects
+            var exp Opt[i64] = None
+            if alive.len == 1 {
+                d := self.cx.fn_decls.buf[alive.buf[0]]
+                if d.tparams.len == 0 {
+                    saved := self.cx.errs.len
+                    empty := map[str, i64]()
+                    t := self.cx.resolve(&d.params.buf[nrecv + i].1, &empty)
+                    self.cx.errs.truncate(saved)
+                    if t != T_ERR {
+                        exp = Some(t)
+                    }
+                }
+            }
+            nerr := self.cx.errs.len
+            v := self.expr(a, exp)
+            if is_some(exp) && self.cx.errs.len > nerr {
+                // the argument was typed for the one declared function: name it
+                e := &self.cx.errs.buf[nerr]
+                e.msg = fmt(e.msg, " (argument ", i + 1, " of the declared `", lower_call_call_overloaded_sigs(self, alive.items()), "`)")
+            }
+            v = self.stabilize(v, args[i + 1..])
+            self.memo.push((a, v))
+            tys.push(v.ty)
+            if v.ty == T_ERR {
+                failed = true
+            }
+        }
+        if failed {
+            self.memo.truncate(memo_mark)
+            return val_err()
+        }
+        keep := vec[i64]()
+        for ai in 0..alive.len {
+            if self.decl_accepts(self.cx.fn_decls.buf[alive.buf[ai]], explicit, recv, args, tys.items()) {
+                keep.push(alive.buf[ai])
+            }
+        }
+        alive = keep
+    }
+    var r Val
+    if alive.len == 1 {
+        r = self.call_decl(alive.buf[0], explicit, recv, args, expect, pos, lower_call_no_pre())
+    } else if alive.len > 1 {
+        r = self.call_overloaded(alive.items(), explicit, recv, args, expect, pos)
+    } else {
+        bargs := args
+        usable := true
+        match recv {
+            Some(rv) => {
+                if lower_mem_is_method_builtin(name) {
+                    self.memo.push((&all[0], rv))
+                    bargs = all
+                } else {
+                    usable = false
+                    tn := self.tyname(rv.ty)
+                    if cands.len != 0 {
+                        s := lower_call_call_overloaded_sigs(self, cands.items())
+                        self.err(pos, fmt("no definition of `", name, "` can be called on ", tn, "; candidates: ", s, " (the builtin `", name, "` has no method form: call it as a plain function)"))
+                    } else {
+                        self.err(pos, fmt("no function `", name, "` to call on ", tn, " (the builtin `", name, "` has no method form: call it as a plain function)"))
+                    }
+                    lower_call_eval_all(self, args)
+                }
+            }
+            None => {}
+        }
+        has_targs := false
+        match explicit {
+            Some(t) => {
+                has_targs = t.len != 0
+            }
+            None => {}
+        }
+        if usable && has_targs && name != "sizeof" && name != "cast" && name != "mkslice" {
+            usable = false
+            self.err(pos, fmt("the builtin `", name, "` takes no type arguments, and no declared `", name, "` accepts these"))
+            lower_call_eval_all(self, bargs)
+        }
+        r = val_err()
+        if usable {
+            saved := self.cx.errs.len
+            match self.builtin(name, lower_call_as_slice(explicit), bargs, expect, pos) {
+                Some(v) => {
+                    r = v
+                }
+                None => {}
+            }
+            if r.ty == T_ERR && self.cx.errs.len > saved && cands.len != 0 {
+                // the declared functions were tried first: say so
+                e := &self.cx.errs.buf[saved]
+                s := lower_call_call_overloaded_sigs(self, cands.items())
+                e.msg = fmt(e.msg, " (the declared functions do not accept these arguments either: ", s, ")")
+            }
+        }
+    }
+    self.memo.truncate(memo_mark)
+    return r
+}
+
+// ---------- the library's Vec and Map ----------
+// the element type of the library's `Vec[T]` (a user struct that is also named Vec is not one)
+fn vec_elem(self *Cx, t i64) Opt[i64] {
+    match self.types.k(t) {
+        TyKStruct(sid) => {
+            di, has := self.p_struct_names.get("Vec")
+            si := &self.types.structs.buf[sid]
+            if has && si.decl == di && si.targs.len == 1 {
+                return Some(si.targs.buf[0])
+            }
+        }
+        _ => {}
+    }
+    return None
+}
+
+// the key and value types of the library's `Map[K, V]`
+fn map_kv(self *Cx, t i64) Opt[(i64, i64)] {
+    match self.types.k(t) {
+        TyKStruct(sid) => {
+            di, has := self.p_struct_names.get("Map")
+            si := &self.types.structs.buf[sid]
+            if has && si.decl == di && si.targs.len == 2 {
+                return Some((si.targs.buf[0], si.targs.buf[1]))
+            }
+        }
+        _ => {}
+    }
+    return None
+}
+
+// (pointer to the elements, length, element type) of a `Vec` in memory: what indexing,
+// slicing and iteration use. The pointer is only loaded when `want_ptr` (NOV otherwise).
+fn vec_parts(self *Fx, v Val, want_ptr bool) Opt[(i64, i64, i64)] {
+    et := 0
+    match self.cx.vec_elem(v.ty) {
+        Some(t) => {
+            et = t
+        }
+        None => {
+            return None
+        }
+    }
+    if !v.mem {
+        return None
+    }
+    sid := 0
+    match self.cx.types.k(v.ty) {
+        TyKStruct(s) => {
+            sid = s
+        }
+        _ => {}
+    }
+    // struct Vec[T] { buf []T, len i64 }
+    self.cx.types.layout_struct(sid)
+    off_buf := self.cx.types.structs.buf[sid].offsets.buf[0]
+    off_len := self.cx.types.structs.buf[sid].offsets.buf[1]
+    p := NOV
+    if want_ptr {
+        leaves := vec[Leaf]()
+        self.cx.types.leaves(self.cx.types.slice(et), 0, &leaves)
+        a := self.add_off(v.v, off_buf)
+        p = self.load_raw(a, TI64, leaves.buf[0].alias)
+    }
+    a := self.add_off(v.v, off_len)
+    l := self.load_raw(a, TI64, self.cx.types.field_alias(v.ty, 1, T_I64))
+    return Some((p, l, et))
+}
+
+// ---------- clone ----------
+// Does a value of type `t` own storage outside itself (a slice, and so a str, Vec or Map,
+// anywhere inside)? Pointers are not followed: `clone` shares what they point to.
+fn has_heap(self *Cx, t i64, depth i64) bool {
+    // a type that contains itself by value is reported by the layout; do not recurse forever
+    if depth > 40 {
+        return false
+    }
+    match self.types.k(t) {
+        TyKSlice(_) => return true
+        TyKArray(e, n) => return n != 0 && self.has_heap(e, depth + 1)
+        TyKStruct(sid) => {
+            for i in 0..self.types.structs.buf[sid].fields.len {
+                if self.has_heap(self.types.structs.buf[sid].fields.buf[i].1, depth + 1) {
+                    return true
+                }
+            }
+            return false
+        }
+        TyKEnum(eid) => {
+            for vi in 0..self.types.enums.buf[eid].variants.len {
+                for i in 0..self.types.enums.buf[eid].variants.buf[vi].1.len {
+                    if self.has_heap(self.types.enums.buf[eid].variants.buf[vi].1.buf[i], depth + 1) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+        TyKTuple(ts) => {
+            for i in 0..ts.len {
+                if self.has_heap(ts.buf[i], depth + 1) {
+                    return true
+                }
+            }
+            return false
+        }
+        _ => {}
+    }
+    return false
+}
+
+// the builtin `clone(x)`
+fn clone_builtin(self *Fx, args []Expr, expect Opt[i64], pos Pos) Val {
+    if len(args) != 1 {
+        self.err(pos, fmt("`clone` takes 1 argument(s), got ", len(args)))
+        lower_call_eval_all(self, args)
+        return val_err()
+    }
+    v := self.expr(&args[0], expect)
+    if v.ty == T_UNIT {
+        self.err(args[0].pos, "`clone` needs a value; this expression has none")
+        return val_err()
+    }
+    return self.clone_val(v, pos, 0)
+}
+
+// a copy of the bytes of `v` in a fresh temporary
+fn clone_copy(self *Fx, v Val) Val {
+    if !v.mem {
+        return v
+    }
+    t := self.temp(v.ty)
+    tv := self.mval(v.ty, t)
+    self.store(tv, v)
+    return tv
+}
+
+// the members `names` of the struct or tuple copy `tv` that own storage are replaced by clones
+fn lower_mem_clone_fields(s *Fx, v Val, tv Val, names Vec[str], tys Vec[i64], pos Pos, depth i64) {
+    for i in 0..names.len {
+        if !s.cx.has_heap(tys.buf[i], 0) {
+            continue
+        }
+        var src Val
+        match s.field_of(v, names.buf[i], pos) {
+            Some(p) => {
+                src = p
+            }
+            None => {
+                continue
+            }
+        }
+        var dst Val
+        match s.field_of(tv, names.buf[i], pos) {
+            Some(p) => {
+                dst = p
+            }
+            None => {
+                continue
+            }
+        }
+        c := s.clone_val(src, pos, depth + 1)
+        s.store(dst, c)
+    }
+}
+
+// An independent copy of `v`, allocated from the current arena: slices (and so str, Vec and
+// Map) get new storage, recursively; pointers and function values are copied as they are.
+fn clone_val(self *Fx, v Val, pos Pos, depth i64) Val {
+    ty := v.ty
+    if ty == T_ERR || ty == T_NEVER || ty == T_UNIT {
+        return v
+    }
+    if self.cx.types.is_scalar(ty) {
+        return self.rvalue(v)
+    }
+    if !v.mem {
+        return v
+    }
+    if depth > 40 || !self.cx.has_heap(ty, 0) {
+        // nothing to duplicate
+        return self.clone_copy(v)
+    }
+    match self.cx.types.k(ty) {
+        TyKSlice(et) => {
+            // plain elements: one allocation and one memory copy
+            name := if self.cx.has_heap(et, 0) { "__clone_slice" } else { "__clone_plain" }
+            return self.call_rt(name, vec_of([]i64{et}), vec_of([]Val{v}), pos)
+        }
+        TyKArray(et, n) => {
+            t := self.temp(ty)
+            sty := self.cx.types.slice(et)
+            nv := self.iconst(TI64, n)
+            d := self.mval(sty, self.temp(sty))
+            self.store_slice(d, t, nv)
+            s := self.mval(sty, self.temp(sty))
+            self.store_slice(s, v.v, nv)
+            self.call_rt("__clone_elems", vec_of([]i64{et}), vec_of([]Val{d, s}), pos)
+            return self.mval(ty, t)
+        }
+        TyKStruct(sid) => {
+            match self.cx.vec_elem(ty) {
+                Some(et) => {
+                    // the live elements only: the spare capacity is uninitialised memory
+                    name := if self.cx.has_heap(et, 0) { "__clone_vec" } else { "__clone_vec_plain" }
+                    return self.call_rt(name, vec_of([]i64{et}), vec_of([]Val{v}), pos)
+                }
+                None => {}
+            }
+            match self.cx.map_kv(ty) {
+                Some(kv) => {
+                    m := self.sval(self.cx.types.ptr_to(ty), v.v)
+                    kp := self.sval(T_BOOL, self.iconst(TI8, lower_expr_bool_i64(!self.cx.has_heap(kv.0, 0))))
+                    vp := self.sval(T_BOOL, self.iconst(TI8, lower_expr_bool_i64(!self.cx.has_heap(kv.1, 0))))
+                    return self.call_rt("__clone_map", vec_of([]i64{kv.0, kv.1}), vec_of([]Val{m, kp, vp}), pos)
+                }
+                None => {}
+            }
+            names := vec[str]()
+            tys := vec[i64]()
+            for i in 0..self.cx.types.structs.buf[sid].fields.len {
+                names.push(self.cx.types.structs.buf[sid].fields.buf[i].0)
+                tys.push(self.cx.types.structs.buf[sid].fields.buf[i].1)
+            }
+            tv := self.clone_copy(v)
+            lower_mem_clone_fields(self, v, tv, names, tys, pos, depth)
+            return tv
+        }
+        TyKTuple(ts) => {
+            names := vec[str]()
+            tys := vec[i64]()
+            for i in 0..ts.len {
+                names.push(fmt(i))
+                tys.push(ts.buf[i])
+            }
+            tv := self.clone_copy(v)
+            lower_mem_clone_fields(self, v, tv, names, tys, pos, depth)
+            return tv
+        }
+        TyKEnum(eid) => {
+            // the same variant; its payload values that own storage are cloned
+            tv := self.clone_copy(v)
+            nvar := self.cx.types.enums.buf[eid].variants.len
+            tag := self.load_raw(v.v, TI64, AK_ANY)
+            bj := self.new_block()
+            for vi in 0..nvar {
+                ptys := vec[i64]()
+                any := false
+                for i in 0..self.cx.types.enums.buf[eid].variants.buf[vi].1.len {
+                    pt := self.cx.types.enums.buf[eid].variants.buf[vi].1.buf[i]
+                    ptys.push(pt)
+                    if self.cx.has_heap(pt, 0) {
+                        any = true
+                    }
+                }
+                if !any {
+                    continue
+                }
+                bt := self.new_block()
+                bn := self.new_block()
+                c := self.iconst(TI64, vi)
+                eq := self.ins(OpEq, TI8, vec_of([]i64{tag, c}), 0)
+                self.br(eq, bt, bn)
+                self.switch_to(bt)
+                offs := self.cx.types.variant_offsets(eid, vi)
+                for i in 0..ptys.len {
+                    if !self.cx.has_heap(ptys.buf[i], 0) {
+                        continue
+                    }
+                    src := self.add_off(v.v, offs.buf[i])
+                    pv := self.load_any(src, ptys.buf[i])
+                    cv := self.clone_val(pv, pos, depth + 1)
+                    fd := self.mval(ptys.buf[i], self.add_off(tv.v, offs.buf[i]))
+                    fd.alias = 0
+                    self.store_any(fd, cv)
+                }
+                self.jmp(bj)
+                self.switch_to(bn)
+            }
+            self.jmp(bj)
+            self.switch_to(bj)
+            return tv
+        }
+        _ => {}
+    }
+    return self.clone_copy(v)
+}

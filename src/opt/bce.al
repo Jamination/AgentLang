@@ -491,8 +491,200 @@ fn bce_hoist_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64) bool {
     return true
 }
 
+// ---------- elimination ----------
+// `a` and `b` are the same value: one instruction, or two equal constants
+fn bce_same(f *Func, a i64, b i64) bool {
+    if a == b {
+        return true
+    }
+    match f.is_const(a) {
+        Some(x) => {
+            match f.is_const(b) {
+                Some(y) => return x == y && f.insts.buf[a].ty == f.insts.buf[b].ty
+                None => {}
+            }
+        }
+        None => {}
+    }
+    return false
+}
+
+// Is `start < end` (in the sense of the loop's own test `iv.cmp`) known whenever the loop is
+// entered? Either both are constants, or a block that is the only way to the preheader
+// branches on that comparison.
+fn bce_entry_guard(f *Func, cfg *Cfg, pre i64, iv *BceIv) bool {
+    match f.is_const(iv.start) {
+        Some(s) => {
+            match f.is_const(iv.end) {
+                Some(e) => {
+                    match simplify_fold_icmp(iv.cmp, iv.ty, s, e) {
+                        Some(r) => return r
+                        None => return false
+                    }
+                }
+                None => {}
+            }
+        }
+        None => {}
+    }
+    signed := iv.cmp == OpSlt
+    lt := if signed { OpSlt } else { OpUlt }
+    gt := if signed { OpSgt } else { OpUgt }
+    ge := if signed { OpSge } else { OpUge }
+    le := if signed { OpSle } else { OpUle }
+    b := pre
+    for depth in 0..16 {
+        if cfg.preds.buf[b].len != 1 {
+            return false
+        }
+        p := cfg.preds.buf[b].buf[0]
+        match f.blocks.buf[p].term {
+            TermBr(c, t, e) => {
+                ci := &f.insts.buf[c]
+                if t != e && ci.args.len == 2 {
+                    x := ci.args.buf[0]
+                    y := ci.args.buf[1]
+                    fwd := bce_same(f, x, iv.start) && bce_same(f, y, iv.end)
+                    rev := bce_same(f, x, iv.end) && bce_same(f, y, iv.start)
+                    if t == b && ((ci.op == lt && fwd) || (ci.op == gt && rev)) {
+                        return true
+                    }
+                    if e == b && ((ci.op == ge && fwd) || (ci.op == le && rev)) {
+                        return true
+                    }
+                }
+            }
+            _ => {}
+        }
+        b = p
+    }
+    return false
+}
+
+// The plainest counted loop, `for i in k..n` with a constant k >= 0, indexing with `i` a
+// sequence whose length is `n` itself: the check `i <u n` holds on every iteration, because
+// the loop is entered only when k < n and continued only when i + 1 < n. The check is
+// removed. Unlike hoisting this puts no condition on the loop body (calls, other exits).
+// `def_block`: the block of every instruction, computed when the first loop needs it.
+fn bce_eliminate_in_loop(f *Func, cfg *Cfg, loops *Loops, li i64, def_block_v *Vec[i64]) bool {
+    l := &loops.loops.buf[li]
+    h := l.header
+    outside := licm_outside_preds(cfg, loops, li, h)
+    if outside.len != 1 || f.succs(outside.buf[0]).len != 1 || l.latches.len != 1 {
+        return false
+    }
+    pre := outside.buf[0]
+    latch := l.latches.buf[0]
+    // is there a check at all? (most loops have none: do not analyse them)
+    any := false
+    for b in l.blocks.items() {
+        match f.blocks.buf[b].term {
+            TermBr(c0, t0, e0) => {
+                if b != latch && bce_is_trap_block(f, e0) {
+                    any = true
+                }
+            }
+            _ => {}
+        }
+        if any {
+            break
+        }
+    }
+    if !any {
+        return false
+    }
+    in_loop_v := vec_fill(f.blocks.len, false)
+    for b in l.blocks.items() {
+        in_loop_v.buf[b] = true
+    }
+    in_loop := in_loop_v.items()
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
+    def_block := def_block_v.items()
+    var iv BceIv
+    match bce_find_iv(f, h, latch, pre, in_loop, def_block) {
+        Some(x) => iv = x
+        None => return false
+    }
+    if iv.step != 1 || iv.ty != TI64 || (iv.cmp != OpSlt && iv.cmp != OpUlt) {
+        return false
+    }
+    match f.is_const(iv.start) {
+        Some(k) => {
+            if k < 0 {
+                return false
+            }
+        }
+        None => return false
+    }
+    guarded := false
+    guard_known := false
+    did := false
+    for b in l.blocks.items() {
+        c := 0
+        t := 0
+        e := 0
+        match f.blocks.buf[b].term {
+            TermBr(c0, t0, e0) => {
+                c = c0
+                t = t0
+                e = e0
+            }
+            _ => continue
+        }
+        if b == latch || t == e || !bce_is_trap_block(f, e) {
+            continue
+        }
+        ci := &f.insts.buf[c]
+        idx := 0
+        ln := 0
+        if ci.op == OpUlt {
+            idx = ci.args.buf[0]
+            ln = ci.args.buf[1]
+        } else if ci.op == OpUgt {
+            idx = ci.args.buf[1]
+            ln = ci.args.buf[0]
+        } else {
+            continue
+        }
+        if idx != iv.phi || !bce_same(f, ln, iv.end) {
+            continue
+        }
+        if !guard_known {
+            guard_known = true
+            guarded = bce_entry_guard(f, cfg, pre, &iv)
+        }
+        if !guarded {
+            return false
+        }
+        f.blocks.buf[b].term = TermJmp(t)
+        did = true
+    }
+    return did
+}
+
+// removes the checks that can never fail, in every loop (nothing here changes the loops)
+fn bce_eliminate(f *Func) bool {
+    licm_make_preheaders(f)
+    cfg := cfg_new(f)
+    loops := loops_new(f, &cfg)
+    def_block := vec[i64]()
+    did := false
+    for li in 0..loops.loops.len {
+        if bce_eliminate_in_loop(f, &cfg, &loops, li, &def_block) {
+            did = true
+        }
+    }
+    return did
+}
+
 fn bce_run(f *Func) bool {
     changed := false
+    if bce_eliminate(f) {
+        changed = true
+        cleanup_prune_unreachable(f)
+    }
     for it in 0..200 {
         licm_make_preheaders(f)
         cfg := cfg_new(f)

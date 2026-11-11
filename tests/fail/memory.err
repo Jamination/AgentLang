@@ -1,0 +1,20 @@
+9:13: error: `len` needs a slice, array, str or Vec, found i64 (the declared functions do not accept these arguments either: len(*T))
+10:15: error: `clone` takes 1 argument(s), got 0
+11:15: error: `clone` takes 1 argument(s), got 2 (the declared functions do not accept these arguments either: clone(T, i64))
+12:17: error: no function `print` to call on T (the builtin `print` has no method form: call it as a plain function)
+13:20: error: the builtin `clone` takes no type arguments, and no declared `clone` accepts these
+14:13: error: `len` takes 1 argument(s), got 2
+16:15: error: `len` needs a slice, array, str or Vec, found i64
+17:15: error: `ptr` takes 1 argument(s), got 2 (the declared functions do not accept these arguments either: ptr(*T))
+18:12: error: index must be an integer, found str
+19:18: error: no function `sizeof` to call on Vec[i64] (the builtin `sizeof` has no method form: call it as a plain function)
+20:23: error: `clone` needs a value; this expression has none
+21:15: error: slice bound must be an integer
+22:14: error: cannot iterate over T
+23:11: error: cannot index T
+24:15: error: `len` takes 1 argument(s), got 2
+25:16: error: cannot infer the type of `nil` here
+26:12: error: type mismatch: expected i64, found str
+27:10: error: cannot take the address of this expression
+32:20: error: type mismatch: expected i64, found str (argument 1 of the declared `hash(Opt[i64])`)
+33:14: error: `hash` takes 1 argument(s), got 2 (the declared functions do not accept these arguments either: hash(Opt[i64]))

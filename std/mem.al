@@ -1,11 +1,14 @@
 // std.mem: memory building blocks for games on top of the program arena. Core module:
 // available in every program.
 //
-// AL has one arena: alloc/new bump a pointer, mark()/release(m) give back everything allocated
-// since the mark. The pieces here structure that for a game:
+// Allocation in AL is bump allocation from the arena in use: alloc/new bump a pointer,
+// mark()/release(m) give back everything allocated since the mark. A program starts in the
+// main arena; a Region (language reference, "Memory") is a further arena that enter()/leave()
+// put in use. The pieces here structure the arena in use for a game:
 //   - frame_begin()/frame_end(): scratch memory that lives for one frame (or one nested scope)
-//   - Arena: a fixed block with its own cursor, for data whose lifetime does not nest with
-//     the frame and level marks (it stays valid across releases of marks taken after it)
+//   - Arena: a fixed block with its own cursor and explicit allocation calls, for data whose
+//     lifetime does not nest with the frame and level marks (it stays valid across releases
+//     of marks taken after it)
 //   - Pool[T]: objects created and destroyed individually, addressed by generational handles
 //   - Ring[T], SparseSet: fixed queues and integer sets without per-operation allocation
 // Typical layout: allocate long-lived state first, take `level := mark()` and load the level,
@@ -21,7 +24,8 @@ fn mb(n i64) i64 {
     return n * 1048576
 }
 
-// bytes of the program arena currently in use (compare per frame to find leaks)
+// bytes in use in the arena that allocations currently come from: the main arena, or the
+// innermost entered Region (compare per frame to find leaks)
 fn mem_used() i64 {
     return __heap_cur - __heap_base
 }
@@ -48,13 +52,16 @@ fn zero[T](s []T) {
 
 // ---------- frame scratch memory ----------
 var __frame_marks [32]i64
+var __frame_arenas [32]*Region
 var __frame_depth i64
 
-// opens a scratch scope: everything allocated from the program arena until the matching
-// frame_end() is temporary. Scopes nest up to 32 deep.
+// opens a scratch scope: everything allocated from the arena in use until the matching
+// frame_end() is temporary. Scopes nest up to 32 deep. A scope belongs to the arena it was
+// opened in: enter()/leave() calls inside it must be balanced before frame_end().
 fn frame_begin() {
     assert __frame_depth < 32, "frame_begin: nested too deeply (missing frame_end?)"
     __frame_marks[__frame_depth] = mark()
+    __frame_arenas[__frame_depth] = __region_top()
     __frame_depth += 1
 }
 
@@ -62,6 +69,7 @@ fn frame_begin() {
 fn frame_end() {
     assert __frame_depth > 0, "frame_end without frame_begin"
     __frame_depth -= 1
+    assert __frame_arenas[__frame_depth] == __region_top(), "frame_end: the arena in use is not the one of the matching frame_begin (unbalanced enter/leave?)"
     release(__frame_marks[__frame_depth])
 }
 

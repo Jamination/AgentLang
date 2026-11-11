@@ -94,9 +94,21 @@ noinline fn __panic(loc str, msg str) never {
 }
 
 // ---------- memory ----------
+// The arena that allocations come from is described by __heap_cur / __heap_end / __heap_base /
+// __heap_hwm. A program starts in the main arena; enter(&r) makes a Region the arena in use.
+// The state of an arena that is not in use is kept in its Region struct (the main arena's in
+// __heap_main), so the allocation paths below never look at regions.
+struct Region { cur i64, end i64, base i64, hwm i64 }
+
+var __heap_main Region
+var __region_stack [64]*Region
+var __region_depth i64
+
 noinline fn __heap_grow(n i64) i64 {
     if __heap_base == 0 {
-        size := 1 << 36
+        // address space is reserved on the first allocation, memory is committed by use: 64 GiB
+        // for the main arena, 16 GiB for a region (thousands of regions fit), less if refused
+        size := if __region_depth == 0 { 1 << 36 } else { 1 << 34 }
         while size >= (1 << 24) {
             // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE
             p := syscall(9, 0, size, 3, 0x4022, -1, 0)
@@ -166,6 +178,106 @@ fn release(m i64) {
         }
         __heap_cur = m
     }
+}
+
+// ---------- regions: independent arenas ----------
+// A Region is an arena of its own. The zero value is a valid empty region. Between enter(&r)
+// and the matching leave() everything that allocates (alloc, new, Vec, Map, fmt, slice
+// literals, clone, ...) takes its memory from r; reset(&r) empties it in one step. A region
+// is used through a pointer and must not be copied while it holds memory or is entered.
+fn region() Region {
+    return Region{}
+}
+
+fn __region_save(r *Region) {
+    r.cur = __heap_cur
+    r.end = __heap_end
+    r.base = __heap_base
+    r.hwm = __heap_hwm
+}
+
+fn __region_load(r *Region) {
+    __heap_cur = r.cur
+    __heap_end = r.end
+    __heap_base = r.base
+    __heap_hwm = r.hwm
+}
+
+// the arena in use: the innermost entered region, or the main arena
+fn __region_top() *Region {
+    if __region_depth == 0 {
+        return &__heap_main
+    }
+    return __region_stack[__region_depth - 1]
+}
+
+fn __region_entered(r *Region) bool {
+    for i in 0..__region_depth {
+        if __region_stack[i] == r {
+            return true
+        }
+    }
+    return false
+}
+
+// allocations now come from r, until the matching leave(); calls nest up to 64 deep
+fn enter(r *Region) {
+    if __region_depth == 64 {
+        __die("panic: enter: more than 64 regions are entered (is a leave() missing?)", "", "")
+    }
+    if __region_entered(r) {
+        __die("panic: enter: this region is already entered", "", "")
+    }
+    __region_save(__region_top())
+    __region_load(r)
+    __region_stack[__region_depth] = r
+    __region_depth += 1
+}
+
+// back to the arena that was in use before the matching enter()
+fn leave() {
+    if __region_depth == 0 {
+        __die("panic: leave without enter", "", "")
+    }
+    __region_save(__region_stack[__region_depth - 1])
+    __region_depth -= 1
+    __region_load(__region_top())
+}
+
+// empties r: everything allocated from it is gone. Its memory is kept and handed out again
+// (zeroed) by later allocations. r may be the region in use.
+fn reset(r *Region) {
+    if __region_depth > 0 && __region_stack[__region_depth - 1] == r {
+        if __heap_cur > __heap_hwm {
+            __heap_hwm = __heap_cur
+        }
+        __heap_cur = __heap_base
+        return
+    }
+    if r.cur > r.hwm {
+        r.hwm = r.cur
+    }
+    r.cur = r.base
+}
+
+// bytes of r in use
+fn used(r *Region) i64 {
+    if __region_depth > 0 && __region_stack[__region_depth - 1] == r {
+        return __heap_cur - __heap_base
+    }
+    return r.cur - r.base
+}
+
+// gives the memory of r back to the operating system; r is empty afterwards and can be used
+// again. The region must not be entered.
+fn region_free(r *Region) {
+    if __region_entered(r) {
+        __die("panic: region_free: this region is entered (leave() first)", "", "")
+    }
+    if r.base != 0 {
+        syscall(11, r.base, r.end - r.base)
+    }
+    *r = Region{}
 }
 
 // ---------- output ----------
@@ -1054,6 +1166,67 @@ fn keys[K, V](m *Map[K, V]) []K {
         }
     }
     return out
+}
+
+// ---------- clone ----------
+// The builtin `clone(x)` copies x member by member and calls these for the parts that own
+// storage. All copies are allocated from the arena in use.
+
+// a slice of elements that own nothing: one allocation, one memory copy
+fn __clone_plain[T](s []T) []T {
+    n := len(s)
+    out := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    memcopy(ptr(out), ptr(s), n * sizeof[T]())
+    return out
+}
+
+fn __clone_slice[T](s []T) []T {
+    n := len(s)
+    out := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    for i in 0..n {
+        out[i] = clone(s[i])
+    }
+    return out
+}
+
+// the elements of an array, cloned into another array of the same length
+fn __clone_elems[T](dst []T, src []T) {
+    for i in 0..len(src) {
+        dst[i] = clone(src[i])
+    }
+}
+
+// a Vec with the same live elements; the spare capacity (uninitialised memory) is not copied
+fn __clone_vec_plain[T](v Vec[T]) Vec[T] {
+    return Vec[T]{buf: __clone_plain(v[..]), len: v.len}
+}
+
+fn __clone_vec[T](v Vec[T]) Vec[T] {
+    return Vec[T]{buf: __clone_slice(v[..]), len: v.len}
+}
+
+// the keys or values of a Map: only occupied slots hold a value (`plain`: T owns no storage)
+fn __clone_slots[T](s []T, state []u8, plain bool) []T {
+    if plain {
+        return __clone_plain(s)
+    }
+    out := alloc[T](len(s))
+    for i in 0..len(s) {
+        if state[i] == 1 {
+            out[i] = clone(s[i])
+        }
+    }
+    return out
+}
+
+fn __clone_map[K, V](m *Map[K, V], kplain bool, vplain bool) Map[K, V] {
+    return Map[K, V]{
+        keys: __clone_slots(m.keys, m.state, kplain),
+        vals: __clone_slots(m.vals, m.state, vplain),
+        state: __clone_plain(m.state),
+        len: m.len,
+        used: m.used,
+    }
 }
 
 // ---------- sorting ----------

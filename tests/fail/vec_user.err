@@ -1,0 +1,5 @@
+5:11: error: cannot index Vec
+6:11: error: cannot index Vec
+7:14: error: cannot iterate over Vec
+8:13: error: `len` needs a slice, array, str or Vec, found Vec
+4 error(s)

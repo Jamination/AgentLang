@@ -2,9 +2,12 @@
 
 Always available (no `use`). Source: `std/mem.al`.
 
-AL has no `free` and no garbage collector. All dynamic memory comes from one program arena:
-`alloc`/`new` bump a pointer, `m := mark()` remembers the position and `release(m)` gives back
-everything allocated since, in one step. This module adds the structure a game needs on top:
+AL has no `free` and no garbage collector. Dynamic memory comes from an arena: `alloc`/`new`
+bump a pointer, `m := mark()` remembers the position and `release(m)` gives back everything
+allocated since, in one step. A program starts in the *main arena*; a `Region` (language
+reference, "Memory") is a further arena that `enter`/`leave` put in use. Everything in this
+module works on the **arena in use**: the main arena, or the innermost entered region. This
+module adds the structure a game needs on top:
 
 | Piece | For |
 |-------|-----|
@@ -36,12 +39,50 @@ growable), so they are unaffected by `release`.
 memory are simply invalid afterwards (using them is a bug the compiler cannot see). Memory is
 zeroed when it is handed out again.
 
+## Region, Arena, mark / release: which one
+
+| Tool | What it is | Who allocates from it | Gives memory back by |
+|------|------------|-----------------------|----------------------|
+| `mark()` / `release(m)` | a position in the arena in use | everything | `release(m)`: all that was allocated after the mark (stack order) |
+| `frame_begin()` / `frame_end()` | the same, with the marks kept on an internal stack | everything | `frame_end()` |
+| `Region` (prelude) | an arena of its own with its own address space (grows on demand, up to 16 GiB) | everything between `enter(&r)` and `leave()`: `alloc`, `new`, `Vec`, `Map`, `fmt`, literals, `clone` | `reset(&r)` (keeps the memory for reuse), `region_free(&r)` (returns it to the system) |
+| `Arena` (this module) | a block of fixed size carved from the arena in use, or over your own buffer | only explicit calls: `a.alloc[T](n)`, `a.new[T]()` | `a.release(m)`, `a.reset()` |
+
+- A mark belongs to the arena it was taken in. `release(m)` with a mark of another arena does
+  nothing; a mark taken before the first allocation of an arena releases everything in it.
+- Regions do not have to nest with marks or with each other: a region can be reset at any
+  time, whatever happened in other arenas. That is what makes them fit for work whose
+  temporary data does not form a stack with the rest ("compile one function, keep the
+  result"): do the work in the region, `clone` the result into the arena that should own it,
+  `reset` the region.
+- An `Arena` is passive: it never changes where `Vec`, `Map` or `fmt` allocate. It is carved
+  from the arena that is in use when `arena_new` runs and dies with that memory (also when
+  that arena is a region that is reset).
+- `frame_begin()` / `frame_end()` may be used inside a region (they then release region
+  memory), and a frame scope may contain balanced `enter` / `leave` pairs. A scope must be
+  closed in the arena it was opened in: `frame_end()` stops the program with `frame_end: the
+  arena in use is not the one of the matching frame_begin` otherwise.
+
+```
+var level Region                               // lives until the level is unloaded
+
+enter(&level)
+load_level(&game)                              // everything it allocates is level memory
+leave()
+loop {
+    frame_begin()                              // frame scratch in the main arena
+    update(&game)
+    frame_end()
+}
+reset(&level)                                  // unload: independent of all marks
+```
+
 ## Sizes, statistics, byte views
 
 | Declaration | Description |
 |-------------|-------------|
 | `kb(n i64) i64`, `mb(n i64) i64` | `n` kibibytes / mebibytes in bytes: `arena_new(mb(4))`. |
-| `mem_used() i64` | Bytes of the program arena currently in use. Print the difference across a frame or a level to find leaks: it must return to the same value. |
+| `mem_used() i64` | Bytes in use in the arena that allocations currently come from (the main arena, or the innermost entered `Region`; `used(&r)` asks a particular region). Print the difference across a frame or a level to find leaks: it must return to the same value. |
 | `as_bytes[T](s []T) []u8` | The memory of a slice as bytes (a view, nothing is copied): for writing typed data to files, hashing, uploading to a GPU. |
 | `from_bytes[T](b []u8) []T` | The reverse view: `from_bytes[Vertex](data)`. Trailing bytes that do not fill a `T` are dropped. `b` must be suitably aligned for `T` (memory from `alloc` and `read_bytes` is). |
 | `zero[T](p *T)` | Sets the value `p` points to to all zero bytes. |
@@ -51,8 +92,8 @@ zeroed when it is handed out again.
 
 | Declaration | Description |
 |-------------|-------------|
-| `frame_begin()` | Opens a scratch scope: remembers the arena position. |
-| `frame_end()` | Closes the innermost scope and releases everything allocated from the program arena since the matching `frame_begin()`. |
+| `frame_begin()` | Opens a scratch scope: remembers the position of the arena in use. |
+| `frame_end()` | Closes the innermost scope and releases everything allocated from that arena since the matching `frame_begin()`. |
 
 Scopes nest up to 32 deep, so a function that needs a lot of temporary memory can open its own
 scope inside the frame. `frame_end` without `frame_begin` is a programming error (panic).
@@ -71,16 +112,18 @@ loop {
 ## Arena
 
 An `Arena` is a block of fixed size with its own bump cursor: a private arena inside (or
-beside) the program arena. Use it when a lifetime does not nest: an audio thread's buffers, a
-streaming chunk that is replaced while the level stays, a string table that is rebuilt on its
-own schedule. Resetting it does not disturb anything else, and marks of the program arena do
-not affect what is allocated *inside* it.
+beside) the arena it was carved from. Use it when a lifetime does not nest and the size is
+known: an audio thread's buffers, a streaming chunk that is replaced while the level stays, a
+string table that is rebuilt on its own schedule. Resetting it does not disturb anything
+else, and marks of the surrounding arena do not affect what is allocated *inside* it. (For
+temporary work of unknown size, and for everything that allocates implicitly, use a
+`Region`.)
 
 | Declaration | Description |
 |-------------|-------------|
 | `struct Arena { base i64, cur i64, end i64, dirty i64 }` | Addresses of the block and the cursor (`dirty` is internal: how far old data reaches). |
-| `arena_new(bytes i64) Arena` | An arena of `bytes` bytes carved from the program arena. It lives as long as that memory: releasing a mark taken *before* `arena_new` frees the whole arena. |
-| `arena_of(buf []u8) Arena` | An arena over storage you provide, for example a global `var buf [65536]u8`: memory outside the program arena altogether. |
+| `arena_new(bytes i64) Arena` | An arena of `bytes` bytes carved from the arena in use. It lives as long as that memory: releasing a mark taken *before* `arena_new` (or resetting the region it was carved from) frees the whole arena. |
+| `arena_of(buf []u8) Arena` | An arena over storage you provide, for example a global `var buf [65536]u8`: memory outside every arena. |
 | `alloc[T](a *Arena, n i64) []T` | `n` zeroed elements from the arena: `alloc[f32](&a, 256)` or `a.alloc[f32](256)`. |
 | `new[T](a *Arena) *T` | One zeroed `T` from the arena. |
 | `mark(a *Arena) i64`, `release(a *Arena, m i64)` | Like `mark()`/`release(m)`, for this arena. |
@@ -88,12 +131,14 @@ not affect what is allocated *inside* it.
 | `used(a *Arena) i64`, `remaining(a *Arena) i64` | Bytes handed out / still available. |
 
 Allocations are zero-initialized and 16-byte aligned (sizes are rounded up to 16), exactly
-like the program arena. Asking for more than `remaining` is a programming error and stops the
+like `alloc` and `new`. Asking for more than `remaining` is a programming error and stops the
 program with `panic: arena exhausted`: size the arena for its worst case, and check
 `remaining` first where the amount is not known.
 
-The standard containers (`Vec`, `Map`, `fmt`, `concat`) always allocate from the program
-arena; an `Arena` serves your own `alloc`/`new` calls.
+The standard containers (`Vec`, `Map`, `fmt`, `concat`) never allocate from an `Arena`: they
+use the arena in use (the main arena or the entered `Region`); an `Arena` serves your own
+`alloc`/`new` calls. `reset(a *Arena)` and `used(a *Arena)` have the same names as the
+`Region` functions `reset(r *Region)` and `used(r *Region)`; the argument type selects.
 
 ## Pool and Handle
 

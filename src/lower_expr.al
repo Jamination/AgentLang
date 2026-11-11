@@ -179,6 +179,13 @@ fn const_val(self *Fx, ty Opt[i64], cv CV, expect Opt[i64], pos Pos) Val {
 }
 
 fn expr(self *Fx, e *Expr, expect Opt[i64]) Val {
+    if self.memo.len != 0 {
+        for i in 0..self.memo.len {
+            if self.memo.buf[i].0 == e {
+                return self.memo.buf[i].1
+            }
+        }
+    }
     match e.k {
         EKInt(n) => { return self.int_lit(i64(n), false, expect, e.pos) }
         EKFloat(f) => {
@@ -703,6 +710,12 @@ fn len_of(self *Fx, v0 Val) Opt[Val] {
             l := self.iconst(TI64, i64(n))
             return Some(self.sval(T_I64, l))
         }
+        TyKStruct(sid) => {
+            match self.vec_parts(v, false) {
+                Some(x) => { return Some(self.sval(T_I64, x.1)) }
+                None => { return None }
+            }
+        }
         _ => { return None }
     }
     return None
@@ -721,6 +734,10 @@ fn to_i64(self *Fx, v Val) i64 {
 // (ptr, len or NOV, elem type) of an indexable value
 fn indexable(self *Fx, bv0 Val, pos Pos) Opt[(i64, i64, i64)] {
     bv := self.auto_deref(bv0)
+    match self.vec_parts(bv, true) {
+        Some(x) => { return Some(x) }
+        None => {}
+    }
     match self.cx.types.k(bv.ty) {
         TyKSlice(et) => {
             p, l := self.slice_parts(bv)
