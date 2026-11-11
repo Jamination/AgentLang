@@ -129,6 +129,7 @@ fn first_or[T](o Opt[(T, T)], d T) T {
 }
 
 fn mk() Opt[P] { Some(P{1, 2}) }
+fn scaled(p P, k i64) i64 { p.x * k }
 
 fn colour_pair(p (Color, Color)) i64 {
     match p {
@@ -340,6 +341,22 @@ fn main() {
         }
     }
     print(out.items())
+    // an arm's own pattern may be any expression that is compared with the value (as before)
+    lim := 3
+    bx := P{4, 0}
+    px := &lim
+    match 12 {
+        lim => print("lim")
+        bx.scaled(2) => print("eight")
+        bx.scaled(3) => print("twelve")
+        _ => print("other")
+    }
+    match px {
+        nil => print("nil")
+        &k => print("k")
+        &lim => print("lim")
+        _ => print("other")
+    }
     // a binding hides an outer variable of the same name
     n := 1
     match Some(2) {

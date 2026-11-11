@@ -89,7 +89,8 @@ enum Pat {
     // matched type, a constant, or (inside a variant / tuple pattern) a new binding.
     PatConst(Expr),
     // [Enum.]Variant(sub-patterns): variant name, one pattern per payload field, position,
-    // and the qualifier as written (`Enum` or `Enum[T]`), if any
+    // and, if the pattern has a qualifier, the whole pattern as the expression it was
+    // parsed from: a call of `Enum.Variant` or `Enum[T].Variant`
     PatVariant(str, Vec[Pat], Pos, Opt[*Expr]),
     // (p, p, ...)
     PatTuple(Vec[Pat], Pos),

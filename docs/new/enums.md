@@ -161,9 +161,9 @@ Sub-patterns nest to any depth: `Some(Circle(r))`, `Two(0, _)`, `(Some(a), None)
    the arm. A name that is a variant of some *other* enum is a binding too.
 
 An **arm's pattern itself** (not nested) is never a binding: a name there is a variant of the
-matched enum, or an expression that is compared with the matched value (a constant, or as
-before any variable). To handle "everything else" and still use the value, write `_` and use
-the matched expression: `_ if n > 10 => ...`.
+matched enum, or an expression that is compared with the matched value: a constant, or (as
+before) any expression such as a variable, `x.f(a)` or `&x`. To handle "everything else" and
+still use the value, write `_` and use the matched expression: `_ if n > 10 => ...`.
 
 Anything else inside a pattern must be a compile-time constant (literals, `const` names,
 arithmetic on them). To compare with a variable, bind the part and use a guard:
@@ -307,9 +307,10 @@ the binding); `_` binds nothing.
 **Guards.** `pattern if cond => body`: `cond` (a `bool`) is evaluated after the pattern
 matched and its bindings exist. If it is false, matching continues with the **next arm**
 (with alternatives the guard is evaluated once, for the alternative that matched; the other
-alternatives of that arm are not tried). The guard may call functions; the arms keep looking
-at the matched value as it was when the `match` began if the guard changes it (unless a
-pattern of the match uses `&name`, see Unsafe corners).
+alternatives of that arm are not tried). The guard may call functions. If a guard changes
+the variable that is being matched, the following arms still look at the value as it was
+when the `match` began (exceptions: a `match` that uses `&name`, and values reached through
+a pointer; see Unsafe corners).
 
 **Order of evaluation.** The matched expression is evaluated once. Patterns are tested in
 order; constants inside patterns have no effects.
@@ -429,7 +430,8 @@ Add to the list of unchecked features:
   place, a guard of that `match` that modifies the matched place has the same effect on the
   arms that follow.
 - **Patterns through pointers** dereference the pointer when it is not `nil`; a pointer to
-  released memory is not detected (as with `*p`).
+  released memory is not detected (as with `*p`). The target is read when each arm is
+  tested: a guard that overwrites the target with another variant confuses the arms after it.
 
 ## Grammar
 

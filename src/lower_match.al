@@ -480,6 +480,11 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
         }
         PatRef(n, pos) => {
             if top {
+                if is_some(self.lookup(n)) || self.cx.global_decls.has(n) {
+                    // as before: the address of a variable, compared with a pointer
+                    as_expr := PatConst(Expr{k: EKUn(UnOpAddr, parser_box(Expr{k: EKIdent(n), pos: pos})), pos: pos})
+                    return self.pat_resolve(&as_expr, ty, top)
+                }
                 self.err(pos, fmt("`&", n, "` binds a part of the matched value; it is only allowed inside a variant or tuple pattern, e.g. `Some(&", n, ")`"))
                 return lower_match_err(ty, pos)
             }
@@ -511,7 +516,31 @@ fn pat_resolve(self *Fx, p *Pat, ty i64, top bool) RPat {
             }
             return lower_match_subs(self, RPat{k: RP_TUPLE, ty: ty, pos: pos}, &subs, &tys)
         }
-        PatVariant(name, subs, pos, qual) => {
+        PatVariant(name, subs, pos, full) => {
+            var qual Opt[*Expr] = None
+            match full {
+                Some(fe) => {
+                    // Enum.Variant(..): `fe` is a call of the field `Variant` of `Enum`
+                    match fe.k {
+                        EKCall(c, _) => {
+                            match c.k {
+                                EKField(q, _) => {
+                                    qual = Some(q)
+                                    if top && self.qual_enum(q).0 < 0 {
+                                        // not an enum: as before, an expression `x.f(a)`
+                                        // that the matched value is compared with
+                                        as_expr := PatConst(*fe)
+                                        return self.pat_resolve(&as_expr, ty, top)
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                None => {}
+            }
             return self.pat_variant(name, &subs, true, qual, ty, pos)
         }
         PatConst(e) => {

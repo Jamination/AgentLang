@@ -1650,7 +1650,9 @@ fn parser_pat(e Expr) Pat {
                         _ => {
                             if parser_typeish(q) {
                                 name = n
-                                qual = Some(q)
+                                // lowering reads the qualifier from the whole expression
+                                // (if it is not an enum, `x.f(a)` is an ordinary call)
+                                qual = Some(parser_box(e))
                                 is_variant = true
                             }
                         }
