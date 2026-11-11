@@ -82,14 +82,24 @@ struct MatchArm {
     pats Vec[Pat]
     body Block
     pos Pos
+    // `if cond` after the patterns: the arm is taken only if it holds
+    guard Opt[*Expr]
 }
 
 enum Pat {
     PatWild,
-    // constant expression (int, enum constant name, string, ...)
+    // an expression: a constant (int, string, named constant, ...). A bare name or
+    // `Enum.Variant` is resolved when the match is lowered: a data-less variant of the
+    // matched type, a constant, or (inside a variant / tuple pattern) a new binding.
     PatConst(Expr),
-    // Variant(bindings...)
-    PatVariant(str, Vec[str], Pos),
+    // [Enum.]Variant(sub-patterns): variant name, one pattern per payload field, position,
+    // and, if the pattern has a qualifier, the whole pattern as the expression it was
+    // parsed from: a call of `Enum.Variant` or `Enum[T].Variant`
+    PatVariant(str, Vec[Pat], Pos, Opt[*Expr]),
+    // (p, p, ...)
+    PatTuple(Vec[Pat], Pos),
+    // &name: binds a pointer to the matched part
+    PatRef(str, Pos),
 }
 
 struct Block {

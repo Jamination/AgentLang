@@ -2037,3 +2037,79 @@ fn from_cstr(p *u8) str {
     }
     return mkslice[u8](p, n)
 }
+
+// ---------- optional values and results ----------
+// a value that may be absent
+enum Opt[T] { Some(T), None }
+
+// a value, or the message of the error that prevented it
+enum Res[T] { Ok(T), Err(str) }
+
+fn is_some[T](o Opt[T]) bool {
+    match o {
+        Some(_) => true
+        None => false
+    }
+}
+
+fn is_none[T](o Opt[T]) bool {
+    match o {
+        Some(_) => false
+        None => true
+    }
+}
+
+// the value of `o`; stops the program if there is none
+fn unwrap[T](o Opt[T]) T {
+    match o {
+        Some(x) => { return x }
+        None => {}
+    }
+    __die("panic: unwrap of None", "", "")
+}
+
+// the value of `o`, or `default` if there is none
+fn or[T](o Opt[T], default T) T {
+    match o {
+        Some(x) => x
+        None => default
+    }
+}
+
+fn is_ok[T](r Res[T]) bool {
+    match r {
+        Ok(_) => true
+        Err(_) => false
+    }
+}
+
+fn is_err[T](r Res[T]) bool {
+    match r {
+        Ok(_) => false
+        Err(_) => true
+    }
+}
+
+// the value of `r`; stops the program with the error message if it is an error
+fn unwrap[T](r Res[T]) T {
+    match r {
+        Ok(x) => { return x }
+        Err(e) => { __die("panic: unwrap of Err: ", e, "") }
+    }
+}
+
+// the value of `r`, or `default` if it is an error
+fn or[T](r Res[T], default T) T {
+    match r {
+        Ok(x) => x
+        Err(_) => default
+    }
+}
+
+// the error message of `r` ("" if it is not an error)
+fn error[T](r Res[T]) str {
+    match r {
+        Ok(_) => ""
+        Err(e) => e
+    }
+}

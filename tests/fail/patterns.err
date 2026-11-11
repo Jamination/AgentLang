@@ -1,0 +1,31 @@
+`&x` binds a part of the matched value; it is only allowed inside a variant or tuple pattern, e.g. `Some(&x)`
+variant `Circle` has 1 field(s); write `Circle(_)` with one pattern per field
+variant `Rect` has 2 field(s), the pattern has 1
+`Square` is not a variant of Shape (variants: Circle, Rect, Empty)
+the pattern names a variant of Color, but the matched value has type Shape
+`Oval` is not a variant of Shape (variants: Circle, Rect, Empty)
+variant `Empty` has 0 field(s), the pattern has 1
+this part of the pattern is not a constant; inside a pattern write a literal, a named constant, a variant, `_` or a name to bind (compare with other values in a guard: `pattern if cond => ...`)
+`n` is bound more than once in this pattern
+a value of type P cannot be compared with a constant in a pattern (bind it to a name and test it in a guard)
+type mismatch: expected i64, found str
+`a` is not bound by every alternative of this arm; all patterns of an arm must bind the same names
+`a` has type i64 in one alternative of this arm and P in another; every alternative must bind it with the same type
+variant `C` has 0 field(s), the pattern has 1
+expected an enum variant pattern
+the tuple pattern has 3 element(s), the matched value has 2: (i64, i64)
+`Circle(..)` is an enum variant pattern, but the matched value has type (i64, i64)
+a constant cannot match a value of type (i64, i64); write a tuple pattern `(.., ..)` or `_`
+a tuple pattern cannot match a value of type i64
+`Some(..)` is an enum variant pattern, but the matched value has type i64
+type mismatch: expected bool, found i64
+unknown identifier `k`: the pattern of an arm is a constant, not a new name for the matched value (write `_` and use the matched value itself, also in a guard)
+`Rod` is not a variant of Color (variants: Red, Green, Blue)
+cannot match on P (a match looks at integers, bool, str, enums and tuples)
+match used as a value must be exhaustive; missing: nil, Rect(_, _)
+match used as a value must be exhaustive; missing: B(_, _), C (an arm with a guard does not count: add an arm without a guard or `_ =>`)
+match used as a value must be exhaustive; missing: (Circle(_), false)
+match used as a value must be exhaustive; missing: Some(Blue)
+match used as a value must be exhaustive (add a `_ =>` arm; an arm with a guard does not count)
+match used as a value must be exhaustive; missing: false
+match used as a value must be exhaustive; missing: Circle(_), Empty (an arm with a guard does not count: add an arm without a guard or `_ =>`)

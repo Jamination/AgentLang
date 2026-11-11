@@ -57,12 +57,24 @@ fn lower_closure_walk_block(w *CapWalk, b *Block) bool {
     true
 }
 
+fn lower_closure_walk_pats(w *CapWalk, ps *Vec[Pat]) bool {
+    for i in 0..ps.len {
+        lower_closure_walk_pat(w, &ps.buf[i])
+    }
+    true
+}
+
 fn lower_closure_walk_pat(w *CapWalk, p *Pat) bool {
     match *p {
         PatWild => true
         PatConst(e) => lower_closure_walk_expr(w, &e)
-        PatVariant(name, binds, pos) => {
-            w.bound.extend(binds.items())
+        // a name inside a variant or tuple pattern is a constant, a variant or a new binding:
+        // walking it as an expression captures a variable of that name of the enclosing
+        // function, which is harmless if the name turns out to be a binding
+        PatVariant(name, subs, pos, qual) => lower_closure_walk_pats(w, &subs)
+        PatTuple(subs, pos) => lower_closure_walk_pats(w, &subs)
+        PatRef(name, pos) => {
+            w.bound.push(name)
             true
         }
     }
@@ -117,6 +129,7 @@ fn lower_closure_walk_expr(w *CapWalk, e *Expr) bool {
                 for j in 0..arm.pats.len {
                     lower_closure_walk_pat(w, &arm.pats.buf[j])
                 }
+                lower_closure_walk_opt(w, arm.guard)
                 lower_closure_walk_block(w, &arm.body)
                 w.bound.truncate(mark)
             }

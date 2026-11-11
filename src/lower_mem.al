@@ -136,19 +136,17 @@ fn lower_mem_literal_ok(s *Fx, a *Expr, t i64) bool {
         EKNil => {
             return lower_call_is_ptr(k) || lower_call_is_fn(k) || lower_call_is_slice(k)
         }
-        EKIdent(n) => {
-            ev, is_variant := s.cx.variants.get(n)
-            if is_variant && !s.cx.const_decls.has(n) {
-                match k {
-                    TyKEnum(eid) => {
-                        return s.cx.types.enums.buf[eid].decl == ev.0
-                    }
-                    _ => {}
-                }
-                return false
-            }
-        }
         _ => {}
+    }
+    vn := s.variant_ref(a)
+    if vn != "" {
+        match k {
+            TyKEnum(eid) => {
+                return s.cx.variant_of(s.cx.types.enums.buf[eid].decl, vn) >= 0
+            }
+            _ => {}
+        }
+        return false
     }
     match s.cx.const_eval(a) {
         Some(cv) => {
@@ -177,15 +175,23 @@ fn lower_mem_literal_type(s *Fx, a *Expr) i64 {
             return -1
         }
         EKIdent(n) => {
-            ev, is_variant := s.cx.variants.get(n)
-            if is_variant && !s.cx.const_decls.has(n) {
-                if s.cx.enum_decls.buf[ev.0].tparams.len != 0 {
+            if !is_some(s.lookup(n)) {
+                bv := s.bare_variant(n, None)
+                if bv.2 == 2 {
                     return -1
                 }
-                return s.cx.inst_enum(ev.0, vec[i64](), a.pos)
+                if bv.2 == 1 {
+                    if s.cx.enum_decls.buf[bv.0].tparams.len != 0 {
+                        return -1
+                    }
+                    return s.cx.inst_enum(bv.0, vec[i64](), a.pos)
+                }
             }
         }
         _ => {}
+    }
+    if s.variant_ref(a) != "" {
+        return -1
     }
     match s.cx.const_eval(a) {
         Some(cv) => {

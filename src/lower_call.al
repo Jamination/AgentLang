@@ -777,6 +777,10 @@ fn lower_call_eval_all(s *Fx, args []Expr) {
 fn recv_val(self *Fx, recv *Expr) Val {
     match recv.k {
         EKField(b, name) => {
+            if self.qual_enum(b).0 >= 0 {
+                // `Enum.Variant`
+                return self.expr(recv, None)
+            }
             if name == "len" {
                 // the length of a slice or array, or a field called `len`
                 bv := self.lvalue_base(b)
@@ -819,6 +823,17 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                 fv := self.expr(c, None)
                 return self.call_indirect(fv, args, pos)
             }
+            // a variant; in a call, a builtin function or type of the same name wins
+            // (`len(x)`, `i64(x)`): such a variant is constructed as `Enum.Variant(..)`
+            bv := self.bare_variant(n, expect)
+            if bv.2 != 0 && !lower_match_builtin_name(n) {
+                if bv.2 == 1 {
+                    return self.construct_variant(bv.0, bv.1, args, expect, pos)
+                }
+                self.variant_ambiguous(n, pos)
+                lower_call_eval_all(self, args)
+                return val_err()
+            }
             cands := self.cx.fn_candidates(n)
             if cands.len != 0 && lower_mem_is_builtin(n) {
                 return self.call_shared(n, cands, None, None, c, args, expect, pos)
@@ -841,10 +856,6 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
                     return self.conversion(t, args, pos)
                 }
                 None => {}
-            }
-            ev, is_variant := self.cx.variants.get(n)
-            if is_variant {
-                return self.construct_variant(ev.0, ev.1, args, expect, pos)
             }
             if self.cx.global_decls.has(n) {
                 fv := self.expr(c, None)
@@ -965,6 +976,11 @@ fn call(self *Fx, c *Expr, args []Expr, expect Opt[i64], pos Pos) Val {
             return self.call_indirect(fv, args, pos)
         }
         EKField(recv, name) => {
+            // Enum.Variant(args)
+            q := self.qual_enum(recv)
+            if q.0 >= 0 {
+                return self.qual_variant(q.0, q.1, name, args, expect, pos)
+            }
             rv := self.recv_val(recv)
             if rv.ty == T_ERR {
                 return val_err()
@@ -1254,20 +1270,28 @@ fn literal_fit(self *Fx, d *FnDecl, pi i64, a *Expr) Opt[i64] {
     k := self.cx.types.k(t)
     is_i := self.cx.types.is_int(t)
     is_f := self.cx.types.is_float(t)
+    vn := self.variant_ref(a)
+    if vn != "" {
+        // a variant fits an enum that has it
+        match k {
+            TyKEnum(eid) => {
+                nv := self.cx.types.enums.buf[eid].variants.len
+                for vi in 0..nv {
+                    if self.cx.types.enums.buf[eid].variants.buf[vi].0 == vn {
+                        return Some(0)
+                    }
+                }
+            }
+            _ => {}
+        }
+        return None
+    }
     match a.k {
         EKNil => {
             if lower_call_is_ptr(k) || lower_call_is_callable(k) || lower_call_is_slice(k) {
                 return Some(0)
             }
             return None
-        }
-        EKIdent(n) => {
-            if self.cx.variants.has(n) {
-                if lower_call_is_enum(k) {
-                    return Some(0)
-                }
-                return None
-            }
         }
         _ => {}
     }
@@ -1461,6 +1485,7 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
         }
         sort_by(ranked.items(), lower_call_rank_less)
         pick = ranked.buf[0].1
+        by_ret := false
         match expect {
             Some(et) => {
                 for ri in 0..ranked.len {
@@ -1473,6 +1498,7 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                                 t := lower_call_resolve_in(self, d, &rt, &empty)
                                 if t == et {
                                     pick = di
+                                    by_ret = true
                                     break
                                 }
                             }
@@ -1482,6 +1508,26 @@ fn call_overloaded(self *Fx, cands []i64, explicit Opt[Vec[i64]], recv Opt[Val],
                 }
             }
             None => {}
+        }
+        if !by_ret && ranked.buf[1].0 == ranked.buf[0].0 {
+            // a variant that fits the enums of two definitions equally well decides nothing
+            for i in 0..len(args) {
+                a := &args[i]
+                vn := self.variant_ref(a)
+                if vn == "" {
+                    continue
+                }
+                saved := self.cx.errs.len
+                empty := map[str, i64]()
+                t0 := self.cx.resolve(&self.cx.fn_decls.buf[ranked.buf[0].1].params.buf[off + i].1, &empty)
+                t1 := self.cx.resolve(&self.cx.fn_decls.buf[ranked.buf[1].1].params.buf[off + i].1, &empty)
+                self.cx.errs.truncate(saved)
+                if t0 != t1 && lower_call_is_enum(self.cx.types.k(t0)) && lower_call_is_enum(self.cx.types.k(t1)) {
+                    s := lower_call_call_overloaded_sigs(self, cands)
+                    self.err(a.pos, fmt("`", vn, "` is a variant of ", self.tyname(t0), " and of ", self.tyname(t1), ", and `", name, "` is defined for both; write `Enum.", vn, "` (candidates: ", s, ")"))
+                    return val_err()
+                }
+            }
         }
     }
     return self.call_decl(pick, explicit, recv, args, expect, pos, pre.items())
@@ -1752,7 +1798,10 @@ fn call_decl(self *Fx, di i64, explicit Opt[Vec[i64]], recv Opt[Val], args []Exp
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            hint := self.closure_fn_hint(v.ty, pt)
+            var hint str = self.closure_fn_hint(v.ty, pt)
+            if hint == "" {
+                hint = lower_match_same_name(a, b)
+            }
             if lower_call_is_ptr_to(self.cx.types.k(pt), v.ty) {
                 hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
             }

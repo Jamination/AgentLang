@@ -499,7 +499,11 @@ fn coerce(self *Fx, v Val, to i64, pos Pos) Val {
     }
     a := self.tyname(to)
     b := self.tyname(v.ty)
-    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, self.closure_fn_hint(v.ty, to)))
+    var hint str = self.closure_fn_hint(v.ty, to)
+    if hint == "" {
+        hint = lower_match_same_name(a, b)
+    }
+    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, hint))
     return val_err()
 }
 

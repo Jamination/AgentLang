@@ -183,6 +183,7 @@ priv fn statements() {
     t := Leaf(N)
     r := match t {
         Leaf(N) => N + 1
+        Leaf(_) => -1
         Fork(l, r) => 0
     }
     print(r, N)

@@ -356,6 +356,12 @@ fn priv_expr(r *PrivCx, e *Expr) bool {
                 for j in 0..arm.pats.len {
                     priv_pat(r, &arm.pats.buf[j])
                 }
+                match arm.guard {
+                    Some(g) => {
+                        priv_expr(r, g)
+                    }
+                    None => {}
+                }
                 priv_block(r, arm.body)
             }
             true
@@ -373,8 +379,41 @@ fn priv_pat(r *PrivCx, p *Pat) bool {
             true
         }
         // the variant name stays (variants are not private); the bindings are local variables
-        PatVariant(name, binds, pos) => {
-            priv_names(r, &binds)
+        // (a name inside is a constant, a variant or a binding: renamed like any identifier)
+        PatVariant(name, subs, pos, qual) => {
+            for i in 0..subs.len {
+                priv_pat(r, &subs.buf[i])
+            }
+            // the qualifier `Enum` of `Enum.Variant(..)` may be a private enum
+            match qual {
+                Some(q) => {
+                    match q.k {
+                        EKCall(c, args) => {
+                            match c.k {
+                                EKField(b, f) => {
+                                    priv_expr(r, b)
+                                }
+                                _ => {}
+                            }
+                        }
+                        EKField(b, f) => {
+                            priv_expr(r, b)
+                        }
+                        _ => {}
+                    }
+                }
+                None => {}
+            }
+            true
+        }
+        PatTuple(subs, pos) => {
+            for i in 0..subs.len {
+                priv_pat(r, &subs.buf[i])
+            }
+            true
+        }
+        PatRef(name, pos) => {
+            *p = PatRef(priv_name(r, name), pos)
             true
         }
     }

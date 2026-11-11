@@ -131,6 +131,7 @@ fn lint_expr(u *LintUse, e *Expr) bool {
         EKMatch(sc, arms) => {
             lint_expr(u, sc)
             for i in 0..arms.len {
+                lint_opt(u, arms.buf[i].guard)
                 lint_block(u, &arms.buf[i].body)
             }
             true
