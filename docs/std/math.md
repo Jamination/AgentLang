@@ -82,8 +82,9 @@ untyped: they become `f32` or `f64` from context.
 
 Accuracy, measured by `tests/std/math_scalar.al` against the C library on 160 inputs per
 function and precision (including huge arguments, denormals, infinities and NaN): every
-transcendental function is within 1 ulp in both `f32` and `f64`; `fmod` is exact. The test
-allows 2 ulp. The `f32` versions are single-precision kernels, not `f64` round trips.
+transcendental function is within 1 ulp in both `f32` and `f64`, except the `f64` `tan`
+(computed as `sin / cos`), which can be off by 2 ulp; `fmod` is exact. The test allows 2 ulp.
+The `f32` versions are single-precision kernels, not `f64` round trips.
 
 ## Vectors (`vec2`, `vec3`, `vec4`)
 

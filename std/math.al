@@ -27,20 +27,22 @@ const NAN = 0.0 / 0.0
 
 // ---------- rounding ----------
 
-// x rounded toward zero
+// x rounded toward zero (a zero result keeps the sign of x, as in C: trunc(-0.5) is -0.0)
 fn trunc(x: f32) -> f32 {
     if !(fabs(x) < 8388608.0) {
         return x
     }
-    f32(i32(x))
+    t := f32(i32(x))
+    if t == 0.0 { x * 0.0 } else { t }
 }
 
-// x rounded toward zero
+// x rounded toward zero (a zero result keeps the sign of x)
 fn trunc(x: f64) -> f64 {
     if !(fabs(x) < 4503599627370496.0) {
         return x
     }
-    f64(i64(x))
+    t := f64(i64(x))
+    if t == 0.0 { x * 0.0 } else { t }
 }
 
 // largest whole number <= x
@@ -701,7 +703,8 @@ fn acos(x: f64) -> f64 {
 fn atan(x: f64) -> f64 {
     a := fabs(x)
     if a < 0.4375 {
-        return x + x * __atan_r(x * x)
+        // (atan(-0.0) is -0.0: x + x * r would give +0.0)
+        return if x == 0.0 { x } else { x + x * __atan_r(x * x) }
     }
     if x != x {
         return x
@@ -1073,7 +1076,7 @@ fn acos(x: f32) -> f32 {
 fn atan(x: f32) -> f32 {
     a := fabs(x)
     if a < 0.4375 {
-        return x + x * __atan_rf(x * x)
+        return if x == 0.0 { x } else { x + x * __atan_rf(x * x) }
     }
     if x != x {
         return x
