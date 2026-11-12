@@ -1,0 +1,23 @@
+keymap from garbage: false
+keys: ff1b Escape 113 q 0 repeats: 1
+shifted: 81 Q 81 1 0 81
+connect: true
+globals: true compositor shm wm_base output: true true true true
+shm xrgb8888: true output mode: 800 600 geometry: true done: true
+versions: 4 1 2 class: wl_shm interface: xdg_toplevel 7
+wrong socket: true
+sync: true user data: true error: 0
+cursor: true true true 0
+window: true fullscreen: false
+buffer: true frame: true
+configure: true fullscreen: true 800 600
+buffer: true frame: true first buffer released: true
+configure: true fullscreen: false
+roundtrip: true poll: true
+reopen: true 0
+second connection: true
+protocol error: true 71 wl_shm_pool true poll: -1
+cycles: 20 descriptors left open: 0
+last connection: true
+connection lost: true true
+compositor stopped, socket removed: true

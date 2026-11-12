@@ -49,6 +49,7 @@ priv const STD_MODULES = [_](str, str){
     ("os", embed("../std/os.al")),
     ("image", embed("../std/image.al")),
     ("x11", embed("../std/x11.al")),
+    ("wayland", embed("../std/wayland.al")),
     ("alsa", embed("../std/alsa.al")),
     ("window", embed("../std/window.al")),
     ("input", embed("../std/input.al")),
