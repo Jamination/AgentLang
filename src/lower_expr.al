@@ -1535,8 +1535,37 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             r := self.ins(FTrunc, T.F32, vec_of([]i64{s}), 0)
             return self.sval(to, r)
         }
-        (F32, Int(tb, _)), (F64, Int(tb, _)) => {
+        (F32, Int(tb, ts)), (F64, Int(tb, ts)) => {
             s := self.scalar(v)
+            if tb == 64 && !ts {
+                // u64: values >= 2^63 are converted after subtracting 2^63, which is added back
+                if fk == F32 {
+                    s = self.ins(FExt, T.F64, vec_of([]i64{s}), 0)
+                }
+                slot := self.alloca(8, 8)
+                big := self.ins(FConst, T.F64, vec[i64](), 0x43E0000000000000)
+                ge := self.ins(FGe, I8, vec_of([]i64{s, big}), 0)
+                b_lo := self.new_block()
+                b_hi := self.new_block()
+                bj := self.new_block()
+                d := self.dead
+                self.br(ge, b_hi, b_lo)
+                self.switch_to(b_lo)
+                r1 := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
+                self.store_raw(slot, r1, I64, 0)
+                self.jmp(bj)
+                self.switch_to(b_hi)
+                sm := self.ins(FSub, T.F64, vec_of([]i64{s, big}), 0)
+                r2 := self.ins(FToSI, I64, vec_of([]i64{sm}), 0)
+                top := self.iconst(I64, i64(0x8000000000000000))
+                r3 := self.ins(Xor, I64, vec_of([]i64{r2, top}), 0)
+                self.store_raw(slot, r3, I64, 0)
+                self.jmp(bj)
+                self.switch_to(bj)
+                self.dead = d
+                r := self.load_raw(slot, I64, 0)
+                return self.sval(to, r)
+            }
             r := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
             if tb < 64 {
                 r = self.ins(Trunc, tt, vec_of([]i64{r}), 0)
