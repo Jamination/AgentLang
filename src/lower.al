@@ -1445,39 +1445,10 @@ priv fn const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
 // The integer type of a constant scalar expression whose type is fixed: a typed constant, a
 // conversion `T(x)`, or an operation with such an operand. None: untyped (or not an integer).
 priv fn const_int_ty(cx: *Cx, e: *Expr) -> Opt[i64] {
-    t: Opt[i64] = None
-    match e.k {
-        Ident(n) => {
-            if cx.const_decls.has(n) {
-                match cx.const_named(n) {
-                    Some(x) => { t = x.0 }
-                    None => {}
-                }
-            }
-        }
-        Un(Neg, x), Un(BitNot, x) => { t = const_int_ty(cx, x) }
-        Bin(op, a, b) => {
-            match op {
-                Add, Sub, Mul, Div, Rem, And, Or, Xor => {
-                    t = const_int_ty(cx, a)
-                    if !is_some(t) {
-                        t = const_int_ty(cx, b)
-                    }
-                }
-                Shl, Shr => { t = const_int_ty(cx, a) }
-                _ => {}
-            }
-        }
-        Call(c, args) => {
-            if args.len == 1 {
-                env := map[str, i64]()
-                saved := cx.errs.len
-                t = cx.expr_type(c, &env)
-                cx.errs.truncate(saved)
-            }
-        }
-        _ => {}
-    }
+    return cx.const_eval_t(e).1
+}
+
+priv fn const_only_int(cx: *Cx, t: Opt[i64]) -> Opt[i64] {
     match t {
         Some(ty) => {
             match cx.types.k(ty) {
@@ -1488,6 +1459,103 @@ priv fn const_int_ty(cx: *Cx, e: *Expr) -> Opt[i64] {
         None => {}
     }
     return None
+}
+
+// `r` wrapped to the integer type `t` (if any)
+priv fn const_wrap_t(cx: *Cx, t: Opt[i64], r: i64) -> i64 {
+    match t {
+        Some(ty) => {
+            match cx.types.k(ty) {
+                Int(bits, signed) => return wrap_int(r, bits, signed)
+                _ => {}
+            }
+        }
+        None => {}
+    }
+    return r
+}
+
+// The value of a constant operator expression together with its integer type (see
+// `const_int_ty`), in one walk over the expression
+fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
+    match e.k {
+        Ident(n) => {
+            if self.const_decls.has(n) {
+                match self.const_named(n) {
+                    Some(x) => return (Some(x.1), const_only_int(self, x.0))
+                    None => return (None, None)
+                }
+            }
+            return (None, None)
+        }
+        Un(op, x) => {
+            xv, t := self.const_eval_t(x)
+            match (op, xv) {
+                (Neg, Some(Int(i))) => return (Some(CV.Int(const_wrap_t(self, t, -i))), t)
+                (BitNot, Some(Int(i))) => return (Some(CV.Int(const_wrap_t(self, t, ~i))), t)
+                (Neg, Some(Float(f))) => return (Some(CV.Float(-f)), None)
+                (Not, Some(Bool(b))) => return (Some(CV.Bool(!b)), None)
+                _ => return (None, None)
+            }
+        }
+        Bin(op, a, b) => {
+            xv, ta := self.const_eval_t(a)
+            x := match xv {
+                Some(v) => v
+                None => return (None, None)
+            }
+            yv, tb := self.const_eval_t(b)
+            y := match yv {
+                Some(v) => v
+                None => return (None, None)
+            }
+            t := ta
+            if !is_some(t) && op != Shl && op != Shr {
+                t = tb
+            }
+            rt: Opt[i64] = match op {
+                Add, Sub, Mul, Div, Rem, And, Or, Xor, Shl, Shr => t
+                _ => None
+            }
+            match (x, y) {
+                (Int(xi), Int(yi)) => {
+                    match t {
+                        Some(ty) => {
+                            match self.types.k(ty) {
+                                Int(bits, signed) => return (const_bin_typed(self, op, xi, yi, bits, signed, e.pos), rt)
+                                _ => {}
+                            }
+                        }
+                        None => {}
+                    }
+                    return (const_bin_int(self, op, xi, yi, e.pos), rt)
+                }
+                (Int(_), Float(_)), (Float(_), Int(_)), (Float(_), Float(_)) => return (const_bin_float(op, x, y), None)
+                (Bool(xb), Bool(yb)) => {
+                    match op {
+                        LAnd => return (Some(CV.Bool(xb && yb)), None)
+                        LOr => return (Some(CV.Bool(xb || yb)), None)
+                        Eq => return (Some(CV.Bool(xb == yb)), None)
+                        Ne => return (Some(CV.Bool(xb != yb)), None)
+                        _ => return (None, None)
+                    }
+                }
+                _ => return (None, None)
+            }
+        }
+        Call(c, args) => {
+            v := self.const_eval(e)
+            if args.len != 1 {
+                return (v, None)
+            }
+            env := map[str, i64]()
+            saved := self.errs.len
+            t := self.expr_type(c, &env)
+            self.errs.truncate(saved)
+            return (v, const_only_int(self, t))
+        }
+        _ => return (self.const_eval(e), None)
+    }
 }
 
 // integer (op) integer in the type `Int(bits, signed)`: operands and result wrapped to it
@@ -1525,38 +1593,17 @@ priv fn const_bin_typed(cx: *Cx, op: BinOp, x: i64, y: i64, bits: i64, signed: b
     }
 }
 
-// `r`, the result of an operation on the constant expression `x`, wrapped to the type of `x`
-priv fn const_wrap(cx: *Cx, x: *Expr, r: i64) -> i64 {
-    match const_int_ty(cx, x) {
-        Some(t) => {
-            match cx.types.k(t) {
-                Int(bits, signed) => return wrap_int(r, bits, signed)
-                _ => {}
-            }
-        }
-        None => {}
+// float (op) float, with integers converted
+priv fn const_bin_float(op: BinOp, xv: CV, yv: CV) -> Opt[CV] {
+    x := match xv {
+        Int(i) => f64(i)
+        Float(f) => f
+        _ => return None
     }
-    return r
-}
-
-// the operand of a mixed / float operation as a float: (value, ok)
-priv fn const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
-    match cx.const_eval(e) {
-        Some(Int(i)) => (f64(i), true)
-        Some(Float(f)) => (f, true)
-        _ => (0.0, false)
-    }
-}
-
-// float (op) float, with integers converted; the operands are evaluated again
-priv fn const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
-    x, xok := const_float_operand(cx, a)
-    if !xok {
-        return None
-    }
-    y, yok := const_float_operand(cx, b)
-    if !yok {
-        return None
+    y := match yv {
+        Int(i) => f64(i)
+        Float(f) => f
+        _ => return None
     }
     match op {
         Add => Some(Float(x + y))
@@ -1588,54 +1635,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
             }
             return None
         }
-        Un(op, x) => {
-            match (op, self.const_eval(x)) {
-                (Neg, Some(Int(i))) => return Some(CV.Int(const_wrap(self, x, -i)))
-                (BitNot, Some(Int(i))) => return Some(CV.Int(const_wrap(self, x, ~i)))
-                (Neg, Some(Float(f))) => return Some(CV.Float(-f))
-                (Not, Some(Bool(b))) => return Some(CV.Bool(!b))
-                _ => return None
-            }
-        }
-        Bin(op, a, b) => {
-            x := match self.const_eval(a) {
-                Some(xv) => xv
-                None => return None
-            }
-            y := match self.const_eval(b) {
-                Some(yv) => yv
-                None => return None
-            }
-            match (x, y) {
-                (Int(xi), Int(yi)) => {
-                    t := const_int_ty(self, a)
-                    if !is_some(t) && op != Shl && op != Shr {
-                        t = const_int_ty(self, b)
-                    }
-                    match t {
-                        Some(ty) => {
-                            match self.types.k(ty) {
-                                Int(bits, signed) => return const_bin_typed(self, op, xi, yi, bits, signed, e.pos)
-                                _ => {}
-                            }
-                        }
-                        None => {}
-                    }
-                    return const_bin_int(self, op, xi, yi, e.pos)
-                }
-                (Int(_), Float(_)), (Float(_), Int(_)), (Float(_), Float(_)) => return const_bin_float(self, op, a, b)
-                (Bool(xb), Bool(yb)) => {
-                    match op {
-                        LAnd => return Some(CV.Bool(xb && yb))
-                        LOr => return Some(CV.Bool(xb || yb))
-                        Eq => return Some(CV.Bool(xb == yb))
-                        Ne => return Some(CV.Bool(xb != yb))
-                        _ => return None
-                    }
-                }
-                _ => return None
-            }
-        }
+        Un(_, _), Bin(_, _, _) => return self.const_eval_t(e).0
         Call(c, args) => {
             match c.k {
                 // embed("file"): the content of a file as a string constant
