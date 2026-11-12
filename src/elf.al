@@ -284,6 +284,11 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
             bss_size += max(g.size, 1)
         }
     }
+    // the code addresses code and data with 32-bit absolute and relative displacements
+    if bss_addr + bss_size > 0x7FFF_FFFF {
+        return ("", fmt("the program's code and global variables take ", bss_addr + bss_size - BASE,
+            " bytes; at most ", 0x7FFF_FFFF - BASE, " fit (put large tables in memory from alloc instead)"))
+    }
     // ---- relocations ----
     entry_addr := func_addr[m.entry]
     start_addr := BASE + text_off
