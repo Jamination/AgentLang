@@ -1,0 +1,3 @@
+panic: out of memory
+panic: negative allocation size
+assertion failed at tests/run/lib_alloc_limits.al:35: Vec resize to a negative length

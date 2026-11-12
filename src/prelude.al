@@ -120,7 +120,7 @@ noinline fn __heap_grow(n: i64) -> i64 {
             }
             size = size >> 1
         }
-        if __heap_base != 0 && n <= __heap_end - __heap_cur {
+        if __heap_base != 0 && n >= 0 && n <= __heap_end - __heap_cur {
             p := __heap_cur
             __heap_cur = p + n
             return p
@@ -129,16 +129,28 @@ noinline fn __heap_grow(n: i64) -> i64 {
     __die("panic: out of memory", "", "")
 }
 
-// uninitialized memory, 16-byte aligned; never freed individually (see mark/release)
+// uninitialized memory, 16-byte aligned; never freed individually (see mark/release). A size
+// that is negative (also one that overflowed) is refused by __heap_grow.
 inline fn __alloc_raw(n: i64) -> i64 {
     n = (n + 15) & ~15
     p := __heap_cur
-    e := p + n
-    if e > __heap_end {
+    if u64(n) > u64(__heap_end - p) {
         return __heap_grow(n)
     }
-    __heap_cur = e
+    __heap_cur = p + n
     return p
+}
+
+// the bytes of n elements of `size` bytes; stops the program if n is negative or the result
+// does not fit in an i64
+inline fn __alloc_size(n: i64, size: i64) -> i64 {
+    if n < 0 {
+        __die("panic: negative allocation size", "", "")
+    }
+    if mulhi(u64(n), u64(size)) != 0 || n * size < 0 {
+        __die("panic: out of memory", "", "")
+    }
+    return n * size
 }
 
 // zeroed memory: only memory that was handed out before (below the high-water mark) is dirty
@@ -152,10 +164,7 @@ inline fn __alloc(n: i64) -> i64 {
 }
 
 fn alloc[T](n: i64) -> []T {
-    if n < 0 {
-        __die("panic: negative allocation size", "", "")
-    }
-    return mkslice[T](__alloc(n * sizeof[T]()), n)
+    return mkslice[T](__alloc(__alloc_size(n, sizeof[T]())), n)
 }
 
 fn new[T]() -> *T {
@@ -509,8 +518,10 @@ fn __fmt_fixed(x: f64, prec: i64, out: []u8) -> i64 {
     if prec < 0 {
         prec = 0
     }
-    if prec > 400 {
-        prec = 400
+    // every f64 has at most 1074 digits after the point: more precision only adds zeros, which
+    // the callers append (__fmt_extra)
+    if prec > 1100 {
+        prec = 1100
     }
     m, e, cls := __f64_parts(x)
     neg := (cast[u64](x) >> 63) != 0
@@ -652,6 +663,7 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
     c: [24]u8
     cn := 0
     cp := 0
+    found := false
     for p in 1..19 {
         if p >= n {
             for i in 0..n {
@@ -661,32 +673,41 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
             cp = pos
             break
         }
-        for i in 0..p {
-            c[i] = d[i]
-        }
-        cn = p
-        cp = pos
-        up := d[p] > '5' || (d[p] == '5' && (n > p + 1 || ((d[p - 1] - '0') & 1) == 1))
-        if up {
-            i := p - 1
-            while i >= 0 && c[i] == '9' {
-                i -= 1
+        // the p-digit numbers below and above x: the nearer one first; the other one counts
+        // too, since below a power of two the interval is closer on one side
+        nearer_up := d[p] > '5' || (d[p] == '5' && (n > p + 1 || ((d[p - 1] - '0') & 1) == 1))
+        for t in 0..2 {
+            up := if t == 0 { nearer_up } else { !nearer_up }
+            for i in 0..p {
+                c[i] = d[i]
             }
-            if i >= 0 {
-                c[i] += 1
-                cn = i + 1
-            } else {
-                c[0] = '1'
-                cn = 1
-                cp = pos + 1
+            cn = p
+            cp = pos
+            if up {
+                i := p - 1
+                while i >= 0 && c[i] == '9' {
+                    i -= 1
+                }
+                if i >= 0 {
+                    c[i] += 1
+                    cn = i + 1
+                } else {
+                    c[0] = '1'
+                    cn = 1
+                    cp = pos + 1
+                }
+            }
+            while cn > 1 && c[cn - 1] == '0' {
+                cn -= 1
+            }
+            lo := __dec_cmp(c[..], cn, cp, dl[..], nl, pl)
+            hi := __dec_cmp(c[..], cn, cp, dh[..], nh, ph)
+            if (lo > 0 || (even && lo == 0)) && (hi < 0 || (even && hi == 0)) {
+                found = true
+                break
             }
         }
-        while cn > 1 && c[cn - 1] == '0' {
-            cn -= 1
-        }
-        lo := __dec_cmp(c[..], cn, cp, dl[..], nl, pl)
-        hi := __dec_cmp(c[..], cn, cp, dh[..], nh, ph)
-        if (lo > 0 || (even && lo == 0)) && (hi < 0 || (even && hi == 0)) {
+        if found {
             break
         }
     }
@@ -798,19 +819,30 @@ fn __put_f64(x: f64) {
     __put_str(b[..n])
 }
 
+// the zeros beyond the 1100 digits that __fmt_fixed writes (x finite)
+fn __fmt_extra(x: f64, prec: i64) -> i64 {
+    return if prec > 1100 && x - x == 0.0 { prec - 1100 } else { 0 }
+}
+
 // print x with exactly `prec` digits after the decimal point (like printf "%.Nf")
 fn putf(x: f64, prec: i64) {
-    b: [800]u8
+    b: [1420]u8
     n := __fmt_fixed(x, prec, b[..])
     __put_str(b[..n])
+    for i in 0..__fmt_extra(x, prec) {
+        putc('0')
+    }
 }
 
 fn fmtf(x: f64, prec: i64) -> str {
-    b: [800]u8
+    b: [1420]u8
     n := __fmt_fixed(x, prec, b[..])
-    s := alloc[u8](n)
+    s := alloc[u8](n + __fmt_extra(x, prec))
     for i in 0..n {
         s[i] = b[i]
+    }
+    for i in n..len(s) {
+        s[i] = '0'
     }
     return s
 }
@@ -1037,7 +1069,7 @@ fn vec_of[T](s: []T) -> Vec[T] {
 
 // a Vec of n copies of x
 fn vec_fill[T](n: i64, x: T) -> Vec[T] {
-    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    buf := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
     for i in 0..n {
         buf[i] = x
     }
@@ -1048,7 +1080,7 @@ fn reserve[T](v: *Vec[T], n: i64) {
     if n > len(v.buf) {
         cap := max(len(v.buf) * 2, max(n, 8))
         // the spare capacity is never read before it is written: no need to zero it
-        nb := mkslice[T](__alloc_raw(cap * sizeof[T]()), cap)
+        nb := mkslice[T](__alloc_raw(__alloc_size(cap, sizeof[T]())), cap)
         memcopy(ptr(nb), ptr(v.buf), v.len * sizeof[T]())
         v.buf = nb
     }
@@ -1116,6 +1148,13 @@ fn __at_truncate[T](v: *Vec[T], n: i64, at: str) {
 
 // grows (with copies of x) or shrinks to exactly n elements
 fn resize[T](v: *Vec[T], n: i64, x: T) {
+    __at_resize(v, n, x, "?")
+}
+
+fn __at_resize[T](v: *Vec[T], n: i64, x: T, at: str) {
+    if n < 0 {
+        __assert_fail(at, "Vec resize to a negative length")
+    }
     reserve(v, n)
     for i in v.len..n {
         v.buf[i] = x
@@ -1539,8 +1578,15 @@ fn __clone_map[K, V](m: *Map[K, V], kplain: bool, vplain: bool) -> Map[K, V] {
 }
 
 // ---------- sorting ----------
-fn __sort_range[T](a: []T, lo: i64, hi: i64) {
+// quicksort; after `depth` levels of bad pivots the rest of the range is heap-sorted, so that
+// no input takes more than n log n steps
+fn __sort_range[T](a: []T, lo: i64, hi: i64, depth: i64) {
     while hi - lo > 16 {
+        if depth == 0 {
+            __heap_sort(a, lo, hi)
+            return
+        }
+        depth -= 1
         p := a[lo + (hi - lo) / 2]
         i := lo
         j := hi
@@ -1561,10 +1607,10 @@ fn __sort_range[T](a: []T, lo: i64, hi: i64) {
         }
         // recurse into the smaller half, loop on the larger one
         if j - lo < hi - i {
-            __sort_range(a, lo, j)
+            __sort_range(a, lo, j, depth)
             lo = i
         } else {
-            __sort_range(a, i, hi)
+            __sort_range(a, i, hi, depth)
             hi = j
         }
     }
@@ -1579,9 +1625,50 @@ fn __sort_range[T](a: []T, lo: i64, hi: i64) {
     }
 }
 
+// a[lo..=hi] sorted with a heap
+fn __heap_sort[T](a: []T, lo: i64, hi: i64) {
+    n := hi - lo + 1
+    for r in 0..n / 2 {
+        __sift_down(a, lo, n / 2 - 1 - r, n)
+    }
+    end := n - 1
+    while end > 0 {
+        t := a[lo]
+        a[lo] = a[lo + end]
+        a[lo + end] = t
+        __sift_down(a, lo, 0, end)
+        end -= 1
+    }
+}
+
+fn __sift_down[T](a: []T, lo: i64, root: i64, n: i64) {
+    loop {
+        c := 2 * root + 1
+        if c >= n {
+            return
+        }
+        if c + 1 < n && a[lo + c] < a[lo + c + 1] {
+            c += 1
+        }
+        if !(a[lo + root] < a[lo + c]) {
+            return
+        }
+        t := a[lo + root]
+        a[lo + root] = a[lo + c]
+        a[lo + c] = t
+        root = c
+    }
+}
+
 // ascending sort of numbers (anything comparable with `<`)
 fn sort[T](a: []T) {
-    __sort_range(a, 0, len(a) - 1)
+    depth := 0
+    k := len(a)
+    while k > 0 {
+        depth += 2
+        k = k >> 1
+    }
+    __sort_range(a, 0, len(a) - 1, depth)
 }
 
 fn sort(a: []str) {
@@ -1810,10 +1897,10 @@ fn __at_replace(s: str, old: str, new: str, at: str) -> str {
 
 // n copies of s (none if n <= 0)
 fn repeat(s: str, n: i64) -> str {
-    if n <= 0 {
+    if n <= 0 || len(s) == 0 {
         return ""
     }
-    out := alloc[u8](len(s) * n)
+    out := alloc[u8](__alloc_size(n, len(s)))
     for i in 0..n {
         memcopy(cast[i64](ptr(out)) + i * len(s), ptr(s), len(s))
     }
@@ -2215,7 +2302,8 @@ fn parse_f64(s: str) -> (f64, bool) {
         }
         e := 0
         while i < n && s[i] >= '0' && s[i] <= '9' {
-            if e < 10000 {
+            // saturates far beyond any digit count a string can have (no overflow)
+            if e < 100_000_000_000_000_000 {
                 e = e * 10 + i64(s[i] - '0')
             }
             i += 1
