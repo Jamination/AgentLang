@@ -88,6 +88,9 @@ priv fn link_name_of(shstr: str, s: str) -> i64 {
 // slots (with the address of the function or variable: R_X86_64_GLOB_DAT, never a copy).
 // Result: (file bytes, error text); the error text is empty on success.
 fn elf_link(m: *Module, out: *Output) -> (str, str) {
+    if len(out.err) != 0 {
+        return ("", out.err)
+    }
     externs := used_externs(m, out)
     dynamic := !externs.is_empty()
     for x in externs {
@@ -283,6 +286,11 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
             gaddr[gi] = bss_addr + bss_size
             bss_size += max(g.size, 1)
         }
+    }
+    // the code addresses code and data with 32-bit absolute and relative displacements
+    if bss_addr + bss_size > 0x7FFF_FFFF {
+        return ("", fmt("the program's code and global variables take ", bss_addr + bss_size - BASE,
+            " bytes; at most ", 0x7FFF_FFFF - BASE, " fit (put large tables in memory from alloc instead)"))
     }
     // ---- relocations ----
     entry_addr := func_addr[m.entry]

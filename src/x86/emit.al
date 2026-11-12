@@ -16,6 +16,7 @@ priv struct Reloc {
 struct Code {
     bytes: Vec[u8]
     relocs: Vec[Reloc]
+    err: str // a frame too large for 32-bit displacements: the message (the code is unusable)
 }
 
 priv struct Frame {
@@ -740,23 +741,30 @@ priv enum Item {
 }
 
 fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
-    // frame layout
-    off: i32 = 8 * i32(mf.out_args)
+    // frame layout (computed in i64: a frame over 2 GiB cannot be addressed and is an error)
+    off := 8 * mf.out_args
     slot_off := vec[i32]()
     for sl in mf.slots {
-        a := i32(min(max(i64(sl.1), 1), 16))
+        a := min(max(sl.1, 1), 16)
         off = (off + a - 1) / a * a
-        slot_off.push(off)
-        off += i32(sl.0)
+        slot_off.push(i32(off))
+        off += sl.0
     }
     npush := i32(alloc.used_callee_saved.len)
-    size := (off + 15) / 16 * 16
-    if (8 + 8 * npush + size) % 16 != 0 {
-        size += 8
+    size64 := (off + 15) / 16 * 16
+    if (8 + 8 * i64(npush) + size64) % 16 != 0 {
+        size64 += 8
     }
     if !mf.has_calls && off == 0 {
-        size = 0
+        size64 = 0
     }
+    err := ""
+    if size64 > 0x7FFF_0000 {
+        err = fmt("function `", mf.name, "` needs a stack frame of ", size64,
+            " bytes; at most 2 GiB are possible (allocate large arrays with alloc[T](n))")
+        size64 = 0
+    }
+    size := i32(size64)
     frame := Frame{slot_off: slot_off, size: size, npush: npush}
     // prologue / epilogue
     pro := vec[MInst]()
@@ -897,7 +905,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             }
         }
     }
-    return Code{bytes: bytes, relocs: relocs}
+    return Code{bytes: bytes, relocs: relocs, err: err}
 }
 
 // padding in front of an aligned block; long paddings are not worth executing

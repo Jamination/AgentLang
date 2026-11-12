@@ -497,8 +497,7 @@ fn mir_print_mfunc(f: *MFunc) -> str {
         s.push(fmt(".L", bi, ":  ; depth ", b.depth, " succs ", b.succs.items(), "\n"))
         for ii in 0..b.insts.len {
             i := &b.insts[ii]
-            // the variant name without its `MOp` prefix, as `{:?}` prints it
-            line := concat("    ", to_lower(fmt(i.op)[3..]))
+            line := concat("    ", to_lower(fmt(i.op)))
             match i.op {
                 Jcc, Setcc, Cmov => {
                     line = fmt(line, "(cc", i.cc, ")")
