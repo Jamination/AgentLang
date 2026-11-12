@@ -175,7 +175,7 @@ priv fn eat_kw(p: *Parser, k: str) -> bool {
 priv fn tok_desc(p: *Parser) -> str {
     match p.peek() {
         Id(s) => fmt("identifier `", s, "`")
-        Int(_), Float(_) => "number"
+        Int(_), Float(_, _) => "number"
         Str(_) => "string"
         Kw(k) => fmt("keyword `", k, "`")
         P(q) => fmt("`", q, "`")
@@ -1639,9 +1639,9 @@ priv fn primary(p: *Parser) -> (Expr, bool) {
             p.bump()
             return (Expr{k: EK.Int(n), pos: pos}, true)
         }
-        Float(f) => {
+        Float(f, g) => {
             p.bump()
-            return (Expr{k: EK.Float(f), pos: pos}, true)
+            return (Expr{k: EK.Float(f, g), pos: pos}, true)
         }
         Str(s) => {
             p.bump()

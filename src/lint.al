@@ -72,7 +72,7 @@ priv fn block(u: *Use, b: *Block) -> bool {
 priv fn expr(u: *Use, e: *Expr) -> bool {
     return match e.k {
         Int(v) => true
-        Float(v) => true
+        Float(v, _) => true
         Str(s) => true
         Bool(b) => true
         Nil => true

@@ -330,7 +330,7 @@ priv fn lower_match_err(ty: i64, pos: Pos) -> RPat {
 // is a pattern expression a compile-time constant?
 priv fn is_const(s: *Fx, e: *Expr) -> bool {
     match e.k {
-        Int(_), Float(_), Str(_), Bool(_), Nil => return true
+        Int(_), Float(_, _), Str(_), Bool(_), Nil => return true
         _ => {}
     }
     saved := s.cx.errs.len

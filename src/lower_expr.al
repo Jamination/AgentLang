@@ -64,7 +64,7 @@ priv fn parse_usize(s: str) -> (i64, bool) {
 
 fn is_untyped(self: *Fx, e: *Expr) -> bool {
     match e.k {
-        Int(_), Float(_), Nil => { return true }
+        Int(_), Float(_, _), Nil => { return true }
         Un(Neg, x), Un(BitNot, x) => { return self.is_untyped(x) }
         Bin(op, a, b) if is_arith(op) || op == Shl || op == Shr => {
             return self.is_untyped(a) && self.is_untyped(b)
@@ -144,7 +144,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
     }
     match e.k {
         Int(n) => { return self.int_lit(i64(n), false, expect, e.pos) }
-        Float(f) => {
+        Float(f, g) => {
             match expect {
                 Some(t) if self.cx.types.is_int(t) => {
                     tn := self.tyname(t)
@@ -153,7 +153,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                 _ => {}
             }
             ft := self.float_expect(expect)
-            return self.fconst_ty(ft, f)
+            return self.fconst_ty(ft, if ft == T_F64 { f } else { f64(g) })
         }
         Bool(b) => {
             v := self.iconst(I8, lower_expr_bool_i64(b))

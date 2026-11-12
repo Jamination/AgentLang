@@ -56,7 +56,7 @@ struct Expr {
 
 enum EK {
     Int(u64),
-    Float(f64),
+    Float(f64, f32), // the value; the literal rounded once to f32
     Str(str),
     Bool(bool),
     Nil,

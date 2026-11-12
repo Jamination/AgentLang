@@ -845,7 +845,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
 // literals convert directly
 priv fn conversion_has_float(e: *Expr) -> bool {
     match e.k {
-        Float(_) => true
+        Float(_, _) => true
         Un(_, x) => conversion_has_float(x)
         Bin(_, a, b) => conversion_has_float(a) || conversion_has_float(b)
         _ => false

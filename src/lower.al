@@ -1008,7 +1008,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
 priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match e.k {
         Int(_) => return T_I64
-        Float(_) => return T_F64
+        Float(_, _) => return T_F64
         Bool(_) => return T_BOOL
         Str(_) => return T_STR
         Lit(t, _) => {
@@ -1366,7 +1366,7 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                             !is_some(vt)
                         }
                         (F32, Float(f)) => {
-                            v = Float(f64(f32(f)))
+                            v = Float(f64(lit_f32(&d.val, f)))
                             true
                         }
                         (F64, Float(_)), (Bool, Bool(_)), (Slice(T_U8), Str(_)) => true
@@ -1573,7 +1573,7 @@ priv fn const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
 fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
     match e.k {
         Int(n) => return Some(CV.Int(i64(n)))
-        Float(f) => return Some(CV.Float(f))
+        Float(f, _) => return Some(CV.Float(f))
         Bool(b) => return Some(CV.Bool(b))
         Str(s) => return Some(CV.Str(s))
         Ident(n) => {
@@ -1919,7 +1919,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
             }
             put_le(data, off, u64(i), bits / 8)
         }
-        (F32, Float(f)) => put_le(data, off, u64(cast[u32](f32(f))), 4)
+        (F32, Float(f)) => put_le(data, off, u64(cast[u32](lit_f32(e, f))), 4)
         (F32, Int(i)) if !is_some(vt) => put_le(data, off, u64(cast[u32](f32(i))), 4)
         (F64, Float(f)) => put_le(data, off, cast[u64](f), 8)
         (F64, Int(i)) if !is_some(vt) => put_le(data, off, cast[u64](f64(i)), 8)
@@ -1949,5 +1949,14 @@ priv fn wrap_int(v: i64, bits: i64, signed: bool) -> i64 {
         (false, 16) => i64(u16(v))
         (false, 32) => i64(u32(v))
         _ => v
+    }
+}
+
+// `f` as an f32; a float literal (also negated) is rounded once from its text
+priv fn lit_f32(e: *Expr, f: f64) -> f32 {
+    match e.k {
+        Float(_, g) => return g
+        Un(Neg, x) => return -lit_f32(x, -f)
+        _ => return f32(f)
     }
 }
