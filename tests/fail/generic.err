@@ -13,5 +13,5 @@ i64 has no field `x`
 index 5 is out of bounds for length 3
 operands have different types: [3]i64 and i64
 `break`/`continue` outside of a loop
-expression statement has no effect (did you mean `=` or `:=`?)
+this expression has no effect (did you mean `=` or `:=`?)
 cannot take the address of this expression (only variables, fields, elements and `&T{...}` literals)

@@ -693,16 +693,21 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 Match(sc, arms) => {
                     self.match_expr(sc, arms.items(), false, None, e.pos)
                 }
-                // `&&` / `||` may have effects through their operands
-                Bin(LAnd, _, _), Bin(LOr, _, _) => {
-                    self.expr(&e, None)
-                }
-                Int(_, _), Float(_, _), Str(_), Bool(_), Ident(_), Fn(_), Bin(_, _, _) => {
-                    self.expr(&e, None)
-                    self.err(e.pos, "expression statement has no effect (did you mean `=` or `:=`?)")
-                }
                 _ => {
                     self.expr(&e, None)
+                    no_effect := match e.k {
+                        Int(_, _), Float(_, _), Str(_), Bool(_), Nil, Ident(_), Fn(_), TypeE(_) => true
+                        Un(_, _), Bin(_, _, _), Field(_, _), Index(_, _), Slice(_, _, _), Tuple(_), Lit(_, _) => !lower_call_has_call(&e)
+                        _ => false
+                    }
+                    if no_effect {
+                        hint := match e.k {
+                            Un(Neg, _), Un(Addr, _), Un(Deref, _) => " (an operator at the start of a line begins a new statement: put it at the end of the previous line)"
+                            Ident(_), Bin(Eq, _, _) => " (did you mean `=` or `:=`?)"
+                            _ => ""
+                        }
+                        self.err(e.pos, fmt("this expression has no effect", hint))
+                    }
                 }
             }
         }
