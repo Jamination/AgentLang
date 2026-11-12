@@ -17,9 +17,9 @@ the numbers they are given. Keep it that way in a game: read the clock once per 
 | `time_now() -> f64` | Monotonic time in seconds. The origin is arbitrary (system start): only differences mean something. Never goes backwards. |
 | `time_ns() -> i64` | The same clock in nanoseconds (the prelude's `clock_ns()`). |
 | `wall_time() -> i64` | Calendar time: seconds since 1970-01-01 UTC. For time stamps and save files, not for measuring (it can jump). |
-| `sleep_ms(ms: i64)` | Suspends the program for `ms` milliseconds. |
+| `sleep_ms(ms: i64)` | Suspends the program for `ms` milliseconds. Times beyond `i64` nanoseconds (about 292 years) are limited to that. |
 | `sleep_ns(ns: i64)` | Suspends the program for `ns` nanoseconds. Zero or negative: returns at once. |
-| `sleep_until(t: f64)` | Sleeps until `time_now()` reaches `t`; returns at once if that moment has passed. For frame pacing without drift: `next += 1.0 / 60.0; sleep_until(next)`. |
+| `sleep_until(t: f64)` | Sleeps until `time_now()` reaches `t`; returns at once if that moment has passed (or `t` is NaN); a moment more than 292 years away is limited to that. For frame pacing without drift: `next += 1.0 / 60.0; sleep_until(next)`. |
 
 Sleeping is accurate to a fraction of a millisecond on an idle machine, never shorter than
 asked.
@@ -86,7 +86,7 @@ the game. Timers are plain values: keep them in your entity or state structs.
 |-------------|-------------|
 | `struct Timer { duration: f64, left: f64, repeat: bool, active: bool }` | `duration`: seconds per period. `left`: seconds until it fires next. `repeat`: restarts itself. `active`: false after a one-shot timer fired or after `stop`. |
 | `timer(seconds: f64, repeat: bool) -> Timer` | An active timer that fires after `seconds` (and then every `seconds` if `repeat`). |
-| `tick(t: *Timer, dt: f64) -> i64` | Advances by `dt` and returns how often the timer fired: 0 or 1 for a one-shot timer; for a repeating timer the number of periods that ended (a long `dt` can end several; the remainder carries over, so no time is lost). |
+| `tick(t: *Timer, dt: f64) -> i64` | Advances by `dt` and returns how often the timer fired: 0 or 1 for a one-shot timer; for a repeating timer the number of periods that ended (a long `dt` can end several; the remainder carries over, so no time is lost; more than an `i64` can count gives the largest `i64` and starts a new period). A NaN `dt` is ignored. |
 | `done(t: *Timer) -> bool` | True once a one-shot timer has fired. |
 | `progress(t: *Timer) -> f32` | Fraction of the current period that has passed, in `[0, 1]` (for cooldown bars and fades). |
 | `reset(t: *Timer)` | Starts the countdown again from the full duration. |

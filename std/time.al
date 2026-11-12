@@ -33,14 +33,21 @@ fn sleep_ns(ns: i64) {
     }
 }
 
-// suspends the program for `ms` milliseconds
+// suspends the program for `ms` milliseconds (a time beyond the range of i64 nanoseconds,
+// about 292 years, is limited to it)
 fn sleep_ms(ms: i64) {
-    sleep_ns(ms * 1000000)
+    sleep_ns(if ms > 0x7FFF_FFFF_FFFF_FFFF / 1000000 { 0x7FFF_FFFF_FFFF_FFFF } else { ms * 1000000 })
 }
 
 // sleeps until time_now() reaches `t` (returns at once if that time has passed)
 fn sleep_until(t: f64) {
-    sleep_ns(i64((t - time_now()) * 1e9))
+    d := (t - time_now()) * 1e9
+    // (compared as a float: a far-away t does not fit in i64 nanoseconds; NaN returns at once)
+    if d >= 9223372036854775807.0 {
+        sleep_ns(0x7FFF_FFFF_FFFF_FFFF)
+    } else if d > 0.0 {
+        sleep_ns(i64(d))
+    }
 }
 
 // ---------- Stopwatch ----------
@@ -181,7 +188,8 @@ fn timer(seconds: f64, repeat: bool) -> Timer {
 // advances the timer by dt and returns how often it fired: 0 or 1 for a one-shot timer, the
 // number of elapsed periods for a repeating one (the remainder carries over)
 fn tick(t: *Timer, dt: f64) -> i64 {
-    if !t.active {
+    if !t.active || dt != dt {
+        // (a NaN dt is ignored)
         return 0
     }
     t.left -= dt
@@ -193,7 +201,13 @@ fn tick(t: *Timer, dt: f64) -> i64 {
         t.active = false
         return 1
     }
-    n := 1 + i64(-t.left / t.duration)
+    q := -t.left / t.duration
+    if !(q < 9223372036854775807.0) {
+        // more periods than an i64 counts: the count is limited, a new period starts
+        t.left = t.duration
+        return 0x7FFF_FFFF_FFFF_FFFF
+    }
+    n := 1 + i64(q)
     t.left += f64(n) * t.duration
     // the division can round down by one period: a period that ends exactly now has fired too
     if t.left <= 0.0 {
