@@ -792,7 +792,7 @@ write_file(path: str, data: str) -> bool   // creates or replaces the file; fals
 read_all(fd: i64) -> str                   // everything up to end of input; read_all(0) reads standard input
 io_error() -> i64                          // Linux error number of the last read_file / write_file / read_all; 0 after success
 error_text(e: i64) -> str                  // "no such file or directory" (2), "permission denied" (13), "is a directory" (21), "file exists" (17), ...; "no error" for 0; "os error N" for other numbers
-args() -> []str                            // args()[0] is the program's path; `alc run f.al -- a "b c"` gives ["./f", "a", "b c"]
+args() -> []str                            // args()[0] is the program's path; `alc run f.al -- a "b c"` gives ["./f", "a", "b c"]; started with an empty argv (execve): [""] (Linux supplies an empty argv[0]; before 5.18: [])
 env_get(name: str) -> (str, bool)          // an environment variable; ("", false) if it is not set
 ```
 
