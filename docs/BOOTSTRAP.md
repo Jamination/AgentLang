@@ -119,7 +119,7 @@ reference; `src/base.al`):
   of the next round discards them; used in `src/opt/simplify.al`). Nothing reachable from
   the function may be allocated between `scratch_on()` and `scratch_off()`.
 
-Compiling the compiler (about 25,400 lines and the 2,200 of the prelude) takes about 3.4 s and 0.4 GB.
+Compiling the compiler (about 25,800 lines and the 2,300 of the prelude) takes about 3.4 s and 0.4 GB.
 `ALC_DEBUG=mem` prints memory and time after each phase.
 
 ## Notes on language features
