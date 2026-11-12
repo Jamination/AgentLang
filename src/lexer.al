@@ -2,7 +2,7 @@
 
 enum Tk {
     Id(str),
-    Int(u64),
+    Int(u64, bool), // value, written in decimal
     Float(f64, f32), // the value; the literal rounded once to f32
     Str(str),
     Kw(str),
@@ -202,7 +202,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 term := false
                 if out.len > 0 {
                     term = match out[out.len - 1].t {
-                        Id(_), Int(_), Float(_, _), Str(_) => true
+                        Id(_), Int(_, _), Float(_, _), Str(_) => true
                         P(p) => p == ")" || p == "]" || p == "}"
                         Kw(k) => k == "return" || k == "break" || k == "continue" || k == "true" || k == "false" || k == "nil"
                         _ => false
@@ -275,7 +275,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 if !any {
                     errs.push(Diag{pos: p, msg: "empty integer literal"})
                 }
-                out.push(Token{t: Int(v), pos: p})
+                out.push(Token{t: Int(v, false), pos: p})
                 continue
             }
             while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
@@ -323,10 +323,10 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             } else {
                 v, ok := parse_u64(text)
                 if ok {
-                    out.push(Token{t: Int(v), pos: p})
+                    out.push(Token{t: Int(v, true), pos: p})
                 } else {
                     errs.push(Diag{pos: p, msg: "integer literal too large"})
-                    out.push(Token{t: Int(0), pos: p})
+                    out.push(Token{t: Int(0, true), pos: p})
                 }
             }
             continue
@@ -418,7 +418,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 if buf.len > 0 {
                     first = buf[0]
                 }
-                out.push(Token{t: Int(u64(first)), pos: p})
+                out.push(Token{t: Int(u64(first), false), pos: p})
             }
             continue
         }

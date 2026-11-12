@@ -1007,7 +1007,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
 // type of a constant initializer expression (for globals without annotation)
 priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match e.k {
-        Int(_) => return T_I64
+        Int(_, _) => return T_I64
         Float(_, _) => return T_F64
         Bool(_) => return T_BOOL
         Str(_) => return T_STR
@@ -1355,8 +1355,8 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                                 vt == Some(t)
                             } else {
                                 // an untyped value must fit, as a literal must
-                                if bits < 64 && (i < -(1 << (bits - 1)) || i >= 1 << bits) {
-                                    self.err(d.val.pos, fmt("constant `", name, "`: value ", i, " does not fit in ", self.types.name(t)))
+                                if bits < 64 && (i < -(1 << (bits - 1)) || i >= 1 << bits) || dec_lit_over(&d.val, bits, signed) {
+                                    self.err(d.val.pos, fmt("constant `", name, "`: value ", match d.val.k { Int(lit, _) => fmt(lit); _ => fmt(i) }, " does not fit in ", self.types.name(t)))
                                 }
                                 true
                             }
@@ -1572,7 +1572,7 @@ priv fn const_bin_float(cx: *Cx, op: BinOp, a: *Expr, b: *Expr) -> Opt[CV] {
 
 fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
     match e.k {
-        Int(n) => return Some(CV.Int(i64(n)))
+        Int(n, _) => return Some(CV.Int(i64(n)))
         Float(f, _) => return Some(CV.Float(f))
         Bool(b) => return Some(CV.Bool(b))
         Str(s) => return Some(CV.Str(s))
@@ -1908,13 +1908,13 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
     }
     vt := const_int_ty(self, e)
     match (k, v) {
-        (Int(bits, _), Int(i)) => {
+        (Int(bits, signed), Int(i)) => {
             if is_some(vt) {
                 if vt != Some(ty) {
                     self.err(e.pos, fmt("type mismatch: expected ", self.types.name(ty), ", found ", self.types.name(vt.or(T_ERR))))
                     return false
                 }
-            } else if bits < 64 && (i < -(1 << (bits - 1)) || i >= 1 << bits) {
+            } else if bits < 64 && (i < -(1 << (bits - 1)) || i >= 1 << bits) || dec_lit_over(e, bits, signed) {
                 self.err(e.pos, fmt("integer constant ", i, " does not fit in ", self.types.name(ty)))
             }
             put_le(data, off, u64(i), bits / 8)
@@ -1958,5 +1958,20 @@ priv fn lit_f32(e: *Expr, f: f64) -> f32 {
         Float(_, g) => return g
         Un(Neg, x) => return -lit_f32(x, -f)
         _ => return f32(f)
+    }
+}
+
+// a decimal literal (also negated) beyond the range of Int(bits, signed); hex, binary,
+// octal and character literals may be bit patterns
+priv fn dec_lit_over(e: *Expr, bits: i64, signed: bool) -> bool {
+    match e.k {
+        Int(n, true) => return n > (if signed { (u64(1) << u64(bits - 1)) - 1 } else { u64(0xFFFFFFFFFFFFFFFF) >> u64(64 - bits) })
+        Un(Neg, x) => {
+            match x.k {
+                Int(n, true) => return n > u64(1) << u64(bits - 1)
+                _ => return false
+            }
+        }
+        _ => return false
     }
 }

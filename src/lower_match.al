@@ -330,7 +330,7 @@ priv fn lower_match_err(ty: i64, pos: Pos) -> RPat {
 // is a pattern expression a compile-time constant?
 priv fn is_const(s: *Fx, e: *Expr) -> bool {
     match e.k {
-        Int(_), Float(_, _), Str(_), Bool(_), Nil => return true
+        Int(_, _), Float(_, _), Str(_), Bool(_), Nil => return true
         _ => {}
     }
     saved := s.cx.errs.len
@@ -1008,7 +1008,7 @@ priv fn bool_pat(s: *Fx, rp: *RPat) -> i64 {
 // the value of a constant pattern, if it is known at compile time
 priv fn const_key(s: *Fx, rp: *RPat) -> Opt[CV] {
     match rp.e.k {
-        Int(n) => return Some(CV.Int(i64(n)))
+        Int(n, _) => return Some(CV.Int(i64(n)))
         Str(t) => return Some(CV.Str(t))
         Ident(n) if is_some(s.lookup(n)) => return None
         _ => {}

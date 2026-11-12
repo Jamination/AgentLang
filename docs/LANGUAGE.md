@@ -97,7 +97,9 @@ test "areas" {
   numeric literals take the type the context asks for (`x: u8 = 200`, `x * 2`, `f(3)`), also
   through the branches of an `if` / `match` used as a value (`x: u8 = if c { 1 } else { 2 }`);
   without context an integer literal is `i64`, a float literal `f64`. An integer literal is
-  accepted where a float is expected (`d: f64 = 5`).
+  accepted where a float is expected (`d: f64 = 5`). A decimal literal must fit its type
+  (`x: i8 = 200` is an error); a hex, binary, octal or character literal may also be a bit
+  pattern of it (`x: i8 = 0xFF` is -1, `m := 0xFFFF_FFFF_FFFF_FFFF` is the `i64` -1).
 - **Conversions** are written like calls: `i64(x)`, `u8(x)`, `f64(n)`. Integer to a narrower
   type keeps the low bits; to a wider type the *source* type decides: a signed source is
   sign-extended, an unsigned one zero-extended (`i64(u8(200))` is 200, `u64(i8(-1))` is

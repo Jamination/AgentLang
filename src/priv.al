@@ -270,7 +270,7 @@ priv fn callee(r: *PrivCx, c: *Expr) -> bool {
 
 priv fn expr(r: *PrivCx, e: *Expr) -> bool {
     return match e.k {
-        Int(v) => true
+        Int(v, _) => true
         Float(v, _) => true
         Str(s) => true
         Bool(b) => true

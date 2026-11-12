@@ -55,7 +55,7 @@ struct Expr {
 }
 
 enum EK {
-    Int(u64),
+    Int(u64, bool), // value, written in decimal
     Float(f64, f32), // the value; the literal rounded once to f32
     Str(str),
     Bool(bool),
@@ -222,7 +222,7 @@ fn ast_type_str(t: *TypeAst) -> str {
         Slice(e) => fmt("[]", ast_type_str(e))
         Array(n, e) => {
             len := match n.k {
-                Int(k) => fmt(k)
+                Int(k, _) => fmt(k)
                 Ident(name) => name
                 _ => "_"
             }

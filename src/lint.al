@@ -34,7 +34,7 @@ priv fn is_root(e: *Expr) -> bool {
 priv fn place_str(e: *Expr) -> str {
     match e.k {
         Ident(n) => ast_plain(n)
-        Int(v) => fmt(v)
+        Int(v, _) => fmt(v)
         Field(b, f) => fmt(place_str(b), ".", f)
         Index(b, idx) => {
             parts := vec[str]()
@@ -71,7 +71,7 @@ priv fn block(u: *Use, b: *Block) -> bool {
 
 priv fn expr(u: *Use, e: *Expr) -> bool {
     return match e.k {
-        Int(v) => true
+        Int(v, _) => true
         Float(v, _) => true
         Str(s) => true
         Bool(b) => true

@@ -64,7 +64,7 @@ priv fn parse_usize(s: str) -> (i64, bool) {
 
 fn is_untyped(self: *Fx, e: *Expr) -> bool {
     match e.k {
-        Int(_), Float(_, _), Nil => { return true }
+        Int(_, _), Float(_, _), Nil => { return true }
         Un(Neg, x), Un(BitNot, x) => { return self.is_untyped(x) }
         Bin(op, a, b) if is_arith(op) || op == Shl || op == Shr => {
             return self.is_untyped(a) && self.is_untyped(b)
@@ -89,23 +89,15 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
     return false
 }
 
-priv fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
+// `n`: the value (already negated if `neg`); `dec`: written in decimal. A decimal literal must
+// not exceed the maximum of its type; a hex / binary / octal / character literal may be a bit
+// pattern (`i8` takes 0xFF, `i64` takes 0xFFFF_FFFF_FFFF_FFFF).
+priv fn int_lit(self: *Fx, n: i64, neg: bool, dec: bool, expect: Opt[i64], pos: Pos) -> Val {
+    ty := T_I64
     match expect {
-        Some(ty) => {
-            match self.cx.types.k(ty) {
-                Int(bits, signed) => {
-                    if bits < 64 {
-                        lo := -(1 << (bits - 1))
-                        hi := if signed && neg { 1 << (bits - 1) } else { 1 << bits }
-                        if n < lo || n >= hi {
-                            tn := self.tyname(ty)
-                            self.err(pos, fmt("integer literal ", n, " does not fit in ", tn))
-                        }
-                    }
-                    it := self.irt(ty)
-                    v := self.iconst(it, n)
-                    return self.sval(ty, v)
-                }
+        Some(t) => {
+            match self.cx.types.k(t) {
+                Int(_, _) => { ty = t }
                 F64, F32, Vec(_), Quat, Mat4 => {
                     ft := self.float_expect(expect)
                     return self.fconst_ty(ft, f64(n))
@@ -115,13 +107,36 @@ priv fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val
         }
         None => {}
     }
-    v := self.iconst(I64, n)
-    return self.sval(T_I64, v)
+    bits, signed := match self.cx.types.k(ty) {
+        Int(b, s) => (b, s)
+        _ => (64, true)
+    }
+    bad := false
+    // the literal as written: its magnitude
+    mag := if neg { u64(-n) } else { u64(n) }
+    if dec {
+        if neg {
+            bad = mag > u64(1) << u64(bits - 1)
+        } else {
+            bad = mag > (if signed { (u64(1) << u64(bits - 1)) - 1 } else { u64(0xFFFFFFFFFFFFFFFF) >> u64(64 - bits) })
+        }
+    } else if bits < 64 {
+        lo := -(1 << (bits - 1))
+        hi := if signed && neg { 1 << (bits - 1) } else { 1 << bits }
+        bad = n < lo || n >= hi
+    }
+    if bad {
+        tn := self.tyname(ty)
+        self.err(pos, fmt("integer literal ", if neg { "-" } else { "" }, mag, " does not fit in ", tn))
+    }
+    it := self.irt(ty)
+    v := self.iconst(it, n)
+    return self.sval(ty, v)
 }
 
 fn const_val(self: *Fx, ty: Opt[i64], cv: CV, expect: Opt[i64], pos: Pos) -> Val {
     match cv {
-        Int(i) => self.int_lit(i, i < 0, lower_expr_or(ty, expect), pos)
+        Int(i) => self.int_lit(i, i < 0, false, lower_expr_or(ty, expect), pos)
         Float(f) => {
             ft := self.float_expect(lower_expr_or(ty, expect))
             self.fconst_ty(ft, f)
@@ -143,7 +158,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
         }
     }
     match e.k {
-        Int(n) => { return self.int_lit(i64(n), false, expect, e.pos) }
+        Int(n, dec) => { return self.int_lit(i64(n), false, dec, expect, e.pos) }
         Float(f, g) => {
             match expect {
                 Some(t) if self.cx.types.is_int(t) => {
@@ -832,7 +847,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
     match op {
         Neg => {
             match x.k {
-                Int(n) => { return self.int_lit(-i64(n), true, expect, pos) }
+                Int(n, dec) => { return self.int_lit(-i64(n), true, dec, expect, pos) }
                 _ => {}
             }
             v := self.expr(x, expect)

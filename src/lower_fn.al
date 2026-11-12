@@ -680,7 +680,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 Bin(LAnd, _, _), Bin(LOr, _, _) => {
                     self.expr(&e, None)
                 }
-                Int(_), Float(_, _), Str(_), Bool(_), Ident(_), Fn(_), Bin(_, _, _) => {
+                Int(_, _), Float(_, _), Str(_), Bool(_), Ident(_), Fn(_), Bin(_, _, _) => {
                     self.expr(&e, None)
                     self.err(e.pos, "expression statement has no effect (did you mean `=` or `:=`?)")
                 }
