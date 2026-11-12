@@ -5,3 +5,4 @@ bench/bin/
 __pycache__/
 *.test
 tools/gen_vk
+tools/gen_dx12

@@ -110,8 +110,8 @@ Other measurements taken during development (not part of `verify.sh`):
   constants were proven against the mingw headers with static assertions (278 structs,
   2667 vtable slots, 2993 constants). The Metal module has never run anywhere: it is checked
   only by the type checker against Apple's documented names and values.
-- **The mingw cross compiler (gcc) was used once, at development time,** by
-  `tools/gen_dx12.py --verify` for those static assertions. It is not in the compile path of
+- **The mingw cross compiler (gcc) was used once, at development time,** on the static
+  assertions that `tools/gen_dx12.al --verify` writes. It is not in the compile path of
   `alc`, and `verify.sh` does not call it.
 - **Window on a real display.** The window test in `verify.sh` is skipped: it only runs when
   `AL_TEST_DISPLAY` names a private X display, so that tests never open windows on your
