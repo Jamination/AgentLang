@@ -206,7 +206,7 @@ display and window handles.
 
 ```
 ./build/alc run tools/gen_vk.al                # rewrites std/vk.al (byte-identical if nothing changed)
-./build/alc run tools/gen_vk.al -- --verify    # also writes two programs that check the layout against the C headers
+./build/alc run tools/gen_vk.al -- --verify    # also checks the layout against the C headers: builds and runs two programs
 ```
 
 - The generator is an AL program, run from the root of the repository. The lists `VERSIONS`
@@ -217,11 +217,12 @@ display and window handles.
   dynamic symbol table: what `nm -D --defined-only` lists) become `extern` declarations (an
   `extern` for a missing symbol would stop the program from starting).
 - `--verify` writes `tmp/VulkanBindings/layout.c` (using `<vulkan/vulkan.h>`) and `layout.al`
-  (using `sizeof[T]()` and field addresses) and prints the commands that build them (clang,
-  `alc` with `ALC_STD_DIR=std`), run them and compare their output. Both programs print the
+  (using `sizeof[T]()` and field addresses), builds them (clang, gcc or cc; `./build/alc`
+  with `ALC_STD_DIR=std`), runs them and compares their output (`layout: no mismatches in 1475
+  lines`, or the differing lines and exit status 1). Both programs print the
   size and every field offset of every struct and the value of every numeric constant, and the
   outputs must be identical. The generator's own layout computation, which sizes the unions,
   is checked against the same numbers: `layout.c` asserts them at compile time. Current
-  result: 300 structs, 1928 fields, 1175 constants, 0 mismatches. It needs clang and the
-  Vulkan, X11, xcb and Wayland headers.
+  result: 300 structs, 1928 fields, 1175 constants, 0 mismatches. It needs a C compiler and
+  the Vulkan, X11, xcb and Wayland headers.
 - The convenience layer lives in `tools/vk_helpers.al`; edit it there, not in `std/vk.al`.
