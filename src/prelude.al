@@ -1021,6 +1021,17 @@ fn swap[T](a: *T, b: *T) {
 
 fn copy[T](dst: []T, src: []T) -> i64 {
     n := min(len(dst), len(src))
+    d := cast[i64](ptr(dst))
+    s := cast[i64](ptr(src))
+    if d > s && d < s + n * sizeof[T]() {
+        // overlapping, the destination after the source (copy(a[1..], a)): from the end
+        k := n - 1
+        while k >= 0 {
+            dst[k] = src[k]
+            k -= 1
+        }
+        return n
+    }
     memcopy(ptr(dst), ptr(src), n * sizeof[T]())
     return n
 }
