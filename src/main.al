@@ -443,6 +443,11 @@ priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
         return false
     }
     sort_by(errs.items(), report_less)
+    // an error in the generated entry (the last file) follows from one in the program (a
+    // second declaration named `main`)
+    while errs.len > 1 && file_name(names, errs[errs.len - 1].pos.file) == "<entry>" && file_name(names, errs[0].pos.file) != "<entry>" {
+        errs.pop()
+    }
     if json {
         // machine-readable diagnostics: one JSON array on stdout
         items := vec[str]()
@@ -588,7 +593,17 @@ priv fn real_main() -> i64 {
             Fn(f) => {
                 if f.name == "main" {
                     has_main = true
-                    main_ret = is_some(f.ret)
+                    // `exit(main())` / `main()` in the entry: anything else would be reported
+                    // there, in generated code
+                    rt := match f.ret {
+                        Some(t) => ast_type_str(&t)
+                        None => ""
+                    }
+                    main_ret = rt == "i64"
+                    if !test_mode && (!f.params.is_empty() || !f.tparams.is_empty() || !(rt == "" || rt == "i64" || rt == "never") || is_some(f.ext)) {
+                        note := if f.params.is_empty() { "" } else { ": the command line is `args()`" }
+                        src.errs.push(Diag{pos: f.pos, msg: fmt("`main` is declared `fn main()` or `fn main() -> i64` (the exit status), not `", ast_sig_str(&f), "`", note)})
+                    }
                 }
                 decls.push(Fn(f))
             }
