@@ -5,6 +5,8 @@ per-frame input state (`std.input`, included automatically) and can show an RGBA
 without any GPU API. It also hands out the native handles needed to create a Vulkan surface.
 
 A program that calls `window_open` is dynamically linked against `libX11.so.6` (and libc).
+On a Wayland session it runs through XWayland; a program that wants to talk to the compositor
+itself uses the bindings of [std.wayland](wayland.md).
 The helper functions that need no display (`key_from_keysym`, `fit_rect`, `blit_fit`, ...)
 do not pull the library in.
 

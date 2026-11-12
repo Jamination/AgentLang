@@ -25,6 +25,7 @@ are `priv` do not appear: a program may reuse their names).
 | `std.input` | per-frame key / mouse state, action maps | nothing | [std/input.md](std/input.md) |
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` | [std/window.md](std/window.md) |
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2` (device only) | [std/audio.md](std/audio.md) |
+| `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings (type-check only: no Windows backend yet) | Windows DLLs | [std/dx12.md](std/dx12.md) |
 | `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
