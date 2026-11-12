@@ -193,8 +193,8 @@ fn __path_slash(p: str) -> i64 {
     return -1
 }
 
-// a and b joined with exactly one '/' between them; b alone if a is empty or b is absolute.
-// Allocates the result.
+// a and b joined with exactly one '/' between them (trailing slashes of a are dropped); b alone
+// if a is empty or b is absolute, a alone if b is empty. Allocates the result.
 fn path_join(a: str, b: str) -> str {
     if len(a) == 0 || (len(b) > 0 && b[0] == '/') {
         return b
@@ -202,10 +202,11 @@ fn path_join(a: str, b: str) -> str {
     if len(b) == 0 {
         return a
     }
-    if a[len(a) - 1] == '/' {
-        return concat(a, b)
+    e := len(a)
+    while e > 0 && a[e - 1] == '/' {
+        e -= 1
     }
-    return fmt(a, "/", b)
+    return fmt(a[..e], "/", b)
 }
 
 // the directory part: "a/b/c.png" -> "a/b", "c.png" -> "", "/c" -> "/" (a view of p)
@@ -219,23 +220,36 @@ fn path_base(p: str) -> str {
     return p[__path_slash(p) + 1..]
 }
 
-// the extension of the last component without the dot: "a/b/c.png" -> "png", "x.tar.gz" ->
-// "gz", "Makefile" and ".hidden" -> "" (a view of p)
-fn path_ext(p: str) -> str {
-    b := path_base(p)
+// index of the dot that starts the extension of the component b, or -1: the last dot that has
+// something other than dots before it (".hidden", "..", "..a" have none)
+fn __path_dot(b: str) -> i64 {
     for i in len(b) - 1..=1 by -1 {
         if b[i] == '.' {
-            return b[i + 1..]
+            for k in 0..i {
+                if b[k] != '.' {
+                    return i
+                }
+            }
+            return -1
         }
     }
-    return ""
+    return -1
 }
 
-// the last component without its extension: "a/b/c.png" -> "c" (a view of p)
+// the extension of the last component without the dot: "a/b/c.png" -> "png", "x.tar.gz" ->
+// "gz", "Makefile", ".hidden" and ".." -> "" (a view of p)
+fn path_ext(p: str) -> str {
+    b := path_base(p)
+    d := __path_dot(b)
+    return if d < 0 { "" } else { b[d + 1..] }
+}
+
+// the last component without its extension: "a/b/c.png" -> "c", "x.tar.gz" -> "x.tar", "a." ->
+// "a", ".hidden" and ".." stay (a view of p)
 fn path_stem(p: str) -> str {
     b := path_base(p)
-    e := path_ext(p)
-    return if len(e) == 0 && !ends_with(b, ".") { b } else { b[..len(b) - len(e) - 1] }
+    d := __path_dot(b)
+    return if d < 0 { b } else { b[..d] }
 }
 
 // ---------- asset loader ----------

@@ -50,11 +50,15 @@ views of their argument and do not allocate.
 
 | Declaration | Description | Examples |
 |-------------|-------------|----------|
-| `path_join(a: str, b: str) -> str` | `a` and `b` with exactly one `/` between them; `b` alone if `a` is empty or `b` is absolute. | `("a", "b")` → `a/b`, `("a/", "b")` → `a/b`, `("", "b")` → `b`, `("a", "/b")` → `/b` |
+| `path_join(a: str, b: str) -> str` | `a` and `b` with exactly one `/` between them (trailing slashes of `a` are dropped); `b` alone if `a` is empty or `b` is absolute, `a` alone if `b` is empty. | `("a", "b")` → `a/b`, `("a//", "b")` → `a/b`, `("/", "b")` → `/b`, `("", "b")` → `b`, `("a", "/b")` → `/b` |
 | `path_dir(p: str) -> str` | Everything before the last `/`. | `a/b/c.png` → `a/b`, `c.png` → empty, `/c` → `/` |
-| `path_base(p: str) -> str` | The last component. | `a/b/c.png` → `c.png` |
-| `path_ext(p: str) -> str` | Extension of the last component, without the dot. | `a/b/c.png` → `png`, `x.tar.gz` → `gz`, `Makefile` → empty, `.hidden` → empty |
-| `path_stem(p: str) -> str` | The last component without its extension. | `a/b/c.png` → `c`, `x.tar.gz` → `x.tar` |
+| `path_base(p: str) -> str` | The last component: the text after the last `/` (empty if `p` ends in `/`, like Python's `os.path.basename`). | `a/b/c.png` → `c.png`, `a/b/` → empty |
+| `path_ext(p: str) -> str` | Extension of the last component, without the dot: the text after its last dot, unless only dots come before that dot. | `a/b/c.png` → `png`, `x.tar.gz` → `gz`, `Makefile`, `.hidden`, `..` → empty, `a.` → empty |
+| `path_stem(p: str) -> str` | The last component without its extension (and its dot). | `a/b/c.png` → `c`, `x.tar.gz` → `x.tar`, `a.` → `a`, `.hidden` → `.hidden`, `..` → `..` |
+
+`path_stem` and `path_ext` follow Python's `pathlib.PurePath(p).stem` / `.suffix` (without its
+dot) for every path whose last component is not empty or `.`. Unlike `pathlib`, the last
+component is taken from the text as it is: `a/b/` has an empty one, `a/.` has `.`.
 
 ## Asset loader
 
