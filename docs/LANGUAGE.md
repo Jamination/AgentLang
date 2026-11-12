@@ -667,7 +667,7 @@ written first):
 | `panic("msg")` | `panic at file:line: msg` |
 | `nil` dereference, stack overflow (deep recursion), write to a string literal or constant | `panic: memory fault (nil dereference, stack overflow or use of released memory)` |
 | `pop` / `unwrap` on nothing | `panic: pop from an empty Vec at file:line`, `panic: unwrap of None` |
-| `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
+| `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` / `resize` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
 | non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave`; a library function called wrongly (empty `sub` in `count`, base 1) | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, `panic at file:line: count: empty substring` (the line of the call), ... |
 
 Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes index and
@@ -708,38 +708,38 @@ argument (`v.push(x)`, `s.trim()`). `alc sigs file.al -- std` prints every libra
 including the math, random and time functions described in [STDLIB.md](STDLIB.md).
 
 ```
-// ---- output: standard output is buffered and written at exit, at exit(), before a panic,
-//      before eprint / eput, and when 64 KiB have gathered
+// ---- output: standard output is buffered and written at exit, at exit(), before a panic, before eprint / eput, and when
+//      64 KiB have gathered. A closed pipe ends the program (SIGPIPE, as in Unix tools); any other error writing standard
+//      output stops it with `panic: cannot write to standard output: ...`; errors writing standard error are ignored
 putc(c: u8)    flush()                     // one byte; write the buffered output now (before waiting or reading a reply)
-putf(x: f64, digits: i64)    fmtf(x: f64, digits: i64) -> str   // fixed notation like C "%.Nf": fmtf(3.14159, 2) is "3.14"
+putf(x: f64, digits: i64)    fmtf(x: f64, digits: i64) -> str   // fixed notation like C "%.Nf": fmtf(3.14159, 2) is "3.14"; digits < 0: assertion failure
 fmtf(x: f64, digits: i64, width: i64) -> str   // the same, right-aligned in width characters: fmtf(3.14159, 2, 8) is "    3.14"
 eprint(s: str)    eput(s: str)             // s to standard error, unbuffered, with / without a newline: eprint(fmt("bad: ", x))
 exit(code: i64) -> never                   // flush, end the program with this exit status
 
 // ---- numbers
-min(a: T, b: T) -> T    max(a: T, b: T) -> T    abs(x: T) -> T   // min / max: any numeric type or str (both arguments the same type); abs: any signed integer or float type
+min(a: T, b: T) -> T    max(a: T, b: T) -> T    abs(x: T) -> T   // min / max: any numeric type or str (both arguments the same type), NaN if either is NaN; abs: any signed integer or float type
 swap(a: *T, b: *T)                         // swap(&x, &y), swap(&v[i], &v[j])
 floor(x: f64) -> f64   ceil(x: f64) -> f64   round(x: f64) -> f64   pow(x: f64, y: f64) -> f64   fmod(x: f64, y: f64) -> f64   sin cos tan atan2 exp log ...: std/math.md
-clock_ns() -> i64                          // monotonic clock in nanoseconds
-// there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
+clock_ns() -> i64                          // monotonic clock in nanoseconds; there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
 
 // ---- slices (for a Vec pass v[..])
 sort(a: []T)                               // ascending, in place; T is a number type or str (bytewise, like cmp)
 sort_by(a: []T, less: fn(T, T) -> bool)    // stable; descending: sort_by(xs, fn(a: i64, b: i64) -> bool { a > b })
 sort_by(a: []T, ctx: C, less: fn(C, T, T) -> bool)   // `ctx` is handed to every comparison (there are no closures)
 index_of(s: []T, x: T) -> i64    contains(s: []T, x: T) -> bool    reverse(s: []T)   // position of the first element == x, or -1; reverse works in place
-copy(dst: []T, src: []T) -> i64    fill(a: []T, x: T)   // copies min(len(dst), len(src)) elements, returns that number; every element = x
+copy(dst: []T, src: []T) -> i64    fill(a: []T, x: T)   // copies min(len(dst), len(src)) elements (they may overlap), returns that number; every element = x
 
 // ---- Vec[T]: growable array.  struct Vec[T] { buf: []T, len: i64 }
 vec[T]() -> Vec[T]                         // the zero value is an empty, usable Vec too: a field `xs: Vec[T]` needs no vec[T]()
 vec_of(s: []T) -> Vec[T]    vec_fill(n: i64, x: T) -> Vec[T]   // a Vec of copies of the elements of s: vec_of([]i64{1, 2}); of n times x
 v.len    len(v)    v[i]    v[a..b]    for x in v    for i, x in v     // checked against v.len
 v.push(x: T)    v.pop() -> T               // appends; removes and returns the last element (empty: panic)
-v.last() -> T    v.is_empty() -> bool      // the last element (stays in the Vec); empty: assertion failure (failures name the caller's line)
+v.last() -> T    v.is_empty() -> bool      // the last element (stays in the Vec); empty: assertion failure (failures name the caller's line; called through a function value: `at ?`)
 v.items() -> []T                           // = v[..]: the elements as a slice (empty Vec: empty slice)
 v.clear()                                  // length 0, capacity kept
 v.truncate(n: i64)                         // keeps the first n elements; nothing happens if n >= v.len; n < 0: assertion failure
-v.resize(n: i64, x: T)                     // exactly n elements: cuts, or appends copies of x
+v.resize(n: i64, x: T)                     // exactly n elements: cuts, or appends copies of x; n < 0: assertion failure
 v.reserve(n: i64)                          // capacity for n elements in total (not n more); length unchanged
 v.extend(s: []T)                           // appends all elements of s; another Vec: v.extend(w[..])
 v.insert(i: i64, x: T)                     // x becomes element i (0 <= i <= v.len), the rest moves up; else assertion failure
@@ -747,7 +747,7 @@ v.remove(i: i64) -> T                      // removes and returns element i, the
 v.swap_remove(i: i64) -> T                 // removes and returns element i, the last element takes its place (fast)
 v.contains(x: T) -> bool    v.dedup()      // (position: index_of(v[..], x)); removes adjacent equal elements (sort first to remove all duplicates)
 
-// ---- Map[K, V]: hash map that keeps the order of insertion. K is any type with == (numbers, str, structs, tuples, enums)
+// ---- Map[K, V]: hash map that keeps the order of insertion. K is any type with == (numbers, str, structs, tuples, enums); a NaN key equals nothing (each set adds an entry that cannot be found)
 map[K, V]() -> Map[K, V]                   // the zero value is an empty, usable Map too
 m.set(k: K, v: V)                          // inserts (as the last entry) or replaces the value (the entry keeps its place)
 m.get(k: K) -> (V, bool)                   // a COPY of the value and true; (zero value, false) if k is missing
