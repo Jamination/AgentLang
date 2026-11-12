@@ -395,7 +395,7 @@ Run-time errors of regions and arenas (exit status 1, message on standard error)
 - Data that refers to itself through slices (`struct Node { kids: []Node }`) is copied
   completely. Data linked through pointers is not followed.
 - `Vec[T]`: a `Vec` of the same length with cloned elements (capacity = length). `Map[K, V]`: an
-  independent map with cloned keys and values. A user struct that happens to be named `Vec` or
+  independent map with cloned keys and values in the same order. A user struct that happens to be named `Vec` or
   `Map` is cloned field by field.
 - The clone of a string literal is ordinary writable memory.
 - Cost: a type without any slice inside is a plain copy (no allocation); a slice or `Vec` whose

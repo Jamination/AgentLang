@@ -8,7 +8,7 @@ are `priv` do not appear: a program may reuse their names).
 
 | Part | What it gives | Reference |
 |------|---------------|-----------|
-| core | printing (`print`, `eprint`), `Vec`, `Map`, strings, sorting, parsing, `Opt`, file I/O with `io_error()`, `args`, `env_get`, arena memory and regions, `clone`: every signature with its edge cases | [LANGUAGE.md](LANGUAGE.md#standard-library) |
+| core | printing (`print`, `eprint`), `Vec`, `Map` (insertion-ordered), strings, number formatting and parsing, sorting, `Opt`, file I/O with `io_error()`, `args`, `env_get`, arena memory and regions, `clone`: every signature with its edge cases | [LANGUAGE.md](LANGUAGE.md#standard-library) |
 | built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [std/math.md](std/math.md#the-built-in-types-f32-vec2-vec3-vec4-quat-mat4) |
 | math | scalar functions for `f32`/`f64`, vector / quaternion / matrix functions, geometry tests, easing, colour | [std/math.md](std/math.md) |
 | rand | seedable generators, ranges, shuffles, noise | [std/rand.md](std/rand.md) |
@@ -20,6 +20,7 @@ are `priv` do not appear: a program may reuse their names).
 | Module | What it gives | Links against | Reference |
 |--------|---------------|---------------|-----------|
 | `std.asset` | files, directories, paths, cached asset loading, hot-reload polling, config and JSON readers | nothing | [std/asset.md](std/asset.md) |
+| `std.os` | for tools and build scripts: run programs (status, captured output), process id, working directory; loads `std.asset` for files and directories | nothing | [std/os.md](std/os.md) |
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
 | `std.input` | per-frame key / mouse state, action maps | nothing | [std/input.md](std/input.md) |
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` | [std/window.md](std/window.md) |

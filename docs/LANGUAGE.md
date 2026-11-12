@@ -14,7 +14,7 @@ that are never called) as `file:line:col: error: ...`.
   type parameters, `<` on strings (use `cmp`), error propagation syntax (see [Errors](#errors)).
 
 Read on demand: [DETAILS.md](DETAILS.md) (grammar, fine print of name resolution and `priv`,
-bounds checks, region limits, C interop), [STDLIB.md](STDLIB.md) (math, random numbers, time, games).
+bounds checks, region limits, C interop), [STDLIB.md](STDLIB.md) (math, random numbers, time, processes and files, games).
 
 ## Quick tour
 
@@ -114,10 +114,9 @@ test "areas" {
 
 ## Declarations
 
-Top-level declarations can appear in any order. A declaration that starts with a keyword
-declares something fixed at compile time; one that starts with a name declares a variable, the
-same at top level and inside functions. Inside a function only variables and functions can be
-declared.
+Top-level declarations can appear in any order. A declaration that starts with a keyword declares
+something fixed at compile time; one that starts with a name declares a variable, the same at top
+level and inside functions. Inside a function only variables and functions can be declared.
 
 ```
 fn name(a: i64, b: f64) -> i64 { ... }     // function; no `->` means it returns nothing
@@ -463,9 +462,8 @@ Circle(center, 2.0)      Empty                   // enum values;  qualified: Sha
 ```
 
 **In the header of `if` / `while` / `for` / `match`, a `{` after a name starts the body**: a
-`Name{...}` literal there needs parentheses (`if p == (Point{1, 2}) { ... }`,
-`match (Point{5, 6}).y { ... }`). A literal that starts with `[` needs none
-(`for x in []i64{1, 2, 3} { ... }`).
+`Name{...}` literal there needs parentheses (`if p == (Point{1, 2}) { ... }`, `match (Point{5, 6}).y
+{ ... }`). A literal that starts with `[` needs none (`for x in []i64{1, 2, 3} { ... }`).
 
 **Method-call syntax**: `x.f(a, b)` means `f(x, a, b)` for any function `f`, also overloaded,
 generic and library functions. (If `x` has a field `f` that holds a function, that is called.)
@@ -597,13 +595,12 @@ fn main() {
 
 ### `clone(x)`
 
-`clone(x)` (or `x.clone()`) returns a deep copy of `x` that shares no storage with it,
-allocated from the arena in use at the call.
-Slices, `str`, `Vec` and `Map` get new storage with cloned elements; arrays, tuples, structs
-and enum payloads are cloned part by part. **A pointer (`*T`) inside the value is copied as it
-is: what it points to stays shared.** `clone(p)` of a pointer itself is a compile error (write
-`clone(*p)` for a copy of the value). Copy linked structures by hand, or declare a `clone`
-function for the type.
+`clone(x)` (or `x.clone()`) returns a deep copy of `x` that shares no storage with it, allocated
+from the arena in use at the call. Slices, `str`, `Vec` and `Map` get new storage with cloned
+elements; arrays, tuples, structs and enum payloads are cloned part by part. **A pointer (`*T`)
+inside the value is copied as it is: what it points to stays shared.** `clone(p)` of a pointer
+itself is a compile error (write `clone(*p)` for a copy of the value). Copy linked structures by
+hand, or declare a `clone` function for the type.
 
 ### Regions
 
@@ -671,7 +668,7 @@ written first):
 | `nil` dereference, stack overflow (deep recursion), write to a string literal or constant | `panic: memory fault (nil dereference, stack overflow or use of released memory)` |
 | `pop` / `unwrap` on nothing | `panic: pop from an empty Vec at file:line`, `panic: unwrap of None` |
 | `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
-| non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave` | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, ... |
+| non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave`; a library function called wrongly (empty `sub` in `count`, base 1) | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, `panic at file:line: count: empty substring` (the line of the call), ... |
 
 Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes index and
 division checks (out-of-range behaviour is then undefined); `assert` and `panic` are kept.
@@ -695,14 +692,14 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 | `cast[T](x)` | reinterpret: pointer↔pointer, pointer↔`i64`/`u64`, `f64`↔`i64`/`u64` bits, slice↔slice |
 | `ptr(s) -> *T`, `mkslice[T](p, n) -> []T`, `memcopy(dst, src, nbytes)`, `memfill(dst, byte, nbytes)` | pointer to the first element of a slice or array; slice from a pointer and a length; raw copy / fill |
 
-**How values print** (`print`, `put`, `fmt`): integers in decimal (a `u8` too: `put(s[0])`
-writes `104`; a character is written with `putc(c)` or as the slice `s[i..i + 1]`); floats as
-the shortest text that reads back exactly, always with a point or an exponent (`3.0`, `0.1`,
-`100.0`, `1e21`, `1e-7`, `inf`, `nan`; for a fixed number of decimals `fmtf(x, 2)`); `bool` as
-`true` / `false`; `str` as its text, without quotes, also inside other values; other slices
-and arrays as `[a, b]`; structs as `Name{field: value}`; tuples as `(a, b)`; enums as
-`Variant(fields)`; pointers as hexadecimal addresses. Print a `Vec` as `v[..]` (`print(v)`
-shows the struct with its whole buffer).
+**How values print** (`print`, `put`, `fmt`): integers in decimal (a `u8` too: `put(s[0])` writes
+`104`; a character is written with `putc(c)` or as the slice `s[i..i + 1]`); floats as the shortest
+text that reads back exactly, always with a point or an exponent (`3.0`, `0.1`, `100.0`, `1e21`,
+`1e-7`, `inf`, `nan`; for a fixed number of decimals `fmtf(x, 2)`); `bool` as `true` / `false`;
+`str` as its text, without quotes, also inside other values; other slices and arrays as `[a, b]`;
+structs as `Name{field: value}`; tuples as `(a, b)`; enums as `Variant(fields)`; a `Map` as
+`{key: value, key: value}` in insertion order; pointers as hexadecimal addresses. Print a `Vec` as
+`v[..]` (`print(v)` shows the struct with its whole buffer).
 
 ## Standard library
 
@@ -713,18 +710,16 @@ including the math, random and time functions described in [STDLIB.md](STDLIB.md
 ```
 // ---- output: standard output is buffered and written at exit, at exit(), before a panic,
 //      before eprint / eput, and when 64 KiB have gathered
-putc(c: u8)                                // one byte
+putc(c: u8)    flush()                     // one byte; write the buffered output now (before waiting or reading a reply)
 putf(x: f64, digits: i64)    fmtf(x: f64, digits: i64) -> str   // fixed notation like C "%.Nf": fmtf(3.14159, 2) is "3.14"
+fmtf(x: f64, digits: i64, width: i64) -> str   // the same, right-aligned in width characters: fmtf(3.14159, 2, 8) is "    3.14"
 eprint(s: str)    eput(s: str)             // s to standard error, unbuffered, with / without a newline: eprint(fmt("bad: ", x))
-flush()                                    // write the buffered output now (before waiting or reading a reply)
 exit(code: i64) -> never                   // flush, end the program with this exit status
 
 // ---- numbers
-min(a: T, b: T) -> T    max(a: T, b: T) -> T    // any numeric type or str (both arguments the same type)
-abs(x: T) -> T                             // any signed integer or float type
+min(a: T, b: T) -> T    max(a: T, b: T) -> T    abs(x: T) -> T   // min / max: any numeric type or str (both arguments the same type); abs: any signed integer or float type
 swap(a: *T, b: *T)                         // swap(&x, &y), swap(&v[i], &v[j])
-floor(x: f64) -> f64    ceil(x: f64) -> f64    round(x: f64) -> f64
-pow(x: f64, y: f64) -> f64   fmod(x: f64, y: f64) -> f64   sin cos tan atan2 exp log ...: std/math.md
+floor(x: f64) -> f64   ceil(x: f64) -> f64   round(x: f64) -> f64   pow(x: f64, y: f64) -> f64   fmod(x: f64, y: f64) -> f64   sin cos tan atan2 exp log ...: std/math.md
 clock_ns() -> i64                          // monotonic clock in nanoseconds
 // there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
 
@@ -732,17 +727,14 @@ clock_ns() -> i64                          // monotonic clock in nanoseconds
 sort(a: []T)                               // ascending, in place; T is a number type or str (bytewise, like cmp)
 sort_by(a: []T, less: fn(T, T) -> bool)    // stable; descending: sort_by(xs, fn(a: i64, b: i64) -> bool { a > b })
 sort_by(a: []T, ctx: C, less: fn(C, T, T) -> bool)   // `ctx` is handed to every comparison (there are no closures)
-index_of(s: []T, x: T) -> i64              // position of the first element == x, or -1
-contains(s: []T, x: T) -> bool             reverse(s: []T)        // reverse works in place
-copy(dst: []T, src: []T) -> i64            // copies min(len(dst), len(src)) elements, returns that number
-fill(a: []T, x: T)                         // every element = x
+index_of(s: []T, x: T) -> i64    contains(s: []T, x: T) -> bool    reverse(s: []T)   // position of the first element == x, or -1; reverse works in place
+copy(dst: []T, src: []T) -> i64    fill(a: []T, x: T)   // copies min(len(dst), len(src)) elements, returns that number; every element = x
 
 // ---- Vec[T]: growable array.  struct Vec[T] { buf: []T, len: i64 }
 vec[T]() -> Vec[T]                         // the zero value is an empty, usable Vec too: a field `xs: Vec[T]` needs no vec[T]()
 vec_of(s: []T) -> Vec[T]    vec_fill(n: i64, x: T) -> Vec[T]   // a Vec of copies of the elements of s: vec_of([]i64{1, 2}); of n times x
 v.len    len(v)    v[i]    v[a..b]    for x in v    for i, x in v     // checked against v.len
-v.push(x: T)                               // appends
-v.pop() -> T                               // removes and returns the last element; empty: panic
+v.push(x: T)    v.pop() -> T               // appends; removes and returns the last element (empty: panic)
 v.last() -> T    v.is_empty() -> bool      // the last element (stays in the Vec); empty: assertion failure (failures name the caller's line)
 v.items() -> []T                           // = v[..]: the elements as a slice (empty Vec: empty slice)
 v.clear()                                  // length 0, capacity kept
@@ -753,52 +745,62 @@ v.extend(s: []T)                           // appends all elements of s; another
 v.insert(i: i64, x: T)                     // x becomes element i (0 <= i <= v.len), the rest moves up; else assertion failure
 v.remove(i: i64) -> T                      // removes and returns element i, the rest moves down (order kept)
 v.swap_remove(i: i64) -> T                 // removes and returns element i, the last element takes its place (fast)
-v.contains(x: T) -> bool                   // position: index_of(v[..], x)
-v.dedup()                                  // removes adjacent equal elements (sort first to remove all duplicates)
+v.contains(x: T) -> bool    v.dedup()      // (position: index_of(v[..], x)); removes adjacent equal elements (sort first to remove all duplicates)
 
-// ---- Map[K, V]: hash map. K is any type with == (numbers, str, structs, tuples, enums)
+// ---- Map[K, V]: hash map that keeps the order of insertion. K is any type with == (numbers, str, structs, tuples, enums)
 map[K, V]() -> Map[K, V]                   // the zero value is an empty, usable Map too
-m.set(k: K, v: V)                          // inserts or replaces
+m.set(k: K, v: V)                          // inserts (as the last entry) or replaces the value (the entry keeps its place)
 m.get(k: K) -> (V, bool)                   // a COPY of the value and true; (zero value, false) if k is missing
-m.get_or(k: K, default: V) -> V    m.has(k: K) -> bool
-m.ptr(k: K) -> *V                          // pointer to the stored value (nil if missing) to change it in place;
-                                           //   valid until a new key is set
-m.del(k: K) -> bool                        // removes k; false if it was missing
-m.keys() -> []K                            // a new slice of all keys in unspecified order (sort it for stable output)
+m.get_or(k: K, default: V) -> V    m.has(k: K) -> bool    m.del(k: K) -> bool   // del removes k; false if it was missing
+m.ptr(k: K) -> *V                          // pointer to the stored value (nil if missing) to change it in place; valid until a new key is set
+m.keys() -> []K    m.values() -> []V       // new slices of all keys / values in the order in which the keys were first set (a deleted key that is set again is the last)
 m.len    len(m)    m.clear()               // number of entries; remove every entry
 
 // ---- strings.  str = []u8: s[i] is a byte, s[a..b] a view (no copy), len(s) counts bytes, == compares content
-concat(a: str, b: str) -> str              // a new string; more parts: fmt(a, b, c)
-find(s: str, sub: str) -> i64              // index of the first occurrence of sub, or -1 (0 if sub is empty)
+concat(a: str, b: str) -> str    repeat(s: str, n: i64) -> str   // new strings: a then b (more parts: fmt(a, b, c)); n copies of s ("" if n <= 0)
+find(s: str, sub: str) -> i64    rfind(s: str, sub: str) -> i64  // index of the first / last occurrence of sub, or -1 (empty sub: 0 / len(s))
+find(s: str, sub: str, from: i64) -> i64   // the first occurrence at from or later, or -1; from is checked like s[from..] (0..=len(s))
+find_any(s: str, chars: str, from: i64) -> i64   // index of the first byte at from or later that is one of chars, or -1
+count(s: str, sub: str) -> i64             // occurrences, taken left to right without overlap: count("aaaa", "aa") is 2
+replace(s: str, old: str, new: str) -> str // a new string with each of these occurrences of old replaced: replace("a-b-c", "-", "+")
 starts_with(s: str, p: str) -> bool        ends_with(s: str, p: str) -> bool
-trim(s: str) -> str                        // view without leading and trailing ' ', '\t', '\n', '\r'
-split(s: str, sep: u8) -> []str            // views of the pieces between separators: "a  b" gives ["a", "", "b"],
-                                           //   "" gives [""]; always (number of separators + 1) pieces
+trim(s: str) -> str    trim_left(s: str) -> str    trim_right(s: str) -> str   // views without the white space (' ', '\t', '\n', '\r', '\x0b', '\x0c') at both ends / the start / the end
+trim(s: str, chars: str) -> str    trim_left, trim_right the same   // without the bytes of chars there: trim_right("a//", "/") is "a"
+split(s: str, sep: u8) -> []str            // views of the pieces between separators: "a  b" gives ["a", "", "b"], "" gives [""]; always (number of separators + 1) pieces
+split(s: str, sep: str) -> []str           // the same for a separator string: split("a, b", ", "). Empty sep, and empty sub / old in count / replace: panic
+fields(s: str) -> []str                    // views of the pieces between runs of white space, none empty: "  a \t b " gives ["a", "b"], "" gives []
 lines(s: str) -> []str                     // split at '\n' after dropping ONE final '\n'; a '\r' stays; "" gives [""]
 join(parts: []str, sep: str) -> str        // join(names[..], ", ")
 cmp(a: str, b: str) -> i64                 // negative / 0 / positive: a before / equal / after b, bytewise; "a" < "ab"
 to_upper(s: str) -> str    to_lower(s: str) -> str     // new string; ASCII letters only
-pad_left(s: str, width: i64, fill: u8) -> str    // right-aligns: pad_left(fmt(42), 6, ' ') is "    42"; never cuts
+pad_left(s: str, width: i64, fill: u8) -> str    // right-aligns: pad_left("ab", 4, ' ') is "  ab"; never cuts (as everything with a width)
 pad_right(s: str, width: i64, fill: u8) -> str   // left-aligns
-hex(x: u64) -> str                         // lower case, no prefix, no padding: hex(255) is "ff"; other types: hex(u64(n))
+fmti(x: T, width: i64, fill: u8) -> str    // an integer of any type right-aligned: fmti(42, 5, ' ') is "   42"; fill '0' follows the sign: fmti(-42, 5, '0') is "-0042"
+hex(x: u64) -> str    hex(x: u64, width: i64) -> str   // lower case, no prefix: hex(255) is "ff", hex(255, 4) "00ff" (zeros up to width); other types: hex(u64(n))
+to_base(x: u64, base: i64) -> str          // the digits in base 2..36 (0-9, a-z), no prefix: to_base(5, 2) is "101"; any other base: panic
 parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits (no spaces, no 0x, no _) and fit in an i64; else (0, false)
+parse_i64(s: str, base: i64) -> (i64, bool)   // the same in base 2..36 (letters of either case; no prefix): parse_i64("ff", 16). Base 0: 0x / 0b / 0o after the sign decide, else decimal ("-0x1F", "017" is 17); other bases: panic
 parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan
-is_digit(c: u8) -> bool   is_alpha(c: u8) -> bool   is_alnum(c: u8) -> bool    // ASCII; '_' is none of them
+is_digit(c: u8) -> bool   is_alpha  is_alnum  is_upper  is_lower  is_space: the same   // ASCII; '_' is none of them; is_space: the white space of trim
 
 // ---- Opt[T]: a value that may be absent.  enum Opt[T] { None, Some(T) }  (zero value: None)
-is_some(o: Opt[T]) -> bool    is_none(o: Opt[T]) -> bool
-unwrap(o: Opt[T]) -> T    or(o: Opt[T], default: T) -> T   // the value; if None: "panic: unwrap of None" / default
+is_some(o: Opt[T]) -> bool   is_none(o: Opt[T]) -> bool   unwrap(o: Opt[T]) -> T   or(o: Opt[T], default: T) -> T   // unwrap / or: the value; if None: "panic: unwrap of None" / default
 
 // ---- files and process
 read_file(path: str) -> (str, bool)        // the whole file; ("", false) if it cannot be opened or read
 write_file(path: str, data: str) -> bool   // creates or replaces the file; false on failure
 read_all(fd: i64) -> str                   // everything up to end of input; read_all(0) reads standard input
 io_error() -> i64                          // Linux error number of the last read_file / write_file / read_all; 0 after success
-error_text(e: i64) -> str                  // "no such file or directory" (2), "permission denied" (13), "is a directory" (21),
-                                           //   "file exists" (17), ...; "no error" for 0; "os error N" for other numbers
+error_text(e: i64) -> str                  // "no such file or directory" (2), "permission denied" (13), "is a directory" (21), "file exists" (17), ...; "no error" for 0; "os error N" for other numbers
 args() -> []str                            // args()[0] is the program's path; `alc run f.al -- a "b c"` gives ["./f", "a", "b c"]
 env_get(name: str) -> (str, bool)          // an environment variable; ("", false) if it is not set
 ```
+
+| C `printf` | AL | C `printf` | AL |
+|------------|----|------------|----|
+| `%d`, `%s`, `%g` | `fmt(x)` | `%x`, `%08x`, `%X` | `hex(x)`, `hex(x, 8)`, `to_upper(hex(x))` |
+| `%5d`, `%05d` | `fmti(x, 5, ' ')`, `fmti(x, 5, '0')` | `%10s`, `%-10s` | `pad_left(s, 10, ' ')`, `pad_right(s, 10, ' ')` |
+| `%-5d` | `pad_right(fmt(x), 5, ' ')` | `%.2f`, `%8.2f` | `fmtf(x, 2)`, `fmtf(x, 2, 8)` |
 
 Idioms:
 
@@ -820,15 +822,12 @@ fn main() {
     e, _ := m.get("orc")
     e.hp -= 3
     m.set("orc", e)
-    // visit a Map in a stable order
-    names := m.keys()
-    sort(names)
-    for k in names { print(k, m.get_or(k, Enemy{}).hp) }    // orc 7
+    for k in m.keys() { print(k, m.get_or(k, Enemy{}).hp) }    // orc 7  (the keys in insertion order)
     // order by something outside the elements: the context argument
     scores := []i64{70, 95, 80}
     order := []i64{0, 1, 2}
     sort_by(order, scores, fn(scores: []i64, a: i64, b: i64) -> bool { scores[a] > scores[b] })
-    print(text, m.ptr("orc").loot[..], order, pad_left(fmt(42), 6, ' '))   // 0,;1,;2,; [axe] [1, 2, 0]     42
+    print(text, m.ptr("orc").loot[..], order, fmti(42, 6, ' '))   // 0,;1,;2,; [axe] [1, 2, 0]     42
 }
 ```
 

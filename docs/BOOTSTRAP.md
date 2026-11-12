@@ -119,7 +119,7 @@ reference; `src/base.al`):
   of the next round discards them; used in `src/opt/simplify.al`). Nothing reachable from
   the function may be allocated between `scratch_on()` and `scratch_off()`.
 
-Compiling the compiler (about 25,800 lines and the 2,300 of the prelude) takes about 3.4 s and 0.4 GB.
+Compiling the compiler (about 25,800 lines and the 2,700 of the prelude) takes about 3.4 s and 0.4 GB.
 `ALC_DEBUG=mem` prints memory and time after each phase.
 
 ## Notes on language features
@@ -152,13 +152,20 @@ Compiling the compiler (about 25,800 lines and the 2,300 of the prelude) takes a
   function is lowered (it needs the type of the initialiser) and counts, in the rest of the
   block, direct field assignments to the new name against every other occurrence of it.
 - **Failures that name the caller** (`pop`, `last`, `insert`, `remove`, `swap_remove`,
-  `truncate`). A prelude function `f` may have a twin `__at_f` with the same parameters plus
+  `truncate`; `count`, `replace`, `split`, `find` from a position, `find_any`, `parse_i64`
+  with a base, `to_base`). A prelude function `f` may have a twin `__at_f` with the same parameters plus
   a last `at: str`. `cx_new` records the pairs (`Cx.located`, matched by parameter types) and
   `call_fn` compiles every call of `f` as a call of `__at_f` with the "file:line" of the call
   (`loc_str`, as `assert` and bounds checks get theirs). Overload resolution, method calls
   and `alc sigs` only ever see `f`; `f` itself (what the name means as a function value)
   calls the twin with "?". To give another library function a caller location, write its
   twin; nothing in the compiler changes.
+- **`Map`** (`src/prelude.al`). The entries are stored in insertion order (`keys`, `vals`,
+  `tags`: three parallel arrays) and found through `index`, an open-addressing table of
+  `u32` slots that hold the entry number and the upper bits of the hash; the comment above
+  `struct Map` has the details. The compiler knows three things about the type (`map_kv` in
+  `src/lower_mem.al` recognises it): the field `len` (for `len(m)`), `__clone_map` (for
+  `clone`) and `__put_map` (for `print`, which shows the entries, not the fields).
 - **`match`** (`src/lower_match.al`). The patterns of all arms are tested in order; the
   bodies are lowered by `arm_body`, normally right after their tests, but an arm whose value
   needs its type from the other arms (`needs_type`) is lowered after all others. `covers`

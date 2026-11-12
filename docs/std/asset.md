@@ -14,7 +14,7 @@ file is a situation, not a bug. Paths are relative to the working directory of t
 unless they start with `/`, and are limited to 4095 bytes (longer paths fail with error 36).
 
 **Why it failed.** The functions that open, read, write, create or delete (`read_bytes`,
-`write_bytes`, `remove_file`, `remove_dir`, `make_dir`, `list_dir`, and the loader built on
+`write_bytes`, `remove_file`, `rename`, `remove_dir`, `make_dir`, `list_dir`, and the loader built on
 them) record their outcome: right after a failure `io_error()` is the OS error number and
 `error_text(io_error())` its text (`no such file or directory`, ...); after a success
 `io_error()` is 0. Both are core functions (language reference, "Standard library").
@@ -35,6 +35,7 @@ allocate from the arena in use (see [mem](mem.md)); wrap temporary work in
 | `read_bytes(path: str) -> ([]u8, bool)` | The whole file; `(empty, false)` if it cannot be opened or cannot be read (a directory, for example). One allocation of exactly the file size. Since `str` is `[]u8`, this also reads text. |
 | `write_bytes(path: str, data: []u8) -> bool` | Creates or replaces the file; `false` on failure. Does not create directories. |
 | `remove_file(path: str) -> bool` | Deletes a file. |
+| `rename(from: str, to: str) -> bool` | Gives a file or directory another name or place on the same file system; an existing file `to` is replaced. |
 | `make_dir(path: str) -> bool` | Creates a directory and any missing parents; true if the directory exists afterwards (also when it existed before). |
 | `remove_dir(path: str) -> bool` | Deletes an empty directory. |
 | `list_dir(path: str) -> []str` | Names of the entries of a directory, without `.` and `..`, sorted by byte value (so the order is the same on every machine); empty if the directory cannot be read. Names only: join them with the directory to open them. |

@@ -1232,8 +1232,8 @@ fn dedup[T](v: *Vec[T]) {
 // table (linear probing, a power of two long) that finds an entry: the home slot of a key is
 // tag & mask; a slot is 0 (free), or e + 1 in the bits of the mask and the tag in the others,
 // or mask (its entry was deleted: equal to no tag in the upper bits). The entry arrays hold
-// 3/4 of len(index) entries, so the table always has free slots. When they are full, the map
-// is compacted in place if a quarter or more are holes, and grows otherwise.
+// half of len(index) entries, so at least half of the slots are free. When they are full, the
+// map is compacted in place if a quarter or more are holes, and grows otherwise.
 struct Map[K, V] { keys: []K, vals: []V, tags: []u32, index: []u32, len: i64, used: i64 }
 
 fn map[K, V]() -> Map[K, V] {
@@ -1298,7 +1298,7 @@ fn __map_grow[K, V](m: *Map[K, V]) {
         if cap > 0x8000_0000 {
             __die("panic: Map too large", "", "")
         }
-        n := cap / 4 * 3
+        n := cap / 2
         // (the spare capacity is never read before it is written)
         keys = mkslice[K](__alloc_raw(n * sizeof[K]()), n)
         vals = mkslice[V](__alloc_raw(n * sizeof[V]()), n)

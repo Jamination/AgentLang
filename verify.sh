@@ -58,7 +58,7 @@ done
 
 echo "== standard library: tests, documentation, static linking =="
 # every module has at least one test and a documentation page
-for m in math rand time mem input window audio image asset; do
+for m in math rand time mem input window audio image asset os; do
   n=$(ls tests/std/${m}*.al tests/sys/${m}*.al 2>/dev/null | wc -l)
   [[ $n -gt 0 ]] || { echo "FAIL: no test for module $m"; fail=1; }
   [[ -s docs/std/$m.md ]] || { echo "FAIL: docs/std/$m.md is missing"; fail=1; }
