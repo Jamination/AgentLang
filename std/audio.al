@@ -270,7 +270,13 @@ fn mixer_new(rate: i64, channels: i64, max_voices: i64) -> *Mixer {
 }
 
 priv fn audio_step(m: *Mixer, s: Sound, pitch: f32) -> i64 {
-    i64(f64(fmax(pitch, 0.0)) * f64(s.rate) / f64(m.rate) * 4294967296.0)
+    x := f64(pitch) * f64(s.rate) / f64(m.rate) * 4294967296.0
+    // limited to 2^20 source frames per output frame, so that positions cannot overflow (a
+    // huge pitch used to wrap the step around to a negative number); NaN and pitches <= 0 stop
+    if !(x > 0.0) {
+        return 0
+    }
+    i64(fmin(x, 4503599627370496.0))
 }
 
 // Starts playing a sound: `volume` is a linear gain, `pan` -1 (left) .. 1 (right), `pitch` a
