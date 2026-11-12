@@ -234,7 +234,7 @@ fn helpers() {
 fn use_wl_display() {
     total += sizeof[WlDisplay]()
     {
-        r: *WlInterface = wl_display_interface()
+        r: *WlInterface = &wl_display_interface
         keep(&r)
     }
     total += i64(WL_DISPLAY_ERROR_INVALID_OBJECT)
@@ -265,7 +265,7 @@ fn use_wl_display() {
 fn use_wl_registry() {
     total += sizeof[WlRegistry]()
     {
-        r: *WlInterface = wl_registry_interface()
+        r: *WlInterface = &wl_registry_interface
         keep(&r)
     }
     total += i64(WL_REGISTRY_BIND)
@@ -292,7 +292,7 @@ fn use_wl_registry() {
 fn use_wl_callback() {
     total += sizeof[WlCallback]()
     {
-        r: *WlInterface = wl_callback_interface()
+        r: *WlInterface = &wl_callback_interface
         keep(&r)
     }
     wl_callback_set_user_data(zero[*WlCallback](), zero[*u8]())
@@ -313,7 +313,7 @@ fn use_wl_callback() {
 fn use_wl_compositor() {
     total += sizeof[WlCompositor]()
     {
-        r: *WlInterface = wl_compositor_interface()
+        r: *WlInterface = &wl_compositor_interface
         keep(&r)
     }
     total += i64(WL_COMPOSITOR_CREATE_SURFACE)
@@ -343,7 +343,7 @@ fn use_wl_compositor() {
 fn use_wl_shm_pool() {
     total += sizeof[WlShmPool]()
     {
-        r: *WlInterface = wl_shm_pool_interface()
+        r: *WlInterface = &wl_shm_pool_interface
         keep(&r)
     }
     total += i64(WL_SHM_POOL_ERROR_INVALID_FORMAT)
@@ -371,7 +371,7 @@ fn use_wl_shm_pool() {
 fn use_wl_shm() {
     total += sizeof[WlShm]()
     {
-        r: *WlInterface = wl_shm_interface()
+        r: *WlInterface = &wl_shm_interface
         keep(&r)
     }
     total += i64(WL_SHM_ERROR_INVALID_FORMAT)
@@ -550,7 +550,7 @@ fn use_wl_shm() {
 fn use_wl_buffer() {
     total += sizeof[WlBuffer]()
     {
-        r: *WlInterface = wl_buffer_interface()
+        r: *WlInterface = &wl_buffer_interface
         keep(&r)
     }
     total += i64(WL_BUFFER_DESTROY)
@@ -572,7 +572,7 @@ fn use_wl_buffer() {
 fn use_wl_data_offer() {
     total += sizeof[WlDataOffer]()
     {
-        r: *WlInterface = wl_data_offer_interface()
+        r: *WlInterface = &wl_data_offer_interface
         keep(&r)
     }
     total += i64(WL_DATA_OFFER_ERROR_INVALID_FINISH)
@@ -608,7 +608,7 @@ fn use_wl_data_offer() {
 fn use_wl_data_source() {
     total += sizeof[WlDataSource]()
     {
-        r: *WlInterface = wl_data_source_interface()
+        r: *WlInterface = &wl_data_source_interface
         keep(&r)
     }
     total += i64(WL_DATA_SOURCE_ERROR_INVALID_ACTION_MASK)
@@ -641,7 +641,7 @@ fn use_wl_data_source() {
 fn use_wl_data_device() {
     total += sizeof[WlDataDevice]()
     {
-        r: *WlInterface = wl_data_device_interface()
+        r: *WlInterface = &wl_data_device_interface
         keep(&r)
     }
     total += i64(WL_DATA_DEVICE_ERROR_ROLE)
@@ -675,7 +675,7 @@ fn use_wl_data_device() {
 fn use_wl_data_device_manager() {
     total += sizeof[WlDataDeviceManager]()
     {
-        r: *WlInterface = wl_data_device_manager_interface()
+        r: *WlInterface = &wl_data_device_manager_interface
         keep(&r)
     }
     total += i64(WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE)
@@ -709,7 +709,7 @@ fn use_wl_data_device_manager() {
 fn use_wl_shell() {
     total += sizeof[WlShell]()
     {
-        r: *WlInterface = wl_shell_interface()
+        r: *WlInterface = &wl_shell_interface
         keep(&r)
     }
     total += i64(WL_SHELL_ERROR_ROLE)
@@ -733,7 +733,7 @@ fn use_wl_shell() {
 fn use_wl_shell_surface() {
     total += sizeof[WlShellSurface]()
     {
-        r: *WlInterface = wl_shell_surface_interface()
+        r: *WlInterface = &wl_shell_surface_interface
         keep(&r)
     }
     total += i64(WL_SHELL_SURFACE_RESIZE_NONE)
@@ -790,7 +790,7 @@ fn use_wl_shell_surface() {
 fn use_wl_surface() {
     total += sizeof[WlSurface]()
     {
-        r: *WlInterface = wl_surface_interface()
+        r: *WlInterface = &wl_surface_interface
         keep(&r)
     }
     total += i64(WL_SURFACE_ERROR_INVALID_SCALE)
@@ -849,7 +849,7 @@ fn use_wl_surface() {
 fn use_wl_seat() {
     total += sizeof[WlSeat]()
     {
-        r: *WlInterface = wl_seat_interface()
+        r: *WlInterface = &wl_seat_interface
         keep(&r)
     }
     total += i64(WL_SEAT_CAPABILITY_POINTER)
@@ -892,7 +892,7 @@ fn use_wl_seat() {
 fn use_wl_pointer() {
     total += sizeof[WlPointer]()
     {
-        r: *WlInterface = wl_pointer_interface()
+        r: *WlInterface = &wl_pointer_interface
         keep(&r)
     }
     total += i64(WL_POINTER_ERROR_ROLE)
@@ -939,7 +939,7 @@ fn use_wl_pointer() {
 fn use_wl_keyboard() {
     total += sizeof[WlKeyboard]()
     {
-        r: *WlInterface = wl_keyboard_interface()
+        r: *WlInterface = &wl_keyboard_interface
         keep(&r)
     }
     total += i64(WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP)
@@ -972,7 +972,7 @@ fn use_wl_keyboard() {
 fn use_wl_touch() {
     total += sizeof[WlTouch]()
     {
-        r: *WlInterface = wl_touch_interface()
+        r: *WlInterface = &wl_touch_interface
         keep(&r)
     }
     total += i64(WL_TOUCH_RELEASE)
@@ -1001,7 +1001,7 @@ fn use_wl_touch() {
 fn use_wl_output() {
     total += sizeof[WlOutput]()
     {
-        r: *WlInterface = wl_output_interface()
+        r: *WlInterface = &wl_output_interface
         keep(&r)
     }
     total += i64(WL_OUTPUT_SUBPIXEL_UNKNOWN)
@@ -1045,7 +1045,7 @@ fn use_wl_output() {
 fn use_wl_region() {
     total += sizeof[WlRegion]()
     {
-        r: *WlInterface = wl_region_interface()
+        r: *WlInterface = &wl_region_interface
         keep(&r)
     }
     total += i64(WL_REGION_DESTROY)
@@ -1068,7 +1068,7 @@ fn use_wl_region() {
 fn use_wl_subcompositor() {
     total += sizeof[WlSubcompositor]()
     {
-        r: *WlInterface = wl_subcompositor_interface()
+        r: *WlInterface = &wl_subcompositor_interface
         keep(&r)
     }
     total += i64(WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE)
@@ -1094,7 +1094,7 @@ fn use_wl_subcompositor() {
 fn use_wl_subsurface() {
     total += sizeof[WlSubsurface]()
     {
-        r: *WlInterface = wl_subsurface_interface()
+        r: *WlInterface = &wl_subsurface_interface
         keep(&r)
     }
     total += i64(WL_SUBSURFACE_ERROR_BAD_SURFACE)
@@ -1124,7 +1124,7 @@ fn use_wl_subsurface() {
 fn use_wl_fixes() {
     total += sizeof[WlFixes]()
     {
-        r: *WlInterface = wl_fixes_interface()
+        r: *WlInterface = &wl_fixes_interface
         keep(&r)
     }
     total += i64(WL_FIXES_ERROR_INVALID_ACK_REMOVE)

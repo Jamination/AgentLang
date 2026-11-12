@@ -29,7 +29,8 @@ these rules (here for `wl_surface`):
 |---|---|
 | `struct wl_surface *` | `*WlSurface` (an opaque struct; `nil` is NULL) |
 | `wl_surface_attach(s, b, x, y)` | the same name and arguments: one function per request |
-| `&wl_surface_interface` | `wl_surface_interface()` (for `wl_registry_bind`) |
+| `&wl_surface_interface` | the same: the table inside libwayland-client (an `extern` variable) |
+| `&xdg_surface_interface` (other protocols) | `xdg_surface_interface()` |
 | `WL_SURFACE_ERROR_INVALID_SCALE`, `WL_SEAT_CAPABILITY_POINTER`, ... | the same constants |
 | `struct wl_surface_listener` + `wl_surface_add_listener(s, &l, data)` | `WlSurfaceListener` + `wl_surface_add_listener(s, &l, data)` |
 | `wl_surface_set_user_data`, `_get_user_data`, `_get_version`, `_destroy` | the same |
@@ -51,10 +52,11 @@ arrives), runs the handlers and returns the number of events, or -1 once the con
 broken (also after a protocol error: then `wl_display_get_error` is 71, EPROTO, and
 `wl_display_get_protocol_error` names the interface and the error code).
 
-The interface tables (`struct wl_interface`, `struct wl_message`) are built in AL with the C
-layout, on the first call of an `..._interface()` function, also for the core protocol:
-libwayland-client exports `wl_surface_interface` and the others as data symbols, and `extern`
-in AL declares functions only.
+The interface tables (`struct wl_interface`, `struct wl_message`, for `wl_registry_bind`): those
+of the core protocol are libwayland-client's own, declared as `extern` variables
+(`&wl_compositor_interface`, as in C). libwayland-client has none for other protocols: theirs
+are built in AL with the C layout on the first call of an `..._interface()` function
+(`xdg_wm_base_interface()`), from constant tables generated with the bindings.
 
 ## Listeners
 
@@ -76,7 +78,8 @@ libwayland keeps the pointer to the listener struct as long as the object lives:
 
 1. Connect, get the registry, add a `WlRegistryListener` whose `global` handler binds
    `wl_compositor`, `wl_shm`, `xdg_wm_base` (and `wl_seat`, `zxdg_decoration_manager_v1`) with
-   `wl_registry_bind(registry, name, <iface>_interface(), version)`; `wl_display_roundtrip`.
+   `wl_registry_bind(registry, name, &wl_compositor_interface, version)`
+   (`xdg_wm_base_interface()` for the other protocols); `wl_display_roundtrip`.
 2. Answer `xdg_wm_base.ping` with `xdg_wm_base_pong` (a compositor disconnects clients that
    do not).
 3. `wl_compositor_create_surface`, `xdg_wm_base_get_xdg_surface`, `xdg_surface_get_toplevel`,

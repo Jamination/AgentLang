@@ -24,6 +24,9 @@ priv const PROTOCOLS = [_]str{
     "/usr/share/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml",
 }
 priv const LIB = "libwayland-client.so.0"
+// the protocol whose interface tables libwayland-client exports (wl_surface_interface, ...); the
+// tables of the other protocols are built by the bindings (wl_interface_at in the helpers)
+priv const CORE = "wayland"
 priv const HELPERS = embed("wayland_helpers.al")
 
 // paths relative to the root of the repository
@@ -45,6 +48,8 @@ priv fn al_name(name: str) -> str {
 
 // ---- helpers ----------------------------------------------------------------------------------
 priv source: str            // the file being read, for messages
+priv library_ifaces: Vec[str]  // the interfaces of CORE
+priv tables_built: i64         // the interfaces of the other protocols
 
 priv fn fail(msg: str) -> never {
     eprint(concat("gen_wayland: ", msg))
@@ -265,7 +270,8 @@ priv struct Iface {
     version: i64
     summary: str
     protocol: str
-    index: i64              // in the interface table
+    index: i64              // in `all`
+    table: i64              // in the interface table built by the helpers; -1: libwayland-client's own
     requests: []Msg
     events: []Msg
     enums: []Enum
@@ -300,7 +306,13 @@ priv fn load(path: str, into: *Vec[Iface]) {
     if root.tag != "protocol" { fail(fmt(path, ": not a Wayland protocol description")) }
     for n in root.children("interface") {
         f := Iface{name: n.attr("name"), version: to_int(n.attr("version")), summary: n.summary(),
-            protocol: root.attr("name"), index: into.len}
+            protocol: root.attr("name"), index: into.len, table: -1}
+        if f.protocol == CORE {
+            library_ifaces.push(f.name)
+        } else {
+            f.table = tables_built
+            tables_built += 1
+        }
         requests := vec[Msg]()
         for r in n.children("request") { requests.push(load_message(n, r)) }
         events := vec[Msg]()
@@ -326,6 +338,12 @@ priv fn find_iface(all: []Iface, name: str) -> *Iface {
         if all[i].name == name { return &all[i] }
     }
     fail(fmt("interface ", name, " is used but not described by the protocols read"))
+}
+
+// `&wl_surface_interface` for an interface of the core protocol (the table of libwayland-client),
+// `xdg_surface_interface()` for one of the other protocols (the table built by the helpers).
+priv fn iface_ref(name: str) -> str {
+    if library_ifaces.contains(name) { fmt("&", name, "_interface") } else { fmt(name, "_interface()") }
 }
 
 // The signature string of struct wl_message, as wayland-scanner writes it.
@@ -443,7 +461,7 @@ priv fn request_fn(out: *Vec[str], f: *Iface, m: *Msg) {
                 version = "version"
             } else {
                 result = concat("*", camel(a.iface))
-                new_iface = fmt(a.iface, "_interface()")
+                new_iface = iface_ref(a.iface)
             }
             values.push("0")
             continue
@@ -499,7 +517,12 @@ priv fn interface_decls(out: *Vec[str], f: *Iface) {
     is_display := f.name == "wl_display"
     out.push(fmt("\n// ---- ", f.name, " (version ", f.version, ")", if f.summary != "" { ": " } else { "" }, f.summary, " ----"))
     out.push(fmt("struct ", ty, " {}"))
-    out.push(fmt("fn ", self, "_interface() -> *WlInterface { wl_interface_at(", f.index, ") }"))
+    if f.table < 0 {
+        out.push(fmt("// the interface table in libwayland-client: `&", self, "_interface`"))
+        out.push(fmt("extern \"", LIB, "\" ", self, "_interface: WlInterface"))
+    } else {
+        out.push(fmt("fn ", self, "_interface() -> *WlInterface { wl_interface_at(", f.table, ") }"))
+    }
 
     for e in f.enums {
         out.push(fmt("// ", f.name, ".", e.name, if e.bitfield { " (bits)" } else { "" },
@@ -561,13 +584,15 @@ priv fn interface_decls(out: *Vec[str], f: *Iface) {
     }
 }
 
-// The constant tables the interface tables are built from (wl_interface_at in the helpers).
+// The constant tables the interface tables of the protocols other than CORE are built from
+// (wl_interface_at in the helpers).
 priv fn tables(out: *Vec[str], all: []Iface) {
     // a run of "no interface" at the start serves every message without object arguments
     null_run := 1
     nmessages := 0
     for i in 0..all.len {
         f := &all[i]
+        if f.table < 0 { continue }
         nmessages += f.requests.len + f.events.len
         for k in 0..f.requests.len { null_run = max(null_run, type_refs(all, &f.requests[k]).len) }
         for k in 0..f.events.len { null_run = max(null_run, type_refs(all, &f.events[k]).len) }
@@ -575,19 +600,31 @@ priv fn tables(out: *Vec[str], all: []Iface) {
     types := vec_fill(null_run, -1)
     messages := vec[(str, str)]()
     interfaces := vec[str]()
+    library := vec[str]()           // the tables of libwayland-client referred to: -2, -3, ...
     for i in 0..all.len {
         f := &all[i]
+        if f.table < 0 { continue }
         interfaces.push(fmt("    WlInterfaceDesc{\"", f.name, "\", ", f.version, ", ", f.requests.len, ", ", f.events.len, "},"))
         for pass in 0..2 {
             list := if pass == 0 { f.requests } else { f.events }
             for k in 0..list.len {
                 m := &list[k]
-                refs := type_refs(all, m)
-                at := 0
-                for r in refs {
-                    if r >= 0 { at = types.len }
+                codes := vec[i64]()
+                for r in type_refs(all, m) {
+                    if r < 0 {
+                        codes.push(-1)
+                    } else if all[r].table >= 0 {
+                        codes.push(all[r].table)
+                    } else {
+                        if !library.contains(all[r].name) { library.push(all[r].name) }
+                        codes.push(-2 - index_of(library[..], all[r].name))
+                    }
                 }
-                if at > 0 { types.extend(refs) }
+                at := 0
+                for c in codes {
+                    if c != -1 { at = types.len }
+                }
+                if at > 0 { types.extend(codes[..]) }
                 messages.push((fmt("    WlMessageDesc{\"", m.name, "\", \"", signature(m), "\", ", at, "},"),
                     if k == 0 { fmt(f.name, if pass == 0 { " requests" } else { " events" }) } else { "" }))
             }
@@ -595,11 +632,13 @@ priv fn tables(out: *Vec[str], all: []Iface) {
     }
     out.push(`
 // ---- interface tables ----
-// What wayland-scanner writes as C data (private-code): per interface its name, version and
-// numbers of requests and events; per message (the requests, then the events of each interface
-// in turn) its name, its signature and where its argument types start in WL_TYPES, which holds
-// the interface number of every object argument (-1: none).`)
-    out.push(fmt("priv const WL_INTERFACE_COUNT = ", all.len))
+// The tables of the core protocol are libwayland-client's (extern wl_surface_interface, ...).
+// For the other protocols, what wayland-scanner writes as C data (private-code): per interface
+// its name, version and numbers of requests and events; per message (the requests, then the
+// events of each interface in turn) its name, its signature and where its argument types start
+// in WL_TYPES, which holds the interface number of every object argument (-1: none; -2, -3, ...:
+// a table of libwayland-client, see wl_library_interface).`)
+    out.push(fmt("priv const WL_INTERFACE_COUNT = ", interfaces.len))
     out.push(fmt("priv const WL_MESSAGE_COUNT = ", nmessages))
     out.push(fmt("priv const WL_TYPE_COUNT = ", types.len))
     out.push("priv const WL_INTERFACES = [WL_INTERFACE_COUNT]WlInterfaceDesc{")
@@ -614,6 +653,12 @@ priv fn tables(out: *Vec[str], all: []Iface) {
         for t in types[i..min(i + 20, types.len)] { row.push(fmt(t)) }
         out.push(fmt("    ", join(row[..], ", "), ","))
     }
+    out.push("}")
+    out.push("priv fn wl_library_interface(code: i64) -> *WlInterface {")
+    out.push("    match code {")
+    for k, name in library { out.push(fmt("        ", -2 - k, " => &", name, "_interface")) }
+    out.push("        _ => nil")
+    out.push("    }")
     out.push("}\n")
 }
 
@@ -633,7 +678,8 @@ priv fn bindings(all: []Iface) -> str {
 //
 // Mapping from the C API (what wayland-scanner generates), per interface, here wl_surface:
 //   struct wl_surface *            *WlSurface (an opaque struct; nil is NULL)
-//   &wl_surface_interface          wl_surface_interface()
+//   &wl_surface_interface          &wl_surface_interface (the library's table, an extern variable);
+//   &xdg_surface_interface         xdg_surface_interface() (other protocols: built on first use)
 //   wl_surface_attach(s, b, x, y)  the same name and arguments: one function per request
 //   WL_SURFACE_ERROR_...           the same constants (enum entries), and the opcodes
 //   struct wl_surface_listener     WlSurfaceListener, wl_surface_add_listener(s, &listener, data)
@@ -745,7 +791,11 @@ total: i64`)
         out.push(fmt("\nfn use_", f.name, "() {"))
         main.push(fmt("    use_", f.name, "()"))
         out.push(fmt("    total += sizeof[", ty, "]()"))
-        out.push(call_line(fmt(f.name, "_interface"), []str{}, "*WlInterface"))
+        if f.table < 0 {
+            out.push(fmt("    {\n        r: *WlInterface = &", f.name, "_interface\n        keep(&r)\n    }"))
+        } else {
+            out.push(call_line(fmt(f.name, "_interface"), []str{}, "*WlInterface"))
+        }
         for e in f.enums {
             for v in e.entries { out.push(fmt("    total += i64(", prefix(f), "_", to_upper(e.name), "_", to_upper(v.name), ")")) }
         }
@@ -868,7 +918,7 @@ fn interface(f: *WlInterface) {
     n := 0
     for i in 0..all.len {
         f := &all[i]
-        main.push(fmt("    interface(", f.name, "_interface())"))
+        main.push(fmt("    interface(", iface_ref(f.name), ")"))
         names := vec[str]()
         for m in f.requests { names.push(fmt(prefix(f), "_", to_upper(m.name))) }
         for e in f.enums {
@@ -922,7 +972,8 @@ fn main() {
         for e in f.enums { nentries += e.entries.len }
     }
     print(fmt("wrote ", OUT, ": ", count(text, "\n"), " lines, ", all.len, " interfaces, ", nrequests, " requests, ",
-        nevents, " events, ", nentries, " enum values, ", count(text, "\nextern "), " library functions; and ", CHECK))
+        nevents, " events, ", nentries, " enum values, ", count(text, "\nextern ") - library_ifaces.len, " library functions, ",
+        library_ifaces.len, " library interface tables; and ", CHECK))
     if !verify { return }
 
     // The same lines from C (the output of wayland-scanner) and from the new std/wayland.al.
@@ -930,8 +981,8 @@ fn main() {
     headers := vec[str]()
     cc_args := vec_of([]str{"-o", concat(SCRATCH, "/tables_c"), concat(SCRATCH, "/tables.c")})
     for i, path in PROTOCOLS {
-        // (wayland-client.h already includes the header of the core protocol; the tables of the
-        // scanner's code are compared for it too, not those inside libwayland-client)
+        // (wayland-client.h already includes the header of the core protocol; the AL program
+        // prints the core tables inside libwayland-client, the C one those of the scanner's code)
         headers.push(fmt("protocol", i, ".h"))
         must_run([]str{"wayland-scanner", "client-header", path, fmt(SCRATCH, "/protocol", i, ".h")})
         must_run([]str{"wayland-scanner", "private-code", path, fmt(SCRATCH, "/protocol", i, ".c")})

@@ -11,8 +11,9 @@ struct WlMessage {
     types: **WlInterface
 }
 
-// struct wl_interface: the description of an interface that libwayland works from. Get it from
-// the function of that name: `wl_compositor_interface()`, `xdg_wm_base_interface()`, ...
+// struct wl_interface: the description of an interface that libwayland works from. Those of the
+// core protocol are the library's: `&wl_compositor_interface`; those of the other protocols come
+// from the function of that name: `xdg_wm_base_interface()`.
 struct WlInterface {
     name: *u8
     version: i32
@@ -134,10 +135,10 @@ fn wl_array_u32(array: *WlArray) -> []u32 {
     mkslice[u32](cast[*u32](array.data), i64(array.size) / 4)
 }
 
-// The interface tables. libwayland-client exports those of the core protocol as data symbols
-// (wl_surface_interface, ...), which `extern` cannot name, and none for other protocols. So
-// all of them are built here on first use, from the constant tables at the end of this file,
-// with the C layout (struct wl_interface, struct wl_message).
+// The interface tables of the protocols other than the core one (whose tables libwayland-client
+// exports: the extern variables wl_surface_interface, ...). They are built here on first use,
+// from the constant tables at the end of this file, with the C layout (struct wl_interface,
+// struct wl_message).
 priv struct WlInterfaceDesc { name: str, version: i32, requests: i32, events: i32 }
 priv struct WlMessageDesc { name: str, signature: str, types: i32 }
 priv wl_interface_table: [WL_INTERFACE_COUNT]WlInterface
@@ -150,6 +151,8 @@ priv fn wl_interface_at(index: i64) -> *WlInterface {
         for i, t in WL_TYPES {
             if t >= 0 {
                 wl_type_table[i] = &wl_interface_table[t]
+            } else if t <= -2 {
+                wl_type_table[i] = wl_library_interface(i64(t))
             }
         }
         for i, d in WL_MESSAGES {

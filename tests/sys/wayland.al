@@ -36,12 +36,12 @@ fn on_global(data: *u8, registry: *WlRegistry, name: u32, interface: *u8, versio
     st := cast[*State](data)
     st.globals += 1
     match from_cstr(interface) {
-        "wl_compositor" => st.compositor = cast[*WlCompositor](wl_registry_bind(registry, name, wl_compositor_interface(), min(version, 4)))
-        "wl_shm" => st.shm = cast[*WlShm](wl_registry_bind(registry, name, wl_shm_interface(), 1))
+        "wl_compositor" => st.compositor = cast[*WlCompositor](wl_registry_bind(registry, name, &wl_compositor_interface, min(version, 4)))
+        "wl_shm" => st.shm = cast[*WlShm](wl_registry_bind(registry, name, &wl_shm_interface, 1))
         "xdg_wm_base" => st.wm_base = cast[*XdgWmBase](wl_registry_bind(registry, name, xdg_wm_base_interface(), min(version, 2)))
         "wl_output" => {
             if st.output == nil {
-                st.output = cast[*WlOutput](wl_registry_bind(registry, name, wl_output_interface(), min(version, 2)))
+                st.output = cast[*WlOutput](wl_registry_bind(registry, name, &wl_output_interface, min(version, 2)))
             }
         }
         _ => {}

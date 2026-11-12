@@ -6,7 +6,8 @@
 //
 // Mapping from the C API (what wayland-scanner generates), per interface, here wl_surface:
 //   struct wl_surface *            *WlSurface (an opaque struct; nil is NULL)
-//   &wl_surface_interface          wl_surface_interface()
+//   &wl_surface_interface          &wl_surface_interface (the library's table, an extern variable);
+//   &xdg_surface_interface         xdg_surface_interface() (other protocols: built on first use)
 //   wl_surface_attach(s, b, x, y)  the same name and arguments: one function per request
 //   WL_SURFACE_ERROR_...           the same constants (enum entries), and the opcodes
 //   struct wl_surface_listener     WlSurfaceListener, wl_surface_add_listener(s, &listener, data)
@@ -38,8 +39,9 @@ struct WlMessage {
     types: **WlInterface
 }
 
-// struct wl_interface: the description of an interface that libwayland works from. Get it from
-// the function of that name: `wl_compositor_interface()`, `xdg_wm_base_interface()`, ...
+// struct wl_interface: the description of an interface that libwayland works from. Those of the
+// core protocol are the library's: `&wl_compositor_interface`; those of the other protocols come
+// from the function of that name: `xdg_wm_base_interface()`.
 struct WlInterface {
     name: *u8
     version: i32
@@ -161,10 +163,10 @@ fn wl_array_u32(array: *WlArray) -> []u32 {
     mkslice[u32](cast[*u32](array.data), i64(array.size) / 4)
 }
 
-// The interface tables. libwayland-client exports those of the core protocol as data symbols
-// (wl_surface_interface, ...), which `extern` cannot name, and none for other protocols. So
-// all of them are built here on first use, from the constant tables at the end of this file,
-// with the C layout (struct wl_interface, struct wl_message).
+// The interface tables of the protocols other than the core one (whose tables libwayland-client
+// exports: the extern variables wl_surface_interface, ...). They are built here on first use,
+// from the constant tables at the end of this file, with the C layout (struct wl_interface,
+// struct wl_message).
 priv struct WlInterfaceDesc { name: str, version: i32, requests: i32, events: i32 }
 priv struct WlMessageDesc { name: str, signature: str, types: i32 }
 priv wl_interface_table: [WL_INTERFACE_COUNT]WlInterface
@@ -177,6 +179,8 @@ priv fn wl_interface_at(index: i64) -> *WlInterface {
         for i, t in WL_TYPES {
             if t >= 0 {
                 wl_type_table[i] = &wl_interface_table[t]
+            } else if t <= -2 {
+                wl_type_table[i] = wl_library_interface(i64(t))
             }
         }
         for i, d in WL_MESSAGES {
@@ -307,7 +311,8 @@ extern "libwayland-cursor.so.0" fn wl_cursor_frame(cursor: *WlCursor, time: u32)
 
 // ---- wl_display (version 1): core global object ----
 struct WlDisplay {}
-fn wl_display_interface() -> *WlInterface { wl_interface_at(0) }
+// the interface table in libwayland-client: `&wl_display_interface`
+extern "libwayland-client.so.0" wl_display_interface: WlInterface
 // wl_display.error: global error values
 const WL_DISPLAY_ERROR_INVALID_OBJECT = 0    // server couldn't find object
 const WL_DISPLAY_ERROR_INVALID_METHOD = 1    // method doesn't exist on the specified interface or malformed request
@@ -323,17 +328,18 @@ fn wl_display_get_version(wl_display: *WlDisplay) -> u32 { wl_proxy_get_version(
 // wl_display.sync: asynchronous roundtrip
 fn wl_display_sync(wl_display: *WlDisplay) -> *WlCallback {
     argv := [1]u64{0}
-    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_SYNC, wl_callback_interface(), wl_proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
+    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_SYNC, &wl_callback_interface, wl_proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
 }
 // wl_display.get_registry: get global registry object
 fn wl_display_get_registry(wl_display: *WlDisplay) -> *WlRegistry {
     argv := [1]u64{0}
-    cast[*WlRegistry](wl_proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_GET_REGISTRY, wl_registry_interface(), wl_proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
+    cast[*WlRegistry](wl_proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_GET_REGISTRY, &wl_registry_interface, wl_proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
 }
 
 // ---- wl_registry (version 1): global registry object ----
 struct WlRegistry {}
-fn wl_registry_interface() -> *WlInterface { wl_interface_at(1) }
+// the interface table in libwayland-client: `&wl_registry_interface`
+extern "libwayland-client.so.0" wl_registry_interface: WlInterface
 // opcodes of the requests of wl_registry
 const WL_REGISTRY_BIND: u32 = 0
 // The handlers of the events of wl_registry, in protocol order.
@@ -360,7 +366,8 @@ fn wl_registry_bind(wl_registry: *WlRegistry, name: u32, interface: *WlInterface
 
 // ---- wl_callback (version 1): callback object ----
 struct WlCallback {}
-fn wl_callback_interface() -> *WlInterface { wl_interface_at(2) }
+// the interface table in libwayland-client: `&wl_callback_interface`
+extern "libwayland-client.so.0" wl_callback_interface: WlInterface
 // The handlers of the events of wl_callback, in protocol order.
 struct WlCallbackListener {
     // done event: (data, wl_callback, callback_data)
@@ -378,7 +385,8 @@ fn wl_callback_destroy(wl_callback: *WlCallback) { wl_proxy_destroy(cast[*u8](wl
 
 // ---- wl_compositor (version 7): the compositor singleton ----
 struct WlCompositor {}
-fn wl_compositor_interface() -> *WlInterface { wl_interface_at(3) }
+// the interface table in libwayland-client: `&wl_compositor_interface`
+extern "libwayland-client.so.0" wl_compositor_interface: WlInterface
 // opcodes of the requests of wl_compositor
 const WL_COMPOSITOR_CREATE_SURFACE: u32 = 0
 const WL_COMPOSITOR_CREATE_REGION: u32 = 1
@@ -391,12 +399,12 @@ fn wl_compositor_destroy(wl_compositor: *WlCompositor) { wl_proxy_destroy(cast[*
 // wl_compositor.create_surface: create new surface
 fn wl_compositor_create_surface(wl_compositor: *WlCompositor) -> *WlSurface {
     argv := [1]u64{0}
-    cast[*WlSurface](wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_SURFACE, wl_surface_interface(), wl_proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
+    cast[*WlSurface](wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_SURFACE, &wl_surface_interface, wl_proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
 }
 // wl_compositor.create_region: create new region
 fn wl_compositor_create_region(wl_compositor: *WlCompositor) -> *WlRegion {
     argv := [1]u64{0}
-    cast[*WlRegion](wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_REGION, wl_region_interface(), wl_proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
+    cast[*WlRegion](wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_REGION, &wl_region_interface, wl_proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
 }
 // wl_compositor.release (since version 7): destroy wl_compositor. Destroys the object.
 fn wl_compositor_release(wl_compositor: *WlCompositor) {
@@ -405,7 +413,8 @@ fn wl_compositor_release(wl_compositor: *WlCompositor) {
 
 // ---- wl_shm_pool (version 3): a shared memory pool ----
 struct WlShmPool {}
-fn wl_shm_pool_interface() -> *WlInterface { wl_interface_at(4) }
+// the interface table in libwayland-client: `&wl_shm_pool_interface`
+extern "libwayland-client.so.0" wl_shm_pool_interface: WlInterface
 // wl_shm_pool.error: wl_shm_pool error values
 const WL_SHM_POOL_ERROR_INVALID_FORMAT = 0    // buffer format is not known
 const WL_SHM_POOL_ERROR_INVALID_STRIDE = 1    // invalid size or stride during buffer creation
@@ -419,7 +428,7 @@ fn wl_shm_pool_get_version(wl_shm_pool: *WlShmPool) -> u32 { wl_proxy_get_versio
 // wl_shm_pool.create_buffer: create a buffer from the pool. `format`: wl_shm.format
 fn wl_shm_pool_create_buffer(wl_shm_pool: *WlShmPool, offset: i32, width: i32, height: i32, stride: i32, format: u32) -> *WlBuffer {
     argv := [6]u64{0, u64(u32(offset)), u64(u32(width)), u64(u32(height)), u64(u32(stride)), u64(format)}
-    cast[*WlBuffer](wl_proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_CREATE_BUFFER, wl_buffer_interface(), wl_proxy_get_version(cast[*u8](wl_shm_pool)), 0, ptr(argv)))
+    cast[*WlBuffer](wl_proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_CREATE_BUFFER, &wl_buffer_interface, wl_proxy_get_version(cast[*u8](wl_shm_pool)), 0, ptr(argv)))
 }
 // wl_shm_pool.destroy: destroy the pool. Destroys the object.
 fn wl_shm_pool_destroy(wl_shm_pool: *WlShmPool) {
@@ -433,7 +442,8 @@ fn wl_shm_pool_resize(wl_shm_pool: *WlShmPool, size: i32) {
 
 // ---- wl_shm (version 3): shared memory support ----
 struct WlShm {}
-fn wl_shm_interface() -> *WlInterface { wl_interface_at(5) }
+// the interface table in libwayland-client: `&wl_shm_interface`
+extern "libwayland-client.so.0" wl_shm_interface: WlInterface
 // wl_shm.error: wl_shm error values
 const WL_SHM_ERROR_INVALID_FORMAT = 0    // buffer format is not known
 const WL_SHM_ERROR_INVALID_STRIDE = 1    // invalid size or stride during pool creation
@@ -607,7 +617,7 @@ fn wl_shm_destroy(wl_shm: *WlShm) { wl_proxy_destroy(cast[*u8](wl_shm)) }
 // wl_shm.create_pool: create a shm pool. `fd`: fd
 fn wl_shm_create_pool(wl_shm: *WlShm, fd: i32, size: i32) -> *WlShmPool {
     argv := [3]u64{0, u64(u32(fd)), u64(u32(size))}
-    cast[*WlShmPool](wl_proxy_marshal_array_flags(cast[*u8](wl_shm), WL_SHM_CREATE_POOL, wl_shm_pool_interface(), wl_proxy_get_version(cast[*u8](wl_shm)), 0, ptr(argv)))
+    cast[*WlShmPool](wl_proxy_marshal_array_flags(cast[*u8](wl_shm), WL_SHM_CREATE_POOL, &wl_shm_pool_interface, wl_proxy_get_version(cast[*u8](wl_shm)), 0, ptr(argv)))
 }
 // wl_shm.release (since version 2): release the shm object. Destroys the object.
 fn wl_shm_release(wl_shm: *WlShm) {
@@ -616,7 +626,8 @@ fn wl_shm_release(wl_shm: *WlShm) {
 
 // ---- wl_buffer (version 1): content for a wl_surface ----
 struct WlBuffer {}
-fn wl_buffer_interface() -> *WlInterface { wl_interface_at(6) }
+// the interface table in libwayland-client: `&wl_buffer_interface`
+extern "libwayland-client.so.0" wl_buffer_interface: WlInterface
 // opcodes of the requests of wl_buffer
 const WL_BUFFER_DESTROY: u32 = 0
 // The handlers of the events of wl_buffer, in protocol order.
@@ -638,7 +649,8 @@ fn wl_buffer_destroy(wl_buffer: *WlBuffer) {
 
 // ---- wl_data_offer (version 4): offer to transfer data ----
 struct WlDataOffer {}
-fn wl_data_offer_interface() -> *WlInterface { wl_interface_at(7) }
+// the interface table in libwayland-client: `&wl_data_offer_interface`
+extern "libwayland-client.so.0" wl_data_offer_interface: WlInterface
 // wl_data_offer.error
 const WL_DATA_OFFER_ERROR_INVALID_FINISH = 0         // finish request was called untimely
 const WL_DATA_OFFER_ERROR_INVALID_ACTION_MASK = 1    // action mask contains invalid values
@@ -696,7 +708,8 @@ fn wl_data_offer_set_actions(wl_data_offer: *WlDataOffer, dnd_actions: u32, pref
 
 // ---- wl_data_source (version 4): offer to transfer data ----
 struct WlDataSource {}
-fn wl_data_source_interface() -> *WlInterface { wl_interface_at(8) }
+// the interface table in libwayland-client: `&wl_data_source_interface`
+extern "libwayland-client.so.0" wl_data_source_interface: WlInterface
 // wl_data_source.error
 const WL_DATA_SOURCE_ERROR_INVALID_ACTION_MASK = 0    // action mask contains invalid values
 const WL_DATA_SOURCE_ERROR_INVALID_SOURCE = 1         // source doesn't accept this request
@@ -745,7 +758,8 @@ fn wl_data_source_set_actions(wl_data_source: *WlDataSource, dnd_actions: u32) {
 
 // ---- wl_data_device (version 4): data transfer device ----
 struct WlDataDevice {}
-fn wl_data_device_interface() -> *WlInterface { wl_interface_at(9) }
+// the interface table in libwayland-client: `&wl_data_device_interface`
+extern "libwayland-client.so.0" wl_data_device_interface: WlInterface
 // wl_data_device.error
 const WL_DATA_DEVICE_ERROR_ROLE = 0           // given wl_surface has another role
 const WL_DATA_DEVICE_ERROR_USED_SOURCE = 1    // source has already been used
@@ -794,7 +808,8 @@ fn wl_data_device_release(wl_data_device: *WlDataDevice) {
 
 // ---- wl_data_device_manager (version 4): data transfer interface ----
 struct WlDataDeviceManager {}
-fn wl_data_device_manager_interface() -> *WlInterface { wl_interface_at(10) }
+// the interface table in libwayland-client: `&wl_data_device_manager_interface`
+extern "libwayland-client.so.0" wl_data_device_manager_interface: WlInterface
 // wl_data_device_manager.dnd_action (bits): drag and drop actions
 const WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE = 0    // no action
 const WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY = 1    // copy action
@@ -812,12 +827,12 @@ fn wl_data_device_manager_destroy(wl_data_device_manager: *WlDataDeviceManager) 
 // wl_data_device_manager.create_data_source: create a new data source
 fn wl_data_device_manager_create_data_source(wl_data_device_manager: *WlDataDeviceManager) -> *WlDataSource {
     argv := [1]u64{0}
-    cast[*WlDataSource](wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE, wl_data_source_interface(), wl_proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
+    cast[*WlDataSource](wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE, &wl_data_source_interface, wl_proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
 }
 // wl_data_device_manager.get_data_device: create a new data device
 fn wl_data_device_manager_get_data_device(wl_data_device_manager: *WlDataDeviceManager, seat: *WlSeat) -> *WlDataDevice {
     argv := [2]u64{0, cast[u64](seat)}
-    cast[*WlDataDevice](wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE, wl_data_device_interface(), wl_proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
+    cast[*WlDataDevice](wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE, &wl_data_device_interface, wl_proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
 }
 // wl_data_device_manager.release (since version 4): destroy wl_data_device_manager. Destroys the object.
 fn wl_data_device_manager_release(wl_data_device_manager: *WlDataDeviceManager) {
@@ -826,7 +841,8 @@ fn wl_data_device_manager_release(wl_data_device_manager: *WlDataDeviceManager) 
 
 // ---- wl_shell (version 1): create desktop-style surfaces ----
 struct WlShell {}
-fn wl_shell_interface() -> *WlInterface { wl_interface_at(11) }
+// the interface table in libwayland-client: `&wl_shell_interface`
+extern "libwayland-client.so.0" wl_shell_interface: WlInterface
 // wl_shell.error
 const WL_SHELL_ERROR_ROLE = 0    // given wl_surface has another role
 // opcodes of the requests of wl_shell
@@ -839,12 +855,13 @@ fn wl_shell_destroy(wl_shell: *WlShell) { wl_proxy_destroy(cast[*u8](wl_shell)) 
 // wl_shell.get_shell_surface: create a shell surface from a surface
 fn wl_shell_get_shell_surface(wl_shell: *WlShell, surface: *WlSurface) -> *WlShellSurface {
     argv := [2]u64{0, cast[u64](surface)}
-    cast[*WlShellSurface](wl_proxy_marshal_array_flags(cast[*u8](wl_shell), WL_SHELL_GET_SHELL_SURFACE, wl_shell_surface_interface(), wl_proxy_get_version(cast[*u8](wl_shell)), 0, ptr(argv)))
+    cast[*WlShellSurface](wl_proxy_marshal_array_flags(cast[*u8](wl_shell), WL_SHELL_GET_SHELL_SURFACE, &wl_shell_surface_interface, wl_proxy_get_version(cast[*u8](wl_shell)), 0, ptr(argv)))
 }
 
 // ---- wl_shell_surface (version 1): desktop-style metadata interface ----
 struct WlShellSurface {}
-fn wl_shell_surface_interface() -> *WlInterface { wl_interface_at(12) }
+// the interface table in libwayland-client: `&wl_shell_surface_interface`
+extern "libwayland-client.so.0" wl_shell_surface_interface: WlInterface
 // wl_shell_surface.resize (bits): edge values for resizing
 const WL_SHELL_SURFACE_RESIZE_NONE = 0             // no edge
 const WL_SHELL_SURFACE_RESIZE_TOP = 1              // top edge
@@ -947,7 +964,8 @@ fn wl_shell_surface_set_class(wl_shell_surface: *WlShellSurface, class_: str) {
 
 // ---- wl_surface (version 7): an onscreen surface ----
 struct WlSurface {}
-fn wl_surface_interface() -> *WlInterface { wl_interface_at(13) }
+// the interface table in libwayland-client: `&wl_surface_interface`
+extern "libwayland-client.so.0" wl_surface_interface: WlInterface
 // wl_surface.error: wl_surface error values
 const WL_SURFACE_ERROR_INVALID_SCALE = 0          // buffer scale value is invalid
 const WL_SURFACE_ERROR_INVALID_TRANSFORM = 1      // buffer transform value is invalid
@@ -1003,7 +1021,7 @@ fn wl_surface_damage(wl_surface: *WlSurface, x: i32, y: i32, width: i32, height:
 // wl_surface.frame: request a frame throttling hint
 fn wl_surface_frame(wl_surface: *WlSurface) -> *WlCallback {
     argv := [1]u64{0}
-    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_FRAME, wl_callback_interface(), wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
+    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_FRAME, &wl_callback_interface, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
 }
 // wl_surface.set_opaque_region: set opaque region. `region`: may be nil
 fn wl_surface_set_opaque_region(wl_surface: *WlSurface, region: *WlRegion) {
@@ -1042,12 +1060,13 @@ fn wl_surface_offset(wl_surface: *WlSurface, x: i32, y: i32) {
 // wl_surface.get_release (since version 7): get a release callback
 fn wl_surface_get_release(wl_surface: *WlSurface) -> *WlCallback {
     argv := [1]u64{0}
-    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_GET_RELEASE, wl_callback_interface(), wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
+    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_GET_RELEASE, &wl_callback_interface, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
 }
 
 // ---- wl_seat (version 11): group of input devices ----
 struct WlSeat {}
-fn wl_seat_interface() -> *WlInterface { wl_interface_at(14) }
+// the interface table in libwayland-client: `&wl_seat_interface`
+extern "libwayland-client.so.0" wl_seat_interface: WlInterface
 // wl_seat.capability (bits): seat capability bitmask
 const WL_SEAT_CAPABILITY_POINTER = 1     // the seat has pointer devices
 const WL_SEAT_CAPABILITY_KEYBOARD = 2    // the seat has one or more keyboards
@@ -1078,17 +1097,17 @@ fn wl_seat_destroy(wl_seat: *WlSeat) { wl_proxy_destroy(cast[*u8](wl_seat)) }
 // wl_seat.get_pointer: return pointer object
 fn wl_seat_get_pointer(wl_seat: *WlSeat) -> *WlPointer {
     argv := [1]u64{0}
-    cast[*WlPointer](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_POINTER, wl_pointer_interface(), wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
+    cast[*WlPointer](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_POINTER, &wl_pointer_interface, wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
 }
 // wl_seat.get_keyboard: return keyboard object
 fn wl_seat_get_keyboard(wl_seat: *WlSeat) -> *WlKeyboard {
     argv := [1]u64{0}
-    cast[*WlKeyboard](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_KEYBOARD, wl_keyboard_interface(), wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
+    cast[*WlKeyboard](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_KEYBOARD, &wl_keyboard_interface, wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
 }
 // wl_seat.get_touch: return touch object
 fn wl_seat_get_touch(wl_seat: *WlSeat) -> *WlTouch {
     argv := [1]u64{0}
-    cast[*WlTouch](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_TOUCH, wl_touch_interface(), wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
+    cast[*WlTouch](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_TOUCH, &wl_touch_interface, wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
 }
 // wl_seat.release (since version 5): release the seat object. Destroys the object.
 fn wl_seat_release(wl_seat: *WlSeat) {
@@ -1097,7 +1116,8 @@ fn wl_seat_release(wl_seat: *WlSeat) {
 
 // ---- wl_pointer (version 11): pointer input device ----
 struct WlPointer {}
-fn wl_pointer_interface() -> *WlInterface { wl_interface_at(15) }
+// the interface table in libwayland-client: `&wl_pointer_interface`
+extern "libwayland-client.so.0" wl_pointer_interface: WlInterface
 // wl_pointer.error
 const WL_POINTER_ERROR_ROLE = 0    // given wl_surface has another role
 // wl_pointer.button_state: physical button state
@@ -1165,7 +1185,8 @@ fn wl_pointer_release(wl_pointer: *WlPointer) {
 
 // ---- wl_keyboard (version 11): keyboard input device ----
 struct WlKeyboard {}
-fn wl_keyboard_interface() -> *WlInterface { wl_interface_at(16) }
+// the interface table in libwayland-client: `&wl_keyboard_interface`
+extern "libwayland-client.so.0" wl_keyboard_interface: WlInterface
 // wl_keyboard.keymap_format: keyboard mapping format
 const WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP = 0    // no keymap; client must understand how to interpret the raw keycode
 const WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 = 1       // libxkbcommon compatible, null-terminated string; to determine the xkb keycode, clients must add 8 to the key event keycode
@@ -1206,7 +1227,8 @@ fn wl_keyboard_release(wl_keyboard: *WlKeyboard) {
 
 // ---- wl_touch (version 11): touchscreen input device ----
 struct WlTouch {}
-fn wl_touch_interface() -> *WlInterface { wl_interface_at(17) }
+// the interface table in libwayland-client: `&wl_touch_interface`
+extern "libwayland-client.so.0" wl_touch_interface: WlInterface
 // opcodes of the requests of wl_touch
 const WL_TOUCH_RELEASE: u32 = 0
 // The handlers of the events of wl_touch, in protocol order.
@@ -1242,7 +1264,8 @@ fn wl_touch_release(wl_touch: *WlTouch) {
 
 // ---- wl_output (version 4): compositor output region ----
 struct WlOutput {}
-fn wl_output_interface() -> *WlInterface { wl_interface_at(18) }
+// the interface table in libwayland-client: `&wl_output_interface`
+extern "libwayland-client.so.0" wl_output_interface: WlInterface
 // wl_output.subpixel: subpixel geometry information
 const WL_OUTPUT_SUBPIXEL_UNKNOWN = 0           // unknown geometry
 const WL_OUTPUT_SUBPIXEL_NONE = 1              // no geometry
@@ -1295,7 +1318,8 @@ fn wl_output_release(wl_output: *WlOutput) {
 
 // ---- wl_region (version 7): region interface ----
 struct WlRegion {}
-fn wl_region_interface() -> *WlInterface { wl_interface_at(19) }
+// the interface table in libwayland-client: `&wl_region_interface`
+extern "libwayland-client.so.0" wl_region_interface: WlInterface
 // opcodes of the requests of wl_region
 const WL_REGION_DESTROY: u32 = 0
 const WL_REGION_ADD: u32 = 1
@@ -1320,7 +1344,8 @@ fn wl_region_subtract(wl_region: *WlRegion, x: i32, y: i32, width: i32, height: 
 
 // ---- wl_subcompositor (version 1): sub-surface compositing ----
 struct WlSubcompositor {}
-fn wl_subcompositor_interface() -> *WlInterface { wl_interface_at(20) }
+// the interface table in libwayland-client: `&wl_subcompositor_interface`
+extern "libwayland-client.so.0" wl_subcompositor_interface: WlInterface
 // wl_subcompositor.error
 const WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE = 0    // the to-be sub-surface is invalid
 const WL_SUBCOMPOSITOR_ERROR_BAD_PARENT = 1     // the to-be sub-surface parent is invalid
@@ -1337,12 +1362,13 @@ fn wl_subcompositor_destroy(wl_subcompositor: *WlSubcompositor) {
 // wl_subcompositor.get_subsurface: give a surface the role sub-surface
 fn wl_subcompositor_get_subsurface(wl_subcompositor: *WlSubcompositor, surface: *WlSurface, parent: *WlSurface) -> *WlSubsurface {
     argv := [3]u64{0, cast[u64](surface), cast[u64](parent)}
-    cast[*WlSubsurface](wl_proxy_marshal_array_flags(cast[*u8](wl_subcompositor), WL_SUBCOMPOSITOR_GET_SUBSURFACE, wl_subsurface_interface(), wl_proxy_get_version(cast[*u8](wl_subcompositor)), 0, ptr(argv)))
+    cast[*WlSubsurface](wl_proxy_marshal_array_flags(cast[*u8](wl_subcompositor), WL_SUBCOMPOSITOR_GET_SUBSURFACE, &wl_subsurface_interface, wl_proxy_get_version(cast[*u8](wl_subcompositor)), 0, ptr(argv)))
 }
 
 // ---- wl_subsurface (version 1): sub-surface interface to a wl_surface ----
 struct WlSubsurface {}
-fn wl_subsurface_interface() -> *WlInterface { wl_interface_at(21) }
+// the interface table in libwayland-client: `&wl_subsurface_interface`
+extern "libwayland-client.so.0" wl_subsurface_interface: WlInterface
 // wl_subsurface.error
 const WL_SUBSURFACE_ERROR_BAD_SURFACE = 0    // wl_surface is not a sibling or the parent
 // opcodes of the requests of wl_subsurface
@@ -1385,7 +1411,8 @@ fn wl_subsurface_set_desync(wl_subsurface: *WlSubsurface) {
 
 // ---- wl_fixes (version 2): wayland protocol fixes ----
 struct WlFixes {}
-fn wl_fixes_interface() -> *WlInterface { wl_interface_at(22) }
+// the interface table in libwayland-client: `&wl_fixes_interface`
+extern "libwayland-client.so.0" wl_fixes_interface: WlInterface
 // wl_fixes.error: wl_fixes error values
 const WL_FIXES_ERROR_INVALID_ACK_REMOVE = 0    // unknown global or the global is not removed
 // opcodes of the requests of wl_fixes
@@ -1414,7 +1441,7 @@ fn wl_fixes_ack_global_remove(wl_fixes: *WlFixes, registry: *WlRegistry, name: u
 
 // ---- xdg_wm_base (version 7): create desktop-style surfaces ----
 struct XdgWmBase {}
-fn xdg_wm_base_interface() -> *WlInterface { wl_interface_at(23) }
+fn xdg_wm_base_interface() -> *WlInterface { wl_interface_at(0) }
 // xdg_wm_base.error
 const XDG_WM_BASE_ERROR_ROLE = 0                     // given wl_surface has another role
 const XDG_WM_BASE_ERROR_DEFUNCT_SURFACES = 1         // xdg_wm_base was destroyed before children
@@ -1462,7 +1489,7 @@ fn xdg_wm_base_pong(xdg_wm_base: *XdgWmBase, serial: u32) {
 
 // ---- xdg_positioner (version 7): child surface positioner ----
 struct XdgPositioner {}
-fn xdg_positioner_interface() -> *WlInterface { wl_interface_at(24) }
+fn xdg_positioner_interface() -> *WlInterface { wl_interface_at(1) }
 // xdg_positioner.error
 const XDG_POSITIONER_ERROR_INVALID_INPUT = 0    // invalid input provided
 // xdg_positioner.anchor
@@ -1558,7 +1585,7 @@ fn xdg_positioner_set_parent_configure(xdg_positioner: *XdgPositioner, serial: u
 
 // ---- xdg_surface (version 7): desktop user interface surface base interface ----
 struct XdgSurface {}
-fn xdg_surface_interface() -> *WlInterface { wl_interface_at(25) }
+fn xdg_surface_interface() -> *WlInterface { wl_interface_at(2) }
 // xdg_surface.error
 const XDG_SURFACE_ERROR_NOT_CONSTRUCTED = 1        // Surface was not fully constructed
 const XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED = 2    // Surface was already constructed
@@ -1611,7 +1638,7 @@ fn xdg_surface_ack_configure(xdg_surface: *XdgSurface, serial: u32) {
 
 // ---- xdg_toplevel (version 7): toplevel surface ----
 struct XdgToplevel {}
-fn xdg_toplevel_interface() -> *WlInterface { wl_interface_at(26) }
+fn xdg_toplevel_interface() -> *WlInterface { wl_interface_at(3) }
 // xdg_toplevel.error
 const XDG_TOPLEVEL_ERROR_INVALID_RESIZE_EDGE = 0    // provided value is not a valid variant of the resize_edge enum
 const XDG_TOPLEVEL_ERROR_INVALID_PARENT = 1         // invalid parent toplevel
@@ -1750,7 +1777,7 @@ fn xdg_toplevel_set_minimized(xdg_toplevel: *XdgToplevel) {
 
 // ---- xdg_popup (version 7): short-lived, popup surfaces for menus ----
 struct XdgPopup {}
-fn xdg_popup_interface() -> *WlInterface { wl_interface_at(27) }
+fn xdg_popup_interface() -> *WlInterface { wl_interface_at(4) }
 // xdg_popup.error
 const XDG_POPUP_ERROR_INVALID_GRAB = 0    // tried to grab after being mapped
 // opcodes of the requests of xdg_popup
@@ -1792,7 +1819,7 @@ fn xdg_popup_reposition(xdg_popup: *XdgPopup, positioner: *XdgPositioner, token:
 
 // ---- zxdg_decoration_manager_v1 (version 2): window decoration manager ----
 struct ZxdgDecorationManagerV1 {}
-fn zxdg_decoration_manager_v1_interface() -> *WlInterface { wl_interface_at(28) }
+fn zxdg_decoration_manager_v1_interface() -> *WlInterface { wl_interface_at(5) }
 // opcodes of the requests of zxdg_decoration_manager_v1
 const ZXDG_DECORATION_MANAGER_V1_DESTROY: u32 = 0
 const ZXDG_DECORATION_MANAGER_V1_GET_TOPLEVEL_DECORATION: u32 = 1
@@ -1811,7 +1838,7 @@ fn zxdg_decoration_manager_v1_get_toplevel_decoration(zxdg_decoration_manager_v1
 
 // ---- zxdg_toplevel_decoration_v1 (version 2): decoration object for a toplevel surface ----
 struct ZxdgToplevelDecorationV1 {}
-fn zxdg_toplevel_decoration_v1_interface() -> *WlInterface { wl_interface_at(29) }
+fn zxdg_toplevel_decoration_v1_interface() -> *WlInterface { wl_interface_at(6) }
 // zxdg_toplevel_decoration_v1.error
 const ZXDG_TOPLEVEL_DECORATION_V1_ERROR_UNCONFIGURED_BUFFER = 0    // xdg_toplevel has a buffer attached before configure
 const ZXDG_TOPLEVEL_DECORATION_V1_ERROR_ALREADY_CONSTRUCTED = 1    // xdg_toplevel already has a decoration object
@@ -1851,37 +1878,16 @@ fn zxdg_toplevel_decoration_v1_unset_mode(zxdg_toplevel_decoration_v1: *ZxdgTopl
 }
 
 // ---- interface tables ----
-// What wayland-scanner writes as C data (private-code): per interface its name, version and
-// numbers of requests and events; per message (the requests, then the events of each interface
-// in turn) its name, its signature and where its argument types start in WL_TYPES, which holds
-// the interface number of every object argument (-1: none).
-priv const WL_INTERFACE_COUNT = 30
-priv const WL_MESSAGE_COUNT = 185
-priv const WL_TYPE_COUNT = 123
+// The tables of the core protocol are libwayland-client's (extern wl_surface_interface, ...).
+// For the other protocols, what wayland-scanner writes as C data (private-code): per interface
+// its name, version and numbers of requests and events; per message (the requests, then the
+// events of each interface in turn) its name, its signature and where its argument types start
+// in WL_TYPES, which holds the interface number of every object argument (-1: none; -2, -3, ...:
+// a table of libwayland-client, see wl_library_interface).
+priv const WL_INTERFACE_COUNT = 7
+priv const WL_MESSAGE_COUNT = 51
+priv const WL_TYPE_COUNT = 28
 priv const WL_INTERFACES = [WL_INTERFACE_COUNT]WlInterfaceDesc{
-    WlInterfaceDesc{"wl_display", 1, 2, 2},
-    WlInterfaceDesc{"wl_registry", 1, 1, 2},
-    WlInterfaceDesc{"wl_callback", 1, 0, 1},
-    WlInterfaceDesc{"wl_compositor", 7, 3, 0},
-    WlInterfaceDesc{"wl_shm_pool", 3, 3, 0},
-    WlInterfaceDesc{"wl_shm", 3, 2, 1},
-    WlInterfaceDesc{"wl_buffer", 1, 1, 1},
-    WlInterfaceDesc{"wl_data_offer", 4, 5, 3},
-    WlInterfaceDesc{"wl_data_source", 4, 3, 6},
-    WlInterfaceDesc{"wl_data_device", 4, 3, 6},
-    WlInterfaceDesc{"wl_data_device_manager", 4, 3, 0},
-    WlInterfaceDesc{"wl_shell", 1, 1, 0},
-    WlInterfaceDesc{"wl_shell_surface", 1, 10, 3},
-    WlInterfaceDesc{"wl_surface", 7, 12, 4},
-    WlInterfaceDesc{"wl_seat", 11, 4, 2},
-    WlInterfaceDesc{"wl_pointer", 11, 2, 12},
-    WlInterfaceDesc{"wl_keyboard", 11, 1, 6},
-    WlInterfaceDesc{"wl_touch", 11, 1, 7},
-    WlInterfaceDesc{"wl_output", 4, 1, 6},
-    WlInterfaceDesc{"wl_region", 7, 3, 0},
-    WlInterfaceDesc{"wl_subcompositor", 1, 2, 0},
-    WlInterfaceDesc{"wl_subsurface", 1, 6, 0},
-    WlInterfaceDesc{"wl_fixes", 2, 3, 0},
     WlInterfaceDesc{"xdg_wm_base", 7, 4, 1},
     WlInterfaceDesc{"xdg_positioner", 7, 10, 0},
     WlInterfaceDesc{"xdg_surface", 7, 5, 1},
@@ -1891,146 +1897,12 @@ priv const WL_INTERFACES = [WL_INTERFACE_COUNT]WlInterfaceDesc{
     WlInterfaceDesc{"zxdg_toplevel_decoration_v1", 2, 3, 1},
 }
 priv const WL_MESSAGES = [WL_MESSAGE_COUNT]WlMessageDesc{
-    WlMessageDesc{"sync", "n", 8},                   // wl_display requests
-    WlMessageDesc{"get_registry", "n", 9},
-    WlMessageDesc{"error", "ous", 0},                // wl_display events
-    WlMessageDesc{"delete_id", "u", 0},
-    WlMessageDesc{"bind", "usun", 0},                // wl_registry requests
-    WlMessageDesc{"global", "usu", 0},               // wl_registry events
-    WlMessageDesc{"global_remove", "u", 0},
-    WlMessageDesc{"done", "u", 0},                   // wl_callback events
-    WlMessageDesc{"create_surface", "n", 10},        // wl_compositor requests
-    WlMessageDesc{"create_region", "n", 11},
-    WlMessageDesc{"release", "7", 0},
-    WlMessageDesc{"create_buffer", "niiiiu", 12},    // wl_shm_pool requests
-    WlMessageDesc{"destroy", "", 0},
-    WlMessageDesc{"resize", "i", 0},
-    WlMessageDesc{"create_pool", "nhi", 18},         // wl_shm requests
-    WlMessageDesc{"release", "2", 0},
-    WlMessageDesc{"format", "u", 0},                 // wl_shm events
-    WlMessageDesc{"destroy", "", 0},                 // wl_buffer requests
-    WlMessageDesc{"release", "", 0},                 // wl_buffer events
-    WlMessageDesc{"accept", "u?s", 0},               // wl_data_offer requests
-    WlMessageDesc{"receive", "sh", 0},
-    WlMessageDesc{"destroy", "", 0},
-    WlMessageDesc{"finish", "3", 0},
-    WlMessageDesc{"set_actions", "3uu", 0},
-    WlMessageDesc{"offer", "s", 0},                  // wl_data_offer events
-    WlMessageDesc{"source_actions", "3u", 0},
-    WlMessageDesc{"action", "3u", 0},
-    WlMessageDesc{"offer", "s", 0},                  // wl_data_source requests
-    WlMessageDesc{"destroy", "", 0},
-    WlMessageDesc{"set_actions", "3u", 0},
-    WlMessageDesc{"target", "?s", 0},                // wl_data_source events
-    WlMessageDesc{"send", "sh", 0},
-    WlMessageDesc{"cancelled", "", 0},
-    WlMessageDesc{"dnd_drop_performed", "3", 0},
-    WlMessageDesc{"dnd_finished", "3", 0},
-    WlMessageDesc{"action", "3u", 0},
-    WlMessageDesc{"start_drag", "?oo?ou", 21},       // wl_data_device requests
-    WlMessageDesc{"set_selection", "?ou", 25},
-    WlMessageDesc{"release", "2", 0},
-    WlMessageDesc{"data_offer", "n", 27},            // wl_data_device events
-    WlMessageDesc{"enter", "uoff?o", 28},
-    WlMessageDesc{"leave", "", 0},
-    WlMessageDesc{"motion", "uff", 0},
-    WlMessageDesc{"drop", "", 0},
-    WlMessageDesc{"selection", "?o", 33},
-    WlMessageDesc{"create_data_source", "n", 34},    // wl_data_device_manager requests
-    WlMessageDesc{"get_data_device", "no", 35},
-    WlMessageDesc{"release", "4", 0},
-    WlMessageDesc{"get_shell_surface", "no", 37},    // wl_shell requests
-    WlMessageDesc{"pong", "u", 0},                   // wl_shell_surface requests
-    WlMessageDesc{"move", "ou", 39},
-    WlMessageDesc{"resize", "ouu", 41},
-    WlMessageDesc{"set_toplevel", "", 0},
-    WlMessageDesc{"set_transient", "oiiu", 44},
-    WlMessageDesc{"set_fullscreen", "uu?o", 48},
-    WlMessageDesc{"set_popup", "ouoiiu", 51},
-    WlMessageDesc{"set_maximized", "?o", 57},
-    WlMessageDesc{"set_title", "s", 0},
-    WlMessageDesc{"set_class", "s", 0},
-    WlMessageDesc{"ping", "u", 0},                   // wl_shell_surface events
-    WlMessageDesc{"configure", "uii", 0},
-    WlMessageDesc{"popup_done", "", 0},
-    WlMessageDesc{"destroy", "", 0},                 // wl_surface requests
-    WlMessageDesc{"attach", "?oii", 58},
-    WlMessageDesc{"damage", "iiii", 0},
-    WlMessageDesc{"frame", "n", 61},
-    WlMessageDesc{"set_opaque_region", "?o", 62},
-    WlMessageDesc{"set_input_region", "?o", 63},
-    WlMessageDesc{"commit", "", 0},
-    WlMessageDesc{"set_buffer_transform", "2i", 0},
-    WlMessageDesc{"set_buffer_scale", "3i", 0},
-    WlMessageDesc{"damage_buffer", "4iiii", 0},
-    WlMessageDesc{"offset", "5ii", 0},
-    WlMessageDesc{"get_release", "7n", 64},
-    WlMessageDesc{"enter", "o", 65},                 // wl_surface events
-    WlMessageDesc{"leave", "o", 66},
-    WlMessageDesc{"preferred_buffer_scale", "6i", 0},
-    WlMessageDesc{"preferred_buffer_transform", "6u", 0},
-    WlMessageDesc{"get_pointer", "n", 67},           // wl_seat requests
-    WlMessageDesc{"get_keyboard", "n", 68},
-    WlMessageDesc{"get_touch", "n", 69},
-    WlMessageDesc{"release", "5", 0},
-    WlMessageDesc{"capabilities", "u", 0},           // wl_seat events
-    WlMessageDesc{"name", "2s", 0},
-    WlMessageDesc{"set_cursor", "u?oii", 70},        // wl_pointer requests
-    WlMessageDesc{"release", "3", 0},
-    WlMessageDesc{"enter", "uoff", 74},              // wl_pointer events
-    WlMessageDesc{"leave", "uo", 78},
-    WlMessageDesc{"motion", "uff", 0},
-    WlMessageDesc{"button", "uuuu", 0},
-    WlMessageDesc{"axis", "uuf", 0},
-    WlMessageDesc{"frame", "5", 0},
-    WlMessageDesc{"axis_source", "5u", 0},
-    WlMessageDesc{"axis_stop", "5uu", 0},
-    WlMessageDesc{"axis_discrete", "5ui", 0},
-    WlMessageDesc{"axis_value120", "8ui", 0},
-    WlMessageDesc{"axis_relative_direction", "9uu", 0},
-    WlMessageDesc{"warp", "11ff", 0},
-    WlMessageDesc{"release", "3", 0},                // wl_keyboard requests
-    WlMessageDesc{"keymap", "uhu", 0},               // wl_keyboard events
-    WlMessageDesc{"enter", "uoa", 80},
-    WlMessageDesc{"leave", "uo", 83},
-    WlMessageDesc{"key", "uuuu", 0},
-    WlMessageDesc{"modifiers", "uuuuu", 0},
-    WlMessageDesc{"repeat_info", "4ii", 0},
-    WlMessageDesc{"release", "3", 0},                // wl_touch requests
-    WlMessageDesc{"down", "uuoiff", 85},             // wl_touch events
-    WlMessageDesc{"up", "uui", 0},
-    WlMessageDesc{"motion", "uiff", 0},
-    WlMessageDesc{"frame", "", 0},
-    WlMessageDesc{"cancel", "", 0},
-    WlMessageDesc{"shape", "6iff", 0},
-    WlMessageDesc{"orientation", "6if", 0},
-    WlMessageDesc{"release", "3", 0},                // wl_output requests
-    WlMessageDesc{"geometry", "iiiiissi", 0},        // wl_output events
-    WlMessageDesc{"mode", "uiii", 0},
-    WlMessageDesc{"done", "2", 0},
-    WlMessageDesc{"scale", "2i", 0},
-    WlMessageDesc{"name", "4s", 0},
-    WlMessageDesc{"description", "4s", 0},
-    WlMessageDesc{"destroy", "", 0},                 // wl_region requests
-    WlMessageDesc{"add", "iiii", 0},
-    WlMessageDesc{"subtract", "iiii", 0},
-    WlMessageDesc{"destroy", "", 0},                 // wl_subcompositor requests
-    WlMessageDesc{"get_subsurface", "noo", 91},
-    WlMessageDesc{"destroy", "", 0},                 // wl_subsurface requests
-    WlMessageDesc{"set_position", "ii", 0},
-    WlMessageDesc{"place_above", "o", 94},
-    WlMessageDesc{"place_below", "o", 95},
-    WlMessageDesc{"set_sync", "", 0},
-    WlMessageDesc{"set_desync", "", 0},
-    WlMessageDesc{"destroy", "", 0},                 // wl_fixes requests
-    WlMessageDesc{"destroy_registry", "o", 96},
-    WlMessageDesc{"ack_global_remove", "2ou", 97},
-    WlMessageDesc{"destroy", "", 0},                 // xdg_wm_base requests
-    WlMessageDesc{"create_positioner", "n", 99},
-    WlMessageDesc{"get_xdg_surface", "no", 100},
+    WlMessageDesc{"destroy", "", 0},          // xdg_wm_base requests
+    WlMessageDesc{"create_positioner", "n", 4},
+    WlMessageDesc{"get_xdg_surface", "no", 5},
     WlMessageDesc{"pong", "u", 0},
-    WlMessageDesc{"ping", "u", 0},                   // xdg_wm_base events
-    WlMessageDesc{"destroy", "", 0},                 // xdg_positioner requests
+    WlMessageDesc{"ping", "u", 0},            // xdg_wm_base events
+    WlMessageDesc{"destroy", "", 0},          // xdg_positioner requests
     WlMessageDesc{"set_size", "ii", 0},
     WlMessageDesc{"set_anchor_rect", "iiii", 0},
     WlMessageDesc{"set_anchor", "u", 0},
@@ -2040,49 +1912,52 @@ priv const WL_MESSAGES = [WL_MESSAGE_COUNT]WlMessageDesc{
     WlMessageDesc{"set_reactive", "3", 0},
     WlMessageDesc{"set_parent_size", "3ii", 0},
     WlMessageDesc{"set_parent_configure", "3u", 0},
-    WlMessageDesc{"destroy", "", 0},                 // xdg_surface requests
-    WlMessageDesc{"get_toplevel", "n", 102},
-    WlMessageDesc{"get_popup", "n?oo", 103},
+    WlMessageDesc{"destroy", "", 0},          // xdg_surface requests
+    WlMessageDesc{"get_toplevel", "n", 7},
+    WlMessageDesc{"get_popup", "n?oo", 8},
     WlMessageDesc{"set_window_geometry", "iiii", 0},
     WlMessageDesc{"ack_configure", "u", 0},
-    WlMessageDesc{"configure", "u", 0},              // xdg_surface events
-    WlMessageDesc{"destroy", "", 0},                 // xdg_toplevel requests
-    WlMessageDesc{"set_parent", "?o", 106},
+    WlMessageDesc{"configure", "u", 0},       // xdg_surface events
+    WlMessageDesc{"destroy", "", 0},          // xdg_toplevel requests
+    WlMessageDesc{"set_parent", "?o", 11},
     WlMessageDesc{"set_title", "s", 0},
     WlMessageDesc{"set_app_id", "s", 0},
-    WlMessageDesc{"show_window_menu", "ouii", 107},
-    WlMessageDesc{"move", "ou", 111},
-    WlMessageDesc{"resize", "ouu", 113},
+    WlMessageDesc{"show_window_menu", "ouii", 12},
+    WlMessageDesc{"move", "ou", 16},
+    WlMessageDesc{"resize", "ouu", 18},
     WlMessageDesc{"set_max_size", "ii", 0},
     WlMessageDesc{"set_min_size", "ii", 0},
     WlMessageDesc{"set_maximized", "", 0},
     WlMessageDesc{"unset_maximized", "", 0},
-    WlMessageDesc{"set_fullscreen", "?o", 116},
+    WlMessageDesc{"set_fullscreen", "?o", 21},
     WlMessageDesc{"unset_fullscreen", "", 0},
     WlMessageDesc{"set_minimized", "", 0},
-    WlMessageDesc{"configure", "iia", 0},            // xdg_toplevel events
+    WlMessageDesc{"configure", "iia", 0},     // xdg_toplevel events
     WlMessageDesc{"close", "", 0},
     WlMessageDesc{"configure_bounds", "4ii", 0},
     WlMessageDesc{"wm_capabilities", "5a", 0},
-    WlMessageDesc{"destroy", "", 0},                 // xdg_popup requests
-    WlMessageDesc{"grab", "ou", 117},
-    WlMessageDesc{"reposition", "3ou", 119},
-    WlMessageDesc{"configure", "iiii", 0},           // xdg_popup events
+    WlMessageDesc{"destroy", "", 0},          // xdg_popup requests
+    WlMessageDesc{"grab", "ou", 22},
+    WlMessageDesc{"reposition", "3ou", 24},
+    WlMessageDesc{"configure", "iiii", 0},    // xdg_popup events
     WlMessageDesc{"popup_done", "", 0},
     WlMessageDesc{"repositioned", "3u", 0},
-    WlMessageDesc{"destroy", "", 0},                 // zxdg_decoration_manager_v1 requests
-    WlMessageDesc{"get_toplevel_decoration", "no", 121},
-    WlMessageDesc{"destroy", "", 0},                 // zxdg_toplevel_decoration_v1 requests
+    WlMessageDesc{"destroy", "", 0},          // zxdg_decoration_manager_v1 requests
+    WlMessageDesc{"get_toplevel_decoration", "no", 26},
+    WlMessageDesc{"destroy", "", 0},          // zxdg_toplevel_decoration_v1 requests
     WlMessageDesc{"set_mode", "u", 0},
     WlMessageDesc{"unset_mode", "", 0},
-    WlMessageDesc{"configure", "u", 0},              // zxdg_toplevel_decoration_v1 events
+    WlMessageDesc{"configure", "u", 0},       // zxdg_toplevel_decoration_v1 events
 }
 priv const WL_TYPES = [WL_TYPE_COUNT]i8{
-    -1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 13, 19, 6, -1, -1, -1, -1, -1, 4, -1,
-    -1, 8, 13, 13, -1, 8, -1, 7, -1, 13, -1, -1, 7, 7, 8, 9, 14, 12, 13, 14,
-    -1, 14, -1, -1, 13, -1, -1, -1, -1, -1, 18, 14, -1, 13, -1, -1, -1, 18, 6, -1,
-    -1, 2, 19, 19, 2, 18, 18, 15, 16, 17, -1, 13, -1, -1, -1, 13, -1, -1, -1, 13,
-    -1, 13, -1, -1, 13, -1, -1, 13, -1, -1, -1, 21, 13, 13, 13, 13, 1, 1, -1, 24,
-    25, 13, 26, 27, 25, 24, 26, 14, -1, -1, -1, 14, -1, 14, -1, -1, 18, 14, -1, 24,
-    -1, 29, 26,
+    -1, -1, -1, -1, 1, 2, -2, 3, 4, 2, 1, 3, -3, -1, -1, -1, -3, -1, -3, -1,
+    -1, -4, -3, -1, 1, -1, 6, 3,
+}
+priv fn wl_library_interface(code: i64) -> *WlInterface {
+    match code {
+        -2 => &wl_surface_interface
+        -3 => &wl_seat_interface
+        -4 => &wl_output_interface
+        _ => nil
+    }
 }

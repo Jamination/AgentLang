@@ -159,13 +159,13 @@ fn redraw() {
 
 fn on_global(data: *u8, registry: *WlRegistry, name: u32, interface: *u8, version: u32) {
     match from_cstr(interface) {
-        "wl_compositor" => app.compositor = cast[*WlCompositor](wl_registry_bind(registry, name, wl_compositor_interface(), min(version, 4)))
-        "wl_shm" => app.shm = cast[*WlShm](wl_registry_bind(registry, name, wl_shm_interface(), 1))
+        "wl_compositor" => app.compositor = cast[*WlCompositor](wl_registry_bind(registry, name, &wl_compositor_interface, min(version, 4)))
+        "wl_shm" => app.shm = cast[*WlShm](wl_registry_bind(registry, name, &wl_shm_interface, 1))
         "xdg_wm_base" => app.wm_base = cast[*XdgWmBase](wl_registry_bind(registry, name, xdg_wm_base_interface(), min(version, 2)))
         "wl_seat" => {
             if app.seat == nil {
                 // version 5: wl_pointer.frame and wl_keyboard.repeat_info, not yet "repeated" keys
-                app.seat = cast[*WlSeat](wl_registry_bind(registry, name, wl_seat_interface(), min(version, 5)))
+                app.seat = cast[*WlSeat](wl_registry_bind(registry, name, &wl_seat_interface, min(version, 5)))
             }
         }
         "zxdg_decoration_manager_v1" => app.decoration_manager = cast[*ZxdgDecorationManagerV1](
