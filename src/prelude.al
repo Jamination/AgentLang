@@ -1219,143 +1219,254 @@ fn dedup[T](v: *Vec[T]) {
     v.len = n
 }
 
-// ---------- hash map (open addressing, linear probing) ----------
-struct Map[K, V] { keys: []K, vals: []V, state: []u8, len: i64, used: i64 }
+// ---------- hash map that keeps the insertion order ----------
+// The entries live in three parallel arrays in the order of their first insertion: keys[e],
+// vals[e], tags[e] for e < used (the slices are as long as the capacity; what lies beyond
+// `used` is uninitialised). tags[e] is the upper half of the key's hash with the top bit set;
+// 0 marks a deleted entry (a hole; `len` counts the live ones). `index` is the open-addressing
+// table (linear probing, a power of two long) that finds an entry: the home slot of a key is
+// tag & mask; a slot is 0 (free), or e + 1 in the bits of the mask and the tag in the others,
+// or mask (its entry was deleted: equal to no tag in the upper bits). The entry arrays hold
+// 3/4 of len(index) entries, so the table always has free slots. When they are full, the map
+// is compacted in place if a quarter or more are holes, and grows otherwise.
+struct Map[K, V] { keys: []K, vals: []V, tags: []u32, index: []u32, len: i64, used: i64 }
 
 fn map[K, V]() -> Map[K, V] {
-    return Map[K, V]{keys: alloc[K](0), vals: alloc[V](0), state: alloc[u8](0), len: 0, used: 0}
+    return Map[K, V]{}
 }
 
+// the entry number of k, or -1
 fn __map_find[K, V](m: *Map[K, V], k: K) -> i64 {
-    n := len(m.state)
+    n := len(m.index)
     if n == 0 {
         return -1
     }
-    mask := n - 1
-    i := i64(hash(k) >> 1) & mask
+    mask := u32(n - 1)
+    tag := u32(hash(k) >> 32) | 0x8000_0000
+    i := tag & mask
     loop {
-        s := m.state[i]
+        s := m.index[i]
         if s == 0 {
             return -1
         }
-        if s == 1 && m.keys[i] == k {
-            return i
+        if (s ^ tag) <= mask {
+            e := i64(s & mask) - 1
+            if m.keys[e] == k {
+                return e
+            }
         }
         i = (i + 1) & mask
     }
 }
 
-fn __map_grow[K, V](m: *Map[K, V]) {
-    old_keys := m.keys
-    old_vals := m.vals
-    old_state := m.state
-    n := max(16, m.len * 4)
-    cap := 16
-    while cap < n {
-        cap = cap * 2
+// enters entry e into a table that does not have it
+fn __map_place(index: []u32, tag: u32, e: i64) {
+    mask := u32(len(index) - 1)
+    i := tag & mask
+    while index[i] != 0 {
+        i = (i + 1) & mask
     }
-    m.keys = alloc[K](cap)
-    m.vals = alloc[V](cap)
-    m.state = alloc[u8](cap)
-    m.len = 0
-    m.used = 0
-    for i in 0..len(old_state) {
-        if old_state[i] == 1 {
-            set(m, old_keys[i], old_vals[i])
+    index[i] = (tag & ~mask) | u32(e + 1)
+}
+
+// the live entries of s, moved to the front of dst (dst may be s)
+fn __map_pack[T](dst: []T, s: []T, tags: []u32, used: i64) {
+    n := 0
+    for e in 0..used {
+        if tags[e] != 0 {
+            dst[n] = s[e]
+            n += 1
         }
+    }
+}
+
+// makes room for one more entry: removes the holes, in larger arrays unless the holes are a
+// quarter of the entries (4 times the size while small: fewer steps for the many maps that
+// stay small; twice later: less memory)
+fn __map_grow[K, V](m: *Map[K, V]) {
+    cap := len(m.index)
+    keys := m.keys
+    vals := m.vals
+    tags := m.tags
+    if cap == 0 || m.len * 4 > m.used * 3 {
+        cap = if cap < 65536 { max(16, cap * 4) } else { cap * 2 }
+        if cap > 0x8000_0000 {
+            __die("panic: Map too large", "", "")
+        }
+        n := cap / 4 * 3
+        // (the spare capacity is never read before it is written)
+        keys = mkslice[K](__alloc_raw(n * sizeof[K]()), n)
+        vals = mkslice[V](__alloc_raw(n * sizeof[V]()), n)
+        tags = mkslice[u32](__alloc_raw(n * 4), n)
+        m.index = alloc[u32](cap)
+    } else {
+        memfill(ptr(m.index), 0, cap * 4)
+    }
+    if m.len == m.used {
+        if ptr(keys) != ptr(m.keys) {
+            memcopy(ptr(keys), ptr(m.keys), m.used * sizeof[K]())
+            memcopy(ptr(vals), ptr(m.vals), m.used * sizeof[V]())
+            memcopy(ptr(tags), ptr(m.tags), m.used * 4)
+        }
+    } else {
+        __map_pack(keys, m.keys, m.tags, m.used)
+        __map_pack(vals, m.vals, m.tags, m.used)
+        __map_pack(tags, m.tags, m.tags, m.used)
+    }
+    m.keys = keys
+    m.vals = vals
+    m.tags = tags
+    m.used = m.len
+    for e in 0..m.used {
+        __map_place(m.index, tags[e], e)
     }
 }
 
 fn set[K, V](m: *Map[K, V], k: K, v: V) {
-    if (m.used + 1) * 4 > len(m.state) * 3 {
+    tag := u32(hash(k) >> 32) | 0x8000_0000
+    slot := -1              // where a new entry goes: the first reusable slot on the way
+    if len(m.index) != 0 {
+        mask := u32(len(m.index) - 1)
+        i := tag & mask
+        loop {
+            s := m.index[i]
+            if s == 0 {
+                if slot < 0 {
+                    slot = i64(i)
+                }
+                break
+            }
+            if (s ^ tag) <= mask {
+                e := i64(s & mask) - 1
+                if m.keys[e] == k {
+                    m.vals[e] = v
+                    return
+                }
+            } else if s == mask && slot < 0 {
+                slot = i64(i)
+            }
+            i = (i + 1) & mask
+        }
+    }
+    e := m.used
+    if e == len(m.keys) {
         __map_grow(m)
+        e = m.used
+        slot = -1
     }
-    mask := len(m.state) - 1
-    i := i64(hash(k) >> 1) & mask
-    first_free := -1
-    loop {
-        s := m.state[i]
-        if s == 0 {
-            break
-        }
-        if s == 1 && m.keys[i] == k {
-            m.vals[i] = v
-            return
-        }
-        if s == 2 && first_free < 0 {
-            first_free = i
-        }
-        i = (i + 1) & mask
-    }
-    if first_free >= 0 {
-        i = first_free
-    } else {
-        m.used += 1
-    }
-    m.state[i] = 1
-    m.keys[i] = k
-    m.vals[i] = v
+    m.keys[e] = k
+    m.vals[e] = v
+    m.tags[e] = tag
+    m.used = e + 1
     m.len += 1
+    if slot < 0 {
+        __map_place(m.index, tag, e)
+    } else {
+        m.index[slot] = (tag & ~u32(len(m.index) - 1)) | u32(e + 1)
+    }
 }
 
 fn get[K, V](m: *Map[K, V], k: K) -> (V, bool) {
-    i := __map_find(m, k)
-    if i < 0 {
+    e := __map_find(m, k)
+    if e < 0 {
         zero: V
         return (zero, false)
     }
-    return (m.vals[i], true)
+    return (m.vals[e], true)
 }
 
 // the value stored for k, or `default` when k is missing
 fn get_or[K, V](m: *Map[K, V], k: K, default: V) -> V {
-    i := __map_find(m, k)
-    if i < 0 {
+    e := __map_find(m, k)
+    if e < 0 {
         return default
     }
-    return m.vals[i]
+    return m.vals[e]
 }
 
 fn has[K, V](m: *Map[K, V], k: K) -> bool {
     return __map_find(m, k) >= 0
 }
 
+// removes k (false if it was missing): its entry becomes a hole, its slot stays taken
 fn del[K, V](m: *Map[K, V], k: K) -> bool {
-    i := __map_find(m, k)
-    if i < 0 {
+    n := len(m.index)
+    if n == 0 {
         return false
     }
-    m.state[i] = 2
-    m.len -= 1
-    return true
+    mask := u32(n - 1)
+    tag := u32(hash(k) >> 32) | 0x8000_0000
+    i := tag & mask
+    loop {
+        s := m.index[i]
+        if s == 0 {
+            return false
+        }
+        if (s ^ tag) <= mask {
+            e := i64(s & mask) - 1
+            if m.keys[e] == k {
+                m.index[i] = mask
+                m.tags[e] = 0
+                m.len -= 1
+                return true
+            }
+        }
+        i = (i + 1) & mask
+    }
 }
 
 // removes every entry
 fn clear[K, V](m: *Map[K, V]) {
-    *m = map[K, V]()
+    *m = Map[K, V]{}
 }
 
 // a pointer to the value stored for k (nil if k is missing), to change it in place; valid
 // until the next `set` of a new key
 fn ptr[K, V](m: *Map[K, V], k: K) -> *V {
-    i := __map_find(m, k)
-    if i < 0 {
+    e := __map_find(m, k)
+    if e < 0 {
         return nil
     }
-    return &m.vals[i]
+    return &m.vals[e]
 }
 
-// all keys, in unspecified order
+// a new slice of the live entries of s
+fn __map_live[K, V, T](m: *Map[K, V], s: []T) -> []T {
+    out := mkslice[T](__alloc_raw(m.len * sizeof[T]()), m.len)
+    if m.len == m.used {
+        memcopy(ptr(out), ptr(s), m.len * sizeof[T]())
+    } else {
+        __map_pack(out, s, m.tags, m.used)
+    }
+    return out
+}
+
+// all keys, in the order in which they were first inserted (a new slice)
 fn keys[K, V](m: *Map[K, V]) -> []K {
-    out := alloc[K](m.len)
+    return __map_live(m, m.keys)
+}
+
+// all values, in the order of keys()
+fn values[K, V](m: *Map[K, V]) -> []V {
+    return __map_live(m, m.vals)
+}
+
+// print(m): {key: value, key: value} in insertion order
+fn __put_map[K, V](m: *Map[K, V]) {
+    putc('{')
     n := 0
-    for i in 0..len(m.state) {
-        if m.state[i] == 1 {
-            out[n] = m.keys[i]
+    for e in 0..m.used {
+        if m.tags[e] != 0 {
+            if n > 0 {
+                __put_str(", ")
+            }
+            put(m.keys[e])
+            __put_str(": ")
+            put(m.vals[e])
             n += 1
         }
     }
-    return out
+    putc('}')
 }
 
 // ---------- clone ----------
@@ -1395,15 +1506,17 @@ fn __clone_vec[T](v: Vec[T]) -> Vec[T] {
     return Vec[T]{buf: __clone_slice(v[..]), len: v.len}
 }
 
-// the keys or values of a Map: only occupied slots hold a value (`plain`: T owns no storage)
-fn __clone_slots[T](s: []T, state: []u8, plain: bool) -> []T {
+// the keys or values of a Map with the same capacity: only live entries hold a value
+// (`plain`: T owns no storage)
+fn __clone_slots[T](s: []T, tags: []u32, used: i64, plain: bool) -> []T {
+    out := mkslice[T](__alloc_raw(len(s) * sizeof[T]()), len(s))
     if plain {
-        return __clone_plain(s)
-    }
-    out := alloc[T](len(s))
-    for i in 0..len(s) {
-        if state[i] == 1 {
-            out[i] = clone(s[i])
+        memcopy(ptr(out), ptr(s), used * sizeof[T]())
+    } else {
+        for e in 0..used {
+            if tags[e] != 0 {
+                out[e] = clone(s[e])
+            }
         }
     }
     return out
@@ -1411,9 +1524,10 @@ fn __clone_slots[T](s: []T, state: []u8, plain: bool) -> []T {
 
 fn __clone_map[K, V](m: *Map[K, V], kplain: bool, vplain: bool) -> Map[K, V] {
     return Map[K, V]{
-        keys: __clone_slots(m.keys, m.state, kplain),
-        vals: __clone_slots(m.vals, m.state, vplain),
-        state: __clone_plain(m.state),
+        keys: __clone_slots(m.keys, m.tags, m.used, kplain),
+        vals: __clone_slots(m.vals, m.tags, m.used, vplain),
+        tags: __clone_slots(m.tags, m.tags, m.used, true),
+        index: __clone_plain(m.index),
         len: m.len,
         used: m.used,
     }

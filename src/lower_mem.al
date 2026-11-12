@@ -343,7 +343,7 @@ priv fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
 }
 
 // the key and value types of the library's `Map[K, V]`
-priv fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
+fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
     match self.types.k(t) {
         Struct(sid) => {
             di, has := self.p_struct_names.get("Map")

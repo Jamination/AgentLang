@@ -1,0 +1,25 @@
+{} 0 [] [] false false (0, false) true
+{pear: 2, fig: 2, apple: 1, kiwi: 1, date: 1} 5
+[pear, fig, apple, kiwi, date] [2, 2, 1, 1, 1]
+{pear: 2, fig: 20, apple: 101, kiwi: 1, date: 1}
+true false false 4
+{pear: 2, apple: 101, kiwi: 1, date: 1} [pear, apple, kiwi, date] [2, 101, 1, 1]
+{pear: 9, apple: 101, kiwi: 1, date: 1, fig: 3} 5 (3, true) (0, false) 1 true
+{apple: 101, kiwi: 1, date: 1, fig: 3, extra: 1}
+{pear: 9, apple: 101, kiwi: 1, date: 1, fig: 3, own: 7}
+{} 0 [] false
+{z: 1, a: 2} 5 [apple, kiwi, date, fig, extra]
+{} 0 [] []
+{b: 1, a: 2}
+{} 0 [] [] false
+{(2, true): 2.5, (1, false): 1.5} [(2, true), (1, false)] [2.5, 1.5]
+Box{m: {y: 1, x: 2}, n: 1} {3: three, 1: one} {3: three, 1: one} Some({3: three, 1: one})
+[axe][axe, gold][orc, bat][orc, bat]
+2 3
+[orc2, bat2]
+[(2, true), (1, false)]
+inserted 100000 [1905964664242128, 2294167169950881, 2919951125055866] [99997, 99998, 99999]
+deleted 66666 [2294167169950881, 2919951125055866, 3582378187130906]
+grown 233333 [-149999, -150000] 0
+churn {-2: 7, 199995: 399990, 199996: 7, 199997: 399994, 199998: 399996, 199999: 399998} 6 true 0
+random 197 true 0

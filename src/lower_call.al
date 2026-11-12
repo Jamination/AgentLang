@@ -2268,6 +2268,15 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 self.put_lit("...", pos)
                 return
             }
+            match self.cx.map_kv(v.ty) {
+                Some(kv) => {
+                    // a Map prints its entries: {key: value, ...} in insertion order
+                    m := self.sval(self.cx.types.ptr_to(v.ty), v.v)
+                    self.call_rt("__put_map", vec_of([]i64{kv.0, kv.1}), vec_of([]Val{m}), pos)
+                    return
+                }
+                None => {}
+            }
             name := self.cx.types.structs[sid].name
             fields := self.cx.types.structs[sid].fields
             self.put_lit(fmt(name, "{"), pos)
