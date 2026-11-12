@@ -666,6 +666,9 @@ priv fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
         self.err(pos, fmt("struct `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
         return T_ERR
     }
+    if self.inst_too_deep(d.name, targs, pos) {
+        return T_ERR
+    }
     known, found := self.struct_insts.get((si, targs.items()))
     if found {
         return known
@@ -712,6 +715,9 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     d := self.enum_decls[ei]
     if d.tparams.len != targs.len {
         self.err(pos, fmt("enum `", d.name, "` expects ", d.tparams.len, " type argument(s), got ", targs.len))
+        return T_ERR
+    }
+    if self.inst_too_deep(d.name, targs, pos) {
         return T_ERR
     }
     known, found := self.enum_insts.get((ei, targs.items()))
@@ -834,6 +840,18 @@ fn fn_abi(self: *Cx, f: *Func, ptys: []i64, rty: i64) {
     }
 }
 
+// a generic instantiated with a type argument nested too deeply: it instantiates itself with
+// ever larger types (`fn f[T](x: T) { f([]T{x}) }`), which would never end
+priv fn inst_too_deep(self: *Cx, name: str, targs: Vec[i64], pos: Pos) -> bool {
+    for t in targs {
+        if self.types.too_deep(t) {
+            self.err(pos, fmt("`", name, "` instantiates itself with ever larger type arguments (a type argument nested more than 40 levels deep, or too large)"))
+            return true
+        }
+    }
+    return false
+}
+
 // ---------- function instances ----------
 fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     known, found := self.fn_insts.get((di, targs.items()))
@@ -841,6 +859,8 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
         return known
     }
     d := self.fn_decls[di]
+    // too deep: the instance gets a signature but no body, whose lowering would instantiate further
+    deep := self.inst_too_deep(d.name, targs, d.pos)
     env := map[str, i64]()
     for i in 0..min(d.tparams.len, targs.len) {
         env.set(d.tparams[i], targs[i])
@@ -888,7 +908,7 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     self.module.funcs.push(f)
     self.fn_sigs.push((ptys, rty))
     self.fn_insts.set((di, clone(targs).items()), fid)
-    if !is_ext {
+    if !is_ext && !deep {
         self.work.push((fid, di, targs))
     }
     return fid
