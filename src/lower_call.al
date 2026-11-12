@@ -461,6 +461,10 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
         RetAbi.None => {
             self.ins(op, Void, ir_args, k)
             res = val_unit()
+            if rty != T_UNIT && rty != T_NEVER {
+                // a zero-size value (`struct E {}`): nothing is passed, but it has its type
+                res = self.mval(rty, self.temp(rty))
+            }
         }
         SRet => {
             self.ins(op, Void, ir_args, k)
