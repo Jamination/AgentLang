@@ -1228,19 +1228,50 @@ fn length_sq(v: vec4) -> f32 {
     dot(v, v)
 }
 
+// (length and normalize take the fast way while the squared length is a normal finite f32, that
+// is for lengths between about 1.1e-19 and 1.8e19; beyond that they scale by the largest
+// component first, so that huge and tiny vectors work too)
+
 // Euclidean length
 fn length(v: vec2) -> f32 {
-    sqrt(dot(v, v))
+    l := dot(v, v)
+    if l >= 1.17549435e-38 && l < INF {
+        return sqrt(l)
+    }
+    m := fmax(fabs(v.x), fabs(v.y))
+    if !(m > 0.0) || m == INF {
+        return sqrt(l)
+    }
+    w := v / m
+    m * sqrt(dot(w, w))
 }
 
 // Euclidean length
 fn length(v: vec3) -> f32 {
-    sqrt(dot(v, v))
+    l := dot(v, v)
+    if l >= 1.17549435e-38 && l < INF {
+        return sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) || m == INF {
+        return sqrt(l)
+    }
+    w := v / m
+    m * sqrt(dot(w, w))
 }
 
 // Euclidean length
 fn length(v: vec4) -> f32 {
-    sqrt(dot(v, v))
+    l := dot(v, v)
+    if l >= 1.17549435e-38 && l < INF {
+        return sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) || m == INF {
+        return sqrt(l)
+    }
+    w := v / m
+    m * sqrt(dot(w, w))
 }
 
 // distance between two points
@@ -1261,19 +1292,43 @@ fn distance(a: vec4, b: vec4) -> f32 {
 // v scaled to length 1; the zero vector stays zero
 fn normalize(v: vec2) -> vec2 {
     l := dot(v, v)
-    if l > 0.0 { v / sqrt(l) } else { vec2(0.0) }
+    if l >= 1.17549435e-38 && l < INF {
+        return v / sqrt(l)
+    }
+    m := fmax(fabs(v.x), fabs(v.y))
+    if !(m > 0.0) {
+        return vec2(0.0)
+    }
+    w := v / m
+    w / sqrt(dot(w, w))
 }
 
 // v scaled to length 1; the zero vector stays zero
 fn normalize(v: vec3) -> vec3 {
     l := dot(v, v)
-    if l > 0.0 { v / sqrt(l) } else { vec3(0.0) }
+    if l >= 1.17549435e-38 && l < INF {
+        return v / sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) {
+        return vec3(0.0)
+    }
+    w := v / m
+    w / sqrt(dot(w, w))
 }
 
 // v scaled to length 1; the zero vector stays zero
 fn normalize(v: vec4) -> vec4 {
     l := dot(v, v)
-    if l > 0.0 { v / sqrt(l) } else { vec4(0.0) }
+    if l >= 1.17549435e-38 && l < INF {
+        return v / sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) {
+        return vec4(0.0)
+    }
+    w := v / m
+    w / sqrt(dot(w, w))
 }
 
 // a at t = 0, b at t = 1

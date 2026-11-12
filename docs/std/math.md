@@ -91,7 +91,7 @@ The `f32` versions are single-precision kernels, not `f64` round trips.
 | Functions | |
 |-----------|---|
 | `dot cross length length_sq distance` | `cross` of two `vec2` is the z of the 3D cross product |
-| `normalize` | the zero vector stays zero |
+| `normalize` | the zero vector stays zero; `length`, `distance` and `normalize` also work where the squared length overflows or underflows `f32` (lengths above 1.8e19 or below 1.1e-19); `length_sq` does not |
 | `lerp min max clamp abs floor ceil fract` | lane-wise |
 | `min_component max_component` | |
 | `reflect(v, n) refract(v, n, eta) project(a, b) angle_between(a, b)` | `refract` returns zero on total internal reflection |
