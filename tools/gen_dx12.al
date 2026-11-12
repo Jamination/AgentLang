@@ -2,9 +2,10 @@
 // repository root:
 //
 //     ./build/alc run tools/gen_dx12.al               writes std/dx12.al, tests/std/dx12.al, tests/std/dx12.out
-//     ./build/alc run tools/gen_dx12.al -- --verify   also writes /tmp/dx12_verify.c, which states every layout,
-//                                                     vtable slot and constant as a C static assertion, and
-//                                                     prints the compiler command that checks it against the headers
+//     ./build/alc run tools/gen_dx12.al -- --verify   also writes tmp/Dx12Bindings/verify.c, which states every
+//                                                     layout, vtable slot and constant as a C static assertion,
+//                                                     and has a C compiler check it against the headers
+//                                                     (x86_64-w64-mingw32-gcc, or clang)
 //
 // Options: --include DIR (header directory), --quiet.
 //
@@ -12,6 +13,7 @@
 // declarations are read: `typedef enum`, `typedef struct`, `typedef struct XVtbl`, `DEFINE_GUID`,
 // object-like `#define`s and the exported function prototypes. Mapping rules are described in
 // docs/std/dx12.md.
+use std.os
 
 const INCLUDE_DIRS = [_]str{"/usr/x86_64-w64-mingw32/include", "/usr/include/wine/windows"}
 
@@ -65,7 +67,7 @@ const SELF = "tools/gen_dx12.al"
 const MODULE_PATH = "std/dx12.al"
 const TEST_PATH = "tests/std/dx12.al"
 const EXPECTED_PATH = "tests/std/dx12.out"
-const VERIFY_PATH = "/tmp/dx12_verify.c"
+const VERIFY_PATH = "tmp/Dx12Bindings/verify.c"
 
 fn fail(msg: str) -> never {
     eprint(concat("gen_dx12: ", msg))
@@ -120,32 +122,15 @@ struct Iface { name: str, methods: []Method }
 
 struct Func { dll: str, name: str, ret: Raw, params: []Param, cdecl: str }
 
-// A map that keeps the order of insertion: the values in a Vec, their positions by name.
-struct Dict[V] { at: Map[str, i64], items: Vec[V] }
-
-// Position of `name` in d.items, or -1.
-fn index[V](d: *Dict[V], name: str) -> i64 { d.at.get_or(name, -1) }
-
-// Adds `v` under `name`; a name that is already there keeps its position and gets the new value.
-fn store[V](d: *Dict[V], name: str, v: V) {
-    i := d.index(name)
-    if i >= 0 {
-        d.items[i] = v
-    } else {
-        d.at.set(name, d.items.len)
-        d.items.push(v)
-    }
-}
-
 struct Db {
-    structs: Dict[Record]
+    structs: Map[str, Record]  // these three in declaration order
     tags: Map[str, str]        // struct tag -> typedef name
-    enums: Dict[CEnum]
+    enums: Map[str, CEnum]
     aliases: Map[str, Raw]     // typedef name -> the type it stands for
     consts: Map[str, Num]      // enumerators and #defines, for evaluating later expressions
     defines: Vec[Define]
     guids: Vec[Guid]
-    ifaces: Dict[Iface]
+    ifaces: Map[str, Iface]
     funcs: Vec[Func]
     skipped: Vec[str]          // notes about declarations that were left out
 }
@@ -256,9 +241,9 @@ fn named(db: *Db, c_name: str) -> Ty {
     if prim(name) != "" { return Prim(prim(name)) }
     pointer, found := pointer_name(name)
     if found { return pointer }
-    if db.structs.index(name) >= 0 { return Struct(name) }
-    if db.enums.index(name) >= 0 { return Enum(name) }
-    if db.ifaces.index(name) >= 0 { return Iface(name) }
+    if db.structs.has(name) { return Struct(name) }
+    if db.enums.has(name) { return Enum(name) }
+    if db.ifaces.has(name) { return Iface(name) }
     target, aliased := db.aliases.get(name)
     if aliased { return resolve(db, target) }
     Opaque(name)
@@ -275,11 +260,11 @@ fn resolve(db: *Db, raw: Raw) -> Ty {
     ty
 }
 
-// Position in db.structs.items of the struct or union that `ty` is, or -1.
-fn record_of(db: *Db, ty: Ty) -> i64 {
+// The struct or union that `ty` is, or nil.
+fn record_of(db: *Db, ty: Ty) -> *Record {
     match ty {
-        Struct(name) => db.structs.index(name)
-        _ => -1
+        Struct(name) => db.structs.ptr(name)
+        _ => nil
     }
 }
 
@@ -294,7 +279,7 @@ fn layout(db: *Db, ty: Ty) -> (i64, i64) {
             (size * n, align)
         }
         Struct(name) => {
-            s := db.structs.items[db.structs.index(name)]
+            s := *db.structs.ptr(name)
             size := 0
             align := 1
             for f in s.fields {
@@ -330,12 +315,12 @@ fn offsets(db: *Db, s: Record) -> []i64 {
 fn al(db: *Db, ty: Ty) -> str {
     match ty {
         Prim(name), Fn(name), Struct(name), Iface(name) => name
-        Enum(name) => db.enums.items[db.enums.index(name)].al
+        Enum(name) => db.enums.ptr(name).al
         Arr(elem, n) => fmt("[", n, "]", al(db, *elem))
         Ptr(Void), Ptr(Opaque(_)) => "*u8"
         Ptr(inner) => {
             r := record_of(db, *inner)
-            if r >= 0 && db.structs.items[r].bitfield { "*u8" } else { concat("*", al(db, *inner)) }
+            if r != nil && r.bitfield { "*u8" } else { concat("*", al(db, *inner)) }
         }
         Void => fail("void has no AL type")
         Opaque(name) => fail(fmt("no AL type for ", name, " (used by value)"))
@@ -345,9 +330,6 @@ fn al(db: *Db, ty: Ty) -> str {
 // ---- scanning -----------------------------------------------------------------------------------
 
 fn is_word(c: u8) -> bool { is_alnum(c) || c == '_' }
-
-// ' ', '\t', '\n', vertical tab, form feed, '\r'
-fn is_space(c: u8) -> bool { c == ' ' || (c >= '\t' && c <= '\r') }
 
 // The position of the first character at or after `i` that is not white space.
 fn skip_space(s: str, i: i64) -> i64 {
@@ -375,37 +357,25 @@ fn word_end(s: str, i: i64) -> i64 {
 
 // The position of the first character at or after `i` that is one of `stops`; len(s) if there is none.
 fn scan_to(s: str, i: i64, stops: str) -> i64 {
-    while i < len(s) && !contains(stops, s[i]) {
-        i += 1
-    }
-    i
-}
-
-// Value of a hexadecimal digit, -1 for any other character.
-fn hex_digit(c: u8) -> i64 {
-    if is_digit(c) { return i64(c - '0') }
-    if c >= 'a' && c <= 'f' { return i64(c - 'a') + 10 }
-    if c >= 'A' && c <= 'F' { return i64(c - 'A') + 10 }
-    -1
+    k := find_any(s, stops, i)
+    if k < 0 { len(s) } else { k }
 }
 
 // The C integer literal (decimal or 0x...) at s[i..], without its suffix: (value, end). `end`
 // is `i` if there is none.
 fn scan_int(s: str, i: i64) -> (i64, i64) {
-    v := 0
-    if i + 2 < len(s) && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X') && hex_digit(s[i + 2]) >= 0 {
-        i += 2
-        while i < len(s) && hex_digit(s[i]) >= 0 {
-            v = v * 16 + hex_digit(s[i])
-            i += 1
-        }
-    } else {
-        while i < len(s) && is_digit(s[i]) {
-            v = v * 10 + i64(s[i] - '0')
-            i += 1
+    end := i
+    while end < len(s) && is_digit(s[end]) {
+        end += 1
+    }
+    if end == i + 1 && s[i] == '0' && end + 1 < len(s) && s[end] | 0x20 == 'x' && contains("0123456789abcdefABCDEF", s[end + 1]) {
+        end += 1
+        while end < len(s) && contains("0123456789abcdefABCDEF", s[end]) {
+            end += 1
         }
     }
-    (v, i)
+    v, _ := parse_i64(s[i..end], 0)
+    (v, end)
 }
 
 // True if the text is one hexadecimal literal.
@@ -444,20 +414,7 @@ fn tokens(text: str) -> []str {
 }
 
 // White space trimmed and every run of it inside turned into one space.
-fn squeeze(s: str) -> str {
-    out := vec[u8]()
-    for c in s {
-        if !is_space(c) {
-            out.push(c)
-        } else if out.len > 0 && out.last() != ' ' {
-            out.push(' ')
-        }
-    }
-    if out.len > 0 && out.last() == ' ' {
-        out.pop()
-    }
-    out[..]
-}
+fn squeeze(s: str) -> str { join(fields(s), " ") }
 
 // The text without comments, and with every line that ends in a backslash joined to the next one.
 fn strip_comments(s: str) -> str {
@@ -783,7 +740,7 @@ fn parse_members(db: *Db, owner: str, toks: []str, path: []str) -> ([]Field, boo
             parts.extend(path)
             parts.push(name)
             sname := join(parts[..], "_")
-            db.structs.store(sname, Record{sname, inner, union, owner, join(sub[..], "."), anon, false})
+            db.structs.set(sname, Record{sname, inner, union, owner, join(sub[..], "."), anon, false})
             fields.push(Field{name: name, ty: Struct(sname)})
             i = end + 1
             continue
@@ -844,7 +801,7 @@ fn parse_enum(db: *Db, name: str, body: str) {
         unsigned = unsigned || value > 0x7fffffff
         items.push(Enumerator{item, value, hex_literal(expr)})
     }
-    db.enums.store(name, CEnum{name, if unsigned { "u32" } else { "i32" }, items[..]})
+    db.enums.set(name, CEnum{name, if unsigned { "u32" } else { "i32" }, items[..]})
 }
 
 // The body of `typedef struct XVtbl`: BEGIN_INTERFACE, one function pointer per method in vtable
@@ -878,7 +835,7 @@ fn parse_vtbl(db: *Db, c_name: str, body: str) {
         cdecl := fmt(ret, " ", name, "::", declarator[2], "(", c_list(params[1..]), ")")
         methods.push(Method{declarator[2], ret_type, params[1..], cdecl})
     }
-    db.ifaces.store(name, Iface{name, methods[..]})
+    db.ifaces.set(name, Iface{name, methods[..]})
 }
 
 // `typedef TYPE NAME`, as tokens.
@@ -889,14 +846,13 @@ fn parse_alias(db: *Db, toks: []str) {
     }
     name, raw, _ := parse_decl(db, toks)
     _, is_pointer := pointer_name(name)
-    if name == "" || prim(name) != "" || is_pointer || db.aliases.has(name) || db.structs.index(name) >= 0 {
+    if name == "" || prim(name) != "" || is_pointer || db.aliases.has(name) || db.structs.has(name) {
         return
     }
-    target := db.structs.index(db.tags.get_or(raw.base, raw.base))
-    if target >= 0 && raw.stars == 0 && raw.dims.len == 0 && raw.base != "GUID" {
+    t, found := db.structs.get(db.tags.get_or(raw.base, raw.base))
+    if found && raw.stars == 0 && raw.dims.len == 0 && raw.base != "GUID" {
         // AL has no type aliases: `typedef RECT D3D12_RECT` becomes a struct with the same members
-        t := db.structs.items[target]
-        db.structs.store(name, Record{name: name, fields: t.fields, union: t.union})
+        db.structs.set(name, Record{name: name, fields: t.fields, union: t.union})
     } else {
         db.aliases.set(name, raw)
     }
@@ -950,10 +906,10 @@ fn parse_typedef(db: *Db, s: str, i: i64) -> i64 {
             parse_vtbl(db, tag[..len(tag) - 4], body)
         } else {
             db.tags.set(tag, name)
-            if db.structs.index(name) < 0 {
-                db.structs.store(name, Record{name: name})   // keeps the position in front of its inline types
+            if !db.structs.has(name) {
+                db.structs.set(name, Record{name: name})   // keeps the position in front of its inline types
                 fields, bitfield := parse_members(db, name, tokens(body), nil)
-                db.structs.store(name, Record{name: name, fields: fields, union: head[0] == "union", bitfield: bitfield})
+                db.structs.set(name, Record{name: name, fields: fields, union: head[0] == "union", bitfield: bitfield})
             }
         }
     } else {
@@ -1036,9 +992,9 @@ fn parse_flags(db: *Db, s: str, i: i64) -> i64 {
     name_end := word_end(s, name_start)
     close := skip_space(s, name_end)
     if open >= len(s) || s[open] != '(' || close >= len(s) || s[close] != ')' { return i }
-    k := db.enums.index(s[name_start..name_end])
-    if k < 0 { fail(concat("DEFINE_ENUM_FLAG_OPERATORS of an unknown enum: ", s[name_start..name_end])) }
-    db.enums.items[k].al = "u32"
+    e := db.enums.ptr(s[name_start..name_end])
+    if e == nil { fail(concat("DEFINE_ENUM_FLAG_OPERATORS of an unknown enum: ", s[name_start..name_end])) }
+    e.al = "u32"
     close + 1
 }
 
@@ -1105,7 +1061,7 @@ fn read_header(dir: str, file: str) -> str {
 fn by_value_bitfield(db: *Db, ty: Ty) -> bool {
     match ty {
         Arr(elem, _) => by_value_bitfield(db, *elem)
-        Struct(name) => db.structs.items[db.structs.index(name)].bitfield
+        Struct(name) => db.structs.ptr(name).bitfield
         _ => false
     }
 }
@@ -1121,7 +1077,7 @@ fn load(db: *Db, include_dir: str) {
         db.defines.push(Define{x.name, concat("0x", hex(u64(x.value))), Int(x.value), false})
     }
     // resolve member types now that every name is known
-    structs := db.structs.items[..]
+    structs := db.structs.values()
     for s in structs {
         for k in 0..s.fields.len {
             if s.fields[k].ctype != "" {
@@ -1141,7 +1097,7 @@ fn load(db: *Db, include_dir: str) {
 // ---- emission -----------------------------------------------------------------------------------
 
 // The text of a raw string of this file, in which `^` stands for the backquote that it cannot contain.
-fn unquoted(raw: str) -> str { join(split(raw, '^'), "`") }
+fn unquoted(raw: str) -> str { replace(raw, "^", "`") }
 
 // Appends one line.
 fn line(out: *Vec[u8], text: str) {
@@ -1151,11 +1107,8 @@ fn line(out: *Vec[u8], text: str) {
 
 // The headline of a section: the title and a rule of so many dashes.
 fn heading(out: *Vec[u8], title: str, dashes: i64) {
-    out.line(pad_right(concat(title, " "), len(title) + 1 + dashes, '-'))
+    out.line(fmt(title, " ", repeat("-", dashes)))
 }
-
-// `v` in hexadecimal with at least `width` digits.
-fn hex_padded(v: i64, width: i64) -> str { pad_left(hex(u64(v)), width, '0') }
 
 fn int_literal(value: i64, hexa: bool) -> str {
     if !hexa { return fmt(value) }
@@ -1202,7 +1155,7 @@ fn float_literal(x: f64) -> str {
             out.extend(d[1..])
         }
         out.extend(if exp < 1 { "e-" } else { "e+" })
-        out.extend(pad_left(fmt(abs(exp - 1)), 2, '0'))
+        out.extend(fmti(abs(exp - 1), 2, '0'))
     } else if exp <= 0 {
         out.extend("0.")
         for k in exp..0 {
@@ -1232,14 +1185,14 @@ fn emit_constants(db: *Db, out: *Vec[u8]) {
     out.heading("// ---- constants (#define)", 70)
     for d in db.defines {
         match d.value {
-            Int(v) if d.typed => out.line(fmt("const ", d.name, ": i32 = 0x", hex_padded(v & 0xffffffff, 8)))
+            Int(v) if d.typed => out.line(fmt("const ", d.name, ": i32 = 0x", hex(u64(v & 0xffffffff), 8)))
             Int(v) => out.line(fmt("const ", d.name, " = ", if d.literal != "" { d.literal } else { fmt(v) }))
             Float(x) => out.line(fmt("const ", d.name, " = ", float_literal(x)))
         }
     }
     out.line("")
     out.heading("// ---- enums: typed constants; struct fields and parameters use the enum's integer type", 8)
-    for e in db.enums.items {
+    for e in db.enums.values() {
         if contains(ENUMS_WITHOUT_CONSTANTS[..], e.name) {
             out.line(fmt("// enum ", e.name, " (", e.al, "): enumerators not listed"))
             continue
@@ -1256,7 +1209,7 @@ fn emit_constants(db: *Db, out: *Vec[u8]) {
 // structs with bit-fields not at all.
 fn emitted_structs(db: *Db) -> []Record {
     out := vec[Record]()
-    for s in db.structs.items {
+    for s in db.structs.values() {
         if !s.union && !s.bitfield {
             out.push(s)
         }
@@ -1266,7 +1219,7 @@ fn emitted_structs(db: *Db) -> []Record {
 
 fn emit_structs(db: *Db, out: *Vec[u8]) {
     out.heading("// ---- structs (Windows x64 C layout)", 60)
-    for s in db.structs.items {
+    for s in db.structs.values() {
         if s.union { continue }
         if s.bitfield {
             out.line(fmt("// struct ", s.name, ": skipped, it has bit-fields (pointers to it are *u8)"))
@@ -1278,8 +1231,8 @@ fn emit_structs(db: *Db, out: *Vec[u8]) {
         accessors := vec[str]()
         for f in s.fields {
             r := record_of(db, f.ty)
-            if r >= 0 && db.structs.items[r].union {
-                u := db.structs.items[r]
+            if r != nil && r.union {
+                u := *r
                 usize, ualign := layout(db, f.ty)
                 block := fmt("u", ualign * 8)
                 if usize != ualign {
@@ -1296,7 +1249,7 @@ fn emit_structs(db: *Db, out: *Vec[u8]) {
                 out.line(fmt("    ", ident(f.name), ": ", block, " // union: ", join(names[..], ", ")))
             } else {
                 // an enum or a typedef of a number loses its name in AL: keep it as a remark
-                lost := db.enums.index(f.ctype) >= 0 || db.aliases.has(f.ctype)
+                lost := db.enums.has(f.ctype) || db.aliases.has(f.ctype)
                 out.line(fmt("    ", ident(f.name), ": ", al(db, f.ty), if lost { concat(" // ", f.ctype) } else { "" }))
             }
         }
@@ -1317,10 +1270,10 @@ fn emit_guids(db: *Db, out: *Vec[u8]) {
         seen.set(name, true)
         bytes := vec[str]()
         for b in g.parts[3..] {
-            bytes.push(concat("0x", hex_padded(b, 2)))
+            bytes.push(concat("0x", hex(u64(b), 2)))
         }
-        out.line(fmt(name, " := GUID{0x", hex_padded(g.parts[0], 8), ", 0x", hex_padded(g.parts[1], 4), ", 0x",
-            hex_padded(g.parts[2], 4), ", [8]u8{", join(bytes[..], ", "), "}}"))
+        out.line(fmt(name, " := GUID{0x", hex(u64(g.parts[0]), 8), ", 0x", hex(u64(g.parts[1]), 4), ", 0x",
+            hex(u64(g.parts[2]), 4), ", [8]u8{", join(bytes[..], ", "), "}}"))
     }
     out.line("")
 }
@@ -1390,10 +1343,10 @@ fn signature(db: *Db, m: Method, self_ty: str) -> Sig {
             }
             vt.push(al(db, ty))
             args.push("&r")
-        } else if r >= 0 {
+        } else if r != nil {
             size, _ := layout(db, ty)
             if size == 1 || size == 2 || size == 4 || size == 8 {
-                scalar, packed := scalar_pack(db, db.structs.items[r], size, name)
+                scalar, packed := scalar_pack(db, *r, size, name)
                 vt.push(scalar)
                 args.push(packed)
             } else {
@@ -1427,7 +1380,7 @@ fn arrow(ret: str) -> str { if ret == "" { "" } else { concat(" -> ", ret) } }
 
 fn emit_interfaces(db: *Db, out: *Vec[u8]) {
     out.heading("// ---- COM interfaces: object = { vt }, vtable = function pointers in header order", 14)
-    for it in db.ifaces.items {
+    for it in db.ifaces.values() {
         out.line(fmt("struct ", it.name, " { vt: *", it.name, "Vtbl }"))
         sigs := vec[Sig]()
         out.line(fmt("struct ", it.name, "Vtbl {"))
@@ -1781,14 +1734,14 @@ fn emit_test(db: *Db, out: *Vec[u8], expected: *Vec[u8]) {
         out.line("")
     }
     out.line("fn vtables() {")
-    for it in db.ifaces.items {
+    for it in db.ifaces.values() {
         out.line(fmt("    chk(sizeof[", it.name, "Vtbl](), ", 8 * it.methods.len, ", \"", it.name, "Vtbl\")"))
     }
     out.line("}")
     out.line("")
     // every generic wrapper (COM out-parameters) instantiated once; never called, only compiled
     out.line("fn instantiate(o: **IUnknown) {")
-    for it in db.ifaces.items {
+    for it in db.ifaces.values() {
         opened := false
         for m in it.methods {
             sig := signature(db, m, it.name)
@@ -1823,7 +1776,7 @@ fn emit_test(db: *Db, out: *Vec[u8], expected: *Vec[u8]) {
     out.line("}")
     expected.extend(TEST_OUTPUT)
     expected.line(fmt("structs ", structs.len, " layout checks ", structs.len + nfields, " wrong 0"))
-    expected.line(fmt("vtables ", db.ifaces.items.len, " wrong 0"))
+    expected.line(fmt("vtables ", db.ifaces.len, " wrong 0"))
 }
 
 // ---- verification against a C compiler ----------------------------------------------------------
@@ -1843,7 +1796,7 @@ const C_HEAD = `#define COBJMACROS
 // C name of a field; an anonymous union is located through its first member.
 fn c_member(db: *Db, f: Field) -> str {
     r := record_of(db, f.ty)
-    if r >= 0 && db.structs.items[r].anon { c_member(db, db.structs.items[r].fields[0]) } else { f.name }
+    if r != nil && r.anon { c_member(db, r.fields[0]) } else { f.name }
 }
 
 // Appends a C translation unit of static assertions; returns what it asserts, in words.
@@ -1853,7 +1806,7 @@ fn emit_c(db: *Db, out: *Vec[u8]) -> str {
     fields := 0
     methods := 0
     constants := 0
-    for s in db.structs.items {
+    for s in db.structs.values() {
         if s.bitfield || s.anon { continue }
         size, align := layout(db, Struct(s.name))
         offs := offsets(db, s)
@@ -1873,7 +1826,7 @@ fn emit_c(db: *Db, out: *Vec[u8]) -> str {
         structs += 1
         fields += s.fields.len
     }
-    for it in db.ifaces.items {
+    for it in db.ifaces.values() {
         vt := concat(header_name(it.name), "Vtbl")
         out.line(fmt("CHECK(sizeof(", vt, ") == ", 8 * it.methods.len, ");"))
         for slot, m in it.methods {
@@ -1881,7 +1834,7 @@ fn emit_c(db: *Db, out: *Vec[u8]) -> str {
         }
         methods += it.methods.len
     }
-    for e in db.enums.items {
+    for e in db.enums.values() {
         out.line(fmt("CHECK(sizeof(", e.name, ") == 4);"))
         for item in e.items {
             out.line(fmt("CHECK((long long)", item.name, " == ", item.value, "LL);"))
@@ -1907,7 +1860,7 @@ fn emit_c(db: *Db, out: *Vec[u8]) -> str {
         constants += 1
     }
     out.line("CHECK((ULONG_PTR)IDC_ARROW == 32512);")
-    fmt(structs, " structs (", fields, " field offsets), ", db.ifaces.items.len, " interfaces (", methods,
+    fmt(structs, " structs (", fields, " field offsets), ", db.ifaces.len, " interfaces (", methods,
         " vtable slots), ", constants, " constants")
 }
 
@@ -1936,14 +1889,10 @@ fn main() {
         }
         i += 1
     }
-    _, at_root := read_file(SELF)
-    if !at_root { fail(fmt("run it from the root of the repository (there is no ", SELF, " here)")) }
+    if !file_exists(SELF) { fail(fmt("run it from the root of the repository (there is no ", SELF, " here)")) }
     for dir in INCLUDE_DIRS {
         if include_dir != "" { break }
-        _, found := read_file(concat(dir, "/d3d12.h"))
-        if found {
-            include_dir = dir
-        }
+        if file_exists(concat(dir, "/d3d12.h")) { include_dir = dir }
     }
     if include_dir == "" {
         fail(fmt("d3d12.h not found in ", join(INCLUDE_DIRS[..], " or "), "; install the mingw-w64 headers or pass --include DIR"))
@@ -1964,26 +1913,33 @@ fn main() {
     save(TEST_PATH, selftest[..])
     save(EXPECTED_PATH, expected[..])
     if !quiet {
-        nlines := 0
-        for b in module {
-            nlines += i64(b == '\n')
-        }
+        nlines := count(module[..], "\n")
         nmethods := 0
-        for it in db.ifaces.items {
+        for it in db.ifaces.values() {
             nmethods += it.methods.len
         }
-        print(fmt(MODULE_PATH, ": ", nlines, " lines; ", db.enums.items.len, " enums, ", db.defines.len, " #defines, ",
-            emitted_structs(&db).len, " structs, ", db.guids.len, " GUIDs, ", db.ifaces.items.len, " interfaces, ", nmethods,
+        print(fmt(MODULE_PATH, ": ", nlines, " lines; ", db.enums.len, " enums, ", db.defines.len, " #defines, ",
+            emitted_structs(&db).len, " structs, ", db.guids.len, " GUIDs, ", db.ifaces.len, " interfaces, ", nmethods,
             " methods, ", functions, " functions"))
         for note in db.skipped {
             print(concat("  skipped: ", note[..min(len(note), 150)]))
         }
     }
     if verify {
+        if !make_dir(path_dir(VERIFY_PATH)) { fail(fmt("cannot create ", path_dir(VERIFY_PATH), ": ", error_text(io_error()))) }
         save(VERIFY_PATH, c[..])
-        print(fmt(VERIFY_PATH, ": ", asserted, " as static assertions. They hold if this prints nothing:"))
-        print(fmt("  x86_64-w64-mingw32-gcc -fsyntax-only -w ", VERIFY_PATH))
-        print(fmt("or, without that compiler:\n  clang --target=x86_64-w64-mingw32 -fsyntax-only -w -isystem ", include_dir, " ",
-            VERIFY_PATH))
+        // a C compiler for Windows targets checks the assertions against the headers
+        commands := [][]str{
+            []str{"x86_64-w64-mingw32-gcc", "-fsyntax-only", "-w", VERIFY_PATH},
+            []str{"clang", "--target=x86_64-w64-mingw32", "-fsyntax-only", "-w", "-isystem", include_dir, VERIFY_PATH},
+        }
+        for command in commands {
+            status := run(command)
+            if status < 0 { continue }          // not installed: try the next one
+            if status != 0 { fail(fmt("verify: ", join(command, " "), ": exit status ", status)) }
+            print(fmt("verify: ", asserted, " hold as static assertions (", command[0], ", ", VERIFY_PATH, ")"))
+            return
+        }
+        fail(fmt("cannot verify ", VERIFY_PATH, ": neither x86_64-w64-mingw32-gcc nor clang is installed"))
     }
 }

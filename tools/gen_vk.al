@@ -4,12 +4,14 @@
 //     ./build/alc run tools/gen_vk.al                writes std/vk.al
 //     ./build/alc run tools/gen_vk.al -- --verify    also writes a C and an AL program to
 //                                                    tmp/VulkanBindings/ that print every struct
-//                                                    size, field offset and constant value, and
-//                                                    prints the commands that build and compare them
+//                                                    size, field offset and constant value, builds
+//                                                    and runs them (a C compiler is needed) and
+//                                                    compares what they print
 //
 // The registry and the Vulkan loader (commands it does not export are listed, not bound) are
 // read from the system. The hand-written convenience layer tools/vk_helpers.al is embedded
 // and appended verbatim to the generated bindings.
+use std.os
 
 // ---- what to generate -------------------------------------------------------------------------
 priv const VERSIONS = [_]str{"1.0", "1.1", "1.2", "1.3"}
@@ -79,33 +81,10 @@ priv fn fail(msg: str) -> never {
 // `a`, or `b` if `a` is empty.
 priv fn or(a: str, b: str) -> str { if a != "" { a } else { b } }
 
-priv fn is_upper(c: u8) -> bool { c >= 'A' && c <= 'Z' }
-
-priv fn is_lower(c: u8) -> bool { c >= 'a' && c <= 'z' }
-
-priv fn stars(n: i64) -> str { pad_left("", n, '*') }
-
-// How often `sub` occurs in `s`.
-priv fn count(s: str, sub: str) -> i64 {
-    n := 0
-    loop {
-        i := find(s, sub)
-        if i < 0 { return n }
-        n += 1
-        s = s[i + sub.len..]
-    }
-}
-
 // The value of a decimal or 0x literal.
 priv fn to_int(s: str) -> i64 {
-    n, ok := parse_i64(s)
-    if ok { return n }
-    if !starts_with(s, "0x") || s.len == 2 { fail(concat("not a number: ", s)) }
-    for c in s[2..] {
-        digit := index_of("0123456789abcdef", c | 0x20)      // | 0x20: the lower-case letter
-        if digit < 0 { fail(concat("not a number: ", s)) }
-        n = n << 4 | digit
-    }
+    n, ok := parse_i64(s, 0)
+    if !ok { fail(concat("not a number: ", s)) }
     n
 }
 
@@ -127,15 +106,7 @@ priv fn snake(name: str) -> str {
 }
 
 // C text with every run of white space reduced to one space, none at the ends or before `*`.
-priv fn squeeze(s: str) -> str {
-    out := vec[u8]()
-    for c in s {
-        space := c <= ' '
-        if (space || c == '*') && !out.is_empty() && out.last() == ' ' { out.pop() }
-        out.push(if space { ' ' } else { c })
-    }
-    trim(out.items())
-}
+priv fn squeeze(s: str) -> str { replace(join(fields(s), " "), " *", "*") }
 
 priv fn save(path: str, text: str) {
     if !write_file(path, text) { fail(fmt("cannot write ", path, ": ", error_text(io_error()))) }
@@ -326,8 +297,7 @@ priv struct Layout { size: i64, align: i64, offsets: []i64 }
 
 priv struct Reg {
     root: *Node
-    types: Map[str, *Node]          // the <type> elements by name
-    type_order: Vec[str]            // their names in the order of the registry
+    types: Map[str, *Node]          // the <type> elements by name, in the order of the registry
     enum_blocks: Map[str, *Node]    // the <enums> elements by name
     commands: Map[str, *Node]
     // what the chosen versions and extensions require:
@@ -377,10 +347,7 @@ priv fn load(xml: str) -> Reg {
         match section.tag {
             "types" => for t in section.children("type") {
                 name := decl_name(t)
-                if name != "" && !r.types.has(name) {
-                    r.types.set(name, t)
-                    r.type_order.push(name)
-                }
+                if name != "" && !r.types.has(name) { r.types.set(name, t) }
             }
             "enums" => r.enum_blocks.set(section.attr("name"), section)
             "commands" => for c in section.children("command") {
@@ -464,7 +431,7 @@ priv fn use_type(r: *Reg, name: str) {
 // The used types of a category, in the order of the registry.
 priv fn selected(r: *Reg, category: str) -> []str {
     out := vec[str]()
-    for name in r.type_order {
+    for name in r.types.keys() {
         if r.used.has(name) && r.type_of(name).attr("category") == category { out.push(name) }
     }
     out.items()
@@ -552,9 +519,7 @@ priv fn collect_enums(r: *Reg) {
             "uint64_t" => "u64"
             _ => ""
         }
-        if al == "f32" {
-            while ends_with(value, "f") || ends_with(value, "F") { value = value[..value.len - 1] }
-        }
+        if al == "f32" { value = trim_right(value, "fF") }
         r.consts.push(Const{name, al, complement_literal(value)})
     }
     for name in r.enums.keys() {
@@ -607,7 +572,7 @@ priv fn al_type(r: *Reg, d: Decl, param: bool) -> (str, i64, i64) {
         dims = nil
     }
     if nptr > 0 {
-        al = concat(stars(nptr), al)
+        al = concat(repeat("*", nptr), al)
         size = 8
         align = 8
     } else if aggregate {
@@ -666,7 +631,7 @@ priv fn layout(r: *Reg, name: str) -> Layout {
 // The structs and unions the bindings declare: no second names, no structs with bit-fields.
 priv fn bound_structs(r: *Reg) -> []str {
     out := vec[str]()
-    for name in r.type_order {
+    for name in r.types.keys() {
         t := r.type_of(name)
         category := t.attr("category")
         if !r.used.has(name) || t.attr("alias") != "" { continue }
@@ -685,7 +650,7 @@ priv fn c_kind(r: *Reg, d: Decl) -> str {
             _ => false
         }
     }
-    if hidden { concat(d.base, stars(d.nptr)) } else { "" }
+    if hidden { concat(d.base, repeat("*", d.nptr)) } else { "" }
 }
 
 // The names of the dynamic symbols that a shared library defines (what `nm -D --defined-only`
@@ -730,8 +695,8 @@ priv fn bindings(r: *Reg) -> str {
 const VK_NULL_HANDLE: u64 = 0`)
     for v in VERSIONS {
         part := split(v, '.')
-        packed := hex(u64(to_int(part[0]) << 22 | to_int(part[1]) << 12))
-        out.push(fmt("const VK_API_VERSION_", part[0], "_", part[1], ": u32 = 0x", pad_left(to_upper(packed), 8, '0')))
+        packed := hex(u64(to_int(part[0]) << 22 | to_int(part[1]) << 12), 8)
+        out.push(fmt("const VK_API_VERSION_", part[0], "_", part[1], ": u32 = 0x", to_upper(packed)))
     }
     for c in r.consts {
         out.push(fmt("const ", c.name, if c.al != "" { ": " } else { "" }, c.al, " = ", c.value))
@@ -759,7 +724,7 @@ const VK_NULL_HANDLE: u64 = 0`)
 
     out.push("\n// ---- structs ----")
     constructors := vec[str]()
-    for name in r.type_order {
+    for name in r.types.keys() {
         t := r.type_of(name)
         category := t.attr("category")
         if !r.used.has(name) || (category != "struct" && category != "union") { continue }
@@ -812,7 +777,7 @@ const VK_NULL_HANDLE: u64 = 0`)
             missing.push(fmt("//   ", name, ": fn(", join(types[..], ", "), ")", result))
             continue
         }
-        out.push(fmt("// ", proto.base, stars(proto.nptr), " ", name, "(", join(ctexts[..], ", "), ")"))
+        out.push(fmt("// ", proto.base, repeat("*", proto.nptr), " ", name, "(", join(ctexts[..], ", "), ")"))
         out.push(fmt("extern \"", LIB, "\" fn ", name, "(", join(params[..], ", "), ")", result))
     }
     if !missing.is_empty() {
@@ -879,7 +844,7 @@ int main(void) {`)
             own.push(fmt(printed.last(), " == ", l.offsets[i]))
         }
         out.push(fmt("    _Static_assert(", join(own[..], " && "), ", \"gen_vk.al lays out ", name, " differently\");"))
-        out.push(fmt("    printf(\"", name, join(vec_fill(printed.len, " %zu")[..], ""), `\n", `, join(printed[..], ", "), ");"))
+        out.push(fmt("    printf(\"", name, repeat(" %zu", printed.len), `\n", `, join(printed[..], ", "), ");"))
     }
     for c in r.int_consts() {
         if c.al == "u32" || c.al == "u64" {
@@ -923,11 +888,24 @@ priv fn verify_al(r: *Reg) -> str {
     join(out[..], "\n")
 }
 
+// Runs a command of the verification; anything but success ends the generator.
+priv fn must_run(argv: []str) {
+    status := run(argv)
+    if status < 0 { fail(fmt("cannot run ", argv[0], ": ", error_text(io_error()))) }
+    if status != 0 { fail(fmt(join(argv, " "), ": exit status ", status)) }
+}
+
+// What a program of the verification prints.
+priv fn output_of(program: str) -> []str {
+    out, status := run_capture([]str{program})
+    if status != 0 { fail(fmt(program, ": exit status ", status)) }
+    lines(out)
+}
+
 fn main() {
     verify := args().len == 2 && args()[1] == "--verify"
     if args().len > 1 && !verify { fail("usage: ./build/alc run tools/gen_vk.al [-- --verify]") }
-    _, at_root := read_file(SELF)
-    if !at_root { fail(fmt("run it from the root of the repository (there is no ", SELF, " here)")) }
+    if !file_exists(SELF) { fail(fmt("run it from the root of the repository (there is no ", SELF, " here)")) }
     xml, ok := read_file(REGISTRY)
     if !ok { fail(fmt("cannot read the Vulkan registry ", REGISTRY, ": ", error_text(io_error()))) }
     r := load(xml)
@@ -937,14 +915,29 @@ fn main() {
         count(text, "\nextern "), " commands"))
     if !verify { return }
 
-    syscall(83, cstr("tmp"), 0o755)             // mkdir; an existing directory is fine
-    syscall(83, cstr(SCRATCH), 0o755)
+    // The same lines from C (the Vulkan headers) and from the new std/vk.al.
+    if !make_dir(SCRATCH) { fail(fmt("cannot create ", SCRATCH, ": ", error_text(io_error()))) }
     save(concat(SCRATCH, "/layout.c"), r.verify_c())
     save(concat(SCRATCH, "/layout.al"), r.verify_al())
-    print(fmt("wrote ", SCRATCH, "/layout.c and layout.al; both programs must print the same:"))
-    print(fmt("clang -o ", SCRATCH, "/layout_c ", SCRATCH, "/layout.c"))
-    print(fmt("ALC_STD_DIR=std ./build/alc build ", SCRATCH, "/layout.al -o ", SCRATCH, "/layout_al"))
-    print(fmt(SCRATCH, "/layout_c > ", SCRATCH, "/c.txt"))
-    print(fmt(SCRATCH, "/layout_al > ", SCRATCH, "/al.txt"))
-    print(fmt("diff ", SCRATCH, "/c.txt ", SCRATCH, "/al.txt && echo layout: no mismatches"))
+    compiled := false
+    for cc in []str{"clang", "gcc", "cc"} {
+        status := run([]str{cc, "-o", concat(SCRATCH, "/layout_c"), concat(SCRATCH, "/layout.c")})
+        if status < 0 { continue }              // not installed: try the next one
+        if status != 0 { fail(fmt(cc, " does not compile ", SCRATCH, "/layout.c (exit status ", status, ")")) }
+        compiled = true
+        break
+    }
+    if !compiled { fail("cannot verify the layouts: no C compiler (clang, gcc or cc) is installed") }
+    // (ALC_STD_DIR: the compiler has the previous std/vk.al inside)
+    must_run([]str{"env", "ALC_STD_DIR=std", "./build/alc", "build", concat(SCRATCH, "/layout.al"), "-o", concat(SCRATCH, "/layout_al")})
+    c := output_of(concat(SCRATCH, "/layout_c"))
+    al := output_of(concat(SCRATCH, "/layout_al"))
+    mismatches := abs(c.len - al.len)
+    for i in 0..min(c.len, al.len) {
+        if c[i] == al[i] { continue }
+        mismatches += 1
+        if mismatches <= 20 { eprint(fmt("layout: C has `", c[i], "`, std.vk has `", al[i], "`")) }
+    }
+    if mismatches > 0 { fail(fmt("layout: ", mismatches, " of ", c.len, " lines differ")) }
+    print(fmt("layout: no mismatches in ", c.len, " lines"))
 }
