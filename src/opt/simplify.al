@@ -1320,9 +1320,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 moved_any = true
                 did = true
             }
-            if did {
-                break
-            }
+            // keep going: edges into blocks not yet visited are only ever added this round
+            // (stale `preds` are subsets), and a pred that now reaches t directly is caught by
+            // its terminator; one block per round made long chains quadratic in time and memory
         }
         if !did {
             break
@@ -1748,8 +1748,10 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 i.args.push(nv)
             }
             f.blocks[b].term = Jmp(j)
+            // keep going: the stale `preds` only over-count (a join loses its arms and gains b),
+            // so later candidates are judged conservatively; one conversion per round made long
+            // if-chains quadratic in time and memory
             did = true
-            break
         }
         if !did {
             break
