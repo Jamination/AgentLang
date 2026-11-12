@@ -3,7 +3,7 @@
 AL is a small, statically typed, compiled language designed to be written by AI agents.
 `alc` compiles a whole program (`alc build main.al`, no build system) directly to a static
 x86-64 Linux executable. The compiler reports all errors of a program at once (also in functions
-that are never called) as `file:line:col: error: ...`.
+that are never called; generic ones: see [Generics](#generics)) as `file:line:col: error: ...`.
 
 - Integers wrap; division by zero and out-of-bounds indexing stop the program with a `file:line`
   message. There are no implicit conversions, no constructors or destructors, no exceptions.
@@ -485,9 +485,9 @@ With `fn incr(p: *i64)`: `x.incr()` passes `&x` (the plain call is `incr(&x)`), 
 ## Generics
 
 Functions, structs and enums can take type parameters in square brackets. Generic code is
-compiled and type-checked per combination of types it is used with (like templates), so any
-operation that is valid for the concrete type may be used. Type arguments are inferred from the
-arguments or the expected type, or written out: `sum[i64](nil)`, `alloc[u32](16)`, `Stack[i64]{}`.
+compiled and type-checked per combination of types it is used with (like templates; unused, it is
+only parsed), so any operation valid for the concrete type may be used. Type arguments are inferred
+from the arguments or the expected type, or written out: `sum[i64](nil)`, `alloc[u32](16)`, `Stack[i64]{}`.
 
 ```
 struct Stack[T] { items: Vec[T] }                  // the zero value is an empty stack
