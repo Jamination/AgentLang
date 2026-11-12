@@ -480,11 +480,19 @@ priv fn sigs_priv(name: str) -> str {
     return ""
 }
 
+// `extern "lib" ` in front of the signature of a C function or variable
+priv fn sigs_extern(ext: Opt[str]) -> str {
+    return match ext {
+        Some(lib) => fmt("extern \"", lib, "\" ")
+        None => ""
+    }
+}
+
 // `alc sigs`: one line per declaration, for a quick overview of a file
 priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
     for d in decls {
         pos, text := match d {
-            Fn(f) => (f.pos, fmt(sigs_priv(f.name), ast_sig_str(&f)))
+            Fn(f) => (f.pos, fmt(sigs_priv(f.name), sigs_extern(f.ext), ast_sig_str(&f)))
             Struct(s) => (s.pos, fmt(sigs_priv(s.name), ast_struct_str(&s)))
             Enum(e) => (e.pos, fmt(sigs_priv(e.name), ast_enum_str(&e)))
             // (the value of a constant or a global is not shown: `...`)
@@ -497,7 +505,7 @@ priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
             }
             Global(g) => {
                 sig := match g.ty {
-                    Some(ty) => fmt(sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
+                    Some(ty) => fmt(sigs_priv(g.name), sigs_extern(g.ext), g.name, ": ", ast_type_str(&ty))
                     None => fmt(sigs_priv(g.name), g.name, " := ...")
                 }
                 (g.pos, sig)

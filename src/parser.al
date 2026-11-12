@@ -283,6 +283,7 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
             } else if q == "." && starts_with(msg, "expected expression") {
                 match p.peek_at(1) {
                     Int(_) => { hint = " (a float literal has digits on both sides of the point: `0.5`, not `.5`)" }
+                    Id(_) if line_start => { hint = " (a line cannot start with `.`: to continue a chain of calls on the next line, end the line with the `.`)" }
                     _ => {}
                 }
             }

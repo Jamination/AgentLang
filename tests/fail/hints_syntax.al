@@ -17,3 +17,7 @@ fn h(x: i64) {
 fn k() {
     z := .5
 }
+fn m() {
+    v := "abc"
+        .len()
+}
