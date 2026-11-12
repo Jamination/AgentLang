@@ -1378,6 +1378,9 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                 }
                 None => {
                     ty = vt
+                    if !is_some(vt) && dec_lit_over(&d.val, 64, true) {
+                        self.err(d.val.pos, fmt("constant `", name, "`: the decimal literal does not fit in i64 (declare the type, as in `const ", name, ": u64 = ...`, or write it in hex)"))
+                    }
                 }
             }
             self.const_vals.set(d.name, Done(ty, v))
@@ -1973,5 +1976,36 @@ priv fn dec_lit_over(e: *Expr, bits: i64, signed: bool) -> bool {
             }
         }
         _ => return false
+    }
+}
+
+// the f32 value of the untyped float constant `name` whose value is `f`: a literal (also
+// negated) is rounded once from its text
+fn const_lit_f32(self: *Cx, name: str, f: f64) -> f32 {
+    d, has := self.const_decls.get(name)
+    if !has {
+        return f32(f)
+    }
+    return lit_f32(&d.val, f)
+}
+
+// an untyped constant expression counts as written in decimal (and must fit the type it is
+// used as) unless its integer literals are hex / binary / octal / characters
+fn const_expr_dec(self: *Cx, e: *Expr, depth: i64) -> bool {
+    if depth > 50 {
+        return true
+    }
+    match e.k {
+        Int(_, dec) => return dec
+        Un(_, x) => return self.const_expr_dec(x, depth + 1)
+        Bin(_, a, b) => return self.const_expr_dec(a, depth + 1) && self.const_expr_dec(b, depth + 1)
+        Ident(n) => {
+            d, has := self.const_decls.get(n)
+            if has {
+                return self.const_expr_dec(&d.val, depth + 1)
+            }
+            return true
+        }
+        _ => return true
     }
 }

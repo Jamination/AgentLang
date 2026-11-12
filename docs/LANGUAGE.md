@@ -97,13 +97,13 @@ test "areas" {
   numeric literals take the type the context asks for (`x: u8 = 200`, `x * 2`, `f(3)`), also
   through the branches of an `if` / `match` used as a value (`x: u8 = if c { 1 } else { 2 }`);
   without context an integer literal is `i64`, a float literal `f64`. An integer literal is
-  accepted where a float is expected (`d: f64 = 5`). A decimal literal must fit its type
-  (`x: i8 = 200` is an error); a hex, binary, octal or character literal may also be a bit
-  pattern of it (`x: i8 = 0xFF` is -1, `m := 0xFFFF_FFFF_FFFF_FFFF` is the `i64` -1).
+  accepted where a float is expected (`d: f64 = 5`). A decimal literal must fit its type (not
+  `x: u8 = -1`); hex, binary, octal, character literals may be bit patterns (`x: i8 = 0xFF`).
 - **Conversions** are written like calls: `i64(x)`, `u8(x)`, `f64(n)`. Integer to a narrower
   type keeps the low bits; to a wider type the *source* type decides: a signed source is
   sign-extended, an unsigned one zero-extended (`i64(u8(200))` is 200, `u64(i8(-1))` is
-  0xFFFFFFFFFFFFFFFF, `i8(200)` is -56). Float to integer truncates toward zero. `i64(true)` is 1.
+  0xFFFFFFFFFFFFFFFF, `i8(200)` is -56). Float to integer truncates toward zero; NaN and values
+  beyond `i64` give 0x8000000000000000 (`u64` is exact below 2^64). `i64(true)` is 1.
 - **Values and references.** Structs, tuples, arrays and enums are values: assignment, argument
   passing and returning copy them. Slices and pointers refer to shared storage, so a copy of a
   struct shares what its slices (and every `str`, `Vec` and `Map` inside) refer to. See
@@ -846,17 +846,15 @@ alc sigs file.al [-- std]      one line per declaration: `file:line: signature`;
 options: --unchecked  -O0  --json  --emit-ir  --emit-asm
 ```
 
-Diagnostics list every error found, sorted by position: `file:line:col: error: message`.
-With `--json` they are printed to standard output as
-`[{"file":"f.al","line":3,"col":7,"message":"..."}]`.
+Diagnostics list every error found, sorted by position: `file:line:col: error: message`. With
+`--json` they are printed to standard output as `[{"file":"f.al","line":3,"col":7,"message":"..."}]`.
 
 ## Unsafe corners
 
 Everything else is checked. These are not:
 
 - Using memory after `release()`, `reset()` or `region_free()` gave it back (slices, pointers,
-  `Vec`s and `Map`s into it), or a slice or pointer into a local variable after its function
-  returned.
+  `Vec`s, `Map`s into it), or a slice or pointer into a local of a function that has returned.
 - A slice or pointer into a `Vec` (or `m.ptr(k)`) used after the container grew; a `Vec` / `Map`
   that grew inside a region and is used after its reset (see [Memory](#memory)).
 - Copying a `Region` that holds memory; unbalanced `enter` / `leave`.

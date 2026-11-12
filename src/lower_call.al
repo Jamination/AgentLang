@@ -867,6 +867,24 @@ priv fn conversion(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
     exp: Opt[i64] = None
     if self.is_untyped(&args[0]) && (self.cx.types.is_float(to) || (self.cx.types.is_int(to) && !floaty)) {
         exp = Some(to)
+        // a constant that does not fit the target type is converted from i64 (`i8(200)` is
+        // -56, `u64(-1)` is 0xFFFF_FFFF_FFFF_FFFF), a literal beyond i64 from u64
+        match (self.cx.types.k(to), self.cx.const_eval(&args[0])) {
+            (Int(bits, signed), Some(Int(i))) => {
+                lit := is_int_lit(&args[0])
+                hi := if signed { (u64(1) << u64(bits - 1)) - 1 } else { u64(0xFFFFFFFFFFFFFFFF) >> u64(64 - bits) }
+                fits := false
+                if lit || i >= 0 {
+                    fits = u64(i) <= hi
+                } else {
+                    fits = signed && i >= -(1 << (bits - 1))
+                }
+                if !fits {
+                    exp = Some(if lit && i < 0 { T_U64 } else { T_I64 })
+                }
+            }
+            _ => {}
+        }
     }
     v := self.expr(&args[0], exp)
     return self.convert(v, to, pos)
@@ -2398,5 +2416,12 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
             self.switch_to(bj)
         }
         Err, Never => {}
+    }
+}
+
+priv fn is_int_lit(e: *Expr) -> bool {
+    match e.k {
+        Int(_, _) => return true
+        _ => return false
     }
 }

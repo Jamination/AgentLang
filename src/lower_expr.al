@@ -125,6 +125,8 @@ priv fn int_lit(self: *Fx, n: i64, neg: bool, dec: bool, expect: Opt[i64], pos: 
         hi := if signed && neg { 1 << (bits - 1) } else { 1 << bits }
         bad = n < lo || n >= hi
     }
+    // a negative literal for an unsigned type (255 as a u8 is `255` or `0xFF`)
+    bad = bad || (neg && !signed && mag != 0)
     if bad {
         tn := self.tyname(ty)
         self.err(pos, fmt("integer literal ", if neg { "-" } else { "" }, mag, " does not fit in ", tn))
@@ -134,9 +136,9 @@ priv fn int_lit(self: *Fx, n: i64, neg: bool, dec: bool, expect: Opt[i64], pos: 
     return self.sval(ty, v)
 }
 
-fn const_val(self: *Fx, ty: Opt[i64], cv: CV, expect: Opt[i64], pos: Pos) -> Val {
+fn const_val(self: *Fx, ty: Opt[i64], cv: CV, dec: bool, expect: Opt[i64], pos: Pos) -> Val {
     match cv {
-        Int(i) => self.int_lit(i, i < 0, false, lower_expr_or(ty, expect), pos)
+        Int(i) => self.int_lit(i, i < 0 && dec && !is_some(ty), dec && !is_some(ty), lower_expr_or(ty, expect), pos)
         Float(f) => {
             ft := self.float_expect(lower_expr_or(ty, expect))
             self.fconst_ty(ft, f)
@@ -417,7 +419,18 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
             }
         }
         match self.cx.const_named(n) {
-            Some(c) => { return self.const_val(c.0, c.1, expect, pos) }
+            Some(c) => {
+                cv := c.1
+                match cv {
+                    // an untyped float literal used as an f32: rounded once from its text
+                    Float(f) if !is_some(c.0) && self.float_expect(expect) == T_F32 => {
+                        cv = Float(f64(self.cx.const_lit_f32(n, f)))
+                    }
+                    _ => {}
+                }
+                d, _ := self.cx.const_decls.get(n)
+                return self.const_val(c.0, cv, self.cx.const_expr_dec(&d.val, 0), expect, pos)
+            }
             None => { return val_err() }
         }
     }

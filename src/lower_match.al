@@ -773,11 +773,11 @@ priv fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
         // inside a pattern a name is a constant even if a local variable has the same name
         pv = match rp.e.k {
             Ident(n) => match self.cx.const_named(n) {
-                Some(c) => self.const_val(c.0, c.1, Some(rp.ty), rp.pos)
+                Some(c) => self.const_val(c.0, c.1, self.cx.const_expr_dec(rp.e, 0), Some(rp.ty), rp.pos)
                 None => val_err()
             }
             _ => match self.cx.const_eval(rp.e) {
-                Some(cv) => self.const_val(None, cv, Some(rp.ty), rp.pos)
+                Some(cv) => self.const_val(None, cv, self.cx.const_expr_dec(rp.e, 0), Some(rp.ty), rp.pos)
                 None => val_err()
             }
         }
