@@ -266,7 +266,7 @@ fn main() {
         w.poll()
         inp := &w.input
         gamepad_poll(&inp.pad)
-        controls.dir = actions.action_vec2(inp, ACT_LEFT, ACT_RIGHT, ACT_DOWN, ACT_UP)
+        controls.dir = actions.action_vec2(inp, ACT_LEFT, ACT_RIGHT, ACT_UP, ACT_DOWN)
         stick := inp.pad.pad_stick(PAD_AXIS_LX, PAD_AXIS_LY, 0.2)
         if stick != vec2(0.0) {
             controls.dir = vec2(stick.x, -stick.y)

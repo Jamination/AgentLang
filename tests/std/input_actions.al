@@ -57,14 +57,14 @@ fn main() {
 
     // axes
     i.begin_frame()
-    print(m.action_axis(&i, ACT_LEFT, ACT_RIGHT), m.action_vec2(&i, ACT_LEFT, ACT_RIGHT, ACT_DOWN, ACT_UP))
+    print(m.action_axis(&i, ACT_LEFT, ACT_RIGHT), m.action_vec2(&i, ACT_LEFT, ACT_RIGHT, ACT_UP, ACT_DOWN))
     down(&i, KEY_D)
-    print(m.action_axis(&i, ACT_LEFT, ACT_RIGHT), m.action_vec2(&i, ACT_LEFT, ACT_RIGHT, ACT_DOWN, ACT_UP))
+    print(m.action_axis(&i, ACT_LEFT, ACT_RIGHT), m.action_vec2(&i, ACT_LEFT, ACT_RIGHT, ACT_UP, ACT_DOWN))
     down(&i, KEY_LEFT)
     print(m.action_axis(&i, ACT_LEFT, ACT_RIGHT))
     up(&i, KEY_D)
     down(&i, KEY_W)
-    v := m.action_vec2(&i, ACT_LEFT, ACT_RIGHT, ACT_DOWN, ACT_UP)
+    v := m.action_vec2(&i, ACT_LEFT, ACT_RIGHT, ACT_UP, ACT_DOWN)
     putf(f64(v.x), 4)
     put(" ")
     putf(f64(v.y), 4)

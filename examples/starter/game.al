@@ -5,8 +5,8 @@
 //     generator (so a run is reproducible), rendering reads the state and never changes it
 //   - the platform layer (window, sound device) is a thin shell around `update` / `render`
 //
-//   alc run examples/starter/game.al                headless: scripted input, prints a checksum
-//   alc run examples/starter/game.al -- --window    play it (arrows / WASD move, space shoots)
+//   alc run examples/starter/game.al                  play it (arrows / WASD move, space shoots)
+//   alc run examples/starter/game.al -- --headless    no window: scripted input, prints a checksum
 use std.input
 use std.window
 
@@ -88,7 +88,7 @@ fn update(g: *Game, inp: *Input, dt: f32) {
     p := g.ents.get(g.player)
     if p != nil {
         dir := g.keys.action_vec2(inp, g.act.left, g.act.right, g.act.up, g.act.down)
-        // screen y grows downwards
+        // dir.y is +1 for up; screen y grows downwards
         p.vel = vec2(dir.x, -dir.y) * 110.0
         g.cooldown -= dt
         if g.keys.action_down(inp, g.act.fire) && g.cooldown <= 0.0 {
@@ -224,8 +224,8 @@ fn run_headless() {
 fn run_window() {
     w, ok := window_open(WindowDesc{title: "AL starter", width: FB_W * 3, height: FB_H * 3, resizable: true})
     if !ok {
-        print("no display: run without --window")
-        return
+        eprint("cannot open a window (no display?): `--headless` runs the scripted demo without one")
+        exit(1)
     }
     g := game_new(u64(time_ns()))
     fb := alloc[u32](FB_W * FB_H)
@@ -249,10 +249,10 @@ fn run_window() {
 
 fn main() {
     for a in args() {
-        if a == "--window" {
-            run_window()
+        if a == "--headless" {
+            run_headless()
             return
         }
     }
-    run_headless()
+    run_window()
 }

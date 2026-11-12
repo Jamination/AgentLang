@@ -681,8 +681,9 @@ fn action_axis(m: *ActionMap, i: *Input, negative: i64, positive: i64) -> f32 {
     v
 }
 
-// A direction from four actions as (x, y) with length 0 or 1 (diagonals are normalized).
-fn action_vec2(m: *ActionMap, i: *Input, left: i64, right: i64, down: i64, up: i64) -> vec2 {
+// A direction from four actions as (x, y) with length 0 or 1 (diagonals are normalized):
+// x is +1 for right, y is +1 for up.
+fn action_vec2(m: *ActionMap, i: *Input, left: i64, right: i64, up: i64, down: i64) -> vec2 {
     v := vec2(action_axis(m, i, left, right), action_axis(m, i, down, up))
     if v.x != 0.0 && v.y != 0.0 {
         return v * 0.70710678

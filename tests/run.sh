@@ -1,7 +1,8 @@
 #!/bin/bash
 # Conformance test runner. Usage: tests/run.sh [path/to/alc] [filter]
 # tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
-#                     every line of NAME.err must appear in stderr)
+#                     every line of NAME.err must appear in stderr; arguments from NAME.args,
+#                     default `a1 b2`)
 # tests/std/NAME.al   the same, for the standard library (static, libc-free programs)
 # tests/sys/NAME.al   the same, for programs that need something from this machine (a GPU
 #                     driver, a sound device, a display, a shared library). NAME.need holds a
@@ -40,7 +41,9 @@ for src in $dir/*.al; do
     if [[ -f "$dir/$name.in" ]]; then
       timeout 60 "$TMP/bin" <"$dir/$name.in" >"$TMP/out" 2>"$TMP/err"; code=$?
     else
-      timeout 60 "$TMP/bin" a1 b2 >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
+      args=(a1 b2)
+      [[ -f "$dir/$name.args" ]] && read -ra args <"$dir/$name.args"
+      timeout 60 "$TMP/bin" "${args[@]}" >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
     fi
     ok=1
     if ! cmp -s "$TMP/out" "$exp_out"; then

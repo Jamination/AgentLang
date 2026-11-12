@@ -123,7 +123,7 @@ rebinding is a data change.
 | `action_pressed(m, i, action) -> bool` | any bound input went down this frame |
 | `action_released(m, i, action) -> bool` | a bound input went up this frame and none is held |
 | `action_axis(m, i, negative, positive) -> f32` | -1, 0 or 1 from two actions |
-| `action_vec2(m, i, left, right, down, up) -> vec2` | a direction of length 0 or 1 (diagonals normalized) |
+| `action_vec2(m, i, left, right, up, down) -> vec2` | a direction of length 0 or 1 (diagonals normalized); x is +1 for right, y is +1 for **up** (negate y for screen coordinates, where y grows downwards) |
 
 Use either your own constants or `action("name")` ids; if both are used for the same actions,
 register the names in the order of the constants. Gamepad bindings read `Input.pad`.
