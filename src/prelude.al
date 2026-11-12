@@ -43,17 +43,41 @@ fn exit(code: i64) -> never {
     syscall(231, code)
 }
 
-fn __write_all(fd: i64, p: i64, n: i64) {
+// writes n bytes at p to fd, also after interruptions and, on a non-blocking fd, waiting
+// until it takes more (EAGAIN: poll); returns 0 or the error number of the failed write
+fn __write_all(fd: i64, p: i64, n: i64) -> i64 {
     while n > 0 {
         r := syscall(1, fd, p, n)
-        if r <= 0 {
-            if r == -4 {
-                continue
-            }
-            return
+        if r == -4 {
+            continue
+        }
+        if r == -11 {
+            // struct pollfd { fd, events = POLLOUT, revents }
+            pfd: [2]i32
+            pfd[0] = i32(fd)
+            pfd[1] = 4
+            syscall(7, ptr(pfd), 1, -1)
+            continue
+        }
+        if r < 0 {
+            return -r
+        }
+        if r == 0 {
+            return 5
         }
         p += r
         n -= r
+    }
+    return 0
+}
+
+// standard output that cannot be written stops the program (a closed pipe normally ends it
+// before, with SIGPIPE)
+fn __out_write(p: i64, n: i64) {
+    e := __write_all(1, p, n)
+    if e != 0 {
+        __olen = 0
+        __die("panic: cannot write to standard output: ", error_text(e), "")
     }
 }
 
@@ -300,8 +324,9 @@ fn region_free(r: *Region) {
 // ---------- output ----------
 fn flush() {
     if __olen > 0 {
-        __write_all(1, cast[i64](ptr(__obuf)), __olen)
+        n := __olen
         __olen = 0
+        __out_write(cast[i64](ptr(__obuf)), n)
     }
 }
 
@@ -314,7 +339,7 @@ fn __put_str(s: str) {
     if n > 65536 - __olen {
         flush()
         if n >= 65536 {
-            __write_all(1, cast[i64](ptr(s)), n)
+            __out_write(cast[i64](ptr(s)), n)
             return
         }
     }
