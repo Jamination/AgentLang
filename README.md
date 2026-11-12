@@ -55,7 +55,7 @@ Linux on x86-64 is the only requirement; the repository carries a seed compiler.
 - [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
 - [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
 - [Standard library](docs/STDLIB.md): strings, collections, files, math, images, windows,
-  input, audio, and bindings for Vulkan, D3D12 and Metal
+  input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
 - [How the compiler is built and organised](docs/BOOTSTRAP.md)
 
