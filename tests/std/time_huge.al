@@ -5,11 +5,15 @@ use std.os
 
 fn main() -> i64 {
     a := args()
-    if len(a) > 1 {
-        if a[1] == "ms" { sleep_ms(0x7FFF_FFFF_FFFF_FFFF) } else { sleep_until(1e300) }
+    if len(a) > 1 && a[1] == "child-ms" {
+        sleep_ms(0x7FFF_FFFF_FFFF_FFFF)
         return 0
     }
-    print(run([]str{"timeout", "0.2", a[0], "ms"}), run([]str{"timeout", "0.2", a[0], "until"}))
+    if len(a) > 1 && a[1] == "child-until" {
+        sleep_until(1e300)
+        return 0
+    }
+    print(run([]str{"timeout", "-s", "KILL", "0.2", a[0], "child-ms"}), run([]str{"timeout", "-s", "KILL", "0.2", a[0], "child-until"}))
     sleep_until(0.0 / 0.0)
     t := timer(1e-9, true)
     print(t.tick(1e300) == 0x7FFF_FFFF_FFFF_FFFF, t.left == t.duration, t.tick(0.0 / 0.0), t.tick(2.5e-9))
