@@ -6,3 +6,4 @@ __pycache__/
 *.test
 tools/gen_vk
 tools/gen_dx12
+examples/starter/game
