@@ -281,7 +281,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
         }
         ss := f.succs(b)
         for s in ss {
-            if !in_loop[s] && b != latch && !is_trap_block(f, s) {
+            if !in_loop[s] && b != latch && !opt_is_check_trap(f, s) {
                 return false
             }
         }
@@ -305,7 +305,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
             Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
         }
-        if !in_loop[t] || in_loop[e] || !is_trap_block(f, e) || b == latch {
+        if !in_loop[t] || in_loop[e] || !opt_is_check_trap(f, e) || b == latch {
             continue
         }
         if !cfg.dom(b, latch) {

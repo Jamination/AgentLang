@@ -30,6 +30,29 @@ fn opt_enabled(name: str) -> bool {
     }
     return true
 }
+
+// check_fail[k]: function k ends the program for a failed run-time check (__bounds_fail,
+// __div_fail, __step_fail); set by opt_optimize before any work_begin
+priv check_fail: Vec[bool]
+
+// Is block `b` the failure exit of a run-time check: a trap block whose calls only report the
+// failure? Other trap blocks (after `exit`, `panic`, a failed `assert`) are observable ways out,
+// so passes that move a failing check earlier must not treat them as check failures.
+fn opt_is_check_trap(f: *Func, b: i64) -> bool {
+    if !is_trap_block(f, b) {
+        return false
+    }
+    for v in f.blocks[b].insts {
+        i := &f.insts[v]
+        if i.op == CallInd || i.op == Syscall {
+            return false
+        }
+        if i.op == Call && !(i.k >= 0 && i.k < check_fail.len && check_fail[i.k]) {
+            return false
+        }
+    }
+    return true
+}
 fn opt_trace(what: str, f: *Func) {
     read_env()
     v := env_debug
@@ -146,6 +169,11 @@ priv fn local_opt(f: *Func, level: i64) {
 
 fn opt_optimize(m: *Module, level: i64) {
     n := m.funcs.len
+    check_fail = vec_fill(n, false)
+    for fid in 0..n {
+        nm := m.funcs[fid].name
+        check_fail[fid] = nm == "__bounds_fail" || nm == "__div_fail" || nm == "__step_fail"
+    }
     for fid in 0..n {
         f := &m.funcs[fid]
         if f.lowered {
