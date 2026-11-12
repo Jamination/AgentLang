@@ -1,0 +1,4 @@
+deep_nesting.al:2:2009: error: nesting is too deep (more than 2000 levels of blocks, statements, `else if`, operators, calls and parentheses)
+deep_nesting.al:5:2005: error: nesting is too deep (more than 2000 levels of blocks, statements, `else if`, operators, calls and parentheses)
+deep_nesting.al:9:8003: error: nesting is too deep (more than 2000 levels of blocks, statements, `else if`, operators, calls and parentheses)
+deep_nesting.al:12:8006: error: nesting is too deep (more than 2000 levels of blocks, statements, `else if`, operators, calls and parentheses)

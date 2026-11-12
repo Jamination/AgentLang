@@ -527,3 +527,8 @@ qual      = IDENT ["[" type {"," type} "]"]
 In a literal `[_]T{...}` the length is the number of elements written (`_` is allowed as a
 length only there). In a pattern, `expr` is a constant, `Variant`, `Enum.Variant`, or (inside another pattern) a new
 name; `&` IDENT is allowed only inside another pattern.
+
+`t.0.1` is the field `1` of `t.0` (after `.` a number is a field, never a float literal). Nesting
+is limited to 2000 levels (blocks, statements, `else if` chains, parentheses, operators of one
+chain `a + b + ...`, links of `x.f(a)[i]...`, types): deeper programs get an error instead of
+exhausting the compiler's stack.
