@@ -1009,7 +1009,8 @@ fn max(a: str, b: str) -> str {
 }
 
 fn abs[T](x: T) -> T {
-    if x < 0 { -x } else { x }
+    // `0 - x`, not `-x`: the absolute value of -0.0 is 0.0
+    if x <= 0 { 0 - x } else { x }
 }
 
 fn swap[T](a: *T, b: *T) {
@@ -1031,7 +1032,8 @@ fn fill[T](a: []T, x: T) {
 }
 
 fn floor(x: f64) -> f64 {
-    if x != x || fabs(x) >= 4503599627370496.0 {
+    // (x == 0: keeps the sign of -0.0, as C's floor)
+    if x != x || x == 0.0 || fabs(x) >= 4503599627370496.0 {
         return x
     }
     t := f64(i64(x))
@@ -1039,8 +1041,11 @@ fn floor(x: f64) -> f64 {
 }
 
 fn ceil(x: f64) -> f64 {
-    if x != x || fabs(x) >= 4503599627370496.0 {
+    if x != x || x == 0.0 || fabs(x) >= 4503599627370496.0 {
         return x
+    }
+    if x < 0.0 && x > -1.0 {
+        return -0.0
     }
     t := f64(i64(x))
     if t < x { t + 1.0 } else { t }
@@ -2402,6 +2407,14 @@ fn __cstr(s: str) -> i64 {
     return p
 }
 
+// open(2) of path; a path with a NUL byte would name another file: EINVAL
+fn __open(path: str, flags: i64, mode: i64) -> i64 {
+    if index_of(path, 0) >= 0 {
+        return __io_result(-22)
+    }
+    return __io_result(syscall(2, __cstr(path), flags, mode))
+}
+
 // the error number of the most recent failed file operation (0 after a success)
 __io_errno: i64
 
@@ -2490,7 +2503,7 @@ fn read_all(fd: i64) -> str {
 
 // the content of a file; ("", false) if it cannot be opened or read (see `io_error()`)
 fn read_file(path: str) -> (str, bool) {
-    fd := __io_result(syscall(2, __cstr(path), 0, 0))
+    fd := __open(path, 0, 0)
     if fd < 0 {
         return ("", false)
     }
@@ -2505,7 +2518,7 @@ fn read_file(path: str) -> (str, bool) {
 // creates or replaces a file; false if that failed (see `io_error()`)
 fn write_file(path: str, data: str) -> bool {
     // O_WRONLY|O_CREAT|O_TRUNC, mode 0644
-    fd := __io_result(syscall(2, __cstr(path), 577, 420))
+    fd := __open(path, 577, 420)
     if fd < 0 {
         return false
     }
