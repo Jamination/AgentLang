@@ -37,7 +37,7 @@ fn priv_decl_info(d: *Decl) -> (str, i64, bool, Pos) {
         Struct(s) => (s.name, 2, s.is_priv, s.pos)
         Enum(e) => (e.name, 2, e.is_priv, e.pos)
         Const(c) => (c.name, 2, c.is_priv, c.pos)
-        Glob(g) => (g.name, 2, g.is_priv, g.pos)
+        Global(g) => (g.name, 2, g.is_priv, g.pos)
         Test(t) => ("", 0, false, t.pos)
         Use(path, pos) => ("", 0, false, pos)
     }
@@ -160,11 +160,11 @@ priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
             expr(r, &c.val)
             Const(c)
         }
-        Glob(g) => {
+        Global(g) => {
             g.name = priv_name(r, g.name)
             g.ty = opt_type(r, g.ty)
             g.init = opt_expr(r, g.init)
-            Glob(g)
+            Global(g)
         }
         Test(t) => {
             block(r, t.body)
@@ -393,7 +393,7 @@ priv fn block(r: *PrivCx, b: Block) -> bool {
 
 priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
     return match s.k {
-        ExprStmt(&e) => expr(r, e)
+        Expr(&e) => expr(r, e)
         Let(&names, &e) => {
             priv_names(r, names)
             expr(r, e)
@@ -425,7 +425,7 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
             expr(r, c)
             block(r, body)
         }
-        LoopStmt(body) => block(r, body)
+        Loop(body) => block(r, body)
         For(v1, v2, lo, hi, incl, step, body) => {
             v2n: Opt[str] = match v2 {
                 Some(n2) => Some(priv_name(r, n2))
@@ -451,7 +451,7 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
             s.k = Assert(cc, opt_expr(r, msg))
             true
         }
-        BlockStmt(b) => block(r, b)
+        Block(b) => block(r, b)
         Defer(b) => block(r, b)
         // a nested function is a local name: renamed like the variables of that spelling
         Fn(d) => priv_fn(r, d)

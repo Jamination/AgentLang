@@ -63,8 +63,8 @@ priv fn link_patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gadd
     for rl in g.relocs {
         off := rl.0
         val := match rl.1 {
-            Glob(tg, add) => gaddr[tg] + add
-            Function(f) => func_addr[f]
+            Global(tg, add) => gaddr[tg] + add
+            Func(f) => func_addr[f]
         }
         at := (ga - base_addr) + off
         assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"

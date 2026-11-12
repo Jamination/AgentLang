@@ -45,7 +45,7 @@ executables before and after); the conventions below describe the result.
 | Path | Contents |
 |------|----------|
 | `src/main.al` | driver: arguments, source loading, bundled modules, diagnostics output; lists every other file |
-| `src/base.al` | helpers for compiler code: Vec constructors (`vec_of`, `vec_fill`, `vec_one`, `vec_two`), processes, the working-memory regions |
+| `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), processes, the working-memory regions |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
@@ -76,9 +76,10 @@ Conventions:
   the few places the compiler asks for; the constructed side in functions that translate
   between two enums sharing a name (`Tuple(ts) => .. intern(TyK.Tuple(ids))`, `o = Op.Add`
   next to `op == Add` on a `BinOp`); and always the variants called `None` (`Term.None`,
-  `Opnd.None`, `RetAbi.None`), because `None` alone reads as `Opt`. A variant cannot have the
-  name of a struct of the program, hence `SK.ExprStmt` / `LoopStmt` / `BlockStmt`,
-  `UnOp.AddrOf`, `Glob` (for `Global`), `RelocTarget.Function`.
+  `Opnd.None`, `RetAbi.None`), because `None` alone reads as `Opt`. A variant may have the
+  name of a struct: `SK.Expr` / `Loop` / `Block`, `UnOp.Addr`, `Decl.Global`,
+  `RelocTarget.Func` stand next to the structs `Expr`, `Loop`, `Block`, `Addr`, `Global`,
+  `Func` (`Addr{base: Global(g), off: off}` is the struct `Addr` with a `Base.Global`).
 - **`match`.** Nested patterns, guards, alternatives and tuple matches replace nested
   matches (`match (fk, tk) { (Int(fb, fs), F64) => .. }` in `convert`, `match (&i.a, &i.b)`
   in the x86 encoder: a tuple of pointers, so nothing is copied). `x := match o { Some(v) =>
@@ -86,16 +87,16 @@ Conventions:
   continue }` are the forms for "take it or leave". `&name` bindings change a payload in
   place (`Br(_, &t, &e)`). What still needs an inner `match`: looking into a struct behind a
   payload (`Field(b, n) => match b.k { Ident(q) => ..`), and a scrutinee computed from an
-  outer binding (`Some(t) => match self.types.k(t) { .. }`). A predicate on an enum with
-  data is a small function (`tk_nl`, `term_is_none`, `is_r`, `eq(a: Term, b: Term)`): such
-  enums have no `==`.
+  outer binding (`Some(t) => match self.types.k(t) { .. }`). Enums with data are compared
+  with `==` (`p.peek() == Nl`, `blk.term != Trap`, `i.b == I(0)`); "is it this variant,
+  whatever the payload" is a small function (`is_r`, `tk_id`).
 - **Copies.** `clone(x)` is the builtin deep copy everywhere (functions leaving the work
-  region, instruction and operand lists). Note that `clone(p)` of a pointer is the pointer:
-  write `clone(*p)` / `clone(v)`, never `clone(&v)`. A plain assignment of a `Vec` shares its
+  region, instruction and operand lists). `clone(p)` of a pointer is a compile error:
+  write `clone(*p)` / `clone(v)`. A plain assignment of a `Vec` shares its
   buffer, which is what the read-only uses of type tables want (`fields :=
   self.types.structs[sid].fields`).
 - **Embedded files** are constants: `priv const PRELUDE = embed("prelude.al")` and the table
-  `STD_MODULES` in `src/main.al` (its length is written out: add a module and raise it).
+  `STD_MODULES = [_](str, str){...}` in `src/main.al`.
 - **Loops.** `for x in v` over a `Vec`; `v.items()` only where a slice is needed (`join`,
   `sort`, `extend`, `==`). Labelled `continue` / `break` instead of flags for leaving two
   loops (`continue blocks` in simplify.al).
@@ -150,6 +151,18 @@ Compiling the compiler (about 25,400 lines and the 2,200 of the prelude) takes a
 - **Copy-write check** (`src/lint.al`). `lint_copy_writes` runs per `:=` statement while a
   function is lowered (it needs the type of the initialiser) and counts, in the rest of the
   block, direct field assignments to the new name against every other occurrence of it.
+- **Failures that name the caller** (`pop`, `last`, `insert`, `remove`, `swap_remove`,
+  `truncate`). A prelude function `f` may have a twin `__at_f` with the same parameters plus
+  a last `at: str`. `cx_new` records the pairs (`Cx.located`, matched by parameter types) and
+  `call_fn` compiles every call of `f` as a call of `__at_f` with the "file:line" of the call
+  (`loc_str`, as `assert` and bounds checks get theirs). Overload resolution, method calls
+  and `alc sigs` only ever see `f`; `f` itself (what the name means as a function value)
+  calls the twin with "?". To give another library function a caller location, write its
+  twin; nothing in the compiler changes.
+- **`match`** (`src/lower_match.al`). The patterns of all arms are tested in order; the
+  bodies are lowered by `arm_body`, normally right after their tests, but an arm whose value
+  needs its type from the other arms (`needs_type`) is lowered after all others. `covers`
+  is the whole unreachable-pattern rule.
 
 ## Debugging switches
 

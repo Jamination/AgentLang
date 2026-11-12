@@ -500,7 +500,7 @@ priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
                 }
                 (c.pos, sig)
             }
-            Glob(g) => {
+            Global(g) => {
                 sig := match g.ty {
                     Some(ty) => fmt(sigs_priv(g.name), g.name, ": ", ast_type_str(&ty))
                     None => fmt(sigs_priv(g.name), g.name, " := ...")
@@ -521,7 +521,7 @@ priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
 priv fn sigs_visible(d: *Decl) -> bool {
     match *d {
         Fn(f) => !starts_with(f.name, "__")
-        Glob(g) => !starts_with(g.name, "__")
+        Global(g) => !starts_with(g.name, "__")
         _ => true
     }
 }

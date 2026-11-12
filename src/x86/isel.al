@@ -673,7 +673,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
         return
     }
     if i.op == GAddr && m.kind == Normal {
-        m.kind = Glob
+        m.kind = Global
         m.id = i.k
         return
     }
@@ -1191,7 +1191,7 @@ priv fn inst(self: *Sel, v: i64) {
                     } else {
                         self.e(Lea, 8, R(d), M(m))
                     }
-                } else if m.kind == Glob && m.base == NOREG && m.idx == NOREG {
+                } else if m.kind == Global && m.base == NOREG && m.idx == NOREG {
                     self.e(Mov, 8, R(d), GAddr(m.id, i64(m.disp)))
                 } else {
                     self.e(Lea, 8, R(d), M(m))

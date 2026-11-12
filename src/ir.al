@@ -239,8 +239,8 @@ struct Func {
 }
 
 enum RelocTarget {
-    Glob(i64, i64),
-    Function(i64),
+    Global(i64, i64),
+    Func(i64),
 }
 
 struct Global {

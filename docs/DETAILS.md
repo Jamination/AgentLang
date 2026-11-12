@@ -58,8 +58,19 @@ fn main() {
   wherever a variant can be written, in expressions and patterns. For a generic enum without
   written type arguments they come from the expected type, else from the payload. `Enum` must
   not be a local variable (`e.b` stays a field access).
-- A variant cannot have the name of a function, constant, global, struct or enum of the
-  program, and an enum cannot declare a variant twice.
+- A variant cannot have the name of a function, constant, global or enum of the program (the
+  error names that declaration and its position), and an enum cannot declare a variant twice.
+  It may have the name of a struct: a struct name is only ever a type (`x: Expr`,
+  `Expr{...}`, `sizeof[Expr]()`), a variant never is, so `Expr` / `Expr(e)` in an expression
+  or pattern is the variant.
+- `==` / `!=` on an enum with data compare the variant and then its payload values with the
+  rules of struct fields (pointers by address, slices by content). A comparison with a
+  variant without data (`t == Nl`, `Tk.Nl != t`) only looks at which variant it is. Such
+  enums can be `Map` keys and arguments of `hash`.
+- A value-`match` arm, whose value is a variant that needs its type from the context (a name
+  that several enums have, a variant of a generic enum such as `None`), is typed after the
+  other arms: `m := match o { Shl => Shl; AShr => Sar; _ => Ror }` is a `MOp` if only `MOp`
+  has `Sar`. If no arm has a type of its own, each such arm is reported.
 - A variant of the program may have the name of a library declaration; in the program the name
   then means the variant (`enum Cmd { push, pop }`: `push` is `Cmd.push`; `v.push(1)` still
   calls the library function). Conversely a function, constant, global or type of the program
@@ -251,7 +262,16 @@ fn main() {
 - Sub-patterns nest to any depth: `Some(Circle(r))`, `(Some(a), None)`, `Node(Leaf(x), &rest)`.
   Parts of enums and tuples can have any type.
 - A name inside a variant or tuple pattern that is a variant of some *other* enum than the
-  part's type is a binding; a binding hides an outer variable of that name.
+  part's type is a binding; a binding hides an outer variable of that name. Where the part is
+  an enum (or a pointer to one), a name that is neither one of its variants nor a constant
+  must start with a lower-case letter or `_`; `Some(Crcle)` is an error that lists the variants.
+- **Unreachable patterns.** A pattern (also one alternative of an arm) is an error if an
+  earlier arm without a guard, or an earlier alternative of the same unguarded arm, has a
+  pattern that covers it by shape: one that matches everything (`_`, a binding, a tuple of
+  them); the same constant (compared by value: `1` and `2 - 1`, `LIMIT` and `3`); the same
+  variant or a tuple whose sub-patterns cover the other's one by one (`Un(_, x)` covers
+  `Un(Neg, 1)`; `P("+")` covers `P("+")`). Nothing else is detected: several arms that
+  together cover a later one do not make it an error, nor does a variable used as a pattern.
 - **`&name`.** If the matched expression is a place (a variable, `x.f`, `a[i]`, `*p`) the
   pointer points into that place; otherwise (a call result, `match (a, b)`) into a temporary of
   the enclosing function, valid until the function returns. If the enum value is later
@@ -369,6 +389,9 @@ Run-time errors of regions and arenas (exit status 1, message on standard error)
 
 ## clone
 
+- `clone(p)` with a pointer `p` is a compile error (the result would be the same pointer; write
+  `clone(*p)`), except inside a generic function, where a type parameter may happen to be a
+  pointer type: there the pointer is copied, as a pointer inside a cloned value is.
 - Data that refers to itself through slices (`struct Node { kids: []Node }`) is copied
   completely. Data linked through pointers is not followed.
 - `Vec[T]`: a `Vec` of the same length with cloned elements (capacity = length). `Map[K, V]`: an
@@ -486,5 +509,6 @@ pattern   = "_" | expr | [qual "."] IDENT "(" [pattern {"," pattern}] ")"
 qual      = IDENT ["[" type {"," type} "]"]
 ```
 
-In a pattern, `expr` is a constant, `Variant`, `Enum.Variant`, or (inside another pattern) a new
+In a literal `[_]T{...}` the length is the number of elements written (`_` is allowed as a
+length only there). In a pattern, `expr` is a constant, `Variant`, `Enum.Variant`, or (inside another pattern) a new
 name; `&` IDENT is allowed only inside another pattern.

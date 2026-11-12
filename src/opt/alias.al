@@ -2,7 +2,7 @@
 
 priv enum Base {
     Alloca(i64),
-    Glob(i64),
+    Global(i64),
     Unknown(i64),
 }
 
@@ -37,7 +37,7 @@ priv fn decompose(f: *Func, addr: i64) -> Addr {
             return Addr{base: Base.Alloca(v), off: off}
         }
         if i.op == GAddr {
-            return Addr{base: Glob(i.k), off: off}
+            return Addr{base: Global(i.k), off: off}
         }
         if i.op == Add && depth < 32 {
             depth += 1
@@ -85,7 +85,7 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
         return Some(Base.Alloca(v))
     }
     if i.op == GAddr {
-        return Some(Glob(i.k))
+        return Some(Global(i.k))
     }
     if i.op == Add {
         r := decompose_obj(f, i.args[0], depth + 1)
@@ -174,8 +174,8 @@ fn alias_memref(f: *Func, v: i64) -> MemRef {
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
     match (a.addr.base, b.addr.base) {
-        (Alloca(x), Alloca(y)), (Glob(x), Glob(y)) if x != y => return false
-        (Alloca(_), Glob(_)), (Glob(_), Alloca(_)) => return false
+        (Alloca(x), Alloca(y)), (Global(x), Global(y)) if x != y => return false
+        (Alloca(_), Global(_)), (Global(_), Alloca(_)) => return false
         (Alloca(x), Unknown(_)), (Unknown(_), Alloca(x)) if !esc[x] => return false
         _ => {}
     }

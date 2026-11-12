@@ -268,7 +268,7 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
                 pos = c.pos
                 kind = 4
             }
-            Glob(g) => {
+            Global(g) => {
                 gp = new[GlobalDecl]()
                 *gp = g
                 name = g.name
@@ -1647,7 +1647,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                         self.err(e.pos, fmt("function `", n, "` does not have the type ", self.types.name(ty)))
                         return false
                     }
-                    relocs.push((off, Function(fid)))
+                    relocs.push((off, Func(fid)))
                     return true
                 }
                 _ => {}
@@ -1714,7 +1714,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
         }
         (Slice(T_U8), Str(s)) => {
             g := self.string_global(s)
-            relocs.push((off, Glob(g, 0)))
+            relocs.push((off, Global(g, 0)))
             put_le(data, off + 8, u64(len(s)), 8)
         }
         _ => return false

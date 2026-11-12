@@ -34,7 +34,7 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
         for rl in m.globals[gi].relocs {
             t := rl.1
             match t {
-                Function(f) if !seen[f] => {
+                Func(f) if !seen[f] => {
                     seen[f] = true
                     out.push(f)
                 }

@@ -33,7 +33,7 @@ struct Bits128 {
 
 priv enum MemKind {
     Normal,
-    Glob,   // disp is relative to global `id`
+    Global,   // disp is relative to global `id`
     Slot,     // disp is relative to frame slot `id` (base is rsp)
     InArg,    // incoming stack argument `id` (base is rsp)
     OutArg,   // outgoing stack argument `id` (base is rsp)
@@ -455,7 +455,7 @@ priv fn opnd_str(o: Opnd, sz: u8) -> str {
             s := "["
             match m.kind {
                 Normal => {}
-                Glob => {
+                Global => {
                     s = fmt(s, "g", m.id, " ")
                 }
                 Slot => {

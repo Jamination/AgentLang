@@ -588,7 +588,7 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
             continue
         }
         match s.k {
-            ExprStmt(e) => {
+            Expr(e) => {
                 v = self.expr(&e, expect)
             }
             If(c, t, Some(e)) => {
@@ -668,7 +668,7 @@ priv fn break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
 
 priv fn stmt(self: *Fx, s: *Stmt) {
     match s.k {
-        ExprStmt(e) => {
+        Expr(e) => {
             match e.k {
                 Match(sc, arms) => {
                     self.match_expr(sc, arms.items(), false, None, e.pos)
@@ -850,7 +850,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             self.cond_br(&c, bb, bx)
             self.switch_to(bx)
         }
-        LoopStmt(body) => {
+        Loop(body) => {
             bb := self.new_block()
             bx := self.new_block()
             self.jmp(bb)
@@ -940,7 +940,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             }
             self.switch_to(ok)
         }
-        BlockStmt(b) => {
+        Block(b) => {
             self.block(&b)
         }
         Defer(b) => {

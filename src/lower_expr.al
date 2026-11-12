@@ -886,7 +886,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
             r := self.ins(Xor, it, vec_of([]i64{s, m}), 0)
             return self.sval(v.ty, r)
         }
-        AddrOf => {
+        Addr => {
             match x.k {
                 Lit(te, items) => {
                     inner_expect: Opt[i64] = None

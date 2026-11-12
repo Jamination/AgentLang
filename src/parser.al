@@ -393,10 +393,10 @@ priv fn set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
             c.pos = ppos
             Const(c)
         }
-        Glob(g) => {
+        Global(g) => {
             g.is_priv = true
             g.pos = ppos
-            Glob(g)
+            Global(g)
         }
         Test(t) => d
         Use(path, upos) => d
@@ -670,7 +670,7 @@ priv fn var_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
         if !ok2 {
             return fail[Decl]()
         }
-        return (Glob(GlobalDecl{name: name, ty: None, init: Some(ie), pos: pos}), true)
+        return (Global(GlobalDecl{name: name, ty: None, init: Some(ie), pos: pos}), true)
     }
     if !p.eat_p(":") {
         return p.err[Decl](fmt("a declaration that starts with a name declares a variable, `", name, ": T` or `", name, " := value` (functions, types and constants start with `fn`, `struct`, `enum`, `const`): expected `:` or `:=`"))
@@ -679,7 +679,7 @@ priv fn var_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
     if !ok3 {
         return fail[Decl]()
     }
-    return (Glob(GlobalDecl{name: name, ty: Some(v.0), init: v.1, pos: pos}), true)
+    return (Global(GlobalDecl{name: name, ty: Some(v.0), init: v.1, pos: pos}), true)
 }
 
 priv fn decl(p: *Parser) -> (Decl, bool) {
@@ -1034,7 +1034,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok {
             return fail[SK]()
         }
-        return (LoopStmt(b), true)
+        return (Loop(b), true)
     }
     if p.eat_kw("for") {
         v1, ok1 := p.ident()
@@ -1150,7 +1150,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         if !ok {
             return fail[SK]()
         }
-        return (BlockStmt(b), true)
+        return (Block(b), true)
     }
     // a labelled loop: `name: for ...`, `name: while ...`, `name: loop ...`
     if tk_id(p.peek()) && tk_p(p.peek_at(1), ":") {
@@ -1263,7 +1263,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         }
         return (Assign(e, op, v), true)
     }
-    return (ExprStmt(e), true)
+    return (Expr(e), true)
 }
 
 // ---------- expressions ----------
@@ -1323,7 +1323,7 @@ priv fn unary(p: *Parser) -> (Expr, bool) {
         P("-") => Neg
         P("!") => Not
         P("~") => BitNot
-        P("&") => AddrOf
+        P("&") => Addr
         P("*") => Deref
         _ => return p.postfix()
     }
@@ -1702,7 +1702,7 @@ priv fn pat(e: Expr) -> Pat {
             }
             return Pat.Tuple(subs, e.pos)
         }
-        Un(AddrOf, x) => {
+        Un(Addr, x) => {
             match x.k {
                 Ident(n) => {
                     return Ref(n, e.pos)

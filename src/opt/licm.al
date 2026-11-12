@@ -226,7 +226,7 @@ fn licm_run(f: *Func) -> bool {
                                     private = !esc[x]
                                     safe_addr = is_some(m.addr.off)
                                 }
-                                Glob(g) => safe_addr = is_some(m.addr.off)
+                                Global(g) => safe_addr = is_some(m.addr.off)
                                 Unknown(u) => {}
                             }
                             if !has_call || private {

@@ -129,7 +129,7 @@ priv fn expr(u: *Use, e: *Expr) -> bool {
 
 priv fn stmt(u: *Use, s: *Stmt) -> bool {
     return match s.k {
-        ExprStmt(e) => expr(u, &e)
+        Expr(e) => expr(u, &e)
         Let(names, e) => expr(u, &e)
         MultiAssign(lhs, e) => {
             exprs(u, &lhs)
@@ -180,7 +180,7 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
             expr(u, &c)
             block(u, &body)
         }
-        LoopStmt(body) => block(u, &body)
+        Loop(body) => block(u, &body)
         For(var1, var2, lo, hi, incl, step, body) => {
             expr(u, &lo)
             match hi {
@@ -212,7 +212,7 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
                 None => true
             }
         }
-        BlockStmt(b) => block(u, &b)
+        Block(b) => block(u, &b)
         Defer(b) => block(u, &b)
         Labeled(label, st) => stmt(u, st)
         BreakTo(label) => true

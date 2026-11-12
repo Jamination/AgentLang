@@ -24,7 +24,7 @@ enum UnOp {
     Neg,
     Not,
     BitNot,
-    AddrOf,
+    Addr,
     Deref,
 }
 
@@ -111,21 +111,21 @@ struct Stmt {
 }
 
 enum SK {
-    ExprStmt(Expr),
+    Expr(Expr),
     Let(Vec[str], Expr),
     MultiAssign(Vec[Expr], Expr),
     Var(str, Opt[TypeAst], Opt[Expr]),
     Assign(Expr, Opt[BinOp], Expr),
     If(Expr, Block, Opt[Block]),
     While(Expr, Block),
-    LoopStmt(Block),
+    Loop(Block),
     // var, var2, lo, hi, incl, step, body
     For(str, Opt[str], Expr, Opt[Expr], bool, Opt[Expr], Block),
     Return(Opt[Expr]),
     Break,
     Continue,
     Assert(Expr, Opt[Expr]),
-    BlockStmt(Block),
+    Block(Block),
     Defer(Block),
     // `name: for/while/loop ...`: the loop statement with its label
     Labeled(str, *Stmt),
@@ -197,7 +197,7 @@ enum Decl {
     Struct(StructDecl),
     Enum(EnumDecl),
     Const(ConstDecl),
-    Glob(GlobalDecl),
+    Global(GlobalDecl),
     Test(TestDecl),
     Use(str, Pos),
 }

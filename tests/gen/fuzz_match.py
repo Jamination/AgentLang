@@ -302,6 +302,24 @@ def matches(t, p, v, env):
     return all(matches(x, y, z, env) for x, y, z in zip(fts, p[2], v[1]))
 
 
+def covers(a, b):
+    """the compiler's rule for an unreachable pattern: does a match everything b matches,
+    judged by shape only (a matches everything, or the same constant / variant / tuple)"""
+    if a[0] in ("wild", "bind", "ref"):
+        return True
+    if a[0] != b[0]:
+        return False
+    if a[0] == "nil":
+        return True
+    if a[0] == "deref":
+        return covers(a[1], b[1])
+    if a[0] == "const":
+        return a[1] == b[1]
+    if a[0] == "tup":
+        return all(covers(x, y) for x, y in zip(a[1], b[1]))
+    return a[1] == b[1] and all(covers(x, y) for x, y in zip(a[2], b[2]))
+
+
 # ---------- programs ----------
 class Match:
     def __init__(self, r, idx, value_form):
@@ -309,6 +327,7 @@ class Match:
         self.idx = idx
         self.t = gen_type(r, r.randint(1, 3))
         self.arms = []  # (alternatives [pattern], binds, guard k or None)
+        self.prior = []  # the patterns of the arms without a guard so far
         for _ in range(r.randint(1, 6)):
             nalt = 1 if r.random() < 0.7 else r.randint(2, 3)
             if nalt > 1 and r.random() < 0.5:
@@ -320,8 +339,16 @@ class Match:
                 g = PatGen(r, nalt == 1)
                 alts = [g.gen(self.t, 3, False) for _ in range(nalt)]
             guard = r.randrange(4) if r.random() < 0.25 else None
-            self.arms.append((alts, g.binds, guard))
-        if r.random() < 0.3:
+            # the compiler rejects a pattern that an earlier unguarded one covers
+            kept = []
+            for p in alts:
+                if not any(covers(q, p) for q in self.prior):
+                    kept.append(p)
+                    if guard is None:
+                        self.prior.append(p)
+            if kept:
+                self.arms.append((kept, g.binds, guard))
+        if r.random() < 0.3 and not any(covers(q, ("wild",)) for q in self.prior):
             self.arms.append(([("wild",)], [], None))
         self.value_form = value_form
 

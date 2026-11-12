@@ -530,7 +530,7 @@ priv fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
             if top {
                 if is_some(self.lookup(n)) || self.cx.global_decls.has(n) {
                     // as before: the address of a variable, compared with a pointer
-                    as_expr := Pat.Const(Expr{k: Un(AddrOf, parser_box(Expr{k: Ident(n), pos: pos})), pos: pos})
+                    as_expr := Pat.Const(Expr{k: Un(Addr, parser_box(Expr{k: Ident(n), pos: pos})), pos: pos})
                     return self.pat_resolve(&as_expr, ty, top)
                 }
                 self.err(pos, fmt("`&", n, "` binds a part of the matched value; it is only allowed inside a variant or tuple pattern, e.g. `Some(&", n, ")`"))
@@ -1311,7 +1311,7 @@ priv fn needs_type(s: *Fx, b: *Block, binds: *Vec[(str, i64, Pos)]) -> bool {
         return false
     }
     match b.stmts[b.stmts.len - 1].k {
-        ExprStmt(e) => {
+        Expr(e) => {
             match e.k {
                 Ident(n) => {
                     for i in 0..binds.len {

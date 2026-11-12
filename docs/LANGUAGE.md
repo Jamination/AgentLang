@@ -11,8 +11,7 @@ that are never called) as `file:line:col: error: ...`.
   there is no `free` and no garbage collector.
 - **AL does not have**: closures (a nested function sees no local of its surroundings), methods
   or `impl` blocks (`x.f(a)` calls the ordinary function `f(x, a)`), interfaces or constraints on
-  type parameters, `==` on enums with data, `<` on strings (use `cmp`), error
-  propagation syntax (see [Errors](#errors)).
+  type parameters, `<` on strings (use `cmp`), error propagation syntax (see [Errors](#errors)).
 
 Read on demand: [DETAILS.md](DETAILS.md) (grammar, fine print of name resolution and `priv`,
 bounds checks, region limits, C interop), [STDLIB.md](STDLIB.md) (math, random numbers, time, games).
@@ -197,13 +196,14 @@ resolved in this order:
 
 - `None` and other variants of generic enums without payload need a type from the context
   (`o: Opt[i64] = None`, a parameter, the result type, `Opt[i64].None`); `x := None` is an error.
-- **Comparing.** `==` / `!=` work on enums *without* data only. To test for a variant of an enum
-  with data use `match` (`is_wall := match cell { Wall(_) => true; _ => false }`) or write a
-  small predicate function.
+  As the value of a `match` arm such a variant takes the type of the other arms.
+- **Comparing.** `==` / `!=` compare the variant and its payload values (`t == Nl`,
+  `o == Some(3)`). "Is it this variant, whatever the payload": `match cell { Wall(_) => true; _ => false }`.
 - An enum value behind a pointer: `p := new[Tree[i64]]()`, `*p = Leaf(1)` (`&Variant(args)` is
   not allowed; `&` allocates only in front of a struct literal).
-- A variant cannot have the name of a function, constant, global, struct or enum of the program.
-  In a call, a builtin name stays the builtin (`len(x)`) even if an enum has such a variant.
+- A variant can have the name of a struct (`Expr{...}` is the struct literal, `Expr` / `Expr(e)`
+  the variant), but not of a function, constant, global or enum of the program. In a call, a
+  builtin name stays the builtin (`len(x)`) even if an enum has such a variant.
 
 ### Constants
 
@@ -402,8 +402,10 @@ fn main() {
 
 - **A name inside a variant or tuple pattern** is, in this order: a variant, if the type of
   that part is an enum (or a pointer to one) that has it; a constant, if a `const` of that
-  name exists; otherwise a new variable of the arm. To compare a part with a variable, bind it
-  and use a guard (`Some(x) if x == limit => ...`).
+  name exists; otherwise a new variable of the arm. Where the part is an enum, a new variable
+  must start with a lower-case letter: a misspelled variant (`Some(Crcle(r))`, `Un(Dref, x)`)
+  is an error, not a binding that matches everything. To compare a part with a variable, bind
+  it and use a guard (`Some(x) if x == limit => ...`).
 - **An arm's pattern itself** (not nested) is never a binding: a name there is a variant of the
   matched enum, or an expression compared with the matched value (a constant, a variable). For
   "everything else" write `_` and use the matched expression (`_ if n > 10 => ...`).
@@ -420,6 +422,8 @@ fn main() {
   runs. A `match` used as a value must cover every possible value; the error lists what is
   missing (`missing: Some(Rect(_, _))`). An arm with a guard covers nothing. Integers, floats,
   strings and pointers are never covered by constants alone: end with `_`.
+- **Unreachable arms.** A pattern that an earlier arm without a guard already covers (the same
+  constant or variant, or `_`) is an error that names the line of that arm.
 
 ## Expressions
 
@@ -436,12 +440,12 @@ Operators, from tightest to loosest binding (all binary operators are left-assoc
 | `==  !=  <  <=  >  >=` | |
 | `&&`, then `\|\|` | short-circuit |
 
-- `==` / `!=` work on numbers, `bool`, pointers, enums without data, and **by content** on
-  `str`, slices, arrays, structs and tuples. `<  <=  >  >=` work on numbers only; strings are
+- `==` / `!=` work on numbers, `bool`, pointers (the address), and **by content** on `str`,
+  slices, arrays, structs, tuples and enums. `<  <=  >  >=` work on numbers only; strings are
   ordered with `cmp(a, b) < 0`.
 - `p.field` dereferences pointers automatically. `a[i]` works on slices, arrays, `Vec`s and
   pointers to them; the index may have any integer type. `s.len` and `len(s)` give the length
-  of a slice, array, string or `Vec`.
+  of a slice, array, string or `Vec`, and the number of entries of a `Map`.
 - `a[i..j]` is the sub-slice `i <= index < j` (bounds may be omitted: `a[..n]`, `a[i..]`, `a[..]`);
   it shares storage with `a`.
 - `if c { a } else { b }` and `match` are expressions.
@@ -452,7 +456,7 @@ Literals for aggregates:
 Point{x: 1.0, y: 2.0}      Point{1.0, 2.0}       // struct: by name or by position; missing fields are zero
 Pair[i64, str]{1, "one"}                         // generic struct
 (1, "one", 2.5)                                  // tuple;  fields are t.0, t.1, t.2
-[4]i64{1, 2, 3}                                  // array (remaining elements are zero)
+[4]i64{1, 2, 3}            [_]i64{1, 2, 3}       // array: missing elements are zero; `[_]`: as long as the list
 []f64{1.0, 2.0}            []f64{}               // slice literal: allocates its elements; empty slice
 &Node{value: 1, next: nil}                       // allocates a struct in the arena, yields a pointer
 Circle(center, 2.0)      Empty                   // enum values;  qualified: Shape.Circle(c, 2.0)
@@ -596,9 +600,10 @@ fn main() {
 `clone(x)` (or `x.clone()`) returns a deep copy of `x` that shares no storage with it,
 allocated from the arena in use at the call.
 Slices, `str`, `Vec` and `Map` get new storage with cloned elements; arrays, tuples, structs
-and enum payloads are cloned part by part. **A pointer (`*T`) is copied as it is: what it
-points to stays shared** (`clone(p)` copies the pointer, `clone(*p)` the value). Copy linked
-structures by hand, or declare a `clone` function for the type.
+and enum payloads are cloned part by part. **A pointer (`*T`) inside the value is copied as it
+is: what it points to stays shared.** `clone(p)` of a pointer itself is a compile error (write
+`clone(*p)` for a copy of the value). Copy linked structures by hand, or declare a `clone`
+function for the type.
 
 ### Regions
 
@@ -664,7 +669,8 @@ written first):
 | `assert` fails | `assertion failed at file:line: message` |
 | `panic("msg")` | `panic at file:line: msg` |
 | `nil` dereference, stack overflow (deep recursion), write to a string literal or constant | `panic: memory fault (nil dereference, stack overflow or use of released memory)` |
-| `pop` / `unwrap` on nothing | `panic: pop from an empty Vec`, `panic: unwrap of None` |
+| `pop` / `unwrap` on nothing | `panic: pop from an empty Vec at file:line`, `panic: unwrap of None` |
+| `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
 | non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave` | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, ... |
 
 Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes index and
@@ -677,7 +683,7 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 | `print(a, b, ...)` | writes the values to standard output, separated by one space, then a newline; any number of arguments of any type |
 | `put(a, b, ...)` | same without separators and newline |
 | `fmt(a, b, ...) -> str` | like `put`, but returns the text: the way to build a string from values |
-| `len(x) -> i64` | length of a slice, array, string or `Vec` |
+| `len(x) -> i64` | length of a slice, array, string or `Vec`; number of entries of a `Map` |
 | `hash(x) -> u64` | hash of any value that supports `==` |
 | `clone(x) -> T` | independent deep copy (see [`clone`](#clonex)) |
 | `sizeof[T]() -> i64` | size of `T` in bytes |
@@ -714,7 +720,7 @@ flush()                                    // write the buffered output now (bef
 exit(code: i64) -> never                   // flush, end the program with this exit status
 
 // ---- numbers
-min(a: T, b: T) -> T    max(a: T, b: T) -> T    // any numeric type (both arguments the same type)
+min(a: T, b: T) -> T    max(a: T, b: T) -> T    // any numeric type or str (both arguments the same type)
 abs(x: T) -> T                             // any signed integer or float type
 swap(a: *T, b: *T)                         // swap(&x, &y), swap(&v[i], &v[j])
 floor(x: f64) -> f64    ceil(x: f64) -> f64    round(x: f64) -> f64
@@ -723,8 +729,8 @@ clock_ns() -> i64                          // monotonic clock in nanoseconds
 // there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
 
 // ---- slices (for a Vec pass v[..])
-sort(a: []T)                               // ascending, in place; T is a number type
-sort_by(a: []T, less: fn(T, T) -> bool)    // stable; strings: sort_by(names, fn(a: str, b: str) -> bool { cmp(a, b) < 0 })
+sort(a: []T)                               // ascending, in place; T is a number type or str (bytewise, like cmp)
+sort_by(a: []T, less: fn(T, T) -> bool)    // stable; descending: sort_by(xs, fn(a: i64, b: i64) -> bool { a > b })
 sort_by(a: []T, ctx: C, less: fn(C, T, T) -> bool)   // `ctx` is handed to every comparison (there are no closures)
 index_of(s: []T, x: T) -> i64              // position of the first element == x, or -1
 contains(s: []T, x: T) -> bool             reverse(s: []T)        // reverse works in place
@@ -733,13 +739,14 @@ fill(a: []T, x: T)                         // every element = x
 
 // ---- Vec[T]: growable array.  struct Vec[T] { buf: []T, len: i64 }
 vec[T]() -> Vec[T]                         // the zero value is an empty, usable Vec too: a field `xs: Vec[T]` needs no vec[T]()
+vec_of(s: []T) -> Vec[T]    vec_fill(n: i64, x: T) -> Vec[T]   // a Vec of copies of the elements of s: vec_of([]i64{1, 2}); of n times x
 v.len    len(v)    v[i]    v[a..b]    for x in v    for i, x in v     // checked against v.len
 v.push(x: T)                               // appends
 v.pop() -> T                               // removes and returns the last element; empty: panic
-v.last() -> T    v.is_empty() -> bool      // the last element (stays in the Vec); empty: assertion failure
+v.last() -> T    v.is_empty() -> bool      // the last element (stays in the Vec); empty: assertion failure (failures name the caller's line)
 v.items() -> []T                           // = v[..]: the elements as a slice (empty Vec: empty slice)
 v.clear()                                  // length 0, capacity kept
-v.truncate(n: i64)                         // keeps the first n elements; nothing happens if n >= v.len
+v.truncate(n: i64)                         // keeps the first n elements; nothing happens if n >= v.len; n < 0: assertion failure
 v.resize(n: i64, x: T)                     // exactly n elements: cuts, or appends copies of x
 v.reserve(n: i64)                          // capacity for n elements in total (not n more); length unchanged
 v.extend(s: []T)                           // appends all elements of s; another Vec: v.extend(w[..])
@@ -749,7 +756,7 @@ v.swap_remove(i: i64) -> T                 // removes and returns element i, the
 v.contains(x: T) -> bool                   // position: index_of(v[..], x)
 v.dedup()                                  // removes adjacent equal elements (sort first to remove all duplicates)
 
-// ---- Map[K, V]: hash map. K is any type with == (numbers, str, structs, tuples)
+// ---- Map[K, V]: hash map. K is any type with == (numbers, str, structs, tuples, enums)
 map[K, V]() -> Map[K, V]                   // the zero value is an empty, usable Map too
 m.set(k: K, v: V)                          // inserts or replaces
 m.get(k: K) -> (V, bool)                   // a COPY of the value and true; (zero value, false) if k is missing
@@ -758,7 +765,7 @@ m.ptr(k: K) -> *V                          // pointer to the stored value (nil i
                                            //   valid until a new key is set
 m.del(k: K) -> bool                        // removes k; false if it was missing
 m.keys() -> []K                            // a new slice of all keys in unspecified order (sort it for stable output)
-m.len    m.clear()                         // number of entries (a field: there is no len(m)); remove every entry
+m.len    len(m)    m.clear()               // number of entries; remove every entry
 
 // ---- strings.  str = []u8: s[i] is a byte, s[a..b] a view (no copy), len(s) counts bytes, == compares content
 concat(a: str, b: str) -> str              // a new string; more parts: fmt(a, b, c)
@@ -774,8 +781,7 @@ to_upper(s: str) -> str    to_lower(s: str) -> str     // new string; ASCII lett
 pad_left(s: str, width: i64, fill: u8) -> str    // right-aligns: pad_left(fmt(42), 6, ' ') is "    42"; never cuts
 pad_right(s: str, width: i64, fill: u8) -> str   // left-aligns
 hex(x: u64) -> str                         // lower case, no prefix, no padding: hex(255) is "ff"; other types: hex(u64(n))
-parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits: no spaces, no 0x, no _; else (0, false);
-                                           //   a value outside i64 wraps (no overflow check)
+parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits (no spaces, no 0x, no _) and fit in an i64; else (0, false)
 parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan
 is_digit(c: u8) -> bool   is_alpha(c: u8) -> bool   is_alnum(c: u8) -> bool    // ASCII; '_' is none of them
 
@@ -816,7 +822,7 @@ fn main() {
     m.set("orc", e)
     // visit a Map in a stable order
     names := m.keys()
-    sort_by(names, fn(a: str, b: str) -> bool { cmp(a, b) < 0 })
+    sort(names)
     for k in names { print(k, m.get_or(k, Enemy{}).hp) }    // orc 7
     // order by something outside the elements: the context argument
     scores := []i64{70, 95, 80}

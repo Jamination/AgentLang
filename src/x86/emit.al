@@ -55,7 +55,7 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
     }
     match m.kind {
         Normal => {}
-        Glob => {
+        Global => {
             r.reloc = Some(Abs32Global(i64(m.id)))
         }
         FConst => {
