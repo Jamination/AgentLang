@@ -180,7 +180,8 @@ priv struct Irc {
     k: i64
     n: i64
     state: Vec[NS]
-    adj_set: Map[u64, bool]
+    adj_set: Map[u64, bool]  // the edges (graphs too large for adj_bits)
+    adj_bits: Vec[u64]       // the edges as a triangular bit matrix (empty: adj_set is used)
     adj: Vec[Vec[i64]]
     degree: Vec[i64]
     moves: Vec[(i64, i64)]
@@ -207,23 +208,35 @@ priv fn add_edge(self: *Irc, u: i64, v: i64) {
     if u == v {
         return
     }
-    key := (u64(min(u, v)) << 32) | u64(max(u, v))
-    if !self.adj_set.has(key) {
-        self.adj_set.set(key, true)
-        if !self.pre(u) {
-            self.adj[u].push(v)
-            self.degree[u] += 1
-        }
-        if !self.pre(v) {
-            self.adj[v].push(u)
-            self.degree[v] += 1
-        }
+    if self.has_edge(u, v) {
+        return
+    }
+    if self.adj_bits.len > 0 {
+        a := min(u, v)
+        b := max(u, v)
+        x := b * (b - 1) / 2 + a
+        self.adj_bits[x / 64] |= u64(1) << u64(x % 64)
+    } else {
+        self.adj_set.set((u64(min(u, v)) << 32) | u64(max(u, v)), true)
+    }
+    if !self.pre(u) {
+        self.adj[u].push(v)
+        self.degree[u] += 1
+    }
+    if !self.pre(v) {
+        self.adj[v].push(u)
+        self.degree[v] += 1
     }
 }
 
 priv fn has_edge(self: *Irc, u: i64, v: i64) -> bool {
-    key := (u64(min(u, v)) << 32) | u64(max(u, v))
-    return self.adj_set.has(key)
+    if self.adj_bits.len > 0 {
+        a := min(u, v)
+        b := max(u, v)
+        x := b * (b - 1) / 2 + a
+        return (self.adj_bits[x / 64] >> u64(x % 64)) & 1 != 0
+    }
+    return self.adj_set.has((u64(min(u, v)) << 32) | u64(max(u, v)))
 }
 
 // is the neighbour m still in the graph? (Callers walk self.adj[n] and skip the others: a
@@ -733,9 +746,12 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
     round := 0
     loop {
         round += 1
-        live_out := liveness(mf, order)
         n := 32 + mf.vclass.len
         unspillable.resize(mf.vclass.len, false)
+        // the graphs of a round are thrown away at the start of the next one
+        scratch_reset()
+        scratch_on()
+        live_out := liveness(mf, order)
         spilled := vec[i64]()
         colors := vec_fill(n, 0xFFFFFFFF)
         for cls in 0..2 {
@@ -746,6 +762,8 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 n: n,
                 state: vec_fill(n, Other),
                 adj_set: map[u64, bool](),
+                // a bit matrix up to 16 MB (16384 registers), a hash set beyond
+                adj_bits: if n <= 16384 { vec_fill((n * (n - 1) / 2 + 64) / 64, u64(0)) } else { vec[u64]() },
                 adj: vec[Vec[i64]](),
                 degree: vec_fill(n, 0),
                 moves: vec[(i64, i64)](),
@@ -938,6 +956,9 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 }
             }
         }
+        scratch_off()
+        spilled = clone(spilled)
+        colors = clone(colors)
         if spilled.is_empty() {
             // rewrite to physical registers
             // (the mapping `|r| if r >= 32 { colors[r] } else { r }` as a table)
