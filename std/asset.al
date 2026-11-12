@@ -492,6 +492,12 @@ fn __json_string(p: *__JsonReader) -> str {
     i := start
     escaped := false
     while i < len(p.s) && p.s[i] != '"' {
+        if p.s[i] < 0x20 {
+            // control characters must be escaped
+            p.i = i
+            p.ok = false
+            return ""
+        }
         if p.s[i] == '\\' {
             escaped = true
             i += 1
@@ -567,6 +573,47 @@ fn __json_in_number(c: u8) -> bool {
     return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
 }
 
+// true if s has the JSON number syntax: -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][+-]?[0-9]+)?
+fn __json_number_ok(s: str) -> bool {
+    i := 0
+    n := len(s)
+    if i < n && s[i] == '-' {
+        i += 1
+    }
+    if i >= n || !is_digit(s[i]) {
+        return false
+    }
+    if s[i] == '0' {
+        i += 1
+    } else {
+        while i < n && is_digit(s[i]) {
+            i += 1
+        }
+    }
+    if i < n && s[i] == '.' {
+        i += 1
+        if i >= n || !is_digit(s[i]) {
+            return false
+        }
+        while i < n && is_digit(s[i]) {
+            i += 1
+        }
+    }
+    if i < n && (s[i] == 'e' || s[i] == 'E') {
+        i += 1
+        if i < n && (s[i] == '+' || s[i] == '-') {
+            i += 1
+        }
+        if i >= n || !is_digit(s[i]) {
+            return false
+        }
+        while i < n && is_digit(s[i]) {
+            i += 1
+        }
+    }
+    return i == n
+}
+
 fn __json_value(p: *__JsonReader, out: *Json) {
     c := __json_peek(p)
     if c == '{' {
@@ -596,7 +643,7 @@ fn __json_value(p: *__JsonReader, out: *Json) {
         out.text = p.s[start..p.i]
         x, ok := parse_f64(out.text)
         out.num = x
-        if !ok {
+        if !ok || !__json_number_ok(out.text) {
             p.i = start
             p.ok = false
         }

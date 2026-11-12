@@ -1,0 +1,26 @@
+[+1] false 1
+[.5] false 1
+[5.] false 1
+[01] false 1
+[-.5] false 1
+[1.e5] false 1
+[[00]] false 1
+[-] false 1
+[1e] false 1
+[1e+] false 1
+[--1] false 1
+["a
+b"] false 1
+["tab	here"] false 1
+[[""]] false 1
+0 true 0.0 -99.0 0
+-0 true -0.0 -99.0 0
+10 true 10.0 -99.0 0
+0.5 true 0.5 -99.0 0
+-1.25e+2 true -125.0 -99.0 0
+1E3 true 1000.0 -99.0 0
+2e-2 true 0.02 -99.0 0
+[0,1,-2] true -99.0 0.0 0
+"\u00e9\n\t" true -99.0 -99.0 4
+{"a": [1.5e1]} true -99.0 -99.0 0
+true false 1
