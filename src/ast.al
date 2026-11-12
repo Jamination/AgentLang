@@ -220,17 +220,100 @@ fn ast_type_str(t: *TypeAst) -> str {
         Name(n, args, _) => fmt(n, "[", type_str_list(&args), "]")
         Ptr(e) => fmt("*", ast_type_str(e))
         Slice(e) => fmt("[]", ast_type_str(e))
-        Array(n, e) => {
-            len := match n.k {
-                Int(k) => fmt(k)
-                Ident(name) => name
-                _ => "_"
-            }
-            fmt("[", len, "]", ast_type_str(e))
-        }
+        Array(n, e) => fmt("[", ast_expr_str(n), "]", ast_type_str(e))
         Fn(ps, Some(r)) => fmt("fn(", type_str_list(&ps), ") -> ", ast_type_str(r))
         Fn(ps, None) => fmt("fn(", type_str_list(&ps), ")")
         Tuple(ts) => fmt("(", type_str_list(&ts), ")")
+    }
+}
+
+// binding strength of an operator, as in the parser (higher binds tighter)
+priv fn bin_prec(op: BinOp) -> i64 {
+    return match op {
+        Mul, Div, Rem => 9
+        Add, Sub => 8
+        Shl, Shr => 7
+        And => 6
+        Xor => 5
+        Or => 4
+        Eq, Ne, Lt, Le, Gt, Ge => 3
+        LAnd => 2
+        LOr => 1
+    }
+}
+
+priv fn bin_text(op: BinOp) -> str {
+    return match op {
+        Mul => "*"
+        Div => "/"
+        Rem => "%"
+        Add => "+"
+        Sub => "-"
+        Shl => "<<"
+        Shr => ">>"
+        And => "&"
+        Xor => "^"
+        Or => "|"
+        Eq => "=="
+        Ne => "!="
+        Lt => "<"
+        Le => "<="
+        Gt => ">"
+        Ge => ">="
+        LAnd => "&&"
+        LOr => "||"
+    }
+}
+
+// an operand of an operator of strength `prec`, in parentheses where the tree needs them
+// (operators are left-associative: a right operand of the same strength needs them too)
+priv fn operand_str(e: *Expr, prec: i64, right: bool) -> str {
+    match e.k {
+        Bin(op, _, _) if bin_prec(op) < prec || (right && bin_prec(op) == prec) => return fmt("(", ast_expr_str(e), ")")
+        _ => {}
+    }
+    return ast_expr_str(e)
+}
+
+priv fn expr_list_str(es: *Vec[Expr]) -> str {
+    parts := vec[str]()
+    for i in 0..es.len {
+        parts.push(ast_expr_str(&es[i]))
+    }
+    return join(parts.items(), ", ")
+}
+
+// source form of a constant expression such as an array length (`N + 1`, `sizeof[T]()`); a
+// kind of expression that does not occur there is `...`
+fn ast_expr_str(e: *Expr) -> str {
+    return match e.k {
+        Int(v) => fmt(v)
+        Float(f) => fmt(f)
+        Bool(b) => fmt(b)
+        Nil => "nil"
+        Str(s) => fmt("\"", s, "\"")
+        Ident(n) => n
+        Un(op, x) => {
+            o := match op {
+                Neg => "-"
+                Not => "!"
+                BitNot => "~"
+                Addr => "&"
+                Deref => "*"
+            }
+            inner := match x.k {
+                Bin(_, _, _) => fmt("(", ast_expr_str(x), ")")
+                _ => ast_expr_str(x)
+            }
+            fmt(o, inner)
+        }
+        Bin(op, a, b) => fmt(operand_str(a, bin_prec(op), false), " ", bin_text(op), " ", operand_str(b, bin_prec(op), true))
+        Call(c, args) => fmt(operand_str(c, 10, false), "(", expr_list_str(&args), ")")
+        Index(b, idx) => fmt(operand_str(b, 10, false), "[", expr_list_str(&idx), "]")
+        Field(b, n) => fmt(operand_str(b, 10, false), ".", n)
+        TypeE(t) => ast_type_str(&t)
+        Tuple(es) => fmt("(", expr_list_str(&es), ")")
+        _ => "..."
     }
 }
 

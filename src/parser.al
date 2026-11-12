@@ -8,10 +8,82 @@ priv struct Parser {
     no_lit: bool
     // index of the `{` after a header expression that ends in a name (`if x == Point {`), or -1
     hdr_name: i64
+    // nesting of statements, expressions and `else if` chains (see `nest`): levels and the
+    // stack they cost, the deepest values reached since the peaks were last reset, and the
+    // stack budget (-1: unlimited)
+    depth: i64
+    cost: i64
+    peak: i64
+    cost_peak: i64
+    budget: i64
+    too_deep: bool
 }
 
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
-    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_name: -1}
+    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_name: -1, depth: 0, cost: 0, peak: 0, cost_peak: 0, budget: stack_budget(), too_deep: false}
+}
+
+// Deeper nesting is an error instead of a stack overflow of the parser and the later phases.
+// The compiler raises its stack limit to 1 GB at startup (ensure_stack), enough for
+// NEST_MAX levels of anything; where that is not possible, the stack each level costs (the
+// largest frames of the parser and lowering on that path, measured) is counted against 3/4
+// of the stack there is.
+priv const NEST_MAX = 2000
+priv const COST_STMT = 112 * 1024
+priv const COST_EXPR = 32 * 1024
+priv const COST_LINK = 16 * 1024
+priv const COST_ELSE_IF = 16 * 1024
+priv const COST_SMALL = 8 * 1024
+
+priv fn stack_budget() -> i64 {
+    lim: [2]i64
+    if syscall(97, 3, ptr(lim)) != 0 || lim[0] < 0 {
+        return -1
+    }
+    return lim[0] / 4 * 3
+}
+
+// enters one level of nesting that costs `c` bytes of stack; false (with an error, reported
+// once per declaration) if it is too deep. A true result must be paired with `p.unnest(c)`
+// (or restored counters).
+priv fn nest(p: *Parser, c: i64) -> bool {
+    if p.depth >= NEST_MAX || (p.budget >= 0 && p.cost + c > p.budget) {
+        if !p.too_deep {
+            p.too_deep = true
+            limit := if p.depth >= NEST_MAX { fmt("than ", NEST_MAX) } else { fmt("than the stack limit of ", p.budget / 3 * 4 / 1024, " KB allows (raise it with `ulimit -s`)") }
+            p.errs.push(Diag{pos: p.pos(), msg: fmt("nesting is too deep (more levels of blocks, statements, `else if`, operators, calls and parentheses ", limit, ")")})
+        }
+        return false
+    }
+    p.depth += 1
+    p.cost += c
+    p.peak = max(p.peak, p.depth)
+    p.cost_peak = max(p.cost_peak, p.cost)
+    return true
+}
+
+priv fn unnest(p: *Parser, c: i64) {
+    p.depth -= 1
+    p.cost -= c
+}
+
+// Before the first operand of a chain (`a + b + c`, `x.f(a)[i]`): the outer peaks, which the
+// operand's own replace for a moment
+priv fn operand_start(p: *Parser) -> (i64, i64) {
+    saved := (p.peak, p.cost_peak)
+    p.peak = p.depth
+    p.cost_peak = p.cost
+    return saved
+}
+
+// After the first operand of a chain: the chain's operators nest below everything inside
+// that operand (`(x.f().f()).f()` is as deep as its three calls together), so counting
+// continues at the operand's deepest level.
+priv fn below_operand(p: *Parser, saved: (i64, i64)) {
+    p.depth = p.peak
+    p.cost = p.cost_peak
+    p.peak = max(saved.0, p.peak)
+    p.cost_peak = max(saved.1, p.cost_peak)
 }
 
 // the failure result of a parsing function: (zero value, false)
@@ -194,27 +266,78 @@ priv fn decl_habit(s: str) -> str {
     }
 }
 
+// words of other languages: the operators `and`, `or`, `not` anywhere, the others only where
+// a statement or declaration starts (`let x = 5`, `switch x {`; a variable may be named `val`)
+priv fn word_habit(p: *Parser, j: i64) -> str {
+    s := match p.toks[j].t {
+        Id(w) => w
+        _ => return ""
+    }
+    match s {
+        "and" => return " (use `&&`)"
+        "or" => return " (use `||`)"
+        "not" => return " (use `!`)"
+        _ => {}
+    }
+    starts := j == 0
+    if j > 0 {
+        starts = match p.toks[j - 1].t {
+            Nl => true
+            P(q) => q == "{" || q == "}" || q == ";"
+            Kw(k) => k == "priv" || k == "inline" || k == "noinline"
+            _ => false
+        }
+    }
+    if !starts {
+        return ""
+    }
+    hint := decl_habit(s)
+    if hint == "" {
+        hint = match s {
+            "import" => " (use `use \"file.al\"`)"
+            "switch" => " (use `match`)"
+            "elif", "elsif" => " (use `else if`)"
+            _ => ""
+        }
+    }
+    return hint
+}
+
+// tokens j and j + 1 are `++` or `--` written together
+priv fn incr_at(p: *Parser, j: i64) -> bool {
+    if j < 0 || j + 1 >= p.toks.len {
+        return false
+    }
+    a := p.toks[j]
+    b := p.toks[j + 1]
+    same := match (a.t, b.t) {
+        (P(x), P(y)) => x == y && (x == "+" || x == "-")
+        _ => false
+    }
+    return same && a.pos.line == b.pos.line && a.pos.col + 1 == b.pos.col
+}
+
 priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
     d := p.tok_desc()
     // habits from other languages get a direct pointer to the AL spelling
     hint := ""
     match p.peek() {
-        Id(s) => {
-            hint = decl_habit(s)
-            if hint == "" {
-                hint = match s {
-                    "and" => " (use `&&`)"
-                    "or" => " (use `||`)"
-                    "not" => " (use `!`)"
-                    "import" => " (use `use \"file.al\"`)"
-                    "switch" => " (use `match`)"
-                    "elif", "elsif" => " (use `else if`)"
-                    _ => ""
+        Id(_) => {
+            hint = p.word_habit(p.i)
+        }
+        P(q) => {
+            line_start := p.i >= 1 && p.toks[p.i - 1].t == Nl
+            if p.incr_at(p.i - 1) || p.incr_at(p.i) {
+                hint = " (there is no `++`/`--`: use `x += 1`)"
+            } else if line_start && is_some(p.binop()) {
+                hint = " (a line cannot start with a binary operator: to continue an expression on the next line, end the line with the operator)"
+            } else if q == "." && starts_with(msg, "expected expression") {
+                match p.peek_at(1) {
+                    Int(_) => { hint = " (a float literal has digits on both sides of the point: `0.5`, not `.5`)" }
+                    Id(_) if line_start => { hint = " (a line cannot start with `.`: to continue a chain of calls on the next line, end the line with the `.`)" }
+                    _ => {}
                 }
             }
-        }
-        P("+"), P("-") => {
-            hint = " (there is no `++`/`--`: use `x += 1`)"
         }
         Kw(k) => {
             // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`,
@@ -230,13 +353,13 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
         }
         _ => {}
     }
-    // (`let x = 5`, `func main()`: the error is at the token after the foreign word)
+    // (`let x = 5`, `func main()`, `switch x`: the error is at the token after the foreign
+    // word; `x--` at the end of a line: at the token after it)
     if hint == "" && p.i >= 1 {
-        match p.toks[p.i - 1].t {
-            Id(prev) => {
-                hint = decl_habit(prev)
-            }
-            _ => {}
+        if tk_id(p.toks[p.i - 1].t) {
+            hint = p.word_habit(p.i - 1)
+        } else if p.incr_at(p.i - 2) {
+            hint = " (there is no `++`/`--`: use `x += 1`)"
         }
     }
     p.errs.push(Diag{pos: p.pos(), msg: fmt(msg, ", found ", d, hint)})
@@ -279,6 +402,7 @@ fn file(p: *Parser) -> Vec[Decl] {
             break
         }
         from := p.i
+        p.too_deep = false
         d, ok := p.decl()
         if ok {
             out.push(d)
@@ -803,6 +927,15 @@ priv fn type_list(p: *Parser, v: *Vec[TypeAst]) -> bool {
 }
 
 priv fn ty(p: *Parser) -> (TypeAst, bool) {
+    if !p.nest(COST_SMALL) {
+        return fail[TypeAst]()
+    }
+    r := p.ty_in()
+    p.unnest(COST_SMALL)
+    return r
+}
+
+priv fn ty_in(p: *Parser) -> (TypeAst, bool) {
     pos := p.pos()
     if p.eat_p("*") {
         t, ok := p.ty()
@@ -825,6 +958,9 @@ priv fn ty(p: *Parser) -> (TypeAst, bool) {
         p.no_lit = save
         if !ok1 {
             return fail[TypeAst]()
+        }
+        if p.is_p(",") {
+            return p.err[TypeAst]("expected `]` (a slice literal is written `[]T{a, b}`, an array `[N]T{a, b}` or `[_]T{a, b}`)")
         }
         if !p.expect_p("]") {
             return fail[TypeAst]()
@@ -998,7 +1134,11 @@ priv fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
         if p.is_kw("if") {
             pos := p.pos()
             p.bump()
+            if !p.nest(COST_ELSE_IF) {
+                return fail[(Expr, Block, Opt[Block])]()
+            }
             r, ok3 := p.if_stmt()
+            p.unnest(COST_ELSE_IF)
             if !ok3 {
                 return fail[(Expr, Block, Opt[Block])]()
             }
@@ -1020,7 +1160,11 @@ priv fn if_stmt(p: *Parser) -> ((Expr, Block, Opt[Block]), bool) {
 
 priv fn stmt(p: *Parser) -> (Stmt, bool) {
     pos := p.pos()
+    if !p.nest(COST_STMT) {
+        return fail[Stmt]()
+    }
     k, ok := p.stmt_k()
+    p.unnest(COST_STMT)
     if !ok {
         return fail[Stmt]()
     }
@@ -1343,7 +1487,12 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
 
 // ---------- expressions ----------
 priv fn expr(p: *Parser) -> (Expr, bool) {
-    return p.bin(1)
+    if !p.nest(COST_EXPR) {
+        return fail[Expr]()
+    }
+    r := p.bin(1)
+    p.unnest(COST_EXPR)
+    return r
 }
 
 priv fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
@@ -1372,10 +1521,23 @@ priv fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
 }
 
 priv fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
+    d := p.depth
+    dc := p.cost
+    r := p.bin_chain(min_prec)
+    p.depth = d
+    p.cost = dc
+    return r
+}
+
+// each operator of a chain (`a + b + c`) nests the tree one level deeper, below the first
+// operand
+priv fn bin_chain(p: *Parser, min_prec: i64) -> (Expr, bool) {
+    saved := p.operand_start()
     lhs, ok1 := p.unary()
     if !ok1 {
         return fail[Expr]()
     }
+    p.below_operand(saved)
     loop {
         op, prec := match p.binop() {
             Some((o, pr)) if pr >= min_prec => (o, pr)
@@ -1383,6 +1545,9 @@ priv fn bin(p: *Parser, min_prec: i64) -> (Expr, bool) {
         }
         pos := p.pos()
         p.bump()
+        if !p.nest(COST_SMALL) {
+            return fail[Expr]()
+        }
         rhs, ok2 := p.bin(prec + 1)
         if !ok2 {
             return fail[Expr]()
@@ -1403,7 +1568,11 @@ priv fn unary(p: *Parser) -> (Expr, bool) {
         _ => return p.postfix()
     }
     p.bump()
+    if !p.nest(COST_SMALL) {
+        return fail[Expr]()
+    }
     e, ok := p.unary()
+    p.unnest(COST_SMALL)
     if !ok {
         return fail[Expr]()
     }
@@ -1451,11 +1620,31 @@ fn args(p: *Parser, close: str) -> (Vec[Expr], bool) {
 }
 
 priv fn postfix(p: *Parser) -> (Expr, bool) {
+    // each link of a chain (`x.f(a)[i].g`) nests the tree one level deeper
+    d := p.depth
+    dc := p.cost
+    r := p.postfix_links()
+    p.depth = d
+    p.cost = dc
+    return r
+}
+
+priv fn postfix_links(p: *Parser) -> (Expr, bool) {
+    saved := p.operand_start()
     e, ok1 := p.primary()
     if !ok1 {
         return fail[Expr]()
     }
+    p.below_operand(saved)
     loop {
+        // (a method call `.f(a)` is one level)
+        method := match e.k {
+            Field(_, _) => p.is_p("(")
+            _ => false
+        }
+        if (p.is_p("(") || p.is_p("[") || p.is_p(".")) && !method && !p.nest(COST_LINK) {
+            return fail[Expr]()
+        }
         pos := p.pos()
         if p.eat_p("(") {
             a, ok2 := p.args(")")
@@ -1473,6 +1662,15 @@ priv fn postfix(p: *Parser) -> (Expr, bool) {
             }
             e = r
         } else if p.eat_p(".") {
+            // `1.` (a float without digits after the point): the `.` ends the line or is
+            // not followed by a name (`5.double()` is a method call)
+            match e.k {
+                Int(n) if p.pos().line != pos.line || !tk_id(p.peek()) => {
+                    p.errs.push(Diag{pos: pos, msg: fmt("a float literal has digits on both sides of the point: write `", n, ".0`, not `", n, ".`")})
+                    return fail[Expr]()
+                }
+                _ => {}
+            }
             match p.bump() {
                 Id(n) => {
                     e = Expr{k: Field(parser_box(e), n), pos: pos}

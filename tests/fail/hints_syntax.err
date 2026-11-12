@@ -1,0 +1,10 @@
+hints_syntax.al:4:9: error: expected expression, found `+` (a line cannot start with a binary operator: to continue an expression on the next line, end the line with the operator)
+hints_syntax.al:6:9: error: expected expression, found `||` (a line cannot start with a binary operator: to continue an expression on the next line, end the line with the operator)
+hints_syntax.al:8:1: error: expected expression, found `}` (there is no `++`/`--`: use `x += 1`)
+hints_syntax.al:9:28: error: expected `)`, found identifier `val`
+hints_syntax.al:10:23: error: expected end of statement, found identifier `x` (use `match`)
+hints_syntax.al:12:12: error: expected `{`, found identifier `x` (use `!`)
+hints_syntax.al:13:11: error: a float literal has digits on both sides of the point: write `1.0`, not `1.`
+hints_syntax.al:15:12: error: expected `]` (a slice literal is written `[]T{a, b}`, an array `[N]T{a, b}` or `[_]T{a, b}`), found `,`
+hints_syntax.al:18:10: error: expected expression, found `.` (a float literal has digits on both sides of the point: `0.5`, not `.5`)
+hints_syntax.al:22:9: error: expected expression, found `.` (a line cannot start with `.`: to continue a chain of calls on the next line, end the line with the `.`)

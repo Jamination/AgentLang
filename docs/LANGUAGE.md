@@ -62,8 +62,8 @@ test "areas" {
 
 ## Lexical structure
 
-- Source is UTF-8 text; identifiers are ASCII: `[A-Za-z_][A-Za-z0-9_]*`. Comments: `//` to the
-  end of the line.
+- Source is UTF-8 text (no NUL bytes; a byte order mark at the start is skipped); identifiers
+  are ASCII: `[A-Za-z_][A-Za-z0-9_]*`. Comments: `//` to the end of the line.
 - **Statements end at a newline** (or `;`). A newline does *not* end a statement when the line
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
   A line cannot *start* with a binary operator.
@@ -72,7 +72,7 @@ test "areas" {
 - Integer literals: `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17`. A character literal (`'a'`,
   `'\n'`, `'\''`, `'\x41'`) is an integer literal with the byte's value: `c: u8 = 'a'`,
   `s[i] == 'a'`; `c := 'a'` is an `i64`.
-- Float literals: `1.5`, `1e9`, `2.5e-3` (a digit is required on both sides of the point).
+- Float literals: `1.5`, `1e9`, `2.5e-3` (digits on both sides of the point); IEEE rounding: `1e999` is `inf`.
 - String literals: `"text"`. Escapes in strings and characters: `\n \t \r \0 \\ \" \' \xHH`.
   A string is a `str` (`[]u8`, bytes, not characters); literals are read-only.
 - Raw string literals: text between backquotes, taken as is (no escapes), may span lines.
@@ -844,9 +844,9 @@ alc sigs file.al [-- std]      one line per declaration: `file:line: signature`;
 options: --unchecked  -O0  --json  --emit-ir  --emit-asm
 ```
 
-Diagnostics list every error found, sorted by position: `file:line:col: error: message`.
-With `--json` they are printed to standard output as
-`[{"file":"f.al","line":3,"col":7,"message":"..."}]`.
+Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`
+counts bytes from 1). With `--json` they are printed to standard output as `[{"file":"f.al",
+"line":3,"col":7,"message":"..."}]`; errors without a position (unreadable file) have line 0.
 
 ## Unsafe corners
 
