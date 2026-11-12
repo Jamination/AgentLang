@@ -61,10 +61,6 @@ struct Fx {
     nested_done: Vec[(*FnDecl, i64)]
 }
 
-priv fn str_less(a: str, b: str) -> bool {
-    return cmp(a, b) < 0
-}
-
 fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
     edi, has_entry := cx.fn_names.get(entry)
     if has_entry {
@@ -98,9 +94,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         }
         // two definitions of a name whose parameter types are the same once type aliases
         // are resolved (the texts differ, so the declaration pass did not see it)
-        okeys := cx.fn_over.keys()
-        sort_by(okeys, str_less)
-        for n in okeys {
+        for n in cx.fn_over.keys() {
             l, _ := cx.fn_over.get(n)
             if l.len < 2 || !cx.fn_names.has(n) {
                 continue
@@ -129,11 +123,9 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             }
         }
         // and force evaluation of user constants / globals
-        // (the names are visited in sorted order, so that diagnostics come out the same every time)
-        ckeys := cx.const_decls.keys()
-        sort_by(ckeys, str_less)
+        // (the names are visited in the order of their declarations)
         cnames := vec[str]()
-        for n in ckeys {
+        for n in cx.const_decls.keys() {
             d, _ := cx.const_decls.get(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
                 cnames.push(n)
@@ -142,10 +134,8 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         for i in 0..cnames.len {
             cx.const_named(cnames[i])
         }
-        gkeys := cx.global_decls.keys()
-        sort_by(gkeys, str_less)
         gnames := vec[str]()
-        for n in gkeys {
+        for n in cx.global_decls.keys() {
             d, _ := cx.global_decls.get(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
                 gnames.push(n)

@@ -254,10 +254,8 @@ priv fn run_once(f: *Func) -> bool {
         ps.push(bp.1)
         by_block.set(bp.0, ps)
     }
-    // blocks are independent of each other; sorted for determinism
-    bkeys := by_block.keys()
-    sort(bkeys)
-    for b in bkeys {
+    // blocks are independent of each other
+    for b in by_block.keys() {
         ps := by_block.get_or(b, vec[i64]())
         ps.extend(f.blocks[b].insts.items())
         f.blocks[b].insts = ps
