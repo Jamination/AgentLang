@@ -917,6 +917,22 @@ priv fn sync_stmt(p: *Parser) {
     }
 }
 
+// `for cond {`: the tokens up to the `{` of the body (on the same line) contain no `in`
+priv fn for_without_in(p: *Parser) -> bool {
+    depth := 0
+    for j in p.i..p.toks.len {
+        match p.toks[j].t {
+            Kw("in") => return false
+            P("("), P("[") => { depth += 1 }
+            P(")"), P("]") => { depth -= 1 }
+            P("{") if depth == 0 => return j > p.i
+            P("}"), Nl, Eof => return false
+            _ => {}
+        }
+    }
+    false
+}
+
 // the scrutinee of a `match`, the condition of an `if` or `while`, an expression of a `for` header
 priv fn header_expr(p: *Parser) -> (Expr, bool) {
     save := p.no_lit
@@ -1037,6 +1053,10 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         return (Loop(b), true)
     }
     if p.eat_kw("for") {
+        if p.for_without_in() {
+            p.errs.push(Diag{pos: p.toks[p.i - 1].pos, msg: "`for` without `in`: a loop on a condition is written `while cond { }`"})
+            return fail[SK]()
+        }
         v1, ok1 := p.ident()
         if !ok1 {
             return fail[SK]()

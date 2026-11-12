@@ -1,0 +1,4 @@
+for_condition.al:4:5: error: `for` without `in`: a loop on a condition is written `while cond { }`
+for_condition.al:8:5: error: `for` without `in`: a loop on a condition is written `while cond { }`
+for_condition.al:11:5: error: `for` without `in`: a loop on a condition is written `while cond { }`
+3 error(s)
