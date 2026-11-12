@@ -621,9 +621,11 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
             }
         }
     }
+    // one membership buffer for all loops, cleared after each (a fresh one per loop made every
+    // loop analysis O(loops x blocks) in memory)
+    inl := vec_fill(n, false)
     for li in 0..loops.len {
         l := &loops[li]
-        inl := vec_fill(n, false)
         inl[l.header] = true
         work := vec[i64]()
         for lt in l.latches {
@@ -642,6 +644,9 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
                     work.push(p)
                 }
             }
+        }
+        for b in l.blocks {
+            inl[b] = false
         }
     }
     // nesting: process loops from largest to smallest
