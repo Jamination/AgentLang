@@ -200,7 +200,9 @@ The surface extensions are bound but this module creates no window. Create one w
 window-system module, then enable `VK_KHR_SURFACE_EXTENSION_NAME` plus the platform extension on
 the instance and `VK_KHR_SWAPCHAIN_EXTENSION_NAME` on the device, and call
 `vkCreateXlibSurfaceKHR` / `vkCreateXcbSurfaceKHR` / `vkCreateWaylandSurfaceKHR` with the native
-display and window handles.
+display and window handles: `x11_display(w)` / `x11_window(w)` of a `std.window` window, or the
+`wl_display` and `wl_surface` of a program that uses `std.wayland` (see
+[wayland.md](wayland.md#a-window-step-by-step)).
 
 ## Regenerating
 

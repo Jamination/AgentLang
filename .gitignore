@@ -8,3 +8,4 @@ tools/gen_vk
 tools/gen_dx12
 tools/gen_wayland
 examples/starter/game
+examples/wayland_window
