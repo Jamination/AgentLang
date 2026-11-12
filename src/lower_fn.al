@@ -1108,6 +1108,13 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                     match self.cx.const_eval(se) {
                         Some(Int(k)) if k != 0 => {
                             stepk = k
+                            match self.cx.types.k(ty) {
+                                Int(bits, _) if bits < 64 && (k < -(1 << (bits - 1)) || k >= 1 << bits) => {
+                                    tn := self.tyname(ty)
+                                    self.err(se.pos, fmt("`by` step ", k, " does not fit in ", tn))
+                                }
+                                _ => {}
+                            }
                         }
                         Some(_) => {
                             self.err(se.pos, "`by` step must be a non-zero integer")
@@ -1165,7 +1172,30 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             }
             next := self.ins(Add, it, vec_of([]i64{cur, st}), 0)
             self.store_raw(addr, next, it, iv.alias)
-            c2 := self.ins(cmpop, I8, vec_of([]i64{next, end}), 0)
+            c2 := NOV
+            if !is_some(step_dyn) && (stepk == 1 || stepk == -1) {
+                if incl {
+                    // `cur + 1 <= end` would overflow at the largest value: `cur < end`
+                    strict := if stepk > 0 { if signed { Slt } else { Ult } } else { if signed { Sgt } else { Ugt } }
+                    c2 = self.ins(strict, I8, vec_of([]i64{cur, end}), 0)
+                } else {
+                    c2 = self.ins(cmpop, I8, vec_of([]i64{next, end}), 0)
+                }
+            } else {
+                // a larger step may jump past the largest value: continue while there is
+                // room for one more step between cur and end (the distance is unsigned)
+                first := self.ins(cmpop, I8, vec_of([]i64{cur, end}), 0)
+                diff := NOV
+                mag := st
+                if stepk > 0 {
+                    diff = self.ins(Sub, it, vec_of([]i64{end, cur}), 0)
+                } else {
+                    diff = self.ins(Sub, it, vec_of([]i64{cur, end}), 0)
+                    mag = self.iconst(it, -stepk)
+                }
+                room := self.ins(if incl { Uge } else { Ugt }, I8, vec_of([]i64{diff, mag}), 0)
+                c2 = self.ins(And, I8, vec_of([]i64{first, room}), 0)
+            }
             self.br(c2, bb, bx)
         }
         None => {

@@ -1454,7 +1454,8 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             if bound {
                 targs.push(t)
             } else {
-                self.err(pos, fmt("cannot infer type parameter `", p, "` of `", d.name, "`; write `", d.name, "[T](...)`"))
+                dn := ast_plain(d.name)
+                self.err(pos, fmt("cannot infer type parameter `", p, "` of `", dn, "`; write `", dn, "[", join(d.tparams.items(), ", "), "](...)` with the types"))
                 return val_err()
             }
         }
