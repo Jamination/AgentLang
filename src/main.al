@@ -252,7 +252,25 @@ priv struct Args {
     rest: Vec[str]
 }
 
-priv fn usage() -> never {
+// an error of the driver itself (no position): with --json the same array as diagnostics,
+// with line and col 0
+priv fn driver_error(file: str, msg: str) {
+    if json {
+        print(fmt("[{\"file\":", json_str(file), ",\"line\":0,\"col\":0,\"message\":", json_str(msg), "}]"))
+    } else {
+        eput(fmt("error: ", msg, "\n"))
+    }
+}
+
+// `why` (empty: the command line is incomplete) and the usage; exit status 2
+priv fn usage(why: str) -> never {
+    if json {
+        driver_error("", if len(why) == 0 { "usage: alc <command> <file.al> [options]" } else { why })
+        exit(2)
+    }
+    if len(why) != 0 {
+        eput(fmt(why, "\n"))
+    }
     eput(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
         "options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
@@ -265,8 +283,17 @@ priv fn parse_args() -> Args {
     for i in 1..len(all) {
         av.push(all[i])
     }
+    // --json first: it also decides how errors in the command line are written
+    for k, s in av {
+        if s == "--" {
+            break
+        }
+        if s == "--json" && !(k > 0 && av[k - 1] == "-o") {
+            json = true
+        }
+    }
     if av.len < 2 {
-        usage()
+        usage("")
     }
     a := Args{cmd: av[0], input: "", output: None, emit_ir: false, emit_asm: false, unchecked: false, opt: 2, rest: vec[str]()}
     i := 1
@@ -275,7 +302,7 @@ priv fn parse_args() -> Args {
         if s == "-o" {
             i += 1
             if i >= av.len {
-                usage()
+                usage("-o needs a path")
             }
             a.output = Some(av[i])
         } else if s == "--json" {
@@ -296,20 +323,18 @@ priv fn parse_args() -> Args {
             a.rest = vec_of(av[i + 1..av.len])
             break
         } else if starts_with(s, "-") {
-            eput(fmt("unknown option ", s, "\n"))
-            usage()
+            usage(fmt("unknown option ", s))
         } else {
             if len(a.input) == 0 {
                 a.input = s
             } else {
-                eput(fmt("unexpected argument ", s, "\n"))
-                usage()
+                usage(fmt("unexpected argument ", s))
             }
         }
         i += 1
     }
     if len(a.input) == 0 {
-        usage()
+        usage("")
     }
     return a
 }
@@ -390,7 +415,7 @@ priv fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
         match from {
             Some(pos) => self.errs.push(Diag{pos: pos, msg: msg})
             None => {
-                eput(fmt("error: ", msg, "\n"))
+                driver_error(path, msg)
                 exit(1)
             }
         }
@@ -538,7 +563,7 @@ priv fn real_main() -> i64 {
     ar := parse_args()
     test_mode := ar.cmd == "test"
     if !(ar.cmd == "build" || ar.cmd == "run" || ar.cmd == "test" || ar.cmd == "check" || ar.cmd == "sigs") {
-        usage()
+        usage(fmt("unknown command ", ar.cmd))
     }
     src := Sources{names: vec[str](), decls: vec[Decl](), errs: vec[Diag](), seen: map[str, bool](), std_files: vec[i64]()}
     src.add_text("<prelude>", PRELUDE, None)
@@ -682,7 +707,7 @@ priv fn real_main() -> i64 {
     mem("compiled")
     bytes, link_err := elf_link(&module, &out)
     if len(link_err) != 0 {
-        eput(fmt("error: ", link_err, "\n"))
+        driver_error(ar.input, link_err)
         return 1
     }
     out_path := match ar.output {
@@ -713,7 +738,7 @@ priv fn real_main() -> i64 {
     // the executable must not replace a source file of the program (`-o main.al`)
     for name in src.names {
         if same_file(name, out_path) {
-            eput(fmt("error: the output `", out_path, "` is the source file `", name, "`: choose another path with -o\n"))
+            driver_error(out_path, fmt("the output `", out_path, "` is the source file `", name, "`: choose another path with -o"))
             return 1
         }
     }
@@ -726,14 +751,14 @@ priv fn real_main() -> i64 {
         } else {
             syscall(3, fd)
         }
-        eput(fmt("error: cannot write `", out_path, "`: ", os_error(errno), "\n"))
+        driver_error(out_path, fmt("cannot write `", out_path, "`: ", os_error(errno)))
         return 1
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
         code := run_program(out_path, ar.rest.items())
         if code < 0 {
-            eput(fmt("error: cannot run `", out_path, "`: ", os_error(11), "\n"))
+            driver_error(out_path, fmt("cannot run `", out_path, "`: ", os_error(11)))
             return 1
         }
         return code
