@@ -57,6 +57,8 @@ struct Cx {
     const_vals: Map[str, CState]
     global_decls: Map[str, *GlobalDecl]
     globals: Map[str, (i64, i64)]
+    // the import slots of `extern` variables (global ids): the slot holds the C variable's address
+    ext_gots: Map[i64, bool]
     // instance tables: the key is (declaration index, type arguments as a slice that is never
     // modified afterwards)
     struct_insts: Map[(i64, []i64), i64]
@@ -199,6 +201,7 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
         const_vals: map[str, CState](),
         global_decls: map[str, *GlobalDecl](),
         globals: map[str, (i64, i64)](),
+        ext_gots: map[i64, bool](),
         struct_insts: map[(i64, []i64), i64](),
         enum_insts: map[(i64, []i64), i64](),
         fn_insts: map[(i64, []i64), i64](),
@@ -939,6 +942,19 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
         }
     }
     self.flush_layout_errors(d.pos)
+    match d.ext {
+        Some(lib) => {
+            // a C variable of a shared library: the program has only its import slot, which
+            // the dynamic loader fills with the variable's address (no copy relocation)
+            got := self.module.globals.len
+            self.module.globals.push(Global{name: fmt("got.", ast_plain(d.name)), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), relocs: vec[(i64, RelocTarget)](), readonly: false})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got, data: true})
+            self.ext_gots.set(got, true)
+            self.globals.set(d.name, (ty, got))
+            return Some((ty, got))
+        }
+        None => {}
+    }
     size := self.types.size_of(ty)
     align := max(self.types.align_of(ty), 1)
     gid := self.module.globals.len
@@ -949,6 +965,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
             if ty != T_ERR {
                 data := vec_fill(size, u8(0))
                 relocs := vec[(i64, RelocTarget)]()
+                nerr := self.errs.len
                 if self.const_init(&init, ty, 0, &data, &relocs) {
                     nonzero := false
                     for i in 0..data.len {
@@ -962,7 +979,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
                         g.data = Some(data)
                         g.relocs = relocs
                     }
-                } else {
+                } else if self.errs.len == nerr {
                     self.err(init.pos, "global initializer must be a compile-time constant")
                 }
             }
@@ -1006,6 +1023,15 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
                 match self.const_global(n) {
                     Some(g) => return g.0
                     None => return T_ERR
+                }
+            }
+            // the name of a single non-generic function
+            if !self.const_decls.has(n) {
+                cands := self.fn_candidates(n)
+                if cands.len == 1 && self.fn_decls[cands[0]].tparams.is_empty() {
+                    fid := self.inst_fn(cands[0], vec[i64]())
+                    sig := self.fn_sigs[fid]
+                    return self.types.intern(TyK.Fn(clone(sig.0), sig.1))
                 }
             }
         }
@@ -1146,7 +1172,15 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
             self.errs.truncate(saved)
         }
         Ident(n) => {
-            mem = n != name && self.const_is_mem(n)
+            if self.const_decls.has(n) {
+                mem = n != name && self.const_is_mem(n)
+            } else {
+                // the name of a function: its address, relocated like one inside an aggregate
+                save_scope := self.scope_prelude
+                self.scope_prelude = self.internal_file(d.pos.file)
+                mem = self.fn_candidates(n).len != 0
+                self.scope_prelude = save_scope
+            }
         }
         _ => {}
     }
@@ -1636,19 +1670,30 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                     return false
                 }
                 Fn(ptys, rty) => {
-                    // address of a (non-generic) function
-                    di := match self.find_fn(n) {
-                        Some(fdi) if self.fn_decls[fdi].tparams.is_empty() => fdi
-                        _ => return false
+                    // address of a (non-generic) function; of an overloaded name the
+                    // definition of this type
+                    cands := self.fn_candidates(n)
+                    plain := 0
+                    for ci in 0..cands.len {
+                        if !self.fn_decls[cands[ci]].tparams.is_empty() {
+                            continue
+                        }
+                        plain += 1
+                        fid := self.inst_fn(cands[ci], vec[i64]())
+                        sig := self.fn_sigs[fid]
+                        if sig.0.items() == ptys.items() && sig.1 == rty {
+                            if is_some(self.module.funcs[fid].ext) {
+                                self.err(e.pos, fmt("the address of the C function `", n, "` is known only at run time: it cannot be part of a constant or a global initializer"))
+                                return false
+                            }
+                            relocs.push((off, Func(fid)))
+                            return true
+                        }
                     }
-                    fid := self.inst_fn(di, vec[i64]())
-                    sig := self.fn_sigs[fid]
-                    if sig.0.items() != ptys.items() || sig.1 != rty {
+                    if plain != 0 {
                         self.err(e.pos, fmt("function `", n, "` does not have the type ", self.types.name(ty)))
-                        return false
                     }
-                    relocs.push((off, Func(fid)))
-                    return true
+                    return false
                 }
                 _ => {}
             }

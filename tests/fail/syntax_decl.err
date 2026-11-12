@@ -16,8 +16,8 @@ syntax_decl.al:16:8: error: `inline`, `noinline` and `extern "lib"` stand in fro
 syntax_decl.al:17:10: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found keyword `const`
 syntax_decl.al:18:8: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `v1`
 syntax_decl.al:19:10: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `v2`
-syntax_decl.al:20:20: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found identifier `v3`
-syntax_decl.al:21:20: error: `inline`, `noinline` and `extern "lib"` stand in front of a function declaration: expected `fn`, found keyword `struct`
+syntax_decl.al:20:20: error: `extern "lib"` stands in front of a C function or variable declaration (`extern "lib" fn name(a: A) -> R`, `extern "lib" name: T`): expected `fn` or a name, found keyword `const`
+syntax_decl.al:21:20: error: `extern "lib"` stands in front of a C function or variable declaration (`extern "lib" fn name(a: A) -> R`, `extern "lib" name: T`): expected `fn` or a name, found keyword `struct`
 syntax_decl.al:22:1: error: the C function `c_gen` cannot have type parameters
 syntax_decl.al:23:39: error: an `extern` function is a C function of the library and has no body: expected end of line after the declaration of `c_bod
 syntax_decl.al:24:8: error: expected a library name string after `extern`, e.g. `extern "libc.so.6" fn getpid() -> i32`, found keyword `fn`

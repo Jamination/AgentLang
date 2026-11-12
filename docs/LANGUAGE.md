@@ -887,6 +887,7 @@ cross length normalize lerp`, matrices, quaternions): [std/math.md](std/math.md)
 ```
 extern "libc.so.6" fn getenv(name: *u8) -> *u8
 extern "libm.so.6" fn cosf(x: f32) -> f32
+extern "libc.so.6" environ: **u8           // a C variable: read, assign, `&environ`; no initializer
 
 home := from_cstr(getenv(ptr("HOME")))     // string literals are NUL-terminated in memory
 p := cstr(path)                            // NUL-terminated copy of any str

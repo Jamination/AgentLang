@@ -259,12 +259,13 @@ struct Module {
     externs: Vec[ExternFn]
 }
 
-// An imported C function: calls load its address from the 8-byte global `got`, which the
-// dynamic loader fills in.
+// An imported C symbol: calls of a C function load its address from the 8-byte global `got`,
+// which the dynamic loader fills in; for a C variable (`data`) `got` holds the variable's address.
 struct ExternFn {
     name: str
     lib: str
     got: i64
+    data: bool
 }
 
 fn ir_canon(ty: T, k: i64) -> i64 {

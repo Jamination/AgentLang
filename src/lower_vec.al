@@ -56,11 +56,8 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
                 None => {}
             }
             if !self.cx.const_decls.has(n) {
-                match self.cx.global(n) {
-                    Some(g) => {
-                        a := self.ins(GAddr, I64, vec[i64](), g.1)
-                        return self.mval(g.0, a)
-                    }
+                match self.global_place(n) {
+                    Some(m) => return m
                     None => {}
                 }
             }

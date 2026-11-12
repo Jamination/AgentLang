@@ -88,9 +88,11 @@ fn main() {
 
 - Allowed in an initialiser: number, `bool` and string constants and constant expressions of
   them; `T{...}` literals and tuples (nested as needed); `vec2/vec3/vec4/quat/mat4(...)` with
-  constant components; names of non-generic functions (for elements of function type); `nil`;
-  variants of enums without data (as elements or fields of a typed literal); `embed("file")`;
-  names of other constants. A constant cannot depend on itself.
+  constant components; names of non-generic functions (for elements of function type, or the
+  whole value: `const F = double`, called as `F(x)`; an overloaded name needs the annotated
+  type `const F: fn(i64) -> i64 = inc`); `nil`; variants of enums without data (as elements or
+  fields of a typed literal); `embed("file")`; names of other constants. A constant cannot
+  depend on itself. The address of an `extern` function is not a constant.
 - An annotated type must match the value (`const UNIT: Point = Point{1, 1}`).
 - An aggregate (array, struct, tuple) or vector / matrix constant is stored once in read-only
   memory. Assigning to it or to a part of it, and `&` on it or on a part of it are compile
@@ -292,8 +294,8 @@ fn main() {
 
 ## Method calls
 
-- Order of lookup for `x.f(a)`: a field `f` of `x` that holds a function; a nested function `f`
-  in scope; the top-level functions `f` (overloading rules).
+- Order of lookup for `x.f(a)`: a field `f` of `x` that holds a function (also a tuple element:
+  `t.1(a)`); a nested function `f` in scope; the top-level functions `f` (overloading rules).
 - The receiver adjustments (`&x` for a `*T` parameter, dereference for a `T` parameter) hold for
   overloaded and generic functions too: a parameter `p: *T` takes the address, a generic
   parameter `T` alone takes the receiver by value.
@@ -438,11 +440,14 @@ fn main() {
 ```
 extern "libc.so.6" fn getenv(name: *u8) -> *u8
 extern "libm.so.6" fn cosf(x: f32) -> f32
+extern "libc.so.6" optind: i32                 // a C variable of the library
 
 fn main() {
     home := from_cstr(getenv(ptr("HOME")))     // string literals are NUL-terminated in memory
     p := cstr("some/path")                     // NUL-terminated copy of any str
-    print(len(home) > 0, p != nil, cosf(0.0))  // true true 1.0
+    optind = 1                                 // read and written like an AL global
+    q: *i32 = &optind
+    print(len(home) > 0, p != nil, cosf(0.0), *q)  // true true 1.0 1
 }
 ```
 
@@ -455,10 +460,19 @@ fn main() {
 - A plain AL function (also a nested or anonymous one) can be passed where C expects a callback
   (`fn(*u8, *u8) -> i32`), as long as its parameters are scalars. Code running on a foreign
   thread must not allocate.
-- A program that calls at least one `extern` function becomes a dynamically linked executable
-  (the system loader maps the libraries at start-up); every other program stays a static,
-  libc-free executable. Only the libraries of functions that are actually reachable are needed.
-- The declared signature of an `extern` function is trusted.
+- `extern "lib" name: T` declares a global variable (or constant) `name` of the C library,
+  with the C type written as `T` (a C struct as an AL struct of the same layout: `extern
+  "libwayland-client.so.0" wl_surface_interface: WlInterface`). It is read, assigned and
+  addressed like an AL global; `&name` is its address in the library. The program refers to
+  it through an import slot that the loader fills with its address (R_X86_64_GLOB_DAT; the
+  variable is not copied into the program), so the library's own code and the program see
+  the same variable. It has no initializer, cannot be `priv` and stands at top level. Writing
+  a C constant (in read-only memory) stops the program with a memory fault.
+- A program that uses at least one `extern` function or variable becomes a dynamically linked
+  executable (the system loader maps the libraries at start-up); every other program stays a
+  static, libc-free executable. Only the libraries of functions and variables that are
+  actually reachable are needed.
+- The declared signature of an `extern` function and the type of an `extern` variable are trusted.
 - Vectors are single values in SSE registers; `vec3` in memory is exactly 12 bytes, so `[]vec3`
   or a struct of vectors can be handed to a GPU API as is.
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
@@ -474,6 +488,7 @@ literal there is written in parentheses).
 file      = { decl }
 decl      = ["priv"] ["inline" | "noinline"] "fn" IDENT [tparams] params ["->" type] block
           | ["priv"] "extern" STRING "fn" IDENT params ["->" type]
+          | "extern" STRING IDENT ":" type
           | ["priv"] "struct" IDENT [tparams] "{" { IDENT ":" type [","] } "}"
           | ["priv"] "enum" IDENT [tparams] "{" { IDENT ["(" type {"," type} ")"] [","] } "}"
           | ["priv"] "const" IDENT [":" type] "=" expr

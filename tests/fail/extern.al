@@ -2,6 +2,9 @@
 struct P { x: i64, y: i64 }
 extern "libc.so.6" fn takes_struct(p: P) -> i32
 extern "libc.so.6" fn returns_vec() -> vec3
+extern "libc.so.6" fn getpid() -> i32
+const PID = getpid
+fns := [1]fn() -> i32{getpid}
 fn area(a: vec2) -> f32 { a.x * a.y }
 fn area(a: vec2) -> f32 { a.y }
 fn main() {
@@ -13,5 +16,5 @@ fn main() {
     d: f64 = 1.0
     y := v * d
     z := &v.x
-    print(area("no"))
+    print(area("no"), PID(), fns[0]())
 }

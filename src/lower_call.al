@@ -636,7 +636,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 }
                 None => {}
             }
-            if self.cx.global_decls.has(n) {
+            if self.cx.global_decls.has(n) || self.cx.const_decls.has(n) {
                 fv := self.expr(c, None)
                 return self.call_indirect(fv, args, pos)
             }
@@ -778,6 +778,17 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                         }
                     }
                     if is_fn_field {
+                        fp := match self.field_of(dv, name, pos) {
+                            Some(p) => self.rvalue(p)
+                            None => return val_err()
+                        }
+                        return self.call_indirect(fp, args, pos)
+                    }
+                }
+                Tuple(ts) => {
+                    // `t.1(x)`: a tuple element holding a function value
+                    idx, num := parse_i64(name)
+                    if num && idx >= 0 && idx < ts.len && lower_call_is_fn(self.cx.types.k(ts[idx])) {
                         fp := match self.field_of(dv, name, pos) {
                             Some(p) => self.rvalue(p)
                             None => return val_err()

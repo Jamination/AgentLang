@@ -394,8 +394,12 @@ priv fn set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
             Const(c)
         }
         Global(g) => {
-            g.is_priv = true
-            g.pos = ppos
+            if is_some(g.ext) {
+                errs.push(Diag{pos: ppos, msg: fmt("an `extern` variable cannot be `priv`: `", g.name, "` is the library's global symbol, visible to the whole program; remove `priv`")})
+            } else {
+                g.is_priv = true
+                g.pos = ppos
+            }
             Global(g)
         }
         Test(t) => d
@@ -699,6 +703,7 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
     ext: Opt[str] = None
     if p.eat_kw("extern") {
         // extern "libfoo.so.1" fn name(a: A) -> R     (a C function; no body)
+        // extern "libfoo.so.1" name: T                (a C variable; no initializer)
         match p.bump() {
             Str(s) => {
                 ext = Some(utf8_lossy(s))
@@ -716,8 +721,27 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
         }
         return (Fn(f), true)
     }
-    if inl != 0 || is_some(ext) {
+    if is_some(ext) && inl == 0 && tk_id(p.peek()) {
+        d, ok := p.var_decl(pos)
+        if !ok {
+            return fail[Decl]()
+        }
+        return match d {
+            Global(g) => {
+                if is_some(g.init) {
+                    p.errs.push(Diag{pos: pos, msg: fmt("the `extern` variable `", g.name, "` has no initializer: its value is in the library; write `extern \"lib\" ", g.name, ": T`")})
+                }
+                g.ext = ext
+                (Global(g), true)
+            }
+            _ => (d, true)
+        }
+    }
+    if inl != 0 {
         return p.err[Decl]("`inline`, `noinline` and `extern \"lib\"` stand in front of a function declaration: expected `fn`")
+    }
+    if is_some(ext) {
+        return p.err[Decl]("`extern \"lib\"` stands in front of a C function or variable declaration (`extern \"lib\" fn name(a: A) -> R`, `extern \"lib\" name: T`): expected `fn` or a name")
     }
     if p.is_kw("const") || p.is_kw("struct") || p.is_kw("enum") {
         return p.kw_decl(pos)
@@ -1009,7 +1033,11 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
     }
     match p.peek() {
         Kw(k) => {
-            if k == "inline" || k == "noinline" || k == "extern" {
+            if k == "extern" {
+                p.errs.push(Diag{pos: p.pos(), msg: "`extern` declarations stand at top level: a C function or variable of a library cannot be declared inside a function"})
+                return fail[SK]()
+            }
+            if k == "inline" || k == "noinline" {
                 p.errs.push(Diag{pos: p.pos(), msg: fmt("`", k, "` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`")})
                 return fail[SK]()
             }

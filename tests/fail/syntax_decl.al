@@ -17,7 +17,7 @@ inline type R1 = i64
 noinline const C1 = 5
 inline v1: i64
 noinline v2 := 1
-extern "libc.so.6" v3: i64
+extern "libc.so.6" const v3 = 1
 extern "libc.so.6" struct S4 { a: i64 }
 extern "libc.so.6" fn c_gen[T](x: T) -> T
 extern "libc.so.6" fn c_body() -> i32 { 1 }

@@ -356,6 +356,19 @@ fn sval(self: *Fx, ty: i64, v: i64) -> Val {
     return Val{ty: ty, v: v, mem: false, alias: 0, lane: None}
 }
 
+// The place of global variable `n`; an `extern` variable is reached through its import slot.
+fn global_place(self: *Fx, n: str) -> Opt[Val] {
+    g := match self.cx.global(n) {
+        Some(g) => g
+        None => return None
+    }
+    a := self.ins(GAddr, I64, vec[i64](), g.1)
+    if self.cx.ext_gots.has(g.1) {
+        a = self.load_raw(a, I64, AK_PTR)
+    }
+    return Some(self.mval(g.0, a))
+}
+
 // a memory value; alias class is the generic class of scalar types
 fn mval(self: *Fx, ty: i64, addr: i64) -> Val {
     alias := 0

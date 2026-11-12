@@ -1,0 +1,8 @@
+environment entries: true stdout: 1 stderr: 2
+optind: 1 opterr: 1
+unknown -x: true optind: 3
+-b: true optind: 4
+end: -1 optind: 4
+through pointers: 11 11
+getenv: two true
+written through stdout

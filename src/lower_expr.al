@@ -406,10 +406,8 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
             None => { return val_err() }
         }
     }
-    match self.cx.global(n) {
-        Some(g) => {
-            a := self.ins(GAddr, I64, vec[i64](), g.1)
-            m := self.mval(g.0, a)
+    match self.global_place(n) {
+        Some(m) => {
             return self.rvalue(m)
         }
         None => {}
@@ -500,10 +498,9 @@ priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                 None => {}
             }
             if !self.cx.const_decls.has(n) {
-                match self.cx.global(n) {
-                    Some(g) => {
-                        a := self.ins(GAddr, I64, vec[i64](), g.1)
-                        return Some(self.mval(g.0, a))
+                match self.global_place(n) {
+                    Some(m) => {
+                        return Some(m)
                     }
                     None => {}
                 }

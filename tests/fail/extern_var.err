@@ -1,0 +1,5 @@
+extern_var.al:2:1: error: the `extern` variable `optind` has no initializer: its value is in the library; write `extern "lib" optind: T`
+extern_var.al:3:1: error: the `extern` variable `opterr` has no initializer: its value is in the library; write `extern "lib" opterr: T`
+extern_var.al:4:1: error: an `extern` variable cannot be `priv`: `environ` is the library's global symbol, visible to the whole program; remove `priv`
+extern_var.al:6:5: error: `extern` declarations stand at top level: a C function or variable of a library cannot be declared inside a function
+4 error(s)

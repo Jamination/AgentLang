@@ -184,6 +184,8 @@ struct GlobalDecl {
     pos: Pos
     // declared with `priv`: visible only in its own file (see priv.al)
     is_priv: bool
+    // `extern "lib" name: T`: a C variable of the named shared library (no initializer)
+    ext: Opt[str]
 }
 
 struct TestDecl {

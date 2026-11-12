@@ -29,7 +29,7 @@ priv fn put64(v: *Vec[u8], x: i64) {
     }
 }
 
-// Imported C functions that the emitted code refers to, in a stable order.
+// Imported C functions and variables that the emitted code refers to, in a stable order.
 priv fn used_externs(m: *Module, out: *Output) -> Vec[i64] {
     used := vec_fill(m.externs.len, false)
     by_got := map[i64, i64]()
@@ -83,8 +83,9 @@ priv fn link_name_of(shstr: str, s: str) -> i64 {
     return p + 1
 }
 
-// A program that calls no C function is a static executable. Otherwise the output is a
-// dynamically linked executable: the system loader maps the libraries and fills the import slots.
+// A program that uses no C function or variable is a static executable. Otherwise the output
+// is a dynamically linked executable: the system loader maps the libraries and fills the import
+// slots (with the address of the function or variable: R_X86_64_GLOB_DAT, never a copy).
 // Result: (file bytes, error text); the error text is empty on success.
 fn elf_link(m: *Module, out: *Output) -> (str, str) {
     externs := used_externs(m, out)
@@ -174,7 +175,8 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
             put32(&dynsym, dynstr.len)
             dynstr.extend(m.externs[x].name)
             dynstr.push(0)
-            dynsym.push(0x12) // STB_GLOBAL, STT_FUNC
+            // STB_GLOBAL, STT_OBJECT for a variable, STT_FUNC for a function
+            dynsym.push(if m.externs[x].data { u8(0x11) } else { u8(0x12) })
             dynsym.push(0)
             put16(&dynsym, 0) // undefined
             put64(&dynsym, 0)
