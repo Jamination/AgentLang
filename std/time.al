@@ -145,12 +145,14 @@ fn advance(f: *FixedStep, dt: f64) -> i64 {
     if dt > 0.0 {
         f.acc += dt
     }
-    n := i64(f.acc / f.step)
-    if n > f.max_steps {
-        n = f.max_steps
-        f.acc = 0.0
-    } else {
+    q := f.acc / f.step
+    // (compared as a float: a huge or infinite acc does not fit in an i64)
+    n := f.max_steps
+    if q < f64(f.max_steps + 1) {
+        n = i64(q)
         f.acc = max(f.acc - f64(n) * f.step, 0.0)
+    } else {
+        f.acc = 0.0
     }
     f.steps += n
     return n
@@ -193,6 +195,12 @@ fn tick(t: *Timer, dt: f64) -> i64 {
     }
     n := 1 + i64(-t.left / t.duration)
     t.left += f64(n) * t.duration
+    // the division can round down by one period: a period that ends exactly now has fired too
+    if t.left <= 0.0 {
+        n += 1
+        t.left += t.duration
+    }
+    t.left = min(t.left, t.duration)
     return n
 }
 
