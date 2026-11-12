@@ -670,7 +670,14 @@ priv fn real_main() -> i64 {
                 None => ""
             }
             cand := path_join(dir, stem)
-            if path_comps(cand).items() == path_comps(ar.input).items() { fmt(cand, ".out") } else { cand }
+            // the test runner gets its own name: `alc test` must not replace the program
+            if test_mode {
+                fmt(cand, ".test")
+            } else if path_comps(cand).items() == path_comps(ar.input).items() {
+                fmt(cand, ".out")
+            } else {
+                cand
+            }
         }
     }
     if find(out_path, "/") < 0 {

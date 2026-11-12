@@ -3,3 +3,4 @@ tmp/
 *.o
 bench/bin/
 __pycache__/
+*.test
