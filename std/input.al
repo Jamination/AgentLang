@@ -459,7 +459,14 @@ fn key_from_name(name: str) -> i64 {
         }
         same := true
         for j in 0..len(kn) {
-            if kn[j] | 0x20 != name[j] | 0x20 {
+            // (key names hold only letters and digits: fold the case of letters only)
+            a := kn[j]
+            b := name[j]
+            if is_alpha(a) && is_alpha(b) {
+                a |= 0x20
+                b |= 0x20
+            }
+            if a != b {
                 same = false
                 break
             }
