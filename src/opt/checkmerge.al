@@ -30,7 +30,7 @@ fn checkmerge_run(f: *Func) -> bool {
             Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
         }
-        if !is_trap_block(f, trap) {
+        if !opt_is_check_trap(f, trap) {
             continue
         }
         ln, k0 := match const_check(f, c) {
@@ -57,7 +57,7 @@ fn checkmerge_run(f: *Func) -> bool {
             match f.blocks[cur].term {
                 Jmp(t) => cur = t
                 Br(c2, t2, e2) => {
-                    if !is_trap_block(f, e2) {
+                    if !opt_is_check_trap(f, e2) {
                         break
                     }
                     match const_check(f, c2) {

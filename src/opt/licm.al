@@ -138,6 +138,9 @@ fn licm_run(f: *Func) -> bool {
     esc := alias_escaped_allocas(f)
     def_block := f.block_of()
     order := licm_loop_order(&loops)
+    // one membership buffer for all loops (cleared after each): a fresh one per loop made
+    // functions with many loops quadratic in memory
+    in_loop := vec_fill(f.blocks.len, false)
     for li in order {
         l := &loops.loops[li]
         h := l.header
@@ -146,7 +149,6 @@ fn licm_run(f: *Func) -> bool {
             continue
         }
         pre := outside[0]
-        in_loop := vec_fill(f.blocks.len, false)
         for b in l.blocks {
             in_loop[b] = true
         }
@@ -257,6 +259,9 @@ fn licm_run(f: *Func) -> bool {
                 break
             }
             changed = true
+        }
+        for b in l.blocks {
+            in_loop[b] = false
         }
     }
     return changed

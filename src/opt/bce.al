@@ -253,7 +253,35 @@ priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bo
     return f.push(pre, i.op, i.ty, args, i.k)
 }
 
-priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
+// For idx = zext(inner) the hoisted checks assume that inner moves monotonically as an unsigned
+// number. Narrow arithmetic in inner (u8 `i + 10`) or a signed counter crossing -1 -> 0 can wrap
+// around at the narrow width and still give indices that are all in bounds (a[250..=255],
+// then a[0..]), which the first/last/order checks would reject: a panic where there is none.
+// A wrap visits a value >= 2^bits - |step|, so it is harmless only to show when the length is
+// a constant no larger than that (the wrapping access is then out of bounds itself).
+priv fn zext_cannot_wrap(f: *Func, a: *BceAffine, iv: *Iv, ln: i64) -> bool {
+    match a.ext {
+        Some(op) if op == ZExt => {}
+        _ => return true
+    }
+    unsigned := iv.cmp == Ult || iv.cmp == Ule || iv.cmp == Ugt || iv.cmp == Uge
+    if a.inner == iv.phi && unsigned {
+        return true
+    }
+    bits := i64(iv.ty.bits())
+    if bits >= 64 {
+        return false
+    }
+    match f.is_const(ln) {
+        Some(k) => k >= 0 && k <= (1 << bits) - abs(iv.step)
+        None => false
+    }
+}
+
+// `in_loop`: the blocks of loop `li` are marked (by the caller, in one buffer for all loops).
+// `def_block`: the block of every instruction, computed when the first loop needs it and shared
+// by the loops of one round (hoisting adds instructions but moves none)
+priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i64]) -> bool {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -262,11 +290,6 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
     }
     pre := outside[0]
     latch := l.latches[0]
-    in_loop_v := vec_fill(f.blocks.len, false)
-    for b in l.blocks {
-        in_loop_v[b] = true
-    }
-    in_loop := in_loop_v.items()
     // the loop may only be left through its latch or through failing checks, and has no calls
     for b in l.blocks {
         for v in f.blocks[b].insts {
@@ -281,12 +304,14 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
         }
         ss := f.succs(b)
         for s in ss {
-            if !in_loop[s] && b != latch && !is_trap_block(f, s) {
+            if !in_loop[s] && b != latch && !opt_is_check_trap(f, s) {
                 return false
             }
         }
     }
-    def_block_v := f.block_of()
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
     def_block := def_block_v.items()
     iv_opt := find_iv(f, h, latch, pre, in_loop, def_block)
     has_iv := false
@@ -305,7 +330,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
             Br(c0, t0, e0) => (c0, t0, e0)
             _ => continue
         }
-        if !in_loop[t] || in_loop[e] || !is_trap_block(f, e) || b == latch {
+        if !in_loop[t] || in_loop[e] || !opt_is_check_trap(f, e) || b == latch {
             continue
         }
         if !cfg.dom(b, latch) {
@@ -334,8 +359,8 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> bool {
         }
         if has_iv {
             match match_affine(f, idx, &iv, in_loop, def_block) {
-                Some(a) => cands.push((b, c, t, e, idx, ln, Affine(a)))
-                None => {}
+                Some(a) if zext_cannot_wrap(f, &a, &iv, ln) => cands.push((b, c, t, e, idx, ln, Affine(a)))
+                _ => {}
             }
         }
     }
@@ -516,8 +541,9 @@ priv fn entry_guard(f: *Func, cfg: *Cfg, pre: i64, iv: *Iv) -> bool {
 // sequence whose length is `n` itself: the check `i <u n` holds on every iteration, because
 // the loop is entered only when k < n and continued only when i + 1 < n. The check is
 // removed. Unlike hoisting this puts no condition on the loop body (calls, other exits).
+// `in_loop`: the blocks of loop `li` are marked (by the caller, in one buffer for all loops).
 // `def_block`: the block of every instruction, computed when the first loop needs it.
-priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block_v: *Vec[i64]) -> bool {
+priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i64]) -> bool {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -540,11 +566,6 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, def_block
     if !any {
         return false
     }
-    in_loop_v := vec_fill(f.blocks.len, false)
-    for b in l.blocks {
-        in_loop_v[b] = true
-    }
-    in_loop := in_loop_v.items()
     if def_block_v.len == 0 {
         *def_block_v = f.block_of()
     }
@@ -605,13 +626,22 @@ priv fn eliminate(f: *Func) -> bool {
     cfg := cfg_new(f)
     loops := loops_new(f, &cfg)
     def_block := vec[i64]()
+    in_loop := vec_fill(f.blocks.len, false)
     did := false
     for li in 0..loops.loops.len {
-        if eliminate_in_loop(f, &cfg, &loops, li, &def_block) {
+        mark_loop(&loops, li, in_loop.items(), true)
+        if eliminate_in_loop(f, &cfg, &loops, li, in_loop.items(), &def_block) {
             did = true
         }
+        mark_loop(&loops, li, in_loop.items(), false)
     }
     return did
+}
+
+priv fn mark_loop(loops: *Loops, li: i64, in_loop: []bool, on: bool) {
+    for b in loops.loops[li].blocks {
+        in_loop[b] = on
+    }
 }
 
 fn bce_run(f: *Func) -> bool {
@@ -625,11 +655,34 @@ fn bce_run(f: *Func) -> bool {
         cfg := cfg_new(f)
         loops := loops_new(f, &cfg)
         order := licm_loop_order(&loops)
+        // one analysis serves every loop of the round except the ancestors of a loop that
+        // changed (their block lists and dominators are stale); deeper loops come first.
+        // Hoisting one loop per round made functions with many loops quadratic in time and
+        // memory (and left loops after the 200th unhoisted)
+        touched := vec_fill(loops.loops.len, false)
+        def_block := vec[i64]()
+        // sized before any hoisting: blocks added this round belong to no loop of the round
+        in_loop := vec_fill(f.blocks.len, false)
         did := false
         for li in order {
-            if hoist_in_loop(f, &cfg, &loops, li) {
+            if touched[li] {
+                continue
+            }
+            mark_loop(&loops, li, in_loop.items(), true)
+            hoisted := hoist_in_loop(f, &cfg, &loops, li, in_loop.items(), &def_block)
+            mark_loop(&loops, li, in_loop.items(), false)
+            if hoisted {
                 did = true
-                break
+                up := loops.loops[li].parent
+                loop {
+                    match up {
+                        Some(p) => {
+                            touched[p] = true
+                            up = loops.loops[p].parent
+                        }
+                        None => break
+                    }
+                }
             }
         }
         if !did {

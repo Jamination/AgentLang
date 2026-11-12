@@ -41,7 +41,10 @@ priv fn header_phis(f: *Func, h: i64) -> Vec[i64] {
     return hphis
 }
 
-priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
+// `in_loop`: the blocks of loop `li` are marked (by the caller, one buffer for all loops);
+// `def_block_v`: the block of every instruction, computed when first needed and shared by the
+// loops of one round (analysis changes nothing)
+priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i64]) -> Opt[Plan] {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -50,10 +53,6 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
     }
     pre := outside[0]
     latch := l.latches[0]
-    in_loop := vec_fill(f.blocks.len, false)
-    for b in l.blocks {
-        in_loop[b] = true
-    }
     c, t, e := match f.blocks[latch].term {
         Br(c0, t0, e0) => (c0, t0, e0)
         _ => return None
@@ -145,7 +144,10 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64) -> Opt[Plan] {
         chain = max(chain, ln)
     }
     // size and exits
-    def_block := f.block_of()
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
+    def_block := def_block_v.items()
     size := 0
     for b in l.blocks {
         size += f.blocks[b].insts.len + 1
@@ -201,7 +203,8 @@ priv fn bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
     return nb
 }
 
-priv fn apply(f: *Func, p: *Plan) {
+// `def_block_v`: as in analyze (still exact: analysis changed nothing)
+priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
     n0 := f.insts.len
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
@@ -209,7 +212,9 @@ priv fn apply(f: *Func, p: *Plan) {
         in_loop_v[b] = true
     }
     in_loop := in_loop_v.items()
-    def_block_v := f.block_of()
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
     def_block := def_block_v.items()
     // is v an original value (below n0) defined inside the loop?
     fn loop_def(v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> bool {
@@ -239,11 +244,23 @@ priv fn apply(f: *Func, p: *Plan) {
         }
         phi_in.set(ph, (s, bk))
     }
-    // copy 0 is the original body; prev maps original values to their copy in the previous iteration
-    prev := vec[i64]()
-    for v in 0..n0 {
-        prev.push(v)
+    // copy 0 is the original body; prev maps original values to their copy in the previous
+    // iteration. Only values defined in the loop are ever looked up, so the two maps are
+    // reused for every copy and only their loop entries are reset (fresh function-sized maps
+    // per copy made unrolling many loops quadratic in memory)
+    loop_vals := vec[i64]()
+    for b in p.blocks {
+        for v in f.blocks[b].insts {
+            if v < n0 {
+                loop_vals.push(v)
+            }
+        }
     }
+    prev := vec_fill(n0, NOV)
+    for v in loop_vals {
+        prev[v] = v
+    }
+    spare := vec_fill(n0, NOV)
     prev_latch := p.latch
     orig_latch_term := clone(f.blocks[p.latch].term)
     prev_header_of_last := p.header
@@ -252,7 +269,10 @@ priv fn apply(f: *Func, p: *Plan) {
         for b in p.blocks {
             bmap.set(b, f.new_block())
         }
-        cur := vec_fill(n0, NOV)
+        cur := spare
+        for v in loop_vals {
+            cur[v] = NOV
+        }
         for ph in hphis {
             bk := phi_in_at(&phi_in, ph).1
             cur[ph] = look(&prev, bk, n0, def_block, in_loop)
@@ -310,6 +330,7 @@ priv fn apply(f: *Func, p: *Plan) {
         f.blocks[prev_latch].term = Jmp(bmap_at(&bmap, p.header))
         prev_latch = bmap_at(&bmap, p.latch)
         prev_header_of_last = bmap_at(&bmap, p.header)
+        spare = prev
         prev = cur
     }
     if p.full {
@@ -418,8 +439,17 @@ fn unroll_run(f: *Func) -> bool {
         loops := loops_new(f, &cfg)
         order := licm_loop_order(&loops)
         plan: Opt[Plan] = None
+        in_loop := vec_fill(f.blocks.len, false)
+        def_block := vec[i64]()
         for li in order {
-            match analyze(f, &cfg, &loops, li) {
+            for b in loops.loops[li].blocks {
+                in_loop[b] = true
+            }
+            found := analyze(f, &cfg, &loops, li, in_loop.items(), &def_block)
+            for b in loops.loops[li].blocks {
+                in_loop[b] = false
+            }
+            match found {
                 Some(p) => {
                     plan = Some(p)
                     break
@@ -429,7 +459,7 @@ fn unroll_run(f: *Func) -> bool {
         }
         match plan {
             Some(p) => {
-                apply(f, &p)
+                apply(f, &p, &def_block)
                 cleanup_prune_unreachable(f)
                 changed = true
             }
