@@ -52,7 +52,8 @@ Linux on x86-64 is the only requirement; the repository carries a seed compiler.
 
 ## Documentation
 
-- [Language reference](docs/LANGUAGE.md)
+- [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
+- [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
 - [Standard library](docs/STDLIB.md): strings, collections, files, math, images, windows,
   input, audio, and bindings for Vulkan, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
@@ -77,7 +78,7 @@ runs with bounds and division checks enabled.
 | hashmap | 1.11 |
 | **geometric mean** | **1.06** |
 
-The compiler compiles its own 30,000 lines in about 4 seconds.
+The compiler compiles its own 28,000 lines in about 3.5 seconds.
 
 ## Repository
 
