@@ -1092,6 +1092,8 @@ priv const MAX_BYTES = 1 << 31
 // a new image with every byte zero (allocates w * h * channels bytes)
 fn image_new(w: i64, h: i64, channels: i64) -> Image {
     assert w >= 0 && h >= 0 && channels >= 1 && channels <= 4, "image_new: bad size or channel count"
+    // (w * h * channels must not wrap around to a small or negative size)
+    assert h == 0 || w <= 0x7FFF_FFFF_FFFF_FFFF / h / channels, "image_new: image too large"
     Image{w, h, channels, alloc[u8](w * h * channels)}
 }
 

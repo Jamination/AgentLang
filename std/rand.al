@@ -83,7 +83,14 @@ fn range(r: *Rng, lo: i64, hi: i64) -> i64 {
 
 // uniform f32 in [lo, hi)
 fn range(r: *Rng, lo: f32, hi: f32) -> f32 {
-    return lo + (hi - lo) * next_f32(r)
+    span := hi - lo
+    loop {
+        v := lo + span * next_f32(r)
+        // rounding can give hi itself: draw again (not for an empty or infinite range)
+        if v < hi || !(span > 0.0 && span - span == 0.0) {
+            return v
+        }
+    }
 }
 
 // true with probability p (p <= 0: never, p >= 1: always)

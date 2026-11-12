@@ -459,7 +459,14 @@ fn key_from_name(name: str) -> i64 {
         }
         same := true
         for j in 0..len(kn) {
-            if kn[j] | 0x20 != name[j] | 0x20 {
+            // (key names hold only letters and digits: fold the case of letters only)
+            a := kn[j]
+            b := name[j]
+            if is_alpha(a) && is_alpha(b) {
+                a |= 0x20
+                b |= 0x20
+            }
+            if a != b {
                 same = false
                 break
             }
@@ -477,7 +484,7 @@ fn key_from_name(name: str) -> i64 {
 fn gamepad_open(g: *Gamepad, index: i64) -> bool {
     gamepad_close(g)
     m := mark()
-    fd := syscall(2, cstr(fmt("/dev/input/js", index)), 0x800, 0)
+    fd := syscall(2, cstr(fmt("/dev/input/js", index)), 0x80800, 0)    // O_RDONLY | O_NONBLOCK | O_CLOEXEC
     release(m)
     if fd < 0 {
         return false

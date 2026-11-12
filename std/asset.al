@@ -64,7 +64,7 @@ fn modified_time(path: str) -> i64 {
 }
 
 fn __asset_read(dir: str, name: str) -> ([]u8, bool) {
-    fd := __io_result(__asset_call(2, dir, name, 0, 0))
+    fd := __io_result(__asset_call(2, dir, name, 0x80000, 0))      // O_RDONLY | O_CLOEXEC
     if fd < 0 {
         return ("", false)
     }
@@ -156,8 +156,8 @@ fn __asset_name_less(a: str, b: str) -> bool {
 // the directory cannot be read. Allocates the names and the list.
 fn list_dir(path: str) -> []str {
     names := vec[str]()
-    // O_RDONLY | O_DIRECTORY
-    fd := __io_result(__asset_call(2, path, "", 0x10000, 0))
+    // O_RDONLY | O_DIRECTORY | O_CLOEXEC
+    fd := __io_result(__asset_call(2, path, "", 0x90000, 0))
     if fd < 0 {
         return names.items()
     }
@@ -193,8 +193,8 @@ fn __path_slash(p: str) -> i64 {
     return -1
 }
 
-// a and b joined with exactly one '/' between them; b alone if a is empty or b is absolute.
-// Allocates the result.
+// a and b joined with exactly one '/' between them (trailing slashes of a are dropped); b alone
+// if a is empty or b is absolute, a alone if b is empty. Allocates the result.
 fn path_join(a: str, b: str) -> str {
     if len(a) == 0 || (len(b) > 0 && b[0] == '/') {
         return b
@@ -202,10 +202,11 @@ fn path_join(a: str, b: str) -> str {
     if len(b) == 0 {
         return a
     }
-    if a[len(a) - 1] == '/' {
-        return concat(a, b)
+    e := len(a)
+    while e > 0 && a[e - 1] == '/' {
+        e -= 1
     }
-    return fmt(a, "/", b)
+    return fmt(a[..e], "/", b)
 }
 
 // the directory part: "a/b/c.png" -> "a/b", "c.png" -> "", "/c" -> "/" (a view of p)
@@ -219,23 +220,36 @@ fn path_base(p: str) -> str {
     return p[__path_slash(p) + 1..]
 }
 
-// the extension of the last component without the dot: "a/b/c.png" -> "png", "x.tar.gz" ->
-// "gz", "Makefile" and ".hidden" -> "" (a view of p)
-fn path_ext(p: str) -> str {
-    b := path_base(p)
+// index of the dot that starts the extension of the component b, or -1: the last dot that has
+// something other than dots before it (".hidden", "..", "..a" have none)
+fn __path_dot(b: str) -> i64 {
     for i in len(b) - 1..=1 by -1 {
         if b[i] == '.' {
-            return b[i + 1..]
+            for k in 0..i {
+                if b[k] != '.' {
+                    return i
+                }
+            }
+            return -1
         }
     }
-    return ""
+    return -1
 }
 
-// the last component without its extension: "a/b/c.png" -> "c" (a view of p)
+// the extension of the last component without the dot: "a/b/c.png" -> "png", "x.tar.gz" ->
+// "gz", "Makefile", ".hidden" and ".." -> "" (a view of p)
+fn path_ext(p: str) -> str {
+    b := path_base(p)
+    d := __path_dot(b)
+    return if d < 0 { "" } else { b[d + 1..] }
+}
+
+// the last component without its extension: "a/b/c.png" -> "c", "x.tar.gz" -> "x.tar", "a." ->
+// "a", ".hidden" and ".." stay (a view of p)
 fn path_stem(p: str) -> str {
     b := path_base(p)
-    e := path_ext(p)
-    return if len(e) == 0 && !ends_with(b, ".") { b } else { b[..len(b) - len(e) - 1] }
+    d := __path_dot(b)
+    return if d < 0 { b } else { b[..d] }
 }
 
 // ---------- asset loader ----------
@@ -300,9 +314,20 @@ fn config_parse(text: str) -> Config {
         if len(line) == 0 || line[0] == '#' || line[0] == ';' {
             continue
         }
-        if line[0] == '[' && line[len(line) - 1] == ']' {
-            section = trim(line[1..len(line) - 1])
-            continue
+        if line[0] == '[' {
+            // `[section]`, possibly followed by white space and a comment
+            close := len(line) - 1
+            if line[close] != ']' {
+                close = find(line, "]")
+                rest := if close > 0 { line[close + 1..] } else { "" }
+                if len(rest) == 0 || (rest[0] != ' ' && rest[0] != '\t') || (trim(rest)[0] != '#' && trim(rest)[0] != ';') {
+                    close = -1
+                }
+            }
+            if close > 0 {
+                section = trim(line[1..close])
+                continue
+            }
         }
         eq := find(line, "=")
         if eq < 0 {
@@ -492,6 +517,12 @@ fn __json_string(p: *__JsonReader) -> str {
     i := start
     escaped := false
     while i < len(p.s) && p.s[i] != '"' {
+        if p.s[i] < 0x20 {
+            // control characters must be escaped
+            p.i = i
+            p.ok = false
+            return ""
+        }
         if p.s[i] == '\\' {
             escaped = true
             i += 1
@@ -567,6 +598,47 @@ fn __json_in_number(c: u8) -> bool {
     return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
 }
 
+// true if s has the JSON number syntax: -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][+-]?[0-9]+)?
+fn __json_number_ok(s: str) -> bool {
+    i := 0
+    n := len(s)
+    if i < n && s[i] == '-' {
+        i += 1
+    }
+    if i >= n || !is_digit(s[i]) {
+        return false
+    }
+    if s[i] == '0' {
+        i += 1
+    } else {
+        while i < n && is_digit(s[i]) {
+            i += 1
+        }
+    }
+    if i < n && s[i] == '.' {
+        i += 1
+        if i >= n || !is_digit(s[i]) {
+            return false
+        }
+        while i < n && is_digit(s[i]) {
+            i += 1
+        }
+    }
+    if i < n && (s[i] == 'e' || s[i] == 'E') {
+        i += 1
+        if i < n && (s[i] == '+' || s[i] == '-') {
+            i += 1
+        }
+        if i >= n || !is_digit(s[i]) {
+            return false
+        }
+        while i < n && is_digit(s[i]) {
+            i += 1
+        }
+    }
+    return i == n
+}
+
 fn __json_value(p: *__JsonReader, out: *Json) {
     c := __json_peek(p)
     if c == '{' {
@@ -596,7 +668,7 @@ fn __json_value(p: *__JsonReader, out: *Json) {
         out.text = p.s[start..p.i]
         x, ok := parse_f64(out.text)
         out.num = x
-        if !ok {
+        if !ok || !__json_number_ok(out.text) {
             p.i = start
             p.ok = false
         }
@@ -681,13 +753,20 @@ fn as_f64(v: *Json, default: f64) -> f64 {
 }
 
 // the number as an integer (exact for integers written without fraction or exponent,
-// otherwise truncated), or `default` if v is nil or not a number
+// otherwise truncated), or `default` if v is nil, not a number, or outside the range of i64
 fn as_i64(v: *Json, default: i64) -> i64 {
     if v == nil || v.kind != JsonNumber {
         return default
     }
     x, ok := parse_i64(v.text)
-    return if ok { x } else { i64(v.num) }
+    if ok {
+        return x
+    }
+    // truncated toward zero; a number outside the range of i64 is not one: `default`
+    if v.num >= -9223372036854775808.0 && v.num < 9223372036854775808.0 {
+        return i64(v.num)
+    }
+    return default
 }
 
 // the boolean, or `default` if v is nil or not a boolean

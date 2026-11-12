@@ -27,20 +27,22 @@ const NAN = 0.0 / 0.0
 
 // ---------- rounding ----------
 
-// x rounded toward zero
+// x rounded toward zero (a zero result keeps the sign of x, as in C: trunc(-0.5) is -0.0)
 fn trunc(x: f32) -> f32 {
     if !(fabs(x) < 8388608.0) {
         return x
     }
-    f32(i32(x))
+    t := f32(i32(x))
+    if t == 0.0 { x * 0.0 } else { t }
 }
 
-// x rounded toward zero
+// x rounded toward zero (a zero result keeps the sign of x)
 fn trunc(x: f64) -> f64 {
     if !(fabs(x) < 4503599627370496.0) {
         return x
     }
-    f64(i64(x))
+    t := f64(i64(x))
+    if t == 0.0 { x * 0.0 } else { t }
 }
 
 // largest whole number <= x
@@ -701,7 +703,8 @@ fn acos(x: f64) -> f64 {
 fn atan(x: f64) -> f64 {
     a := fabs(x)
     if a < 0.4375 {
-        return x + x * __atan_r(x * x)
+        // (atan(-0.0) is -0.0: x + x * r would give +0.0)
+        return if x == 0.0 { x } else { x + x * __atan_r(x * x) }
     }
     if x != x {
         return x
@@ -1073,7 +1076,7 @@ fn acos(x: f32) -> f32 {
 fn atan(x: f32) -> f32 {
     a := fabs(x)
     if a < 0.4375 {
-        return x + x * __atan_rf(x * x)
+        return if x == 0.0 { x } else { x + x * __atan_rf(x * x) }
     }
     if x != x {
         return x
@@ -1225,19 +1228,50 @@ fn length_sq(v: vec4) -> f32 {
     dot(v, v)
 }
 
+// (length and normalize take the fast way while the squared length is a normal finite f32, that
+// is for lengths between about 1.1e-19 and 1.8e19; beyond that they scale by the largest
+// component first, so that huge and tiny vectors work too)
+
 // Euclidean length
 fn length(v: vec2) -> f32 {
-    sqrt(dot(v, v))
+    l := dot(v, v)
+    if l >= 1.17549435e-38 && l < INF {
+        return sqrt(l)
+    }
+    m := fmax(fabs(v.x), fabs(v.y))
+    if !(m > 0.0) || m == INF {
+        return sqrt(l)
+    }
+    w := v / m
+    m * sqrt(dot(w, w))
 }
 
 // Euclidean length
 fn length(v: vec3) -> f32 {
-    sqrt(dot(v, v))
+    l := dot(v, v)
+    if l >= 1.17549435e-38 && l < INF {
+        return sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) || m == INF {
+        return sqrt(l)
+    }
+    w := v / m
+    m * sqrt(dot(w, w))
 }
 
 // Euclidean length
 fn length(v: vec4) -> f32 {
-    sqrt(dot(v, v))
+    l := dot(v, v)
+    if l >= 1.17549435e-38 && l < INF {
+        return sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) || m == INF {
+        return sqrt(l)
+    }
+    w := v / m
+    m * sqrt(dot(w, w))
 }
 
 // distance between two points
@@ -1258,19 +1292,43 @@ fn distance(a: vec4, b: vec4) -> f32 {
 // v scaled to length 1; the zero vector stays zero
 fn normalize(v: vec2) -> vec2 {
     l := dot(v, v)
-    if l > 0.0 { v / sqrt(l) } else { vec2(0.0) }
+    if l >= 1.17549435e-38 && l < INF {
+        return v / sqrt(l)
+    }
+    m := fmax(fabs(v.x), fabs(v.y))
+    if !(m > 0.0) {
+        return vec2(0.0)
+    }
+    w := v / m
+    w / sqrt(dot(w, w))
 }
 
 // v scaled to length 1; the zero vector stays zero
 fn normalize(v: vec3) -> vec3 {
     l := dot(v, v)
-    if l > 0.0 { v / sqrt(l) } else { vec3(0.0) }
+    if l >= 1.17549435e-38 && l < INF {
+        return v / sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) {
+        return vec3(0.0)
+    }
+    w := v / m
+    w / sqrt(dot(w, w))
 }
 
 // v scaled to length 1; the zero vector stays zero
 fn normalize(v: vec4) -> vec4 {
     l := dot(v, v)
-    if l > 0.0 { v / sqrt(l) } else { vec4(0.0) }
+    if l >= 1.17549435e-38 && l < INF {
+        return v / sqrt(l)
+    }
+    m := max_component(fabs(v))
+    if !(m > 0.0) {
+        return vec4(0.0)
+    }
+    w := v / m
+    w / sqrt(dot(w, w))
 }
 
 // a at t = 0, b at t = 1

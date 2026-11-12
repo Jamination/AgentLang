@@ -93,11 +93,12 @@ fn arena_of(buf: []u8) -> Arena {
 }
 
 fn __arena_take(a: *Arena, bytes: i64) -> i64 {
-    n := (bytes + 15) & ~15
     p := a.cur
-    if bytes < 0 || n > a.end - p {
+    // (bytes is compared before rounding: rounding a huge size up would wrap around)
+    if bytes < 0 || bytes > a.end - p || (bytes + 15) & ~15 > a.end - p {
         panic("arena exhausted")
     }
+    n := (bytes + 15) & ~15
     a.cur = p + n
     // only memory that was handed out before can hold old data
     if p < a.dirty {
@@ -108,6 +109,10 @@ fn __arena_take(a: *Arena, bytes: i64) -> i64 {
 
 // n zeroed elements from the arena
 fn alloc[T](a: *Arena, n: i64) -> []T {
+    // n * sizeof[T]() must not wrap around to a small size
+    if n < 0 || (sizeof[T]() > 0 && n > (a.end - a.cur) / sizeof[T]()) {
+        panic("arena exhausted")
+    }
     return mkslice[T](__arena_take(a, n * sizeof[T]()), n)
 }
 
@@ -276,6 +281,9 @@ fn push[T](r: *Ring[T], x: T) -> bool {
 
 // appends x at the back, dropping the oldest element if the ring is full ("keep the last N")
 fn push_overwrite[T](r: *Ring[T], x: T) {
+    if len(r.buf) == 0 {
+        return
+    }
     if r.len == len(r.buf) {
         r.head = __ring_slot(r, 1)
         r.len -= 1
