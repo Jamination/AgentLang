@@ -1663,15 +1663,23 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                 match (self.types.k(t), v) {
                     (Int(bits, signed), Int(i)) => return Some(CV.Int(wrap_int(i, bits, signed)))
                     (Int(64, false), Float(f)) => {
-                        if f >= 9223372036854775808.0 && f < 18446744073709551616.0 {
-                            return Some(CV.Int(i64(f - 9223372036854775808.0) ^ (-0x7FFFFFFFFFFFFFFF - 1)))
+                        if f >= 9223372036854775808.0 {
+                            // as at run time (also beyond 2^64)
+                            return Some(CV.Int(f64_to_i64(f - 9223372036854775808.0) ^ (-0x7FFFFFFFFFFFFFFF - 1)))
                         }
                         return Some(CV.Int(f64_to_i64(f)))
                     }
                     (Int(bits, signed), Float(f)) => return Some(CV.Int(wrap_int(f64_to_i64(f), bits, signed)))
                     (F64, Int(i)) => return Some(CV.Float(if src_u64 { f64(u64(i)) } else { f64(i) }))
                     (F64, Float(f)) => return Some(CV.Float(f))
-                    (F32, Int(i)) => return Some(CV.Float(if src_u64 { f64(f32(f64(u64(i)))) } else { f64(f32(i)) }))
+                    (F32, Int(i)) => {
+                        if src_u64 && i < 0 {
+                            // halved with the sticky bit, converted once and doubled
+                            h := f32(i64((u64(i) >> 1) | (u64(i) & 1)))
+                            return Some(CV.Float(f64(h + h)))
+                        }
+                        return Some(CV.Float(f64(f32(i))))
+                    }
                     (F32, Float(f)) => return Some(CV.Float(f64(f32(f))))
                     _ => return None
                 }

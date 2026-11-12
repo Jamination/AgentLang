@@ -9,6 +9,8 @@
 | 05 | wrong output | `--emit-ir` printed op names with two letters cut off (`ram` for Param, `` for Eq), relic of when enums printed with a prefix; `ir.al ir_print_func` | y | (manual) |
 | 06 | miscompile | constant folding ignored the type of typed constants: `const A: u64 = 0xFFFF_FFFF_FFFF_FFFF`, then `A / 2` = 0, `A > 5` = false, `A >> 1` = -1, `L % 3` negative, `f64(A)` = -1.0, `-G`/`~G` of a u8 not wrapped, `S8 >> 9` count mod 64 not 8; `u64(1.5e19)` saturated; out-of-range float->int differed from run time; an unannotated constant whose value has a fixed integer type (`const C = u64(x)`, `const D = A / 2`) is now of that type; `lower.al const_eval`/`const_named` (`const_int_ty`, `const_bin_typed`) | y | tests/run/const_typed_fold |
 | 07 | invalid accepted | `const U: u8 = 256`, `U: u8 = 256` (global), `[2]u8{1, 300}` in constants/globals, `[2]u8{N, 1}` / `const F: f64 = N` with `N: i64` were silently truncated/converted; in a function they are errors; `lower.al const_named`/`const_init` | y | tests/fail/const_typed_range |
+| 08 | miscompile (hang) | range `for` loops overflowed when the last value is at the end of the type (`for i in x..=0x7FFF_FFFF_FFFF_FFFF`, `u8(250)..=255`, `u8(3)..=0 by -1`, steps that jump past MAX): infinite loops; `by 256` on a u8 loop silently became step 0; `lower_fn.al for_stmt` | y | tests/run/for_range_overflow, tests/fail/for_step_range |
+| 09 | wrong diagnostic | `cannot infer type parameter U of z; write z[T](...)` named only one parameter; now lists all | y | - |
 
 ## For other areas
 

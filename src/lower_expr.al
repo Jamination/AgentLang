@@ -1399,13 +1399,12 @@ priv fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b
         }
         None => {}
     }
-    if !self.cx.opts.checks {
-        v := self.ins(o, it, vec_of([]i64{a, b}), 0)
-        return self.sval(ty, v)
+    // --unchecked drops only the zero check: MIN / -1 still wraps
+    if self.cx.opts.checks {
+        z := self.iconst(it, 0)
+        nz := self.ins(Ne, I8, vec_of([]i64{b, z}), 0)
+        self.check(nz, 1, pos)
     }
-    z := self.iconst(it, 0)
-    nz := self.ins(Ne, I8, vec_of([]i64{b, z}), 0)
-    self.check(nz, 1, pos)
     if !signed {
         v := self.ins(o, it, vec_of([]i64{a, b}), 0)
         return self.sval(ty, v)
@@ -1459,18 +1458,20 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             }
             return self.sval(to, r)
         }
-        (Int(fb, fs), F64) => {
+        (Int(fb, fs), F64), (Int(fb, fs), F32) => {
+            ft := if to == T_F32 { T.F32 } else { T.F64 }
             s := self.scalar(v)
             if fb < 64 {
                 s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
-                r := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
+                r := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
                 return self.sval(to, r)
             }
             if fs {
-                r := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
+                r := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
                 return self.sval(to, r)
             }
             // u64: values >= 2^63 are halved (keeping the sticky bit), converted and doubled
+            // (rounded once, also to f32)
             slot := self.alloca(8, 8)
             zero := self.iconst(I64, 0)
             nonneg := self.ins(Sge, I8, vec_of([]i64{s, zero}), 0)
@@ -1480,33 +1481,21 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             d := self.dead
             self.br(nonneg, b_lo, b_hi)
             self.switch_to(b_lo)
-            r1 := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
-            self.store_raw(slot, r1, T.F64, 0)
+            r1 := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
+            self.store_raw(slot, r1, ft, 0)
             self.jmp(bj)
             self.switch_to(b_hi)
             one := self.iconst(I64, 1)
             half := self.ins(LShr, I64, vec_of([]i64{s, one}), 0)
             low := self.ins(And, I64, vec_of([]i64{s, one}), 0)
             h := self.ins(Or, I64, vec_of([]i64{half, low}), 0)
-            hf := self.ins(SIToF, T.F64, vec_of([]i64{h}), 0)
-            r2 := self.ins(FAdd, T.F64, vec_of([]i64{hf, hf}), 0)
-            self.store_raw(slot, r2, T.F64, 0)
+            hf := self.ins(SIToF, ft, vec_of([]i64{h}), 0)
+            r2 := self.ins(FAdd, ft, vec_of([]i64{hf, hf}), 0)
+            self.store_raw(slot, r2, ft, 0)
             self.jmp(bj)
             self.switch_to(bj)
             self.dead = d
-            r := self.load_raw(slot, T.F64, 0)
-            return self.sval(to, r)
-        }
-        (Int(fb, fs), F32) => {
-            if fb == 64 && !fs {
-                d := self.convert(v, T_F64, pos)
-                return self.convert(d, T_F32, pos)
-            }
-            s := self.scalar(v)
-            if fb < 64 {
-                s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
-            }
-            r := self.ins(SIToF, T.F32, vec_of([]i64{s}), 0)
+            r := self.load_raw(slot, ft, 0)
             return self.sval(to, r)
         }
         (Bool, Int(tb, _)) => {
