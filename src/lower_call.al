@@ -642,7 +642,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
             }
             hint := match n {
                 "println", "printf", "echo", "puts", "console" => " (use `print(a, b, ...)`)"
-                "length", "size", "count" => " (use `len(x)`)"
+                "length", "size" => " (use `len(x)`)"
                 "malloc", "calloc" => " (use `alloc[T](n)` or `new[T]()`)"
                 "str", "string", "to_string", "format", "sprintf" => " (use `fmt(a, b, ...)`)"
                 "append" => " (use a `Vec`: `v.push(x)`)"

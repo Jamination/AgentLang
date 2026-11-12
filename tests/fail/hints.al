@@ -2,7 +2,7 @@
 fn f(x: int) -> string {
     y := null
     println(x)
-    return fmt(count(y))
+    return fmt(size(y))
 }
 fn main() {
     d: double

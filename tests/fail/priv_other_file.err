@@ -4,8 +4,7 @@ tests/fail/priv_other_file.al:10:8: error: unknown type `Mode` (`Mode` is declar
 tests/fail/priv_other_file.al:11:11: error: unknown identifier `LIMIT` (`LIMIT` is declared `priv` in tests/fail/priv/lib.al, line 4: a private declaration is visible only inside its own file; remove `priv` there to use it from other files)
 tests/fail/priv_other_file.al:12:15: error: unknown function `bump` (`bump` is declared `priv` in tests/fail/priv/lib.al, line 6: a private declaration is visible only inside its own file; remove `priv` there to use it from other files)
 tests/fail/priv_other_file.al:13:5: error: unknown variable `counter` (declare it with `:=`) (`counter` is declared `priv` in tests/fail/priv/lib.al, line 5: a private declaration is visible only inside its own file; remove `priv` there to use it from other files)
-tests/fail/priv_other_file.al:16:14: error: argument `s` of `find`: expected str, found Ctx
-tests/fail/priv_other_file.al:16:15: error: argument `sub` of `find`: expected str, found i64
+tests/fail/priv_other_file.al:16:14: error: no definition of `find` can be called on Ctx; candidates: find(str, str); find(str, str, i64) (a `priv` declaration of `find` exists in tests/fail/priv/lib.al, line 10: it is visible only inside that file)
 tests/fail/priv_other_file.al:17:11: error: unknown identifier `counter` (`counter` is declared `priv` in tests/fail/priv/lib.al, line 5: a private declaration is visible only inside its own file; remove `priv` there to use it from other files)
 tests/fail/priv_other_file.al:18:21: error: argument `r` of `pick`: expected *Rng, found i64
 tests/fail/priv_other_file.al:18:24: error: argument `xs` of `pick`: expected []i64, found i64
