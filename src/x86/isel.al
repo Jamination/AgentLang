@@ -1375,9 +1375,19 @@ priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
 priv fn zext_free(self: *Sel, v: i64) -> bool {
     i := &self.f.insts[v]
     op := i.op
-    return i.ty == I32 &&
-        (op == Add || op == Sub || op == Mul || op == And || op == Or || op == Xor || op == Shl || op == LShr || op == AShr ||
-        op == Rotl || op == Rotr || op == Load || op == ZExt || op == SDiv || op == UDiv || op == SRem || op == URem || op == Bswap)
+    if i.ty != I32 {
+        return false
+    }
+    if op == Shl || op == LShr || op == AShr || op == Rotl || op == Rotr {
+        // a shift or rotation by 0 (also a count in a register that is 0 modulo 32) leaves
+        // the register as it was, upper half included
+        return match self.f.is_const(i.args[1]) {
+            Some(k) => k & 31 != 0
+            None => false
+        }
+    }
+    return op == Add || op == Sub || op == Mul || op == And || op == Or || op == Xor ||
+        op == Load || op == ZExt || op == SDiv || op == UDiv || op == SRem || op == URem || op == Bswap
 }
 
 // value extended to 32 bits (for narrow division/shift inputs)
