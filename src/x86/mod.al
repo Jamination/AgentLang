@@ -8,6 +8,7 @@ priv struct Compiled {
 struct Output {
     funcs: Vec[Compiled]
     fpool: Vec[Bits128]
+    err: str // the first function that cannot be compiled (stack frame too large), or ""
 }
 
 priv fn reachable_funcs(m: *Module) -> Vec[i64] {
@@ -52,6 +53,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     fpool := vec[Bits128]()
     fpool_ix := map[Bits128, i64]()
     funcs := vec[Compiled]()
+    err := ""
     for fid in fids {
         f := &m.funcs[fid]
         // everything up to the machine code of this function is temporary (see work_begin)
@@ -115,12 +117,15 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
             put(mir_print_mfunc(&mf))
         }
         work_end()
+        if len(code.err) != 0 && len(err) == 0 {
+            err = clone(code.err)
+        }
         funcs.push(Compiled{fid: fid, code: Code{bytes: clone(code.bytes), relocs: clone(code.relocs)}})
         // the function's IR was rewritten on the work heap and is not needed again
         f.insts = vec[Inst]()
         f.blocks = vec[BlockData]()
     }
-    return Output{funcs: funcs, fpool: fpool}
+    return Output{funcs: funcs, fpool: fpool, err: err}
 }
 
 // Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,

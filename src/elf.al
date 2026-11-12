@@ -88,6 +88,9 @@ priv fn link_name_of(shstr: str, s: str) -> i64 {
 // slots (with the address of the function or variable: R_X86_64_GLOB_DAT, never a copy).
 // Result: (file bytes, error text); the error text is empty on success.
 fn elf_link(m: *Module, out: *Output) -> (str, str) {
+    if len(out.err) != 0 {
+        return ("", out.err)
+    }
     externs := used_externs(m, out)
     dynamic := !externs.is_empty()
     for x in externs {
