@@ -351,6 +351,246 @@ priv fn drain_rev(s: *Sel, rev: *Vec[MInst]) {
     s.out.clear()
 }
 
+// ---------- frame slots of allocas ----------
+// Allocas whose address is only used to load, store, copy and fill (directly or plus an
+// offset: never passed to a call, stored, compared, merged or returned) share a frame slot
+// when their contents are never needed at the same time. Inlining leaves many such
+// temporaries (aggregate results and their copies): without sharing they sum up to frames of
+// tens of kilobytes.
+priv fn bits_has(b: *Vec[u64], base: i64, i: i64) -> bool {
+    return (b[base + i / 64] >> u64(i % 64)) & 1 != 0
+}
+
+priv fn bits_set(b: *Vec[u64], base: i64, i: i64) {
+    b[base + i / 64] |= u64(1) << u64(i % 64)
+}
+
+priv fn bits_clear(b: *Vec[u64], base: i64, i: i64) {
+    b[base + i / 64] &= ~(u64(1) << u64(i % 64))
+}
+
+// the candidate number of the alloca an address is derived from, or -1
+priv fn slot_cand(root: *Vec[i64], cand: *Vec[i64], a: i64) -> i64 {
+    r := root[a]
+    if r < 0 {
+        return -1
+    }
+    return cand[r]
+}
+
+// the memory effect of instruction v on the candidate allocas: (written, read, killed): the
+// candidate numbers or -1; killed when the whole alloca is overwritten
+priv fn slot_effect(f: *Func, v: i64, root: *Vec[i64], cand: *Vec[i64], allocas: *Vec[i64]) -> (i64, i64, bool) {
+    i := &f.insts[v]
+    match i.op {
+        Load => return (-1, slot_cand(root, cand, i.args[0]), false)
+        Store => return (slot_cand(root, cand, i.args[0]), -1, false)
+        MemCpy, MemSet => {
+            w := slot_cand(root, cand, i.args[0])
+            r := -1
+            if i.op == MemCpy {
+                r = slot_cand(root, cand, i.args[1])
+            }
+            kill := false
+            if w >= 0 && allocas[root[i.args[0]]] == i.args[0] {
+                match f.is_const(i.args[2]) {
+                    Some(n) => kill = n == f.insts[i.args[0]].k
+                    None => {}
+                }
+            }
+            return (w, r, kill)
+        }
+        _ => return (-1, -1, false)
+    }
+}
+
+// the frame slot of every alloca
+priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
+    slot_of := map[i64, i64]()
+    allocas := vec[i64]()
+    for v in f.blocks[0].insts {
+        if f.insts[v].op == Alloca {
+            allocas.push(v)
+        }
+    }
+    n := f.insts.len
+    nb := f.blocks.len
+    // the alloca (index into allocas) an address is derived from, or -1
+    root := vec_fill(n, -1)
+    for ai in 0..allocas.len {
+        root[allocas[ai]] = ai
+    }
+    changed := true
+    while changed {
+        changed = false
+        for bi in 0..nb {
+            for v in f.blocks[bi].insts {
+                i := &f.insts[v]
+                if i.op == Add && root[v] < 0 {
+                    a := root[i.args[0]]
+                    b := root[i.args[1]]
+                    if (a >= 0) != (b >= 0) {
+                        root[v] = max(a, b)
+                        changed = true
+                    }
+                }
+            }
+        }
+    }
+    escaped := vec_fill(allocas.len, false)
+    for bi in 0..nb {
+        for v in f.blocks[bi].insts {
+            i := &f.insts[v]
+            for j in 0..i.args.len {
+                r := root[i.args[j]]
+                if r < 0 {
+                    continue
+                }
+                ok := match i.op {
+                    Load, MemSet => j == 0
+                    Store => j == 0 && root[i.args[1]] < 0
+                    MemCpy => j <= 1
+                    Add => root[v] >= 0
+                    _ => false
+                }
+                if !ok {
+                    escaped[r] = true
+                }
+            }
+        }
+        for a in f.term_uses(bi) {
+            if root[a] >= 0 {
+                escaped[root[a]] = true
+            }
+        }
+    }
+    // candidates: allocas worth sharing
+    cand := vec_fill(allocas.len, -1)
+    members := vec[i64]()
+    for ai in 0..allocas.len {
+        if !escaped[ai] && f.insts[allocas[ai]].k >= 16 && members.len < 4096 {
+            cand[ai] = members.len
+            members.push(ai)
+        }
+    }
+    k := members.len
+    if k >= 2 {
+        w := (k + 63) / 64
+        // live: some path leads to a read without a whole overwrite before it
+        live_in := vec_fill(nb * w, u64(0))
+        live := vec_fill(w, u64(0))
+        succs := vec[Vec[i64]]()
+        for b in 0..nb {
+            succs.push(f.succs(b))
+        }
+        changed = true
+        while changed {
+            changed = false
+            for b in nb - 1..=0 by -1 {
+                for x in 0..w {
+                    live[x] = 0
+                }
+                for sb in succs[b] {
+                    for x in 0..w {
+                        live[x] |= live_in[sb * w + x]
+                    }
+                }
+                insts := &f.blocks[b].insts
+                for ii in insts.len - 1..=0 by -1 {
+                    wr, rd, kill := slot_effect(f, insts[ii], &root, &cand, &allocas)
+                    if kill {
+                        bits_clear(&live, 0, wr)
+                    }
+                    if rd >= 0 {
+                        bits_set(&live, 0, rd)
+                    }
+                }
+                for x in 0..w {
+                    if live_in[b * w + x] != live[x] {
+                        live_in[b * w + x] = live[x]
+                        changed = true
+                    }
+                }
+            }
+        }
+        // interference: a write while the other one is live, or a read and a write in one copy
+        interf := vec_fill(k * w, u64(0))
+        for b in 0..nb {
+            for x in 0..w {
+                live[x] = 0
+            }
+            for sb in succs[b] {
+                for x in 0..w {
+                    live[x] |= live_in[sb * w + x]
+                }
+            }
+            insts := &f.blocks[b].insts
+            for ii in insts.len - 1..=0 by -1 {
+                wr, rd, kill := slot_effect(f, insts[ii], &root, &cand, &allocas)
+                if wr >= 0 {
+                    for x in 0..w {
+                        interf[wr * w + x] |= live[x]
+                    }
+                    if rd >= 0 {
+                        bits_set(&interf, wr * w, rd)
+                    }
+                }
+                if kill {
+                    bits_clear(&live, 0, wr)
+                }
+                if rd >= 0 {
+                    bits_set(&live, 0, rd)
+                }
+            }
+        }
+        // greedy, largest first; what is live on entry keeps a slot of its own
+        order := vec[(i64, i64)]()
+        for c in 0..k {
+            if !bits_has(&live_in, 0, c) {
+                order.push((f.insts[allocas[members[c]]].k, c))
+            }
+        }
+        sort_by(order.items(), fn(a: (i64, i64), b: (i64, i64)) -> bool { a.0 > b.0 })
+        groups := vec[Vec[i64]]()
+        for sc in order {
+            c := sc.1
+            gi := -1
+            next: for g in 0..groups.len {
+                for o in groups[g] {
+                    if bits_has(&interf, c * w, o) || bits_has(&interf, o * w, c) {
+                        continue next
+                    }
+                }
+                gi = g
+                break
+            }
+            if gi < 0 {
+                groups.push(vec[i64]())
+                gi = groups.len - 1
+            }
+            groups[gi].push(c)
+        }
+        for g in groups {
+            size := 0
+            align := 1
+            for c in g {
+                size = max(size, f.insts[allocas[members[c]]].k)
+                align = max(align, f.insts[allocas[members[c]]].aux)
+            }
+            sl := new_slot(mf, size, align)
+            for c in g {
+                slot_of.set(allocas[members[c]], sl)
+            }
+        }
+    }
+    for v in allocas {
+        if !slot_of.has(v) {
+            slot_of.set(v, new_slot(mf, f.insts[v].k, f.insts[v].aux))
+        }
+    }
+    return slot_of
+}
+
 fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFunc {
     n := f.insts.len
     cfg := cfg_new(f)
@@ -450,12 +690,7 @@ fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFu
             _ => {}
         }
     }
-    for v in f.blocks[0].insts {
-        if f.insts[v].op == Alloca {
-            sl := new_slot(&s.mf, f.insts[v].k, f.insts[v].aux)
-            s.slot_of.set(v, sl)
-        }
-    }
+    s.slot_of = alloca_slots(f, &s.mf)
     rpo := f.rpo()
     for ri in rpo.len - 1..=0 by -1 {
         b := rpo[ri]
