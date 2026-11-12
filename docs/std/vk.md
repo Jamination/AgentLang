@@ -7,7 +7,7 @@ those of the C API, so the Vulkan specification and any C tutorial apply directl
 convenience layer (result checking, `sType` constructors, clear values, memory type search,
 shader modules) removes the most repetitive boilerplate.
 
-The module is generated: `std/vk.al` is written by `tools/gen_vk.py` from the Khronos registry
+The module is generated: `std/vk.al` is written by `tools/gen_vk.al` from the Khronos registry
 (`vk.xml`), followed by the hand-written `tools/vk_helpers.al`. It contains 300 structs, about
 1200 constants and 235 functions. Using it costs about 10 ms of compile time.
 
@@ -205,20 +205,23 @@ display and window handles.
 ## Regenerating
 
 ```
-python3 tools/gen_vk.py             # rewrites std/vk.al (byte-identical if nothing changed)
-python3 tools/gen_vk.py --verify    # also checks the layout against the C headers
+./build/alc run tools/gen_vk.al                # rewrites std/vk.al (byte-identical if nothing changed)
+./build/alc run tools/gen_vk.al -- --verify    # also writes two programs that check the layout against the C headers
 ```
 
-- The lists `VERSIONS` and `EXTENSIONS` at the top of the script select what is bound; the
-  registry is read from `/usr/share/vulkan/registry/vk.xml`. Types and enum values are included
-  when a selected version/extension requires them, directly or through a struct member or
-  command parameter.
-- Only commands that `nm -D /usr/lib/libvulkan.so.1` shows as exported become `extern`
-  declarations (an `extern` for a missing symbol would stop the program from starting).
-- `--verify` writes `tmp/VulkanBindings/layout.c` (using `<vulkan/vulkan.h>`, built with clang)
-  and `layout.al` (using `sizeof[T]()` and field addresses); both print the size and every
-  field offset of every struct and the value of every numeric constant, and the outputs must be
-  identical. The generator's own layout computation, which sizes the unions, is checked against
-  the same numbers. Current result: 300 structs, 1928 fields, 1175 constants, 0 mismatches.
-  It needs clang and the Vulkan, X11, xcb and Wayland headers.
+- The generator is an AL program, run from the root of the repository. The lists `VERSIONS`
+  and `EXTENSIONS` at its top select what is bound; the registry is read from
+  `/usr/share/vulkan/registry/vk.xml`. Types and enum values are included when a selected
+  version/extension requires them, directly or through a struct member or command parameter.
+- Only commands that the loader `/usr/lib/libvulkan.so.1` exports (the generator reads its
+  dynamic symbol table: what `nm -D --defined-only` lists) become `extern` declarations (an
+  `extern` for a missing symbol would stop the program from starting).
+- `--verify` writes `tmp/VulkanBindings/layout.c` (using `<vulkan/vulkan.h>`) and `layout.al`
+  (using `sizeof[T]()` and field addresses) and prints the commands that build them (clang,
+  `alc` with `ALC_STD_DIR=std`), run them and compare their output. Both programs print the
+  size and every field offset of every struct and the value of every numeric constant, and the
+  outputs must be identical. The generator's own layout computation, which sizes the unions,
+  is checked against the same numbers: `layout.c` asserts them at compile time. Current
+  result: 300 structs, 1928 fields, 1175 constants, 0 mismatches. It needs clang and the
+  Vulkan, X11, xcb and Wayland headers.
 - The convenience layer lives in `tools/vk_helpers.al`; edit it there, not in `std/vk.al`.

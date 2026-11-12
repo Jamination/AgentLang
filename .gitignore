@@ -4,3 +4,4 @@ tmp/
 bench/bin/
 __pycache__/
 *.test
+tools/gen_vk
