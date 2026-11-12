@@ -484,7 +484,7 @@ fn key_from_name(name: str) -> i64 {
 fn gamepad_open(g: *Gamepad, index: i64) -> bool {
     gamepad_close(g)
     m := mark()
-    fd := syscall(2, cstr(fmt("/dev/input/js", index)), 0x800, 0)
+    fd := syscall(2, cstr(fmt("/dev/input/js", index)), 0x80800, 0)    // O_RDONLY | O_NONBLOCK | O_CLOEXEC
     release(m)
     if fd < 0 {
         return false

@@ -64,7 +64,7 @@ fn modified_time(path: str) -> i64 {
 }
 
 fn __asset_read(dir: str, name: str) -> ([]u8, bool) {
-    fd := __io_result(__asset_call(2, dir, name, 0, 0))
+    fd := __io_result(__asset_call(2, dir, name, 0x80000, 0))      // O_RDONLY | O_CLOEXEC
     if fd < 0 {
         return ("", false)
     }
@@ -156,8 +156,8 @@ fn __asset_name_less(a: str, b: str) -> bool {
 // the directory cannot be read. Allocates the names and the list.
 fn list_dir(path: str) -> []str {
     names := vec[str]()
-    // O_RDONLY | O_DIRECTORY
-    fd := __io_result(__asset_call(2, path, "", 0x10000, 0))
+    // O_RDONLY | O_DIRECTORY | O_CLOEXEC
+    fd := __io_result(__asset_call(2, path, "", 0x90000, 0))
     if fd < 0 {
         return names.items()
     }
