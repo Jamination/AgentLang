@@ -150,15 +150,10 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
     }
 }
 
-// f64 to i64 at compile time: saturating, NaN gives 0
+// f64 to i64 at compile time, as the processor converts at run time: NaN and values out of
+// range give 0x8000000000000000
 priv fn f64_to_i64(f: f64) -> i64 {
-    if f != f {
-        return 0
-    }
-    if f >= 9223372036854775808.0 {
-        return 0x7FFFFFFFFFFFFFFF
-    }
-    if f <= -9223372036854775808.0 {
+    if f != f || f >= 9223372036854775808.0 || f < -9223372036854775808.0 {
         return -0x7FFFFFFFFFFFFFFF - 1
     }
     return i64(f)
@@ -1348,17 +1343,27 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
     match self.const_eval(&d.val) {
         Some(v0) => {
             v := v0
+            // the value's own integer type, if it has one (a typed constant, a conversion)
+            vt := const_int_ty(self, &d.val)
             match ty {
                 Some(t) => {
                     // typed constant: check/coerce
                     ok := match (self.types.k(t), v0) {
                         (Int(bits, signed), Int(i)) => {
                             v = CV.Int(wrap_int(i, bits, signed))
-                            true
+                            if is_some(vt) {
+                                vt == Some(t)
+                            } else {
+                                // an untyped value must fit, as a literal must
+                                if bits < 64 && (i < -(1 << (bits - 1)) || i >= 1 << bits) {
+                                    self.err(d.val.pos, fmt("constant `", name, "`: value ", i, " does not fit in ", self.types.name(t)))
+                                }
+                                true
+                            }
                         }
                         (F64, Int(i)), (F32, Int(i)) => {
                             v = Float(f64(i))
-                            true
+                            !is_some(vt)
                         }
                         (F32, Float(f)) => {
                             v = Float(f64(f32(f)))
@@ -1371,7 +1376,9 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                         self.err(d.pos, fmt("constant `", name, "` value does not match its declared type"))
                     }
                 }
-                None => {}
+                None => {
+                    ty = vt
+                }
             }
             self.const_vals.set(d.name, Done(ty, v))
             return Some((ty, v))
@@ -1432,6 +1439,103 @@ priv fn const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
     return None
 }
 
+// The integer type of a constant scalar expression whose type is fixed: a typed constant, a
+// conversion `T(x)`, or an operation with such an operand. None: untyped (or not an integer).
+priv fn const_int_ty(cx: *Cx, e: *Expr) -> Opt[i64] {
+    t: Opt[i64] = None
+    match e.k {
+        Ident(n) => {
+            if cx.const_decls.has(n) {
+                match cx.const_named(n) {
+                    Some(x) => { t = x.0 }
+                    None => {}
+                }
+            }
+        }
+        Un(Neg, x), Un(BitNot, x) => { t = const_int_ty(cx, x) }
+        Bin(op, a, b) => {
+            match op {
+                Add, Sub, Mul, Div, Rem, And, Or, Xor => {
+                    t = const_int_ty(cx, a)
+                    if !is_some(t) {
+                        t = const_int_ty(cx, b)
+                    }
+                }
+                Shl, Shr => { t = const_int_ty(cx, a) }
+                _ => {}
+            }
+        }
+        Call(c, args) => {
+            if args.len == 1 {
+                env := map[str, i64]()
+                saved := cx.errs.len
+                t = cx.expr_type(c, &env)
+                cx.errs.truncate(saved)
+            }
+        }
+        _ => {}
+    }
+    match t {
+        Some(ty) => {
+            match cx.types.k(ty) {
+                Int(_, _) => return t
+                _ => {}
+            }
+        }
+        None => {}
+    }
+    return None
+}
+
+// integer (op) integer in the type `Int(bits, signed)`: operands and result wrapped to it
+priv fn const_bin_typed(cx: *Cx, op: BinOp, x: i64, y: i64, bits: i64, signed: bool, pos: Pos) -> Opt[CV] {
+    if signed || bits < 64 {
+        // narrower unsigned values are zero-extended, signed ones sign-extended: the i64
+        // operations give the right low bits; shifts and comparisons need care
+        match op {
+            Shl => return Some(Int(wrap_int(x << (y & (bits - 1)), bits, signed)))
+            Shr => return Some(Int(wrap_int(x >> (y & (bits - 1)), bits, signed)))
+            _ => {}
+        }
+        res := const_bin_int(cx, op, x, y, pos)
+        match res {
+            Some(Int(r)) => return Some(Int(wrap_int(r, bits, signed)))
+            _ => return res
+        }
+    }
+    ux := u64(x)
+    uy := u64(y)
+    match op {
+        Div, Rem => {
+            if uy == 0 {
+                cx.err(pos, "division by zero in constant expression")
+                return None
+            }
+            return Some(Int(i64(if op == Div { ux / uy } else { ux % uy })))
+        }
+        Shr => return Some(Int(i64(ux >> (uy & 63))))
+        Lt => return Some(Bool(ux < uy))
+        Le => return Some(Bool(ux <= uy))
+        Gt => return Some(Bool(ux > uy))
+        Ge => return Some(Bool(ux >= uy))
+        _ => return const_bin_int(cx, op, x, y, pos)
+    }
+}
+
+// `r`, the result of an operation on the constant expression `x`, wrapped to the type of `x`
+priv fn const_wrap(cx: *Cx, x: *Expr, r: i64) -> i64 {
+    match const_int_ty(cx, x) {
+        Some(t) => {
+            match cx.types.k(t) {
+                Int(bits, signed) => return wrap_int(r, bits, signed)
+                _ => {}
+            }
+        }
+        None => {}
+    }
+    return r
+}
+
 // the operand of a mixed / float operation as a float: (value, ok)
 priv fn const_float_operand(cx: *Cx, e: *Expr) -> (f64, bool) {
     match cx.const_eval(e) {
@@ -1483,8 +1587,8 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         }
         Un(op, x) => {
             match (op, self.const_eval(x)) {
-                (Neg, Some(Int(i))) => return Some(CV.Int(-i))
-                (BitNot, Some(Int(i))) => return Some(CV.Int(~i))
+                (Neg, Some(Int(i))) => return Some(CV.Int(const_wrap(self, x, -i)))
+                (BitNot, Some(Int(i))) => return Some(CV.Int(const_wrap(self, x, ~i)))
                 (Neg, Some(Float(f))) => return Some(CV.Float(-f))
                 (Not, Some(Bool(b))) => return Some(CV.Bool(!b))
                 _ => return None
@@ -1500,7 +1604,22 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                 None => return None
             }
             match (x, y) {
-                (Int(xi), Int(yi)) => return const_bin_int(self, op, xi, yi, e.pos)
+                (Int(xi), Int(yi)) => {
+                    t := const_int_ty(self, a)
+                    if !is_some(t) && op != Shl && op != Shr {
+                        t = const_int_ty(self, b)
+                    }
+                    match t {
+                        Some(ty) => {
+                            match self.types.k(ty) {
+                                Int(bits, signed) => return const_bin_typed(self, op, xi, yi, bits, signed, e.pos)
+                                _ => {}
+                            }
+                        }
+                        None => {}
+                    }
+                    return const_bin_int(self, op, xi, yi, e.pos)
+                }
                 (Int(_), Float(_)), (Float(_), Int(_)), (Float(_), Float(_)) => return const_bin_float(self, op, a, b)
                 (Bool(xb), Bool(yb)) => {
                     match op {
@@ -1536,12 +1655,23 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                     Some(av) => av
                     None => return None
                 }
+                // a u64 source: values >= 2^63 are held as negative i64
+                src_u64 := match const_int_ty(self, &args[0]) {
+                    Some(st) => st == T_U64
+                    None => false
+                }
                 match (self.types.k(t), v) {
                     (Int(bits, signed), Int(i)) => return Some(CV.Int(wrap_int(i, bits, signed)))
+                    (Int(64, false), Float(f)) => {
+                        if f >= 9223372036854775808.0 && f < 18446744073709551616.0 {
+                            return Some(CV.Int(i64(f - 9223372036854775808.0) ^ (-0x7FFFFFFFFFFFFFFF - 1)))
+                        }
+                        return Some(CV.Int(f64_to_i64(f)))
+                    }
                     (Int(bits, signed), Float(f)) => return Some(CV.Int(wrap_int(f64_to_i64(f), bits, signed)))
-                    (F64, Int(i)) => return Some(CV.Float(f64(i)))
+                    (F64, Int(i)) => return Some(CV.Float(if src_u64 { f64(u64(i)) } else { f64(i) }))
                     (F64, Float(f)) => return Some(CV.Float(f))
-                    (F32, Int(i)) => return Some(CV.Float(f64(f32(i))))
+                    (F32, Int(i)) => return Some(CV.Float(if src_u64 { f64(f32(f64(u64(i)))) } else { f64(f32(i)) }))
                     (F32, Float(f)) => return Some(CV.Float(f64(f32(f))))
                     _ => return None
                 }
@@ -1768,12 +1898,27 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
         Some(cv) => cv
         None => return false
     }
+    vt := const_int_ty(self, e)
     match (k, v) {
-        (Int(bits, _), Int(i)) => put_le(data, off, u64(i), bits / 8)
+        (Int(bits, _), Int(i)) => {
+            if is_some(vt) {
+                if vt != Some(ty) {
+                    self.err(e.pos, fmt("type mismatch: expected ", self.types.name(ty), ", found ", self.types.name(vt.or(T_ERR))))
+                    return false
+                }
+            } else if bits < 64 && (i < -(1 << (bits - 1)) || i >= 1 << bits) {
+                self.err(e.pos, fmt("integer constant ", i, " does not fit in ", self.types.name(ty)))
+            }
+            put_le(data, off, u64(i), bits / 8)
+        }
         (F32, Float(f)) => put_le(data, off, u64(cast[u32](f32(f))), 4)
-        (F32, Int(i)) => put_le(data, off, u64(cast[u32](f32(i))), 4)
+        (F32, Int(i)) if !is_some(vt) => put_le(data, off, u64(cast[u32](f32(i))), 4)
         (F64, Float(f)) => put_le(data, off, cast[u64](f), 8)
-        (F64, Int(i)) => put_le(data, off, cast[u64](f64(i)), 8)
+        (F64, Int(i)) if !is_some(vt) => put_le(data, off, cast[u64](f64(i)), 8)
+        (F32, Int(_)), (F64, Int(_)) => {
+            self.err(e.pos, fmt("type mismatch: expected ", self.types.name(ty), ", found ", self.types.name(vt.or(T_ERR))))
+            return false
+        }
         (Bool, Bool(b)) => {
             data[off] = if b { u8(1) } else { u8(0) }
         }
