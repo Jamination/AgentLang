@@ -253,6 +253,31 @@ priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bo
     return f.push(pre, i.op, i.ty, args, i.k)
 }
 
+// For idx = zext(inner) the hoisted checks assume that inner moves monotonically as an unsigned
+// number. Narrow arithmetic in inner (u8 `i + 10`) or a signed counter crossing -1 -> 0 can wrap
+// around at the narrow width and still give indices that are all in bounds (a[250..=255],
+// then a[0..]), which the first/last/order checks would reject: a panic where there is none.
+// A wrap visits a value >= 2^bits - |step|, so it is harmless only to show when the length is
+// a constant no larger than that (the wrapping access is then out of bounds itself).
+priv fn zext_cannot_wrap(f: *Func, a: *BceAffine, iv: *Iv, ln: i64) -> bool {
+    match a.ext {
+        Some(op) if op == ZExt => {}
+        _ => return true
+    }
+    unsigned := iv.cmp == Ult || iv.cmp == Ule || iv.cmp == Ugt || iv.cmp == Uge
+    if a.inner == iv.phi && unsigned {
+        return true
+    }
+    bits := i64(iv.ty.bits())
+    if bits >= 64 {
+        return false
+    }
+    match f.is_const(ln) {
+        Some(k) => k >= 0 && k <= (1 << bits) - abs(iv.step)
+        None => false
+    }
+}
+
 // `in_loop`: the blocks of loop `li` are marked (by the caller, in one buffer for all loops).
 // `def_block`: the block of every instruction, computed when the first loop needs it and shared
 // by the loops of one round (hoisting adds instructions but moves none)
@@ -334,8 +359,8 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
         }
         if has_iv {
             match match_affine(f, idx, &iv, in_loop, def_block) {
-                Some(a) => cands.push((b, c, t, e, idx, ln, Affine(a)))
-                None => {}
+                Some(a) if zext_cannot_wrap(f, &a, &iv, ln) => cands.push((b, c, t, e, idx, ln, Affine(a)))
+                _ => {}
             }
         }
     }
