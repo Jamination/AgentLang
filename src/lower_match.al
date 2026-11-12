@@ -1690,13 +1690,37 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     }
 }
 
-// A note for a mismatch between two different types that print the same: a type of the
-// program has the name of a type of the standard library (for example its own `Opt`).
-fn lower_match_same_name(a: str, b: str) -> str {
-    if a != b {
+// A note for a mismatch between two different types `ta` and `tb` that print the same (a
+// program's own `Opt`, or private structs `Ctx` of two files): where each one is declared.
+fn same_name_hint(self: *Fx, ta: i64, tb: i64) -> str {
+    if self.tyname(ta) != self.tyname(tb) {
         return ""
     }
-    return " (two different types have this name: one declared in this program, one in the standard library; the library's functions take the library's type)"
+    pa := lower_match_decl_pos(self.cx, ta)
+    pb := lower_match_decl_pos(self.cx, tb)
+    match (pa, pb) {
+        (Some(x), Some(y)) if x != y => {
+            where := fn(cx: *Cx, p: Pos) -> str {
+                if p.file < cx.n_prelude {
+                    return "in the standard library"
+                }
+                return concat("at ", cx.pos_str(p))
+            }
+            return fmt(" (two different types have this name: one declared ", where(self.cx, x), ", the other ", where(self.cx, y), ")")
+        }
+        _ => {}
+    }
+    return " (two different types have this name)"
+}
+
+// where the struct or enum that names type `t` (also behind pointers, slices, arrays) is declared
+priv fn lower_match_decl_pos(cx: *Cx, t: i64) -> Opt[Pos] {
+    match cx.types.k(t) {
+        Struct(sid) => return Some(cx.struct_decls[cx.types.structs[sid].decl].pos)
+        Enum(eid) => return Some(cx.enum_decls[cx.types.enums[eid].decl].pos)
+        Ptr(x), Slice(x), Array(x, _) => return lower_match_decl_pos(cx, x)
+        _ => return None
+    }
 }
 
 // names that a call resolves before it looks for a variant: builtin functions and types

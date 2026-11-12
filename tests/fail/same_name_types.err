@@ -1,0 +1,1 @@
+same_name_types.al:7:13: error: argument `c` of `takes_b`: expected Ctx, found Ctx (two different types have this name: one declared at tests/fail/priv/same_name_ctx.al:1:1, the other at tests/fail/same_name_types.al:3:1)

@@ -1552,7 +1552,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            hint: str = lower_match_same_name(a, b)
+            hint: str = self.same_name_hint(pt, v.ty)
             if is_ptr_to(self.cx.types.k(pt), v.ty) {
                 hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
             }
