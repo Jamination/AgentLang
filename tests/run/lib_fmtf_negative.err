@@ -1,0 +1,3 @@
+assertion failed at tests/run/lib_fmtf_negative.al:17: fmtf: negative number of digits
+assertion failed at tests/run/lib_fmtf_negative.al:18: fmtf: negative number of digits
+assertion failed at tests/run/lib_fmtf_negative.al:19: fmtf: negative number of digits

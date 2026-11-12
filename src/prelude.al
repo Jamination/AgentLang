@@ -859,6 +859,11 @@ fn __fmt_extra(x: f64, prec: i64) -> i64 {
 
 // print x with exactly `prec` digits after the decimal point (like printf "%.Nf")
 fn putf(x: f64, prec: i64) {
+    __at_putf(x, prec, "?")
+}
+
+fn __at_putf(x: f64, prec: i64, at: str) {
+    __check_digits(prec, at)
     b: [1420]u8
     n := __fmt_fixed(x, prec, b[..])
     __put_str(b[..n])
@@ -867,7 +872,18 @@ fn putf(x: f64, prec: i64) {
     }
 }
 
+fn __check_digits(prec: i64, at: str) {
+    if prec < 0 {
+        __assert_fail(at, "fmtf: negative number of digits")
+    }
+}
+
 fn fmtf(x: f64, prec: i64) -> str {
+    return __at_fmtf(x, prec, "?")
+}
+
+fn __at_fmtf(x: f64, prec: i64, at: str) -> str {
+    __check_digits(prec, at)
     b: [1420]u8
     n := __fmt_fixed(x, prec, b[..])
     s := alloc[u8](n + __fmt_extra(x, prec))
@@ -882,7 +898,11 @@ fn fmtf(x: f64, prec: i64) -> str {
 
 // fmtf(x, prec) right-aligned in `width` characters (like printf "%W.Nf")
 fn fmtf(x: f64, prec: i64, width: i64) -> str {
-    return pad_left(fmtf(x, prec), width, ' ')
+    return __at_fmtf(x, prec, width, "?")
+}
+
+fn __at_fmtf(x: f64, prec: i64, width: i64, at: str) -> str {
+    return pad_left(__at_fmtf(x, prec, at), width, ' ')
 }
 
 fn __put_slice[T](s: []T) {
