@@ -1345,6 +1345,10 @@ priv fn simplify_cfg(f: *Func) -> bool {
         scratch_on()
         preds := f.preds()
         uses := f.use_counts()
+        // blocks whose edges or phis changed this round: their entries in preds / phi lists are
+        // stale, so they wait for the next round (one threading per round made long chains of
+        // `&&` / `||` quadratic in time and memory)
+        touched := vec_fill(f.blocks.len, false)
         did := false
         rpo := f.rpo()
         scratch_off()
@@ -1352,6 +1356,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
                 _ => continue
+            }
+            if touched[b] {
+                continue
             }
             binsts := clone(f.blocks[b].insts)
             if binsts.is_empty() || !all_phis(f, &binsts) || !contains(&binsts, c) {
@@ -1404,6 +1411,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 if kc != 0 {
                     target = t
                 }
+                if touched[p] || touched[target] {
+                    continue
+                }
                 // p must not already reach the target directly (its phis would need two inputs)
                 if contains(&preds[target], p) {
                     continue
@@ -1434,11 +1444,15 @@ priv fn simplify_cfg(f: *Func) -> bool {
                         im := f.im(v)
                         im.args.push(nv)
                         im.pb.push(p)
+                        uses[nv] += 1
                     }
                 }
                 retarget(f, p, b, target)
+                touched[b] = true
+                touched[p] = true
+                touched[target] = true
                 did = true
-                break blocks
+                continue blocks
             }
         }
         if !did {
