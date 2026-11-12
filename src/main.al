@@ -601,15 +601,24 @@ priv fn real_main() -> i64 {
     if test_mode {
         for i in 0..tests.len {
             name := tests[i]
-            esc := alloc[u8](len(name))
-            for k, c in name {
-                esc[k] = if c == '"' || c == '\\' { '_' } else { c }
+            // as a string literal of the entry source: every byte that cannot stand there as it is
+            // becomes a \x escape
+            esc := vec[u8]()
+            for c in name {
+                if c == '"' || c == '\\' || c < 0x20 || c == 0x7F {
+                    esc.extend(concat("\\x", hex(u64(c), 2)))
+                } else {
+                    esc.push(c)
+                }
             }
-            entry.push(fmt(" __run_test(\"", esc, "\", __test_", i, ")\n"))
+            entry.push(fmt(" __run_test(\"", esc.items(), "\", __test_", i, ")\n"))
         }
         entry.push(" exit(__tests_done())\n}\n")
     } else if !has_main {
-        src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `fn main() { ... }`, the function where the program starts"})
+        // (after a syntax error main may just not have been parsed)
+        if src.errs.is_empty() {
+            src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `fn main() { ... }`, the function where the program starts"})
+        }
         entry.push(" exit(0)\n}\n")
     } else if main_ret {
         entry.push(" exit(main())\n}\n")

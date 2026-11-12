@@ -1,0 +1,8 @@
+lexer_errors.al:2:10: error: integer literal too large
+lexer_errors.al:3:10: error: integer literal too large
+lexer_errors.al:4:10: error: integer literal too large
+lexer_errors.al:6:10: error: invalid digit `2` in a base-2 integer literal
+lexer_errors.al:7:10: error: unterminated string/char literal
+lexer_errors.al:8:10: error: expected expression, found `@`
+lexer_errors.al:9:10: error: unexpected character 'é'
+lexer_errors.al:10:10: error: unexpected character '\x1E'

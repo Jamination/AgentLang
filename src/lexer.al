@@ -44,17 +44,33 @@ priv fn to_digit(c: u8, radix: i64) -> Opt[i64] {
     return None
 }
 
-// the byte as a Unicode scalar value in UTF-8 (for messages)
-priv fn char_str(c: u8) -> str {
-    if c < 0x80 {
-        out := alloc[u8](1)
-        out[0] = c
-        return out
+// the character that starts at s[i], for messages, and its length in bytes: a printable
+// ASCII character or a valid UTF-8 sequence as it is, any other byte as `\xHH`
+priv fn char_at(s: str, i: i64) -> (str, i64) {
+    c := s[i]
+    if c >= 0x20 && c < 0x7F {
+        return (s[i..i + 1], 1)
     }
-    out := alloc[u8](2)
-    out[0] = 0xC0 | (c >> 6)
-    out[1] = 0x80 | (c & 0x3F)
-    return out
+    n := 0
+    if c >= 0xC2 && c <= 0xDF {
+        n = 2
+    } else if c >= 0xE0 && c <= 0xEF {
+        n = 3
+    } else if c >= 0xF0 && c <= 0xF4 {
+        n = 4
+    }
+    ok := n > 0 && i + n <= len(s)
+    if ok {
+        for k in 1..n {
+            if s[i + k] & 0xC0 != 0x80 {
+                ok = false
+            }
+        }
+    }
+    if ok {
+        return (s[i..i + n], n)
+    }
+    return (concat("\\x", to_upper(hex(u64(c), 2))), 1)
 }
 
 // the value of a non-empty text of decimal digits; false on overflow
@@ -77,7 +93,7 @@ priv fn parse_u64(text: str) -> (u64, bool) {
 }
 
 priv fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
-    return Pos{file: file, line: line, col: i64(u16(at - line_start + 1))}
+    return Pos{file: file, line: line, col: at - line_start + 1}
 }
 
 fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
@@ -152,22 +168,34 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 i += 2
                 v: u64 = 0
                 any := false
+                big := false
+                bad := false
                 while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
                     if s[i] != '_' {
                         match to_digit(s[i], radix) {
                             Some(d) => {
+                                if v > (0xFFFFFFFFFFFFFFFF - u64(d)) / u64(radix) {
+                                    big = true
+                                }
                                 v = v * u64(radix) + u64(d)
-                                any = true
                             }
                             None => {
-                                errs.push(Diag{pos: p, msg: "invalid digit in integer literal"})
+                                if !bad {
+                                    errs.push(Diag{pos: p, msg: fmt("invalid digit `", s[i..i + 1], "` in a base-", radix, " integer literal")})
+                                }
+                                bad = true
                             }
                         }
+                        any = true
                     }
                     i += 1
                 }
                 if !any {
                     errs.push(Diag{pos: p, msg: "empty integer literal"})
+                }
+                if big {
+                    errs.push(Diag{pos: p, msg: "integer literal too large"})
+                    v = 0
                 }
                 out.push(Token{t: Int(v), pos: p})
                 continue
@@ -176,14 +204,22 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 i += 1
             }
             is_float := false
-            if i + 1 < len(s) && s[i] == '.' && is_digit(s[i + 1]) {
+            // after a `.` a number is a tuple field: `t.0.1` is (t.0).1
+            field := false
+            if out.len > 0 {
+                field = match out[out.len - 1].t {
+                    P(q) => q == "."
+                    _ => false
+                }
+            }
+            if !field && i + 1 < len(s) && s[i] == '.' && is_digit(s[i + 1]) {
                 is_float = true
                 i += 1
                 while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
                     i += 1
                 }
             }
-            if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+            if !field && i < len(s) && (s[i] == 'e' || s[i] == 'E') {
                 j := i + 1
                 if j < len(s) && (s[j] == '+' || s[j] == '-') {
                     j += 1
@@ -236,11 +272,12 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 }
                 i += 1
             }
+            out.push(Token{t: Str(s[st..i]), pos: p})
             if i >= len(s) {
                 errs.push(Diag{pos: p, msg: "unterminated raw string (missing closing `)"})
+            } else {
+                i += 1
             }
-            out.push(Token{t: Str(s[st..min(i, len(s))]), pos: p})
-            i += 1
             continue
         }
         if c == '"' || c == '\'' {
@@ -258,9 +295,10 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 if d == '\n' {
                     break
                 }
-                if d == '\\' && i + 1 < len(s) {
+                if d == '\\' && i + 1 < len(s) && s[i + 1] != '\n' {
                     i += 1
                     e := s[i]
+                    shown, elen := char_at(s, i)
                     i += 1
                     match e {
                         'n' => buf.push('\n')
@@ -291,7 +329,8 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                             buf.push(u8(v))
                         }
                         _ => {
-                            errs.push(Diag{pos: p, msg: fmt("unknown escape \\", char_str(e))})
+                            errs.push(Diag{pos: p, msg: fmt("unknown escape \\", shown)})
+                            i += elen - 1
                         }
                     }
                     continue
@@ -334,8 +373,9 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             }
         }
         if !matched {
-            errs.push(Diag{pos: p, msg: fmt("unexpected character '", char_str(c), "'")})
-            i += 1
+            shown, clen := char_at(s, i)
+            errs.push(Diag{pos: p, msg: fmt("unexpected character '", shown, "'")})
+            i += clen
         }
     }
     p := lexer_pos(file, line, i, line_start)
