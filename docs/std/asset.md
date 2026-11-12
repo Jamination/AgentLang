@@ -129,7 +129,7 @@ requested type, so a settings file only needs to list what differs from the defa
 | `count(v: *Json) -> i64` | Number of elements or members; 0 for anything else. |
 | `as_str(v: *Json, default: str) -> str` | The string, or `default` if `v` is not a string. |
 | `as_f64(v: *Json, default: f64) -> f64` | The number, or `default` if `v` is not a number. |
-| `as_i64(v: *Json, default: i64) -> i64` | The number as an integer: exact for integer literals (all 64 bits), truncated toward zero otherwise. |
+| `as_i64(v: *Json, default: i64) -> i64` | The number as an integer: exact for integer literals (all 64 bits), truncated toward zero otherwise; `default` if `v` is not a number or the number lies outside the range of `i64` (`1e19`, `-1e400`), like the other accessors for a value they cannot represent. |
 | `as_bool(v: *Json, default: bool) -> bool` | The boolean, or `default` if `v` is not a boolean. |
 | `is_null(v: *Json) -> bool` | True if `v` is a JSON `null` (false for `nil`, i.e. for a missing value). |
 

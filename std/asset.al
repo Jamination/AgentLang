@@ -753,13 +753,20 @@ fn as_f64(v: *Json, default: f64) -> f64 {
 }
 
 // the number as an integer (exact for integers written without fraction or exponent,
-// otherwise truncated), or `default` if v is nil or not a number
+// otherwise truncated), or `default` if v is nil, not a number, or outside the range of i64
 fn as_i64(v: *Json, default: i64) -> i64 {
     if v == nil || v.kind != JsonNumber {
         return default
     }
     x, ok := parse_i64(v.text)
-    return if ok { x } else { i64(v.num) }
+    if ok {
+        return x
+    }
+    // truncated toward zero; a number outside the range of i64 is not one: `default`
+    if v.num >= -9223372036854775808.0 && v.num < 9223372036854775808.0 {
+        return i64(v.num)
+    }
+    return default
 }
 
 // the boolean, or `default` if v is nil or not a boolean
