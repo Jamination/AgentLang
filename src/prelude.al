@@ -1047,12 +1047,13 @@ fn __slice_eq[T](a: []T, b: []T) -> bool {
 }
 
 // ---------- small generic helpers ----------
+// a NaN argument makes the result NaN, whatever its position (`b != b`: only a NaN)
 fn min[T](a: T, b: T) -> T {
-    if b < a { b } else { a }
+    if b < a || b != b { b } else { a }
 }
 
 fn max[T](a: T, b: T) -> T {
-    if b > a { b } else { a }
+    if b > a || b != b { b } else { a }
 }
 
 // strings are ordered bytewise, like `cmp`
