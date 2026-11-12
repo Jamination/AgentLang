@@ -1816,20 +1816,71 @@ fn concat(a: str, b: str) -> str {
 }
 
 // index of the first occurrence of sub in s, or -1
+// (a plain scan; when it may have compared too many bytes in vain, as with "aaa...ab" in
+// "aaaa...", the rest of s is searched in linear time: __kmp_find)
 fn find(s: str, sub: str) -> i64 {
     n := len(s)
     m := len(sub)
     if m == 0 {
         return 0
     }
+    c := sub[0]
+    work := 0
     i := 0
     while i + m <= n {
-        if s[i] == sub[0] && s[i..i + m] == sub {
-            return i
+        if s[i] == c {
+            if s[i..i + m] == sub {
+                return i
+            }
+            // (at most m bytes compared)
+            work += m
+            if work > 8 * i + 1024 {
+                return __kmp_find(s, sub, i, false)
+            }
         }
         i += 1
     }
     return -1
+}
+
+// Knuth-Morris-Pratt: the first occurrence of sub in s at `from` or later, or -1; with `rev`
+// both strings are read backwards (s[len(s) - 1 - i]): the result is then the start of the
+// last occurrence that ends at len(s) - from or earlier, counted from the front
+fn __kmp_find(s: str, sub: str, from: i64, rev: bool) -> i64 {
+    n := len(s)
+    m := len(sub)
+    mk := mark()
+    // border[k]: length of the longest proper border of the first k + 1 bytes of sub
+    border := alloc[i64](m)
+    j := 0
+    for k in 1..m {
+        ck := if rev { sub[m - 1 - k] } else { sub[k] }
+        while j > 0 && ck != (if rev { sub[m - 1 - j] } else { sub[j] }) {
+            j = border[j - 1]
+        }
+        if ck == (if rev { sub[m - 1 - j] } else { sub[j] }) {
+            j += 1
+        }
+        border[k] = j
+    }
+    r := -1
+    j = 0
+    for i in from..n {
+        ci := if rev { s[n - 1 - i] } else { s[i] }
+        while j > 0 && ci != (if rev { sub[m - 1 - j] } else { sub[j] }) {
+            j = border[j - 1]
+        }
+        if ci == (if rev { sub[m - 1 - j] } else { sub[j] }) {
+            j += 1
+        }
+        if j == m {
+            r = if rev { n - 1 - i } else { i - m + 1 }
+            break
+        }
+    }
+    // the table was the last allocation: give it back
+    release(mk)
+    return r
 }
 
 // the first occurrence that starts at `from` or later; `from` is checked like s[from..]
@@ -1867,11 +1918,23 @@ fn __at_find_any(s: str, chars: str, from: i64, at: str) -> i64 {
 
 // index of the last occurrence of sub in s, or -1
 fn rfind(s: str, sub: str) -> i64 {
+    n := len(s)
     m := len(sub)
-    i := len(s) - m
+    if m == 0 {
+        return n
+    }
+    c := sub[m - 1]
+    work := 0
+    i := n - m
     while i >= 0 {
-        if s[i..i + m] == sub {
-            return i
+        if s[i + m - 1] == c {
+            if s[i..i + m] == sub {
+                return i
+            }
+            work += m
+            if work > 8 * (n - m - i) + 1024 {
+                return __kmp_find(s, sub, n - m - i, true)
+            }
         }
         i -= 1
     }
