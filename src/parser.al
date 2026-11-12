@@ -1182,6 +1182,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         return (Var(name, Some(v.0), v.1), true)
     }
     // multi-let: a, b := e
+    start := p.i
     if tk_id(p.peek()) && tk_p(p.peek_at(1), ",") {
         pos := p.pos()
         names := vec[str]()
@@ -1190,14 +1191,19 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             return fail[SK]()
         }
         names.push(n1)
+        only_names := true
         while p.eat_p(",") {
-            n2, ok2 := p.ident()
-            if !ok2 {
-                return fail[SK]()
+            if !tk_id(p.peek()) {
+                only_names = false
+                break
             }
+            n2, _ := p.ident()
             names.push(n2)
         }
-        if p.eat_p("=") {
+        if !only_names || !(p.is_p("=") || p.is_p(":=")) {
+            // not a list of names: places (`a.x, v[i] = f()`), handled below
+            p.i = start
+        } else if p.eat_p("=") {
             e, ok3 := p.expr()
             if !ok3 {
                 return fail[SK]()
@@ -1207,19 +1213,40 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
                 lhs.push(Expr{k: Ident(n), pos: pos})
             }
             return (MultiAssign(lhs, e), true)
+        } else {
+            p.bump()
+            e, ok4 := p.expr()
+            if !ok4 {
+                return fail[SK]()
+            }
+            return (Let(names, e), true)
         }
-        if !p.expect_p(":=") {
-            return fail[SK]()
-        }
-        e, ok4 := p.expr()
-        if !ok4 {
-            return fail[SK]()
-        }
-        return (Let(names, e), true)
     }
     e, ok1 := p.expr()
     if !ok1 {
         return fail[SK]()
+    }
+    // `a.x, v[i] = f()`: the parts of a tuple go to several places
+    if p.is_p(",") {
+        lhs := vec_of([]Expr{e})
+        while p.eat_p(",") {
+            e2, ok2 := p.expr()
+            if !ok2 {
+                return fail[SK]()
+            }
+            lhs.push(e2)
+        }
+        if p.is_p(":=") {
+            return p.err[SK]("`:=` declares new variables, so its left side is a list of names; assign to existing places with `=`")
+        }
+        if !p.expect_p("=") {
+            return fail[SK]()
+        }
+        v, ok3 := p.expr()
+        if !ok3 {
+            return fail[SK]()
+        }
+        return (MultiAssign(lhs, v), true)
     }
     if p.eat_p(":=") {
         name := match e.k {

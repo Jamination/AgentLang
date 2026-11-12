@@ -7,7 +7,7 @@ variant `Red2` of enum `Bad2` has the name of the constant `Red2` declared at te
 enum `Color` has no variant `Purple` (variants: Red, Green, Blue)
 variant `Some` takes 1 value(s), got 0
 enum `Maybe` expects 1 type argument(s), got 2
-enum `Opt` has no variant `Nothing` (variants: Some, None)
+enum `Opt` has no variant `Nothing` (variants: None, Some)
 variant `Red` takes 0 value(s), got 1
 enum `Light` cannot be used as a value here; write `Light.Variant`
 unknown identifier `Colour`

@@ -2269,7 +2269,8 @@ fn eput(s: str) {
 
 // ---------- optional values ----------
 // a value that may be absent
-enum Opt[T] { Some(T), None }
+// (`None` first: the zero value of an Opt is None)
+enum Opt[T] { None, Some(T) }
 
 fn is_some[T](o: Opt[T]) -> bool {
     match o {

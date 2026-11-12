@@ -251,7 +251,7 @@ x := expr                    // declare a new variable (type inferred)
 x: T                         // declare, zero-initialized
 x: T = expr                  // declare with an explicit type
 a, b := pair()               // declare from a tuple;  `_` discards: _, ok := m.get(k)
-a, b = b_and_a()             // assign to existing variables from a tuple
+a, v[i], p.x = f()           // assign the parts of a tuple to existing places
 x = expr                     // assign;  also  += -= *= /= %= &= |= ^= <<= >>=
 p.field = v    a[i] = v    *ptr = v
 
@@ -785,7 +785,7 @@ parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits 
 parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan
 is_digit(c: u8) -> bool   is_alpha(c: u8) -> bool   is_alnum(c: u8) -> bool    // ASCII; '_' is none of them
 
-// ---- Opt[T]: a value that may be absent.  enum Opt[T] { Some(T), None }
+// ---- Opt[T]: a value that may be absent.  enum Opt[T] { None, Some(T) }  (zero value: None)
 is_some(o: Opt[T]) -> bool    is_none(o: Opt[T]) -> bool
 unwrap(o: Opt[T]) -> T    or(o: Opt[T], default: T) -> T   // the value; if None: "panic: unwrap of None" / default
 

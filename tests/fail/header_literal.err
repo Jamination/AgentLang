@@ -1,2 +1,2 @@
-header_literal.al:5:21: error: expected end of statement, found `,` (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)
-header_literal.al:8:15: error: expected end of statement, found `,` (if this `{` was meant
+header_literal.al:5:24: error: expected `=`, found `}` (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)
+header_literal.al:8:18: error: expected `=`, found `}` (if this `{` was meant
