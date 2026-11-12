@@ -52,4 +52,5 @@
 ## Final checks (in the worktree)
 
 - `./build.sh`: stages 2 and 3 identical. `tests/run.sh`: 441 passed, 1 skipped (window_x11, no private X display). `ALC_DEBUG=verify tests/run.sh`: 441 passed, 1 skipped.
+- Compiler fuzzers: fuzz, fuzz_vec, fuzz_match, fuzz_nested and fuzz_fnptr, 100 programs each (seed 7): 0 failures.
 - Compiler sources are untouched (only std/, docs/, tests/), so self-compile time is unchanged.
