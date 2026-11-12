@@ -131,7 +131,9 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 
 ## Platform shell
 
-- `std.window` + `std.input`: window, events, software `present` for 2D or CPU rendering.
+- `std.window` + `std.input`: window, events, software `present` for 2D or CPU rendering (X11;
+  on a Wayland session through XWayland). `std.wayland` binds the Wayland client API for a
+  program that wants to talk to the compositor itself.
 - `std.vk`: Vulkan through `x11_display(w)` / `x11_window(w)` for a surface.
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame; the mixer is
   pure code and can be tested without a device.

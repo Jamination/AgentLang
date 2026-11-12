@@ -91,8 +91,9 @@ libwayland keeps the pointer to the listener struct as long as the object lives:
    as evdev codes: add 8 for xkb, compile the keymap that `wl_keyboard.keymap` sends with
    `xkb_keymap_new_from_string`, keep an `XkbState` updated from `wl_keyboard.modifiers`, and
    read keysyms (`xkb_state_key_get_one_sym`, the X11 keysym numbers) and text
-   (`xkb_state_key_get_utf8`). There is no key repeat from the compositor: a client repeats
-   keys itself from `wl_keyboard.repeat_info`. The pointer image is the client's job:
+   (`xkb_state_key_get_utf8`). Up to `wl_seat` version 9 the compositor sends no key repeat:
+   a client repeats keys itself from `wl_keyboard.repeat_info` (version 10 adds the
+   `WL_KEYBOARD_KEY_STATE_REPEATED` state, sent only to clients that bind version 10). The pointer image is the client's job:
    `wl_cursor_theme_load(nil, 24, shm)`, `wl_cursor_theme_get_cursor(theme, ptr("left_ptr"))`,
    its image's buffer on a surface of its own, `wl_pointer_set_cursor` on every
    `wl_pointer.enter`.
