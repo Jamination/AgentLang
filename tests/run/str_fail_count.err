@@ -1,0 +1,1 @@
+panic at tests/run/str_fail_count.al:6: count: empty substring

@@ -1,0 +1,1 @@
+panic at tests/run/str_fail_parse_base.al:6: parse_i64: the base must be 0 or 2..36

@@ -815,6 +815,11 @@ fn fmtf(x: f64, prec: i64) -> str {
     return s
 }
 
+// fmtf(x, prec) right-aligned in `width` characters (like printf "%W.Nf")
+fn fmtf(x: f64, prec: i64, width: i64) -> str {
+    return pad_left(fmtf(x, prec), width, ' ')
+}
+
 fn __put_slice[T](s: []T) {
     putc('[')
     for i, x in s {
@@ -1713,6 +1718,108 @@ fn find(s: str, sub: str) -> i64 {
     return -1
 }
 
+// the first occurrence that starts at `from` or later; `from` is checked like s[from..]
+fn find(s: str, sub: str, from: i64) -> i64 {
+    return __at_find(s, sub, from, "?")
+}
+
+fn __at_find(s: str, sub: str, from: i64, at: str) -> i64 {
+    if from < 0 || from > len(s) {
+        __bounds_fail(at)
+    }
+    i := find(s[from..], sub)
+    if i < 0 {
+        return -1
+    }
+    return from + i
+}
+
+// index of the first byte at `from` or later that is one of `chars`, or -1
+fn find_any(s: str, chars: str, from: i64) -> i64 {
+    return __at_find_any(s, chars, from, "?")
+}
+
+fn __at_find_any(s: str, chars: str, from: i64, at: str) -> i64 {
+    if from < 0 || from > len(s) {
+        __bounds_fail(at)
+    }
+    for i in from..len(s) {
+        if contains(chars, s[i]) {
+            return i
+        }
+    }
+    return -1
+}
+
+// index of the last occurrence of sub in s, or -1
+fn rfind(s: str, sub: str) -> i64 {
+    m := len(sub)
+    i := len(s) - m
+    while i >= 0 {
+        if s[i..i + m] == sub {
+            return i
+        }
+        i -= 1
+    }
+    return -1
+}
+
+// how often sub occurs in s (occurrences that do not overlap, counted from the left)
+fn count(s: str, sub: str) -> i64 {
+    return __at_count(s, sub, "?")
+}
+
+fn __at_count(s: str, sub: str, at: str) -> i64 {
+    if len(sub) == 0 {
+        __panic(at, "count: empty substring")
+    }
+    n := 0
+    i := find(s, sub)
+    while i >= 0 {
+        n += 1
+        i = __at_find(s, sub, i + len(sub), at)
+    }
+    return n
+}
+
+// s with every occurrence of old (left to right, not overlapping) replaced by new
+fn replace(s: str, old: str, new: str) -> str {
+    return __at_replace(s, old, new, "?")
+}
+
+fn __at_replace(s: str, old: str, new: str, at: str) -> str {
+    if len(old) == 0 {
+        __panic(at, "replace: empty substring")
+    }
+    out := alloc[u8](len(s) + __at_count(s, old, at) * (len(new) - len(old)))
+    k := 0
+    start := 0
+    loop {
+        i := __at_find(s, old, start, at)
+        end := if i < 0 { len(s) } else { i }
+        memcopy(cast[i64](ptr(out)) + k, cast[i64](ptr(s)) + start, end - start)
+        k += end - start
+        if i < 0 {
+            return out
+        }
+        memcopy(cast[i64](ptr(out)) + k, ptr(new), len(new))
+        k += len(new)
+        start = i + len(old)
+    }
+}
+
+// n copies of s (none if n <= 0)
+fn repeat(s: str, n: i64) -> str {
+    if n <= 0 {
+        return ""
+    }
+    out := alloc[u8](len(s) * n)
+    for i in 0..n {
+        memcopy(cast[i64](ptr(out)) + i * len(s), ptr(s), len(s))
+    }
+    return out
+}
+
 fn starts_with(s: str, p: str) -> bool {
     return len(s) >= len(p) && s[..len(p)] == p
 }
@@ -1721,20 +1828,51 @@ fn ends_with(s: str, p: str) -> bool {
     return len(s) >= len(p) && s[len(s) - len(p)..] == p
 }
 
-fn __is_space(c: u8) -> bool {
-    return c == ' ' || c == '\n' || c == '\t' || c == '\r'
+// white space: ' ', '\t', '\n', '\r', vertical tab, form feed
+fn is_space(c: u8) -> bool {
+    return c == ' ' || (c >= '\t' && c <= '\r')
 }
 
+// views of s without white space at both ends / at the start / at the end
 fn trim(s: str) -> str {
+    return trim_right(trim_left(s))
+}
+
+fn trim_left(s: str) -> str {
     lo := 0
-    hi := len(s)
-    while lo < hi && __is_space(s[lo]) {
+    while lo < len(s) && is_space(s[lo]) {
         lo += 1
     }
-    while hi > lo && __is_space(s[hi - 1]) {
+    return s[lo..]
+}
+
+fn trim_right(s: str) -> str {
+    hi := len(s)
+    while hi > 0 && is_space(s[hi - 1]) {
         hi -= 1
     }
-    return s[lo..hi]
+    return s[..hi]
+}
+
+// the same for the bytes of `chars` instead of white space
+fn trim(s: str, chars: str) -> str {
+    return trim_right(trim_left(s, chars), chars)
+}
+
+fn trim_left(s: str, chars: str) -> str {
+    lo := 0
+    while lo < len(s) && contains(chars, s[lo]) {
+        lo += 1
+    }
+    return s[lo..]
+}
+
+fn trim_right(s: str, chars: str) -> str {
+    hi := len(s)
+    while hi > 0 && contains(chars, s[hi - 1]) {
+        hi -= 1
+    }
+    return s[..hi]
 }
 
 // pieces of s between occurrences of sep (views into s, no copying)
@@ -1759,6 +1897,55 @@ fn split(s: str, sep: u8) -> []str {
     return out
 }
 
+// pieces of s between occurrences of sep (left to right, not overlapping)
+fn split(s: str, sep: str) -> []str {
+    return __at_split(s, sep, "?")
+}
+
+fn __at_split(s: str, sep: str, at: str) -> []str {
+    if len(sep) == 0 {
+        __panic(at, "split: empty separator")
+    }
+    out := alloc[str](__at_count(s, sep, at) + 1)
+    k := 0
+    start := 0
+    loop {
+        i := __at_find(s, sep, start, at)
+        if i < 0 {
+            out[k] = s[start..]
+            return out
+        }
+        out[k] = s[start..i]
+        k += 1
+        start = i + len(sep)
+    }
+}
+
+// the pieces of s between runs of white space (views; none is empty)
+fn fields(s: str) -> []str {
+    n := 0
+    for i, c in s {
+        if !is_space(c) && (i == 0 || is_space(s[i - 1])) {
+            n += 1
+        }
+    }
+    out := alloc[str](n)
+    k := 0
+    i := 0
+    while k < n {
+        while is_space(s[i]) {
+            i += 1
+        }
+        start := i
+        while i < len(s) && !is_space(s[i]) {
+            i += 1
+        }
+        out[k] = s[start..i]
+        k += 1
+    }
+    return out
+}
+
 fn lines(s: str) -> []str {
     if len(s) > 0 && s[len(s) - 1] == '\n' {
         return split(s[..len(s) - 1], '\n')
@@ -1778,6 +1965,24 @@ fn cmp(a: str, b: str) -> i64 {
 }
 
 fn parse_i64(s: str) -> (i64, bool) {
+    return __parse_int(s, 10)
+}
+
+// an integer in another base (2..36; digits beyond 9 are letters of either case). Base 0: the
+// text says it with 0x, 0b or 0o after the sign, and is decimal without one. With a base
+// given, a prefix is not accepted.
+fn parse_i64(s: str, base: i64) -> (i64, bool) {
+    return __at_parse_i64(s, base, "?")
+}
+
+fn __at_parse_i64(s: str, base: i64, at: str) -> (i64, bool) {
+    if base != 0 && (base < 2 || base > 36) {
+        __panic(at, "parse_i64: the base must be 0 or 2..36")
+    }
+    return __parse_int(s, base)
+}
+
+fn __parse_int(s: str, base: i64) -> (i64, bool) {
     n := len(s)
     i := 0
     neg := false
@@ -1785,22 +1990,37 @@ fn parse_i64(s: str) -> (i64, bool) {
         neg = s[0] == '-'
         i = 1
     }
+    if base == 0 {
+        base = 10
+        if i + 1 < n && s[i] == '0' {
+            p := s[i + 1] | 0x20
+            base = if p == 'x' { 16 } else if p == 'b' { 2 } else if p == 'o' { 8 } else { 10 }
+            if base != 10 {
+                i += 2
+            }
+        }
+    }
     if i == n {
         return (0, false)
     }
     v: u64 = 0
     // the largest magnitude: 2^63 - 1, or 2^63 after a minus sign
     limit: u64 = if neg { 0x8000_0000_0000_0000 } else { 0x7FFF_FFFF_FFFF_FFFF }
+    b := u64(base)
+    q := limit / b
+    r := limit % b
     while i < n {
         c := s[i]
-        if c < '0' || c > '9' {
+        d: u64 = 99
+        if c >= '0' && c <= '9' {
+            d = u64(c - '0')
+        } else if (c | 0x20) >= 'a' && (c | 0x20) <= 'z' {
+            d = u64((c | 0x20) - 'a') + 10
+        }
+        if d >= b || v > q || (v == q && d > r) {
             return (0, false)
         }
-        d := u64(c - '0')
-        if v > (limit - d) / 10 {
-            return (0, false)
-        }
-        v = v * 10 + d
+        v = v * b + d
         i += 1
     }
     if neg {
@@ -2262,20 +2482,53 @@ fn pad_right(s: str, width: i64, fill: u8) -> str {
 
 // lower-case hexadecimal digits of x (no prefix)
 fn hex(x: u64) -> str {
-    b: [16]u8
-    i := 16
+    return __to_base(x, 16)
+}
+
+// at least `width` digits (zeros in front)
+fn hex(x: u64, width: i64) -> str {
+    return pad_left(__to_base(x, 16), width, '0')
+}
+
+// the digits of x in a base of 2..36 (0-9, then a-z; no prefix)
+fn to_base(x: u64, base: i64) -> str {
+    return __at_to_base(x, base, "?")
+}
+
+fn __at_to_base(x: u64, base: i64, at: str) -> str {
+    if base < 2 || base > 36 {
+        __panic(at, "to_base: the base must be 2..36")
+    }
+    return __to_base(x, u64(base))
+}
+
+fn __to_base(x: u64, base: u64) -> str {
+    b: [64]u8
+    i := 64
     loop {
         i -= 1
-        d := u8(x & 15)
+        d := u8(x % base)
         b[i] = if d < 10 { d + '0' } else { d - 10 + 'a' }
-        x = x >> 4
+        x = x / base
         if x == 0 {
             break
         }
     }
-    out := alloc[u8](16 - i)
-    memcopy(ptr(out), cast[i64](ptr(b)) + i, 16 - i)
+    out := alloc[u8](64 - i)
+    memcopy(ptr(out), cast[i64](ptr(b)) + i, 64 - i)
     return out
+}
+
+// an integer right-aligned in `width` characters; with fill '0' the zeros follow the sign:
+// fmti(-42, 5, '0') is "-0042"
+fn fmti[T](x: T, width: i64, fill: u8) -> str {
+    s := fmt(x)
+    if fill == '0' && len(s) < width && s[0] == '-' {
+        out := pad_left(s[1..], width, '0')
+        out[0] = '-'
+        return out
+    }
+    return pad_left(s, width, fill)
 }
 
 fn to_upper(s: str) -> str {
@@ -2345,6 +2598,14 @@ fn is_alpha(c: u8) -> bool {
 
 fn is_alnum(c: u8) -> bool {
     return is_digit(c) || is_alpha(c)
+}
+
+fn is_upper(c: u8) -> bool {
+    return c >= 'A' && c <= 'Z'
+}
+
+fn is_lower(c: u8) -> bool {
+    return c >= 'a' && c <= 'z'
 }
 
 // ---------- process ----------

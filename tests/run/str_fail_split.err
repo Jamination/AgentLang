@@ -1,0 +1,1 @@
+panic at tests/run/str_fail_split.al:7: split: empty separator

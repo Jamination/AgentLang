@@ -1,0 +1,1 @@
+panic at tests/run/str_fail_to_base.al:6: to_base: the base must be 2..36
