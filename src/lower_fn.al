@@ -26,6 +26,10 @@ fn val_never() -> Val {
 priv struct Scope {
     vars: Map[str, (i64, i64)]
     defers: Vec[*Block]
+    // the nearest scope below that had names when this one was pushed (-1: none). Names are
+    // only added to the innermost scope and to scope 0, so `lookup` skips the empty ones
+    // between (a long `else if` chain nests thousands of them)
+    below: i64
 }
 
 priv struct LoopCtx {
@@ -193,7 +197,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         labels: vec[(str, i64, i64)](),
         parent: parent,
     }
-    fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
+    fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block](), below: -1})
     fx.cur = fx.f.new_block()
     pi := 0
     match fx.cx.abi_ret(rty) {
@@ -484,13 +488,18 @@ fn coerce(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
     }
     a := self.tyname(to)
     b := self.tyname(v.ty)
-    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, lower_match_same_name(a, b)))
+    self.err(pos, fmt("type mismatch: expected ", a, ", found ", b, self.same_name_hint(to, v.ty)))
     return val_err()
 }
 
 // ---------- scopes ----------
 fn push_scope(self: *Fx) {
-    self.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
+    t := self.scopes.len - 1
+    below := t
+    if t > 0 && self.scopes[t].vars.len == 0 {
+        below = self.scopes[t].below
+    }
+    self.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block](), below: below})
 }
 
 fn pop_scope(self: *Fx) {
@@ -533,8 +542,16 @@ priv fn run_defers_down_to(self: *Fx, depth: i64) {
 // nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
 // enclosing function, which a nested function cannot use.
 fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
-    for si in self.scopes.len - 1..=0 by -1 {
+    si := self.scopes.len - 1
+    while si > 0 {
         x, ok := self.scopes[si].vars.get(name)
+        if ok {
+            return Some(x)
+        }
+        si = self.scopes[si].below
+    }
+    if self.scopes.len > 0 {
+        x, ok := self.scopes[0].vars.get(name)
         if ok {
             return Some(x)
         }
@@ -676,16 +693,21 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 Match(sc, arms) => {
                     self.match_expr(sc, arms.items(), false, None, e.pos)
                 }
-                // `&&` / `||` may have effects through their operands
-                Bin(LAnd, _, _), Bin(LOr, _, _) => {
-                    self.expr(&e, None)
-                }
-                Int(_), Float(_), Str(_), Bool(_), Ident(_), Fn(_), Bin(_, _, _) => {
-                    self.expr(&e, None)
-                    self.err(e.pos, "expression statement has no effect (did you mean `=` or `:=`?)")
-                }
                 _ => {
                     self.expr(&e, None)
+                    no_effect := match e.k {
+                        Int(_, _), Float(_, _), Str(_), Bool(_), Nil, Ident(_), Fn(_), TypeE(_) => true
+                        Un(_, _), Bin(_, _, _), Field(_, _), Index(_, _), Slice(_, _, _), Tuple(_), Lit(_, _) => !lower_call_has_call(&e)
+                        _ => false
+                    }
+                    if no_effect {
+                        hint := match e.k {
+                            Un(Neg, _), Un(Addr, _), Un(Deref, _) => " (an operator at the start of a line begins a new statement: put it at the end of the previous line)"
+                            Ident(_), Bin(Eq, _, _) => " (did you mean `=` or `:=`?)"
+                            _ => ""
+                        }
+                        self.err(e.pos, fmt("this expression has no effect", hint))
+                    }
                 }
             }
         }
@@ -1108,6 +1130,13 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                     match self.cx.const_eval(se) {
                         Some(Int(k)) if k != 0 => {
                             stepk = k
+                            match self.cx.types.k(ty) {
+                                Int(bits, _) if bits < 64 && (k < -(1 << (bits - 1)) || k >= 1 << bits) => {
+                                    tn := self.tyname(ty)
+                                    self.err(se.pos, fmt("`by` step ", k, " does not fit in ", tn))
+                                }
+                                _ => {}
+                            }
                         }
                         Some(_) => {
                             self.err(se.pos, "`by` step must be a non-zero integer")
@@ -1165,7 +1194,30 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             }
             next := self.ins(Add, it, vec_of([]i64{cur, st}), 0)
             self.store_raw(addr, next, it, iv.alias)
-            c2 := self.ins(cmpop, I8, vec_of([]i64{next, end}), 0)
+            c2 := NOV
+            if !is_some(step_dyn) && (stepk == 1 || stepk == -1) {
+                if incl {
+                    // `cur + 1 <= end` would overflow at the largest value: `cur < end`
+                    strict := if stepk > 0 { if signed { Slt } else { Ult } } else { if signed { Sgt } else { Ugt } }
+                    c2 = self.ins(strict, I8, vec_of([]i64{cur, end}), 0)
+                } else {
+                    c2 = self.ins(cmpop, I8, vec_of([]i64{next, end}), 0)
+                }
+            } else {
+                // a larger step may jump past the largest value: continue while there is
+                // room for one more step between cur and end (the distance is unsigned)
+                first := self.ins(cmpop, I8, vec_of([]i64{cur, end}), 0)
+                diff := NOV
+                mag := st
+                if stepk > 0 {
+                    diff = self.ins(Sub, it, vec_of([]i64{end, cur}), 0)
+                } else {
+                    diff = self.ins(Sub, it, vec_of([]i64{cur, end}), 0)
+                    mag = self.iconst(it, -stepk)
+                }
+                room := self.ins(if incl { Uge } else { Ugt }, I8, vec_of([]i64{diff, mag}), 0)
+                c2 = self.ins(And, I8, vec_of([]i64{first, room}), 0)
+            }
             self.br(c2, bb, bx)
         }
         None => {

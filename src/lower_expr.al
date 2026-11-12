@@ -64,7 +64,7 @@ priv fn parse_usize(s: str) -> (i64, bool) {
 
 fn is_untyped(self: *Fx, e: *Expr) -> bool {
     match e.k {
-        Int(_), Float(_), Nil => { return true }
+        Int(_, _), Float(_, _), Nil => { return true }
         Un(Neg, x), Un(BitNot, x) => { return self.is_untyped(x) }
         Bin(op, a, b) if is_arith(op) || op == Shl || op == Shr => {
             return self.is_untyped(a) && self.is_untyped(b)
@@ -89,23 +89,15 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
     return false
 }
 
-priv fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val {
+// `n`: the value (already negated if `neg`); `dec`: written in decimal. A decimal literal must
+// not exceed the maximum of its type; a hex / binary / octal / character literal may be a bit
+// pattern (`i8` takes 0xFF, `i64` takes 0xFFFF_FFFF_FFFF_FFFF).
+priv fn int_lit(self: *Fx, n: i64, neg: bool, dec: bool, expect: Opt[i64], pos: Pos) -> Val {
+    ty := T_I64
     match expect {
-        Some(ty) => {
-            match self.cx.types.k(ty) {
-                Int(bits, signed) => {
-                    if bits < 64 {
-                        lo := -(1 << (bits - 1))
-                        hi := if signed && neg { 1 << (bits - 1) } else { 1 << bits }
-                        if n < lo || n >= hi {
-                            tn := self.tyname(ty)
-                            self.err(pos, fmt("integer literal ", n, " does not fit in ", tn))
-                        }
-                    }
-                    it := self.irt(ty)
-                    v := self.iconst(it, n)
-                    return self.sval(ty, v)
-                }
+        Some(t) => {
+            match self.cx.types.k(t) {
+                Int(_, _) => { ty = t }
                 F64, F32, Vec(_), Quat, Mat4 => {
                     ft := self.float_expect(expect)
                     return self.fconst_ty(ft, f64(n))
@@ -115,13 +107,38 @@ priv fn int_lit(self: *Fx, n: i64, neg: bool, expect: Opt[i64], pos: Pos) -> Val
         }
         None => {}
     }
-    v := self.iconst(I64, n)
-    return self.sval(T_I64, v)
+    bits, signed := match self.cx.types.k(ty) {
+        Int(b, s) => (b, s)
+        _ => (64, true)
+    }
+    bad := false
+    // the literal as written: its magnitude
+    mag := if neg { u64(-n) } else { u64(n) }
+    if dec {
+        if neg {
+            bad = mag > u64(1) << u64(bits - 1)
+        } else {
+            bad = mag > (if signed { (u64(1) << u64(bits - 1)) - 1 } else { u64(0xFFFFFFFFFFFFFFFF) >> u64(64 - bits) })
+        }
+    } else if bits < 64 {
+        lo := -(1 << (bits - 1))
+        hi := if signed && neg { 1 << (bits - 1) } else { 1 << bits }
+        bad = n < lo || n >= hi
+    }
+    // a negative literal for an unsigned type (255 as a u8 is `255` or `0xFF`)
+    bad = bad || (neg && !signed && mag != 0)
+    if bad {
+        tn := self.tyname(ty)
+        self.err(pos, fmt("integer literal ", if neg { "-" } else { "" }, mag, " does not fit in ", tn))
+    }
+    it := self.irt(ty)
+    v := self.iconst(it, n)
+    return self.sval(ty, v)
 }
 
-fn const_val(self: *Fx, ty: Opt[i64], cv: CV, expect: Opt[i64], pos: Pos) -> Val {
+fn const_val(self: *Fx, ty: Opt[i64], cv: CV, dec: bool, expect: Opt[i64], pos: Pos) -> Val {
     match cv {
-        Int(i) => self.int_lit(i, i < 0, lower_expr_or(ty, expect), pos)
+        Int(i) => self.int_lit(i, i < 0 && dec && !is_some(ty), dec && !is_some(ty), lower_expr_or(ty, expect), pos)
         Float(f) => {
             ft := self.float_expect(lower_expr_or(ty, expect))
             self.fconst_ty(ft, f)
@@ -143,8 +160,8 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
         }
     }
     match e.k {
-        Int(n) => { return self.int_lit(i64(n), false, expect, e.pos) }
-        Float(f) => {
+        Int(n, dec) => { return self.int_lit(i64(n), false, dec, expect, e.pos) }
+        Float(f, g) => {
             match expect {
                 Some(t) if self.cx.types.is_int(t) => {
                     tn := self.tyname(t)
@@ -153,7 +170,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                 _ => {}
             }
             ft := self.float_expect(expect)
-            return self.fconst_ty(ft, f)
+            return self.fconst_ty(ft, if ft == T_F64 { f } else { f64(g) })
         }
         Bool(b) => {
             v := self.iconst(I8, lower_expr_bool_i64(b))
@@ -402,7 +419,18 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
             }
         }
         match self.cx.const_named(n) {
-            Some(c) => { return self.const_val(c.0, c.1, expect, pos) }
+            Some(c) => {
+                cv := c.1
+                match cv {
+                    // an untyped float literal used as an f32: rounded once from its text
+                    Float(f) if !is_some(c.0) && self.float_expect(expect) == T_F32 => {
+                        cv = Float(f64(self.cx.const_lit_f32(n, f)))
+                    }
+                    _ => {}
+                }
+                d, _ := self.cx.const_decls.get(n)
+                return self.const_val(c.0, cv, self.cx.const_expr_dec(&d.val, 0), expect, pos)
+            }
             None => { return val_err() }
         }
     }
@@ -832,7 +860,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
     match op {
         Neg => {
             match x.k {
-                Int(n) => { return self.int_lit(-i64(n), true, expect, pos) }
+                Int(n, dec) => { return self.int_lit(-i64(n), true, dec, expect, pos) }
                 _ => {}
             }
             v := self.expr(x, expect)
@@ -1399,13 +1427,12 @@ priv fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b
         }
         None => {}
     }
-    if !self.cx.opts.checks {
-        v := self.ins(o, it, vec_of([]i64{a, b}), 0)
-        return self.sval(ty, v)
+    // --unchecked drops only the zero check: MIN / -1 still wraps
+    if self.cx.opts.checks {
+        z := self.iconst(it, 0)
+        nz := self.ins(Ne, I8, vec_of([]i64{b, z}), 0)
+        self.check(nz, 1, pos)
     }
-    z := self.iconst(it, 0)
-    nz := self.ins(Ne, I8, vec_of([]i64{b, z}), 0)
-    self.check(nz, 1, pos)
     if !signed {
         v := self.ins(o, it, vec_of([]i64{a, b}), 0)
         return self.sval(ty, v)
@@ -1459,18 +1486,20 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             }
             return self.sval(to, r)
         }
-        (Int(fb, fs), F64) => {
+        (Int(fb, fs), F64), (Int(fb, fs), F32) => {
+            ft := if to == T_F32 { T.F32 } else { T.F64 }
             s := self.scalar(v)
             if fb < 64 {
                 s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
-                r := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
+                r := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
                 return self.sval(to, r)
             }
             if fs {
-                r := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
+                r := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
                 return self.sval(to, r)
             }
             // u64: values >= 2^63 are halved (keeping the sticky bit), converted and doubled
+            // (rounded once, also to f32)
             slot := self.alloca(8, 8)
             zero := self.iconst(I64, 0)
             nonneg := self.ins(Sge, I8, vec_of([]i64{s, zero}), 0)
@@ -1480,33 +1509,21 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             d := self.dead
             self.br(nonneg, b_lo, b_hi)
             self.switch_to(b_lo)
-            r1 := self.ins(SIToF, T.F64, vec_of([]i64{s}), 0)
-            self.store_raw(slot, r1, T.F64, 0)
+            r1 := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
+            self.store_raw(slot, r1, ft, 0)
             self.jmp(bj)
             self.switch_to(b_hi)
             one := self.iconst(I64, 1)
             half := self.ins(LShr, I64, vec_of([]i64{s, one}), 0)
             low := self.ins(And, I64, vec_of([]i64{s, one}), 0)
             h := self.ins(Or, I64, vec_of([]i64{half, low}), 0)
-            hf := self.ins(SIToF, T.F64, vec_of([]i64{h}), 0)
-            r2 := self.ins(FAdd, T.F64, vec_of([]i64{hf, hf}), 0)
-            self.store_raw(slot, r2, T.F64, 0)
+            hf := self.ins(SIToF, ft, vec_of([]i64{h}), 0)
+            r2 := self.ins(FAdd, ft, vec_of([]i64{hf, hf}), 0)
+            self.store_raw(slot, r2, ft, 0)
             self.jmp(bj)
             self.switch_to(bj)
             self.dead = d
-            r := self.load_raw(slot, T.F64, 0)
-            return self.sval(to, r)
-        }
-        (Int(fb, fs), F32) => {
-            if fb == 64 && !fs {
-                d := self.convert(v, T_F64, pos)
-                return self.convert(d, T_F32, pos)
-            }
-            s := self.scalar(v)
-            if fb < 64 {
-                s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
-            }
-            r := self.ins(SIToF, T.F32, vec_of([]i64{s}), 0)
+            r := self.load_raw(slot, ft, 0)
             return self.sval(to, r)
         }
         (Bool, Int(tb, _)) => {
@@ -1535,8 +1552,37 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             r := self.ins(FTrunc, T.F32, vec_of([]i64{s}), 0)
             return self.sval(to, r)
         }
-        (F32, Int(tb, _)), (F64, Int(tb, _)) => {
+        (F32, Int(tb, ts)), (F64, Int(tb, ts)) => {
             s := self.scalar(v)
+            if tb == 64 && !ts {
+                // u64: values >= 2^63 are converted after subtracting 2^63, which is added back
+                if fk == F32 {
+                    s = self.ins(FExt, T.F64, vec_of([]i64{s}), 0)
+                }
+                slot := self.alloca(8, 8)
+                big := self.ins(FConst, T.F64, vec[i64](), 0x43E0000000000000)
+                ge := self.ins(FGe, I8, vec_of([]i64{s, big}), 0)
+                b_lo := self.new_block()
+                b_hi := self.new_block()
+                bj := self.new_block()
+                d := self.dead
+                self.br(ge, b_hi, b_lo)
+                self.switch_to(b_lo)
+                r1 := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
+                self.store_raw(slot, r1, I64, 0)
+                self.jmp(bj)
+                self.switch_to(b_hi)
+                sm := self.ins(FSub, T.F64, vec_of([]i64{s, big}), 0)
+                r2 := self.ins(FToSI, I64, vec_of([]i64{sm}), 0)
+                top := self.iconst(I64, i64(0x8000000000000000))
+                r3 := self.ins(Xor, I64, vec_of([]i64{r2, top}), 0)
+                self.store_raw(slot, r3, I64, 0)
+                self.jmp(bj)
+                self.switch_to(bj)
+                self.dead = d
+                r := self.load_raw(slot, I64, 0)
+                return self.sval(to, r)
+            }
             r := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
             if tb < 64 {
                 r = self.ins(Trunc, tt, vec_of([]i64{r}), 0)

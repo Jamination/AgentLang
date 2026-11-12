@@ -247,7 +247,7 @@ priv fn eat_kw(p: *Parser, k: str) -> bool {
 priv fn tok_desc(p: *Parser) -> str {
     match p.peek() {
         Id(s) => fmt("identifier `", s, "`")
-        Int(_), Float(_) => "number"
+        Int(_, _), Float(_, _) => "number"
         Str(_) => "string"
         Kw(k) => fmt("keyword `", k, "`")
         P(q) => fmt("`", q, "`")
@@ -333,7 +333,7 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
                 hint = " (a line cannot start with a binary operator: to continue an expression on the next line, end the line with the operator)"
             } else if q == "." && starts_with(msg, "expected expression") {
                 match p.peek_at(1) {
-                    Int(_) => { hint = " (a float literal has digits on both sides of the point: `0.5`, not `.5`)" }
+                    Int(_, _) => { hint = " (a float literal has digits on both sides of the point: `0.5`, not `.5`)" }
                     Id(_) if line_start => { hint = " (a line cannot start with `.`: to continue a chain of calls on the next line, end the line with the `.`)" }
                     _ => {}
                 }
@@ -1665,7 +1665,7 @@ priv fn postfix_links(p: *Parser) -> (Expr, bool) {
             // `1.` (a float without digits after the point): the `.` ends the line or is
             // not followed by a name (`5.double()` is a method call)
             match e.k {
-                Int(n) if p.pos().line != pos.line || !tk_id(p.peek()) => {
+                Int(n, _) if p.pos().line != pos.line || !tk_id(p.peek()) => {
                     p.errs.push(Diag{pos: pos, msg: fmt("a float literal has digits on both sides of the point: write `", n, ".0`, not `", n, ".`")})
                     return fail[Expr]()
                 }
@@ -1675,7 +1675,7 @@ priv fn postfix_links(p: *Parser) -> (Expr, bool) {
                 Id(n) => {
                     e = Expr{k: Field(parser_box(e), n), pos: pos}
                 }
-                Int(n) => {
+                Int(n, _) => {
                     e = Expr{k: Field(parser_box(e), fmt(n)), pos: pos}
                 }
                 _ => {
@@ -1696,7 +1696,7 @@ priv fn postfix_links(p: *Parser) -> (Expr, bool) {
             match e.k {
                 TypeE(Array(n, t)) => {
                     match n.k {
-                        Ident("_") => { e.k = TypeE(Array(parser_box(Expr{k: Int(u64(r.len)), pos: n.pos}), t)) }
+                        Ident("_") => { e.k = TypeE(Array(parser_box(Expr{k: Int(u64(r.len), true), pos: n.pos}), t)) }
                         _ => {}
                     }
                 }
@@ -1833,13 +1833,13 @@ priv fn primary_r(p: *Parser, pos: Pos) -> (Expr, bool) {
 priv fn primary(p: *Parser) -> (Expr, bool) {
     pos := p.pos()
     match p.peek() {
-        Int(n) => {
+        Int(n, dec) => {
             p.bump()
-            return (Expr{k: EK.Int(n), pos: pos}, true)
+            return (Expr{k: EK.Int(n, dec), pos: pos}, true)
         }
-        Float(f) => {
+        Float(f, g) => {
             p.bump()
-            return (Expr{k: EK.Float(f), pos: pos}, true)
+            return (Expr{k: EK.Float(f, g), pos: pos}, true)
         }
         Str(s) => {
             p.bump()

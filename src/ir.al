@@ -789,8 +789,7 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
             } else {
                 s.push("  ")
             }
-            // the variant name without its `Op` prefix, as `{:?}` prints it
-            s.push(fmt(fmt(i.op)[2..], " ", i.ty.name()))
+            s.push(fmt(i.op, " ", i.ty.name()))
             match i.op {
                 Const => {
                     s.push(fmt(" ", i.k))

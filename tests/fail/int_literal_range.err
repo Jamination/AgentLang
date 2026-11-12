@@ -1,0 +1,7 @@
+int_literal_range.al:2:16: error: constant `C1`: value 200 does not fit in i8
+int_literal_range.al:3:17: error: constant `C2`: value 9223372036854775808 does not fit in i64
+int_literal_range.al:4:16: error: integer constant 128 does not fit in i8
+int_literal_range.al:6:13: error: integer literal 128 does not fit in i8
+int_literal_range.al:7:10: error: integer literal 9223372036854775808 does not fit in i64
+int_literal_range.al:8:10: error: integer literal -18446744073709551615 does not fit in i64
+int_literal_range.al:9:14: error: integer literal 2147483648 does not fit in i32

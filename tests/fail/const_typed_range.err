@@ -1,0 +1,8 @@
+const_typed_range.al:3:16: error: constant `U1`: value 256 does not fit in u8
+const_typed_range.al:4:16: error: constant `U2`: value -129 does not fit in i8
+const_typed_range.al:5:19: error: constant `U3`: value 4294967296 does not fit in u32
+const_typed_range.al:6:21: error: integer constant 300 does not fit in u8
+const_typed_range.al:7:10: error: integer constant 256 does not fit in u8
+const_typed_range.al:9:18: error: type mismatch: expected u8, found i64
+const_typed_range.al:10:1: error: constant `U7` value does not match its declared type
+const_typed_range.al:11:19: error: type mismatch: expected f64, found i64

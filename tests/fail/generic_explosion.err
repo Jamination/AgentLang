@@ -1,0 +1,4 @@
+generic_explosion.al:2:16: error: `L` instantiates itself with ever larger type arguments (a type argument nested more than 40 levels deep, or too large)
+generic_explosion.al:7:1: error: `h` instantiates itself with ever larger type arguments (a type argument nested more than 40 levels deep, or too large)
+generic_explosion.al:9:1: error: `f` instantiates itself with ever larger type arguments (a type argument nested more than 40 levels deep, or too large)
+generic_explosion.al:10:19: error: `B` instantiates itself with ever larger type arguments (a type argument nested more than 40 levels deep, or too large)

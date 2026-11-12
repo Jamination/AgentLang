@@ -79,6 +79,11 @@ struct Types {
     field_ids: Map[(i64, i64), i64]
     next_field_id: i64
     layout_errors: Vec[str]
+    // per type: nesting depth and size of the type expression (saturating), to stop
+    // generic instantiations that build ever larger types
+    shape: Vec[(i64, i64)]
+    // tuple type -> (size, align): computed once (recomputing nested tuples is exponential)
+    tuple_layout: Map[i64, (i64, i64)]
 }
 
 const AK_ANY = 0
@@ -148,6 +153,8 @@ fn types_new() -> Types {
         field_ids: map[(i64, i64), i64](),
         next_field_id: 1,
         layout_errors: vec[str](),
+        shape: vec[(i64, i64)](),
+        tuple_layout: map[i64, (i64, i64)](),
     }
     t.intern(Err)
     t.intern(Unit)
@@ -184,7 +191,32 @@ fn intern(self: *Types, k: TyK) -> i64 {
     id := self.kinds.len
     self.kinds.push(clone(k))
     self.map.set(key, id)
+    kids := vec[i64]()
+    match k {
+        Ptr(t), Slice(t), Array(t, _) => kids.push(t)
+        Tuple(v) => kids.extend(v.items())
+        Fn(p, r) => {
+            kids.extend(p.items())
+            kids.push(r)
+        }
+        Struct(s) => kids.extend(self.structs[s].targs.items())
+        Enum(e) => kids.extend(self.enums[e].targs.items())
+        _ => {}
+    }
+    depth := 0
+    size := 1
+    for c in kids {
+        depth = max(depth, self.shape[c].0 + 1)
+        size = min(size + self.shape[c].1, 1 << 30)
+    }
+    self.shape.push((depth, size))
     return id
+}
+
+// the type is nested too deeply to be a type argument (a generic that instantiates itself
+// with ever larger types)
+fn too_deep(self: *Types, t: i64) -> bool {
+    return self.shape[t].0 > 40 || self.shape[t].1 > 4000
 }
 
 fn k(self: *Types, t: i64) -> TyK {
@@ -389,7 +421,7 @@ fn size_of(self: *Types, t: i64) -> i64 {
             self.layout_enum(e)
             return self.enums[e].size
         }
-        Tuple(v) => return self.layout_fields(v.items()).1
+        Tuple(_) => return self.tuple_size_align(t).0
     }
 }
 
@@ -404,8 +436,25 @@ fn align_of(self: *Types, t: i64) -> i64 {
             self.layout_struct(s)
             self.structs[s].align
         }
-        Tuple(v) => self.layout_fields(v.items()).2
+        Tuple(_) => self.tuple_size_align(t).1
     }
+}
+
+priv fn tuple_size_align(self: *Types, t: i64) -> (i64, i64) {
+    known, found := self.tuple_layout.get(t)
+    if found {
+        return known
+    }
+    r := (0, 1)
+    match self.k(t) {
+        Tuple(v) => {
+            _, size, align := self.layout_fields(v.items())
+            r = (size, align)
+        }
+        _ => {}
+    }
+    self.tuple_layout.set(t, r)
+    return r
 }
 
 priv fn field_id(self: *Types, owner: i64, idx: i64) -> i64 {

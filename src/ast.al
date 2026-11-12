@@ -55,8 +55,8 @@ struct Expr {
 }
 
 enum EK {
-    Int(u64),
-    Float(f64),
+    Int(u64, bool), // value, written in decimal
+    Float(f64, f32), // the value; the literal rounded once to f32
     Str(str),
     Bool(bool),
     Nil,
@@ -287,8 +287,8 @@ priv fn expr_list_str(es: *Vec[Expr]) -> str {
 // kind of expression that does not occur there is `...`
 fn ast_expr_str(e: *Expr) -> str {
     return match e.k {
-        Int(v) => fmt(v)
-        Float(f) => fmt(f)
+        Int(v, _) => fmt(v)
+        Float(f, _) => fmt(f)
         Bool(b) => fmt(b)
         Nil => "nil"
         Str(s) => fmt("\"", s, "\"")

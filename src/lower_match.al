@@ -330,7 +330,7 @@ priv fn lower_match_err(ty: i64, pos: Pos) -> RPat {
 // is a pattern expression a compile-time constant?
 priv fn is_const(s: *Fx, e: *Expr) -> bool {
     match e.k {
-        Int(_), Float(_), Str(_), Bool(_), Nil => return true
+        Int(_, _), Float(_, _), Str(_), Bool(_), Nil => return true
         _ => {}
     }
     saved := s.cx.errs.len
@@ -773,11 +773,11 @@ priv fn pat_const_val(self: *Fx, rp: *RPat, top: bool) -> Val {
         // inside a pattern a name is a constant even if a local variable has the same name
         pv = match rp.e.k {
             Ident(n) => match self.cx.const_named(n) {
-                Some(c) => self.const_val(c.0, c.1, Some(rp.ty), rp.pos)
+                Some(c) => self.const_val(c.0, c.1, self.cx.const_expr_dec(rp.e, 0), Some(rp.ty), rp.pos)
                 None => val_err()
             }
             _ => match self.cx.const_eval(rp.e) {
-                Some(cv) => self.const_val(None, cv, Some(rp.ty), rp.pos)
+                Some(cv) => self.const_val(None, cv, self.cx.const_expr_dec(rp.e, 0), Some(rp.ty), rp.pos)
                 None => val_err()
             }
         }
@@ -829,7 +829,8 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
         }
         if key != NOV {
             p := self.scalar(pv)
-            eq := self.ins(Op.Eq, I8, vec_of([]i64{key, p}), 0)
+            op := if self.cx.types.is_float(rp.ty) { Op.FEq } else { Op.Eq }
+            eq := self.ins(op, I8, vec_of([]i64{key, p}), 0)
             self.br(eq, ok_b, fail_b)
             return
         }
@@ -1007,7 +1008,7 @@ priv fn bool_pat(s: *Fx, rp: *RPat) -> i64 {
 // the value of a constant pattern, if it is known at compile time
 priv fn const_key(s: *Fx, rp: *RPat) -> Opt[CV] {
     match rp.e.k {
-        Int(n) => return Some(CV.Int(i64(n)))
+        Int(n, _) => return Some(CV.Int(i64(n)))
         Str(t) => return Some(CV.Str(t))
         Ident(n) if is_some(s.lookup(n)) => return None
         _ => {}
@@ -1689,13 +1690,37 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     }
 }
 
-// A note for a mismatch between two different types that print the same: a type of the
-// program has the name of a type of the standard library (for example its own `Opt`).
-fn lower_match_same_name(a: str, b: str) -> str {
-    if a != b {
+// A note for a mismatch between two different types `ta` and `tb` that print the same (a
+// program's own `Opt`, or private structs `Ctx` of two files): where each one is declared.
+fn same_name_hint(self: *Fx, ta: i64, tb: i64) -> str {
+    if self.tyname(ta) != self.tyname(tb) {
         return ""
     }
-    return " (two different types have this name: one declared in this program, one in the standard library; the library's functions take the library's type)"
+    pa := lower_match_decl_pos(self.cx, ta)
+    pb := lower_match_decl_pos(self.cx, tb)
+    match (pa, pb) {
+        (Some(x), Some(y)) if x != y => {
+            where := fn(cx: *Cx, p: Pos) -> str {
+                if p.file < cx.n_prelude {
+                    return "in the standard library"
+                }
+                return concat("at ", cx.pos_str(p))
+            }
+            return fmt(" (two different types have this name: one declared ", where(self.cx, x), ", the other ", where(self.cx, y), ")")
+        }
+        _ => {}
+    }
+    return " (two different types have this name)"
+}
+
+// where the struct or enum that names type `t` (also behind pointers, slices, arrays) is declared
+priv fn lower_match_decl_pos(cx: *Cx, t: i64) -> Opt[Pos] {
+    match cx.types.k(t) {
+        Struct(sid) => return Some(cx.struct_decls[cx.types.structs[sid].decl].pos)
+        Enum(eid) => return Some(cx.enum_decls[cx.types.enums[eid].decl].pos)
+        Ptr(x), Slice(x), Array(x, _) => return lower_match_decl_pos(cx, x)
+        _ => return None
+    }
 }
 
 // names that a call resolves before it looks for a variant: builtin functions and types

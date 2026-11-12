@@ -461,6 +461,10 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
         RetAbi.None => {
             self.ins(op, Void, ir_args, k)
             res = val_unit()
+            if rty != T_UNIT && rty != T_NEVER {
+                // a zero-size value (`struct E {}`): nothing is passed, but it has its type
+                res = self.mval(rty, self.temp(rty))
+            }
         }
         SRet => {
             self.ins(op, Void, ir_args, k)
@@ -841,7 +845,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
 // literals convert directly
 priv fn conversion_has_float(e: *Expr) -> bool {
     match e.k {
-        Float(_) => true
+        Float(_, _) => true
         Un(_, x) => conversion_has_float(x)
         Bin(_, a, b) => conversion_has_float(a) || conversion_has_float(b)
         _ => false
@@ -863,6 +867,24 @@ priv fn conversion(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
     exp: Opt[i64] = None
     if self.is_untyped(&args[0]) && (self.cx.types.is_float(to) || (self.cx.types.is_int(to) && !floaty)) {
         exp = Some(to)
+        // a constant that does not fit the target type is converted from i64 (`i8(200)` is
+        // -56, `u64(-1)` is 0xFFFF_FFFF_FFFF_FFFF), a literal beyond i64 from u64
+        match (self.cx.types.k(to), self.cx.const_eval(&args[0])) {
+            (Int(bits, signed), Some(Int(i))) => {
+                lit := is_int_lit(&args[0])
+                hi := if signed { (u64(1) << u64(bits - 1)) - 1 } else { u64(0xFFFFFFFFFFFFFFFF) >> u64(64 - bits) }
+                fits := false
+                if lit || i >= 0 {
+                    fits = u64(i) <= hi
+                } else {
+                    fits = signed && i >= -(1 << (bits - 1))
+                }
+                if !fits {
+                    exp = Some(if lit && i < 0 { T_U64 } else { T_I64 })
+                }
+            }
+            _ => {}
+        }
     }
     v := self.expr(&args[0], exp)
     return self.convert(v, to, pos)
@@ -1454,7 +1476,8 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             if bound {
                 targs.push(t)
             } else {
-                self.err(pos, fmt("cannot infer type parameter `", p, "` of `", d.name, "`; write `", d.name, "[T](...)`"))
+                dn := ast_plain(d.name)
+                self.err(pos, fmt("cannot infer type parameter `", p, "` of `", dn, "`; write `", dn, "[", join(d.tparams.items(), ", "), "](...)` with the types"))
                 return val_err()
             }
         }
@@ -1529,7 +1552,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
         if v.ty != pt && v.ty != T_ERR && pt != T_ERR && v.ty != T_NEVER {
             a := self.tyname(pt)
             b := self.tyname(v.ty)
-            hint: str = lower_match_same_name(a, b)
+            hint: str = self.same_name_hint(pt, v.ty)
             if is_ptr_to(self.cx.types.k(pt), v.ty) {
                 hint = " (pass its address with `&`; only the receiver of a method call `x.f()` is referenced automatically)"
             }
@@ -2176,6 +2199,32 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
             }
             return hash_fields(self, v, names, pos)
         }
+        Vec(_), Quat, Mat4 => {
+            // lane by lane as f32 values, like `==` compares them
+            h := self.iconst(I64, 0x51ed270b)
+            nc := if v.ty == T_MAT4 { 4 } else { 1 }
+            for c in 0..nc {
+                col := v
+                if v.ty == T_MAT4 {
+                    col = self.mval(T_VEC4, self.add_off(v.v, 16 * c))
+                }
+                n := match self.cx.types.vec_lanes(col.ty) {
+                    Some(vn) => vn
+                    None => 0
+                }
+                x := self.scalar(col)
+                for k in 0..n {
+                    l := self.ins(VExt, T.F32, vec_of([]i64{x}), k)
+                    fh := match self.hash_val(self.sval(T_F32, l), pos) {
+                        Some(y) => y
+                        None => return None
+                    }
+                    r := self.call_rt("__hash_mix", vec[i64](), vec_of([]Val{self.sval(T_U64, h), self.sval(T_U64, fh)}), pos)
+                    h = self.scalar(r)
+                }
+            }
+            return Some(h)
+        }
         _ => {}
     }
     tn := self.tyname(v.ty)
@@ -2367,5 +2416,12 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
             self.switch_to(bj)
         }
         Err, Never => {}
+    }
+}
+
+priv fn is_int_lit(e: *Expr) -> bool {
+    match e.k {
+        Int(_, _) => return true
+        _ => return false
     }
 }

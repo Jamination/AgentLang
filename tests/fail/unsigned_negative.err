@@ -1,0 +1,5 @@
+unsigned_negative.al:2:11: error: constant `B`: the decimal literal does not fit in i64 (declare the type, as in `const B: u64 = ...`, or write it in hex)
+unsigned_negative.al:6:13: error: integer literal -1 does not fit in u8
+unsigned_negative.al:7:14: error: integer literal -5 does not fit in u64
+unsigned_negative.al:8:13: error: integer literal 200 does not fit in i8
+unsigned_negative.al:9:14: error: integer literal -1 does not fit in u32

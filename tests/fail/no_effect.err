@@ -1,0 +1,12 @@
+no_effect.al:9:9: error: this expression has no effect (an operator at the start of a line begins a new statement: put it at the end of the previous line)
+no_effect.al:10:5: error: this expression has no effect
+no_effect.al:11:5: error: this expression has no effect
+no_effect.al:12:5: error: this expression has no effect (an operator at the start of a line begins a new statement: put it at the end of the previous line)
+no_effect.al:13:6: error: this expression has no effect
+no_effect.al:14:6: error: this expression has no effect
+no_effect.al:15:5: error: this expression has no effect
+no_effect.al:16:5: error: cannot infer the type of `nil` here
+no_effect.al:16:5: error: this expression has no effect
+no_effect.al:17:5: error: this expression has no effect (did you mean `=` or `:=`?)
+no_effect.al:18:5: error: this expression has no effect
+no_effect.al:19:7: error: this expression has no effect (did you mean `=` or `:=`?)
