@@ -30,51 +30,71 @@ priv fn union_with(self: *BitSet, o: *BitSet) -> bool {
     return ch
 }
 
-priv fn liveness(mf: *MFunc, order: []i64) -> Vec[BitSet] {
+// The registers live at the end of each block. Only a register that some block uses before
+// defining it (upward exposed) can be live across a block boundary, so the sets range over
+// those registers only: sets over all registers made liveness quadratic in the size of the
+// function (blocks x registers; gigabytes for functions with thousands of blocks).
+priv fn liveness(mf: *MFunc, order: []i64) -> Vec[Vec[i64]] {
     nreg := 32 + mf.vclass.len
     nb := mf.blocks.len
-    gen := vec[BitSet]()
-    kill := vec[BitSet]()
-    for x in 0..nb {
-        gen.push(bit_set_new(nreg))
-    }
-    for x in 0..nb {
-        kill.push(bit_set_new(nreg))
-    }
     defs := vec[i64]()
     uses := vec[i64]()
+    gidx := vec_fill(nreg, -1)
+    globals := vec[i64]()
+    def_in := vec_fill(nreg, -1) // the block whose forward scan defined the register last
+    for b in order {
+        for x in 0..mf.blocks[b].insts.len {
+            mir_defs_uses(&mf.blocks[b].insts[x], &defs, &uses)
+            for u in uses {
+                if def_in[u] != b && gidx[u] < 0 {
+                    gidx[u] = globals.len
+                    globals.push(u)
+                }
+            }
+            for d in defs {
+                def_in[d] = b
+            }
+        }
+    }
+    ng := globals.len
+    gen := vec[BitSet]()
+    kill := vec[BitSet]()
+    live_in := vec[BitSet]()
+    live_out := vec[BitSet]()
+    for x in 0..nb {
+        gen.push(bit_set_new(ng))
+        kill.push(bit_set_new(ng))
+        live_in.push(bit_set_new(ng))
+        live_out.push(bit_set_new(ng))
+    }
     for b in order {
         n := mf.blocks[b].insts.len
         for x in n - 1..=0 by -1 {
             mir_defs_uses(&mf.blocks[b].insts[x], &defs, &uses)
             for d in defs {
-                gen[b].clear(d)
-                kill[b].set(d)
+                g := gidx[d]
+                if g >= 0 {
+                    gen[b].clear(g)
+                    kill[b].set(g)
+                }
             }
             for u in uses {
-                gen[b].set(u)
+                g := gidx[u]
+                if g >= 0 {
+                    gen[b].set(g)
+                }
             }
         }
-    }
-    live_in := vec[BitSet]()
-    live_out := vec[BitSet]()
-    for x in 0..nb {
-        live_in.push(bit_set_new(nreg))
-    }
-    for x in 0..nb {
-        live_out.push(bit_set_new(nreg))
     }
     changed := true
     while changed {
         changed = false
         for oi in len(order) - 1..=0 by -1 {
             b := order[oi]
-            out := BitSet{w: clone(live_out[b].w)}
             for si in 0..mf.blocks[b].succs.len {
                 s := mf.blocks[b].succs[si]
-                out.union_with(&live_in[s])
+                live_out[b].union_with(&live_in[s])
             }
-            live_out[b] = out
             // in = gen | (out - kill)
             ch := false
             for wi in 0..live_in[b].w.len {
@@ -87,7 +107,52 @@ priv fn liveness(mf: *MFunc, order: []i64) -> Vec[BitSet] {
             changed = changed || ch
         }
     }
-    return live_out
+    out := vec[Vec[i64]]()
+    for b in 0..nb {
+        regs := vec[i64]()
+        for wi in 0..live_out[b].w.len {
+            bits := live_out[b].w[wi]
+            while bits != 0 {
+                regs.push(globals[wi * 64 + i64(ctz(bits))])
+                bits &= bits - 1
+            }
+        }
+        out.push(regs)
+    }
+    return out
+}
+
+// a set of registers with constant-time insertion and removal whose members can be walked
+// in time proportional to their number
+priv struct RegSet {
+    members: Vec[i64]
+    pos: Vec[i64] // index in members, or -1
+}
+
+priv fn add(self: *RegSet, r: i64) {
+    if self.pos[r] < 0 {
+        self.pos[r] = self.members.len
+        self.members.push(r)
+    }
+}
+
+priv fn remove(self: *RegSet, r: i64) {
+    p := self.pos[r]
+    if p >= 0 {
+        last := self.members.pop()
+        if last != r {
+            self.members[p] = last
+            self.pos[last] = p
+        }
+        self.pos[r] = -1
+    }
+}
+
+priv fn clear_all(self: *RegSet) {
+    for r in self.members {
+        self.pos[r] = -1
+    }
+    self.members.clear()
 }
 
 priv enum NS {
@@ -120,7 +185,8 @@ priv struct Irc {
     degree: Vec[i64]
     moves: Vec[(i64, i64)]
     mstate: Vec[MS]
-    move_list: Vec[Vec[i64]]
+    move_list: Vec[Vec[i64]] // every move of the node (for biased coloring)
+    act_list: Vec[Vec[i64]]  // its moves that may still be coalesced (finished ones are dropped)
     alias: Vec[i64]
     color: Vec[i64]
     simplify_wl: Vec[i64]
@@ -129,6 +195,8 @@ priv struct Irc {
     move_wl: Vec[i64]
     stack: Vec[i64]
     cost: Vec[f64]
+    seen: Vec[i64] // stamps of the Briggs test
+    stamp: i64
 }
 
 fn pre(self: *Irc, n: i64) -> bool {
@@ -158,36 +226,53 @@ priv fn has_edge(self: *Irc, u: i64, v: i64) -> bool {
     return self.adj_set.has(key)
 }
 
-priv fn adjacent(self: *Irc, n: i64) -> Vec[i64] {
-    out := vec[i64]()
-    for m in self.adj[n] {
-        st := self.state[m]
-        if !(st == Stack || st == Coalesced) {
-            out.push(m)
-        }
-    }
-    return out
+// is the neighbour m still in the graph? (Callers walk self.adj[n] and skip the others: a
+// list of the remaining neighbours per call filled the arena with gigabytes for nodes that
+// interfere with thousands of others.)
+priv fn in_graph(self: *Irc, m: i64) -> bool {
+    st := self.state[m]
+    return !(st == Stack || st == Coalesced)
 }
 
+// A move that is coalesced, constrained or frozen never becomes active again: it is dropped
+// from act_list when met, so that nodes with thousands of moves do not cost quadratic time.
 priv fn node_moves(self: *Irc, n: i64) -> Vec[i64] {
-    out := vec[i64]()
-    for m in self.move_list[n] {
-        ms := self.mstate[m]
+    l := &self.act_list[n]
+    k := 0
+    for x in 0..l.len {
+        ms := self.mstate[l[x]]
         if ms == Active || ms == Worklist {
-            out.push(m)
+            l[k] = l[x]
+            k += 1
         }
     }
-    return out
+    l.len = k
+    return clone(*l)
 }
 
 priv fn move_related(self: *Irc, n: i64) -> bool {
-    for m in self.move_list[n] {
-        ms := self.mstate[m]
+    l := &self.act_list[n]
+    while l.len > 0 {
+        ms := self.mstate[l[l.len - 1]]
         if ms == Active || ms == Worklist {
             return true
         }
+        l.pop()
     }
     return false
+}
+
+// appends the list of v to the one of u (the shorter one is copied)
+priv fn merge_moves(lists: *Vec[Vec[i64]], u: i64, v: i64) {
+    if lists[v].len > lists[u].len {
+        t := lists[u]
+        lists[u] = lists[v]
+        lists[v] = t
+    }
+    for m in lists[v] {
+        lists[u].push(m)
+    }
+    lists[v] = vec[i64]()
 }
 
 priv fn get_alias(self: *Irc, n0: i64) -> i64 {
@@ -217,9 +302,10 @@ priv fn decrement_degree(self: *Irc, m: i64) {
     self.degree[m] = if d > 0 { d - 1 } else { 0 }
     if d == self.k {
         self.enable_moves(m)
-        adj := self.adjacent(m)
-        for a in adj {
-            self.enable_moves(a)
+        for a in self.adj[m] {
+            if self.in_graph(a) {
+                self.enable_moves(a)
+            }
         }
         if self.state[m] == Spill {
             if self.move_related(m) {
@@ -236,9 +322,10 @@ priv fn decrement_degree(self: *Irc, m: i64) {
 priv fn simplify(self: *Irc, n: i64) {
     self.state[n] = Stack
     self.stack.push(n)
-    adj := self.adjacent(n)
-    for m in adj {
-        self.decrement_degree(m)
+    for m in self.adj[n] {
+        if self.in_graph(m) {
+            self.decrement_degree(m)
+        }
     }
 }
 
@@ -254,47 +341,71 @@ fn ok(self: *Irc, t: i64, r: i64) -> bool {
 }
 
 priv fn conservative(self: *Irc, u: i64, v: i64) -> bool {
-    seen := map[i64, bool]()
+    // George's test from the side of the node with fewer neighbours first: cheap, and the
+    // Briggs test below walks both neighbourhoods (quadratic for a node that interferes with
+    // thousands of others and is the target of thousands of moves)
+    x := u
+    y := v
+    if self.adj[v].len > self.adj[u].len {
+        x = v
+        y = u
+    }
+    george := true
+    for t in self.adj[x] {
+        st := self.state[t]
+        if st == Stack || st == Coalesced {
+            continue
+        }
+        if !self.ok(t, y) {
+            george = false
+            break
+        }
+    }
+    if george {
+        return true
+    }
+    // Briggs: fewer than k neighbours of significant degree (each counted once: marked with
+    // a stamp of this test)
+    self.stamp += 1
     k := 0
-    au := self.adjacent(u)
-    av := self.adjacent(v)
-    for n in au {
-        if !seen.has(n) {
-            seen.set(n, true)
-            if self.pre(n) || self.degree[n] >= self.k {
-                k += 1
+    for w in 0..2 {
+        for n in self.adj[if w == 0 { u } else { v }] {
+            if self.in_graph(n) && self.seen[n] != self.stamp {
+                self.seen[n] = self.stamp
+                if self.pre(n) || self.degree[n] >= self.k {
+                    k += 1
+                    if k >= self.k {
+                        return false
+                    }
+                }
             }
         }
     }
-    for n in av {
-        if !seen.has(n) {
-            seen.set(n, true)
-            if self.pre(n) || self.degree[n] >= self.k {
-                k += 1
-            }
-        }
-    }
-    return k < self.k
+    return true
 }
 
 priv fn combine(self: *Irc, u: i64, v: i64) {
     // v is merged into u
     self.state[v] = Coalesced
     self.alias[v] = u
-    ml := clone(self.move_list[v])
+    // a move may then be listed twice: harmless (its state is checked where it is used)
+    nm := self.node_moves(v)
     if !self.pre(u) {
-        for m in ml {
-            if !contains(&self.move_list[u], m) {
-                self.move_list[u].push(m)
-            }
-        }
+        merge_moves(&self.move_list, u, v)
+        merge_moves(&self.act_list, u, v)
         self.cost[u] += self.cost[v]
     }
-    self.enable_moves(v)
-    adj_v := self.adjacent(v)
-    for t in adj_v {
-        self.add_edge(t, u)
-        self.decrement_degree(t)
+    for m in nm {
+        if self.mstate[m] == Active {
+            self.mstate[m] = Worklist
+            self.move_wl.push(m)
+        }
+    }
+    for t in self.adj[v] {
+        if self.in_graph(t) {
+            self.add_edge(t, u)
+            self.decrement_degree(t)
+        }
     }
     if !self.pre(u) && self.degree[u] >= self.k && self.state[u] == Freeze {
         self.state[u] = Spill
@@ -323,9 +434,8 @@ priv fn coalesce(self: *Irc, m: i64) {
         can := false
         if self.pre(u) {
             can = true
-            adj := self.adjacent(v)
-            for t in adj {
-                if !self.ok(t, u) {
+            for t in self.adj[v] {
+                if self.in_graph(t) && !self.ok(t, u) {
                     can = false
                     break
                 }
@@ -641,6 +751,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 moves: vec[(i64, i64)](),
                 mstate: vec[MS](),
                 move_list: vec[Vec[i64]](),
+                act_list: vec[Vec[i64]](),
                 alias: vec_fill(n, 0),
                 color: vec_fill(n, 0xFFFFFFFF),
                 simplify_wl: vec[i64](),
@@ -649,11 +760,14 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                 move_wl: vec[i64](),
                 stack: vec[i64](),
                 cost: vec_fill(n, 0.0),
+                seen: vec_fill(n, 0),
+                stamp: 0,
             }
             // every element is its own Vec
             for x in 0..n {
                 g.adj.push(vec[i64]())
                 g.move_list.push(vec[i64]())
+                g.act_list.push(vec[i64]())
             }
             for r in 0..32 {
                 if allocate_in_class(r, mf, class) {
@@ -670,9 +784,13 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             // build
             defs := vec[i64]()
             uses := vec[i64]()
+            live := RegSet{members: vec[i64](), pos: vec_fill(n, -1)}
             for b in order {
                 w := depth_weight(mf.blocks[b].depth)
-                live := BitSet{w: clone(live_out[b].w)}
+                live.clear_all()
+                for r in live_out[b] {
+                    live.add(r)
+                }
                 ninsts := mf.blocks[b].insts.len
                 for x in ninsts - 1..=0 by -1 {
                     i := &mf.blocks[b].insts[x]
@@ -690,12 +808,14 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                     d, s, is_cp := i.is_copy()
                     if is_cp {
                         if allocate_in_class(d, mf, class) && allocate_in_class(s, mf, class) && d != s && d != RSP && s != RSP {
-                            live.clear(s)
+                            live.remove(s)
                             mi := g.moves.len
                             g.moves.push((d, s))
                             g.mstate.push(Worklist)
                             g.move_list[d].push(mi)
                             g.move_list[s].push(mi)
+                            g.act_list[d].push(mi)
+                            g.act_list[s].push(mi)
                             g.move_wl.push(mi)
                         }
                     }
@@ -703,15 +823,10 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                         if !allocate_in_class(df, mf, class) {
                             continue
                         }
-                        // the members of live, walked in place (the set does not change meanwhile)
-                        for wi in 0..live.w.len {
-                            bits := live.w[wi]
-                            while bits != 0 {
-                                l := wi * 64 + i64(ctz(bits))
-                                bits &= bits - 1
-                                if l != df && allocate_in_class(l, mf, class) && !(l < 32 && df < 32) {
-                                    g.add_edge(l, df)
-                                }
+                        // the members of live (the set does not change meanwhile)
+                        for l in live.members {
+                            if l != df && allocate_in_class(l, mf, class) && !(l < 32 && df < 32) {
+                                g.add_edge(l, df)
                             }
                         }
                     }
@@ -729,10 +844,10 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
                         }
                     }
                     for df in defs {
-                        live.clear(df)
+                        live.remove(df)
                     }
                     for u in uses {
-                        live.set(u)
+                        live.add(u)
                     }
                 }
             }
