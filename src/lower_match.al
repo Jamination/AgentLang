@@ -829,7 +829,8 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
         }
         if key != NOV {
             p := self.scalar(pv)
-            eq := self.ins(Op.Eq, I8, vec_of([]i64{key, p}), 0)
+            op := if self.cx.types.is_float(rp.ty) { Op.FEq } else { Op.Eq }
+            eq := self.ins(op, I8, vec_of([]i64{key, p}), 0)
             self.br(eq, ok_b, fail_b)
             return
         }
