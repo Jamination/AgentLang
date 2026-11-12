@@ -2612,7 +2612,14 @@ fn error_text(e: i64) -> str {
 // everything readable from a file descriptor (0 = standard input); what was read before an
 // error is returned, and `io_error()` tells whether there was one
 fn read_all(fd: i64) -> str {
-    buf := alloc[u8](65536)
+    // a regular file: room for its size and one more byte (to see the end); /proc files
+    // report 0. Other inputs (pipes, terminals): 64 KiB first. The buffer doubles as needed.
+    size := 65536
+    st: [18]i64
+    if syscall(5, fd, ptr(st)) == 0 && (st[3] & 0xF000) == 0x8000 {
+        size = if st[6] > 0 { st[6] + 1 } else { 4096 }
+    }
+    buf := alloc[u8](size)
     n := 0
     loop {
         if n == len(buf) {
