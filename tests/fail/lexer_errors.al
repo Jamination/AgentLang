@@ -8,5 +8,6 @@ fn main() {
     f := @
     g := é
     h := 
-    print(a, b, c, d, e, s, f, g, h)
+    i := 1 + 2
+    print(a, b, c, d, e, s, f, g, h, i)
 }

@@ -62,8 +62,8 @@ test "areas" {
 
 ## Lexical structure
 
-- Source is UTF-8 text; identifiers are ASCII: `[A-Za-z_][A-Za-z0-9_]*`. Comments: `//` to the
-  end of the line.
+- Source is UTF-8 text (no NUL bytes; a byte order mark at the start is skipped); identifiers
+  are ASCII: `[A-Za-z_][A-Za-z0-9_]*`. Comments: `//` to the end of the line.
 - **Statements end at a newline** (or `;`). A newline does *not* end a statement when the line
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
   A line cannot *start* with a binary operator.

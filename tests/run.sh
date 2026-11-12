@@ -11,6 +11,8 @@
 # tests/fail/NAME.al  must fail to compile; every line of NAME.err must appear in the diagnostics
 # tests/check/NAME.al must pass `alc check` (bindings for platforms this machine cannot run)
 # tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
+# tests/driver/NAME.sh is run with bash, the compiler as $1 and an empty scratch directory as
+#                     $2; it tests the command line (files, paths, exit codes) and must exit 0
 # Programs run with the repository root as working directory.
 cd "$(dirname "$0")/.." || exit 2
 ALC=${1:-./build/alc}
@@ -97,6 +99,17 @@ for src in tests/unit/*.al; do
   if ! cmp -s "$TMP/out" "tests/unit/$name.out"; then echo "FAIL unit/$name: stdout differs"; diff "tests/unit/$name.out" "$TMP/out" | head -10; ok=0; fi
   if [[ "$code" != "$exp_code" ]]; then echo "FAIL unit/$name: exit code $code, expected $exp_code"; ok=0; fi
   if [[ $ok == 1 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi
+done
+for src in tests/driver/*.sh; do
+  [[ -e "$src" ]] || continue
+  name=$(basename "$src" .sh)
+  [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
+  mkdir -p "$TMP/driver_$name"
+  if bash "$src" "$(realpath "$ALC")" "$TMP/driver_$name" >"$TMP/out" 2>&1; then
+    pass=$((pass+1))
+  else
+    echo "FAIL driver/$name"; head -10 "$TMP/out"; fail=$((fail+1))
+  fi
 done
 if [[ $skip == 0 ]]; then
   echo "conformance: $pass passed, $fail failed"

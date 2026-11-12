@@ -159,32 +159,20 @@ priv fn path_file_stem(p: str) -> Opt[str] {
     return Some(name[..k])
 }
 
-// the canonical form of a path, as far as the driver needs it (to recognise a file that is included
-// twice): the absolute path with "." and ".." resolved textually; symbolic links are kept
-priv fn canonical(path: str) -> str {
-    full := path
-    if !starts_with(path, "/") {
-        buf := alloc[u8](4096)
-        n := syscall(79, ptr(buf), 4096)
-        if n > 0 {
-            // the length includes the terminating NUL
-            full = fmt(buf[..n - 1], "/", path)
-        }
+// the identity of an existing file (device and inode), or false
+priv fn file_id(path: str) -> (str, bool) {
+    st: [18]i64
+    if syscall(4, cstr(path), ptr(st)) != 0 {
+        return ("", false)
     }
-    parts := vec[str]()
-    for c in split(full, '/') {
-        if len(c) == 0 || c == "." {
-            continue
-        }
-        if c == ".." {
-            if parts.len > 0 {
-                parts.pop()
-            }
-            continue
-        }
-        parts.push(c)
-    }
-    return concat("/", join(parts.items(), "/"))
+    return (fmt(st[0], ":", st[1]), true)
+}
+
+// both paths name the same existing file (also through links)
+priv fn same_file(a: str, b: str) -> bool {
+    ia, oka := file_id(a)
+    ib, okb := file_id(b)
+    return oka && okb && ia == ib
 }
 
 // the text for an errno, as in diagnostics: "No such file or directory (os error 2)"
@@ -380,16 +368,21 @@ priv fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
 }
 
 priv fn add_file(self: *Sources, path: str, from: Opt[Pos]) {
-    // canonicalize fails for a file that does not exist: the path is then used as it is
-    canon := path
-    if syscall(21, cstr(path), 0) == 0 {
-        canon = canonical(path)
+    // a file is recognised by its identity, also through symbolic and hard links; one that
+    // does not exist by its path (reading it fails below)
+    key, exists := file_id(path)
+    if !exists {
+        key = concat("path:", path)
     }
-    if self.seen.has(canon) {
+    if self.seen.has(key) {
         return
     }
-    self.seen.set(canon, true)
+    self.seen.set(key, true)
     text, err := read_to_string(path)
+    if len(err) == 0 && find(text, "\x00") >= 0 {
+        // an executable or other binary file: one error instead of one per byte
+        err = "not a source file (it contains NUL bytes)"
+    }
     if len(err) == 0 {
         self.add_text(path, text, path_parent(path))
     } else {
@@ -693,6 +686,13 @@ priv fn real_main() -> i64 {
     }
     if find(out_path, "/") < 0 {
         out_path = fmt("./", out_path)
+    }
+    // the executable must not replace a source file of the program (`-o main.al`)
+    for name in src.names {
+        if same_file(name, out_path) {
+            eput(fmt("error: the output `", out_path, "` is the source file `", name, "`: choose another path with -o\n"))
+            return 1
+        }
     }
     if !write_file(out_path, bytes) {
         // write_file does not say why it failed: ask again

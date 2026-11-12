@@ -101,6 +101,11 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     i := 0
     line := 1
     line_start := 0
+    // a UTF-8 byte order mark at the start is not part of the text
+    if starts_with(s, "\xEF\xBB\xBF") {
+        i = 3
+        line_start = 3
+    }
     out := vec[Token]()
     // bracket stack: '(' / '[' suppress newlines, '{' enables them
     stack := vec[u8]()
@@ -374,7 +379,17 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         }
         if !matched {
             shown, clen := char_at(s, i)
-            errs.push(Diag{pos: p, msg: fmt("unexpected character '", shown, "'")})
+            if clen > 1 {
+                // the code point too: the character may be invisible (U+00A0, U+200B)
+                cp := u64(s[i]) & (0x7F >> u64(clen))
+                for k in 1..clen {
+                    cp = (cp << 6) | u64(s[i + k] & 0x3F)
+                }
+                shown = fmt(shown, "' (U+", to_upper(hex(cp, 4)), ")")
+            } else {
+                shown = fmt(shown, "'")
+            }
+            errs.push(Diag{pos: p, msg: fmt("unexpected character '", shown)})
             i += clen
         }
     }
