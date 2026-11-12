@@ -163,6 +163,14 @@ inline fn __alloc(n: i64) -> i64 {
     return p
 }
 
+// a + b for sizes that are not negative; stops the program if the sum does not fit
+inline fn __add_size(a: i64, b: i64) -> i64 {
+    if a + b < 0 {
+        __die("panic: out of memory", "", "")
+    }
+    return a + b
+}
+
 fn alloc[T](n: i64) -> []T {
     return mkslice[T](__alloc(__alloc_size(n, sizeof[T]())), n)
 }
@@ -923,6 +931,9 @@ fn __cap_begin() -> i64 {
 fn __cap_put(s: str) {
     n := len(s)
     if __cap_len + n > len(__cap_buf) {
+        if n > (1 << 46) - __cap_len {
+            __die("panic: out of memory", "", "")
+        }
         cap := len(__cap_buf) * 2
         while cap < __cap_len + n {
             cap = cap * 2
@@ -1078,7 +1089,7 @@ fn vec[T]() -> Vec[T] {
 // a Vec holding a copy of the elements of s
 fn vec_of[T](s: []T) -> Vec[T] {
     n := len(s)
-    buf := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    buf := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
     memcopy(ptr(buf), ptr(s), n * sizeof[T]())
     return Vec[T]{buf: buf, len: n}
 }
@@ -1355,8 +1366,8 @@ fn __map_grow[K, V](m: *Map[K, V]) {
         }
         n := cap / 2
         // (the spare capacity is never read before it is written)
-        keys = mkslice[K](__alloc_raw(n * sizeof[K]()), n)
-        vals = mkslice[V](__alloc_raw(n * sizeof[V]()), n)
+        keys = mkslice[K](__alloc_raw(__alloc_size(n, sizeof[K]())), n)
+        vals = mkslice[V](__alloc_raw(__alloc_size(n, sizeof[V]())), n)
         tags = mkslice[u32](__alloc_raw(n * 4), n)
         m.index = alloc[u32](cap)
     } else {
@@ -1492,7 +1503,7 @@ fn ptr[K, V](m: *Map[K, V], k: K) -> *V {
 
 // a new slice of the live entries of s
 fn __map_live[K, V, T](m: *Map[K, V], s: []T) -> []T {
-    out := mkslice[T](__alloc_raw(m.len * sizeof[T]()), m.len)
+    out := mkslice[T](__alloc_raw(__alloc_size(m.len, sizeof[T]())), m.len)
     if m.len == m.used {
         memcopy(ptr(out), ptr(s), m.len * sizeof[T]())
     } else {
@@ -1536,14 +1547,14 @@ fn __put_map[K, V](m: *Map[K, V]) {
 // a slice of elements that own nothing: one allocation, one memory copy
 fn __clone_plain[T](s: []T) -> []T {
     n := len(s)
-    out := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    out := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
     memcopy(ptr(out), ptr(s), n * sizeof[T]())
     return out
 }
 
 fn __clone_slice[T](s: []T) -> []T {
     n := len(s)
-    out := mkslice[T](__alloc_raw(n * sizeof[T]()), n)
+    out := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
     for i in 0..n {
         out[i] = clone(s[i])
     }
@@ -1569,7 +1580,7 @@ fn __clone_vec[T](v: Vec[T]) -> Vec[T] {
 // the keys or values of a Map with the same capacity: only live entries hold a value
 // (`plain`: T owns no storage)
 fn __clone_slots[T](s: []T, tags: []u32, used: i64, plain: bool) -> []T {
-    out := mkslice[T](__alloc_raw(len(s) * sizeof[T]()), len(s))
+    out := mkslice[T](__alloc_raw(__alloc_size(len(s), sizeof[T]())), len(s))
     if plain {
         memcopy(ptr(out), ptr(s), used * sizeof[T]())
     } else {
@@ -1798,7 +1809,7 @@ fn sort_by[T, C](a: []T, ctx: C, less: fn(C, T, T) -> bool) {
 
 // ---------- strings ----------
 fn concat(a: str, b: str) -> str {
-    out := alloc[u8](len(a) + len(b))
+    out := alloc[u8](__add_size(len(a), len(b)))
     memcopy(ptr(out), ptr(a), len(a))
     memcopy(cast[i64](ptr(out)) + len(a), ptr(b), len(b))
     return out
@@ -1894,7 +1905,8 @@ fn __at_replace(s: str, old: str, new: str, at: str) -> str {
     if len(old) == 0 {
         __panic(at, "replace: empty substring")
     }
-    out := alloc[u8](len(s) + __at_count(s, old, at) * (len(new) - len(old)))
+    cnt := __at_count(s, old, at)
+    out := alloc[u8](if len(new) >= len(old) { __add_size(len(s), __alloc_size(cnt, len(new) - len(old))) } else { len(s) - cnt * (len(old) - len(new)) })
     k := 0
     start := 0
     loop {
@@ -2667,10 +2679,10 @@ fn to_lower(s: str) -> str {
 fn join(parts: []str, sep: str) -> str {
     n := 0
     for p in parts {
-        n += len(p)
+        n = __add_size(n, len(p))
     }
     if len(parts) > 1 {
-        n += len(sep) * (len(parts) - 1)
+        n = __add_size(n, __alloc_size(len(parts) - 1, len(sep)))
     }
     out := alloc[u8](n)
     k := 0
