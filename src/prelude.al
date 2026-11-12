@@ -73,7 +73,7 @@ fn __write_all(fd: i64, p: i64, n: i64) -> i64 {
 
 // standard output that cannot be written stops the program (a closed pipe normally ends it
 // before, with SIGPIPE)
-fn __out_write(p: i64, n: i64) {
+noinline fn __out_write(p: i64, n: i64) {
     e := __write_all(1, p, n)
     if e != 0 {
         __olen = 0
@@ -168,13 +168,17 @@ inline fn __alloc_raw(n: i64) -> i64 {
 // the bytes of n elements of `size` bytes; stops the program if n is negative or the result
 // does not fit in an i64
 inline fn __alloc_size(n: i64, size: i64) -> i64 {
+    if n < 0 || mulhi(u64(n), u64(size)) != 0 || n * size < 0 {
+        __size_fail(n)
+    }
+    return n * size
+}
+
+noinline fn __size_fail(n: i64) -> never {
     if n < 0 {
         __die("panic: negative allocation size", "", "")
     }
-    if mulhi(u64(n), u64(size)) != 0 || n * size < 0 {
-        __die("panic: out of memory", "", "")
-    }
-    return n * size
+    __die("panic: out of memory", "", "")
 }
 
 // zeroed memory: only memory that was handed out before (below the high-water mark) is dirty
@@ -190,7 +194,7 @@ inline fn __alloc(n: i64) -> i64 {
 // a + b for sizes that are not negative; stops the program if the sum does not fit
 inline fn __add_size(a: i64, b: i64) -> i64 {
     if a + b < 0 {
-        __die("panic: out of memory", "", "")
+        __size_fail(0)
     }
     return a + b
 }
@@ -330,7 +334,7 @@ fn flush() {
     }
 }
 
-fn __put_str(s: str) {
+noinline fn __put_str(s: str) {
     if __cap_on != 0 {
         __cap_put(s)
         return
