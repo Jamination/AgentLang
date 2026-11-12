@@ -2176,6 +2176,32 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
             }
             return hash_fields(self, v, names, pos)
         }
+        Vec(_), Quat, Mat4 => {
+            // lane by lane as f32 values, like `==` compares them
+            h := self.iconst(I64, 0x51ed270b)
+            nc := if v.ty == T_MAT4 { 4 } else { 1 }
+            for c in 0..nc {
+                col := v
+                if v.ty == T_MAT4 {
+                    col = self.mval(T_VEC4, self.add_off(v.v, 16 * c))
+                }
+                n := match self.cx.types.vec_lanes(col.ty) {
+                    Some(vn) => vn
+                    None => 0
+                }
+                x := self.scalar(col)
+                for k in 0..n {
+                    l := self.ins(VExt, T.F32, vec_of([]i64{x}), k)
+                    fh := match self.hash_val(self.sval(T_F32, l), pos) {
+                        Some(y) => y
+                        None => return None
+                    }
+                    r := self.call_rt("__hash_mix", vec[i64](), vec_of([]Val{self.sval(T_U64, h), self.sval(T_U64, fh)}), pos)
+                    h = self.scalar(r)
+                }
+            }
+            return Some(h)
+        }
         _ => {}
     }
     tn := self.tyname(v.ty)
