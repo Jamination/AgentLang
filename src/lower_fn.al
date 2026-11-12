@@ -26,6 +26,10 @@ fn val_never() -> Val {
 priv struct Scope {
     vars: Map[str, (i64, i64)]
     defers: Vec[*Block]
+    // the nearest scope below that had names when this one was pushed (-1: none). Names are
+    // only added to the innermost scope and to scope 0, so `lookup` skips the empty ones
+    // between (a long `else if` chain nests thousands of them)
+    below: i64
 }
 
 priv struct LoopCtx {
@@ -193,7 +197,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         labels: vec[(str, i64, i64)](),
         parent: parent,
     }
-    fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
+    fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block](), below: -1})
     fx.cur = fx.f.new_block()
     pi := 0
     match fx.cx.abi_ret(rty) {
@@ -490,7 +494,12 @@ fn coerce(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
 
 // ---------- scopes ----------
 fn push_scope(self: *Fx) {
-    self.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block]()})
+    t := self.scopes.len - 1
+    below := t
+    if t > 0 && self.scopes[t].vars.len == 0 {
+        below = self.scopes[t].below
+    }
+    self.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block](), below: below})
 }
 
 fn pop_scope(self: *Fx) {
@@ -533,8 +542,16 @@ priv fn run_defers_down_to(self: *Fx, depth: i64) {
 // nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
 // enclosing function, which a nested function cannot use.
 fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
-    for si in self.scopes.len - 1..=0 by -1 {
+    si := self.scopes.len - 1
+    while si > 0 {
         x, ok := self.scopes[si].vars.get(name)
+        if ok {
+            return Some(x)
+        }
+        si = self.scopes[si].below
+    }
+    if self.scopes.len > 0 {
+        x, ok := self.scopes[0].vars.get(name)
         if ok {
             return Some(x)
         }
