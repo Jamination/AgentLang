@@ -14,6 +14,20 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
     seen := vec_fill(m.funcs.len, false)
     work := vec_of([]i64{m.entry})
     seen[m.entry] = true
+    // function pointers stored in global data: these functions are roots as well (what they
+    // call must be compiled too)
+    for gi in 0..m.globals.len {
+        for rl in m.globals[gi].relocs {
+            t := rl.1
+            match t {
+                Func(f) if !seen[f] => {
+                    seen[f] = true
+                    work.push(f)
+                }
+                _ => {}
+            }
+        }
+    }
     out := vec[i64]()
     while work.len > 0 {
         f := work.pop()
@@ -26,19 +40,6 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
                     seen[i.k] = true
                     work.push(i.k)
                 }
-            }
-        }
-    }
-    // function pointers stored in global data
-    for gi in 0..m.globals.len {
-        for rl in m.globals[gi].relocs {
-            t := rl.1
-            match t {
-                Func(f) if !seen[f] => {
-                    seen[f] = true
-                    out.push(f)
-                }
-                _ => {}
             }
         }
     }
