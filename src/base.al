@@ -23,7 +23,9 @@ fn make_executable(path: str) -> bool {
 }
 
 // runs a program with arguments and the current environment, waits for it and returns its
-// exit code (128 + signal number if a signal ended it, -1 if it could not be started)
+// exit code (128 + signal number if a signal ended it, -1 if it could not be started). The
+// program gets the stack limit and environment the compiler was started with (see
+// ensure_stack).
 fn run_program(path: str, argv: []str) -> i64 {
     flush()
     cargs := alloc[i64](len(argv) + 2)
@@ -31,13 +33,38 @@ fn run_program(path: str, argv: []str) -> i64 {
     for i, a in argv {
         cargs[i + 1] = cast[i64](cstr(a))
     }
-    envp := __argv + 8 * (__argc + 1)
+    // the environment without the marker of ensure_stack, whose value is the original limit
+    env := cast[*i64](__argv + 8 * (__argc + 1))
+    n := 0
+    while env[n] != 0 {
+        n += 1
+    }
+    envp := alloc[i64](n + 1)
+    k := 0
+    orig := -2
+    for i in 0..n {
+        e := from_cstr(cast[*u8](env[i]))
+        if starts_with(e, "ALC_STACK_SET=") {
+            v, ok := parse_i64(e[14..])
+            if ok {
+                orig = v
+            }
+            continue
+        }
+        envp[k] = env[i]
+        k += 1
+    }
     pid := syscall(57)
     if pid < 0 {
         return -1
     }
     if pid == 0 {
-        syscall(59, cargs[0], ptr(cargs), envp)
+        lim: [2]i64
+        if orig != -2 && syscall(97, 3, ptr(lim)) == 0 {
+            lim[0] = orig
+            syscall(160, 3, ptr(lim))
+        }
+        syscall(59, cargs[0], ptr(cargs), ptr(envp))
         syscall(231, 127)
     }
     status: [1]i64
@@ -81,11 +108,12 @@ fn ensure_stack(bytes: i64) {
     if want <= lim[0] {
         return
     }
+    orig := lim[0]
     lim[0] = want
     if syscall(160, 3, ptr(lim)) != 0 {
         return
     }
-    // envp plus the marker
+    // envp plus the marker, which holds the original limit (for run_program)
     envp := cast[*i64](__argv + 8 * (__argc + 1))
     n := 0
     while envp[n] != 0 {
@@ -95,7 +123,7 @@ fn ensure_stack(bytes: i64) {
     for i in 0..n {
         nenv[i] = envp[i]
     }
-    nenv[n] = cast[i64](ptr("ALC_STACK_SET=1"))
+    nenv[n] = cast[i64](cstr(fmt("ALC_STACK_SET=", orig)))
     syscall(59, ptr("/proc/self/exe"), __argv, ptr(nenv))
 }
 
