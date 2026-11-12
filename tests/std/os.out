@@ -1,0 +1,49 @@
+true true true
+true true
+make_dir true true true 0
+write true true false 6 true
+missing false false -1 0
+list [.hidden, Two.txt, b, one.txt] [] 0
+list missing [] no such file or directory
+list a file [] not a directory
+rename true 0 false (hello
+, true)
+rename over a file true (2, true) [.hidden, b]
+rename missing false no such file or directory
+rename into a missing directory false no such file or directory
+rename a directory true [B, a] [c, moved.txt]
+remove_file true 0 false no such file or directory
+remove_dir not empty false directory not empty
+remove_dir true true false no such file or directory
+make_dir below a file false not a directory
+true 0 0
+false 1 0
+exit 7 7 44
+arguments (a b  c
+, 0)
+killed 137 143 (before
+, 137) 0
+parent, child
+stdin (0
+, 0) true
+missing program -1 no such file or directory
+missing path -1 no such file or directory (, -1) no such file or directory (, -1) no such file or directory
+a directory -1 permission denied -1 permission denied
+not executable -1 permission denied
+after a start 0 no error
+executable (script arg
+, 0)
+no program format -1 exec format error
+no name -1 invalid argument -1 no such file or directory
+stdout only one
+three
+ 3
+both one
+two
+three
+ 3
+nothing 0 0
+1 MB 1048580 0 1048576 true
+2 MB from both 2097156 0 1048576 1048576 true true
+PATH lookup 5 true
+cleanup true true true true false

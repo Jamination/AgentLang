@@ -120,6 +120,17 @@ fn remove_dir(path: str) -> bool {
     return __io_result(__asset_call(84, path, "", 0, 0)) == 0
 }
 
+// gives a file or directory another name or place (on the same file system); a file that
+// has the new name is replaced. false if that failed
+fn rename(from: str, to: str) -> bool {
+    a: [4096]u8
+    b: [4096]u8
+    if !__asset_cpath(a[..], from, "") || !__asset_cpath(b[..], to, "") {
+        return __io_result(-36) == 0
+    }
+    return __io_result(syscall(82, ptr(a), ptr(b))) == 0
+}
+
 // creates a directory and any missing parents; true if the directory exists afterwards
 fn make_dir(path: str) -> bool {
     for i in 1..len(path) {

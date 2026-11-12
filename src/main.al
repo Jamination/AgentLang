@@ -46,6 +46,7 @@ priv const STD_MODULES = [_](str, str){
     ("mem", embed("../std/mem.al")),
     ("libc", embed("../std/libc.al")),
     ("asset", embed("../std/asset.al")),
+    ("os", embed("../std/os.al")),
     ("image", embed("../std/image.al")),
     ("x11", embed("../std/x11.al")),
     ("alsa", embed("../std/alsa.al")),

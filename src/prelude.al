@@ -2343,6 +2343,8 @@ fn error_text(e: i64) -> str {
         4 => return "interrupted system call"
         5 => return "input/output error"
         6 => return "no such device or address"
+        7 => return "argument list too long"
+        8 => return "exec format error"
         9 => return "bad file descriptor"
         11 => return "resource temporarily unavailable"
         12 => return "out of memory"
