@@ -1,0 +1,5 @@
+clone_pointer.al:8:15: error: `clone` of a pointer would copy the pointer, not what it points to; write `clone(*p)` for a copy of the value, or assign the pointer itself
+clone_pointer.al:9:15: error: `clone` of a pointer would copy the pointer
+clone_pointer.al:10:17: error: `clone` of a pointer would copy the pointer
+clone_pointer.al:14:14: error: type mismatch: expected i64, found S
+4 error(s)

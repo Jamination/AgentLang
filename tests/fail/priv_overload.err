@@ -1,0 +1,4 @@
+priv_overload.al:10:43: error: function `is_int(self, t)` expects 2 argument(s), got 1 (a `priv` declaration of `is_int` exists in tests/fail/priv/over.al, line 2: it is visible only inside that file)
+priv_overload.al:10:57: error: argument `self` of `size`: expected *Types, found K (a `priv` declaration of `size` exists in tests/fail/priv/over.al, line 3: it is visible only inside that file)
+priv_overload.al:10:73: error: no definition of `size` can be called on K; candidates: size(*Types); size(*Types, i64) (a `priv` declaration of `size` exists in tests/fail/priv/over.al, line 3: it is visible only inside that file)
+3 error(s)

@@ -1,0 +1,15 @@
+pattern_mistakes.al:11:14: error: `Emty` is not a variant of `Shape` (variants: Circle, Rect, Empty); a binding starts with a lower-case letter
+pattern_mistakes.al:19:12: error: `Dref` is not a variant of `UnOp` (variants: Neg, Deref); a binding starts with a lower-case letter
+pattern_mistakes.al:23:10: error: `Ngg` is not a variant of `UnOp` (variants: Neg, Deref); a binding starts with a lower-case letter
+pattern_mistakes.al:29:9: error: this pattern can never match: the arm in line 28 has the same pattern (remove one of them)
+pattern_mistakes.al:31:9: error: this pattern can never match: the arm in line 30 has the same pattern
+pattern_mistakes.al:33:9: error: this pattern can never match: the arm in line 28 has the same pattern
+pattern_mistakes.al:41:9: error: this pattern can never match: the arm in line 40 has the same pattern
+pattern_mistakes.al:44:13: error: this pattern can never match: the arm in line 44 has the same pattern
+pattern_mistakes.al:46:9: error: this pattern can never match: the arm in line 45 has the same pattern
+pattern_mistakes.al:51:9: error: this pattern can never match: the arm in line 50 has the same pattern
+pattern_mistakes.al:52:11: error: this pattern can never match: the arm in line 49 has the same pattern
+pattern_mistakes.al:58:14: error: this pattern can never match: the arm in line 57 has the same pattern
+pattern_mistakes.al:63:9: error: this pattern can never match: the arm in line 61 has the same pattern
+pattern_mistakes.al:67:9: error: this pattern can never match: the arm in line 66 has the same pattern
+pattern_mistakes.al:70:9: error: this pattern can never match: the arm in line 69 has the same pattern

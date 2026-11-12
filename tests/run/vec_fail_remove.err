@@ -1,0 +1,1 @@
+assertion failed at tests/run/vec_fail_remove.al:6: Vec remove position out of range

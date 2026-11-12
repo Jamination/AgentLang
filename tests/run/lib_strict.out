@@ -1,0 +1,8 @@
+(9223372036854775807, true) (0, false) (-9223372036854775808, true)
+(0, false) (0, false) (0, true) (-12, true) (0, false)
+2 2 2 2
+[app, apple, fig, pear] a b  x 2 2.5
+ehllo
+[app, apple, fig, pear, zz] 4 [7, 8, 7] 0 true
+[start, app, apple, fig, end] app start fig fig [end, apple]
+0

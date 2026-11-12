@@ -1,0 +1,11 @@
+compare_diag.al:9:14: error: `<`, `<=`, `>`, `>=` work on numbers only, not on str (order strings with `cmp(a, b) < 0`)
+compare_diag.al:11:12: error: `<`, `<=`, `>`, `>=` work on numbers only, not on S
+compare_diag.al:12:16: error: `<`, `<=`, `>`, `>=` work on numbers only, not on Shape
+compare_diag.al:13:20: error: values of type () cannot be compared: `==` and `!=` work on numbers, bool, pointers, function values, enums, str, slices, arrays, structs and tuples
+compare_diag.al:14:15: error: `<`, `<=`, `>`, `>=` work on numbers only, not on bool
+compare_diag.al:16:12: error: operands have different types: A and B
+compare_diag.al:19:14: error: `X` is a variant of several enums (`A`, `B`) and the expected type does not say which; write `A.X` or `B.X`
+compare_diag.al:20:14: error: `Y` is a variant of several enums
+compare_diag.al:21:14: error: `X` is a variant of several enums
+compare_diag.al:24:14: error: `Y` is a variant of several enums
+10 error(s)

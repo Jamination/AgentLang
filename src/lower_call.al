@@ -1123,7 +1123,7 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
             if keep.len == 0 {
                 tn := self.tyname(rv.ty)
                 s := lower_call_call_overloaded_sigs(self, cands)
-                self.err(pos, fmt("no definition of `", name, "` can be called on ", tn, "; candidates: ", s))
+                self.err(pos, fmt("no definition of `", name, "` can be called on ", tn, "; candidates: ", s, self.cx.priv_note(name, pos)))
                 lower_call_eval_all(self, args)
                 return val_err()
             }
