@@ -300,9 +300,20 @@ fn config_parse(text: str) -> Config {
         if len(line) == 0 || line[0] == '#' || line[0] == ';' {
             continue
         }
-        if line[0] == '[' && line[len(line) - 1] == ']' {
-            section = trim(line[1..len(line) - 1])
-            continue
+        if line[0] == '[' {
+            // `[section]`, possibly followed by white space and a comment
+            close := len(line) - 1
+            if line[close] != ']' {
+                close = find(line, "]")
+                rest := if close > 0 { line[close + 1..] } else { "" }
+                if len(rest) == 0 || (rest[0] != ' ' && rest[0] != '\t') || (trim(rest)[0] != '#' && trim(rest)[0] != ';') {
+                    close = -1
+                }
+            }
+            if close > 0 {
+                section = trim(line[1..close])
+                continue
+            }
         }
         eq := find(line, "=")
         if eq < 0 {
