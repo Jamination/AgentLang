@@ -126,31 +126,27 @@ struct Buffer {
 
 fn buffer_new(shm: *WlShm, width: i64, height: i64) -> (Buffer, bool) {
     size := width * height * 4
-    fd := syscall(319, ptr("al-wayland-test"), 1)       // memfd_create(name, MFD_CLOEXEC)
-    if fd < 0 {
+    fd, ok := shm_create(size)
+    if !ok {
         return (Buffer{}, false)
     }
-    if syscall(77, fd, size) < 0 {                      // ftruncate
-        syscall(3, fd)
-        return (Buffer{}, false)
-    }
-    mem := syscall(9, 0, size, 3, 1, fd, 0)             // mmap(PROT_READ | PROT_WRITE, MAP_SHARED)
-    if mem < 0 && mem > -4096 {
-        syscall(3, fd)
+    mem, mapped := map_shared(fd, size)
+    if !mapped {
+        close_fd(fd)
         return (Buffer{}, false)
     }
     pool := wl_shm_create_pool(shm, i32(fd), i32(size))
-    b := Buffer{pixels: mkslice[u32](cast[*u32](mem), width * height), width: width, height: height}
+    b := Buffer{pixels: mkslice[u32](cast[*u32](ptr(mem)), width * height), width: width, height: height}
     b.buffer = wl_shm_pool_create_buffer(pool, 0, i32(width), i32(height), i32(width * 4), WL_SHM_FORMAT_XRGB8888)
     // the buffer keeps the pool's memory alive; the compositor has its own copy of the fd
     wl_shm_pool_destroy(pool)
-    syscall(3, fd)
+    close_fd(fd)
     (b, true)
 }
 
 fn buffer_free(b: *Buffer) {
     wl_buffer_destroy(b.buffer)
-    syscall(11, ptr(b.pixels), b.width * b.height * 4)  // munmap
+    unmap(mkslice[u8](cast[*u8](ptr(b.pixels)), b.width * b.height * 4))
     *b = Buffer{}
 }
 
@@ -290,6 +286,23 @@ fn keyboard_check() {
     xkb_context_unref(context)
 }
 
+// Ends the compositor: SIGTERM to `timeout`, which passes it on to weston and ends with it;
+// waits for that (at most 10 s: `timeout -k 5` kills weston after 5 s) and returns the status,
+// -1 if it did not end.
+fn stop(weston: Process) -> i64 {
+    kill(weston, 15)
+    for attempt in 0..500 {
+        status, ended := try_wait(weston)
+        if ended {
+            return status
+        }
+        sleep_ns(20_000_000)
+    }
+    kill(weston, 9)
+    wait(weston)
+    -1
+}
+
 fn main() {
     runtime, has := env_get("XDG_RUNTIME_DIR")
     if !has {
@@ -299,14 +312,13 @@ fn main() {
     keyboard_check()
     socket := fmt("al-wl-test-", process_id())
     path := path_join(runtime, socket)
-    // weston in the background (std.os only runs programs to their end, so a shell starts it);
-    // `timeout` ends it even if this program is killed before it can
-    script := fmt("env -u WAYLAND_DISPLAY -u DISPLAY timeout 50 weston --backend=headless --socket=", socket,
-        " --width=800 --height=600 --no-config >/dev/null 2>&1 & echo $!")
-    out, status := run_capture([]str{"sh", "-c", script})
-    pid, pid_ok := parse_i64(trim(out))
-    if status != 0 || !pid_ok {
-        print("cannot start weston")
+    // weston in the background, through `timeout`: it ends weston (SIGTERM, SIGKILL 5 s later)
+    // even if this program dies before it can, and passes on the SIGTERM of `stop`
+    weston, started := spawn([]str{"env", "-u", "WAYLAND_DISPLAY", "-u", "DISPLAY", "timeout", "-k", "5", "50",
+        "weston", "--backend=headless", fmt("--socket=", socket), "--width=800", "--height=600", "--no-config",
+        "--log=/dev/null"})
+    if !started {
+        print("cannot start weston:", error_text(io_error()))
         exit(1)
     }
     st := new[State]()
@@ -320,7 +332,7 @@ fn main() {
     }
     print("connect:", connected)
     if !connected {
-        syscall(62, pid, 15)
+        stop(weston)
         exit(1)
     }
     fds := open_fds()
@@ -396,10 +408,9 @@ fn main() {
     bad := new[State]()
     print("second connection:", connect(bad, socket))
     {
-        fd := syscall(319, ptr("al-wayland-test"), 1)
-        syscall(77, fd, 4096)
+        fd, _ := shm_create(4096)
         pool := wl_shm_create_pool(bad.shm, i32(fd), 4096)
-        syscall(3, fd)
+        close_fd(fd)
         wl_shm_pool_create_buffer(pool, 0, 16, 16, 3, WL_SHM_FORMAT_XRGB8888)
         failed := wl_display_roundtrip(bad.display) < 0
         interface: *WlInterface
@@ -435,7 +446,7 @@ fn main() {
 
     // the compositor goes away while a client is connected: dispatching reports it
     print("last connection:", connect(st, socket))
-    syscall(62, pid, 15)                                // SIGTERM
+    kill(weston, 15)                                    // SIGTERM, passed on by `timeout`
     lost := false
     for attempt in 0..250 {
         if wl_display_poll(st.display, 20) < 0 {
@@ -445,14 +456,7 @@ fn main() {
     }
     print("connection lost:", lost, wl_display_get_error(st.display) != 0)
     disconnect(st)
-    gone := false
-    for attempt in 0..250 {
-        // (kill with signal 0 only asks whether the process exists)
-        if !file_exists(path) && !file_exists(concat(path, ".lock")) && syscall(62, pid, 0) == -3 {
-            gone = true
-            break
-        }
-        sleep_ns(20_000_000)
-    }
-    print("compositor stopped, socket removed:", gone)
+    // `timeout` ends when weston has ended; then its socket must be gone
+    status := stop(weston)
+    print("compositor stopped, socket removed:", status >= 0 && !file_exists(path) && !file_exists(concat(path, ".lock")))
 }

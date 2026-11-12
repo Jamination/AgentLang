@@ -1,7 +1,8 @@
 # std.os: running programs, the process, files for tools
 
 `use std.os`. Source: `std/os.al`. For tools and build scripts: start other programs and read
-what they print, find out about the process itself, and work with files and directories. Raw
+what they print, or let them run alongside; shared memory; find out about the process itself,
+and work with files and directories. Raw
 Linux system calls, no libc: a program using this module stays a static executable.
 
 `use std.os` also loads [std.asset](asset.md), where the file and directory functions live
@@ -60,6 +61,68 @@ fn main() -> i64 {
 }
 ```
 
+## Background processes
+
+| Declaration | Description |
+|-------------|-------------|
+| `spawn(argv: []str) -> (Process, bool)` | Starts the program `argv[0]` (found as by `run`) with the arguments `argv[1..]` and returns at once. `(Process{}, false)` if it could not be started; `io_error()` is the reason, as for `run`. |
+| `wait(p: Process) -> i64` | Waits until it has ended; the status as for `run` (exit status, 128 + signal). Waiting again returns the same status. |
+| `try_wait(p: Process) -> (i64, bool)` | Does not block: `(status, true)` once it has ended (it is then waited for), `(0, false)` while it runs, `(-1, true)` if it cannot be waited for (`io_error()`). |
+| `kill(p: Process, signal: i64) -> bool` | Sends a signal: 15 (SIGTERM) asks it to end, 9 (SIGKILL) ends it, 2 is SIGINT, 0 only checks that it is there. `false` with `io_error()` 3 (`no such process`) once it has been waited for. |
+| `pid(p: Process) -> i64` | Its process id. |
+
+- The program shares the environment, working directory, standard input, output and error of
+  this process; what this process printed before is written first (`flush()`).
+- A copy of a `Process` is the same process (waiting through one copy is seen by the others).
+  `Process{}` was not started: `wait` returns -1 with `io_error()` 10 (`no child processes`).
+- **Wait for every process.** A program that has ended stays in the system's process table (a
+  *zombie*) until it is waited for with `wait` or `try_wait`; a process that this program
+  never waits for is reaped by the system when this program exits. After it has been waited
+  for, its id may be given to a new process, which is why `kill` refuses then.
+- A program that should not outlive this one (if this one crashes) can be started through
+  `timeout` (`[]str{"timeout", "-k", "5", "60", "server", ...}`): it passes SIGTERM on to the
+  program and ends it after 60 s in any case.
+
+```
+use std.os
+
+fn main() {
+    server, ok := spawn([]str{"sleep", "30"})
+    if !ok {
+        eprint(fmt("cannot start: ", error_text(io_error())))
+        return
+    }
+    _, ended := try_wait(server)
+    print(pid(server) > 0, ended)                   // true false
+    kill(server, 15)
+    print(wait(server), kill(server, 15))           // 143 false
+    jobs := vec[Process]()
+    for i in 0..3 {
+        p, _ := spawn([]str{"sh", "-c", fmt("exit ", i)})
+        jobs.push(p)
+    }
+    for p in jobs { put(wait(p), " ") }             // 0 1 2
+    print()
+}
+```
+
+## Shared memory
+
+Memory that another process maps as well, for example the pixels of a Wayland `wl_shm` buffer
+([std.wayland](wayland.md)): the file descriptor is what is handed over.
+
+| Declaration | Description |
+|-------------|-------------|
+| `shm_create(size: i64) -> (i64, bool)` | A new anonymous file of `size` zero bytes in memory (`memfd_create`, closed when a program is started): `(fd, true)`, or `(-1, false)` with `io_error()`. |
+| `map_shared(fd: i64, size: i64) -> ([]u8, bool)` | The first `size` bytes of the file as memory shared with every other mapping of it, readable and writable. |
+| `map_readonly(fd: i64, size: i64) -> ([]u8, bool)` | Read-only and private to this process (a file the other side may have opened read-only, like the keymap of `wl_keyboard.keymap`). Writing to it stops the program with a memory fault. |
+| `unmap(s: []u8) -> bool` | Gives back a mapping (the whole slice that was returned). Using it afterwards is a memory fault. |
+| `close_fd(fd: i64) -> bool` | Closes a file descriptor; a mapping stays valid after its descriptor is closed. |
+
+All report failures through their result and `io_error()` (`bad file descriptor`, `invalid
+argument` for a size of 0, ...). View the bytes as other types with `mkslice` and `cast`:
+`pixels := mkslice[u32](cast[*u32](ptr(mem)), width * height)`.
+
 ## The process
 
 | Declaration | Description |
@@ -84,5 +147,6 @@ through their result and `io_error()`, none panics.
 | delete | `remove_file(path) -> bool`, `remove_dir(path) -> bool` (an empty directory); `false` with `io_error()` 2 if it is missing |
 | path text | `path_join(a, b)`, `path_dir(p)`, `path_base(p)`, `path_ext(p)`, `path_stem(p)` |
 
-Not there: changing the working directory or the environment of this process, starting a
-program without waiting for it, feeding its standard input from a string, time limits.
+Not there: changing the working directory or the environment of this process, feeding the
+standard input of a program from a string, time limits (use `timeout`, or `try_wait` and
+`kill`).

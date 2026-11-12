@@ -1,0 +1,12 @@
+shm_create: true true 0
+map_shared: true true 8192 8192 true 0 0
+shared: 1 250 0 159 1016720
+as u32: 212 161
+map_readonly: true 4096 212 100
+close_fd: true again: false bad file descriptor
+after close: 7
+unmap: true true true 0
+closed descriptor: false bad file descriptor
+size 0: false invalid argument
+negative size: false invalid argument
+done

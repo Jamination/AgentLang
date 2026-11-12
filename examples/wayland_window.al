@@ -1,6 +1,7 @@
-// A window that talks to the Wayland compositor directly, with std.wayland alone: an
-// xdg_toplevel showing a test pattern from wl_shm buffers, server-side decorations where the
-// compositor offers them, keyboard (xkbcommon), pointer with a themed cursor, resize, fullscreen.
+// A window that talks to the Wayland compositor directly, with std.wayland (and std.os for the
+// shared memory of the buffers): an xdg_toplevel showing a test pattern from wl_shm buffers,
+// server-side decorations where the compositor offers them, keyboard (xkbcommon), pointer with
+// a themed cursor, resize, fullscreen.
 // Every input event is printed. Escape or the compositor's close action quits; F toggles
 // fullscreen, M maximized, H hides / shows the pointer.
 //
@@ -8,6 +9,7 @@
 // The test pattern: red top left, green top right, blue bottom left, white bottom right, a grey
 // ramp along the top edge (black at the left), a yellow cross at the pointer.
 use std.wayland
+use std.os
 
 struct Buffer {
     buffer: *WlBuffer
@@ -57,24 +59,20 @@ app: App
 
 fn buffer_create(b: *Buffer, width: i64, height: i64) -> bool {
     size := width * height * 4
-    fd := syscall(319, ptr("al-wayland-window"), 1)     // memfd_create(name, MFD_CLOEXEC)
-    if fd < 0 {
+    fd, ok := shm_create(size)
+    if !ok {
         return false
     }
-    if syscall(77, fd, size) < 0 {                      // ftruncate
-        syscall(3, fd)
-        return false
-    }
-    mem := syscall(9, 0, size, 3, 1, fd, 0)             // mmap(PROT_READ | PROT_WRITE, MAP_SHARED)
-    if mem < 0 && mem > -4096 {
-        syscall(3, fd)
+    mem, mapped := map_shared(fd, size)
+    if !mapped {
+        close_fd(fd)
         return false
     }
     pool := wl_shm_create_pool(app.shm, i32(fd), i32(size))
     b.buffer = wl_shm_pool_create_buffer(pool, 0, i32(width), i32(height), i32(width * 4), WL_SHM_FORMAT_XRGB8888)
     wl_shm_pool_destroy(pool)                           // the buffer keeps the memory alive
-    syscall(3, fd)                                      // the compositor has its own copy
-    b.pixels = mkslice[u32](cast[*u32](mem), width * height)
+    close_fd(fd)                                        // the compositor has its own copy
+    b.pixels = mkslice[u32](cast[*u32](ptr(mem)), width * height)
     b.width = width
     b.height = height
     b.busy = false
@@ -85,7 +83,7 @@ fn buffer_create(b: *Buffer, width: i64, height: i64) -> bool {
 fn buffer_destroy(b: *Buffer) {
     if b.buffer != nil {
         wl_buffer_destroy(b.buffer)
-        syscall(11, ptr(b.pixels), b.width * b.height * 4)  // munmap
+        unmap(mkslice[u8](cast[*u8](ptr(b.pixels)), b.width * b.height * 4))
     }
     *b = Buffer{}
 }
@@ -290,16 +288,16 @@ fn on_pointer_axis(data: *u8, pointer: *WlPointer, time: u32, axis: u32, value: 
 
 fn on_keymap(data: *u8, keyboard: *WlKeyboard, format: u32, fd: i32, size: u32) {
     if format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 {
-        syscall(3, i64(fd))
+        close_fd(i64(fd))
         return
     }
-    mem := syscall(9, 0, i64(size), 1, 2, i64(fd), 0)   // mmap(PROT_READ, MAP_PRIVATE)
-    syscall(3, i64(fd))
-    if mem < 0 && mem > -4096 {
+    text, ok := map_readonly(i64(fd), i64(size))       // the keymap text, NUL-terminated
+    close_fd(i64(fd))
+    if !ok {
         return
     }
-    keymap := xkb_keymap_new_from_string(app.xkb, cast[*u8](mem), XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS)
-    syscall(11, mem, i64(size))
+    keymap := xkb_keymap_new_from_string(app.xkb, ptr(text), XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS)
+    unmap(text)
     if keymap == nil {
         return
     }

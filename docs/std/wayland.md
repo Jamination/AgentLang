@@ -86,14 +86,15 @@ libwayland keeps the pointer to the listener struct as long as the object lives:
    title and app id, then `wl_surface_commit` without a buffer: that asks for the first
    configure. Answer every `xdg_surface.configure` with `xdg_surface_ack_configure`; the size
    comes with `xdg_toplevel.configure` (0 means "your choice").
-4. Draw into a `wl_shm` buffer: an anonymous file (`memfd_create`, `ftruncate`, `mmap`
-   through `syscall`), `wl_shm_create_pool`, `wl_shm_pool_create_buffer` with
-   `WL_SHM_FORMAT_XRGB8888` (a `u32` per pixel, `0x00RRGGBB`). Attach, damage, commit. Do not
-   draw into a buffer the compositor holds: wait for `wl_buffer.release`, or use more than one.
+4. Draw into a `wl_shm` buffer: an anonymous file mapped into memory (`shm_create`,
+   `map_shared` of [std.os](os.md); `close_fd` once the pool exists), `wl_shm_create_pool`,
+   `wl_shm_pool_create_buffer` with `WL_SHM_FORMAT_XRGB8888` (a `u32` per pixel, `0x00RRGGBB`).
+   Attach, damage, commit. Do not draw into a buffer the compositor holds: wait for
+   `wl_buffer.release`, or use more than one.
 5. Input: `wl_seat.capabilities` tells whether there is a pointer and a keyboard. Keys arrive
-   as evdev codes: add 8 for xkb, compile the keymap that `wl_keyboard.keymap` sends with
-   `xkb_keymap_new_from_string`, keep an `XkbState` updated from `wl_keyboard.modifiers`, and
-   read keysyms (`xkb_state_key_get_one_sym`, the X11 keysym numbers) and text
+   as evdev codes: add 8 for xkb, compile the keymap that `wl_keyboard.keymap` sends (a file
+   descriptor: `map_readonly` of std.os) with `xkb_keymap_new_from_string`, keep an `XkbState`
+   updated from `wl_keyboard.modifiers`, and read keysyms (`xkb_state_key_get_one_sym`, the X11 keysym numbers) and text
    (`xkb_state_key_get_utf8`). Up to `wl_seat` version 9 the compositor sends no key repeat:
    a client repeats keys itself from `wl_keyboard.repeat_info` (version 10 adds the
    `WL_KEYBOARD_KEY_STATE_REPEATED` state, sent only to clients that bind version 10). The pointer image is the client's job:
@@ -123,7 +124,9 @@ their events (shm formats, output mode, output geometry: a handler of ten argume
 keymap of its own, the cursor theme, a toplevel with configure, shm buffers, frame callbacks,
 fullscreen and back, a protocol error on a second connection, 20 connect / window / teardown
 cycles without a leaked file descriptor, and the compositor going away under a connected
-client; then it checks that the compositor and its socket are gone. It is skipped without
+client; then it checks that the compositor and its socket are gone. weston is started with
+`spawn` (std.os) through `timeout -k 5 50`, so it cannot outlive a test that crashes, and
+stopped (SIGTERM, waited for) on every way out. It is skipped without
 `weston`. `tests/check/wayland.al` (generated with the bindings) uses every public
 declaration of the module and is type-checked; `tests/check/wayland_window.al` keeps the
 example compiling.
