@@ -292,6 +292,16 @@ fn func_new(name: str) -> Func {
     }
 }
 
+// n zeros (filled by memfill, not one by one)
+priv fn zeros(n: i64) -> Vec[i64] {
+    return Vec[i64]{buf: alloc[i64](n), len: n}
+}
+
+// n uninitialised words
+priv fn raw(n: i64) -> []i64 {
+    return mkslice[i64](__alloc_raw(n * 8), n)
+}
+
 // n lists in one buffer: list i has room for cnt[i] items (filled with `add`)
 priv fn lists_sized(cnt: *Vec[i64]) -> Vec[Vec[i64]] {
     n := cnt.len
@@ -299,13 +309,16 @@ priv fn lists_sized(cnt: *Vec[i64]) -> Vec[Vec[i64]] {
     for i in 0..n {
         total += cnt[i]
     }
-    flat := alloc[i64](total)
-    out := vec_fill(n, vec[i64]())
+    // every list is filled to its size before it is read: no zeroing
+    flat := mkslice[i64](__alloc_raw(total * 8), total)
+    out: Vec[Vec[i64]]
+    out.reserve(n)
     off := 0
     for i in 0..n {
-        out[i] = Vec[i64]{buf: flat[off..off + cnt[i]], len: 0}
+        out.buf[i] = Vec[i64]{buf: flat[off..off + cnt[i]], len: 0}
         off += cnt[i]
     }
+    out.len = n
     return out
 }
 
@@ -538,7 +551,7 @@ fn rpo(self: *Func) -> Vec[i64] {
 
 priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
     n := self.blocks.len
-    cnt := vec_fill(n, 0)
+    cnt := zeros(n)
     for b in 0..n {
         k, s0, s1 := self.succ_pair(b)
         if k > 0 {
@@ -561,14 +574,17 @@ priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
     return p
 }
 
-priv fn rpo_compute(self: *Func) -> Vec[i64] {
+// rpo without the memo (for a CFG that changes between calls)
+fn rpo_compute(self: *Func) -> Vec[i64] {
     n := self.blocks.len
     seen := alloc[bool](n)
     // every block is on the stack at most once; the postorder is written from the end, so
     // order[k..n] is the reverse postorder
-    order := alloc[i64](n)
-    sb := alloc[i64](n)
-    si := alloc[i64](n)
+    order := raw(n)
+    sb := raw(n)
+    si := raw(n)
+    sb[0] = 0
+    si[0] = 0
     sp := 1
     seen[0] = true
     k := n
@@ -728,7 +744,7 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
         rpo_idx[rpo[i]] = i
     }
     // predecessors among the reachable blocks, in reverse postorder
-    cnt := vec_fill(n, 0)
+    cnt := zeros(n)
     for b in rpo {
         k, s0, s1 := f.succ_pair(b)
         if k > 0 {
@@ -782,7 +798,7 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
             }
         }
     }
-    ccnt := vec_fill(n, 0)
+    ccnt := zeros(n)
     for bi in 1..rpo.len {
         ccnt[idom[rpo[bi]]] += 1
     }
@@ -791,12 +807,14 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
         b := rpo[bi]
         add(&children[idom[b]], b)
     }
-    pre := vec_fill(n, 0)
-    post := vec_fill(n, 0)
+    pre := zeros(n)
+    post := zeros(n)
     t := 0
     // every block is on the stack at most once
-    sb := alloc[i64](n)
-    si := alloc[i64](n)
+    sb := raw(n)
+    si := raw(n)
+    sb[0] = 0
+    si[0] = 0
     sp := 1
     while sp > 0 {
         b := sb[sp - 1]

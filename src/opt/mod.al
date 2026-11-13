@@ -365,13 +365,14 @@ fn opt_optimize(m: *Module, level: i64) {
     }
     pol := Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000}
     done := vec_fill(n, false)
+    costs := vec_fill(n, -1)
     for fid in order {
         if m.funcs[fid].lowered {
             work_begin()
             ir_memo_begin(&m.funcs[fid])
             sk_restore(clean_at[fid])
             local_opt(&m.funcs[fid], level)
-            if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol) {
+            if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol, costs.items()) {
                 sk_forget()
                 opt_trace("after-inline", &m.funcs[fid])
                 local_opt(&m.funcs[fid], level)

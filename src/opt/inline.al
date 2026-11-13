@@ -31,7 +31,7 @@ priv fn bmap_at(bmap: *Vec[i64], b: i64) -> i64 {
 // inline one call site: `call` (in block `cb`) to callee `g`. The uses of the call's results
 // are not rewritten here: `repl` gets their replacements (applied once by inline_run; a value
 // taken from the caller is looked up in it). Returns by how much cost(f) grew.
-priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64]) -> i64 {
+priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], returns: *bool) -> i64 {
     pos := index_of(f.blocks[cb].insts.items(), call)
     assert pos >= 0
     call_inst := clone(f.insts[call])
@@ -146,6 +146,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64]) -> 
         f.blocks[0].insts = e
     }
     f.blocks[cb].term = Jmp(bmap_at(&bmap, 0))
+    *returns = !rets.is_empty()
     // results
     nrets := g.rets.len
     results := vec[i64]()
@@ -226,14 +227,22 @@ struct Policy {
     max_caller: i64,
 }
 
-// inline eligible calls in function `fid`; `done[g]` marks callees that are final
-fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken: []bool, pol: *Policy) -> bool {
+// inline eligible calls in function `fid`; `done[g]` marks callees that are final;
+// `costs[g]` is cost(g) once known (-1 before: a final function does not change)
+fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken: []bool, pol: *Policy, costs: []i64) -> bool {
     any := false
     budget := 400
-    sizes := map[i64, i64]()
     // replacements of the results of inlined calls, applied at the end
     repl := vec[i64]()
     caller_size := cost(&m.funcs[fid])
+    // Where the search for the next call can start in the reverse postorder. Whether a call
+    // can be inlined depends only on its callee. The blocks before the block of the call just
+    // inlined had none; inlining changes only the successors of that block (and adds blocks
+    // reachable through it alone), so the depth-first search reaches the same blocks in the
+    // same order before it: they keep their places, and keep having no such call (block 0 only
+    // gains allocas and constants). Unless the callee never returns, the blocks after the call
+    // are still reached through it.
+    start := 0
     loop {
         if budget == 0 {
             break
@@ -245,8 +254,10 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         found: Opt[(i64, i64, i64)] = None
         {
             f := &m.funcs[fid]
-            frpo := f.rpo()
-            search: for b in frpo {
+            // (the CFG changes with every inlined call: no use for the memo)
+            frpo := f.rpo_compute()
+            search: for ri in start..frpo.len {
+                b := frpo[ri]
                 for v in f.blocks[b].insts {
                     i := &f.insts[v]
                     if i.op != Call {
@@ -260,11 +271,10 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     if gf.inl < 0 || gf.noreturn || !gf.lowered {
                         continue
                     }
-                    size, have := sizes.get(g)
-                    if !have {
-                        size = cost(gf)
-                        sizes.set(g, size)
+                    if costs[g] < 0 {
+                        costs[g] = cost(gf)
                     }
+                    size := costs[g]
                     limit := 0
                     if gf.inl > 0 {
                         limit = pol.hinted
@@ -275,6 +285,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     }
                     if size <= limit {
                         found = Some((b, v, g))
+                        start = ri
                         break search
                     }
                 }
@@ -283,7 +294,13 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         match found {
             Some(x) => {
                 // g is not f and inline_call only changes f
-                caller_size += inline_call(&m.funcs[fid], x.0, x.1, &m.funcs[x.2], &repl)
+                returns := false
+                caller_size += inline_call(&m.funcs[fid], x.0, x.1, &m.funcs[x.2], &repl, &returns)
+                if !returns {
+                    // the blocks after the call became unreachable through it: they may now
+                    // be reached later, before the call's block
+                    start = 0
+                }
                 any = true
                 budget -= 1
             }
