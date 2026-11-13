@@ -121,10 +121,7 @@ fn priv_hint(self: *Cx, n: str) -> str {
     if !found {
         return ""
     }
-    fname: str = "?"
-    if pos.file >= 0 && pos.file < self.file_names.len {
-        fname = self.file_names[pos.file]
-    }
+    fname := self.file_of(pos.file, "?")
     return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
 
@@ -164,9 +161,11 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
 
 // f64 to i64 at compile time, as the processor converts at run time: NaN and values out of
 // range give 0x8000000000000000
+priv const I64_MIN: i64 = 0x8000_0000_0000_0000
+
 priv fn f64_to_i64(f: f64) -> i64 {
     if f != f || f >= 9223372036854775808.0 || f < -9223372036854775808.0 {
-        return -0x7FFFFFFFFFFFFFFF - 1
+        return I64_MIN
     }
     return i64(f)
 }
@@ -193,52 +192,16 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
     cx := Cx{
         n_prelude: n_prelude,
         types: types_new(),
-        module: Module{funcs: vec[Func](), globals: vec[Global](), entry: 0, externs: vec[ExternFn]()},
-        errs: vec[Diag](),
         opts: opts,
         file_names: file_names,
-        fn_decls: vec[*FnDecl](),
-        fn_names: map[str, i64](),
-        struct_decls: vec[*StructDecl](),
-        struct_names: map[str, i64](),
-        enum_decls: vec[*EnumDecl](),
-        enum_names: map[str, i64](),
-        variants: map[str, Vec[(i64, i64)]](),
-        const_decls: map[str, *ConstDecl](),
-        const_vals: map[str, CState](),
-        global_decls: map[str, *GlobalDecl](),
-        globals: map[str, (i64, i64)](),
-        ext_gots: map[i64, bool](),
-        struct_insts: map[(i64, []i64), i64](),
-        enum_insts: map[(i64, []i64), i64](),
-        fn_insts: map[(i64, []i64), i64](),
-        fn_sigs: vec[(Vec[i64], i64)](),
-        work: vec[(i64, i64, Vec[i64])](),
-        strings: map[str, i64](),
-        exposed: map[i64, bool](),
-        inst_depth: 0,
-        p_fn_names: map[str, i64](),
-        fn_over: map[str, Vec[i64]](),
-        p_fn_over: map[str, Vec[i64]](),
-        p_struct_names: map[str, i64](),
-        p_enum_names: map[str, i64](),
-        scope_prelude: false,
         entry_file: 0xFFFF,
-        lazy_files: map[i64, bool](),
-        priv_decls: map[str, Pos](),
-        const_kind: map[str, i64](),
-        const_mems: map[str, (i64, i64)](),
-        embeds: map[str, str](),
-        p_variants: map[str, Vec[(i64, i64)]](),
-        decl_layers: map[str, i64](),
-        located: map[i64, i64](),
     }
     names := map[str, Pos]()
     // is the visible declaration of a name a function?
     names_fn := map[str, bool]()
     // the layers (1 = prelude, 2 = user) in which a name is a struct
     struct_layers := map[str, i64]()
-    for i in 0..len(decls) {
+    decls: for i in 0..len(decls) {
         name: str
         pos: Pos
         // 1 = function, 2 = struct, 3 = enum, 4 = constant, 5 = global
@@ -302,26 +265,13 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
             was_fn, was_known := names_fn.get(name)
             if kind == 1 && was_known && was_fn {
                 // another definition of a function name: an overload, chosen by argument type
-                l: Vec[i64]
-                has_layer := false
-                if pos.file < np {
-                    l, has_layer = cx.p_fn_over.get(name)
-                } else {
-                    l, has_layer = cx.fn_over.get(name)
-                }
-                dup := -1
-                if has_layer {
-                    for k in 0..l.len {
-                        if lower_new_sig(cx.fn_decls[l[k]]) == lower_new_sig(fp) {
-                            dup = l[k]
-                            break
-                        }
+                sig := lower_new_sig(fp)
+                for k in (if pos.file < np { &cx.p_fn_over } else { &cx.fn_over }).get_or(name, Vec[i64]{}) {
+                    if lower_new_sig(cx.fn_decls[k]) == sig {
+                        at := cx.pos_str(cx.fn_decls[k].pos)
+                        cx.err(pos, fmt("`", name, "` is already declared with these parameter types at ", at))
+                        continue decls
                     }
-                }
-                if dup >= 0 {
-                    at := cx.pos_str(cx.fn_decls[dup].pos)
-                    cx.err(pos, fmt("`", name, "` is already declared with these parameter types at ", at))
-                    continue
                 }
             } else if prev.file < np && pos.file >= np {
                 // a user declaration shadows a prelude declaration of the same name; types
@@ -346,50 +296,46 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
         if kind == 2 {
             struct_layers.set(name, struct_layers.get_or(name, 0) | (if pos.file < np { 1 } else { 2 }))
         }
-        if kind == 1 {
-            di := cx.fn_decls.len
-            if pos.file < np {
-                if !cx.p_fn_names.has(name) {
-                    cx.p_fn_names.set(name, di)
+        match kind {
+            1 => {
+                di := cx.fn_decls.len
+                if pos.file < np {
+                    if !cx.p_fn_names.has(name) {
+                        cx.p_fn_names.set(name, di)
+                    }
+                    l, _ := cx.p_fn_over.get(name)
+                    l.push(di)
+                    cx.p_fn_over.set(name, l)
+                    if !cx.fn_names.has(name) {
+                        cx.fn_names.set(name, di)
+                    }
+                } else {
+                    // the first user definition is what the plain name refers to
+                    if !cx.fn_over.has(name) {
+                        cx.fn_names.set(name, di)
+                    }
+                    l, _ := cx.fn_over.get(name)
+                    l.push(di)
+                    cx.fn_over.set(name, l)
                 }
-                l, has_l := cx.p_fn_over.get(name)
-                if !has_l {
-                    l = vec[i64]()
-                }
-                l.push(di)
-                cx.p_fn_over.set(name, l)
-                if !cx.fn_names.has(name) {
-                    cx.fn_names.set(name, di)
-                }
-            } else {
-                // the first user definition is what the plain name refers to
-                if !cx.fn_over.has(name) {
-                    cx.fn_names.set(name, di)
-                }
-                l, has_l := cx.fn_over.get(name)
-                if !has_l {
-                    l = vec[i64]()
-                }
-                l.push(di)
-                cx.fn_over.set(name, l)
+                cx.fn_decls.push(fp)
             }
-            cx.fn_decls.push(fp)
-        } else if kind == 2 {
-            if pos.file < np {
-                cx.p_struct_names.set(name, cx.struct_decls.len)
+            2 => {
+                if pos.file < np {
+                    cx.p_struct_names.set(name, cx.struct_decls.len)
+                }
+                cx.struct_names.set(name, cx.struct_decls.len)
+                cx.struct_decls.push(sp)
             }
-            cx.struct_names.set(name, cx.struct_decls.len)
-            cx.struct_decls.push(sp)
-        } else if kind == 3 {
-            if pos.file < np {
-                cx.p_enum_names.set(name, cx.enum_decls.len)
+            3 => {
+                if pos.file < np {
+                    cx.p_enum_names.set(name, cx.enum_decls.len)
+                }
+                cx.enum_names.set(name, cx.enum_decls.len)
+                cx.enum_decls.push(ep)
             }
-            cx.enum_names.set(name, cx.enum_decls.len)
-            cx.enum_decls.push(ep)
-        } else if kind == 4 {
-            cx.const_decls.set(name, cp)
-        } else {
-            cx.global_decls.set(name, gp)
+            4 => cx.const_decls.set(name, cp)
+            _ => cx.global_decls.set(name, gp)
         }
     }
     // library functions with a twin that takes the place of the call (see `call_fn`)
@@ -414,40 +360,23 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
     for ei in 0..cx.enum_decls.len {
         e := cx.enum_decls[ei]
         layer := if e.pos.file < np { 1 } else { 2 }
-        for vi in 0..e.variants.len {
+        variants: for vi in 0..e.variants.len {
             vn := e.variants[vi].0
             if cx.decl_layers.get_or(vn, 0) & layer != 0 && struct_layers.get_or(vn, 0) & layer == 0 {
                 what := if cx.const_decls.has(vn) { "constant" } else if cx.global_decls.has(vn) { "global variable" } else if names_fn.get_or(vn, false) { "function" } else { "enum" }
                 cx.err(e.pos, fmt("variant `", vn, "` of enum `", e.name, "` has the name of the ", what, " `", vn, "` declared at ", cx.pos_str(names.get_or(vn, e.pos)), "; a variant can share its name with variants of other enums and with a struct, not with a function, constant, global variable or enum"))
                 continue
             }
-            dup := false
             for vj in 0..vi {
                 if e.variants[vj].0 == vn {
-                    dup = true
-                    break
+                    cx.err(e.pos, fmt("enum `", e.name, "` declares the variant `", vn, "` twice"))
+                    continue variants
                 }
             }
-            if dup {
-                cx.err(e.pos, fmt("enum `", e.name, "` declares the variant `", vn, "` twice"))
-                continue
-            }
-            l: Vec[(i64, i64)]
-            has_l := false
-            if layer == 1 {
-                l, has_l = cx.p_variants.get(vn)
-            } else {
-                l, has_l = cx.variants.get(vn)
-            }
-            if !has_l {
-                l = vec[(i64, i64)]()
-            }
+            vm := if layer == 1 { &cx.p_variants } else { &cx.variants }
+            l, _ := vm.get(vn)
             l.push((ei, vi))
-            if layer == 1 {
-                cx.p_variants.set(vn, l)
-            } else {
-                cx.variants.set(vn, l)
-            }
+            vm.set(vn, l)
         }
     }
     cx.index_names()
@@ -538,7 +467,7 @@ priv fn index_names(self: *Cx) {
 }
 
 // the entry of `names` for the name `n`, or nil if no declaration has that name
-fn named(self: *Cx, n: str) -> *SymNames {
+priv fn named(self: *Cx, n: str) -> *SymNames {
     id := ast_sym_find(n)
     if id < 0 || id >= self.names.len {
         return nil
@@ -717,12 +646,33 @@ fn internal_file(self: *Cx, file: i64) -> bool {
     return file < self.n_prelude || file == self.entry_file
 }
 
-fn pos_str(self: *Cx, p: Pos) -> str {
-    fname: str = "?"
-    if p.file >= 0 && p.file < self.file_names.len {
-        fname = self.file_names[p.file]
+// the name of file `f`, or `none` for an unknown file
+priv fn file_of(self: *Cx, f: i64, none: str) -> str {
+    if f >= 0 && f < self.file_names.len {
+        return self.file_names[f]
     }
+    return none
+}
+
+fn pos_str(self: *Cx, p: Pos) -> str {
+    fname := self.file_of(p.file, "?")
     return fmt(fname, ":", p.line, ":", p.col)
+}
+
+// the import slot of the extern function or variable `name`: a new 8-byte global
+priv fn got_global(self: *Cx, name: str) -> i64 {
+    got := self.module.globals.len
+    self.module.globals.push(Global{name: fmt("got.", ast_plain(name)), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), readonly: false})
+    return got
+}
+
+// the type environment of an instance: type parameter name -> type argument
+fn tparam_env(tparams: Vec[str], targs: Vec[i64]) -> Map[str, i64] {
+    env := map[str, i64]()
+    for i in 0..min(tparams.len, targs.len) {
+        env.set(tparams[i], targs[i])
+    }
+    return env
 }
 
 fn err(self: *Cx, pos: Pos, msg: str) {
@@ -866,18 +816,12 @@ priv fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
         name: name,
         decl: si,
         targs: clone(targs),
-        fields: vec[(str, i64)](),
-        offsets: vec[i64](),
-        size: 0,
         align: 1,
         state: 3,
     })
     ty := self.types.intern(Struct(sid))
     self.struct_insts.set((si, clone(targs).items()), ty)
-    env := map[str, i64]()
-    for i in 0..min(d.tparams.len, targs.len) {
-        env.set(d.tparams[i], targs[i])
-    }
+    env := tparam_env(d.tparams, targs)
     fields := vec[(str, i64)]()
     seen := map[str, bool]()
     save_scope := self.scope_prelude
@@ -928,7 +872,6 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
         name: name,
         decl: ei,
         targs: clone(targs),
-        variants: vec[(str, Vec[i64])](),
         simple: simple,
         size: ENUM_TAG,
         align: ENUM_TAG,
@@ -936,10 +879,7 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     })
     ty := self.types.intern(Enum(eid))
     self.enum_insts.set((ei, clone(targs).items()), ty)
-    env := map[str, i64]()
-    for i in 0..min(d.tparams.len, targs.len) {
-        env.set(d.tparams[i], targs[i])
-    }
+    env := tparam_env(d.tparams, targs)
     vars := vec[(str, Vec[i64])]()
     save_scope := self.scope_prelude
     self.scope_prelude = self.internal_file(d.pos.file)
@@ -1089,10 +1029,7 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     d := self.fn_decls[di]
     // too deep: the instance gets a signature but no body, whose lowering would instantiate further
     deep := self.inst_too_deep(d.name, targs, d.pos)
-    env := map[str, i64]()
-    for i in 0..min(d.tparams.len, targs.len) {
-        env.set(d.tparams[i], targs[i])
-    }
+    env := tparam_env(d.tparams, targs)
     save_scope := self.scope_prelude
     self.scope_prelude = self.internal_file(d.pos.file)
     ptys := vec[i64]()
@@ -1127,8 +1064,7 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
                 what := if target_os == TargetWindows { "pass integers, floats, pointers and structs" } else { "pass integers, floats and pointers" }
                 self.err(d.pos, fmt("extern function `", d.name, "`: ", tn, " cannot cross the C boundary (", what, ")"))
             }
-            got := self.module.globals.len
-            self.module.globals.push(Global{name: fmt("got.", ast_plain(d.name)), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), relocs: vec[(i64, RelocTarget)](), readonly: false})
+            got := self.got_global(d.name)
             f.ext = Some(self.module.externs.len)
             self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got})
         }
@@ -1190,7 +1126,6 @@ fn string_global(self: *Cx, s: str) -> i64 {
         size: len(s),
         align: 1,
         data: Some(vec_of(s)),
-        relocs: vec[(i64, RelocTarget)](),
         readonly: true,
     })
     if long {
@@ -1234,8 +1169,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
         Some(lib) => {
             // a C variable of a shared library: the program has only its import slot, which
             // the dynamic loader fills with the variable's address (no copy relocation)
-            got := self.module.globals.len
-            self.module.globals.push(Global{name: fmt("got.", ast_plain(d.name)), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), relocs: vec[(i64, RelocTarget)](), readonly: false})
+            got := self.got_global(d.name)
             self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got, data: true})
             self.ext_gots.set(got, true)
             self.globals.set(d.name, (ty, got))
@@ -1246,7 +1180,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
     size := self.types.size_of(ty)
     align := max(self.types.align_of(ty), 1)
     gid := self.module.globals.len
-    self.module.globals.push(Global{name: ast_plain(d.name), size: size, align: max(align, 8), data: None, relocs: vec[(i64, RelocTarget)](), readonly: false})
+    self.module.globals.push(Global{name: ast_plain(d.name), size: size, align: max(align, 8), data: None, readonly: false})
     self.globals.set(d.name, (ty, gid))
     match d.init {
         Some(init) => {
@@ -1389,13 +1323,8 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
             }
             match is_s {
                 Some(si) => return Some(self.inst_struct(si, targs, e.pos))
-                None => {}
+                None => return Some(self.inst_enum(is_e.unwrap(), targs, e.pos))
             }
-            match is_e {
-                Some(ei) => return Some(self.inst_enum(ei, targs, e.pos))
-                None => {}
-            }
-            panic("unwrap of None")
         }
         TypeE(t) => {
             return Some(self.resolve(t, env))
@@ -1447,16 +1376,11 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
             save_scope := self.scope_prelude
             self.scope_prelude = self.internal_file(d.pos.file)
             env := map[str, i64]()
-            match self.expr_type(c, &env) {
-                Some(t) => {
-                    match self.types.k(t) {
-                        Vec(_), Quat, Mat4 => {
-                            mem = true
-                        }
-                        _ => {}
-                    }
+            match self.types.k(self.expr_type(c, &env).or(T_ERR)) {
+                Vec(_), Quat, Mat4 => {
+                    mem = true
                 }
-                None => {}
+                _ => {}
             }
             self.scope_prelude = save_scope
             self.errs.truncate(saved)
@@ -1556,19 +1480,8 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
             return None
         }
     }
-    src := ""
-    if pos.file >= 0 && pos.file < self.file_names.len {
-        src = self.file_names[pos.file]
-    }
-    dir := ""
-    if starts_with(src, "<") {
-        std_dir, have := env_get("ALC_STD_DIR")
-        if have {
-            dir = std_dir
-        }
-    } else {
-        dir = lower_call_parent_dir(src)
-    }
+    src := self.file_of(pos.file, "")
+    dir := if starts_with(src, "<") { env_get("ALC_STD_DIR").0 } else { lower_call_parent_dir(src) }
     path := lower_call_path_join(dir, rel)
     cached, hit := self.embeds.get(path)
     if hit {
@@ -1611,12 +1524,11 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
     match d.ty {
         Some(t) => {
             env := map[str, i64]()
-            ty = Some(self.resolve(&t, &env))
-            match self.types.k(ty.unwrap()) {
-                Enum(_) => {
-                    want = ty.unwrap()
-                }
-                _ => {}
+            rt := self.resolve(&t, &env)
+            ty = Some(rt)
+            want = match self.types.k(rt) {
+                Enum(_) => rt
+                _ => -1
             }
         }
         None => {}
@@ -1701,7 +1613,7 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
 // A variant of a non-generic enum without data written as a value: `Os.Linux`, or a bare
 // `Linux` that the expected enum type `want` (-1: none) has or exactly one enum of this
 // layer (else of the other) has. (enum type, variant index)
-fn const_variant(self: *Cx, e: *Expr, want: i64) -> Opt[(i64, i64)] {
+priv fn const_variant(self: *Cx, e: *Expr, want: i64) -> Opt[(i64, i64)] {
     ei := -1
     vi := -1
     match e.k {
@@ -1807,28 +1719,15 @@ priv fn const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
         Add => return Some(Int(x + y))
         Sub => return Some(Int(x - y))
         Mul => return Some(Int(x * y))
-        Div => {
-            if y == 0 {
-                cx.err(pos, "division by zero in constant expression")
-                return None
-            }
-            if y == -1 {
-                // wrapping: MIN / -1 is MIN
-                return Some(Int(-x))
-            }
-            return Some(Int(x / y))
+        Div, Rem if y == 0 => {
+            cx.err(pos, "division by zero in constant expression")
+            return None
         }
-        Rem => {
-            if y == 0 {
-                cx.err(pos, "division by zero in constant expression")
-                return None
-            }
-            if y == -1 {
-                // wrapping: MIN % -1 is 0
-                return Some(Int(0))
-            }
-            return Some(Int(x % y))
-        }
+        // wrapping: MIN / -1 is MIN, MIN % -1 is 0
+        Div if y == -1 => return Some(Int(-x))
+        Rem if y == -1 => return Some(Int(0))
+        Div => return Some(Int(x / y))
+        Rem => return Some(Int(x % y))
         And => return Some(Int(x & y))
         Or => return Some(Int(x | y))
         Xor => return Some(Int(x ^ y))
@@ -1854,30 +1753,18 @@ priv fn const_int_ty(cx: *Cx, e: *Expr) -> Opt[i64] {
 
 // `t` if it is a number type
 priv fn const_only_num(cx: *Cx, t: Opt[i64]) -> Opt[i64] {
-    match t {
-        Some(ty) => {
-            match cx.types.k(ty) {
-                Int(_, _), F64, F32 => return t
-                _ => {}
-            }
-        }
-        None => {}
+    return match cx.types.k(t.or(T_ERR)) {
+        Int(_, _), F64, F32 => t
+        _ => None
     }
-    return None
 }
 
 // `r` wrapped to the integer type `t` (if any)
 priv fn const_wrap_t(cx: *Cx, t: Opt[i64], r: i64) -> i64 {
-    match t {
-        Some(ty) => {
-            match cx.types.k(ty) {
-                Int(bits, signed) => return wrap_int(r, bits, signed)
-                _ => {}
-            }
-        }
-        None => {}
+    return match cx.types.k(t.or(T_ERR)) {
+        Int(bits, signed) => wrap_int(r, bits, signed)
+        _ => r
     }
-    return r
 }
 
 // The value of a constant operator expression together with its number type (see
@@ -1885,14 +1772,11 @@ priv fn const_wrap_t(cx: *Cx, t: Opt[i64], r: i64) -> i64 {
 // rounded to f32.
 fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
     match e.k {
-        Ident(n) => {
-            if self.has_const(n) {
-                match self.const_named(n) {
-                    Some(x) => return (Some(x.1), const_only_num(self, x.0))
-                    None => return (None, None)
-                }
+        Ident(n) if self.has_const(n) => {
+            match self.const_named(n) {
+                Some(x) => return (Some(x.1), const_only_num(self, x.0))
+                None => return (None, None)
             }
-            return (None, None)
         }
         Un(op, x) => {
             xv, t := self.const_eval_t(x)
@@ -1931,14 +1815,9 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
             }
             match (x, y) {
                 (Int(xi), Int(yi)) => {
-                    match t {
-                        Some(ty) => {
-                            match self.types.k(ty) {
-                                Int(bits, signed) => return (const_bin_typed(self, op, xi, yi, bits, signed, e.pos), rt)
-                                _ => {}
-                            }
-                        }
-                        None => {}
+                    match self.types.k(t.or(T_ERR)) {
+                        Int(bits, signed) => return (const_bin_typed(self, op, xi, yi, bits, signed, e.pos), rt)
+                        _ => {}
                     }
                     return (const_bin_int(self, op, xi, yi, e.pos), rt)
                 }
@@ -2052,14 +1931,11 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         Float(f, _) => return Some(CV.Float(f))
         Bool(b) => return Some(CV.Bool(b))
         Str(s) => return Some(CV.Str(s))
-        Ident(n) => {
-            if self.has_const(n) {
-                match self.const_named(n) {
-                    Some(x) => return Some(x.1)
-                    None => return None
-                }
+        Ident(n) if self.has_const(n) => {
+            match self.const_named(n) {
+                Some(x) => return Some(x.1)
+                None => return None
             }
-            return None
         }
         Un(_, _), Bin(_, _, _) => return self.const_eval_t(e).0
         Call(c, args) => {
@@ -2085,16 +1961,13 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                     None => return None
                 }
                 // a u64 source: values >= 2^63 are held as negative i64
-                src_u64 := match const_int_ty(self, &args[0]) {
-                    Some(st) => st == T_U64
-                    None => false
-                }
+                src_u64 := const_int_ty(self, &args[0]) == Some(T_U64)
                 match (self.types.k(t), v) {
                     (Int(bits, signed), Int(i)) => return Some(CV.Int(wrap_int(i, bits, signed)))
                     (Int(64, false), Float(f)) => {
                         if f >= 9223372036854775808.0 {
                             // as at run time (also beyond 2^64)
-                            return Some(CV.Int(f64_to_i64(f - 9223372036854775808.0) ^ (-0x7FFFFFFFFFFFFFFF - 1)))
+                            return Some(CV.Int(f64_to_i64(f - 9223372036854775808.0) ^ I64_MIN))
                         }
                         return Some(CV.Int(f64_to_i64(f)))
                     }
@@ -2130,7 +2003,6 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                     }
                     _ => {}
                 }
-                return None
             }
             return None
         }
@@ -2230,16 +2102,11 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                             return false
                         }
                         match self.module.globals[g.1].data {
-                            Some(src) => {
-                                for i in 0..src.len {
-                                    data[off + i] = src[i]
-                                }
-                            }
+                            Some(src) => copy(data[off..], src.items())
                             None => {}
                         }
-                        srel := self.module.globals[g.1].relocs
-                        for i in 0..srel.len {
-                            relocs.push((off + srel[i].0, srel[i].1))
+                        for r in self.module.globals[g.1].relocs {
+                            relocs.push((off + r.0, r.1))
                         }
                         return true
                     }
@@ -2359,7 +2226,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
         (Bool, Bool(b)) => {
             data[off] = if b { u8(1) } else { u8(0) }
         }
-        (Enum(_), Variant(t, vi)) if t == ty => put_le(data, off, u64(vi), 4)
+        (Enum(_), Variant(t, vi)) if t == ty => put_le(data, off, u64(vi), ENUM_TAG)
         (Slice(T_U8), Str(s)) => {
             g := self.string_global(s)
             relocs.push((off, Global(g, 0)))
