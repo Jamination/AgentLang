@@ -111,6 +111,7 @@ A key that occurs twice keeps its last value.
 | `get_str(c: *Config, key: str, default: str) -> str` | The value as text. |
 | `get_i64(c: *Config, key: str, default: i64) -> i64` | The value as a decimal integer. |
 | `get_f64(c: *Config, key: str, default: f64) -> f64` | The value as a number. |
+| `get_f32(c: *Config, key: str, default: f32) -> f32` | The value as an `f32`, rounded once from the text. |
 | `get_bool(c: *Config, key: str, default: bool) -> bool` | `true`/`yes`/`on`/`1` or `false`/`no`/`off`/`0` (lower case). |
 
 Every getter returns `default` when the key is missing or its text does not parse as the
@@ -129,6 +130,7 @@ requested type, so a settings file only needs to list what differs from the defa
 | `count(v: *Json) -> i64` | Number of elements or members; 0 for anything else. |
 | `as_str(v: *Json, default: str) -> str` | The string, or `default` if `v` is not a string. |
 | `as_f64(v: *Json, default: f64) -> f64` | The number, or `default` if `v` is not a number. |
+| `as_f32(v: *Json, default: f32) -> f32` | The number as an `f32`, rounded once from the text as written. |
 | `as_i64(v: *Json, default: i64) -> i64` | The number as an integer: exact for integer literals (all 64 bits), truncated toward zero otherwise; `default` if `v` is not a number or the number lies outside the range of `i64` (`1e19`, `-1e400`), like the other accessors for a value they cannot represent. |
 | `as_bool(v: *Json, default: bool) -> bool` | The boolean, or `default` if `v` is not a boolean. |
 | `is_null(v: *Json) -> bool` | True if `v` is a JSON `null` (false for `nil`, i.e. for a missing value). |

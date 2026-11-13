@@ -63,6 +63,7 @@ simulation advances in steps of constant length. Physics then behaves the same a
 | `struct FixedStep { step: f64, acc: f64, max_steps: i64, steps: i64 }` | `step`: seconds per simulation step. `acc`: time not yet simulated (less than `step` after `advance`). `max_steps`: cap on steps per `advance`, 8 unless changed. `steps`: total steps handed out. |
 | `fixed_step(hz: f64) -> FixedStep` | An accumulator for `hz` simulation steps per second. |
 | `advance(f: *FixedStep, dt: f64) -> i64` | Adds the frame time and returns how many steps to run now, from 0 to `max_steps`. |
+| `fixed_step(hz: f32)`, `advance(f: *FixedStep, dt: f32)`, `timer(seconds: f32, repeat: bool)`, `tick(t: *Timer, dt: f32)` | The same for `f32` arguments (a bare literal is one): converted exactly to `f64`, in which the time is kept. `timer(0.1, true)` thus has the period of the `f32` nearest to 0.1; write `timer(f64(0.1), true)` for the `f64` one. |
 | `alpha(f: *FixedStep) -> f32` | How far the current frame lies between the last two simulation states, in `[0, 1)`: draw `lerp(previous, current, alpha)`. |
 
 ```

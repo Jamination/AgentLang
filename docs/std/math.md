@@ -5,7 +5,7 @@ functions on the built-in types, geometry tests, easing curves and colour helper
 is written in AL: no libm, so programs stay static.
 
 Every function exists for each type it makes sense for; the call picks by argument type
-(`length(v2)`, `length(v3)`, `sin(x32)`, `sin(x64)`). A literal next to an `f32` is an `f32`.
+(`length(v2)`, `length(v3)`, `sin(x32)`, `sin(x64)`). A float literal is an `f32` unless an `f64` is expected (`sin(1.0)` is the `f32` routine, `sin(y * 2.0)` with an `f64` `y` the `f64` one).
 
 ```
 // examples/math_demo.al

@@ -72,7 +72,7 @@ test "areas" {
 - Integer literals: `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17`. A character literal (`'a'`,
   `'\n'`, `'\''`, `'\x41'`) is an integer literal with the byte's value: `c: u8 = 'a'`,
   `s[i] == 'a'`; `c := 'a'` is an `i64`.
-- Float literals: `1.5`, `1e9`, `2.5e-3` (digits on both sides of the point); IEEE rounding: `1e999` is `inf`.
+- Float literals: `1.5`, `1e9`, `2.5e-3` (digits on both sides of the point), rounded once from the text to their type: `1e999` is `inf`.
 - String literals: `"text"`. Escapes in strings and characters: `\n \t \r \0 \\ \" \' \xHH`.
   A string is a `str` (`[]u8`, bytes, not characters); literals are read-only.
 - Raw string literals: text between backquotes, taken as is (no escapes), may span lines.
@@ -82,7 +82,7 @@ test "areas" {
 | Type | Meaning |
 |------|---------|
 | `i8 i16 i32 i64`, `u8 u16 u32 u64` | integers; arithmetic wraps around |
-| `f64`, `f32` | IEEE-754 double / single |
+| `f32`, `f64` | IEEE-754 single / double; `f32` is the default of a float literal, `f64` where precision matters |
 | `bool` | `true` / `false` |
 | `*T` | pointer to `T` (may be `nil`) |
 | `[]T` | slice: pointer + length, a view of elements stored elsewhere; `nil` and `[]T{}` are empty slices |
@@ -96,9 +96,10 @@ test "areas" {
 - **No implicit conversions.** Both operands of an operator must have the same type. Untyped
   numeric literals take the type the context asks for (`x: u8 = 200`, `x * 2`, `f(3)`), also
   through the branches of an `if` / `match` used as a value (`x: u8 = if c { 1 } else { 2 }`);
-  without context an integer literal is `i64`, a float literal `f64`. An integer literal is
-  accepted where a float is expected (`d: f64 = 5`). A decimal literal must fit its type (not
-  `x: u8 = -1`); hex, binary, octal, character literals may be bit patterns (`x: i8 = 0xFF`).
+  without context an integer literal is `i64`, a float literal **`f32`**: `x := 0.1` is an
+  `f32`; `x: f64 = 0.1`, `f64(0.1)` and `y * 0.1` (`y` an `f64`) use the f64 nearest to 0.1. An
+  integer literal is accepted where a float is expected (`d: f64 = 5`). A decimal literal must
+  fit its type (not `x: u8 = -1`); hex, binary, octal, character literals may be bit patterns (`x: i8 = 0xFF`).
 - **Conversions** are written like calls: `i64(x)`, `u8(x)`, `f64(n)`. Integer to a narrower
   type keeps the low bits; to a wider type the *source* type decides: a signed source is
   sign-extended, an unsigned one zero-extended (`i64(u8(200))` is 200, `u64(i8(-1))` is
@@ -696,12 +697,12 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 
 **How values print** (`print`, `put`, `fmt`): integers in decimal (a `u8` too: `put(s[0])` writes
 `104`; a character is written with `putc(c)` or as the slice `s[i..i + 1]`); floats as the shortest
-text that reads back exactly, always with a point or an exponent (`3.0`, `0.1`, `100.0`, `1e21`,
-`1e-7`, `inf`, `nan`; for a fixed number of decimals `fmtf(x, 2)`); `bool` as `true` / `false`;
-`str` as its text, without quotes, also inside other values; other slices and arrays as `[a, b]`;
-structs as `Name{field: value}`; tuples as `(a, b)`; enums as `Variant(fields)`; a `Map` as
-`{key: value, key: value}` in insertion order; pointers as hexadecimal addresses. Print a `Vec` as
-`v[..]` (`print(v)` shows the struct with its whole buffer).
+text that reads back exactly in their type, always with a point or an exponent (`3.0`, `1e21`,
+`inf`, `nan`; `1.0 / 3.0` is `0.33333334`, as an `f64` `0.3333333333333333`; fixed decimals:
+`fmtf(x, 2)`); `bool` as `true` / `false`; `str` as its text, without quotes, also inside other
+values; other slices and arrays as `[a, b]`; structs as `Name{field: value}`; tuples as `(a, b)`;
+enums as `Variant(fields)`; a `Map` as `{key: value, key: value}` in insertion order; pointers as
+hexadecimal addresses. Print a `Vec` as `v[..]` (`print(v)` shows the struct with its whole buffer).
 
 ## Standard library
 
@@ -714,15 +715,14 @@ including the math, random and time functions described in [STDLIB.md](STDLIB.md
 //      64 KiB have gathered. A closed pipe ends the program (SIGPIPE, as in Unix tools); any other error writing standard
 //      output stops it with `panic: cannot write to standard output: ...`; errors writing standard error are ignored
 putc(c: u8)    flush()                     // one byte; write the buffered output now (before waiting or reading a reply)
-putf(x: f64, digits: i64)    fmtf(x: f64, digits: i64) -> str   // fixed notation like C "%.Nf": fmtf(3.14159, 2) is "3.14"; digits < 0: assertion failure
-fmtf(x: f64, digits: i64, width: i64) -> str   // the same, right-aligned in width characters: fmtf(3.14159, 2, 8) is "    3.14"
+putf(x: f64, digits: i64)    fmtf(x: f64, digits: i64) -> str   // fixed notation like C "%.Nf": fmtf(3.14159, 2) is "3.14"; digits < 0: assertion failure; also for f32 (its exact value)
+fmtf(x: f64, digits: i64, width: i64) -> str   // the same, right-aligned in width characters: fmtf(3.14159, 2, 8) is "    3.14"; also for f32
 eprint(s: str)    eput(s: str)             // s to standard error, unbuffered, with / without a newline: eprint(fmt("bad: ", x))
 exit(code: i64) -> never                   // flush, end the program with this exit status
 
 // ---- numbers
 min(a: T, b: T) -> T    max(a: T, b: T) -> T    abs(x: T) -> T   // min / max: any numeric type or str (both arguments the same type), NaN if either is NaN; abs: any signed integer or float type
-swap(a: *T, b: *T)                         // swap(&x, &y), swap(&v[i], &v[j])
-floor(x: f64) -> f64   ceil(x: f64) -> f64   round(x: f64) -> f64   pow(x: f64, y: f64) -> f64   fmod(x: f64, y: f64) -> f64   sin cos tan atan2 exp log ...: std/math.md
+swap(a: *T, b: *T)    floor ceil round trunc pow fmod sin cos tan atan2 exp log ...   // swap(&x, &y), swap(&v[i], &v[j]); the math functions exist for f32 and f64 (the argument type picks one): std/math.md
 clock_ns() -> i64                          // monotonic clock in nanoseconds; there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
 
 // ---- slices (for a Vec pass v[..])
@@ -782,7 +782,7 @@ hex(x: u64) -> str    hex(x: u64, width: i64) -> str   // lower case, no prefix:
 to_base(x: u64, base: i64) -> str          // the digits in base 2..36 (0-9, a-z), no prefix: to_base(5, 2) is "101"; any other base: panic
 parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits (no spaces, no 0x, no _) and fit in an i64; else (0, false)
 parse_i64(s: str, base: i64) -> (i64, bool)   // the same in base 2..36 (letters of either case; no prefix): parse_i64("ff", 16). Base 0: 0x / 0b / 0o after the sign decide, else decimal ("-0x1F", "017" is 17); other bases: panic
-parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan
+parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan. parse_f32: the same to f32, rounded once from the text
 is_digit(c: u8) -> bool   is_alpha  is_alnum  is_upper  is_lower  is_space: the same   // ASCII; '_' is none of them; is_space: the white space of trim
 
 // ---- Opt[T]: a value that may be absent.  enum Opt[T] { None, Some(T) }  (zero value: None)
@@ -869,10 +869,10 @@ Everything else is checked. These are not:
 ## f32, vectors, matrices
 
 `vec2 vec3 vec4` are vectors of 2 / 3 / 4 `f32` (C-compatible: 8 / 12 / 16 bytes), `quat` is
-`(x, y, z, w)`, `mat4` four `vec4` columns. A literal next to an `f32` or a vector is an `f32`.
+`(x, y, z, w)`, `mat4` four `vec4` columns. A float literal is an `f32` unless an `f64` is expected.
 
 ```
-x: f32 = 1.5                     // literals adapt; f32 and f64 never mix: f32(n), f64(x)
+x := 1.5                         // an f32 (the default); f32 and f64 never mix: f32(n), f64(x)
 a := vec3(1.0, 2.0, 3.0)         // constructors: components, vec3(0.5) for all lanes, vec4(a, 1.0)
 c := a + a * 2.0 - a / a         // + - * / work lane-wise; a vector combines with an f32
 a.y = 4.0                        // components x y z w (or r g b a), a[i]; swizzles (read-only): a.zyx

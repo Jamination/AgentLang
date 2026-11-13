@@ -2,7 +2,7 @@
 //
 // f32 first: every scalar function exists for f32 and f64 and is chosen by the argument type
 // (`sin(x)` with an f32 `x` is the single-precision routine; a bare literal such as `sin(1.0)`
-// is f64 unless an f32 is expected). Vector, quaternion and matrix functions work on the
+// is f32, the default of a float literal, unless an f64 is expected). Vector, quaternion and matrix functions work on the
 // built-in `vec2 vec3 vec4 quat mat4`.
 //
 // Conventions: angles are radians. Coordinates are right-handed, view space looks down -Z,

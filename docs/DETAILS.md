@@ -7,7 +7,7 @@ method calls and nested functions, bounds checks, region limits, `clone` cost, C
 the grammar.
 
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
-[Enum variants](#enum-variants) · [Constants](#constants) · [priv](#priv) ·
+[Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
 [Method calls](#method-calls) · [Bounds checks](#bounds-checks) · [Regions](#regions) ·
 [clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Grammar](#grammar)
@@ -17,7 +17,8 @@ Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 - A call looks at the receiver (`x.f()`) and then at the arguments from left to right until one
   definition is left: a typed argument must have the parameter's type, an untyped literal must
   be acceptable to it. If literals leave a tie, the definition whose parameters are the
-  literals' default types (`i64`, `f64`) wins, unless another one returns the expected type.
+  literals' default types (`i64`, `f32`) wins, unless another one returns the expected type
+  (`floor(2.5)` is the `f32` one, `floor(x)` with an `f64` `x` the `f64` one).
   User definitions are considered before library definitions of the same name.
 - A function may have the name of a builtin (`len`, `ptr`, `clone`, `hash`, `print`, `fmt`,
   `sqrt`, ...). A call (also `x.f(a)`) uses the declared functions first, by the overloading
@@ -123,6 +124,42 @@ fn main() {
     t[0] = 100
     table[0] = 9
     print(t, table, TABLE[1..3])           // [100, 2, 4, 8] [9, 2, 4, 8] [2, 4]
+}
+```
+
+## Float literals
+
+An untyped float (a literal, a constant declared without a type whose value has none, or a
+constant expression of them) takes the float type its context expects; without one it is an
+`f32`. Integer literals keep `i64` as their default.
+
+- **Expected types** are those of untyped integers: a declared variable, an assignment, an
+  argument, a returned value, a field, an element, a payload, a conversion `f64(..)`. An
+  untyped operand takes the type of the other operand (`y * 0.1`), an untyped `if` branch or
+  `match` arm the type of the other branches (`if c { 0.0 } else { y }`), also when the untyped
+  side is an `if` of untyped values or the builtin `sqrt` / `fabs` / `fmin` / `fmax` of untyped
+  arguments (`sqrt(2.0) * y`). In a generic call a literal binds `T` to `f32` (`max(1.5, 2.5)`);
+  with overloads it prefers the `f32` definition.
+- **Rounding.** A literal is rounded once from its text to the type it gets: `f64(0.1)` is the
+  f64 nearest to 0.1, `x := 0.1` the f32 nearest to it (not the f64 rounded again). A constant
+  expression (`1.0 / 3.0` in a `const`) is computed in f64 and then rounded to f32 where an f32
+  is needed; written in an expression with no `f64` in it, the same operation is done in f32.
+- **Typed constants.** A constant whose value has a type is typed even without an annotation:
+  `const DT = f64(1) / 60.0` is an `f64` (an operation with a typed operand has its type), so
+  `x := DT` is an `f64`. `const PI = 3.141592653589793` stays untyped: `f32` alone, `f64` next
+  to an `f64`.
+- **To an integer.** Converting an untyped float to an integer uses its exact value, as a
+  constant does: `i64(16777217.0)` is 16777217 (the f32 nearest to it would be 16777216).
+
+```
+const H = 1.00000005960464477539062500000001
+
+fn main() {
+    y: f64 = 2.0
+    a := 0.1                                 // f32
+    b := if y > 1.0 { 0.5 } else { y }       // f64: the other branch
+    print(a, f64(a), y * 0.1, b, sqrt(2.0) * y, H, f64(H), i64(16777217.0))
+    // 0.1 0.10000000149011612 0.2 0.5 2.8284271247461903 1.0000001 1.0000000596046448 16777217
 }
 ```
 

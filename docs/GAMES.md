@@ -34,6 +34,12 @@ while !w.should_close() {
   `key_down(KEY_SPACE)`; bindings are data.
 - **Headless first.** `update` and `render` need no window. Drive them with scripted `Event`s
   fed to an `Input` and compare a checksum: that is a regression test for the whole game.
+- **`f32` by default, `f64` where precision matters.** A float literal without a type from its
+  context is an `f32`, the type of `vec2`..`mat4`, of GPU data and of the math functions game
+  code calls (`speed := 4.5`, `sin(angle)`, `lerp(a, b, 0.25)`). Keep `f64` (declared:
+  `t: f64 = 0.0`) for absolute time, long-running accumulators, money-like totals and large
+  world coordinates; `frame_clock`, `FixedStep` and `Timer` keep their time in `f64` and accept
+  an `f32` `dt` or period too. Convert at the boundary: `f32(steps.step)`, `f64(x)`.
 
 ## Entities: fat structs and tagged unions
 
