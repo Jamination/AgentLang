@@ -61,9 +61,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         f := &m.funcs[fid]
         // everything up to the machine code of this function is temporary (see work_begin)
         work_begin()
-        cleanup_prune_unreachable(f)
-        cleanup_trivial_phis(f)
-        cleanup_dce(f)
+        opt_backend_cleanup(f, fid)
         aliases := isel_split_critical_edges(f)
         // the loops (a function without a cycle has none: no need for dominators)
         rpo := f.rpo()

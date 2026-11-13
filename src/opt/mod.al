@@ -118,11 +118,12 @@ priv fn keep_func(f: *Func) {
 
 // ---------- passes that cannot change anything are not run ----------
 // Every pass is a function of the IR of the function and tells whether it changed it (also for
-// what the passes it calls do; unroll_run and bce_run may add preheaders without saying so and
-// count as a change). `sk_gen` counts the changes; a pass that reported no change when it was
-// last run at the current count would report no change again: it is skipped.
+// what the passes it calls do; unroll_run and bce_run may add preheaders without saying so:
+// a preheader made counts as a change). `sk_gen` counts the changes; a pass that reported no
+// change when it was last run at the current count would report no change again: it is
+// skipped. Some passes are also known to be clean after a change (see opt_pass).
 priv sk_gen: i64
-priv sk_clean: [16]i64 // sk_gen + 1 when pass k last reported no change
+priv sk_clean: [16]i64 // sk_gen + 1 when pass k is known to change nothing
 
 // keys of the passes (simplify_run's parts use 7..9)
 const PASS_PRUNE = 0
@@ -132,16 +133,39 @@ const PASS_GVN = 3
 const PASS_CHECKMERGE = 4
 const PASS_LOADELIM = 5
 const PASS_LICM = 6
+const PASS_CFG = 8
+const PASS_PHIS = 9
 
 fn opt_pass(k: i64, f: *Func, p: fn(*Func) -> bool) -> bool {
     if sk_clean[k] == sk_gen + 1 {
         return false
     }
+    prune_clean := sk_clean[PASS_PRUNE] == sk_gen + 1
     if p(f) {
         sk_gen += 1
+        now := sk_gen + 1
+        // passes that leave nothing for a second run of themselves
+        if k == PASS_PRUNE || k == PASS_DCE || k == PASS_PHIS {
+            sk_clean[k] = now
+        }
+        if k == PASS_MEM2REG && mem2reg_settled() {
+            // its last change ended with trivial phis and DCE (DCE removes no input of a live
+            // phi), then a round found nothing; it keeps the CFG and the phi blocks of the
+            // phis there are, and gives its phis the predecessors: a pruned function stays so
+            sk_clean[PASS_MEM2REG] = now
+            sk_clean[PASS_PHIS] = now
+            sk_clean[PASS_DCE] = now
+            if prune_clean {
+                sk_clean[PASS_PRUNE] = now
+            }
+        }
         return true
     }
     sk_clean[k] = sk_gen + 1
+    if k == PASS_CFG {
+        // simplify_cfg begins with prune: it found nothing either
+        sk_clean[PASS_PRUNE] = sk_gen + 1
+    }
     return false
 }
 
@@ -223,8 +247,12 @@ priv fn local_opt(f: *Func, level: i64) {
         if !opt_enabled("unroll") {
             break
         }
+        made := licm_preheaders_made()
         unrolled := unroll_run(f)
-        sk_forget()
+        // (preheaders change the function without being reported)
+        if unrolled || licm_preheaders_made() != made {
+            sk_forget()
+        }
         if !unrolled {
             break
         }
@@ -266,8 +294,11 @@ priv fn local_opt(f: *Func, level: i64) {
         if !opt_enabled("bce") {
             break
         }
+        made := licm_preheaders_made()
         hoisted := bce_run(f)
-        sk_forget()
+        if hoisted || licm_preheaders_made() != made {
+            sk_forget()
+        }
         if !hoisted {
             break
         }
@@ -289,6 +320,22 @@ priv fn local_opt(f: *Func, level: i64) {
 // (see opt_pass) at its end (the function does not change until its local_opt)
 priv first_done: Vec[bool]
 priv clean_at: Vec[i64]
+// clean_end[fid]: the passes that are clean when the optimisation of the function is over (it
+// does not change until the back end compiles it; one module per run of the compiler)
+priv clean_end: Vec[i64]
+
+// The cleanups the back end runs first (prune, trivial phis, DCE), each skipped where the
+// optimiser left the function clean for it.
+fn opt_backend_cleanup(f: *Func, fid: i64) {
+    bits := 0
+    if fid < clean_end.len {
+        bits = clean_end[fid]
+    }
+    sk_restore(bits)
+    opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
+    opt_pass(PASS_PHIS, f, cleanup_trivial_phis)
+    opt_pass(PASS_DCE, f, cleanup_dce)
+}
 
 // The first part of the optimisation of one function, also callable right after the function
 // is lowered (opt_optimize then skips it): prune, mem2reg, dce and, when optimising, simplify
@@ -299,6 +346,7 @@ fn opt_first(m: *Module, fid: i64, level: i64) {
     if first_done.len < m.funcs.len {
         first_done.resize(m.funcs.len, false)
         clean_at.resize(m.funcs.len, 0)
+        clean_end.resize(m.funcs.len, 0)
     }
     f := &m.funcs[fid]
     if !f.lowered || first_done[fid] {
@@ -321,6 +369,8 @@ fn opt_first(m: *Module, fid: i64, level: i64) {
             simplify_run(f)
         }
         clean_at[fid] = sk_save()
+    } else {
+        clean_end[fid] = sk_save()
     }
     // keep the function, drop the passes' temporary data (see work_begin in base.al)
     ir_memo_end()
@@ -402,6 +452,7 @@ fn opt_optimize(m: *Module, level: i64) {
             }
             ir_memo_end()
             work_end()
+            clean_end[fid] = sk_save()
             keep_func(&m.funcs[fid])
         }
         done[fid] = true

@@ -85,11 +85,20 @@ priv inline fn put(l: *Vec[i64], x: i64) {
     }
 }
 
+// the last mem2reg_run ended with a round that changed nothing (not at its round limit)
+priv settled: bool
+
+fn mem2reg_settled() -> bool {
+    return settled
+}
+
 fn mem2reg_run(f: *Func) -> bool {
     any := false
+    settled = false
     for it in 0..8 {
         // (only the first round sees the IR the pass began with)
         if !run_once(f, it == 0) {
+            settled = true
             break
         }
         any = true

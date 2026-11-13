@@ -2072,11 +2072,11 @@ fn simplify_run(f: *Func) -> bool {
             ch = true
         }
         opt_trace("  cfg", f)
-        if opt_pass(8, f, simplify_cfg) {
+        if opt_pass(PASS_CFG, f, simplify_cfg) {
             ch = true
         }
         opt_trace("  phis", f)
-        if opt_pass(9, f, cleanup_trivial_phis) {
+        if opt_pass(PASS_PHIS, f, cleanup_trivial_phis) {
             ch = true
         }
         opt_trace("  dce", f)
