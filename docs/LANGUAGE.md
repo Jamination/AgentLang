@@ -113,7 +113,8 @@ test "areas" {
   a pointer: `p := &v[0]`, `p.x = 10`. (A copy of a field or element that is only ever assigned
   to and never read is reported as a compile error.)
 - Every type has a zero value (0, `false`, `nil`, empty slice, the first variant of an enum, all
-  fields zero); `x: T` declares a zeroed variable. Layout follows the C rules; `sizeof[T]()` is the size in bytes.
+  fields zero); `x: T` declares a zeroed variable. `sizeof[T]()` is the size in bytes. Layout
+  follows the C rules; an enum is a 1-byte tag (2 bytes beyond 256 variants), then the payload.
 
 ## Declarations
 
@@ -414,9 +415,8 @@ fn main() {
 - **Bindings.** `name` holds a copy; assigning to it does not change the matched value. `&name`
   points at the part inside the matched value, to modify it in place (match on a place: a
   variable, `x.f`, `a[i]`, `*p`).
-- **Pointers.** A variant or tuple pattern also matches a *pointer* to an enum or tuple, if the
-  pointer is not `nil` and the value it points to matches. `nil` is matched by the constant
-  `nil` or `_`.
+- **Pointers.** A variant or tuple pattern also matches a *pointer* to an enum or tuple, if it is
+  not `nil` and the value it points to matches. `nil` is matched by the constant `nil` or `_`.
 - **Alternatives** (`p1, p2 => body`) must bind the same names with the same types. A **guard**
   (`pattern if cond => body`) is evaluated after the pattern matched; if it is false, matching
   continues with the next arm.
