@@ -1,17 +1,10 @@
 // Redundant load elimination, store-to-load forwarding and local dead store elimination.
 
 priv struct Avail {
-    ptr: i64,
-    mref_addr: Addr,
-    size: i64,
-    class: i64,
+    m: MemRef,
     ty: T,
     val: i64,
-    pending_store: Opt[i64], // a store not yet observed by any possible reader
-}
-
-priv fn mr(a: *Avail) -> MemRef {
-    return MemRef{addr: a.mref_addr, size: a.size, class: a.class, ptr: a.ptr}
+    pending_store: i64, // a store not yet observed by any possible reader (NOV: none)
 }
 
 priv fn run_find(repl: []i64, v0: i64) -> i64 {
@@ -26,20 +19,35 @@ fn loadelim_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     esc := alias_escaped_allocas(f)
     repl := vec_fill(f.insts.len, NOV)
-    dead := vec_fill(f.insts.len, false)
+    dead := alloc[bool](f.insts.len)
     changed := false
-    // state at the end of each block, reused by a child that has that block as its only predecessor
+    // state at the end of each block, reused by a child that has that block as its only
+    // predecessor; `left[p]`: such children of p not yet visited (the last one takes the state
+    // instead of a copy)
+    nb := f.blocks.len
+    left := alloc[i64](nb)
+    for b in cfg.rpo {
+        if cfg.preds[b].len == 1 {
+            left[cfg.preds[b][0]] += 1
+        }
+    }
     no_state: Opt[Vec[Avail]] = None
-    out_state := vec_fill(f.blocks.len, no_state)
+    out_state := vec_fill(nb, no_state)
     for b in cfg.rpo {
         st := vec[Avail]()
         if cfg.preds[b].len == 1 {
             p := cfg.preds[b][0]
+            left[p] -= 1
             match out_state[p] {
                 Some(s) => {
-                    st = clone(s)
+                    if left[p] == 0 {
+                        st = s
+                        out_state[p] = None
+                    } else {
+                        st = clone(s)
+                    }
                     for k in 0..st.len {
-                        st[k].pending_store = None
+                        st[k].pending_store = NOV
                     }
                 }
                 None => {}
@@ -58,36 +66,27 @@ fn loadelim_run(f: *Func) -> bool {
             if op == Load {
                 m := alias_memref(f, v)
                 ty := f.insts[v].ty
-                hit: Opt[i64] = None
+                hit := NOV
                 for k in 0..st.len {
                     a := &st[k]
-                    if a.ty == ty {
-                        am := mr(a)
-                        if alias_must_alias(&am, &m) {
-                            hit = Some(a.val)
-                            break
-                        }
+                    if a.ty == ty && alias_must_alias(&a.m, &m) {
+                        hit = a.val
+                        break
                     }
                 }
-                match hit {
-                    Some(val) => {
-                        repl[v] = val
-                        dead[v] = true
-                        changed = true
-                    }
-                    None => {
-                        // this load observes any aliasing pending store
-                        for k in 0..st.len {
-                            a := &st[k]
-                            if is_some(a.pending_store) {
-                                am := mr(a)
-                                if alias_may_alias(&am, &m, esc.items()) {
-                                    a.pending_store = None
-                                }
-                            }
+                if hit != NOV {
+                    repl[v] = hit
+                    dead[v] = true
+                    changed = true
+                } else {
+                    // this load observes any aliasing pending store
+                    for k in 0..st.len {
+                        a := &st[k]
+                        if a.pending_store != NOV && alias_may_alias(&a.m, &m, esc.items()) {
+                            a.pending_store = NOV
                         }
-                        st.push(Avail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: v, pending_store: None})
                     }
+                    st.push(Avail{m: m, ty: ty, val: v, pending_store: NOV})
                 }
             } else if op == Store {
                 m := alias_memref(f, v)
@@ -96,33 +95,26 @@ fn loadelim_run(f: *Func) -> bool {
                 // a previous unobserved store to exactly this location is dead
                 for k in 0..st.len {
                     a := &st[k]
-                    match a.pending_store {
-                        Some(s) => {
-                            am := mr(a)
-                            if alias_must_alias(&am, &m) {
-                                dead[s] = true
-                                changed = true
-                            }
-                        }
-                        None => {}
+                    if a.pending_store != NOV && alias_must_alias(&a.m, &m) {
+                        dead[a.pending_store] = true
+                        changed = true
                     }
                 }
-                // st.retain(|a| !may_alias(&mr(a), &m, &esc))
+                // st.retain(|a| !may_alias(&a.m, &m, &esc))
                 n := 0
                 for k in 0..st.len {
-                    am := mr(&st[k])
-                    if !alias_may_alias(&am, &m, esc.items()) {
+                    if !alias_may_alias(&st[k].m, &m, esc.items()) {
                         st[n] = st[k]
                         n += 1
                     }
                 }
                 st.len = n
-                st.push(Avail{ptr: m.ptr, mref_addr: m.addr, size: m.size, class: m.class, ty: ty, val: val, pending_store: Some(v)})
+                st.push(Avail{m: m, ty: ty, val: val, pending_store: v})
             } else if op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet {
                 // may read or write anything reachable: only non-escaped stack slots survive
                 n := 0
                 for k in 0..st.len {
-                    match st[k].mref_addr.base {
+                    match st[k].m.addr.base {
                         Alloca(x) if !esc[x] => {
                             st[n] = st[k]
                             n += 1
@@ -136,7 +128,7 @@ fn loadelim_run(f: *Func) -> bool {
                     st.clear()
                 }
                 for k in 0..st.len {
-                    st[k].pending_store = None
+                    st[k].pending_store = NOV
                 }
             }
         }
