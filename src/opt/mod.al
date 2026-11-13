@@ -131,9 +131,8 @@ priv fn keep_args(f: *Func) {
 priv fn orphan_map(f: *Func) -> ([]i32, i64, i64, i64) {
     n := f.insts.len
     scratch_on()
-    m := mkslice[i32](__alloc_raw(n * 4), n)
+    m := alloc_neg1(n)
     scratch_off()
-    memfill(ptr(m), 0xFF, n * 4)
     for b in 0..f.blocks.len {
         for v in f.blocks[b].insts {
             m[v] = 0

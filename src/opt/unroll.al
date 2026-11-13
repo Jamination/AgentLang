@@ -329,20 +329,15 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
             if in_loop[b] {
                 continue
             }
+            if b == p.exit {
+                f.phi_pred_replace(b, p.latch, prev_latch)
+            }
             for ii in 0..f.blocks[b].insts.len {
                 v := f.blocks[b].insts[ii]
                 for ai in 0..f.insts[v].args.len {
                     a := f.insts[v].args[ai]
                     if loop_def(a, n0, def_block, in_loop) {
                         f.insts[v].args[ai] = last_m[a]
-                    }
-                }
-                if f.insts[v].op == Phi && b == p.exit {
-                    pbs := f.insts[v].from()
-                    for k in 0..pbs.len {
-                        if pbs[k] == p.latch {
-                            pbs[k] = prev_latch
-                        }
                     }
                 }
             }
@@ -388,16 +383,8 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
     for ph in hphis {
         repl[ph] = i32(phi_in_at(&phi_in, ph).0)
     }
-    hb := &f.blocks[p.header]
-    n := 0
-    for ii in 0..hb.insts.len {
-        v := hb.insts[ii]
-        if !contains(&hphis, i64(v)) {
-            hb.insts[n] = v
-            n += 1
-        }
-    }
-    hb.insts.len = n
+    // (hphis are still the leading phis of the header: nothing above changed its list)
+    f.blocks[p.header].insts = vec_of(f.blocks[p.header].insts[hphis.len..])
     f.apply_repl(&repl)
 }
 

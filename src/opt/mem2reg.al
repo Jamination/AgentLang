@@ -164,8 +164,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     // the recorded users of x, in the order recorded: pairs[2 * e + 1] for e = head[x],
     // unext[e], .. until -1 (the lists are made from the end)
     total := pairs.len / 2
-    head := mkslice[i32](__alloc_raw(n * 4), n)
-    memfill(ptr(head), 0xFF, n * 4)
+    head := alloc_neg1(n)
     unext := mkslice[i32](__alloc_raw(total * 4), total)
     for k in total - 1..=0 by -1 {
         x := pairs[2 * k]

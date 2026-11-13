@@ -21,9 +21,7 @@ priv fn table_new(n: i64) -> Table {
     while cap < 2 * n {
         cap *= 2
     }
-    head := mkslice[i32](__alloc_raw(cap * 4), cap)
-    memfill(ptr(head), 0xFF, cap * 4)
-    return Table{head: head, ent: vec[i32](), next: vec[i32](), bucket: vec[i32]()}
+    return Table{head: alloc_neg1(cap), ent: vec[i32](), next: vec[i32](), bucket: vec[i32]()}
 }
 
 // the arguments of instruction i in key order

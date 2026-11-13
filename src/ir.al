@@ -323,6 +323,13 @@ priv fn raw32(n: i64) -> []i32 {
     return mkslice[i32](__alloc_raw(n * 4), n)
 }
 
+// n i32s, all -1
+fn alloc_neg1(n: i64) -> []i32 {
+    s := raw32(n)
+    memfill(ptr(s), 0xFF, n * 4)
+    return s
+}
+
 // n lists in one buffer: list i has room for cnt[i] items (filled with `add`)
 priv fn lists_sized(cnt: *Vec[i32]) -> Vec[Vec[i64]] {
     n := cnt.len
