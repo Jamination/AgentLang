@@ -519,6 +519,9 @@ fn main() {
 
 **Windows** (`--target windows`):
 
+- `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`), a Windows x86-64
+  console executable. On Linux, `alc run` / `alc test` run it under Wine when `ALC_WINE=1` and
+  `WINEPREFIX` are set (no display: no window can open); otherwise they only build it.
 - Functions and variables are imported from DLLs (`extern "kernel32.dll" fn GetStdHandle(n: u32) ->
   *u8`, `extern "abi.dll" counter: i32`), through the executable's import address table: the
   slot of each holds the address of the function or variable (a variable is not copied). The
