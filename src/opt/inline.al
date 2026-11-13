@@ -227,6 +227,72 @@ struct Policy {
     max_caller: i64,
 }
 
+// The reverse postorder after inlining a call in block cb = rpo[at] when the callee returns:
+// the blocks from nb0 on are new, nb0 is the continuation (it got cb's successors), the others
+// are the callee's copy, entered from cb and left only to the continuation. The depth-first
+// search reaches everything outside cb's subtree as before (see inline_run), and inside it
+// the copy, where reaching the continuation explores cb's old subtree X exactly as before.
+// When the continuation is the first block of the copy to finish (C = the copy's blocks that
+// finish after it, in finishing order), the new order is
+//   rpo[..=at] ++ reverse(C) ++ [cont] ++ rpo[at + 1..]
+// (X comes right after cb in the old order, the rest after X). Otherwise false.
+priv fn rpo_after_inline(f: *Func, rpo: *Vec[i64], at: i64, nb0: i64) -> (Vec[i64], bool) {
+    cb := rpo[at]
+    entry := match f.blocks[cb].term {
+        Jmp(e) => e
+        _ => return (vec[i64](), false)
+    }
+    n := f.blocks.len - nb0
+    seen := alloc[bool](n)
+    post := vec[i64]()
+    // the search of rpo_compute over the new blocks, the continuation taken as a leaf
+    sb := vec_one(entry)
+    si := vec_one(0)
+    seen[entry - nb0] = true
+    while sb.len > 0 {
+        b := sb[sb.len - 1]
+        i := si[si.len - 1]
+        cnt, s0, s1 := f.succ_pair(b)
+        if b == nb0 {
+            cnt = 0
+        }
+        if i < cnt {
+            s := s0
+            if i == 1 {
+                s = s1
+            }
+            si[si.len - 1] = i + 1
+            if s < nb0 || s >= f.blocks.len {
+                // (cannot happen: the copy only goes to itself and the continuation)
+                return (vec[i64](), false)
+            }
+            if !seen[s - nb0] {
+                seen[s - nb0] = true
+                sb.push(s)
+                si.push(0)
+            }
+        } else {
+            post.push(b)
+            sb.pop()
+            si.pop()
+        }
+    }
+    if post.len == 0 || post[0] != nb0 {
+        return (vec[i64](), false)
+    }
+    out := vec[i64]()
+    out.reserve(rpo.len + post.len)
+    out.extend(rpo.buf[..at + 1])
+    k := post.len - 1
+    while k >= 1 {
+        out.push(post[k])
+        k -= 1
+    }
+    out.push(nb0)
+    out.extend(rpo.buf[at + 1..rpo.len])
+    return (out, true)
+}
+
 // inline eligible calls in function `fid`; `done[g]` marks callees that are final;
 // `costs[g]` is cost(g) once known (-1 before: a final function does not change)
 fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken: []bool, pol: *Policy, costs: []i64) -> bool {
@@ -243,6 +309,9 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
     // gains allocas and constants). Unless the callee never returns, the blocks after the call
     // are still reached through it.
     start := 0
+    // the reverse postorder of f, kept up to date (see rpo_after_inline) or made anew
+    frpo := vec[i64]()
+    fresh := true
     loop {
         if budget == 0 {
             break
@@ -255,7 +324,10 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         {
             f := &m.funcs[fid]
             // (the CFG changes with every inlined call: no use for the memo)
-            frpo := f.rpo_compute()
+            if fresh {
+                frpo = f.rpo_compute()
+                fresh = false
+            }
             search: for ri in start..frpo.len {
                 b := frpo[ri]
                 for v in f.blocks[b].insts {
@@ -295,11 +367,20 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
             Some(x) => {
                 // g is not f and inline_call only changes f
                 returns := false
+                nb0 := m.funcs[fid].blocks.len
                 caller_size += inline_call(&m.funcs[fid], x.0, x.1, &m.funcs[x.2], &repl, &returns)
                 if !returns {
                     // the blocks after the call became unreachable through it: they may now
                     // be reached later, before the call's block
                     start = 0
+                    fresh = true
+                } else {
+                    upd, ok := rpo_after_inline(&m.funcs[fid], &frpo, start, nb0)
+                    if ok {
+                        frpo = upd
+                    } else {
+                        fresh = true
+                    }
                 }
                 any = true
                 budget -= 1
