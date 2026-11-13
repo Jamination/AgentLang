@@ -8,8 +8,8 @@
 // plain function value `fn(A) -> R`. In the IR and the symbol table they are `outer.name` and
 // `outer.fn@line:col`.
 //
-// The name of a nested function lives in the scope of its block like a variable
-// (`Scope.vars`): the type slot of such an entry is negative, -(index into `Cx.nested`) - 1.
+// The name of a nested function lives in the scope of its block like a variable (a binding,
+// see `Scope` in lower_fn.al): its type slot is negative, -(index into `Cx.nested`) - 1.
 // The body is lowered with an `Fx` of its own whose `parent` is the enclosing one: `lookup`
 // continues there, finds the nested functions, and reports a variable as LOWER_NESTED_OUTER.
 
@@ -30,16 +30,17 @@ const LOWER_NESTED_OUTER = -0x4000000000000000
 // The name `name` as seen from a function nested in `p`: a nested function of `p` (or of a
 // function around it) is visible, a variable is LOWER_NESTED_OUTER.
 fn lower_nested_outer(p: *Fx, name: str) -> Opt[(i64, i64)] {
+    id := ast_sym_find(name)
     fx := p
     while fx != nil {
-        for si in fx.scopes.len - 1..=0 by -1 {
-            x, ok := fx.scopes[si].vars.get(name)
-            if ok {
+        match fx.local(id) {
+            Some(x) => {
                 if x.0 < 0 {
                     return Some(x)
                 }
                 return Some((LOWER_NESTED_OUTER, 0))
             }
+            None => {}
         }
         fx = fx.parent
     }
@@ -81,18 +82,17 @@ fn nested_method(self: *Fx, name: str) -> i64 {
 // is an erroneous local of this function
 fn nested_outer_err(self: *Fx, n: str, pos: Pos) {
     owner := ""
+    id := ast_sym(n)
     fx := self.parent
     while fx != nil && owner == "" {
-        for si in fx.scopes.len - 1..=0 by -1 {
-            if fx.scopes[si].vars.has(n) {
-                owner = fx.f.name
-                break
-            }
+        if is_some(fx.local(id)) {
+            owner = fx.f.name
         }
         fx = fx.parent
     }
     self.err(pos, fmt("`", n, "` is a variable of the enclosing function `", owner, "`", rule(self, n)))
-    self.scopes[0].vars.set(n, (T_ERR, self.temp(T_ERR)))
+    // (into scope 0: inner scopes may be popped before the next use)
+    self.late.push((id, T_ERR, self.temp(T_ERR)))
 }
 
 // the rule and the way out, for a nested function that uses the variable `n` of its surroundings
@@ -203,7 +203,7 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
     cx.nested[idx].ptys = ptys
     cx.nested[idx].rty = rty
     if !anon {
-        self.scopes[self.scopes.len - 1].vars.set(d.name, (-(idx + 1), 0))
+        self.scope_set(d.name, (-(idx + 1), 0))
     }
     lower_fn_lower_body(cx, fid, &d.params, &d.body, self.tenv, shown, d.pos, self)
     return idx
@@ -211,13 +211,12 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
 
 // the statement `fn name(params) -> R { body }`
 fn nested_fn(self: *Fx, d: *FnDecl) {
-    top := self.scopes.len - 1
-    if self.scopes[top].vars.has(d.name) {
+    if self.in_scope(ast_sym(d.name)) {
         self.err(d.pos, fmt("`", d.name, "` is already declared in this scope: a nested function needs a name that no variable or other nested function of its block has (nested functions cannot be overloaded)"))
         return
     }
     idx := self.nested_lower(d)
-    self.scopes[top].vars.set(d.name, (-(idx + 1), 0))
+    self.scope_set(d.name, (-(idx + 1), 0))
 }
 
 // ---------- uses ----------
