@@ -695,7 +695,7 @@ priv fn run(self: *Irc) {
         } else {
             // select a spill candidate: lowest cost / degree
             bi := -1
-            bc := 0.0
+            bc: f64 = 0.0
             for i in 0..self.spill_wl.len {
                 n := self.spill_wl[i]
                 if self.state[n] != Spill {
@@ -793,7 +793,7 @@ priv fn select(g: *Irc, cls: u8, vcls: []u8, spilled: *Vec[i64], colors: *Vec[i6
 // spill weight helper
 priv fn depth_weight(d: i64) -> f64 {
     // 10f64.powi(min(d, 6))
-    w := 1.0
+    w: f64 = 1.0
     for x in 0..min(d, 6) {
         w *= 10.0
     }
@@ -1234,10 +1234,10 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             spill_wl: vec[i64](),
             move_wl: vec[i64](),
             stack: vec[i64](),
-            cost: vec_fill(n, 0.0),
+            cost: vec_fill(n, f64(0.0)),
             seen: vec_fill(n, 0),
             stamp: 0,
-            ratio: vec_fill(n, 0.0),
+            ratio: vec_fill(n, f64(0.0)),
             rdirty: vec_fill(n, true),
         }
         for r in 0..32 {
