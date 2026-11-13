@@ -70,6 +70,8 @@ struct Cx {
     // strings of LONG_STRING bytes or more (embedded files): (hash, text, global), see
     // string_global
     long_strings: Vec[(u64, str, i64)]
+    // "file:line" strings for run-time failures: (file, line) -> (string global, length)
+    locs: Map[(i64, i64), (i64, i64)]
     exposed: Map[i64, bool]
     inst_depth: i64
     // names declared by the prelude: prelude code always sees these, user code may shadow them
@@ -104,6 +106,11 @@ struct Cx {
     located: Map[i64, i64]
     // the nested and anonymous functions (lower_nested.al)
     nested: Vec[NestedFn]
+    // by symbol: the declarations of the name (built from the tables above at the end of
+    // cx_new, see index_names); a symbol beyond its length has none. Lookups go through it.
+    names: Vec[SymNames]
+    lists: Vec[Vec[i64]]
+    vlists: Vec[Vec[(i64, i64)]]
 }
 
 // for "unknown name" diagnostics: says that `n` exists as a private declaration of another file
@@ -441,19 +448,198 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
             }
         }
     }
+    cx.index_names()
     return cx
 }
 
-fn find_fn(self: *Cx, n: str) -> Opt[i64] {
-    if self.scope_prelude {
-        i, ok := self.p_fn_names.get(n)
-        if ok {
-            return Some(i)
-        }
+// What the declarations say about one symbol (see `Cx.names`); -1 / empty / nil for none
+struct SymNames {
+    fn_name: i64
+    p_fn_name: i64
+    struct_name: i64
+    p_struct_name: i64
+    enum_name: i64
+    p_enum_name: i64
+    // an index into `Cx.lists` (the overloads of a function name) / `Cx.vlists` (the
+    // variants of a name), or -1
+    fn_over: i64
+    p_fn_over: i64
+    variants: i64
+    p_variants: i64
+    layers: i64
+    const_decl: *ConstDecl
+    global_decl: *GlobalDecl
+}
+
+// fills `names` from the tables of declared names, which are complete after cx_new
+priv fn index_names(self: *Cx) {
+    // (every name is a symbol before the table gets its length)
+    for n in self.decl_layers.keys() {
+        ast_sym(n)
     }
-    i, ok := self.fn_names.get(n)
-    if ok {
-        return Some(i)
+    for n in self.variants.keys() {
+        ast_sym(n)
+    }
+    for n in self.p_variants.keys() {
+        ast_sym(n)
+    }
+    self.names.resize(ast_sym_count(), SymNames{fn_name: -1, p_fn_name: -1, struct_name: -1, p_struct_name: -1, enum_name: -1, p_enum_name: -1, fn_over: -1, p_fn_over: -1, variants: -1, p_variants: -1})
+    for n in self.fn_names.keys() {
+        self.names[ast_sym(n)].fn_name = self.fn_names.get_or(n, -1)
+    }
+    for n in self.p_fn_names.keys() {
+        self.names[ast_sym(n)].p_fn_name = self.p_fn_names.get_or(n, -1)
+    }
+    for n in self.struct_names.keys() {
+        self.names[ast_sym(n)].struct_name = self.struct_names.get_or(n, -1)
+    }
+    for n in self.p_struct_names.keys() {
+        self.names[ast_sym(n)].p_struct_name = self.p_struct_names.get_or(n, -1)
+    }
+    for n in self.enum_names.keys() {
+        self.names[ast_sym(n)].enum_name = self.enum_names.get_or(n, -1)
+    }
+    for n in self.p_enum_names.keys() {
+        self.names[ast_sym(n)].p_enum_name = self.p_enum_names.get_or(n, -1)
+    }
+    for n in self.fn_over.keys() {
+        l, _ := self.fn_over.get(n)
+        self.names[ast_sym(n)].fn_over = self.lists.len
+        self.lists.push(l)
+    }
+    for n in self.p_fn_over.keys() {
+        l, _ := self.p_fn_over.get(n)
+        self.names[ast_sym(n)].p_fn_over = self.lists.len
+        self.lists.push(l)
+    }
+    for n in self.variants.keys() {
+        l, _ := self.variants.get(n)
+        self.names[ast_sym(n)].variants = self.vlists.len
+        self.vlists.push(l)
+    }
+    for n in self.p_variants.keys() {
+        l, _ := self.p_variants.get(n)
+        self.names[ast_sym(n)].p_variants = self.vlists.len
+        self.vlists.push(l)
+    }
+    for n in self.decl_layers.keys() {
+        self.names[ast_sym(n)].layers = self.decl_layers.get_or(n, 0)
+    }
+    for n in self.const_decls.keys() {
+        d, _ := self.const_decls.get(n)
+        self.names[ast_sym(n)].const_decl = d
+    }
+    for n in self.global_decls.keys() {
+        d, _ := self.global_decls.get(n)
+        self.names[ast_sym(n)].global_decl = d
+    }
+}
+
+// the entry of `names` for the name `n`, or nil if no declaration has that name
+fn named(self: *Cx, n: str) -> *SymNames {
+    id := ast_sym_find(n)
+    if id < 0 || id >= self.names.len {
+        return nil
+    }
+    return &self.names[id]
+}
+
+fn fn_name(self: *Cx, n: str) -> (i64, bool) {
+    e := self.named(n)
+    if e == nil || e.fn_name < 0 {
+        return (0, false)
+    }
+    return (e.fn_name, true)
+}
+
+fn p_fn_name(self: *Cx, n: str) -> (i64, bool) {
+    e := self.named(n)
+    if e == nil || e.p_fn_name < 0 {
+        return (0, false)
+    }
+    return (e.p_fn_name, true)
+}
+
+fn has_fn_name(self: *Cx, n: str) -> bool {
+    e := self.named(n)
+    return e != nil && e.fn_name >= 0
+}
+
+fn has_p_fn_over(self: *Cx, n: str) -> bool {
+    e := self.named(n)
+    return e != nil && e.p_fn_over >= 0
+}
+
+// the user's / the prelude's definitions of the function name `n`
+fn fn_over_of(self: *Cx, n: str) -> (Vec[i64], bool) {
+    e := self.named(n)
+    if e == nil || e.fn_over < 0 {
+        return (vec[i64](), false)
+    }
+    return (self.lists[e.fn_over], true)
+}
+
+fn user_variants(self: *Cx, n: str) -> (Vec[(i64, i64)], bool) {
+    e := self.named(n)
+    if e == nil || e.variants < 0 {
+        return (vec[(i64, i64)](), false)
+    }
+    return (self.vlists[e.variants], true)
+}
+
+fn lib_variants(self: *Cx, n: str) -> (Vec[(i64, i64)], bool) {
+    e := self.named(n)
+    if e == nil || e.p_variants < 0 {
+        return (vec[(i64, i64)](), false)
+    }
+    return (self.vlists[e.p_variants], true)
+}
+
+// which layers declare a function, type, constant or global of the name: 1 = prelude, 2 = user
+fn decl_layer(self: *Cx, n: str) -> i64 {
+    e := self.named(n)
+    if e == nil {
+        return 0
+    }
+    return e.layers
+}
+
+fn has_const(self: *Cx, n: str) -> bool {
+    e := self.named(n)
+    return e != nil && e.const_decl != nil
+}
+
+fn const_decl(self: *Cx, n: str) -> (*ConstDecl, bool) {
+    e := self.named(n)
+    if e == nil || e.const_decl == nil {
+        return (nil, false)
+    }
+    return (e.const_decl, true)
+}
+
+fn has_global(self: *Cx, n: str) -> bool {
+    e := self.named(n)
+    return e != nil && e.global_decl != nil
+}
+
+fn global_decl(self: *Cx, n: str) -> (*GlobalDecl, bool) {
+    e := self.named(n)
+    if e == nil || e.global_decl == nil {
+        return (nil, false)
+    }
+    return (e.global_decl, true)
+}
+
+fn find_fn(self: *Cx, n: str) -> Opt[i64] {
+    e := self.named(n)
+    if e == nil {
+        return None
+    }
+    if self.scope_prelude && e.p_fn_name >= 0 {
+        return Some(e.p_fn_name)
+    }
+    if e.fn_name >= 0 {
+        return Some(e.fn_name)
     }
     return None
 }
@@ -471,56 +657,56 @@ fn fn_candidates(self: *Cx, n: str) -> Vec[i64] {
 
 priv fn fn_candidates_of(self: *Cx, n: str) -> Vec[i64] {
     v := vec[i64]()
+    e := self.named(n)
+    if e == nil {
+        return v
+    }
     if self.scope_prelude {
         // prelude code sees its own definitions; the synthesized entry also reaches user code
-        pl, pok := self.p_fn_over.get(n)
-        if pok {
-            return clone(pl)
+        if e.p_fn_over >= 0 {
+            return clone(self.lists[e.p_fn_over])
         }
-        ul, uok := self.fn_over.get(n)
-        if uok {
-            return clone(ul)
+        if e.fn_over >= 0 {
+            return clone(self.lists[e.fn_over])
         }
         return v
     }
-    if !self.fn_names.has(n) {
+    if e.fn_name < 0 {
         return v
     }
-    l, ok := self.fn_over.get(n)
-    if ok {
-        v.extend(l.items())
+    if e.fn_over >= 0 {
+        v.extend(self.lists[e.fn_over].items())
     }
-    l2, ok2 := self.p_fn_over.get(n)
-    if ok2 {
-        v.extend(l2.items())
+    if e.p_fn_over >= 0 {
+        v.extend(self.lists[e.p_fn_over].items())
     }
     return v
 }
 
 fn find_struct(self: *Cx, n: str) -> Opt[i64] {
-    if self.scope_prelude {
-        i, ok := self.p_struct_names.get(n)
-        if ok {
-            return Some(i)
-        }
+    e := self.named(n)
+    if e == nil {
+        return None
     }
-    i, ok := self.struct_names.get(n)
-    if ok {
-        return Some(i)
+    if self.scope_prelude && e.p_struct_name >= 0 {
+        return Some(e.p_struct_name)
+    }
+    if e.struct_name >= 0 {
+        return Some(e.struct_name)
     }
     return None
 }
 
 fn find_enum(self: *Cx, n: str) -> Opt[i64] {
-    if self.scope_prelude {
-        i, ok := self.p_enum_names.get(n)
-        if ok {
-            return Some(i)
-        }
+    e := self.named(n)
+    if e == nil {
+        return None
     }
-    i, ok := self.enum_names.get(n)
-    if ok {
-        return Some(i)
+    if self.scope_prelude && e.p_enum_name >= 0 {
+        return Some(e.p_enum_name)
+    }
+    if e.enum_name >= 0 {
+        return Some(e.enum_name)
     }
     return None
 }
@@ -976,7 +1162,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
     if found {
         return Some(known)
     }
-    d, has_decl := self.global_decls.get(name)
+    d, has_decl := self.global_decl(name)
     if !has_decl {
         return None
     }
@@ -1084,7 +1270,7 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
                 }
             }
             // the name of a single non-generic function
-            if !self.const_decls.has(n) {
+            if !self.has_const(n) {
                 cands := self.fn_candidates(n)
                 if cands.len == 1 && self.fn_decls[cands[0]].tparams.is_empty() {
                     fid := self.inst_fn(cands[0], vec[i64]())
@@ -1200,7 +1386,7 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
     if known {
         return k == 2
     }
-    d, has := self.const_decls.get(name)
+    d, has := self.const_decl(name)
     if !has {
         return false
     }
@@ -1230,7 +1416,7 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
             self.errs.truncate(saved)
         }
         Ident(n) => {
-            if self.const_decls.has(n) {
+            if self.has_const(n) {
                 mem = n != name && self.const_is_mem(n)
             } else {
                 // the name of a function: its address, relocated like one inside an aggregate
@@ -1248,7 +1434,7 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
 
 // the (type, global) of a constant that lives in read-only memory (see `const_is_mem`)
 fn const_global(self: *Cx, name: str) -> Opt[(i64, i64)] {
-    d, has_decl := self.const_decls.get(name)
+    d, has_decl := self.const_decl(name)
     if !has_decl {
         return None
     }
@@ -1362,14 +1548,14 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
         match st {
             Done(t, v) => return Some((t, v))
             Busy => {
-                bd, _ := self.const_decls.get(name)
+                bd, _ := self.const_decl(name)
                 self.err(bd.pos, fmt("constant `", name, "` depends on itself"))
                 return None
             }
             Failed => return None
         }
     }
-    d, has_decl := self.const_decls.get(name)
+    d, has_decl := self.const_decl(name)
     if !has_decl {
         return None
     }
@@ -1523,7 +1709,7 @@ priv fn const_wrap_t(cx: *Cx, t: Opt[i64], r: i64) -> i64 {
 fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
     match e.k {
         Ident(n) => {
-            if self.const_decls.has(n) {
+            if self.has_const(n) {
                 match self.const_named(n) {
                     Some(x) => return (Some(x.1), const_only_int(self, x.0))
                     None => return (None, None)
@@ -1670,7 +1856,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         Bool(b) => return Some(CV.Bool(b))
         Str(s) => return Some(CV.Str(s))
         Ident(n) => {
-            if self.const_decls.has(n) {
+            if self.has_const(n) {
                 match self.const_named(n) {
                     Some(x) => return Some(x.1)
                     None => return None
@@ -1682,7 +1868,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         Call(c, args) => {
             match c.k {
                 // embed("file"): the content of a file as a string constant
-                Ident("embed") if !self.fn_names.has("embed") => {
+                Ident("embed") if !self.has_fn_name("embed") => {
                     match self.embed_bytes(args.items(), e.pos) {
                         Some(bytes) => return Some(CV.Str(bytes))
                         None => return None
@@ -2025,7 +2211,7 @@ priv fn dec_lit_over(e: *Expr, bits: i64, signed: bool) -> bool {
 // the f32 value of the untyped float constant `name` whose value is `f`: a literal (also
 // negated) is rounded once from its text
 fn const_lit_f32(self: *Cx, name: str, f: f64) -> f32 {
-    d, has := self.const_decls.get(name)
+    d, has := self.const_decl(name)
     if !has {
         return f32(f)
     }
@@ -2043,7 +2229,7 @@ fn const_expr_dec(self: *Cx, e: *Expr, depth: i64) -> bool {
         Un(_, x) => return self.const_expr_dec(x, depth + 1)
         Bin(_, a, b) => return self.const_expr_dec(a, depth + 1) && self.const_expr_dec(b, depth + 1)
         Ident(n) => {
-            d, has := self.const_decls.get(n)
+            d, has := self.const_decl(n)
             if has {
                 return self.const_expr_dec(&d.val, depth + 1)
             }

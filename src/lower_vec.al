@@ -55,7 +55,7 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
                 }
                 None => {}
             }
-            if !self.cx.const_decls.has(n) {
+            if !self.cx.has_const(n) {
                 match self.global_place(n) {
                     Some(m) => return m
                     None => {}
@@ -138,7 +138,7 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
         if bv.mem {
             return Some(Some(Val{ty: T_F32, v: bv.v, mem: true, alias: bv.alias, lane: Some((lanes[0], vt))}))
         }
-        x := self.ins(VExt, F32, vec_of([]i64{bv.v}), lanes[0])
+        x := self.ins(VExt, F32, vec_one(bv.v), lanes[0])
         return Some(Some(self.sval(T_F32, x)))
     }
     x := self.scalar(bv)
@@ -148,7 +148,7 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
     }
     rt := fx_vec_ty(lanes.len)
     it := self.irt(rt)
-    r := self.ins(VShuf, it, vec_of([]i64{x, x}), imm)
+    r := self.ins(VShuf, it, vec_two(x, x), imm)
     return Some(Some(self.sval(rt, r)))
 }
 
@@ -180,14 +180,14 @@ fn vec_index(self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
                 return Some(Val{ty: T_F32, v: bv.v, mem: true, alias: bv.alias, lane: Some((k, vt))})
             }
             x := self.scalar(bv)
-            r := self.ins(VExt, F32, vec_of([]i64{x}), k)
+            r := self.ins(VExt, F32, vec_one(x), k)
             return Some(self.sval(T_F32, r))
         }
         None => {}
     }
     if self.cx.opts.checks {
         ln := self.iconst(I64, n)
-        c := self.ins(Ult, I8, vec_of([]i64{i, ln}), 0)
+        c := self.ins(Ult, I8, vec_two(i, ln), 0)
         self.check(c, 0, pos)
     }
     // a run-time lane: go through memory
@@ -201,8 +201,8 @@ fn vec_index(self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
         base = t
     }
     four := self.iconst(I64, 4)
-    off := self.ins(Mul, I64, vec_of([]i64{i, four}), 0)
-    a := self.ins(Add, I64, vec_of([]i64{base, off}), 0)
+    off := self.ins(Mul, I64, vec_two(i, four), 0)
+    a := self.ins(Add, I64, vec_two(base, off), 0)
     p := self.mval(T_F32, a)
     p.alias = AK_ANY
     return Some(p)
@@ -213,13 +213,13 @@ priv fn vec_eq(self: *Fx, l: Val, r: Val, n: i64) -> i64 {
     y := self.scalar(r)
     acc := NOV
     for k in 0..n {
-        a := self.ins(VExt, F32, vec_of([]i64{x}), k)
-        b := self.ins(VExt, F32, vec_of([]i64{y}), k)
-        e := self.ins(FEq, I8, vec_of([]i64{a, b}), 0)
+        a := self.ins(VExt, F32, vec_one(x), k)
+        b := self.ins(VExt, F32, vec_one(y), k)
+        e := self.ins(FEq, I8, vec_two(a, b), 0)
         if acc == NOV {
             acc = e
         } else {
-            acc = self.ins(And, I8, vec_of([]i64{acc, e}), 0)
+            acc = self.ins(And, I8, vec_two(acc, e), 0)
         }
     }
     return acc
@@ -243,10 +243,10 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
     eq := op == Eq || op == Ne
     if l.ty == T_MAT4 || r.ty == T_MAT4 {
         if op == Mul && l.ty == T_MAT4 && r.ty == T_MAT4 {
-            return Some(self.call_rt("__mat4_mul", vec[i64](), vec_of([]Val{l, r}), pos))
+            return Some(self.call_rt("__mat4_mul", vec[i64](), vec_two[Val](l, r), pos))
         }
         if op == Mul && l.ty == T_MAT4 && r.ty == T_VEC4 {
-            return Some(self.call_rt("__mat4_mulv", vec[i64](), vec_of([]Val{l, r}), pos))
+            return Some(self.call_rt("__mat4_mulv", vec[i64](), vec_two[Val](l, r), pos))
         }
         if l.ty == T_MAT4 && r.ty == T_MAT4 && eq {
             acc := NOV
@@ -259,22 +259,22 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
                 if acc == NOV {
                     acc = e
                 } else {
-                    acc = self.ins(And, I8, vec_of([]i64{acc, e}), 0)
+                    acc = self.ins(And, I8, vec_two(acc, e), 0)
                 }
             }
             if op == Ne {
                 one := self.iconst(I8, 1)
-                acc = self.ins(Xor, I8, vec_of([]i64{acc, one}), 0)
+                acc = self.ins(Xor, I8, vec_two(acc, one), 0)
             }
             return Some(self.sval(T_BOOL, acc))
         }
         return vec_binary_bad(self, l, r, pos)
     }
     if op == Mul && l.ty == T_QUAT && r.ty == T_QUAT {
-        return Some(self.call_rt("__quat_mul", vec[i64](), vec_of([]Val{l, r}), pos))
+        return Some(self.call_rt("__quat_mul", vec[i64](), vec_two[Val](l, r), pos))
     }
     if op == Mul && l.ty == T_QUAT && r.ty == T_VEC3 {
-        return Some(self.call_rt("__quat_rotate", vec[i64](), vec_of([]Val{l, r}), pos))
+        return Some(self.call_rt("__quat_rotate", vec[i64](), vec_two[Val](l, r), pos))
     }
     if eq {
         if l.ty != r.ty {
@@ -287,7 +287,7 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         e := self.vec_eq(l, r, lanes)
         if op == Ne {
             one := self.iconst(I8, 1)
-            e = self.ins(Xor, I8, vec_of([]i64{e, one}), 0)
+            e = self.ins(Xor, I8, vec_two(e, one), 0)
         }
         return Some(self.sval(T_BOOL, e))
     }
@@ -311,11 +311,11 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         a = self.scalar(l)
         s := self.scalar(r)
         ty = l.ty
-        b = self.ins(VSplat, it, vec_of([]i64{s}), 0)
+        b = self.ins(VSplat, it, vec_one(s), 0)
     } else if is_some(rn) && l.ty == T_F32 {
         it := self.irt(r.ty)
         s := self.scalar(l)
-        a = self.ins(VSplat, it, vec_of([]i64{s}), 0)
+        a = self.ins(VSplat, it, vec_one(s), 0)
         ty = r.ty
         b = self.scalar(r)
     } else {
@@ -325,7 +325,7 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         return Some(val_err())
     }
     it := self.irt(ty)
-    v := self.ins(o, it, vec_of([]i64{a, b}), 0)
+    v := self.ins(o, it, vec_two(a, b), 0)
     return Some(self.sval(ty, v))
 }
 
@@ -345,7 +345,7 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
             return vals[0].0
         }
         if vals.len == 1 && vals[0].0.ty == T_F32 {
-            return self.call_rt("__mat4_diag", vec[i64](), vec_of([]Val{vals[0].0}), pos)
+            return self.call_rt("__mat4_diag", vec[i64](), vec_one[Val](vals[0].0), pos)
         }
         all_vec4 := true
         for i in 0..vals.len {
@@ -381,14 +381,14 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
         }
         if v.ty == T_F32 {
             s := self.scalar(v)
-            r := self.ins(VSplat, it, vec_of([]i64{s}), 0)
+            r := self.ins(VSplat, it, vec_one(s), 0)
             return self.sval(to, r)
         }
         match self.cx.types.vec_lanes(v.ty) {
             Some(m) if m >= n => {
                 // drop trailing lanes (or reinterpret vec4 <-> quat)
                 x := self.scalar(v)
-                r := self.ins(VShuf, it, vec_of([]i64{x, x}), 0xE4)
+                r := self.ins(VShuf, it, vec_two(x, x), 0xE4)
                 return self.sval(to, r)
             }
             _ => {}
@@ -405,7 +405,7 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
                 Some(m) => {
                     x := self.scalar(v)
                     for k in 0..m {
-                        lanes.push(self.ins(VExt, F32, vec_of([]i64{x}), k))
+                        lanes.push(self.ins(VExt, F32, vec_one(x), k))
                     }
                 }
                 None => {
@@ -450,9 +450,9 @@ fn put_vec(self: *Fx, v: Val, pos: Pos) {
         if k > 0 {
             self.put_lit_pub(", ", pos)
         }
-        l := self.ins(VExt, F32, vec_of([]i64{x}), k)
+        l := self.ins(VExt, F32, vec_one(x), k)
         lv := self.sval(T_F32, l)
-        self.call_rt("__put_f32", vec[i64](), vec_of([]Val{lv}), pos)
+        self.call_rt("__put_f32", vec[i64](), vec_one[Val](lv), pos)
     }
     self.put_lit_pub(")", pos)
 }

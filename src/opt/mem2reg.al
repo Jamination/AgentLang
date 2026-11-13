@@ -4,16 +4,18 @@ priv struct Ctx {
     f: *Func,
     cfg: *Cfg,
     var_ty: Vec[T],
-    last_store: Map[(i64, i64), i64],
-    def_in: Map[(i64, i64), i64],
+    nb: i64, // block count: the key of (var, block) is var * nb + block
+    last_store: IMap,
+    has_store: []bool,
+    def_in: IMap,
     new_phis: Vec[(i64, i64)],
     entry_consts: Vec[i64],
-    zero: Map[T, i64],
+    zero: [10]i64, // by T; NOV: none yet
 }
 
 priv fn zero_of(self: *Ctx, t: T) -> i64 {
-    z0, found := self.zero.get(t)
-    if found {
+    z0 := self.zero[i64(t)]
+    if z0 != NOV {
         return z0
     }
     z := 0
@@ -23,29 +25,33 @@ priv fn zero_of(self: *Ctx, t: T) -> i64 {
         z = self.f.mk(Const, t, vec[i64](), 0)
     }
     self.entry_consts.push(z)
-    self.zero.set(t, z)
+    self.zero[i64(t)] = z
     return z
 }
 
 priv fn read_out(self: *Ctx, var_: i64, b: i64) -> i64 {
-    v, found := self.last_store.get((var_, b))
-    if found {
-        return v
+    if self.has_store[b] {
+        v := self.last_store.iget(var_ * self.nb + b)
+        if v >= 0 {
+            return v
+        }
     }
     return self.read_in(var_, b)
 }
 
 priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
-    v0, found := self.def_in.get((var_, b))
-    if found {
+    key := var_ * self.nb + b
+    v0 := self.def_in.iget(key)
+    if v0 >= 0 {
         return v0
     }
-    np := self.cfg.preds[b].len
+    preds := self.cfg.preds[b]
+    np := preds.len
     v := 0
     if np == 0 {
         v = self.zero_of(self.var_ty[var_])
     } else if np == 1 {
-        p := self.cfg.preds[b][0]
+        p := preds[0]
         // guard against a self-loop of a single block
         if p == b {
             v = self.zero_of(self.var_ty[var_])
@@ -53,26 +59,46 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
             v = self.read_out(var_, p)
         }
     } else {
-        phi := self.f.mk(Phi, self.var_ty[var_], vec[i64](), 0)
-        self.def_in.set((var_, b), phi)
+        phi := self.f.mk(Phi, self.var_ty[var_], Vec[i64]{buf: alloc[i64](np), len: 0}, 0)
+        self.f.im(phi).pb = Vec[i64]{buf: alloc[i64](np), len: 0}
+        self.def_in.iset(key, phi)
         self.new_phis.push((b, phi))
-        preds := clone(self.cfg.preds[b])
         for p in preds {
             a := self.read_out(var_, p)
             inst := self.f.im(phi)
-            inst.args.push(a)
-            inst.pb.push(p)
+            put(&inst.args, a)
+            put(&inst.pb, p)
         }
         v = phi
     }
-    self.def_in.set((var_, b), v)
+    self.def_in.iset(key, v)
     return v
+}
+
+// push for a list that usually has room (push itself is not inlined)
+priv inline fn put(l: *Vec[i64], x: i64) {
+    if l.len < len(l.buf) {
+        l.buf[l.len] = x
+        l.len += 1
+    } else {
+        l.push(x)
+    }
+}
+
+// the last mem2reg_run ended with a round that changed nothing (not at its round limit)
+priv settled: bool
+
+fn mem2reg_settled() -> bool {
+    return settled
 }
 
 fn mem2reg_run(f: *Func) -> bool {
     any := false
+    settled = false
     for it in 0..8 {
-        if !run_once(f) {
+        // (only the first round sees the IR the pass began with)
+        if !run_once(f, it == 0) {
+            settled = true
             break
         }
         any = true
@@ -80,40 +106,117 @@ fn mem2reg_run(f: *Func) -> bool {
     return any
 }
 
-priv fn run_once(f: *Func) -> bool {
-    cfg := cfg_new(f)
-    n := f.insts.len
-    // users of each value (instruction users only) + escape through terminators
-    users := vec_fill(n, vec[i64]())
-    term_used := vec_fill(n, false)
-    for b in cfg.rpo {
-        for v in f.blocks[b].insts {
-            for a in f.insts[v].args {
-                users[a].push(v)
-            }
-        }
-        tu := f.term_uses(b)
-        for u in tu {
-            term_used[u] = true
-        }
-    }
-    // access: inst -> var
-    access := map[i64, i64]()
-    var_ty := vec[T]()
-    allocas := vec[i64]()
+priv fn run_once(f: *Func, first: bool) -> bool {
+    // allocas live in the entry block; without one there is nothing to do
+    nalloca := 0
     for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
-            allocas.push(v)
+            nalloca += 1
         }
     }
-    allocas: for a in allocas {
-        if term_used[a] {
+    if nalloca == 0 {
+        return false
+    }
+    // An alloca that escapes (alias_escaped_allocas) is never promoted: its pointers, which
+    // include the ones promotion follows, have a use that promotion refuses (in a terminator,
+    // as a stored value, by anything but an Add, Load or Store, by an Add with a second
+    // pointer). If that analysis of this very IR is at hand and every alloca escapes, nothing
+    // can be done.
+    esc, known := alias_escaped_known(f, opt_gen())
+    if first && known {
+        all := true
+        for v in f.blocks[0].insts {
+            if f.insts[v].op == Alloca && !esc[v] {
+                all = false
+                break
+            }
+        }
+        if all {
+            return false
+        }
+    }
+    rpo := f.rpo()
+    n := f.insts.len
+    // The users of the pointers into allocas (instruction users only, in reverse postorder).
+    // `ptrs` is a superset of those pointers: the allocas of the entry block and constant
+    // offsets from such pointers (an argument is defined before its user in reverse postorder,
+    // except for a phi: the uses by phis are all recorded). The recorded (value, user) pairs go
+    // to one buffer by value: the users of a are ulist[ustart[a]..ustart[a + 1]].
+    ptrs := alloc[bool](n)
+    for v in f.blocks[0].insts {
+        if f.insts[v].op == Alloca {
+            ptrs[v] = true
+        }
+    }
+    term_used := alloc[bool](n)
+    pairs := vec[i64]()
+    for b in rpo {
+        for v in f.blocks[b].insts {
+            i := &f.insts[v]
+            if i.op == Phi {
+                for a in i.args {
+                    put(&pairs, a)
+                    put(&pairs, v)
+                }
+                continue
+            }
+            for a in i.args {
+                if ptrs[a] {
+                    put(&pairs, a)
+                    put(&pairs, v)
+                }
+            }
+            if i.op == Add {
+                a0 := i.args[0]
+                a1 := i.args[1]
+                if ptrs[a0] && f.insts[a1].op == Const || ptrs[a1] && f.insts[a0].op == Const {
+                    ptrs[v] = true
+                }
+            }
+        }
+        match f.blocks[b].term {
+            Br(c, _, _) => term_used[c] = true
+            Ret(vs) => {
+                for u in vs {
+                    term_used[u] = true
+                }
+            }
+            _ => {}
+        }
+    }
+    total := pairs.len / 2
+    ustart := alloc[i64](n + 1)
+    for k in 0..total {
+        ustart[pairs[2 * k] + 1] += 1
+    }
+    for x in 0..n {
+        ustart[x + 1] += ustart[x]
+    }
+    ulist := mkslice[i64](__alloc_raw(total * 8), total)
+    ufill := mkslice[i64](__alloc_raw(n * 8), n)
+    memcopy(ptr(ufill), ptr(ustart), n * 8)
+    for k in 0..total {
+        x := pairs[2 * k]
+        ulist[ufill[x]] = pairs[2 * k + 1]
+        ufill[x] += 1
+    }
+    // access[v] = var + 1 for a load or store of a promoted slot (0: none)
+    access := alloc[i64](n)
+    naccess := 0
+    var_ty := vec[T]()
+    // derived_of[x] == a + 1: x is a (constant offset) pointer into alloca a
+    derived_of := alloc[i64](n)
+    derived := vec[(i64, i64)]()
+    accs := vec[(i64, i64, T)]()
+    slots := vec[(i64, T)]()
+    allocas: for a in f.blocks[0].insts {
+        if f.insts[a].op != Alloca || term_used[a] {
             continue
         }
-        derived := vec_of([](i64, i64){(a, 0)})
-        is_derived := map[i64, i64]()
-        is_derived.set(a, 0)
-        accs := vec[(i64, i64, T)]()
+        derived.clear()
+        derived.push((a, 0))
+        derived_of[a] = a + 1
+        accs.clear()
         qi := 0
         while qi < derived.len {
             x := derived[qi].0
@@ -122,24 +225,21 @@ priv fn run_once(f: *Func) -> bool {
             if term_used[x] {
                 continue allocas
             }
-            for u in users[x] {
+            for ui in ustart[x]..ustart[x + 1] {
+                u := ulist[ui]
                 inst := &f.insts[u]
                 if inst.op == Add {
                     other := if inst.args[0] == x { inst.args[1] } else { inst.args[0] }
                     if other == x {
                         continue allocas
                     }
-                    match f.is_const(other) {
-                        Some(c) => {
-                            had := is_derived.has(u)
-                            is_derived.set(u, off + c)
-                            if !had {
-                                derived.push((u, off + c))
-                            }
-                        }
-                        None => {
-                            continue allocas
-                        }
+                    oi := &f.insts[other]
+                    if oi.op != Const {
+                        continue allocas
+                    }
+                    if derived_of[u] != a + 1 {
+                        derived_of[u] = a + 1
+                        derived.push((u, off + oi.k))
                     }
                 } else if inst.op == Load {
                     accs.push((u, off, inst.ty))
@@ -156,113 +256,123 @@ priv fn run_once(f: *Func) -> bool {
         // stored values must not be derived pointers of this alloca
         for acc in accs {
             u := acc.0
-            if f.insts[u].op == Store && is_derived.has(f.insts[u].args[1]) {
+            if f.insts[u].op == Store && derived_of[f.insts[u].args[1]] == a + 1 {
                 continue allocas
             }
         }
         // slots: (offset, type); promotable when no partial overlap with a different slot
         size := f.insts[a].k
-        slots := vec[(i64, T)]()
+        slots.clear()
         for acc in accs {
             if !contains(&slots, (acc.1, acc.2)) {
                 slots.push((acc.1, acc.2))
             }
         }
-        ok := vec_fill(slots.len, true)
+        slot_var := vec_fill(slots.len, NOV)
         for i in 0..slots.len {
             o1 := slots[i].0
-            t1 := slots[i].1
-            if o1 < 0 || o1 + t1.size() > size {
-                ok[i] = false
-            }
+            s1 := slots[i].1.size()
+            ok := o1 >= 0 && o1 + s1 <= size
             for j in 0..slots.len {
                 if i == j {
                     continue
                 }
                 o2 := slots[j].0
-                t2 := slots[j].1
-                if o1 < o2 + t2.size() && o2 < o1 + t1.size() {
-                    ok[i] = false
+                if o1 < o2 + slots[j].1.size() && o2 < o1 + s1 {
+                    ok = false
                 }
             }
-        }
-        slot_var := vec_fill(slots.len, 0xFFFFFFFF)
-        for i in 0..slots.len {
-            if ok[i] {
+            if ok {
                 slot_var[i] = var_ty.len
                 var_ty.push(slots[i].1)
             }
         }
         for acc in accs {
             si := index_of(slots.items(), (acc.1, acc.2))
-            assert si >= 0
-            if ok[si] {
-                access.set(acc.0, slot_var[si])
+            if slot_var[si] != NOV {
+                if access[acc.0] == 0 {
+                    naccess += 1
+                }
+                access[acc.0] = slot_var[si] + 1
             }
         }
     }
-    if access.len == 0 {
+    if naccess == 0 {
         return false
     }
-    // last store per (var, block)
-    last_store := map[(i64, i64), i64]()
-    for b in cfg.rpo {
+    cfg := cfg_new(f)
+    nb := f.blocks.len
+    // last store per (var, block); has_store[b]: block b stores to a var
+    last_store := imap_new(naccess)
+    has_store := alloc[bool](nb)
+    for b in rpo {
         for v in f.blocks[b].insts {
-            if f.insts[v].op == Store {
-                var_, found := access.get(v)
-                if found {
-                    last_store.set((var_, b), f.insts[v].args[1])
-                }
+            var_ := access[v] - 1
+            if var_ >= 0 && f.insts[v].op == Store {
+                last_store.iset(var_ * nb + b, f.insts[v].args[1])
+                has_store[b] = true
             }
         }
     }
     repl := vec_fill(n, NOV)
-    rpo := clone(cfg.rpo)
-    cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, last_store: last_store, def_in: map[(i64, i64), i64](), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: map[T, i64]()}
+    nvar := var_ty.len
+    cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}}
+    // the value of each var in the current block: cur_val[var] when cur_blk[var] == b
+    cur_val := alloc[i64](nvar)
+    cur_blk := vec_fill(nvar, NOV)
     for b in rpo {
-        insts := clone(cx.f.blocks[b].insts)
-        cur := map[i64, i64]()
-        keep := vec[i64]()
-        for v in insts {
-            var_, found := access.get(v)
-            if found {
+        // the kept instructions are a subsequence: compacted in place
+        insts := &cx.f.blocks[b].insts
+        kept := 0
+        for ii in 0..insts.len {
+            v := insts[ii]
+            var_ := access[v] - 1
+            if var_ >= 0 {
                 if cx.f.insts[v].op == Store {
-                    cur.set(var_, cx.f.insts[v].args[1])
+                    cur_val[var_] = cx.f.insts[v].args[1]
+                    cur_blk[var_] = b
                 } else {
-                    val, have := cur.get(var_)
-                    if !have {
-                        val = cx.read_in(var_, b)
-                        cur.set(var_, val)
+                    if cur_blk[var_] != b {
+                        cur_val[var_] = cx.read_in(var_, b)
+                        cur_blk[var_] = b
                     }
-                    if repl.len < cx.f.insts.len {
-                        repl.resize(cx.f.insts.len, NOV)
-                    }
-                    repl[v] = val
+                    repl[v] = cur_val[var_]
                 }
             } else {
-                keep.push(v)
+                insts[kept] = v
+                kept += 1
             }
         }
-        cx.f.blocks[b].insts = keep
+        insts.len = kept
     }
     new_phis := cx.new_phis
-    entry_consts := cx.entry_consts
-    // insert phis at block heads, constants at the entry
-    by_block := map[i64, Vec[i64]]()
-    for bp in new_phis {
-        ps := by_block.get_or(bp.0, vec[i64]())
-        ps.push(bp.1)
-        by_block.set(bp.0, ps)
+    // insert phis at block heads (in the order they were made), constants at the entry
+    if !new_phis.is_empty() {
+        // the phis of block b: by_blk[start[b]..start[b + 1]]
+        start := alloc[i64](nb + 1)
+        for bp in new_phis {
+            start[bp.0 + 1] += 1
+        }
+        for b in 0..nb {
+            start[b + 1] += start[b]
+        }
+        fill := clone(start)
+        by_blk := alloc[i64](new_phis.len)
+        for bp in new_phis {
+            by_blk[fill[bp.0]] = bp.1
+            fill[bp.0] += 1
+        }
+        for b in 0..nb {
+            if start[b + 1] > start[b] {
+                l := vec_of(by_blk[start[b]..start[b + 1]])
+                l.extend(f.blocks[b].insts.items())
+                f.blocks[b].insts = l
+            }
+        }
     }
-    // blocks are independent of each other
-    for b in by_block.keys() {
-        ps := by_block.get_or(b, vec[i64]())
-        ps.extend(f.blocks[b].insts.items())
-        f.blocks[b].insts = ps
-    }
-    if !entry_consts.is_empty() {
+    if !cx.entry_consts.is_empty() {
         // after allocas/phis is not required for constants; put them first
-        e := entry_consts
+        e := cx.entry_consts
         e.extend(f.blocks[0].insts.items())
         f.blocks[0].insts = e
     }

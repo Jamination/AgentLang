@@ -348,6 +348,10 @@ priv struct Irc {
     cost: Vec[f64]
     seen: Vec[i64] // stamps of the Briggs test
     stamp: i64
+    // cost / degree of each node for the choice of a spill candidate, recomputed only after
+    // its cost or degree changed (rdirty)
+    ratio: Vec[f64]
+    rdirty: Vec[bool]
 }
 
 // the edge between machine register r and virtual register v, if new
@@ -483,6 +487,7 @@ priv inline fn decrement_degree(self: *Irc, m: i64) {
     d := self.degree[m]
     // saturating_sub(1)
     self.degree[m] = if d > 0 { d - 1 } else { 0 }
+    self.rdirty[m] = true
     if d == self.k {
         self.degree_fell(m)
     }
@@ -522,6 +527,7 @@ priv fn simplify(self: *Irc, n: i64) {
         }
         d := self.degree[m]
         self.degree[m] = if d > 0 { d - 1 } else { 0 }
+        self.rdirty[m] = true
         if d == k {
             self.degree_fell(m)
         }
@@ -606,6 +612,8 @@ priv fn combine(self: *Irc, u: i64, v: i64) {
             self.decrement_degree(t)
         }
     }
+    // (cost and degree of u changed)
+    self.rdirty[u] = true
     if u >= 32 && self.degree[u] >= self.k && self.state[u] == Freeze {
         self.state[u] = Spill
         self.spill_wl.push(u)
@@ -693,7 +701,11 @@ priv fn run(self: *Irc) {
                 if self.state[n] != Spill {
                     continue
                 }
-                c := self.cost[n] / f64(max(self.degree[n], 1))
+                if self.rdirty[n] {
+                    self.ratio[n] = self.cost[n] / f64(max(self.degree[n], 1))
+                    self.rdirty[n] = false
+                }
+                c := self.ratio[n]
                 if bi < 0 || c < bc {
                     bi = i
                     bc = c
@@ -1225,6 +1237,8 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             cost: vec_fill(n, 0.0),
             seen: vec_fill(n, 0),
             stamp: 0,
+            ratio: vec_fill(n, 0.0),
+            rdirty: vec_fill(n, true),
         }
         for r in 0..32 {
             g.state[r] = Pre

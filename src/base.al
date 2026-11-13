@@ -86,7 +86,9 @@ fn run_program(path: str, argv: []str) -> i64 {
 }
 
 // ---------- worker processes (the parallel back end) ----------
-// the number of CPUs this process may run on (sched_getaffinity), at least 1
+// the number of CPUs this process may use, at least 1: those it may run on
+// (sched_getaffinity), limited by a cgroup v2 CPU quota (/sys/fs/cgroup/cpu.max:
+// "quota period", or "max period" without a limit)
 fn cpu_count() -> i64 {
     mask: [16]u64
     n := syscall(204, 0, 128, ptr(mask))
@@ -96,6 +98,17 @@ fn cpu_count() -> i64 {
     c := 0
     for i in 0..min(n / 8, 16) {
         c += i64(popcnt(mask[i]))
+    }
+    text, ok := read_file("/sys/fs/cgroup/cpu.max")
+    if ok {
+        parts := fields(text)
+        if parts.len == 2 {
+            q, qok := parse_i64(parts[0])
+            p, pok := parse_i64(parts[1])
+            if qok && pok && q > 0 && p > 0 {
+                c = min(c, (q + p - 1) / p)
+            }
+        }
     }
     return max(c, 1)
 }
@@ -116,10 +129,18 @@ fn shared_unmap(addr: i64, bytes: i64) {
 }
 
 // fork after flushing standard output: 0 in the child, the child's pid in the parent, < 0 if
-// it failed
-fn fork_worker() -> i64 {
+// it failed. A quiet child writes its standard error to /dev/null (the parent redoes the work
+// of a child that fails, so its messages would only confuse).
+fn fork_worker(quiet: bool) -> i64 {
     flush()
-    return syscall(57)
+    pid := syscall(57)
+    if pid == 0 && quiet {
+        fd := syscall(2, cstr("/dev/null"), 1)
+        if fd >= 0 {
+            syscall(33, fd, 2)
+        }
+    }
+    return pid
 }
 
 // ends a forked worker at once (its copy of the buffered output is not written)

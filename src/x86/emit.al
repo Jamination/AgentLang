@@ -668,13 +668,14 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
             fwd[b] = i64(blk.insts[0].tgt)
         }
     }
+    // (jumps are only at the end of a block: isel puts them last and nothing is ever inserted
+    // after an instruction without definitions)
     for b in 0..nb {
         insts := &mf.blocks[b].insts
-        for x in 0..insts.len {
-            i := &insts[x]
-            if i.op == Jmp || i.op == Jcc {
-                i.tgt = i32(peephole_resolve(i64(i.tgt), &fwd))
-            }
+        x := insts.len - 1
+        while x >= 0 && (insts[x].op == Jmp || insts[x].op == Jcc) {
+            insts[x].tgt = i32(peephole_resolve(i64(insts[x].tgt), &fwd))
+            x -= 1
         }
     }
     // drop blocks that are no longer reachable
@@ -685,12 +686,14 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
         while work.len > 0 {
             b := work.pop()
             insts := &mf.blocks[b].insts
-            for x in 0..insts.len {
-                i := &insts[x]
-                if (i.op == Jmp || i.op == Jcc) && !reach[i64(i.tgt)] {
-                    reach[i64(i.tgt)] = true
-                    work.push(i64(i.tgt))
+            x := insts.len - 1
+            while x >= 0 && (insts[x].op == Jmp || insts[x].op == Jcc) {
+                t := i64(insts[x].tgt)
+                if !reach[t] {
+                    reach[t] = true
+                    work.push(t)
                 }
+                x -= 1
             }
         }
         // layout.retain(|b| reach[b])

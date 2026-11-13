@@ -72,8 +72,13 @@ struct Leaf {
 
 struct Types {
     kinds: Vec[TyK]
-    // kind -> type id, keyed by the canonical text of the kind (types_key)
-    map: Map[str, i64]
+    // kind -> type id: pointers and slices by their element type (ptr_of / slice_of: id, or
+    // 0 for not yet), tuples and function types by their type lists (`lists`: the kind's tag,
+    // then the types), every other kind by (tag, a, b) (`small`, see key3)
+    ptr_of: Vec[i64]
+    slice_of: Vec[i64]
+    small: Map[(i64, i64, i64), i64]
+    lists: Map[[]i64, i64]
     structs: Vec[StructInfo]
     enums: Vec[EnumInfo]
     field_ids: Map[(i64, i64), i64]
@@ -116,45 +121,53 @@ fn types_may_alias_class(a: i64, b: i64) -> bool {
     return fa == fb || fa == 0 || fb == 0
 }
 
-// canonical text of a kind: equal kinds have equal keys and different kinds different keys
-priv fn types_key(k: TyK) -> str {
-    match k {
-        Err => return "E"
-        Unit => return "U"
-        Bool => return "B"
-        Int(b, s) => return fmt(if s { "i" } else { "u" }, b)
-        F64 => return "D"
-        F32 => return "G"
-        Vec(n) => return fmt("V", n)
-        Quat => return "Q"
-        Mat4 => return "M"
-        Ptr(t) => return fmt("P", t)
-        Slice(t) => return fmt("S", t)
-        Array(t, n) => return fmt("A", t, ",", n)
-        Struct(s) => return fmt("R", s)
-        Enum(e) => return fmt("N", e)
+// the key of a kind without a type list in `Types.small`: its variant and payload
+priv fn key3(k: *TyK) -> (i64, i64, i64) {
+    return match *k {
+        Err => (0, 0, 0)
+        Unit => (1, 0, 0)
+        Bool => (2, 0, 0)
+        Int(b, s) => (3, b, i64(s))
+        F64 => (4, 0, 0)
+        F32 => (5, 0, 0)
+        Vec(n) => (6, n, 0)
+        Quat => (7, 0, 0)
+        Mat4 => (8, 0, 0)
+        Ptr(t) => (9, t, 0)
+        Slice(t) => (10, t, 0)
+        Array(t, n) => (11, t, n)
+        Struct(s) => (12, s, 0)
+        Enum(e) => (13, e, 0)
+        Never => (16, 0, 0)
+        Tuple(_), Fn(_, _) => (-1, 0, 0)
+    }
+}
+
+// the key of a tuple or function type in `Types.lists`
+priv fn key_list(k: *TyK) -> []i64 {
+    match *k {
         Tuple(v) => {
-            parts := vec[str]()
-            for t in v {
-                parts.push(fmt(t))
-            }
-            return concat("T", join(parts.items(), ","))
+            l := alloc[i64](v.len + 1)
+            l[0] = 14
+            copy(l[1..], v.items())
+            return l
         }
         Fn(p, r) => {
-            parts := vec[str]()
-            for t in p {
-                parts.push(fmt(t))
-            }
-            return fmt("F", join(parts.items(), ","), ">", r)
+            l := alloc[i64](p.len + 2)
+            l[0] = 15
+            copy(l[1..], p.items())
+            l[p.len + 1] = r
+            return l
         }
-        Never => return "!"
+        _ => return nil
     }
 }
 
 fn types_new() -> Types {
     t := Types{
         kinds: vec[TyK](),
-        map: map[str, i64](),
+        small: map[(i64, i64, i64), i64](),
+        lists: map[[]i64, i64](),
         structs: vec[StructInfo](),
         enums: vec[EnumInfo](),
         field_ids: map[(i64, i64), i64](),
@@ -190,14 +203,47 @@ fn types_new() -> Types {
 }
 
 fn intern(self: *Types, k: TyK) -> i64 {
-    key := types_key(k)
-    t, found := self.map.get(key)
-    if found {
-        return t
+    match k {
+        Ptr(e) if e < self.ptr_of.len && self.ptr_of[e] != 0 => return self.ptr_of[e]
+        Slice(e) if e < self.slice_of.len && self.slice_of[e] != 0 => return self.slice_of[e]
+        _ => {}
+    }
+    k3 := key3(&k)
+    kl: []i64 = nil
+    if k3.0 < 0 {
+        kl = key_list(&k)
+        t, found := self.lists.get(kl)
+        if found {
+            return t
+        }
+    } else {
+        t, found := self.small.get(k3)
+        if found {
+            return t
+        }
     }
     id := self.kinds.len
     self.kinds.push(clone(k))
-    self.map.set(key, id)
+    if k3.0 < 0 {
+        self.lists.set(kl, id)
+    } else {
+        self.small.set(k3, id)
+    }
+    match k {
+        Ptr(e) => {
+            if self.ptr_of.len <= e {
+                self.ptr_of.resize(e + 1 + self.kinds.len, 0)
+            }
+            self.ptr_of[e] = id
+        }
+        Slice(e) => {
+            if self.slice_of.len <= e {
+                self.slice_of.resize(e + 1 + self.kinds.len, 0)
+            }
+            self.slice_of[e] = id
+        }
+        _ => {}
+    }
     kids := vec[i64]()
     match k {
         Ptr(t), Slice(t), Array(t, _) => kids.push(t)

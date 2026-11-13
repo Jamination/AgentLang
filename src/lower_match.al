@@ -10,9 +10,9 @@ fn variant_of(self: *Cx, ei: i64, n: str) -> i64 {
     l: Vec[(i64, i64)]
     has := false
     if self.enum_decls[ei].pos.file < self.n_prelude {
-        l, has = self.p_variants.get(n)
+        l, has = self.lib_variants(n)
     } else {
-        l, has = self.variants.get(n)
+        l, has = self.user_variants(n)
     }
     if has {
         for i in 0..l.len {
@@ -48,7 +48,7 @@ priv fn qual_enum_name(self: *Cx, n: str) -> i64 {
     own := (self.enum_decls[ei].pos.file < self.n_prelude) == self.scope_prelude
     if !own {
         bit := if self.scope_prelude { 1 } else { 2 }
-        if self.decl_layers.get_or(n, 0) & bit != 0 {
+        if self.decl_layer(n) & bit != 0 {
             return -1
         }
     }
@@ -61,8 +61,8 @@ priv fn qual_enum_name(self: *Cx, n: str) -> i64 {
 // being compiled; the enums of the other layer.
 fn bare_variant(self: *Fx, n: str, expect: Opt[i64]) -> (i64, i64, i64) {
     cx := self.cx
-    ul, uhas := cx.variants.get(n)
-    pl, phas := cx.p_variants.get(n)
+    ul, uhas := cx.user_variants(n)
+    pl, phas := cx.lib_variants(n)
     if !uhas && !phas {
         return (0, 0, 0)
     }
@@ -81,7 +81,7 @@ fn bare_variant(self: *Fx, n: str, expect: Opt[i64]) -> (i64, i64, i64) {
         own = ul
         other = pl
     }
-    hidden := !own_has && cx.decl_layers.get_or(n, 0) & bit != 0
+    hidden := !own_has && cx.decl_layer(n) & bit != 0
     match expect {
         Some(t) => {
             match cx.types.k(t) {
@@ -120,8 +120,8 @@ fn bare_variant(self: *Fx, n: str, expect: Opt[i64]) -> (i64, i64, i64) {
 // the diagnostic for a bare variant name that several enums have
 fn variant_ambiguous(self: *Fx, n: str, pos: Pos) {
     cx := self.cx
-    ul, uhas := cx.variants.get(n)
-    pl, phas := cx.p_variants.get(n)
+    ul, uhas := cx.user_variants(n)
+    pl, phas := cx.lib_variants(n)
     l := ul
     if (cx.scope_prelude && phas) || !uhas {
         l = pl
@@ -341,7 +341,7 @@ priv fn is_const(s: *Fx, e: *Expr) -> bool {
 
 // does the name `n` denote anything in an expression?
 priv fn known(s: *Fx, n: str) -> bool {
-    return is_some(s.lookup(n)) || s.cx.const_decls.has(n) || s.cx.global_decls.has(n) || s.cx.fn_names.has(n) || s.bare_variant(n, None).2 != 0
+    return is_some(s.lookup(n)) || s.cx.has_const(n) || s.cx.has_global(n) || s.cx.has_fn_name(n) || s.bare_variant(n, None).2 != 0
 }
 
 // the enum (index into the type table's enums) of a type, or -1
@@ -528,7 +528,7 @@ priv fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
         }
         Ref(n, pos) => {
             if top {
-                if is_some(self.lookup(n)) || self.cx.global_decls.has(n) {
+                if is_some(self.lookup(n)) || self.cx.has_global(n) {
                     // as before: the address of a variable, compared with a pointer
                     as_expr := Pat.Const(Expr{k: Un(Addr, parser_box(Expr{k: Ident(n), pos: pos})), pos: pos})
                     return self.pat_resolve(&as_expr, ty, top)
@@ -606,7 +606,7 @@ priv fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
                         }
                     }
                     if !top {
-                        if !self.cx.const_decls.has(n) {
+                        if !self.cx.has_const(n) {
                             // a capitalised name where an enum is matched is meant as a variant
                             pe := eid
                             if pe < 0 {
@@ -623,7 +623,7 @@ priv fn pat_resolve(self: *Fx, p: *Pat, ty: i64, top: bool) -> RPat {
                             return RPat{k: RP_BIND, ty: ty, pos: e.pos, name: n, nbinds: 1}
                         }
                         const_name = true
-                    } else if eid >= 0 && !is_some(self.lookup(n)) && !self.cx.global_decls.has(n) {
+                    } else if eid >= 0 && !is_some(self.lookup(n)) && !self.cx.has_global(n) {
                         // reports that `n` is not a variant
                         return self.pat_variant(n, &none, false, no_qual, ty, e.pos)
                     } else if !known(self, n) {
@@ -705,7 +705,7 @@ priv fn lower_match_names(s: *Fx, p: *Pat, top: bool, out: *Vec[str]) {
                         if !known(s, n) {
                             out.push(n)
                         }
-                    } else if !s.cx.const_decls.has(n) && s.bare_variant(n, None).2 == 0 {
+                    } else if !s.cx.has_const(n) && s.bare_variant(n, None).2 == 0 {
                         out.push(n)
                     }
                 }
@@ -822,7 +822,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
             if payload {
                 l = self.load_any(part.v, T_STR)
             }
-            r := self.call_rt("__str_eq", vec[i64](), vec_of([]Val{l, pv}), rp.pos)
+            r := self.call_rt("__str_eq", vec[i64](), vec_two[Val](l, pv), rp.pos)
             c := self.scalar(r)
             self.br(c, ok_b, fail_b)
             return
@@ -830,7 +830,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
         if key != NOV {
             p := self.scalar(pv)
             op := if self.cx.types.is_float(rp.ty) { Op.FEq } else { Op.Eq }
-            eq := self.ins(op, I8, vec_of([]i64{key, p}), 0)
+            eq := self.ins(op, I8, vec_two(key, p), 0)
             self.br(eq, ok_b, fail_b)
             return
         }
@@ -850,7 +850,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
             }
         }
         c := self.iconst(I64, rp.vi)
-        eq := self.ins(Op.Eq, I8, vec_of([]i64{tag, c}), 0)
+        eq := self.ins(Op.Eq, I8, vec_two(tag, c), 0)
         if !subs_refutable(rp) {
             self.br(eq, ok_b, fail_b)
             return
@@ -867,7 +867,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
             p = self.scalar(part)
         }
         z := self.iconst(I64, 0)
-        ne := self.ins(Ne, I8, vec_of([]i64{p, z}), 0)
+        ne := self.ins(Ne, I8, vec_two(p, z), 0)
         b := self.new_block()
         self.br(ne, b, fail_b)
         self.switch_to(b)
@@ -938,7 +938,7 @@ priv fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(st
             tmp = self.mval(rp.ty, t)
             self.store(tmp, part)
         }
-        self.scopes[self.scopes.len - 1].vars.set(rp.name, (rp.ty, tmp.v))
+        self.scope_set(rp.name, (rp.ty, tmp.v))
         return
     }
     if rp.k == RP_REF {
@@ -958,7 +958,7 @@ priv fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(st
         }
         self.store(self.mval(pt, a), self.sval(pt, part.v))
         if !use_slots {
-            self.scopes[self.scopes.len - 1].vars.set(rp.name, (pt, a))
+            self.scope_set(rp.name, (pt, a))
         }
         return
     }
@@ -1341,7 +1341,7 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
     self.push_scope()
     if a.use_slots {
         for i in 0..a.slots.len {
-            self.scopes[self.scopes.len - 1].vars.set(a.slots[i].0, (a.slots[i].1, a.slots[i].2))
+            self.scope_set(a.slots[i].0, (a.slots[i].1, a.slots[i].2))
         }
     } else if a.pat_err {
         // the arm's variables are unknown: give them the error type, which is silent
@@ -1351,7 +1351,7 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
         }
         for i in 0..names.len {
             if names[i] != "_" {
-                self.scopes[self.scopes.len - 1].vars.set(names[i], (T_ERR, self.temp(T_ERR)))
+                self.scope_set(names[i], (T_ERR, self.temp(T_ERR)))
             }
         }
     } else if npats == 1 {

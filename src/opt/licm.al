@@ -28,9 +28,16 @@ fn licm_loop_order(loops: *Loops) -> Vec[i64] {
     return order
 }
 
+// how many preheaders licm_make_preheaders has made so far (callers that do not report them
+// as a change: unroll_run, bce_run)
+priv preheaders_made: i64
+
+fn licm_preheaders_made() -> i64 {
+    return preheaders_made
+}
+
 fn licm_make_preheaders(f: *Func) -> bool {
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
+    cfg, loops := cfg_loops(f)
     changed := false
     for li in 0..loops.loops.len {
         h := loops.loops[li].header
@@ -42,6 +49,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
             continue
         }
         p := f.new_block()
+        preheaders_made += 1
         f.blocks[p].term = Jmp(h)
         for o in outside {
             match f.blocks[o].term {
@@ -130,12 +138,12 @@ priv fn run_guaranteed(cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> boo
 
 fn licm_run(f: *Func) -> bool {
     changed := licm_make_preheaders(f)
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
+    cfg, loops := cfg_loops(f)
     if loops.loops.is_empty() {
         return changed
     }
-    esc := alias_escaped_allocas(f)
+    // (unchanged since this pass began unless preheaders were made)
+    esc := alias_escaped_cached(f, if changed { -1 } else { opt_gen() })
     def_block := f.block_of()
     order := licm_loop_order(&loops)
     // one membership buffer for all loops (cleared after each): a fresh one per loop made
@@ -145,23 +153,25 @@ fn licm_run(f: *Func) -> bool {
         l := &loops.loops[li]
         h := l.header
         outside := licm_outside_preds(&cfg, &loops, li, h)
-        if outside.len != 1 || f.succs(outside[0]).len != 1 {
+        if outside.len != 1 {
+            continue
+        }
+        nsucc, _, _ := f.succ_pair(outside[0])
+        if nsucc != 1 {
             continue
         }
         pre := outside[0]
         for b in l.blocks {
             in_loop[b] = true
         }
-        // blocks.sort_by_key(|b| cfg.rpo_idx[*b as usize]) (stable)
+        // the blocks in reverse postorder (their positions in it are distinct)
         blocks := vec[i64]()
         for b in l.blocks {
-            blocks.push(b)
-            k := blocks.len - 1
-            while k > 0 && cfg.rpo_idx[blocks[k - 1]] > cfg.rpo_idx[b] {
-                blocks[k] = blocks[k - 1]
-                k -= 1
-            }
-            blocks[k] = b
+            blocks.push(cfg.rpo_idx[b])
+        }
+        sort(blocks.items())
+        for k in 0..blocks.len {
+            blocks[k] = cfg.rpo[blocks[k]]
         }
         // memory effects and exits
         stores := vec[MemRef]()
@@ -176,14 +186,8 @@ fn licm_run(f: *Func) -> bool {
                     has_call = true
                 }
             }
-            leaves := false
-            ss := f.succs(b)
-            for s in ss {
-                if !in_loop[s] {
-                    leaves = true
-                    break
-                }
-            }
+            ns, s0, s1 := f.succ_pair(b)
+            leaves := ns > 0 && !in_loop[s0] || ns > 1 && !in_loop[s1]
             if !leaves {
                 match f.blocks[b].term {
                     Ret(_), Trap => leaves = true
@@ -197,9 +201,11 @@ fn licm_run(f: *Func) -> bool {
         loop {
             moved := false
             for b in blocks {
-                insts := clone(f.blocks[b].insts)
-                keep := vec[i64]()
-                for v in insts {
+                // the kept instructions are compacted in place (b is not pre)
+                insts := &f.blocks[b].insts
+                kept := 0
+                for ii in 0..insts.len {
+                    v := insts[ii]
                     i := &f.insts[v]
                     invariant_args := true
                     for a in i.args {
@@ -250,10 +256,11 @@ fn licm_run(f: *Func) -> bool {
                         def_block[v] = pre
                         moved = true
                     } else {
-                        keep.push(v)
+                        insts[kept] = v
+                        kept += 1
                     }
                 }
-                f.blocks[b].insts = keep
+                insts.len = kept
             }
             if !moved {
                 break

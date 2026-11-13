@@ -502,22 +502,43 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
     for ai in 0..allocas.len {
         root[allocas[ai]] = ai
     }
-    changed := true
-    while changed {
-        changed = false
-        for bi in 0..nb {
-            for v in f.blocks[bi].insts {
-                i := &f.insts[v]
-                if i.op == Add && root[v] < 0 {
-                    a := root[i.args[0]]
-                    b := root[i.args[1]]
-                    if (a >= 0) != (b >= 0) {
-                        root[v] = max(a, b)
-                        changed = true
-                    }
+    // (the passes visit the Adds in block order; after the first pass only the Adds without
+    // a root yet can change)
+    adds := vec[i64]()
+    changed := false
+    for bi in 0..nb {
+        for v in f.blocks[bi].insts {
+            i := &f.insts[v]
+            if i.op == Add && root[v] < 0 {
+                a := root[i.args[0]]
+                b := root[i.args[1]]
+                if (a >= 0) != (b >= 0) {
+                    root[v] = max(a, b)
+                    changed = true
+                } else {
+                    adds.push(v)
                 }
             }
         }
+    }
+    while changed {
+        changed = false
+        k := 0
+        for v in adds {
+            i := &f.insts[v]
+            if root[v] < 0 {
+                a := root[i.args[0]]
+                b := root[i.args[1]]
+                if (a >= 0) != (b >= 0) {
+                    root[v] = max(a, b)
+                    changed = true
+                    continue
+                }
+                adds[k] = v
+                k += 1
+            }
+        }
+        adds.len = k
     }
     escaped := vec_fill(allocas.len, false)
     for bi in 0..nb {

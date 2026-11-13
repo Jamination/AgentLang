@@ -1,14 +1,6 @@
 // Dominator-scoped global value numbering for pure instructions, plus propagation of
 // branch conditions into dominated blocks (removes repeated checks).
 
-// type Key = (Op, T, Vec<V>, i64); `args` is an independent copy that is never changed
-priv struct Key { op: Op, ty: T, args: []i64, k: i64 }
-
-priv enum Step {
-    Enter(i64),
-    Exit(Vec[Key], Vec[(i64, Opt[bool])]),
-}
-
 priv fn numberable(op: Op) -> bool {
     return op.is_pure() || op == SDiv || op == UDiv || op == SRem || op == URem || op == Proj
 }
@@ -21,127 +13,219 @@ priv fn run_find(repl: []i64, v0: i64) -> i64 {
     return v
 }
 
+// The instructions in scope, by their key (op, type, arguments (the two of a commutative op in
+// increasing order), k). An entry is the instruction itself: its key fields do not change while
+// it is in scope. Entries go in the reverse order they came (the walk leaves a block after its
+// children), so the table is a stack with hash chains.
+priv struct Table {
+    head: []i64 // per hash bucket: the newest entry, -1 if none
+    ent: Vec[i64] // the instruction
+    next: Vec[i64] // the older entry of the same bucket
+    bucket: Vec[i64]
+}
+
+priv fn table_new(n: i64) -> Table {
+    cap := 16
+    while cap < 2 * n {
+        cap *= 2
+    }
+    head := mkslice[i64](__alloc_raw(cap * 8), cap)
+    memfill(ptr(head), 0xFF, cap * 8)
+    return Table{head: head, ent: vec[i64](), next: vec[i64](), bucket: vec[i64]()}
+}
+
+// the arguments of instruction i in key order
+priv inline fn key_args(i: *Inst) -> (i64, i64) {
+    if i.args.len != 2 {
+        return (0, 0)
+    }
+    a := i.args[0]
+    b := i.args[1]
+    if i.op.is_commutative() && a > b {
+        return (b, a)
+    }
+    return (a, b)
+}
+
+priv fn key_hash(i: *Inst) -> i64 {
+    h := (u64(i64(i.op)) * 31 + u64(i64(i.ty))) * 0x9E3779B97F4A7C15 + u64(i.k)
+    if i.args.len == 2 {
+        a, b := key_args(i)
+        h = (h ^ u64(a)) * 0x9E3779B97F4A7C15
+        h = (h ^ u64(b)) * 0x9E3779B97F4A7C15
+    } else {
+        for x in i.args {
+            h = (h ^ u64(x)) * 0x9E3779B97F4A7C15
+        }
+    }
+    h = (h ^ u64(i.args.len)) * 0x9E3779B97F4A7C15
+    return i64(h >> 32)
+}
+
+priv fn same_key(i: *Inst, j: *Inst) -> bool {
+    if i.op != j.op || i.ty != j.ty || i.k != j.k || i.args.len != j.args.len {
+        return false
+    }
+    if i.args.len == 2 {
+        a1, b1 := key_args(i)
+        a2, b2 := key_args(j)
+        return a1 == a2 && b1 == b2
+    }
+    for x in 0..i.args.len {
+        if i.args[x] != j.args[x] {
+            return false
+        }
+    }
+    return true
+}
+
+// the instruction in scope with the key of v, or NOV
+priv fn lookup(t: *Table, f: *Func, v: i64, h: i64) -> i64 {
+    i := &f.insts[v]
+    e := t.head[h & (len(t.head) - 1)]
+    while e >= 0 {
+        w := t.ent[e]
+        if same_key(i, &f.insts[w]) {
+            return w
+        }
+        e = t.next[e]
+    }
+    return NOV
+}
+
+priv fn add(t: *Table, v: i64, h: i64) {
+    bk := h & (len(t.head) - 1)
+    t.ent.push(v)
+    t.next.push(t.head[bk])
+    t.bucket.push(bk)
+    t.head[bk] = t.ent.len - 1
+}
+
+// remove the entries above `mark`
+priv fn pop_to(t: *Table, mark: i64) {
+    while t.ent.len > mark {
+        e := t.ent.len - 1
+        t.head[t.bucket[e]] = t.next[e]
+        t.ent.len = e
+        t.next.len = e
+        t.bucket.len = e
+    }
+}
+
+// the conditions known in a block: known[c] is 0 (unknown), 1 (false) or 2 (true)
+priv fn known_at(known: *Vec[u8], c: i64) -> u8 {
+    if c < known.len {
+        return known[c]
+    }
+    return 0
+}
+
+priv fn known_set(known: *Vec[u8], c: i64, s: u8) {
+    if c >= known.len {
+        known.resize(c + 1, 0)
+    }
+    known[c] = s
+}
+
 fn gvn_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     repl := vec_fill(f.insts.len, NOV)
-    table := map[Key, i64]()
-    known := map[i64, bool]()
+    table := table_new(f.insts.len)
+    known := Vec[u8]{buf: alloc[u8](f.insts.len), len: f.insts.len}
     changed := false
     bool_consts := [2]i64{NOV, NOV}
-    stack := vec_of([]Step{Enter(0)})
+    // the walk over the dominator tree: (b, -1, ..) enters block b; (-1, mark, c, old) leaves
+    // a block: entries above `mark` go, known[c] (if c is not NOV) is old again
+    stack := vec_of([](i64, i64, i64, u8){(0, -1, NOV, u8(0))})
     while stack.len > 0 {
         step := stack.pop()
-        match step {
-            Exit(keys, facts) => {
-                for k in keys {
-                    table.del(k)
-                }
-                fi := facts.len - 1
-                while fi >= 0 {
-                    c := facts[fi].0
-                    match facts[fi].1 {
-                        Some(o) => {
-                            known.set(c, o)
-                        }
-                        None => {
-                            known.del(c)
-                        }
-                    }
-                    fi -= 1
-                }
+        b := step.0
+        if b < 0 {
+            pop_to(&table, step.1)
+            if step.2 != NOV {
+                known_set(&known, step.2, step.3)
             }
-            Enter(b) => {
-                added := vec[Key]()
-                facts := vec[(i64, Opt[bool])]()
-                // a block reached only through one arm of a conditional branch knows the condition
-                if cfg.preds[b].len == 1 {
-                    p := cfg.preds[b][0]
-                    match f.blocks[p].term {
-                        Br(c0, t, e) if t != e => {
-                            c := run_find(repl.items(), c0)
-                            val := t == b
-                            old: Opt[bool] = None
-                            ov, had := known.get(c)
-                            if had {
-                                old = Some(ov)
-                            }
-                            known.set(c, val)
-                            facts.push((c, old))
-                            // an equivalent negated compare is also decided
-                        }
-                        _ => {}
-                    }
+            continue
+        }
+        fact := NOV
+        fact_old := u8(0)
+        // a block reached only through one arm of a conditional branch knows the condition
+        if cfg.preds[b].len == 1 {
+            p := cfg.preds[b][0]
+            match f.blocks[p].term {
+                Br(c0, t, e) if t != e => {
+                    c := run_find(repl.items(), c0)
+                    fact = c
+                    fact_old = known_at(&known, c)
+                    known_set(&known, c, if t == b { u8(2) } else { u8(1) })
                 }
-                old := f.blocks[b].insts
-                f.blocks[b].insts = vec[i64]()
-                nw := vec[i64]()
-                for v in old {
-                    for ai in 0..f.insts[v].args.len {
-                        a := f.insts[v].args[ai]
-                        r := run_find(repl.items(), a)
-                        // a condition decided by a dominating branch is a constant here
-                        val, is_known := known.get(r)
-                        if is_known {
-                            if f.insts[r].op != Const {
-                                // the constants live at the top of the entry block
-                                slot := i64(val)
-                                if bool_consts[slot] == NOV {
-                                    bool_consts[slot] = f.mk(Const, I8, vec[i64](), i64(val))
-                                    repl.push(NOV)
-                                }
-                                r = bool_consts[slot]
-                                changed = true
-                            }
+                _ => {}
+            }
+        }
+        mark := table.ent.len
+        // the kept instructions are compacted in place
+        insts := &f.blocks[b].insts
+        kept := 0
+        for ii in 0..insts.len {
+            v := insts[ii]
+            for ai in 0..f.insts[v].args.len {
+                a := f.insts[v].args[ai]
+                r := run_find(repl.items(), a)
+                // a condition decided by a dominating branch is a constant here
+                kn := known_at(&known, r)
+                if kn != 0 {
+                    if f.insts[r].op != Const {
+                        // the constants live at the top of the entry block
+                        slot := i64(kn) - 1
+                        if bool_consts[slot] == NOV {
+                            bool_consts[slot] = f.mk(Const, I8, vec[i64](), slot)
+                            repl.push(NOV)
                         }
-                        if r != a {
-                            f.insts[v].args[ai] = r
-                        }
-                    }
-                    i := &f.insts[v]
-                    if !numberable(i.op) {
-                        nw.push(v)
-                        continue
-                    }
-                    args := clone(i.args)
-                    if i.op.is_commutative() && args.len == 2 && args[0] > args[1] {
-                        t := args[0]
-                        args[0] = args[1]
-                        args[1] = t
-                    }
-                    key := Key{op: i.op, ty: i.ty, args: args.items(), k: i.k}
-                    w, found := table.get(key)
-                    if found {
-                        repl[v] = w
+                        r = bool_consts[slot]
                         changed = true
-                    } else {
-                        table.set(key, v)
-                        added.push(key)
-                        nw.push(v)
                     }
                 }
-                f.blocks[b].insts = nw
-                match f.blocks[b].term {
-                    Br(c0, t, e) => {
-                        c := run_find(repl.items(), c0)
-                        val, is_known := known.get(c)
-                        if is_known {
-                            if val {
-                                f.blocks[b].term = Jmp(t)
-                            } else {
-                                f.blocks[b].term = Jmp(e)
-                            }
-                            changed = true
-                        }
-                    }
-                    _ => {}
-                }
-                stack.push(Exit(added, facts))
-                ci := cfg.children[b].len - 1
-                while ci >= 0 {
-                    stack.push(Enter(cfg.children[b][ci]))
-                    ci -= 1
+                if r != a {
+                    f.insts[v].args[ai] = r
                 }
             }
+            if !numberable(f.insts[v].op) {
+                insts[kept] = v
+                kept += 1
+                continue
+            }
+            h := key_hash(&f.insts[v])
+            w := lookup(&table, f, v, h)
+            if w != NOV {
+                repl[v] = w
+                changed = true
+            } else {
+                add(&table, v, h)
+                insts[kept] = v
+                kept += 1
+            }
+        }
+        insts.len = kept
+        match f.blocks[b].term {
+            Br(c0, t, e) => {
+                c := run_find(repl.items(), c0)
+                kn := known_at(&known, c)
+                if kn != 0 {
+                    if kn == 2 {
+                        f.blocks[b].term = Jmp(t)
+                    } else {
+                        f.blocks[b].term = Jmp(e)
+                    }
+                    changed = true
+                }
+            }
+            _ => {}
+        }
+        stack.push((-1, mark, fact, fact_old))
+        ci := cfg.children[b].len - 1
+        while ci >= 0 {
+            stack.push((cfg.children[b][ci], -1, NOV, u8(0)))
+            ci -= 1
         }
     }
     extra := vec[i64]()

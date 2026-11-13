@@ -119,9 +119,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts) -> Done {
     f := &m.funcs[fid]
     // everything up to the machine code of this function is temporary (see work_begin)
     work_begin()
-    cleanup_prune_unreachable(f)
-    cleanup_trivial_phis(f)
-    cleanup_dce(f)
+    opt_backend_cleanup(f, fid)
     aliases := isel_split_critical_edges(f)
     // the loops (a function without a cycle has none: no need for dominators)
     rpo := f.rpo()
@@ -214,7 +212,9 @@ priv fn compile_parallel(m: *Module, fids: []i64, o: *Opts, nw: i64, done: *Vec[
         if base[w] == 0 {
             continue
         }
-        pid := fork_worker()
+        // (a failed worker stays silent unless ALC_DEBUG is set)
+        dv, dset := env_get("ALC_DEBUG")
+        pid := fork_worker(!dset)
         if pid == 0 {
             worker(m, fids, owner.items(), w, base[w], room[w], o)
             worker_exit(0)
