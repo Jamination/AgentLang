@@ -1458,6 +1458,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         scratch_on()
         merged := false
         repl := vec_fill(f.insts.len, NOV)
+        nrepl := 0
         dead := vec_fill(f.blocks.len, false)
         scratch_off()
         for b in rpo {
@@ -1477,6 +1478,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 for v in sinsts {
                     if f.insts[v].op == Phi {
                         repl[v] = f.insts[v].args[0]
+                        nrepl += 1
                     } else {
                         f.blocks[b].insts.push(v)
                     }
@@ -1486,8 +1488,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 f.blocks[b].term = st
                 dead[s] = true
                 // successors of s now come from b
-                succs := f.succs(b)
-                for ss in succs {
+                nsucc, s0, s1 := f.succ_pair(b)
+                for si in 0..nsucc {
+                    ss := if si == 0 { s0 } else { s1 }
                     for ii in 0..f.blocks[ss].insts.len {
                         v := f.blocks[ss].insts[ii]
                         if f.insts[v].op != Phi {
@@ -1507,7 +1510,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         if !merged {
             break
         }
-        f.apply_repl(&repl)
+        if nrepl > 0 {
+            f.apply_repl(&repl)
+        }
         changed = true
         scanned = false
     }
