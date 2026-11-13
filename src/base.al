@@ -17,52 +17,43 @@ fn vec_two[T](a: T, b: T) -> Vec[T] {
 }
 
 // ---------- process ----------
-// The system the compiler runs on (its host) is reached through the OS layer of the run-time
-// library (the `__os_*` functions of src/prelude_linux.al / prelude_windows.al).
+// The system the compiler runs on (its host) is TARGET_OS: the target the compiler was built
+// for. src/host_linux.al and src/host_windows.al define for it:
+//   make_executable(path) -> bool  marks a file as executable (mode 0755; nothing to do on
+//                                  Windows)
+//   run_program_env(path, argv, drop, add) -> i64
+//                                  runs a program with arguments and the current environment
+//                                  without the variables named in `drop` and with the
+//                                  `NAME=value` entries of `add`, waits for it and returns its
+//                                  exit status (128 + signal number if a signal ended it, -1 if
+//                                  it could not be started); it gets the stack limit and the
+//                                  environment the compiler was started with (see with_stack)
+//   with_stack(bytes, f) -> i64    deep recursion needs a big stack: calls f with a stack of at
+//                                  least `bytes` and returns its result. Linux raises the stack
+//                                  limit and starts the compiler again; Windows runs f on a
+//                                  thread with a stack of that size. Call first in main.
+//   stack_size() -> i64            the stack the compiler has (its limit), -1 if it is
+//                                  unlimited or not known
+//   file_id(path) -> (str, bool)   the identity of an existing file (device and inode, or
+//                                  volume and file index), or false
+//   cpu_count() -> i64             the number of CPUs this process may use, at least 1
+//   shared_map, fork_worker, queue_new, pipe_open: worker processes (below)
+// The rest goes through the OS layer of the run-time library (the `__os_*` functions of
+// src/prelude_linux.al / prelude_windows.al).
+when TARGET_OS == Windows {
+    use "host_windows.al"
+} else {
+    use "host_linux.al"
+}
 
 // the compiler runs on Windows (else on Linux)
-fn host_windows() -> bool {
-    return __os_is_windows()
+inline fn host_windows() -> bool {
+    return TARGET_OS == Windows
 }
 
-// marks a file as executable (mode 0755; nothing to do on Windows)
-fn make_executable(path: str) -> bool {
-    return __os_make_executable(cstr(path))
-}
-
-// runs a program with arguments and the current environment, waits for it and returns its
-// exit status (128 + signal number if a signal ended it, -1 if it could not be started). The
-// program gets the stack limit and environment the compiler was started with (see
-// with_stack).
+// run_program_env without changes to the environment
 fn run_program(path: str, argv: []str) -> i64 {
     return run_program_env(path, argv, nil, nil)
-}
-
-// run_program with a changed environment: the variables named in `drop` are removed and the
-// `NAME=value` entries of `add` appended
-fn run_program_env(path: str, argv: []str, drop: []str, add: []str) -> i64 {
-    return __os_run(path, argv, drop, add)
-}
-
-// Deep recursion needs a big stack: calls f with a stack of at least `bytes` and returns its
-// result. Linux raises the stack limit and starts the compiler again; Windows runs f on a
-// thread with a stack of that size. Call first in main.
-fn with_stack(bytes: i64, f: fn() -> i64) -> i64 {
-    return __os_big_stack(bytes, f)
-}
-
-// the stack the compiler has (its limit), -1 if it is unlimited or not known
-fn stack_size() -> i64 {
-    return __os_stack_size()
-}
-
-// the identity of an existing file (device and inode, or volume and file index), or false
-fn file_id(path: str) -> (str, bool) {
-    dev, ino, ok := __os_file_id(cstr(path))
-    if !ok {
-        return ("", false)
-    }
-    return (fmt(dev, ":", ino), true)
 }
 
 // a byte that separates path components on the host: `/`, on Windows also `\`
@@ -77,35 +68,34 @@ fn host_root(p: str) -> i64 {
 }
 
 // ---------- worker processes (the parallel back end) ----------
-// the number of CPUs this process may use, at least 1
-fn cpu_count() -> i64 {
-    return __os_cpu_count()
-}
+// The host files also define:
+//   shared_map(bytes) -> i64       a zeroed mapping of `bytes` that forked children share with
+//                                  this process (pages are only allocated when touched): its
+//                                  address, or 0
+//   fork_worker(quiet) -> i64      fork after flushing standard output: 0 in the child, the
+//                                  child's pid in the parent, < 0 if it failed. A quiet child
+//                                  writes its standard error to /dev/null (the parent redoes
+//                                  the work of a child that fails, so its messages would only
+//                                  confuse).
+//   queue_new(items) -> i64        a work queue that forked workers share: a pipe filled with
+//                                  the items (each below 2^32) and closed for writing before
+//                                  the workers are forked. A read of a pipe is atomic, so every
+//                                  item is taken (queue_take) by one process only, in the order
+//                                  of the items. Items that do not fit into the pipe are left
+//                                  out. Returns the read end, or -1.
+//   pipe_open() -> (i64, i64)      a pipe through which forked workers report that they are
+//                                  done: (read end, write end), or (-1, -1). Every worker
+//                                  closes its copy of the write end when it is done (a process
+//                                  that ends closes it too); once this process has closed its
+//                                  own, pipe_wait_closed returns when all are.
 
 // whether workers can be forked (not on Windows: the back end is sequential there)
-fn can_fork() -> bool {
-    return !__os_is_windows()
-}
-
-// a zeroed mapping of `bytes` that forked children share with this process (pages are only
-// allocated when touched): its address, or 0
-fn shared_map(bytes: i64) -> i64 {
-    r := __os_map_shared(bytes)
-    if r < 0 && r > -4096 {
-        return 0
-    }
-    return r
+inline fn can_fork() -> bool {
+    return TARGET_OS != Windows
 }
 
 fn shared_unmap(addr: i64, bytes: i64) {
     __os_unmap(addr, bytes)
-}
-
-// fork after flushing standard output: 0 in the child, the child's pid in the parent, < 0 if
-// it failed. A quiet child writes its standard error to /dev/null (the parent redoes the work
-// of a child that fails, so its messages would only confuse).
-fn fork_worker(quiet: bool) -> i64 {
-    return __os_fork(quiet)
 }
 
 // ends a forked worker at once (its copy of the buffered output is not written)
@@ -118,14 +108,6 @@ fn wait_worker(pid: i64) -> i64 {
     return __os_wait(pid, pid, true)
 }
 
-// A work queue that forked workers share: a pipe filled with the items (each below 2^32) and
-// closed for writing before the workers are forked. A read of a pipe is atomic, so every item
-// is taken (queue_take) by one process only, in the order of the items. Items that do not fit
-// into the pipe are left out. Returns the read end, or -1.
-fn queue_new(items: []i64) -> i64 {
-    return __os_queue_new(items)
-}
-
 // the next item of the queue at fd, or -1 if it is empty
 fn queue_take(fd: i64) -> i64 {
     x: [1]u32
@@ -133,13 +115,6 @@ fn queue_take(fd: i64) -> i64 {
         return -1
     }
     return i64(x[0])
-}
-
-// A pipe through which forked workers report that they are done: (read end, write end), or
-// (-1, -1). Every worker closes its copy of the write end when it is done (a process that ends
-// closes it too); once this process has closed its own, pipe_wait_closed returns when all are.
-fn pipe_open() -> (i64, i64) {
-    return __os_pipe()
 }
 
 fn fd_close(fd: i64) {
