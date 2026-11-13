@@ -101,7 +101,18 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
 // allocas whose address may be observed by something other than direct loads/stores
 fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     n := f.insts.len
-    esc := vec_fill(n, false)
+    esc := Vec[bool]{buf: alloc[bool](n), len: n}
+    any := false
+    for v in f.blocks[0].insts {
+        if f.insts[v].op == Alloca {
+            any = true
+            break
+        }
+    }
+    if !any {
+        // nothing is derived from an alloca: nothing escapes
+        return esc
+    }
     // derived[v] = alloca this pointer value is derived from
     derived := vec_fill(n, NOV)
     for v in f.blocks[0].insts {
@@ -147,17 +158,27 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
                     }
                 }
             }
-            tu := f.term_uses(b)
-            for u in tu {
-                d := derived[u]
-                if d != NOV && !esc[d] {
-                    esc[d] = true
-                    changed = true
+            match f.blocks[b].term {
+                Br(c, _, _) => esc_use(&esc, &derived, c, &changed)
+                Ret(vs) => {
+                    for u in vs {
+                        esc_use(&esc, &derived, u, &changed)
+                    }
                 }
+                _ => {}
             }
         }
     }
     return esc
+}
+
+// a terminator uses u: the alloca it is derived from escapes
+priv inline fn esc_use(esc: *Vec[bool], derived: *Vec[i64], u: i64, changed: *bool) {
+    d := derived[u]
+    if d != NOV && !esc[d] {
+        esc[d] = true
+        *changed = true
+    }
 }
 
 struct MemRef {

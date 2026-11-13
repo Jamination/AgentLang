@@ -197,9 +197,11 @@ fn licm_run(f: *Func) -> bool {
         loop {
             moved := false
             for b in blocks {
-                insts := clone(f.blocks[b].insts)
-                keep := vec[i64]()
-                for v in insts {
+                // the kept instructions are compacted in place (b is not pre)
+                insts := &f.blocks[b].insts
+                kept := 0
+                for ii in 0..insts.len {
+                    v := insts[ii]
                     i := &f.insts[v]
                     invariant_args := true
                     for a in i.args {
@@ -250,10 +252,11 @@ fn licm_run(f: *Func) -> bool {
                         def_block[v] = pre
                         moved = true
                     } else {
-                        keep.push(v)
+                        insts[kept] = v
+                        kept += 1
                     }
                 }
-                f.blocks[b].insts = keep
+                insts.len = kept
             }
             if !moved {
                 break

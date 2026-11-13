@@ -3,19 +3,20 @@
 // remove phi inputs from non-predecessors, drop unreachable blocks' contents
 fn cleanup_prune_unreachable(f: *Func) -> bool {
     rpo := f.rpo()
-    reach := vec_fill(f.blocks.len, false)
+    n := f.blocks.len
+    reach := alloc[bool](n)
     for b in rpo {
         reach[b] = true
     }
     changed := false
-    for b in 0..f.blocks.len {
+    for b in 0..n {
         if !reach[b] && (!f.blocks[b].insts.is_empty() || f.blocks[b].term != Term.None) {
             f.blocks[b].insts.clear()
             f.blocks[b].term = Term.None
             changed = true
         }
     }
-    preds := f.preds()
+    // p is a predecessor of b when its (now pruned) terminator goes to b
     for b in rpo {
         for ii in 0..f.blocks[b].insts.len {
             v := f.blocks[b].insts[ii]
@@ -25,7 +26,13 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
             inst := &f.insts[v]
             k := 0
             while k < inst.pb.len {
-                if !contains(&preds[b], inst.pb[k]) {
+                p := inst.pb[k]
+                is_pred := false
+                if p >= 0 && p < n {
+                    cnt, s0, s1 := f.succ_pair(p)
+                    is_pred = cnt > 0 && s0 == b || cnt > 1 && s1 == b
+                }
+                if !is_pred {
                     inst.pb.remove(k)
                     inst.args.remove(k)
                     changed = true
@@ -44,39 +51,45 @@ fn cleanup_is_root(op: Op) -> bool {
 
 fn cleanup_dce(f: *Func) -> bool {
     n := f.insts.len
-    live := vec_fill(n, false)
-    work := vec[i64]()
+    live := alloc[bool](n)
+    // every value is pushed at most once (when it becomes live)
+    work := mkslice[i64](__alloc_raw(n * 8), n)
+    sp := 0
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
         for v in b.insts {
-            if cleanup_is_root(f.insts[v].op) {
+            if !live[v] && cleanup_is_root(f.insts[v].op) {
                 live[v] = true
-                work.push(v)
+                work[sp] = v
+                sp += 1
             }
         }
         match b.term {
             Br(c, _, _) if !live[c] => {
                 live[c] = true
-                work.push(c)
+                work[sp] = c
+                sp += 1
             }
             Ret(vs) => {
                 for v in vs {
                     if !live[v] {
                         live[v] = true
-                        work.push(v)
+                        work[sp] = v
+                        sp += 1
                     }
                 }
             }
             _ => {}
         }
     }
-    while work.len > 0 {
-        v := work.pop()
-        for ai in 0..f.insts[v].args.len {
-            a := f.insts[v].args[ai]
+    while sp > 0 {
+        sp -= 1
+        v := work[sp]
+        for a in f.insts[v].args {
             if !live[a] {
                 live[a] = true
-                work.push(a)
+                work[sp] = a
+                sp += 1
             }
         }
     }

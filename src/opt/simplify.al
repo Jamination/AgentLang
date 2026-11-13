@@ -252,6 +252,12 @@ priv fn simplify_is_not(s: *Ctx, n: i64, x: i64) -> bool {
 
 // returns Some(w) when v should be replaced by the existing value w
 priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
+    // ops without a rule below (most instructions): nothing to copy or match
+    match self.f.insts[v].op {
+        Const, FConst, Param, GAddr, FAddr, Alloca, Load, Store, Call, CallInd, Syscall, Proj, Phi,
+        MemCpy, MemSet => return None
+        _ => {}
+    }
     inst := self.f.insts[v]
     ty := inst.ty
     op := inst.op
