@@ -118,6 +118,14 @@ fn alias_escaped_cached(f: *Func, gen: i64) -> Vec[bool] {
     return esc
 }
 
+// the remembered result for change count `gen`, if there is one
+fn alias_escaped_known(f: *Func, gen: i64) -> (Vec[bool], bool) {
+    if gen >= 0 && f == esc_f && gen == esc_gen {
+        return (esc_last, true)
+    }
+    return (vec[bool](), false)
+}
+
 // allocas whose address may be observed by something other than direct loads/stores
 fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     n := f.insts.len

@@ -88,7 +88,8 @@ priv inline fn put(l: *Vec[i64], x: i64) {
 fn mem2reg_run(f: *Func) -> bool {
     any := false
     for it in 0..8 {
-        if !run_once(f) {
+        // (only the first round sees the IR the pass began with)
+        if !run_once(f, it == 0) {
             break
         }
         any = true
@@ -96,7 +97,7 @@ fn mem2reg_run(f: *Func) -> bool {
     return any
 }
 
-priv fn run_once(f: *Func) -> bool {
+priv fn run_once(f: *Func, first: bool) -> bool {
     // allocas live in the entry block; without one there is nothing to do
     nalloca := 0
     for v in f.blocks[0].insts {
@@ -106,6 +107,24 @@ priv fn run_once(f: *Func) -> bool {
     }
     if nalloca == 0 {
         return false
+    }
+    // An alloca that escapes (alias_escaped_allocas) is never promoted: its pointers, which
+    // include the ones promotion follows, have a use that promotion refuses (in a terminator,
+    // as a stored value, by anything but an Add, Load or Store, by an Add with a second
+    // pointer). If that analysis of this very IR is at hand and every alloca escapes, nothing
+    // can be done.
+    esc, known := alias_escaped_known(f, opt_gen())
+    if first && known {
+        all := true
+        for v in f.blocks[0].insts {
+            if f.insts[v].op == Alloca && !esc[v] {
+                all = false
+                break
+            }
+        }
+        if all {
+            return false
+        }
     }
     rpo := f.rpo()
     n := f.insts.len
