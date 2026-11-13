@@ -30,6 +30,14 @@ priv fn is_root(e: *Expr) -> bool {
     }
 }
 
+// is `e` the name `n`
+priv fn is_name(e: *Expr, n: str) -> bool {
+    match e.k {
+        Ident(x) => x == n
+        _ => false
+    }
+}
+
 // source text of a place expression (an index that is not a name or number is shown as `..`)
 priv fn place_str(e: *Expr) -> str {
     match e.k {
@@ -71,36 +79,27 @@ priv fn block(u: *Use, b: *Block) -> bool {
 
 priv fn expr(u: *Use, e: *Expr) -> bool {
     return match e.k {
-        Int(v, _) => true
-        Float(v, _) => true
-        Str(s) => true
-        Bool(b) => true
-        Nil => true
+        Int(_, _), Float(_, _), Str(_), Bool(_), Nil, TypeE(_), Fn(_) => true
         Ident(n) => {
             if n == u.name {
                 u.others += 1
             }
             true
         }
-        Un(op, x) => expr(u, x)
-        Bin(op, a, b) => {
+        Un(_, x), Field(x, _) => expr(u, x)
+        Bin(_, a, b) => {
             expr(u, a)
             expr(u, b)
         }
-        Call(c, args) => {
+        Call(c, args), Index(c, args) => {
             expr(u, c)
             exprs(u, &args)
-        }
-        Index(b, idx) => {
-            expr(u, b)
-            exprs(u, &idx)
         }
         Slice(b, lo, hi) => {
             expr(u, b)
             opt(u, lo)
             opt(u, hi)
         }
-        Field(b, f) => expr(u, b)
         Lit(t, fields) => {
             expr(u, t)
             for i in 0..fields.len {
@@ -108,14 +107,12 @@ priv fn expr(u: *Use, e: *Expr) -> bool {
             }
             true
         }
-        TypeE(t) => true
         If(c, a, b) => {
             expr(u, c)
             block(u, a)
             block(u, b)
         }
         Tuple(es) => exprs(u, &es)
-        Fn(d) => true
         Match(sc, arms) => {
             expr(u, sc)
             for i in 0..arms.len {
@@ -130,37 +127,25 @@ priv fn expr(u: *Use, e: *Expr) -> bool {
 priv fn stmt(u: *Use, s: *Stmt) -> bool {
     return match s.k {
         Expr(e) => expr(u, e)
-        Let(names, e) => expr(u, e)
+        Let(_, e) => expr(u, e)
         MultiAssign(lhs, e) => {
             exprs(u, &lhs)
             expr(u, e)
         }
-        Var(name, ty, init) => opt(u, init)
-        Assign(lhs, op, rhs) => {
+        Var(_, _, init) => opt(u, init)
+        Assign(lhs, _, rhs) => {
             expr(u, rhs)
-            direct := false
             match lhs.k {
-                Field(b, f) => {
-                    match b.k {
-                        Ident(n) => {
-                            if n == u.name {
-                                direct = true
-                                if u.writes == 0 {
-                                    u.first = lhs.pos
-                                    u.field = f
-                                }
-                                u.writes += 1
-                            }
-                        }
-                        _ => {}
+                // a direct field assignment `name.f = e`
+                Field(b, f) if is_name(b, u.name) => {
+                    if u.writes == 0 {
+                        u.first = lhs.pos
+                        u.field = f
                     }
+                    u.writes += 1
+                    true
                 }
-                _ => {}
-            }
-            if direct {
-                true
-            } else {
-                expr(u, lhs)
+                _ => expr(u, lhs)
             }
         }
         If(c, t, eo) => {
@@ -175,7 +160,7 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
             expr(u, c)
             block(u, body)
         }
-        Loop(body) => block(u, body)
+        Loop(b), Block(b), Defer(b) => block(u, b)
         For(f) => {
             expr(u, f.lo)
             opt(u, f.hi)
@@ -183,21 +168,16 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
             block(u, f.body)
         }
         Return(e) => opt(u, e)
-        Break => true
-        Continue => true
+        Break, Continue, BreakTo(_), ContinueTo(_) => true
         Assert(c, m) => {
             expr(u, c)
             opt(u, m)
         }
-        Block(b) => block(u, b)
-        Defer(b) => block(u, b)
-        Labeled(label, st) => stmt(u, st)
-        BreakTo(label) => true
-        ContinueTo(label) => true
+        Labeled(_, st) => stmt(u, st)
         // (a nested function does not see the variable)
-        Fn(d) => true
+        Fn(_) => true
         // (replaced by its taken branch before lowering: src/when.al)
-        When(w) => true
+        When(_) => true
     }
 }
 
@@ -205,33 +185,32 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
 // type and the rest of the block only assigns fields of `x`, that is reported.
 fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
     s := &b.stmts[i]
-    match s.k {
-        Let(names, e) => {
-            if names.len != 1 || names[0] == "_" || !is_place(e) {
-                return
-            }
-            name := names[0]
-            v := match self.lookup(name) {
-                Some(v) => v
-                None => return
-            }
-            match self.cx.types.k(v.0) {
-                Struct(_) => {}
-                _ => return
-            }
-            u := Use{name: name, writes: 0, first: s.pos, field: "", others: 0}
-            for j in i + 1..b.stmts.len {
-                stmt(&u, &b.stmts[j])
-                if u.others > 0 {
-                    return
-                }
-            }
-            if u.writes > 0 {
-                src := place_str(e)
-                plain := ast_plain(name)
-                self.err(u.first, fmt("`", plain, "` is a copy of `", src, "` (`:=` copies a struct), so this assignment changes only the copy, and the copy is never read afterwards. To change the original write `", src, ".", u.field, " = ...`, or take a pointer: `", plain, " := &", src, "`"))
-            }
+    names, e := match s.k {
+        Let(n, x) => (n, x)
+        _ => return
+    }
+    if names.len != 1 || names[0] == "_" || !is_place(e) {
+        return
+    }
+    name := names[0]
+    v := match self.lookup(name) {
+        Some(v) => v
+        None => return
+    }
+    match self.cx.types.k(v.0) {
+        Struct(_) => {}
+        _ => return
+    }
+    u := Use{name: name, first: s.pos}
+    for j in i + 1..b.stmts.len {
+        stmt(&u, &b.stmts[j])
+        if u.others > 0 {
+            return
         }
-        _ => {}
+    }
+    if u.writes > 0 {
+        src := place_str(e)
+        plain := ast_plain(name)
+        self.err(u.first, fmt("`", plain, "` is a copy of `", src, "` (`:=` copies a struct), so this assignment changes only the copy, and the copy is never read afterwards. To change the original write `", src, ".", u.field, " = ...`, or take a pointer: `", plain, " := &", src, "`"))
     }
 }
