@@ -197,7 +197,8 @@ The same program runs on Windows with the same events; what differs:
 - **Timing of events.** Events caused by the program's own calls (`set_fullscreen`, creating a
   swapchain) arrive at the next `poll`, as on X11.
 - A program built with `--target windows` is a console program: started from Explorer it also
-  gets a console window.
+  gets a console window. `alc build --target windows --gui` makes a GUI program that gets none
+  (and attaches to the console it is started from: [DETAILS.md](../DETAILS.md#windows)).
 
 `examples/win32_input.al` prints every event it receives on either system: the quickest way
 to see what a keyboard, mouse or gamepad delivers.

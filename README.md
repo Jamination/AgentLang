@@ -60,6 +60,16 @@ runs on Linux and Windows (`build/alc.exe`), and builds for both (`--target linu
 - [Structuring a game](docs/GAMES.md)
 - [How the compiler is built and organised](docs/BOOTSTRAP.md)
 
+## Examples
+
+- `examples/hello.al`, `wordfreq.al`, `math_demo.al`, `image_demo.al`: small programs
+- `examples/starter/`: a small shooter in software rendering, the game structure of docs/GAMES.md (Linux and Windows)
+- `examples/dx12_starter/`: the same game with Direct3D 12 sprites, WASAPI sound and music, keyboard and gamepad (Windows)
+- `examples/dx12_breakout/`: breakout with a title screen, pause menu, volumes, fullscreen and a bitmap font (Windows)
+- `examples/gamekit/`: the parts both Direct3D 12 games share (screen, font, synthesizer, options)
+- `examples/dx12_triangle.al`, `vk_triangle.al`: a triangle with Direct3D 12 (Windows) / Vulkan (Linux)
+- `examples/wayland_window.al`, `win32_input.al`, `audio_tone.al`: a Wayland window, input events, a melody on the sound device
+
 ## Performance
 
 Best of 7 runs against `clang -O2`, same algorithms and sizes, identical output required. AL

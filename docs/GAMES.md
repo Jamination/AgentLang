@@ -1,8 +1,9 @@
 # Structuring a game in AL
 
 This is the shape the standard library is built to support. The complete example is
-[examples/starter/game.al](../examples/starter/game.al) (about 250 lines: a playable shooter
-that also runs headless and prints a checksum, which is how it is tested).
+[examples/starter](../examples/starter) (`logic.al`, the game, about 220 lines; `game.al`, its
+software front end: a playable shooter that also runs headless and prints a checksum, which is
+how it is tested).
 
 ## The frame
 
@@ -151,3 +152,40 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 
 A program that never opens a window or a device (a test run, a server, a tool) uses none of
 the system libraries and is a static executable.
+
+## Windows
+
+**Building and shipping.** `alc build --target windows --gui game.al -o game.exe` makes one
+executable that needs only DLLs every Windows 10/11 has (kernel32, user32, gdi32, ole32, d3d12,
+dxgi, d3dcompiler_47; xinput1_4 is loaded only if a gamepad is opened). `--gui` gives it no
+console window when started from Explorer; started from a terminal it still prints there, and a
+panic also shows a message box ([DETAILS.md](DETAILS.md#windows)). Build assets into the
+executable with `embed("file.png")` + `image_decode`: the working directory of a program started
+from Explorer or a shortcut is not its own folder. Build from Linux; test under Wine
+(`tests/run.sh --target windows`) and then on Windows.
+
+**Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
+(events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
+Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
+(WASAPI). Windows only: std.dx12, std.dx12_util. Linux only: std.vk, std.x11, std.wayland,
+std.alsa.
+
+**Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
+
+```
+logic.al     state, rules, menus, the fixed step; events for sounds     (portable)
+sound.al     sounds generated at start-up, events -> mixer voices          (portable)
+headless.al  scripted input, N frames, checksums of state and mix          (portable)
+game.al      window, GPU, sound device, drawing; `--headless` runs headless.al (Windows)
+```
+
+The frame: `w.poll()`; `if !inp.focused { pause }`; menu and command edges read once
+(`handle_input`); `for k in 0..steps.advance(clock.tick()) { update(...) }`; play the events on
+the mixer; `audio_pump(dev, mixer)`; draw with the sprite batcher and `Present` (vsync paces
+the loop). [examples/gamekit](../examples/gamekit) has the shared parts: `screen.al` (a swap
+chain on the std.window window, two frames in flight, a fixed virtual resolution letterboxed
+into any window size or fullscreen, resizing while the window is dragged), `font.al` (a 5 x 7
+bitmap font baked into the atlas), `synth.al` (tones, noise, sweeps and music rendered through a
+mixer), `options.al`. A lost sound device (`dev.lost`) is shown and recovers by itself; a removed
+GPU ends the game with a panic that names the reason. The headless run is the regression test:
+`tests/std/dx12_*_sim` prints the same checksums on Linux as `tests/sys/dx12_*` on Windows.

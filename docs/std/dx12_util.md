@@ -116,8 +116,10 @@ s.sprites_draw(list)
 
 ## Examples and tests
 
-- `examples/dx12_triangle.al`: a window with a flip-model swap chain, two frames in flight,
-  resizing, vsync, a sprite overlay, device-removal reporting and a clean shutdown.
+- `examples/dx12_triangle.al`: a std.window window with a flip-model swap chain, two frames in
+  flight, resizing, fullscreen, vsync, a sprite overlay, device-removal reporting and a clean shutdown.
+- `examples/dx12_starter`, `examples/dx12_breakout`: games on the sprite batcher, through
+  `examples/gamekit/screen.al` (swap chain, letterboxed virtual resolution, bitmap-font text).
 - `tests/sys/dx12_offscreen.al`: device (and WARP) creation, shader compilation and its error
   text, a depth buffer, triangles, sprites from an atlas, readback; pixels checked at known
   positions.

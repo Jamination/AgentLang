@@ -520,7 +520,7 @@ fn main() {
 **Windows** (`--target windows`):
 
 - `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`), a Windows x86-64
-  console executable. On Linux, `alc run` / `alc test` run it under Wine when `ALC_WINE=1` and
+  console executable (`--gui`: a GUI one, see [Windows](#windows)). On Linux, `alc run` / `alc test` run it under Wine when `ALC_WINE=1` and
   `WINEPREFIX` are set (no display: no window can open); otherwise they only build it.
 - Functions and variables are imported from DLLs (`extern "kernel32.dll" fn GetStdHandle(n: u32) ->
   *u8`, `extern "abi.dll" counter: i32`), through the executable's import address table: the
@@ -537,7 +537,8 @@ fn main() {
 
 ## Windows
 
-`alc build --target windows f.al` writes `f.exe`, a Windows x86-64 console program (PE32+).
+`alc build --target windows f.al` writes `f.exe`, a Windows x86-64 console program (PE32+);
+with `--gui` a GUI program (below).
 The run-time library (`src/prelude_windows.al`) calls only `kernel32.dll`; there is no C
 run-time library. The same program prints the same output and ends with the same status on
 both systems, except where this section says otherwise.
@@ -577,6 +578,20 @@ both systems, except where this section says otherwise.
   [std/os.md](std/os.md)).
 - **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless
   `ALC_WINE=1` (with `WINEPREFIX`) runs it under Wine.
+- **GUI programs (`--gui`).** `alc build --target windows --gui f.al` gives the executable the
+  GUI subsystem instead of the console one (the only difference in the file), so a game started
+  from Explorer gets no console window. `--gui` without `--target windows` is a usage error.
+  At run time such a program (it reads the subsystem from its own image header):
+  - started from a console (cmd, PowerShell, a terminal) attaches to it
+    (`AttachConsole(ATTACH_PARENT_PROCESS)`), so `print` and panics show there; the shell does
+    not wait for it. Standard handles redirected to a file or pipe (`game.exe > log.txt`) are
+    kept; standard input is never taken from the console (empty unless redirected);
+  - a standard handle that does not exist (started from Explorer) reads as empty and swallows
+    output without an error;
+  - a panic writes its message to standard error as always and, if standard error is a console
+    or nothing, also shows it in a message box (`MessageBoxW` of user32.dll, loaded only then)
+    titled with the executable's name, so a game that stops says why; with standard error
+    redirected to a file or pipe there is no box.
 - **The compiler on Windows.** `alc build --target windows src/main.al -o alc.exe` (or
   `build/alc.exe` of `./build.sh`) is the compiler for Windows. It writes the same executables
   as the Linux compiler, for both targets; its default `--target` is `windows`. `alc run` /
