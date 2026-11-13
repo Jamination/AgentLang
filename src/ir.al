@@ -291,13 +291,41 @@ fn func_new(name: str) -> Func {
     }
 }
 
-// n empty lists (each with its own buffer)
-priv fn lists(n: i64) -> Vec[Vec[i64]] {
-    p := vec[Vec[i64]]()
+// n lists in one buffer: list i has room for cnt[i] items (filled with `add`)
+priv fn lists_sized(cnt: *Vec[i64]) -> Vec[Vec[i64]] {
+    n := cnt.len
+    total := 0
     for i in 0..n {
-        p.push(vec[i64]())
+        total += cnt[i]
     }
-    return p
+    flat := alloc[i64](total)
+    out := vec_fill(n, vec[i64]())
+    off := 0
+    for i in 0..n {
+        out[i] = Vec[i64]{buf: flat[off..off + cnt[i]], len: 0}
+        off += cnt[i]
+    }
+    return out
+}
+
+// append to a list made by lists_sized (it has room)
+priv inline fn add(l: *Vec[i64], x: i64) {
+    l.buf[l.len] = x
+    l.len += 1
+}
+
+// the successors of block b without allocating: (count, first, second)
+fn succ_pair(self: *Func, b: i64) -> (i64, i64, i64) {
+    match self.blocks[b].term {
+        Jmp(t) => return (1, t, 0)
+        Br(_, t, e) => {
+            if t == e {
+                return (1, t, 0)
+            }
+            return (2, t, e)
+        }
+        _ => return (0, 0, 0)
+    }
 }
 
 fn new_block(self: *Func) -> i64 {
@@ -351,12 +379,27 @@ fn succs(self: *Func, b: i64) -> Vec[i64] {
     }
 }
 
+// the predecessors of every block, in increasing block order
 fn preds(self: *Func) -> Vec[Vec[i64]] {
-    p := lists(self.blocks.len)
-    for b in 0..self.blocks.len {
-        ss := self.succs(b)
-        for s in ss {
-            p[s].push(b)
+    n := self.blocks.len
+    cnt := vec_fill(n, 0)
+    for b in 0..n {
+        k, s0, s1 := self.succ_pair(b)
+        if k > 0 {
+            cnt[s0] += 1
+        }
+        if k > 1 {
+            cnt[s1] += 1
+        }
+    }
+    p := lists_sized(&cnt)
+    for b in 0..n {
+        k, s0, s1 := self.succ_pair(b)
+        if k > 0 {
+            add(&p[s0], b)
+        }
+        if k > 1 {
+            add(&p[s1], b)
         }
     }
     return p
@@ -365,30 +408,38 @@ fn preds(self: *Func) -> Vec[Vec[i64]] {
 // reverse postorder of reachable blocks
 fn rpo(self: *Func) -> Vec[i64] {
     n := self.blocks.len
-    seen := vec_fill(n, false)
-    post := vec[i64]()
-    stack := vec[(i64, i64)]()
-    stack.push((0, 0))
+    seen := alloc[bool](n)
+    // every block is on the stack at most once; the postorder is written from the end, so
+    // order[k..n] is the reverse postorder
+    order := alloc[i64](n)
+    sb := alloc[i64](n)
+    si := alloc[i64](n)
+    sp := 1
     seen[0] = true
-    while stack.len > 0 {
-        top := stack.len - 1
-        b := stack[top].0
-        i := stack[top].1
-        ss := self.succs(b)
-        if i < ss.len {
-            s := ss[i]
-            stack[top].1 = i + 1
+    k := n
+    while sp > 0 {
+        b := sb[sp - 1]
+        i := si[sp - 1]
+        cnt, s0, s1 := self.succ_pair(b)
+        if i < cnt {
+            s := s0
+            if i == 1 {
+                s = s1
+            }
+            si[sp - 1] = i + 1
             if !seen[s] {
                 seen[s] = true
-                stack.push((s, 0))
+                sb[sp] = s
+                si[sp] = 0
+                sp += 1
             }
         } else {
-            post.push(b)
-            stack.pop()
+            k -= 1
+            order[k] = b
+            sp -= 1
         }
     }
-    reverse(post.items())
-    return post
+    return Vec[i64]{buf: order[k..n], len: n - k}
 }
 
 fn term_uses(self: *Func, b: i64) -> Vec[i64] {
@@ -507,11 +558,25 @@ fn cfg_new(f: *Func) -> Cfg {
     for i in 0..rpo.len {
         rpo_idx[rpo[i]] = i
     }
-    preds := lists(n)
+    // predecessors among the reachable blocks, in reverse postorder
+    cnt := vec_fill(n, 0)
     for b in rpo {
-        ss := f.succs(b)
-        for s in ss {
-            preds[s].push(b)
+        k, s0, s1 := f.succ_pair(b)
+        if k > 0 {
+            cnt[s0] += 1
+        }
+        if k > 1 {
+            cnt[s1] += 1
+        }
+    }
+    preds := lists_sized(&cnt)
+    for b in rpo {
+        k, s0, s1 := f.succ_pair(b)
+        if k > 0 {
+            add(&preds[s0], b)
+        }
+        if k > 1 {
+            add(&preds[s1], b)
         }
     }
     idom := vec_fill(n, 0xFFFFFFFF)
@@ -548,31 +613,37 @@ fn cfg_new(f: *Func) -> Cfg {
             }
         }
     }
-    children := lists(n)
+    ccnt := vec_fill(n, 0)
+    for bi in 1..rpo.len {
+        ccnt[idom[rpo[bi]]] += 1
+    }
+    children := lists_sized(&ccnt)
     for bi in 1..rpo.len {
         b := rpo[bi]
-        children[idom[b]].push(b)
+        add(&children[idom[b]], b)
     }
     pre := vec_fill(n, 0)
     post := vec_fill(n, 0)
     t := 0
-    stack := vec[(i64, i64)]()
-    stack.push((0, 0))
-    pre[0] = 0
-    while stack.len > 0 {
-        top := stack.len - 1
-        b := stack[top].0
-        i := stack[top].1
+    // every block is on the stack at most once
+    sb := alloc[i64](n)
+    si := alloc[i64](n)
+    sp := 1
+    while sp > 0 {
+        b := sb[sp - 1]
+        i := si[sp - 1]
         if i < children[b].len {
             c := children[b][i]
-            stack[top].1 = i + 1
+            si[sp - 1] = i + 1
             t += 1
             pre[c] = t
-            stack.push((c, 0))
+            sb[sp] = c
+            si[sp] = 0
+            sp += 1
         } else {
             t += 1
             post[b] = t
-            stack.pop()
+            sp -= 1
         }
     }
     return Cfg{rpo: rpo, rpo_idx: rpo_idx, preds: preds, idom: idom, children: children, pre: pre, post: post}
