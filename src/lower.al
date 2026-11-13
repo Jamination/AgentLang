@@ -673,6 +673,7 @@ priv fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
     }
     sid := self.types.structs.len
     name := self.inst_name(ast_plain(d.name), targs.items())
+    self.types.instantiating += 1
     self.types.structs.push(StructInfo{
         name: name,
         decl: si,
@@ -706,6 +707,7 @@ priv fn inst_struct(self: *Cx, si: i64, targs: Vec[i64], pos: Pos) -> i64 {
     self.scope_prelude = save_scope
     self.types.structs[sid].fields = fields
     self.types.structs[sid].state = 0
+    self.types.instantiating -= 1
     return ty
 }
 
@@ -730,6 +732,9 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
             simple = false
             break
         }
+    }
+    if !simple {
+        self.types.instantiating += 1
     }
     self.types.enums.push(EnumInfo{
         name: name,
@@ -761,6 +766,7 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     self.types.enums[eid].variants = vars
     if !simple {
         self.types.enums[eid].state = 0
+        self.types.instantiating -= 1
     }
     return ty
 }
@@ -779,8 +785,7 @@ fn abi_param(self: *Cx, t: i64) -> ParamAbi {
         return Scalar(self.types.scalar_ir(t).0)
     }
     if self.types.leaf_count(t) <= MAX_FLAT {
-        l := vec[Leaf]()
-        self.types.leaves(t, 0, &l)
+        l := self.types.leaf_list(t)
         return Flat(l)
     }
     return ByRef
@@ -794,8 +799,7 @@ fn abi_ret(self: *Cx, t: i64) -> RetAbi {
         return Scalar(self.types.scalar_ir(t).0)
     }
     if self.types.leaf_count(t) <= MAX_FLAT {
-        l := vec[Leaf]()
-        self.types.leaves(t, 0, &l)
+        l := self.types.leaf_list(t)
         if l.is_empty() {
             return RetAbi.None
         }

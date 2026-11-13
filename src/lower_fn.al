@@ -492,8 +492,7 @@ fn store(self: *Fx, dst: Val, src: Val) {
     }
     n := self.cx.types.leaf_count(dst.ty)
     if n <= 16 {
-        leaves := vec[Leaf]()
-        self.cx.types.leaves(dst.ty, 0, &leaves)
+        leaves := self.cx.types.leaf_list(dst.ty)
         vals := vec[i64]()
         for i in 0..leaves.len {
             l := leaves[i]
@@ -518,8 +517,7 @@ fn zero(self: *Fx, dst: Val) {
     }
     n := self.cx.types.leaf_count(dst.ty)
     if n <= 32 {
-        leaves := vec[Leaf]()
-        self.cx.types.leaves(dst.ty, 0, &leaves)
+        leaves := self.cx.types.leaf_list(dst.ty)
         for i in 0..leaves.len {
             l := leaves[i]
             a := self.add_off(dst.v, l.off)
@@ -1389,16 +1387,14 @@ fn str_val(self: *Fx, s: str) -> Val {
 }
 
 fn store_slice(self: *Fx, dst: Val, p: i64, n: i64) {
-    leaves := vec[Leaf]()
-    self.cx.types.leaves(dst.ty, 0, &leaves)
+    leaves := self.cx.types.leaf_list(dst.ty)
     self.store_raw(dst.v, p, I64, leaves[0].alias)
     a := self.add_off(dst.v, 8)
     self.store_raw(a, n, I64, leaves[1].alias)
 }
 
 fn slice_parts(self: *Fx, s: Val) -> (i64, i64) {
-    leaves := vec[Leaf]()
-    self.cx.types.leaves(s.ty, 0, &leaves)
+    leaves := self.cx.types.leaf_list(s.ty)
     p := self.load_raw(s.v, I64, leaves[0].alias)
     a := self.add_off(s.v, 8)
     l := self.load_raw(a, I64, leaves[1].alias)

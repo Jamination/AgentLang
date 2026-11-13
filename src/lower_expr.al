@@ -1856,8 +1856,7 @@ fn store_any(self: *Fx, dst: Val, src: Val) {
         self.store_raw(dst.v, v, t, AK_ANY)
         return
     }
-    lvs := vec[Leaf]()
-    self.cx.types.leaves(dst.ty, 0, &lvs)
+    lvs := self.cx.types.leaf_list(dst.ty)
     if lvs.len > 64 {
         sz := self.cx.types.size_of(dst.ty)
         c := self.iconst(I64, sz)
@@ -1881,8 +1880,7 @@ fn load_any(self: *Fx, src: i64, ty: i64) -> Val {
     // copy a payload field out of enum memory into a fresh temp
     t := self.temp(ty)
     dst := self.mval(ty, t)
-    lvs := vec[Leaf]()
-    self.cx.types.leaves(ty, 0, &lvs)
+    lvs := self.cx.types.leaf_list(ty)
     if lvs.len > 64 {
         sz := self.cx.types.size_of(ty)
         c := self.iconst(I64, sz)

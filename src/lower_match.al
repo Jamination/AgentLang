@@ -884,8 +884,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
 
 // copies `ty` out of enum payload memory at `src` to `dst`
 priv fn copy_any(self: *Fx, dst: i64, src: i64, ty: i64) {
-    lvs := vec[Leaf]()
-    self.cx.types.leaves(ty, 0, &lvs)
+    lvs := self.cx.types.leaf_list(ty)
     if lvs.len > 64 {
         sz := self.cx.types.size_of(ty)
         c := self.iconst(I64, sz)

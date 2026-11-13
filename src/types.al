@@ -84,6 +84,13 @@ struct Types {
     shape: Vec[(i64, i64)]
     // tuple type -> (size, align): computed once (recomputing nested tuples is exponential)
     tuple_layout: Map[i64, (i64, i64)]
+    // structs and enums whose fields are being resolved (state 3): while there are any,
+    // layouts may still change and nothing is cached in the tables below
+    instantiating: i64
+    // per type: its leaves (leaf_list) and leaf_count, once known (leaf_known / -1)
+    leaf_cache: Vec[Vec[Leaf]]
+    leaf_known: Vec[bool]
+    count_cache: Vec[i64]
 }
 
 const AK_ANY = 0
@@ -585,8 +592,41 @@ priv fn sat_add(a: i64, b: i64) -> i64 {
     return a + b
 }
 
-// number of leaves without materializing huge arrays
+// The leaves of `t` at offset 0, for reading only: kept per type once no type is being
+// instantiated (a later call would give the same list and assign no new field ids)
+fn leaf_list(self: *Types, t: i64) -> Vec[Leaf] {
+    if t < self.leaf_known.len && self.leaf_known[t] {
+        return self.leaf_cache[t]
+    }
+    out := vec[Leaf]()
+    self.leaves(t, 0, &out)
+    if self.instantiating == 0 {
+        while self.leaf_known.len <= t {
+            self.leaf_known.push(false)
+            self.leaf_cache.push(vec[Leaf]())
+        }
+        self.leaf_known[t] = true
+        self.leaf_cache[t] = out
+    }
+    return out
+}
+
+// number of leaves without materializing huge arrays (cached like leaf_list)
 fn leaf_count(self: *Types, t: i64) -> i64 {
+    if t < self.count_cache.len && self.count_cache[t] >= 0 {
+        return self.count_cache[t]
+    }
+    n := count_leaves(self, t)
+    if self.instantiating == 0 {
+        while self.count_cache.len <= t {
+            self.count_cache.push(-1)
+        }
+        self.count_cache[t] = n
+    }
+    return n
+}
+
+priv fn count_leaves(self: *Types, t: i64) -> i64 {
     match self.k(t) {
         Array(e, n) => return sat_mul(self.leaf_count(e), n)
         Struct(s) => {

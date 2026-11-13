@@ -388,8 +388,7 @@ fn vec_parts(self: *Fx, v: Val, want_ptr: bool) -> Opt[(i64, i64, i64)] {
     off_len := self.cx.types.structs[sid].offsets[1]
     p := NOV
     if want_ptr {
-        leaves := vec[Leaf]()
-        self.cx.types.leaves(self.cx.types.slice(et), 0, &leaves)
+        leaves := self.cx.types.leaf_list(self.cx.types.slice(et))
         a := self.add_off(v.v, off_buf)
         p = self.load_raw(a, I64, leaves[0].alias)
     }
