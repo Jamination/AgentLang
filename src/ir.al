@@ -342,11 +342,12 @@ priv inline fn add(l: *Vec[i64], x: i64) {
     l.len += 1
 }
 
-// A hash map from non-negative integers to integers for the passes (open addressing, linear
-// probing); `iget` gives -1 for a missing key. Faster than a `Map` for these keys.
+// A hash map from non-negative integers to instruction numbers for the passes (open
+// addressing, linear probing); `iget` gives -1 for a missing key. Faster than a `Map` for
+// these keys.
 struct IMap {
     keys: []i64 // -1: empty slot
-    vals: []i64
+    vals: []i32
     len: i64
 }
 
@@ -357,7 +358,7 @@ fn imap_new(n: i64) -> IMap {
     }
     keys := mkslice[i64](__alloc_raw(cap * 8), cap)
     memfill(ptr(keys), 0xFF, cap * 8)
-    return IMap{keys: keys, vals: mkslice[i64](__alloc_raw(cap * 8), cap), len: 0}
+    return IMap{keys: keys, vals: mkslice[i32](__alloc_raw(cap * 4), cap), len: 0}
 }
 
 priv inline fn islot(keys: []i64, k: i64) -> i64 {
@@ -374,7 +375,7 @@ fn iget(self: *IMap, k: i64) -> i64 {
     if self.keys[h] == -1 {
         return -1
     }
-    return self.vals[h]
+    return i64(self.vals[h])
 }
 
 fn iset(self: *IMap, k: i64, v: i64) {
@@ -385,7 +386,7 @@ fn iset(self: *IMap, k: i64, v: i64) {
             *self = imap_new(len(old.keys))
             for i in 0..len(old.keys) {
                 if old.keys[i] != -1 {
-                    self.iset(old.keys[i], old.vals[i])
+                    self.iset(old.keys[i], i64(old.vals[i]))
                 }
             }
             h = islot(self.keys, k)
@@ -393,7 +394,7 @@ fn iset(self: *IMap, k: i64, v: i64) {
         self.keys[h] = k
         self.len += 1
     }
-    self.vals[h] = v
+    self.vals[h] = i32(v)
 }
 
 // the successors of block b without allocating: (count, first, second)
