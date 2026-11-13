@@ -1192,6 +1192,9 @@ priv fn do_return(self: *Fx, v: Opt[Val]) {
                     }
                     dst := self.mval(self.ret_ty, sp)
                     self.store(dst, rv)
+                    if target_os == TargetWindows {
+                        rets.push(sp)
+                    }
                 }
             }
         }

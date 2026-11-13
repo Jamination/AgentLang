@@ -8,6 +8,12 @@
 
 priv gpr_order := [15]i64{0, 1, 2, 6, 7, 8, 9, 10, 11, 3, 5, 12, 13, 14, 15}
 
+// Windows: rsi and rdi have to be saved by the function that writes them, as rbx does: they
+// come last
+fn regalloc_windows() {
+    gpr_order = [15]i64{0, 1, 2, 8, 9, 10, 11, 3, 5, 12, 13, 14, 15, 6, 7}
+}
+
 // the general-purpose and the xmm registers that a call clobbers, as bit masks
 priv const CLOBBER_GPR: u64 = 0xFC7
 priv const CLOBBER_XMM: u64 = 0xFFFF0000
@@ -994,6 +1000,7 @@ priv fn build(g: *Irc, mf: *MFunc, order: []i64, dec: *Dec, vcls: []u8, lo_off: 
 
 struct Alloc {
     used_callee_saved: Vec[i64]
+    used_xmm_saved: Vec[i64] // Windows: xmm6-xmm15 that the function writes
 }
 
 priv fn spill_slot(o: *Opnd, first_spill: i64) -> i64 {
@@ -1285,15 +1292,20 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
         if spilled.is_empty() {
             used := rewrite(mf, order, &dec, colors.items())
             used_callee_saved := vec[i64]()
-            for r in 0..16 {
-                if (used >> u64(r)) & 1 != 0 && mir_callee_saved(r) {
-                    used_callee_saved.push(r)
+            used_xmm_saved := vec[i64]()
+            for r in 0..32 {
+                if (used >> u64(r)) & 1 != 0 {
+                    if mir_callee_saved(r) {
+                        used_callee_saved.push(r)
+                    } else if mir_xmm_saved(r) {
+                        used_xmm_saved.push(r)
+                    }
                 }
             }
             if mf.slots.len > first_spill {
                 spill_forward(mf, order, first_spill)
             }
-            return Alloc{used_callee_saved: used_callee_saved}
+            return Alloc{used_callee_saved: used_callee_saved, used_xmm_saved: used_xmm_saved}
         }
         if round > 40 {
             panic(fmt("register allocation did not converge in `", mf.name, "`"))

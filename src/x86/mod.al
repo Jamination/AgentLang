@@ -93,6 +93,9 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     align_v, align_set := env_get("ALC_ALIGN")
     dbg, dbg_set := env_get("ALC_DEBUG")
     o := Opts{dump_asm: dump_asm, align: align_set, mir: dbg_set && dbg == "mir"}
+    if target_os == TargetWindows {
+        regalloc_windows()
+    }
     // Functions are compiled independently of each other: with several CPUs, forked workers
     // compile parts of them (ALC_JOBS=n sets the number of processes). Debug output that is
     // written per function (mir, trace, verify) keeps the plain order.

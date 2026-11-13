@@ -27,6 +27,12 @@ fn make_executable(path: str) -> bool {
 // program gets the stack limit and environment the compiler was started with (see
 // ensure_stack).
 fn run_program(path: str, argv: []str) -> i64 {
+    return run_program_env(path, argv, nil, nil)
+}
+
+// run_program with a changed environment: the variables named in `drop` are removed and the
+// `NAME=value` entries of `add` appended
+fn run_program_env(path: str, argv: []str, drop: []str, add: []str) -> i64 {
     flush()
     cargs := alloc[i64](len(argv) + 2)
     cargs[0] = cast[i64](cstr(path))
@@ -39,10 +45,10 @@ fn run_program(path: str, argv: []str) -> i64 {
     while env[n] != 0 {
         n += 1
     }
-    envp := alloc[i64](n + 1)
+    envp := alloc[i64](n + len(add) + 1)
     k := 0
     orig := -2
-    for i in 0..n {
+    next: for i in 0..n {
         e := from_cstr(cast[*u8](env[i]))
         if starts_with(e, "ALC_STACK_SET=") {
             v, ok := parse_i64(e[14..])
@@ -51,7 +57,16 @@ fn run_program(path: str, argv: []str) -> i64 {
             }
             continue
         }
+        for d in drop {
+            if len(e) > len(d) && e[len(d)] == '=' && starts_with(e, d) {
+                continue next
+            }
+        }
         envp[k] = env[i]
+        k += 1
+    }
+    for a in add {
+        envp[k] = cast[i64](cstr(a))
         k += 1
     }
     pid := syscall(57)
