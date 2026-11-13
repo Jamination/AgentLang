@@ -78,7 +78,7 @@ runs with bounds and division checks enabled.
 | hashmap | 1.11 |
 | **geometric mean** | **1.06** |
 
-The compiler compiles its own 28,000 lines in about 3.5 seconds.
+The compiler compiles its own 34,000 lines in about 0.12 s without optimisation (about 280,000 lines/s) and 0.86 s with optimisation (`bench/compile.sh`), compiling functions in parallel worker processes (`ALC_JOBS=n` sets the number).
 
 ## Repository
 
