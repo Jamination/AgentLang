@@ -36,6 +36,27 @@ use "priv.al"
 use "lower_mem.al"
 
 priv const PRELUDE = embed("prelude.al")
+// the OS layer of the run-time library, compiled right after the prelude (see the top of
+// prelude.al)
+priv const PRELUDE_LINUX = embed("prelude_linux.al")
+priv const PRELUDE_WINDOWS = embed("prelude_windows.al")
+
+// the operating system of the executable (--target); Linux unless the command line says
+// otherwise
+enum TargetOs { TargetLinux, TargetWindows }
+target_os: TargetOs
+
+// bundled modules that only exist for Linux: what a program built for Windows can use instead
+priv const LINUX_ONLY = [_](str, str){
+    ("libc", "declare the functions of a Windows library with `extern \"x.dll\" fn`"),
+    ("x11", ""),
+    ("wayland", ""),
+    ("alsa", ""),
+    ("input", ""),
+    ("window", "std.dx12 binds the user32 window functions"),
+    ("audio", ""),
+    ("vk", ""),
+}
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
@@ -319,6 +340,12 @@ priv fn parse_args() -> Args {
             a.opt = 1
         } else if s == "-O2" {
             a.opt = 2
+        } else if s == "--target" {
+            i += 1
+            if i >= av.len || !(av[i] == "linux" || av[i] == "windows") {
+                usage("--target needs `linux` or `windows`")
+            }
+            target_os = if av[i] == "windows" { TargetWindows } else { TargetLinux }
         } else if s == "--" {
             a.rest = vec_of(av[i + 1..av.len])
             break
@@ -360,6 +387,15 @@ priv fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
             Use(path, pos) => {
                 if starts_with(path, "std:") {
                     mname := path[4..]
+                    // (once, where the program asks for it: not again for the modules it uses)
+                    if target_os == TargetWindows && is_some(dir) {
+                        for lo in LINUX_ONLY {
+                            if lo.0 == mname {
+                                more := if len(lo.1) == 0 { "" } else { fmt("; ", lo.1) }
+                                self.errs.push(Diag{pos: pos, msg: fmt("module `std.", mname, "` is not available for --target windows (it uses Linux system interfaces)", more)})
+                            }
+                        }
+                    }
                     match std_text(mname) {
                         Some(mtext) => {
                             key := fmt("<std/", mname, ".al>")
@@ -567,6 +603,11 @@ priv fn real_main() -> i64 {
     }
     src := Sources{names: vec[str](), decls: vec[Decl](), errs: vec[Diag](), seen: map[str, bool](), std_files: vec[i64]()}
     src.add_text("<prelude>", PRELUDE, None)
+    if target_os == TargetWindows {
+        src.add_text("<prelude_windows>", PRELUDE_WINDOWS, None)
+    } else {
+        src.add_text("<prelude_linux>", PRELUDE_LINUX, None)
+    }
     // the core library is part of the language: always present, no `use` needed
     for name in CORE_MODULES {
         text := match std_text(name) {
@@ -691,6 +732,11 @@ priv fn real_main() -> i64 {
     }
     if ar.cmd == "check" {
         return 0
+    }
+    if target_os == TargetWindows {
+        // (until the PE writer exists)
+        driver_error(ar.input, "--target windows: only `alc check` is implemented")
+        return 1
     }
     module := cx.module
     mem("lowered")

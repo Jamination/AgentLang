@@ -1,74 +1,35 @@
 // AL runtime prelude. Compiled together with every program.
+//
+// Everything that depends on the operating system is in the OS layer of the target, compiled
+// right after this file: src/prelude_linux.al (system calls) or src/prelude_windows.al
+// (kernel32.dll). Each layer defines the same functions:
+//   __rt_init(sp)                  called first by the generated entry point
+//   __os_exit(code) -> never       ends the process (output is flushed by the callers)
+//   __write_all(fd, p, n) -> errno writes everything (fd 1 / 2: standard output / error)
+//   __os_read(fd, p, n)            bytes read, 0 at the end, or -errno
+//   __os_open(path, write)         a descriptor or -errno (path: NUL-terminated)
+//   __os_close(fd), __os_fstat(fd) -> (size, is a regular file)
+//   __heap_grow(n)                 the slow path of the arena allocator (see below)
+//   __os_map(n), __os_unmap(p, n)  memory outside the arena
+//   __os_test(f) -> 1 / 0 / -1     runs one `test` block in a process of its own: passed,
+//                                  failed, or not run by this process
+//   __os_error_text(e)             error_text for numbers it does not know
+//   clock_ns, args, env_get        the public functions of that name
+// plus the __os_* functions used by std.asset, std.time and std.os. Error numbers are
+// Linux errno values on every target (the Windows layer maps its error codes to them).
 
 __heap_cur: i64
 __heap_end: i64
 __heap_base: i64
 __heap_hwm: i64
-__argc: i64
-__argv: i64
 __obuf: [65536]u8
 __olen: i64
 __tests_failed: i64
 
-__sigstack: [32768]u8
-
-noinline fn __on_fault(sig: i64) -> never {
-    if sig == 8 {
-        __die("panic: arithmetic fault (division by zero or overflow)", "", "")
-    }
-    __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
-}
-
-fn __rt_init(sp: i64) {
-    __argc = cast[*i64](sp)[0]
-    __argv = sp + 8
-    // report crashes as panics: handlers run on their own stack so that stack overflow works too
-    ss: [3]i64
-    ss[0] = cast[i64](ptr(__sigstack))
-    ss[2] = 32768
-    syscall(131, ptr(ss), 0)
-    sa: [4]i64
-    sa[0] = cast[i64](__on_fault)
-    // SA_ONSTACK | SA_RESTORER | SA_NODEFER
-    sa[1] = 0x08000000 | 0x04000000 | 0x40000000
-    sa[2] = cast[i64](__on_fault)
-    syscall(13, 11, ptr(sa), 0, 8)
-    syscall(13, 7, ptr(sa), 0, 8)
-    syscall(13, 8, ptr(sa), 0, 8)
-}
-
 // ---------- process ----------
 fn exit(code: i64) -> never {
     flush()
-    syscall(231, code)
-}
-
-// writes n bytes at p to fd, also after interruptions and, on a non-blocking fd, waiting
-// until it takes more (EAGAIN: poll); returns 0 or the error number of the failed write
-fn __write_all(fd: i64, p: i64, n: i64) -> i64 {
-    while n > 0 {
-        r := syscall(1, fd, p, n)
-        if r == -4 {
-            continue
-        }
-        if r == -11 {
-            // struct pollfd { fd, events = POLLOUT, revents }
-            pfd: [2]i32
-            pfd[0] = i32(fd)
-            pfd[1] = 4
-            syscall(7, ptr(pfd), 1, -1)
-            continue
-        }
-        if r < 0 {
-            return -r
-        }
-        if r == 0 {
-            return 5
-        }
-        p += r
-        n -= r
-    }
-    return 0
+    __os_exit(code)
 }
 
 // standard output that cannot be written stops the program (a closed pipe normally ends it
@@ -94,7 +55,7 @@ fn __die(kind: str, loc: str, msg: str) -> never {
         __err(msg)
     }
     __err("\n")
-    syscall(231, 1)
+    __os_exit(1)
 }
 
 noinline fn __bounds_fail(loc: str) -> never {
@@ -128,30 +89,11 @@ __heap_main: Region
 __region_stack: [64]*Region
 __region_depth: i64
 
-noinline fn __heap_grow(n: i64) -> i64 {
-    if __heap_base == 0 {
-        // address space is reserved on the first allocation, memory is committed by use: 64 GiB
-        // for the main arena, 16 GiB for a region (thousands of regions fit), less if refused
-        size := if __region_depth == 0 { 1 << 36 } else { 1 << 34 }
-        while size >= (1 << 24) {
-            // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE
-            p := syscall(9, 0, size, 3, 0x4022, -1, 0)
-            if p > 0 || p < -4096 {
-                __heap_base = p
-                __heap_cur = p
-                __heap_end = p + size
-                break
-            }
-            size = size >> 1
-        }
-        if __heap_base != 0 && n >= 0 && n <= __heap_end - __heap_cur {
-            p := __heap_cur
-            __heap_cur = p + n
-            return p
-        }
-    }
-    __die("panic: out of memory", "", "")
-}
+// __heap_grow(n) (OS layer) hands out n bytes when they do not fit between __heap_cur and
+// __heap_end, or stops the program with "out of memory". The first call for an arena reserves
+// its address space: 64 GiB for the main arena, 16 GiB for a region (thousands of regions
+// fit), less if refused. __heap_end is the end of the memory that may be used without asking
+// the system again (Linux: the whole reservation; Windows: the committed part).
 
 // uninitialized memory, 16-byte aligned; never freed individually (see mark/release). A size
 // that is negative (also one that overflowed) is refused by __heap_grow.
@@ -320,7 +262,7 @@ fn region_free(r: *Region) {
         __die("panic: region_free: this region is entered (leave() first)", "", "")
     }
     if r.base != 0 {
-        syscall(11, r.base, r.end - r.base)
+        __os_unmap(r.base, r.end - r.base)
     }
     *r = Region{}
 }
@@ -961,14 +903,12 @@ fn __str_eq(a: str, b: str) -> bool {
 // ---------- tests ----------
 fn __run_test(name: str, f: fn()) {
     flush()
-    pid := syscall(57)
-    if pid == 0 {
-        f()
-        exit(0)
+    r := __os_test(f)
+    if r < 0 {
+        // (a process that runs one test of the program, on Windows: not this one)
+        return
     }
-    status: i32
-    syscall(61, pid, &status, 0, 0)
-    if status == 0 {
+    if r == 1 {
         put("ok   ", name, "\n")
     } else {
         put("FAIL ", name, "\n")
@@ -1012,14 +952,13 @@ fn __cap_put(s: str) {
         while cap < __cap_len + n {
             cap = cap * 2
         }
-        // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS
-        p := syscall(9, 0, cap, 3, 0x22, -1, 0)
-        if p < 0 && p > -4096 {
+        p := __os_map(cap)
+        if p == 0 {
             __die("panic: out of memory", "", "")
         }
         memcopy(p, ptr(__cap_buf), __cap_len)
         if len(__cap_buf) > 1024 {
-            syscall(11, ptr(__cap_buf), len(__cap_buf))
+            __os_unmap(cast[i64](ptr(__cap_buf)), len(__cap_buf))
         }
         __cap_buf = mkslice[u8](p, cap)
     }
@@ -1146,12 +1085,6 @@ fn ceil(x: f64) -> f64 {
     }
     t := f64(i64(x))
     if t < x { t + 1.0 } else { t }
-}
-
-fn clock_ns() -> i64 {
-    ts: [2]i64
-    syscall(228, 1, ptr(ts))
-    return ts[0] * 1000000000 + ts[1]
 }
 
 // ---------- growable vector ----------
@@ -2606,12 +2539,13 @@ fn __cstr(s: str) -> i64 {
     return p
 }
 
-// open(2) of path; a path with a NUL byte would name another file: EINVAL
-fn __open(path: str, flags: i64, mode: i64) -> i64 {
+// opens path for reading or (created or emptied) for writing; a path with a NUL byte would
+// name another file: EINVAL
+fn __open(path: str, write: bool) -> i64 {
     if index_of(path, 0) >= 0 {
         return __io_result(-22)
     }
-    return __io_result(syscall(2, __cstr(path), flags, mode))
+    return __io_result(__os_open(cast[*u8](__cstr(path)), write))
 }
 
 // the error number of the most recent failed file operation (0 after a success)
@@ -2673,7 +2607,7 @@ fn error_text(e: i64) -> str {
         122 => return "disk quota exceeded"
         _ => {}
     }
-    return fmt("os error ", e)
+    return __os_error_text(e)
 }
 
 // everything readable from a file descriptor (0 = standard input); what was read before an
@@ -2682,9 +2616,9 @@ fn read_all(fd: i64) -> str {
     // a regular file: room for its size and one more byte (to see the end); /proc files
     // report 0. Other inputs (pipes, terminals): 64 KiB first. The buffer doubles as needed.
     size := 65536
-    st: [18]i64
-    if syscall(5, fd, ptr(st)) == 0 && (st[3] & 0xF000) == 0x8000 {
-        size = if st[6] > 0 { st[6] + 1 } else { 4096 }
+    fsize, regular := __os_fstat(fd)
+    if regular {
+        size = if fsize > 0 { fsize + 1 } else { 4096 }
     }
     buf := alloc[u8](size)
     n := 0
@@ -2694,10 +2628,7 @@ fn read_all(fd: i64) -> str {
             memcopy(ptr(nb), ptr(buf), n)
             buf = nb
         }
-        r := syscall(0, fd, cast[i64](ptr(buf)) + n, len(buf) - n)
-        if r == -4 {
-            continue
-        }
+        r := __os_read(fd, cast[i64](ptr(buf)) + n, len(buf) - n)
         __io_result(r)
         if r <= 0 {
             break
@@ -2709,12 +2640,12 @@ fn read_all(fd: i64) -> str {
 
 // the content of a file; ("", false) if it cannot be opened or read (see `io_error()`)
 fn read_file(path: str) -> (str, bool) {
-    fd := __open(path, 0, 0)
+    fd := __open(path, false)
     if fd < 0 {
         return ("", false)
     }
     data := read_all(fd)
-    syscall(3, fd)
+    __os_close(fd)
     if __io_errno != 0 {
         return ("", false)
     }
@@ -2723,44 +2654,16 @@ fn read_file(path: str) -> (str, bool) {
 
 // creates or replaces a file; false if that failed (see `io_error()`)
 fn write_file(path: str, data: str) -> bool {
-    // O_WRONLY|O_CREAT|O_TRUNC, mode 0644
-    fd := __open(path, 577, 420)
+    fd := __open(path, true)
     if fd < 0 {
         return false
     }
-    p := cast[i64](ptr(data))
-    n := len(data)
-    ok := true
-    while n > 0 {
-        r := syscall(1, fd, p, n)
-        if r == -4 {
-            continue
-        }
-        if r <= 0 {
-            // (a write of nothing without an error: reported as an input/output error)
-            __io_errno = if r < 0 { -r } else { 5 }
-            ok = false
-            break
-        }
-        p += r
-        n -= r
+    e := __write_all(fd, cast[i64](ptr(data)), len(data))
+    if e != 0 {
+        __io_errno = e
     }
-    syscall(3, fd)
-    return ok
-}
-
-// command line arguments (args()[0] is the program name)
-fn args() -> []str {
-    out := alloc[str](__argc)
-    for i in 0..__argc {
-        p := cast[*i64](__argv)[i]
-        n := 0
-        while cast[*u8](p)[n] != 0 {
-            n += 1
-        }
-        out[i] = mkslice[u8](p, n)
-    }
-    return out
+    __os_close(fd)
+    return e == 0
 }
 
 // ---------- text helpers ----------
@@ -2919,24 +2822,8 @@ fn is_lower(c: u8) -> bool {
     return c >= 'a' && c <= 'z'
 }
 
-// ---------- process ----------
-// the value of an environment variable; ("", false) if it is not set
-fn env_get(name: str) -> (str, bool) {
-    envp := cast[*i64](__argv + 8 * (__argc + 1))
-    i := 0
-    while envp[i] != 0 {
-        p := cast[*u8](envp[i])
-        n := 0
-        while p[n] != 0 && p[n] != '=' {
-            n += 1
-        }
-        if p[n] == '=' && mkslice[u8](p, n) == name {
-            return (from_cstr(cast[*u8](envp[i] + n + 1)), true)
-        }
-        i += 1
-    }
-    return ("", false)
-}
+// ---------- standard error ----------
+// (environment variables: env_get(name) of the OS layer)
 
 // like print, to standard error
 fn eprint(s: str) {

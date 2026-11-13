@@ -1,13 +1,16 @@
 // std.asset: files, directories, paths, a cached asset loader with hot-reload polling, and
 // readers for two simple data formats (INI-style config, JSON). `use std.asset`.
-// Everything goes through raw Linux system calls (no libc). Paths are limited to 4095 bytes.
+// The system calls are those of the OS layer of the prelude (no libc). Paths are limited to
+// 4095 bytes. On Windows, `\` separates components as well as `/`, and a path may start
+// with a drive (`C:/x`, `C:x`) or `\\server\share\`; paths that this module builds use `/`.
 // Functions that return file contents, lists or parsed data allocate from the program arena;
 // the queries (file_exists, file_size, modified_time, is_dir, changed) do not allocate.
 
 // ---------- files and directories ----------
-// writes a, a '/' if both parts are non-empty and a does not end in one, b and a NUL into buf
+// writes a, a '/' if both parts are non-empty and a does not end in a separator, b and a NUL
+// into buf
 fn __asset_cpath(buf: []u8, a: str, b: str) -> bool {
-    sep := if len(a) > 0 && len(b) > 0 && a[len(a) - 1] != '/' { 1 } else { 0 }
+    sep := if len(a) > 0 && len(b) > 0 && !__os_is_sep(a[len(a) - 1]) { 1 } else { 0 }
     if len(a) + sep + len(b) >= len(buf) {
         return false
     }
@@ -18,43 +21,45 @@ fn __asset_cpath(buf: []u8, a: str, b: str) -> bool {
     return true
 }
 
-// stat(dir/name) into st (struct stat as 18 i64: [3] low half = mode, [6] = size,
-// [11] = mtime seconds, [12] = mtime nanoseconds)
-fn __asset_stat(dir: str, name: str, st: []i64) -> bool {
+// (kind, size, mtime) of dir/name as __os_stat tells it (kind -1: it does not exist)
+fn __asset_stat(dir: str, name: str) -> (i64, i64, i64) {
     buf: [4096]u8
-    return __asset_cpath(buf[..], dir, name) && syscall(4, ptr(buf), ptr(st)) == 0
+    if !__asset_cpath(buf[..], dir, name) {
+        return (-1, 0, 0)
+    }
+    return __os_stat(ptr(buf))
 }
 
-// a system call whose first argument is the path dir/name (open, mkdir, unlink, rmdir)
-fn __asset_call(nr: i64, dir: str, name: str, a: i64, b: i64) -> i64 {
+// an OS layer call whose argument is the path dir/name (remove_file, remove_dir, make_dir)
+fn __asset_call(f: fn(*u8) -> i64, dir: str, name: str) -> i64 {
     buf: [4096]u8
     if !__asset_cpath(buf[..], dir, name) {
         return -36
     }
-    return syscall(nr, ptr(buf), a, b)
+    return f(ptr(buf))
 }
 
 // true if path names an existing file or directory
 fn file_exists(path: str) -> bool {
-    st: [18]i64
-    return __asset_stat(path, "", st[..])
+    kind, _, _ := __asset_stat(path, "")
+    return kind >= 0
 }
 
 // true if path names a directory
 fn is_dir(path: str) -> bool {
-    st: [18]i64
-    return __asset_stat(path, "", st[..]) && st[3] & 0xF000 == 0x4000
+    kind, _, _ := __asset_stat(path, "")
+    return kind == 2
 }
 
 // size of the file in bytes, or -1 if it does not exist
 fn file_size(path: str) -> i64 {
-    st: [18]i64
-    return if __asset_stat(path, "", st[..]) { st[6] } else { -1 }
+    kind, size, _ := __asset_stat(path, "")
+    return if kind >= 0 { size } else { -1 }
 }
 
 fn __asset_mtime(dir: str, name: str) -> i64 {
-    st: [18]i64
-    return if __asset_stat(dir, name, st[..]) { st[11] * 1000000000 + st[12] } else { 0 }
+    kind, _, mtime := __asset_stat(dir, name)
+    return if kind >= 0 { mtime } else { 0 }
 }
 
 // time of the last modification in nanoseconds since 1970 (0 if the file does not exist);
@@ -64,13 +69,18 @@ fn modified_time(path: str) -> i64 {
 }
 
 fn __asset_read(dir: str, name: str) -> ([]u8, bool) {
-    fd := __io_result(__asset_call(2, dir, name, 0x80000, 0))      // O_RDONLY | O_CLOEXEC
+    buf: [4096]u8
+    if !__asset_cpath(buf[..], dir, name) {
+        __io_result(-36)
+        return ("", false)
+    }
+    fd := __io_result(__os_open(ptr(buf), false))
     if fd < 0 {
         return ("", false)
     }
-    defer { syscall(3, fd) }
-    st: [18]i64
-    if syscall(5, fd, ptr(st)) != 0 || st[6] <= 0 {
+    defer { __os_close(fd) }
+    size, _ := __os_fstat(fd)
+    if size <= 0 {
         // size unknown (pipes, /proc): read until end of file
         data := read_all(fd)
         if io_error() != 0 {
@@ -78,13 +88,10 @@ fn __asset_read(dir: str, name: str) -> ([]u8, bool) {
         }
         return (data, true)
     }
-    buf := alloc[u8](st[6])
+    data := alloc[u8](size)
     n := 0
-    while n < len(buf) {
-        r := syscall(0, fd, cast[i64](ptr(buf)) + n, len(buf) - n)
-        if r == -4 {
-            continue
-        }
+    while n < len(data) {
+        r := __os_read(fd, cast[i64](ptr(data)) + n, len(data) - n)
         if __io_result(r) < 0 {
             return ("", false)
         }
@@ -93,7 +100,7 @@ fn __asset_read(dir: str, name: str) -> ([]u8, bool) {
         }
         n += r
     }
-    return (buf[..n], true)
+    return (data[..n], true)
 }
 
 // the whole content of a file; (empty, false) if it cannot be opened or read (`io_error()`
@@ -112,12 +119,12 @@ fn write_bytes(path: str, data: []u8) -> bool {
 
 // deletes a file; false if that failed
 fn remove_file(path: str) -> bool {
-    return __io_result(__asset_call(87, path, "", 0, 0)) == 0
+    return __io_result(__asset_call(__os_remove_file, path, "")) == 0
 }
 
 // deletes an empty directory; false if that failed
 fn remove_dir(path: str) -> bool {
-    return __io_result(__asset_call(84, path, "", 0, 0)) == 0
+    return __io_result(__asset_call(__os_remove_dir, path, "")) == 0
 }
 
 // gives a file or directory another name or place (on the same file system); a file that
@@ -128,17 +135,17 @@ fn rename(from: str, to: str) -> bool {
     if !__asset_cpath(a[..], from, "") || !__asset_cpath(b[..], to, "") {
         return __io_result(-36) == 0
     }
-    return __io_result(syscall(82, ptr(a), ptr(b))) == 0
+    return __io_result(__os_rename(ptr(a), ptr(b))) == 0
 }
 
 // creates a directory and any missing parents; true if the directory exists afterwards
 fn make_dir(path: str) -> bool {
-    for i in 1..len(path) {
-        if path[i] == '/' {
-            __asset_call(83, path[..i], "", 493, 0)
+    for i in __os_path_root(path) + 1..len(path) {
+        if __os_is_sep(path[i]) {
+            __asset_call(__os_make_dir, path[..i], "")
         }
     }
-    r := __asset_call(83, path, "", 493, 0)
+    r := __asset_call(__os_make_dir, path, "")
     if is_dir(path) {
         __io_result(0)
         return true
@@ -156,68 +163,60 @@ fn __asset_name_less(a: str, b: str) -> bool {
 // the directory cannot be read. Allocates the names and the list.
 fn list_dir(path: str) -> []str {
     names := vec[str]()
-    // O_RDONLY | O_DIRECTORY | O_CLOEXEC
-    fd := __io_result(__asset_call(2, path, "", 0x90000, 0))
-    if fd < 0 {
+    buf: [4096]u8
+    if !__asset_cpath(buf[..], path, "") {
+        __io_result(-36)
         return names.items()
     }
-    buf: [8192]u8
-    loop {
-        n := syscall(217, fd, ptr(buf), 8192)
-        if n <= 0 {
-            break
-        }
-        // struct linux_dirent64: u64 ino, i64 off, u16 reclen, u8 type, char name[]
-        off := 0
-        while off < n {
-            reclen := i64(buf[off + 16]) | i64(buf[off + 17]) << 8
-            name := from_cstr(cast[*u8](cast[i64](ptr(buf)) + off + 19))
-            if name != "." && name != ".." {
-                names.push(concat(name, ""))
-            }
-            off += reclen
-        }
+    if __io_result(__os_list_dir(ptr(buf), &names)) < 0 {
+        return names.items()
     }
-    syscall(3, fd)
     sort_by(names.items(), __asset_name_less)
     return names.items()
 }
 
 // ---------- paths ----------
+// the index of the last separator in p, or -1
 fn __path_slash(p: str) -> i64 {
     for i in len(p) - 1..=0 by -1 {
-        if p[i] == '/' {
+        if __os_is_sep(p[i]) {
             return i
         }
     }
     return -1
 }
 
-// a and b joined with exactly one '/' between them (trailing slashes of a are dropped); b alone
-// if a is empty or b is absolute, a alone if b is empty. Allocates the result.
+// a and b joined with exactly one '/' between them (trailing separators of a are dropped); b
+// alone if a is empty or b is absolute (Windows: also `C:x`), a alone if b is empty; on
+// Windows `C:` and b become `C:b`. Allocates the result.
 fn path_join(a: str, b: str) -> str {
-    if len(a) == 0 || (len(b) > 0 && b[0] == '/') {
+    if len(a) == 0 || __os_path_root(b) > 0 {
         return b
     }
     if len(b) == 0 {
         return a
     }
+    if __os_path_root(a) == len(a) && !__os_is_sep(a[len(a) - 1]) {
+        return concat(a, b)
+    }
     e := len(a)
-    while e > 0 && a[e - 1] == '/' {
+    while e > 0 && __os_is_sep(a[e - 1]) {
         e -= 1
     }
     return fmt(a[..e], "/", b)
 }
 
-// the directory part: "a/b/c.png" -> "a/b", "c.png" -> "", "/c" -> "/" (a view of p)
+// the directory part: "a/b/c.png" -> "a/b", "c.png" -> "", "/c" -> "/" (Windows: "C:/c" ->
+// "C:/", "C:c" -> "C:") (a view of p)
 fn path_dir(p: str) -> str {
     i := __path_slash(p)
-    return if i < 0 { "" } else if i == 0 { p[..1] } else { p[..i] }
+    root := __os_path_root(p)
+    return if i < root { p[..root] } else { p[..i] }
 }
 
 // the last component: "a/b/c.png" -> "c.png" (a view of p)
 fn path_base(p: str) -> str {
-    return p[__path_slash(p) + 1..]
+    return p[max(__path_slash(p) + 1, __os_path_root(p))..]
 }
 
 // index of the dot that starts the extension of the component b, or -1: the last dot that has

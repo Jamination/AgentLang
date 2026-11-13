@@ -15,9 +15,7 @@ fn time_now() -> f64 {
 
 // wall-clock time: seconds since 1970-01-01 UTC (can jump when the system clock is set)
 fn wall_time() -> i64 {
-    ts: [2]i64
-    syscall(228, 0, ptr(ts))
-    return ts[0]
+    return __os_wall_time()
 }
 
 // suspends the program for `ns` nanoseconds (returns at once when ns <= 0)
@@ -25,12 +23,7 @@ fn sleep_ns(ns: i64) {
     if ns <= 0 {
         return
     }
-    ts: [2]i64
-    ts[0] = ns / 1000000000
-    ts[1] = ns % 1000000000
-    // nanosleep stores the remaining time back into ts when a signal interrupts it (EINTR)
-    while syscall(35, ptr(ts), ptr(ts)) == -4 {
-    }
+    __os_sleep_ns(ns)
 }
 
 // suspends the program for `ms` milliseconds (a time beyond the range of i64 nanoseconds,
