@@ -51,7 +51,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
 }
 
 fn cleanup_is_root(op: Op) -> bool {
-    return op == Store || op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet
+    return op == Store || op.clobbers()
 }
 
 fn cleanup_dce(f: *Func) -> bool {
@@ -102,7 +102,7 @@ fn cleanup_dce(f: *Func) -> bool {
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
         before := b.insts.len
-        // retain(|v| live[v])
+        // keep the live instructions, in order
         kept := 0
         for i in 0..before {
             v := b.insts[i]
@@ -117,14 +117,6 @@ fn cleanup_dce(f: *Func) -> bool {
         }
     }
     return changed
-}
-
-priv fn trivial_phis_res(repl: *Vec[i32], v0: i64) -> i64 {
-    v := v0
-    while repl[v] != NOV {
-        v = i64(repl[v])
-    }
-    return v
 }
 
 // remove phis whose inputs are all the same value
@@ -153,7 +145,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
             same := NOV
             trivial := true
             for a0 in f.insts[v].args {
-                a := trivial_phis_res(&repl, a0)
+                a := repl_find(repl.items(), a0)
                 if a == v || a == same {
                     continue
                 }
@@ -176,7 +168,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
     if any {
         for bi in 0..f.blocks.len {
             b := &f.blocks[bi]
-            // retain(|v| repl[v] == NOV)
+            // keep the instructions that are not replaced, in order
             kept := 0
             for i in 0..b.insts.len {
                 v := b.insts[i]

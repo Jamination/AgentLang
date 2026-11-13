@@ -5,14 +5,6 @@ priv fn numberable(op: Op) -> bool {
     return op.is_pure() || op == SDiv || op == UDiv || op == SRem || op == URem || op == Proj
 }
 
-priv fn run_find(repl: []i32, v0: i64) -> i64 {
-    v := v0
-    while repl[v] != NOV {
-        v = i64(repl[v])
-    }
-    return v
-}
-
 // The instructions in scope, by their key (op, type, arguments (the two of a commutative op in
 // increasing order), k). An entry is the instruction itself: its key fields do not change while
 // it is in scope. Entries go in the reverse order they came (the walk leaves a block after its
@@ -29,9 +21,7 @@ priv fn table_new(n: i64) -> Table {
     while cap < 2 * n {
         cap *= 2
     }
-    head := mkslice[i32](__alloc_raw(cap * 4), cap)
-    memfill(ptr(head), 0xFF, cap * 4)
-    return Table{head: head, ent: vec[i32](), next: vec[i32](), bucket: vec[i32]()}
+    return Table{head: alloc_neg1(cap), ent: vec[i32](), next: vec[i32](), bucket: vec[i32]()}
 }
 
 // the arguments of instruction i in key order
@@ -137,13 +127,12 @@ fn gvn_run(f: *Func) -> bool {
     // the walk over the dominator tree: (b, -1, ..) enters block b; (-1, mark, c, old) leaves
     // a block: entries above `mark` go, known[c] (if c is not NOV) is old again
     stack := vec_of([](i64, i64, i64, u8){(0, -1, NOV, u8(0))})
-    while stack.len > 0 {
-        step := stack.pop()
-        b := step.0
+    while !stack.is_empty() {
+        b, top, fact_c, fact_v := stack.pop()
         if b < 0 {
-            pop_to(&table, step.1)
-            if step.2 != NOV {
-                known_set(&known, step.2, step.3)
+            pop_to(&table, top)
+            if fact_c != NOV {
+                known_set(&known, fact_c, fact_v)
             }
             continue
         }
@@ -154,7 +143,7 @@ fn gvn_run(f: *Func) -> bool {
             p := cfg.preds[b][0]
             match f.blocks[p].term {
                 Br(c0, t, e) if t != e => {
-                    c := run_find(repl.items(), c0)
+                    c := repl_find(repl.items(), c0)
                     fact = c
                     fact_old = known_at(&known, c)
                     known_set(&known, c, if t == b { u8(2) } else { u8(1) })
@@ -170,7 +159,7 @@ fn gvn_run(f: *Func) -> bool {
             v := insts[ii]
             for ai in 0..f.insts[v].args.len {
                 a := f.insts[v].args[ai]
-                r := run_find(repl.items(), a)
+                r := repl_find(repl.items(), a)
                 // a condition decided by a dominating branch is a constant here
                 kn := known_at(&known, r)
                 if kn != 0 {
@@ -208,24 +197,18 @@ fn gvn_run(f: *Func) -> bool {
         insts.len = kept
         match f.blocks[b].term {
             Br(c0, t, e) => {
-                c := run_find(repl.items(), c0)
+                c := repl_find(repl.items(), c0)
                 kn := known_at(&known, c)
                 if kn != 0 {
-                    if kn == 2 {
-                        f.blocks[b].term = Jmp(t)
-                    } else {
-                        f.blocks[b].term = Jmp(e)
-                    }
+                    f.blocks[b].term = Jmp(if kn == 2 { t } else { e })
                     changed = true
                 }
             }
             _ => {}
         }
         stack.push((-1, mark, fact, fact_old))
-        ci := cfg.children[b].len - 1
-        while ci >= 0 {
+        for ci in cfg.children[b].len - 1..=0 by -1 {
             stack.push((cfg.children[b][ci], -1, NOV, u8(0)))
-            ci -= 1
         }
     }
     extra := vec[i32]()

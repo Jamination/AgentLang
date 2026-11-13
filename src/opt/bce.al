@@ -31,19 +31,10 @@ priv enum Kind {
     Affine(BceAffine),
 }
 
-// the closure `invariant` of find_iv, match_affine and hoist_in_loop
+// v is defined outside the loop (in_loop: its blocks; def_block: the block of every
+// instruction)
 priv fn invariant(v: i64, in_loop: []bool, def_block: []i32) -> bool {
-    return def_block[v] == 0xFFFFFFFF || !in_loop[def_block[v]]
-}
-
-priv fn signum(x: i64) -> i64 {
-    if x > 0 {
-        return 1
-    }
-    if x < 0 {
-        return -1
-    }
-    return 0
+    return def_block[v] == NOV || !in_loop[def_block[v]]
 }
 
 priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i32) -> Opt[Iv] {
@@ -76,16 +67,8 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     if pi.op != Phi || i64(def_block[phi]) != header || pi.args.len != 2 {
         return None
     }
-    start := NOV
-    back := NOV
-    for k in 0..pi.args.len {
-        pb := pi.from()[k]
-        if pb == pre {
-            start = pi.args[k]
-        } else if pb == latch {
-            back = pi.args[k]
-        }
-    }
+    start := pi.phi_input(pre)
+    back := pi.phi_input(latch)
     if start == NOV || back != next {
         return None
     }
@@ -124,13 +107,11 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
         }
         return Some(Iv{phi: phi, start: start, step: step, end: end, cmp: ci.op, ty: ty, last_const: Some(i)})
     }
-    ok := false
     o := ci.op
-    if (step == 1 && (o == Slt || o == Ult)) || (step == -1 && (o == Sgt || o == Ugt)) {
-        ok = true
-    } else if (step == 1 && (o == Sle || o == Ule)) || (step == -1 && (o == Sge || o == Uge)) {
+    ok := match (step, o) {
+        (1, Slt), (1, Ult), (-1, Sgt), (-1, Ugt) => true
         // inclusive bounds must not sit at the edge of the type (the counter would wrap)
-        match f.is_const(end) {
+        (1, Sle), (1, Ule), (-1, Sge), (-1, Uge) => match f.is_const(end) {
             Some(k) => {
                 bits := ty.bits()
                 smin := -9223372036854775807 - 1
@@ -139,18 +120,16 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
                     smin = -(1 << (bits - 1))
                     smax = (1 << (bits - 1)) - 1
                 }
-                if o == Sle {
-                    ok = k != smax
-                } else if o == Sge {
-                    ok = k != smin
-                } else if o == Ule {
-                    ok = k != -1
-                } else {
-                    ok = k != 0
+                match o {
+                    Sle => k != smax
+                    Sge => k != smin
+                    Ule => k != -1
+                    _ => k != 0
                 }
             }
-            None => ok = false
+            None => false
         }
+        _ => false
     }
     if !ok {
         return None
@@ -185,23 +164,15 @@ priv fn match_affine(f: *Func, idx: i64, iv: *Iv, in_loop: []bool, def_block: []
         if i.ty != iv.ty {
             return None
         }
-        if i.op == Add {
+        if i.op == Add || i.op == Sub {
             a := i.args[0]
             b := i.args[1]
             if invariant(b, in_loop, def_block) && !invariant(a, in_loop, def_block) {
                 v = a
             } else if invariant(a, in_loop, def_block) && !invariant(b, in_loop, def_block) {
-                v = b
-            } else {
-                return None
-            }
-        } else if i.op == Sub {
-            a := i.args[0]
-            b := i.args[1]
-            if invariant(b, in_loop, def_block) && !invariant(a, in_loop, def_block) {
-                v = a
-            } else if invariant(a, in_loop, def_block) && !invariant(b, in_loop, def_block) {
-                coef = -coef
+                if i.op == Sub {
+                    coef = -coef
+                }
                 v = b
             } else {
                 return None
@@ -238,11 +209,7 @@ priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bo
     if v == iv_phi {
         return at
     }
-    db := i32(NOV)
-    if v < len(def_block) {
-        db = def_block[v]
-    }
-    if db == 0xFFFFFFFF || !in_loop[db] {
+    if v >= len(def_block) || invariant(v, in_loop, def_block) {
         return v
     }
     i := clone(f.insts[v])
@@ -260,15 +227,14 @@ priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bo
 // A wrap visits a value >= 2^bits - |step|, so it is harmless only to show when the length is
 // a constant no larger than that (the wrapping access is then out of bounds itself).
 priv fn zext_cannot_wrap(f: *Func, a: *BceAffine, iv: *Iv, ln: i64) -> bool {
-    match a.ext {
-        Some(op) if op == ZExt => {}
-        _ => return true
+    if a.ext != Some(ZExt) {
+        return true
     }
     unsigned := iv.cmp == Ult || iv.cmp == Ule || iv.cmp == Ugt || iv.cmp == Uge
     if a.inner == iv.phi && unsigned {
         return true
     }
-    bits := i64(iv.ty.bits())
+    bits := iv.ty.bits()
     if bits >= 64 {
         return false
     }
@@ -314,15 +280,8 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
     }
     def_block := def_block_v.items()
     iv_opt := find_iv(f, h, latch, pre, in_loop, def_block)
-    has_iv := false
-    iv: Iv
-    match iv_opt {
-        Some(x) => {
-            has_iv = true
-            iv = x
-        }
-        None => {}
-    }
+    has_iv := is_some(iv_opt)
+    iv := iv_opt.or(Iv{})
     // collect candidate checks
     cands := vec[(i64, i64, i64, i64, i64, i64, Kind)]() // block, cond, ok, trap, idx, len
     for b in l.blocks {
@@ -337,16 +296,10 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
             continue
         }
         ci := &f.insts[c]
-        idx := 0
-        ln := 0
-        if ci.op == Ult {
-            idx = ci.args[0]
-            ln = ci.args[1]
-        } else if ci.op == Ugt {
-            idx = ci.args[1]
-            ln = ci.args[0]
-        } else {
-            continue
+        idx, ln := match ci.op {
+            Ult => (ci.args[0], ci.args[1])
+            Ugt => (ci.args[1], ci.args[0])
+            _ => continue
         }
         if f.insts[idx].ty != I64 || !invariant(ln, in_loop, def_block) {
             continue
@@ -374,12 +327,9 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
             Some(k) => last_eff = f.push(pre, Const, iv.ty, vec[i64](), k)
             None => {
                 any_affine := false
-                for ci in 0..cands.len {
-                    match cands[ci].6 {
-                        Affine(a) => any_affine = true
-                        Invariant => {}
-                    }
-                    if any_affine {
+                for cand in cands {
+                    if cand.6 != Invariant {
+                        any_affine = true
                         break
                     }
                 }
@@ -417,13 +367,8 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
         }
     }
     for ci in 0..cands.len {
-        cand := cands[ci]
-        b := cand.0
-        c := cand.1
-        ok := cand.2
-        trap := cand.3
-        ln := cand.5
-        match cand.6 {
+        b, c, ok, trap, _, ln, kind := cands[ci]
+        match kind {
             Invariant => {
                 add_check(f, &cur, c, trap, h)
             }
@@ -433,24 +378,20 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
                 e_last := index_at(f, last_eff, pre, &a, &iv, in_loop, def_block)
                 c1 := f.push(pre, Ult, I8, vec_of([]i64{e_first, ln}), 0)
                 c2 := f.push(pre, Ult, I8, vec_of([]i64{e_last, ln}), 0)
-                dir := signum(a.coef) * signum(iv.step)
-                c3 := 0
-                if dir > 0 {
-                    c3 = f.push(pre, Ule, I8, vec_of([]i64{e_first, e_last}), 0)
-                } else {
-                    c3 = f.push(pre, Ule, I8, vec_of([]i64{e_last, e_first}), 0)
-                }
+                // coef and step are not 0: the order of the indices of the first and the last
+                // iteration
+                x, y := if (a.coef > 0) == (iv.step > 0) { (e_first, e_last) } else { (e_last, e_first) }
+                c3 := f.push(pre, Ule, I8, vec_of([]i64{x, y}), 0)
                 add_check(f, &cur, c1, trap, h)
                 add_check(f, &cur, c2, trap, h)
                 add_check(f, &cur, c3, trap, h)
                 if abs(a.coef) > 1 {
                     // the trip count must be small enough that coef * iv cannot wrap; when it is
                     // not, some access is out of bounds anyway
-                    d := 0
-                    if iv.step > 0 {
-                        d = f.push(pre, Sub, I64, vec_of([]i64{last_eff, iv.start}), 0)
+                    d := if iv.step > 0 {
+                        f.push(pre, Sub, I64, vec_of([]i64{last_eff, iv.start}), 0)
                     } else {
-                        d = f.push(pre, Sub, I64, vec_of([]i64{iv.start, last_eff}), 0)
+                        f.push(pre, Sub, I64, vec_of([]i64{iv.start, last_eff}), 0)
                     }
                     lim := f.push(pre, Const, I64, vec[i64](), 9223372036854775807 / abs(a.coef))
                     c4 := f.push(pre, Ule, I8, vec_of([]i64{d, lim}), 0)
@@ -462,18 +403,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
     }
     // header phis now come from the end of the chain
     if cur != pre {
-        for ii in 0..f.blocks[h].insts.len {
-            v := f.blocks[h].insts[ii]
-            if f.insts[v].op != Phi {
-                break
-            }
-            pbs := f.insts[v].from()
-            for k in 0..pbs.len {
-                if pbs[k] == pre {
-                    pbs[k] = cur
-                }
-            }
-        }
+        f.phi_pred_replace(h, pre, cur)
     }
     return true
 }
@@ -495,12 +425,7 @@ priv fn same(f: *Func, a: i64, b: i64) -> bool {
 // branches on that comparison.
 priv fn entry_guard(f: *Func, cfg: *Cfg, pre: i64, iv: *Iv) -> bool {
     match (f.is_const(iv.start), f.is_const(iv.end)) {
-        (Some(s), Some(e)) => {
-            match simplify_fold_icmp(iv.cmp, iv.ty, s, e) {
-                Some(r) => return r
-                None => return false
-            }
-        }
+        (Some(s), Some(e)) => return simplify_fold_icmp(iv.cmp, iv.ty, s, e).or(false)
         _ => {}
     }
     signed := iv.cmp == Slt
@@ -556,11 +481,11 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: 
     any := false
     for b in l.blocks {
         match f.blocks[b].term {
-            Br(_, _, e0) if b != latch && is_trap_block(f, e0) => any = true
+            Br(_, _, e0) if b != latch && is_trap_block(f, e0) => {
+                any = true
+                break
+            }
             _ => {}
-        }
-        if any {
-            break
         }
     }
     if !any {
@@ -593,16 +518,10 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: 
             continue
         }
         ci := &f.insts[c]
-        idx := 0
-        ln := 0
-        if ci.op == Ult {
-            idx = ci.args[0]
-            ln = ci.args[1]
-        } else if ci.op == Ugt {
-            idx = ci.args[1]
-            ln = ci.args[0]
-        } else {
-            continue
+        idx, ln := match ci.op {
+            Ult => (ci.args[0], ci.args[1])
+            Ugt => (ci.args[1], ci.args[0])
+            _ => continue
         }
         if idx != iv.phi || !same(f, ln, iv.end) {
             continue
@@ -628,19 +547,13 @@ priv fn eliminate(f: *Func) -> bool {
     in_loop := vec_fill(f.blocks.len, false)
     did := false
     for li in 0..loops.loops.len {
-        mark_loop(&loops, li, in_loop.items(), true)
+        loops.mark_blocks(li, in_loop.items(), true)
         if eliminate_in_loop(f, &cfg, &loops, li, in_loop.items(), &def_block) {
             did = true
         }
-        mark_loop(&loops, li, in_loop.items(), false)
+        loops.mark_blocks(li, in_loop.items(), false)
     }
     return did
-}
-
-priv fn mark_loop(loops: *Loops, li: i64, in_loop: []bool, on: bool) {
-    for b in loops.loops[li].blocks {
-        in_loop[b] = on
-    }
 }
 
 fn bce_run(f: *Func) -> bool {
@@ -666,9 +579,9 @@ fn bce_run(f: *Func) -> bool {
             if touched[li] {
                 continue
             }
-            mark_loop(&loops, li, in_loop.items(), true)
+            loops.mark_blocks(li, in_loop.items(), true)
             hoisted := hoist_in_loop(f, &cfg, &loops, li, in_loop.items(), &def_block)
-            mark_loop(&loops, li, in_loop.items(), false)
+            loops.mark_blocks(li, in_loop.items(), false)
             if hoisted {
                 did = true
                 up := loops.loops[li].parent

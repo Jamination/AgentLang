@@ -6,19 +6,17 @@
 // (len value, constant index) of a check condition `len >u k` / `k <u len`
 priv fn const_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
     i := &f.insts[c]
-    if i.op == Ugt {
-        match f.is_const(i.args[1]) {
-            Some(k) => return Some((i.args[0], k))
-            None => return None
+    return match i.op {
+        Ugt => match f.is_const(i.args[1]) {
+            Some(k) => Some((i.args[0], k))
+            None => None
         }
-    }
-    if i.op == Ult {
-        match f.is_const(i.args[0]) {
-            Some(k) => return Some((i.args[1], k))
-            None => return None
+        Ult => match f.is_const(i.args[0]) {
+            Some(k) => Some((i.args[1], k))
+            None => None
         }
+        _ => None
     }
-    return None
 }
 
 fn checkmerge_run(f: *Func) -> bool {

@@ -168,6 +168,14 @@ fn is_pure(self: Op) -> bool {
     }
 }
 
+// may read or write any memory the function can reach (calls, bulk memory operations)
+fn clobbers(self: Op) -> bool {
+    match self {
+        Call, CallInd, Syscall, MemCpy, MemSet => true
+        _ => false
+    }
+}
+
 fn swap_cmp(self: Op) -> Op {
     match self {
         Slt => Sgt
@@ -315,6 +323,13 @@ priv fn raw32(n: i64) -> []i32 {
     return mkslice[i32](__alloc_raw(n * 4), n)
 }
 
+// n i32s, all -1
+fn alloc_neg1(n: i64) -> []i32 {
+    s := raw32(n)
+    memfill(ptr(s), 0xFF, n * 4)
+    return s
+}
+
 // n lists in one buffer: list i has room for cnt[i] items (filled with `add`)
 priv fn lists_sized(cnt: *Vec[i32]) -> Vec[Vec[i64]] {
     n := cnt.len
@@ -329,10 +344,9 @@ priv fn lists_sized(cnt: *Vec[i32]) -> Vec[Vec[i64]] {
     off := 0
     for i in 0..n {
         c := i64(cnt[i])
-        out.buf[i] = Vec[i64]{buf: flat[off..off + c], len: 0}
+        out.push(Vec[i64]{buf: flat[off..off + c], len: 0})
         off += c
     }
-    out.len = n
     return out
 }
 
@@ -340,6 +354,16 @@ priv fn lists_sized(cnt: *Vec[i32]) -> Vec[Vec[i64]] {
 priv inline fn add(l: *Vec[i64], x: i64) {
     l.buf[l.len] = x
     l.len += 1
+}
+
+// push for a list that usually has room (push itself is not inlined)
+inline fn push_fast(l: *Vec[i32], x: i32) {
+    if l.len < len(l.buf) {
+        l.buf[l.len] = x
+        l.len += 1
+    } else {
+        l.push(x)
+    }
 }
 
 // A hash map from non-negative integers to instruction numbers for the passes (open
@@ -460,6 +484,12 @@ fn from(self: *Inst) -> []i64 {
     return mkslice[i64](cast[i64](ptr(self.args)) + i64(self.cap) * 8, len(self.args))
 }
 
+// the input of a phi from block b, or NOV
+fn phi_input(self: *Inst, b: i64) -> i64 {
+    k := index_of(self.from(), b)
+    return if k < 0 { NOV } else { self.args[k] }
+}
+
 // replaces all inputs of a phi
 fn phi_set(self: *Inst, vals: []i64, bs: []i64) {
     n := len(vals)
@@ -502,6 +532,41 @@ fn phi_remove(self: *Inst, k: i64) {
     self.args = full[..n - 1]
 }
 
+// in the leading phis of block b, the inputs from block old come from block cur
+fn phi_pred_replace(self: *Func, b: i64, old: i64, cur: i64) {
+    for v in self.blocks[b].insts {
+        if self.insts[v].op != Phi {
+            break
+        }
+        pbs := self.insts[v].from()
+        for k in 0..pbs.len {
+            if pbs[k] == old {
+                pbs[k] = cur
+            }
+        }
+    }
+}
+
+// redirects the edge p -> old to p -> cur (the terminator only)
+fn retarget(self: *Func, p: i64, old: i64, cur: i64) {
+    match self.blocks[p].term {
+        Jmp(&x) => {
+            if *x == old {
+                *x = cur
+            }
+        }
+        Br(_, &x, &y) => {
+            if *x == old {
+                *x = cur
+            }
+            if *y == old {
+                *y = cur
+            }
+        }
+        _ => {}
+    }
+}
+
 fn push(self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.mk(op, ty, args, k)
     self.blocks[b].insts.push(i32(v))
@@ -515,11 +580,7 @@ fn im(self: *Func, v: i64) -> *Inst {
 
 fn is_const(self: *Func, v: i64) -> Opt[i64] {
     i := &self.insts[v]
-    if i.op == Const {
-        return Some(i.k)
-    } else {
-        return None
-    }
+    return if i.op == Const { Some(i.k) } else { None }
 }
 
 // a block that only traps (the failure block of a check)
@@ -649,15 +710,12 @@ fn rpo_preds(self: *Func) -> (Vec[i64], Vec[Vec[i64]]) {
     if !memo_valid(self) {
         return (self.rpo_compute(), self.preds_compute())
     }
-    if !memo_has_rpo {
-        memo_rpo = self.rpo_compute()
-        memo_has_rpo = true
-    }
+    rpo := memo_rpo_of(self)
     if !memo_has_preds {
         memo_preds = self.preds_compute()
         memo_has_preds = true
     }
-    return (memo_rpo, memo_preds)
+    return (rpo, memo_preds)
 }
 
 // reverse postorder of reachable blocks
@@ -665,11 +723,25 @@ fn rpo(self: *Func) -> Vec[i64] {
     if !memo_valid(self) {
         return self.rpo_compute()
     }
+    return memo_rpo_of(self)
+}
+
+// the memorised rpo of f (memo_valid(f) holds), computed on first use; the same for the
+// cfg and the loops below
+priv fn memo_rpo_of(f: *Func) -> Vec[i64] {
     if !memo_has_rpo {
-        memo_rpo = self.rpo_compute()
+        memo_rpo = f.rpo_compute()
         memo_has_rpo = true
     }
     return memo_rpo
+}
+
+priv fn memo_cfg_of(f: *Func) -> *Cfg {
+    if !memo_has_cfg {
+        memo_cfg = cfg_compute(f, memo_rpo_of(f))
+        memo_has_cfg = true
+    }
+    return &memo_cfg
 }
 
 priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
@@ -738,14 +810,14 @@ fn rpo_compute(self: *Func) -> Vec[i64] {
 
 fn term_uses(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
-        Br(c, _, _) => vec_of([]i64{c})
+        Br(c, _, _) => vec_one(c)
         Ret(v) => clone(v)
         _ => vec[i64]()
     }
 }
 
 fn use_counts(self: *Func) -> Vec[i32] {
-    c := Vec[i32]{buf: alloc[i32](self.insts.len), len: self.insts.len}
+    c := zeros(self.insts.len)
     for bi in 0..self.blocks.len {
         b := &self.blocks[bi]
         for v in b.insts {
@@ -754,7 +826,7 @@ fn use_counts(self: *Func) -> Vec[i32] {
             }
         }
         match b.term {
-            Br(v, t, e) => {
+            Br(v, _, _) => {
                 c[v] += 1
             }
             Ret(vs) => {
@@ -768,11 +840,18 @@ fn use_counts(self: *Func) -> Vec[i32] {
     return c
 }
 
-priv fn apply_repl_find(map: *Vec[i32], v: i64) -> i64 {
-    r := v
-    while map[r] != NOV {
-        r = i64(map[r])
+// the end of the replacement chain of v (repl[v] = replacement or NOV; v past the end of
+// repl has none)
+fn repl_find(repl: []i32, v: i64) -> i64 {
+    while v < len(repl) && repl[v] != NOV {
+        v = i64(repl[v])
     }
+    return v
+}
+
+// repl_find that also points every map entry on the chain at its end
+priv fn apply_repl_find(map: *Vec[i32], v: i64) -> i64 {
+    r := repl_find(map.items(), v)
     c := v
     while map[c] != NOV {
         n := i64(map[c])
@@ -850,15 +929,7 @@ fn cfg_new(f: *Func) -> Cfg {
     if !memo_valid(f) {
         return cfg_compute(f, f.rpo_compute())
     }
-    if !memo_has_cfg {
-        if !memo_has_rpo {
-            memo_rpo = f.rpo_compute()
-            memo_has_rpo = true
-        }
-        memo_cfg = cfg_compute(f, memo_rpo)
-        memo_has_cfg = true
-    }
-    return memo_cfg
+    return *memo_cfg_of(f)
 }
 
 // cfg_new(f).preds without the rest of the analysis
@@ -869,11 +940,7 @@ fn cfg_preds(f: *Func) -> Vec[Vec[i64]] {
     if memo_has_cfg {
         return memo_cfg.preds
     }
-    if !memo_has_rpo {
-        memo_rpo = f.rpo_compute()
-        memo_has_rpo = true
-    }
-    return rpo_preds_of(f, memo_rpo)
+    return rpo_preds_of(f, memo_rpo_of(f))
 }
 
 // the predecessors among the reachable blocks (those of rpo), in reverse postorder
@@ -951,8 +1018,8 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
         b := rpo[bi]
         add(&children[idom[b]], b)
     }
-    pre := Vec[i32]{buf: alloc[i32](n), len: n}
-    post := Vec[i32]{buf: alloc[i32](n), len: n}
+    pre := zeros(n)
+    post := zeros(n)
     t := 0
     // every block is on the stack at most once
     sb := raw32(n)
@@ -1008,29 +1075,23 @@ fn cfg_loops(f: *Func) -> (Cfg, Loops) {
         cfg := cfg_compute(f, f.rpo_compute())
         return (cfg, loops_compute(f, &cfg))
     }
-    if !memo_has_cfg {
-        if !memo_has_rpo {
-            memo_rpo = f.rpo_compute()
-            memo_has_rpo = true
-        }
-        memo_cfg = cfg_compute(f, memo_rpo)
-        memo_has_cfg = true
-    }
+    cfg := memo_cfg_of(f)
+    return (*cfg, memo_loops_of(f, cfg))
+}
+
+// (the memorised loops belong to the memorised cfg)
+priv fn memo_loops_of(f: *Func, cfg: *Cfg) -> Loops {
     if !memo_has_loops {
-        memo_loops = loops_compute(f, &memo_cfg)
+        memo_loops = loops_compute(f, cfg)
         memo_has_loops = true
     }
-    return (memo_cfg, memo_loops)
+    return memo_loops
 }
 
 fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
     // the memorised loops belong to the memorised cfg
     if memo_valid(f) && memo_has_cfg && ptr(cfg.rpo_idx.buf) == ptr(memo_cfg.rpo_idx.buf) {
-        if !memo_has_loops {
-            memo_loops = loops_compute(f, cfg)
-            memo_has_loops = true
-        }
-        return memo_loops
+        return memo_loops_of(f, cfg)
     }
     return loops_compute(f, cfg)
 }
@@ -1082,21 +1143,12 @@ priv fn loops_compute(f: *Func, cfg: *Cfg) -> Loops {
             inl[b] = false
         }
     }
-    // nesting: process loops from largest to smallest
-    // (a stable insertion sort in place of sort_by with a closure)
+    // nesting: process loops from largest to smallest (sort_by is stable)
     order := vec[i64]()
     for i in 0..loops.len {
         order.push(i)
     }
-    for i in 1..order.len {
-        j := i
-        while j > 0 && loops[order[j - 1]].blocks.len < loops[order[j]].blocks.len {
-            tmp := order[j - 1]
-            order[j - 1] = order[j]
-            order[j] = tmp
-            j -= 1
-        }
-    }
+    sort_by(order.items(), loops, fn(loops: Vec[Loop], a: i64, b: i64) -> bool { loops[a].blocks.len > loops[b].blocks.len })
     loop_of := vec_fill(n, i32(-1))
     for li in order {
         p := i64(loop_of[loops[li].header])
@@ -1123,19 +1175,21 @@ fn depth(self: *Loops, b: i64) -> i64 {
 }
 
 fn contains(self: *Loops, li: i64, b: i64) -> bool {
-    l := i64(self.loop_of[b])
-    if l < 0 {
-        return false
-    }
-    cur: Opt[i64] = Some(l)
-    loop {
-        match cur {
-            Some(c) if c == li => return true
-            Some(c) => cur = self.loops[c].parent
-            None => return false
+    cur := i64(self.loop_of[b])
+    while cur >= 0 {
+        if cur == li {
+            return true
         }
+        cur = self.loops[cur].parent.or(-1)
     }
     return false
+}
+
+// sets in_loop[b] to on for the blocks b of loop li
+fn mark_blocks(self: *Loops, li: i64, in_loop: []bool, on: bool) {
+    for b in self.loops[li].blocks {
+        in_loop[b] = on
+    }
 }
 
 // ---------- printer ----------
@@ -1170,7 +1224,7 @@ priv fn float_debug(s: str) -> str {
     }
     exp := 0
     if p < len(s) {
-        e, ok := parse_i64(s[p + 1..])
+        e, _ := parse_i64(s[p + 1..])
         exp = e
     }
     // value = 0.d1d2.. * 10^e10
@@ -1196,14 +1250,10 @@ priv fn float_debug(s: str) -> str {
         return fmt(sign, d[..1], ".", d[1..], "e", e10 - 1)
     }
     if e10 <= 0 {
-        zeros := alloc[u8](-e10)
-        fill(zeros, '0')
-        return fmt(sign, "0.", zeros, d)
+        return fmt(sign, "0.", repeat("0", -e10), d)
     }
     if len(d) <= e10 {
-        zeros := alloc[u8](e10 - len(d))
-        fill(zeros, '0')
-        return fmt(sign, d, zeros, ".0")
+        return fmt(sign, d, repeat("0", e10 - len(d)), ".0")
     }
     return fmt(sign, d[..e10], ".", d[e10..])
 }
@@ -1307,12 +1357,12 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
 fn ir_verify(f: *Func) -> str {
     cfg := cfg_new(f)
     n := f.insts.len
-    def_block := vec_fill(n, 0xFFFFFFFF)
+    def_block := vec_fill(n, NOV)
     def_pos := vec_fill(n, 0)
     for b in cfg.rpo {
         for pi in 0..f.blocks[b].insts.len {
             v := f.blocks[b].insts[pi]
-            if def_block[v] != 0xFFFFFFFF {
+            if def_block[v] != NOV {
                 return fmt("%", v, " appears twice (b", def_block[v], " and b", b, ")")
             }
             def_block[v] = b
@@ -1340,7 +1390,7 @@ fn ir_verify(f: *Func) -> str {
                 for k in 0..i.args.len {
                     a := i.args[k]
                     db := def_block[a]
-                    if db == 0xFFFFFFFF {
+                    if db == NOV {
                         return fmt("phi %", v, " in b", b, " uses %", a, " which is not defined in reachable code")
                     }
                     if !cfg.dom(db, i.from()[k]) {
@@ -1351,7 +1401,7 @@ fn ir_verify(f: *Func) -> str {
                 seen_non_phi = true
                 for a in i.args {
                     db := def_block[a]
-                    if db == 0xFFFFFFFF {
+                    if db == NOV {
                         return fmt("%", v, " in b", b, " uses %", a, " which is not defined in reachable code")
                     }
                     if db == b {
@@ -1367,7 +1417,7 @@ fn ir_verify(f: *Func) -> str {
         tu := f.term_uses(b)
         for a in tu {
             db := def_block[a]
-            if db == 0xFFFFFFFF || !cfg.dom(db, b) {
+            if db == NOV || !cfg.dom(db, b) {
                 return fmt("terminator of b", b, " uses %", a, " which does not dominate it")
             }
         }

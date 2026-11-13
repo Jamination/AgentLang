@@ -39,27 +39,14 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
     grown := 0
     // split the block
     cont := f.new_block()
-    tail := vec_of(f.blocks[cb].insts[pos + 1..f.blocks[cb].insts.len])
-    f.blocks[cb].insts.len = pos + 1
-    f.blocks[cb].insts.pop()
+    tail := vec_of(f.blocks[cb].insts[pos + 1..])
+    f.blocks[cb].insts.truncate(pos)
     f.blocks[cont].insts = tail
     old_term := f.blocks[cb].term
     f.blocks[cb].term = Term.None
     f.blocks[cont].term = old_term
-    ss := f.succs(cont)
-    for s in ss {
-        for ii in 0..f.blocks[s].insts.len {
-            v := f.blocks[s].insts[ii]
-            if f.insts[v].op != Phi {
-                break
-            }
-            pbs := f.insts[v].from()
-            for k in 0..pbs.len {
-                if pbs[k] == cb {
-                    pbs[k] = cont
-                }
-            }
-        }
+    for s in f.succs(cont) {
+        f.phi_pred_replace(s, cb, cont)
     }
     // clone callee
     grpo := g.rpo()
@@ -73,7 +60,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         for gv in g.blocks[gb].insts {
             gi := &g.insts[gv]
             if gi.op == Param {
-                vmap[gv] = repl_find(repl, call_inst.args[gi.k])
+                vmap[gv] = repl_find(repl.items(), call_inst.args[gi.k])
                 continue
             }
             nv := f.mk(gi.op, gi.ty, vec[i64](), gi.k)
@@ -99,7 +86,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
                 gfrom := gi.from()
                 for k in 0..n {
                     p := bmap[gfrom[k]]
-                    if p != 0xFFFFFFFF {
+                    if p != NOV {
                         a2.push(vmap[gi.args[k]])
                         p2.push(p)
                     }
@@ -151,24 +138,17 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         rt := g.rets[k]
         if rets.is_empty() {
             // callee never returns: any value will do
-            z := 0
-            if rt.is_fp() {
-                z = f.mk(FConst, rt, vec[i64](), 0)
-            } else {
-                z = f.mk(Const, rt, vec[i64](), 0)
-            }
+            z := f.mk(if rt.is_fp() { FConst } else { Const }, rt, vec[i64](), 0)
             f.blocks[0].insts.insert(0, i32(z))
             results.push(z)
         } else if rets.len == 1 {
             results.push(rets[0].1[k])
         } else {
             vals := vec[i64]()
-            for ri in 0..rets.len {
-                vals.push(rets[ri].1[k])
-            }
             pbs := vec[i64]()
-            for ri in 0..rets.len {
-                pbs.push(rets[ri].0)
+            for r in rets {
+                vals.push(r.1[k])
+                pbs.push(r.0)
             }
             phi := f.mk_phi_of(rt, vals.items(), pbs.items())
             f.blocks[cont].insts.insert(k, i32(phi))
@@ -181,22 +161,16 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
     if nrets == 1 {
         repl[call] = i32(results[0])
     } else if nrets > 1 {
-        // projections of the call
-        for b in 0..f.blocks.len {
-            for ii in 0..f.blocks[b].insts.len {
-                v := f.blocks[b].insts[ii]
-                i := &f.insts[v]
-                if i.op == Proj && i.args[0] == call {
-                    repl[v] = i32(results[i.k])
-                }
-            }
-        }
+        // projections of the call: replaced, and dropped from their blocks
         for b in 0..f.blocks.len {
             blk := &f.blocks[b]
             n := 0
             for ii in 0..blk.insts.len {
                 v := blk.insts[ii]
-                if !(f.insts[v].op == Proj && f.insts[v].args[0] == call) {
+                i := &f.insts[v]
+                if i.op == Proj && i.args[0] == call {
+                    repl[v] = i32(results[i.k])
+                } else {
                     blk.insts[n] = v
                     n += 1
                 }
@@ -205,15 +179,6 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         }
     }
     return grown
-}
-
-// the final replacement of v
-priv fn repl_find(repl: *Vec[i32], v: i64) -> i64 {
-    r := v
-    while r < repl.len && repl[r] != NOV {
-        r = i64(repl[r])
-    }
-    return r
 }
 
 struct Policy {
@@ -245,18 +210,15 @@ priv fn rpo_after_inline(f: *Func, rpo: *Vec[i64], at: i64, nb0: i64) -> (Vec[i6
     sb := vec_one(entry)
     si := vec_one(0)
     seen[entry - nb0] = true
-    while sb.len > 0 {
-        b := sb[sb.len - 1]
-        i := si[si.len - 1]
+    while !sb.is_empty() {
+        b := sb.last()
+        i := si.last()
         cnt, s0, s1 := f.succ_pair(b)
         if b == nb0 {
             cnt = 0
         }
         if i < cnt {
-            s := s0
-            if i == 1 {
-                s = s1
-            }
+            s := if i == 1 { s1 } else { s0 }
             si[si.len - 1] = i + 1
             if s < nb0 || s >= f.blocks.len {
                 // (cannot happen: the copy only goes to itself and the continuation)
@@ -273,19 +235,17 @@ priv fn rpo_after_inline(f: *Func, rpo: *Vec[i64], at: i64, nb0: i64) -> (Vec[i6
             si.pop()
         }
     }
-    if post.len == 0 || post[0] != nb0 {
+    if post.is_empty() || post[0] != nb0 {
         return (vec[i64](), false)
     }
     out := vec[i64]()
     out.reserve(rpo.len + post.len)
-    out.extend(rpo.buf[..at + 1])
-    k := post.len - 1
-    while k >= 1 {
+    out.extend(rpo[..at + 1])
+    for k in post.len - 1..=1 by -1 {
         out.push(post[k])
-        k -= 1
     }
     out.push(nb0)
-    out.extend(rpo.buf[at + 1..rpo.len])
+    out.extend(rpo[at + 1..])
     return (out, true)
 }
 
@@ -308,13 +268,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
     // the reverse postorder of f, kept up to date (see rpo_after_inline) or made anew
     frpo := vec[i64]()
     fresh := true
-    loop {
-        if budget == 0 {
-            break
-        }
-        if caller_size > pol.max_caller {
-            break
-        }
+    while budget > 0 && caller_size <= pol.max_caller {
         // find the next inlinable call
         found: Opt[(i64, i64, i64)] = None
         {
@@ -343,13 +297,12 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                         costs[g] = cost(gf)
                     }
                     size := costs[g]
-                    limit := 0
-                    if gf.inl > 0 {
-                        limit = pol.hinted
+                    limit := if gf.inl > 0 {
+                        pol.hinted
                     } else if call_counts[g] == 1 && !addr_taken[g] {
-                        limit = pol.single_site
+                        pol.single_site
                     } else {
-                        limit = pol.small
+                        pol.small
                     }
                     if size <= limit {
                         found = Some((b, i64(v), g))
@@ -360,11 +313,11 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
             }
         }
         match found {
-            Some(x) => {
+            Some((b, call, g)) => {
                 // g is not f and inline_call only changes f
                 returns := false
                 nb0 := m.funcs[fid].blocks.len
-                caller_size += inline_call(&m.funcs[fid], x.0, x.1, &m.funcs[x.2], &repl, &returns)
+                caller_size += inline_call(&m.funcs[fid], b, call, &m.funcs[g], &repl, &returns)
                 if !returns {
                     // the blocks after the call became unreachable through it: they may now
                     // be reached later, before the call's block

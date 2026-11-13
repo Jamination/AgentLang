@@ -11,7 +11,7 @@ struct Addr {
     off: Opt[i64],
 }
 
-// off.map(|o| o.wrapping_add(k))
+// the offset plus k (None stays None)
 priv fn off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     match off {
         Some(o) => Some(o + k)
@@ -19,7 +19,7 @@ priv fn off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     }
 }
 
-// a.is_some() && a == b
+// both offsets are known and equal (a tuple match: faster here than `is_some(a) && a == b`)
 priv fn off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
     match (a, b) {
         (Some(x), Some(y)) => x == y
@@ -60,17 +60,14 @@ priv fn decompose(f: *Func, addr: i64) -> Addr {
                 None => {}
             }
             // variable index: look for an identified object on either side
-            da := decompose_obj(f, a, depth)
-            match da {
+            match decompose_obj(f, a, depth) {
                 Some(base) => return Addr{base: base, off: None}
                 None => {}
             }
-            db := decompose_obj(f, b, depth)
-            match db {
+            match decompose_obj(f, b, depth) {
                 Some(base) => return Addr{base: base, off: None}
                 None => {}
             }
-            return Addr{base: Unknown(v), off: off}
         }
         return Addr{base: Unknown(v), off: off}
     }
@@ -89,9 +86,8 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     }
     if i.op == Add {
         r := decompose_obj(f, i.args[0], depth + 1)
-        match r {
-            Some(x) => return r
-            None => {}
+        if is_some(r) {
+            return r
         }
         return decompose_obj(f, i.args[1], depth + 1)
     }
@@ -155,33 +151,37 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
         for b in rpo {
             for v in f.blocks[b].insts {
                 i := &f.insts[v]
-                if i.op == Add {
-                    for a in i.args {
-                        d := derived[a]
-                        if d != NOV && derived[v] != d {
-                            if derived[v] != NOV {
-                                // derived from two allocas: treat both as escaped
-                                esc[d] = true
-                                esc[derived[v]] = true
-                            } else {
-                                derived[v] = d
-                                changed = true
+                match i.op {
+                    Add => {
+                        for a in i.args {
+                            d := derived[a]
+                            if d != NOV && derived[v] != d {
+                                if derived[v] != NOV {
+                                    // derived from two allocas: treat both as escaped
+                                    esc[d] = true
+                                    esc[derived[v]] = true
+                                } else {
+                                    derived[v] = d
+                                    changed = true
+                                }
                             }
                         }
                     }
-                } else if i.op == Load {
-                } else if i.op == Store {
-                    d := derived[i.args[1]]
-                    if d != NOV && !esc[d] {
-                        esc[d] = true
-                        changed = true
-                    }
-                } else {
-                    for a in i.args {
-                        d := derived[a]
+                    Load => {}
+                    Store => {
+                        d := derived[i.args[1]]
                         if d != NOV && !esc[d] {
                             esc[d] = true
                             changed = true
+                        }
+                    }
+                    _ => {
+                        for a in i.args {
+                            d := derived[a]
+                            if d != NOV && !esc[d] {
+                                esc[d] = true
+                                changed = true
+                            }
                         }
                     }
                 }
