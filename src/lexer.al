@@ -335,6 +335,10 @@ priv fn punct_len(c: u8, c1: u8, c2: u8) -> i64 {
     }
 }
 
+// the tokens of one file at a time (lexer_lex reuses the buffer)
+priv tok_buf: Vec[Token]
+
+// The tokens of `src`; they stay valid until the next call.
 fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     if !ident_tab_ready {
         ident_tab_init()
@@ -349,8 +353,9 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         i = 3
         line_start = 3
     }
-    out := vec[Token]()
-    out.reserve(n / 5 + 16)
+    out := tok_buf
+    out.len = 0
+    out.reserve(n / 4 + 16)
     // bracket stack: '(' / '[' suppress newlines, '{' enables them
     stack := vec[u8]()
     while i < n {
@@ -653,5 +658,6 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         }
     }
     out.push(Token{t: Eof, pos: p})
+    tok_buf = out
     return out
 }

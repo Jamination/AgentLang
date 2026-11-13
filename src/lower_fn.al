@@ -43,6 +43,9 @@ struct Fx {
     f: Func
     cur: i64
     dead: bool
+    // instructions of block `cur` not yet in its list: pend[pend_base..] (see flush_pend)
+    pend: Vec[i64]
+    pend_base: i64
     scopes: Vec[Scope]
     loops: Vec[LoopCtx]
     tenv: Map[str, i64]
@@ -173,10 +176,11 @@ priv fn lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
     lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, nil)
 }
 
-// buffers for the instructions and blocks of the functions being lowered, one pair per level
-// of nesting (see lower_fn_lower_body)
+// buffers for the instructions, blocks and pending block lists of the functions being
+// lowered, one set per level of nesting (see lower_fn_lower_body)
 priv inst_bufs: Vec[Vec[Inst]]
 priv block_bufs: Vec[Vec[BlockData]]
+priv pend_bufs: Vec[Vec[i64]]
 priv buf_depth: i64
 
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
@@ -193,17 +197,22 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     if buf_depth == inst_bufs.len {
         inst_bufs.push(vec[Inst]())
         block_bufs.push(vec[BlockData]())
+        pend_bufs.push(vec[i64]())
     }
     f.insts = inst_bufs[buf_depth]
     f.insts.len = 0
     f.blocks = block_bufs[buf_depth]
     f.blocks.len = 0
+    pend := pend_bufs[buf_depth]
+    pend.len = 0
     buf_depth += 1
     fx := Fx{
         cx: cx,
         f: f,
         cur: 0,
         dead: false,
+        pend: pend,
+        pend_base: 0,
         scopes: vec[Scope](),
         loops: vec[LoopCtx](),
         tenv: tenv,
@@ -276,6 +285,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
             fx.do_return(Some(v2))
         }
     }
+    fx.flush_pend()
     // finalize: allocas at the top of the entry block
     b0 := fx.f.blocks[0].insts
     na := fx.allocas.len
@@ -295,6 +305,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     buf_depth -= 1
     inst_bufs[buf_depth] = lf.insts
     block_bufs[buf_depth] = lf.blocks
+    pend_bufs[buf_depth] = fx.pend
     lf.insts = vec_of(lf.insts.items())
     lf.blocks = vec_of(lf.blocks.items())
     lf.lowered = true
@@ -303,8 +314,26 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
 }
 
 // ---------- builder primitives ----------
+// Instructions are appended to `pend` and move to the list of block `cur` when `cur` changes
+// (`flush_pend`): a block's list is allocated once, at its final length.
 fn ins(self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
-    return self.f.push(self.cur, op, ty, args, k)
+    v := self.f.mk(op, ty, args, k)
+    self.pend.push(v)
+    return v
+}
+
+// moves the pending instructions (from `pend_base` on) to the list of block `cur`
+priv fn flush_pend(self: *Fx) {
+    if self.pend.len == self.pend_base {
+        return
+    }
+    l := &self.f.blocks[self.cur].insts
+    if l.len == 0 {
+        *l = vec_of(self.pend[self.pend_base..])
+    } else {
+        l.extend(self.pend[self.pend_base..])
+    }
+    self.pend.len = self.pend_base
 }
 
 fn iconst(self: *Fx, ty: T, k: i64) -> i64 {
@@ -316,17 +345,20 @@ fn new_block(self: *Fx) -> i64 {
 }
 
 fn switch_to(self: *Fx, b: i64) {
+    self.flush_pend()
     self.cur = b
     self.dead = false
 }
 
 fn terminate(self: *Fx, t: Term) {
+    self.flush_pend()
     self.f.blocks[self.cur].term = t
     self.cur = self.f.new_block()
     self.dead = true
 }
 
 fn jmp(self: *Fx, b: i64) {
+    self.flush_pend()
     d := self.dead
     self.f.blocks[self.cur].term = Jmp(b)
     self.cur = self.f.new_block()
@@ -334,6 +366,7 @@ fn jmp(self: *Fx, b: i64) {
 }
 
 fn br(self: *Fx, c: i64, t: i64, e: i64) {
+    self.flush_pend()
     self.f.blocks[self.cur].term = Br(c, t, e)
     self.cur = self.f.new_block()
 }
@@ -674,6 +707,7 @@ priv fn break_continue(fx: *Fx, pos: Pos, is_break: bool) {
     target := if is_break { l.brk } else { l.cont }
     depth := l.scope_depth
     fx.run_defers_down_to(depth)
+    fx.flush_pend()
     fx.f.blocks[fx.cur].term = Jmp(target)
     fx.cur = fx.f.new_block()
     fx.dead = true
@@ -706,6 +740,7 @@ priv fn break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
     l := fx.loops[idx]
     target := if is_break { l.brk } else { l.cont }
     fx.run_defers_down_to(l.scope_depth)
+    fx.flush_pend()
     fx.f.blocks[fx.cur].term = Jmp(target)
     fx.cur = fx.f.new_block()
     fx.dead = true
@@ -1376,10 +1411,14 @@ priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     if found {
         return known
     }
+    // the pending instructions of `cur` stay in `pend`: the trap block's are kept above them
     save_cur := self.cur
     save_dead := self.dead
+    save_base := self.pend_base
+    self.pend_base = self.pend.len
     b := self.new_block()
-    self.switch_to(b)
+    self.cur = b
+    self.dead = false
     loc := self.loc_str(pos)
     name := match kind {
         0 => "__bounds_fail"
@@ -1390,6 +1429,8 @@ priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     if !self.dead {
         self.terminate(Trap)
     }
+    self.flush_pend()
+    self.pend_base = save_base
     self.cur = save_cur
     self.dead = save_dead
     self.traps.set((kind, pos.line), b)

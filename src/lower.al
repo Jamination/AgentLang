@@ -67,6 +67,9 @@ struct Cx {
     fn_sigs: Vec[(Vec[i64], i64)]
     work: Vec[(i64, i64, Vec[i64])]
     strings: Map[str, i64]
+    // strings of LONG_STRING bytes or more (embedded files): (hash, text, global), see
+    // string_global
+    long_strings: Vec[(u64, str, i64)]
     exposed: Map[i64, bool]
     inst_depth: i64
     // names declared by the prelude: prelude code always sees these, user code may shadow them
@@ -910,10 +913,42 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
 }
 
 // ---------- strings / globals ----------
+// strings from this length on are found by a hash of 8 bytes per step (embedded files are
+// long: hashing them byte by byte in `strings` took milliseconds)
+priv const LONG_STRING = 1024
+
+priv fn long_hash(s: str) -> u64 {
+    n := len(s)
+    p := cast[i64](ptr(s))
+    h: u64 = u64(n)
+    i := 0
+    while i + 8 <= n {
+        h = (h ^ *cast[*u64](p + i)) * 0x9E3779B97F4A7C15
+        h ^= h >> 29
+        i += 8
+    }
+    while i < n {
+        h = (h ^ u64(s[i])) * 0x100000001B3
+        i += 1
+    }
+    return h
+}
+
 fn string_global(self: *Cx, s: str) -> i64 {
-    known, found := self.strings.get(s)
-    if found {
-        return known
+    long := len(s) >= LONG_STRING
+    h: u64 = 0
+    if long {
+        h = long_hash(s)
+        for e in self.long_strings {
+            if e.0 == h && e.1 == s {
+                return e.2
+            }
+        }
+    } else {
+        known, found := self.strings.get(s)
+        if found {
+            return known
+        }
     }
     gid := self.module.globals.len
     self.module.globals.push(Global{
@@ -924,7 +959,11 @@ fn string_global(self: *Cx, s: str) -> i64 {
         relocs: vec[(i64, RelocTarget)](),
         readonly: true,
     })
-    self.strings.set(s, gid)
+    if long {
+        self.long_strings.push((h, s, gid))
+    } else {
+        self.strings.set(s, gid)
+    }
     return gid
 }
 
