@@ -173,18 +173,7 @@ priv fn key_list(k: *TyK) -> []i64 {
 }
 
 fn types_new() -> Types {
-    t := Types{
-        kinds: vec[TyK](),
-        small: map[(i64, i64, i64), i64](),
-        lists: map[[]i64, i64](),
-        structs: vec[StructInfo](),
-        enums: vec[EnumInfo](),
-        field_ids: map[(i64, i64), i64](),
-        next_field_id: 1,
-        layout_errors: vec[str](),
-        shape: vec[(i64, i64)](),
-        tuple_layout: map[i64, (i64, i64)](),
-    }
+    t := Types{next_field_id: 1}
     t.intern(Err)
     t.intern(Unit)
     t.intern(Bool)
@@ -198,10 +187,8 @@ fn types_new() -> Types {
     t.intern(Int(64, false))
     t.intern(F64)
     t.intern(F32)
-    s := t.intern(Slice(T_U8))
-    assert s == T_STR
-    n := t.intern(Never)
-    assert n == T_NEVER
+    assert t.intern(Slice(T_U8)) == T_STR
+    assert t.intern(Never) == T_NEVER
     t.intern(Vec(2))
     t.intern(Vec(3))
     t.intern(Vec(4))
@@ -390,17 +377,14 @@ fn layout_struct(self: *Types, sid: i64) {
         s := &self.structs[sid]
         s.state = 2
         // the fields are dropped: everything that walks a type by its fields would not end
-        s.fields.truncate(0)
-        s.offsets = vec_fill(0, 0)
+        s.fields.clear()
+        s.offsets.clear()
         s.size = 8
         s.align = 8
         return
     }
     self.structs[sid].state = 1
-    tys := vec[i64]()
-    for i in 0..self.structs[sid].fields.len {
-        tys.push(self.structs[sid].fields[i].1)
-    }
+    tys := self.field_types(sid)
     offs, size, align := self.layout_fields(tys.items())
     s := &self.structs[sid]
     if s.state == 2 {
@@ -410,6 +394,15 @@ fn layout_struct(self: *Types, sid: i64) {
     s.size = size
     s.align = align
     s.state = 2
+}
+
+// the types of the fields of struct `sid`
+priv fn field_types(self: *Types, sid: i64) -> Vec[i64] {
+    tys := vec[i64]()
+    for f in self.structs[sid].fields {
+        tys.push(f.1)
+    }
+    return tys
 }
 
 priv fn layout_enum(self: *Types, eid: i64) {
@@ -458,9 +451,9 @@ priv fn merge_spans(spans: []i64) -> Vec[i64] {
     sort(spans)
     out := vec[i64]()
     for s in spans {
-        if out.len > 0 && (s >> 32) <= (out[out.len - 1] & 0xFFFFFFFF) {
-            last := out[out.len - 1]
-            out[out.len - 1] = ((last >> 32) << 32) | max(last & 0xFFFFFFFF, s & 0xFFFFFFFF)
+        if !out.is_empty() && (s >> 32) <= (out.last() & 0xFFFFFFFF) {
+            last := &out[out.len - 1]
+            *last = ((*last >> 32) << 32) | max(*last & 0xFFFFFFFF, s & 0xFFFFFFFF)
         } else {
             out.push(s)
         }
@@ -642,7 +635,7 @@ priv fn leaves_fields(self: *Types, t: i64, tys: []i64, offs: []i64, base: i64, 
     }
 }
 
-fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
+priv fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
     match self.k(t) {
         Err, Unit, Never => {}
         Mat4 => {
@@ -668,10 +661,7 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
         }
         Struct(s) => {
             self.layout_struct(s)
-            tys := vec[i64]()
-            for i in 0..self.structs[s].fields.len {
-                tys.push(self.structs[s].fields[i].1)
-            }
+            tys := self.field_types(s)
             offs := clone(self.structs[s].offsets)
             leaves_fields(self, t, tys.items(), offs.items(), base, out)
         }
@@ -691,7 +681,12 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
                 end := r & 0xFFFFFFFF
                 while o < end {
                     c := piece(o, end)
-                    pt := if c == 8 { I64 } else if c == 4 { I32 } else if c == 2 { I16 } else { I8 }
+                    pt := match c {
+                        8 => I64
+                        4 => I32
+                        2 => I16
+                        _ => I8
+                    }
                     out.push(Leaf{off: base + o, t: pt, alias: AK_ANY})
                     o += c
                     if out.len > 4096 {
@@ -732,9 +727,9 @@ fn leaf_list(self: *Types, t: i64) -> Vec[Leaf] {
     out := vec[Leaf]()
     self.leaves(t, 0, &out)
     if self.instantiating == 0 {
-        while self.leaf_known.len <= t {
-            self.leaf_known.push(false)
-            self.leaf_cache.push(vec[Leaf]())
+        if self.leaf_known.len <= t {
+            self.leaf_known.resize(t + 1, false)
+            self.leaf_cache.resize(t + 1, Vec[Leaf]{})
         }
         self.leaf_known[t] = true
         self.leaf_cache[t] = out
@@ -749,8 +744,8 @@ fn leaf_count(self: *Types, t: i64) -> i64 {
     }
     n := count_leaves(self, t)
     if self.instantiating == 0 {
-        while self.count_cache.len <= t {
-            self.count_cache.push(-1)
+        if self.count_cache.len <= t {
+            self.count_cache.resize(t + 1, -1)
         }
         self.count_cache[t] = n
     }
@@ -761,13 +756,9 @@ priv fn count_leaves(self: *Types, t: i64) -> i64 {
     match self.k(t) {
         Array(e, n) => return sat_mul(self.leaf_count(e), n)
         Struct(s) => {
-            tys := vec[i64]()
-            for i in 0..self.structs[s].fields.len {
-                tys.push(self.structs[s].fields[i].1)
-            }
             total := 0
-            for ft in tys {
-                total = sat_add(total, self.leaf_count(ft))
+            for f in self.structs[s].fields {
+                total = sat_add(total, self.leaf_count(f.1))
             }
             return total
         }

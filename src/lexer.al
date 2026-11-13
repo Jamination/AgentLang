@@ -111,17 +111,16 @@ priv fn big_mul_add(a: *Vec[u64], m: u64, add: u64) {
 }
 
 priv fn big_cmp(a: *Vec[u64], b: *Vec[u64]) -> i64 {
-    while a.len > 0 && a[a.len - 1] == 0 {
+    while !a.is_empty() && a.last() == 0 {
         a.pop()
     }
-    while b.len > 0 && b[b.len - 1] == 0 {
+    while !b.is_empty() && b.last() == 0 {
         b.pop()
     }
     if a.len != b.len {
         return if a.len < b.len { -1 } else { 1 }
     }
-    for k in 0..a.len {
-        i := a.len - 1 - k
+    for i in a.len - 1..=0 by -1 {
         if a[i] != b[i] {
             return if a[i] < b[i] { -1 } else { 1 }
         }
@@ -158,9 +157,7 @@ priv fn dec_cmp_f64(text: str, v: f64) -> i64 {
     fr := bits & 0xFFFFFFFFFFFFF
     m := if ex == 0 { fr } else { fr | (u64(1) << 52) }
     q := if ex == 0 { -1074 } else { ex - 1075 }
-    b := vec[u64]()
-    b.push(m & 0xFFFFFFFF)
-    b.push(m >> 32)
+    b := vec_two(m & 0xFFFFFFFF, m >> 32)
     // a * 10^k against b * 2^q
     for _ in 0..max(k, 0) {
         big_mul_add(&a, 10, 0)
@@ -177,7 +174,7 @@ priv fn dec_cmp_f64(text: str, v: f64) -> i64 {
     return big_cmp(&a, &b)
 }
 
-fn lexer_f32(text: str, v: f64) -> f32 {
+priv fn f32_of(text: str, v: f64) -> f32 {
     r := f32(v)
     if f64(r) == v || v != v || v > 3.4028234663852886e38 {
         return r
@@ -294,8 +291,8 @@ priv fn ident_tab_init() {
         byte_cls[b] = CL_P
     }
     // keywords are symbols too (interned first, so their numbers are small)
-    for k in 0..KEYWORDS.len {
-        id := ast_sym(KEYWORDS[k])
+    for k, w in KEYWORDS {
+        id := ast_sym(w)
         if id >= kw_of_sym.len {
             kw_of_sym.resize(id + 1, -1)
         }
@@ -345,7 +342,7 @@ priv fn lex_number(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -
         any := false
         big := false
         bad := false
-        while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
+        while i < len(s) && ident_tab[s[i]] {
             if s[i] != '_' {
                 match to_digit(s[i], radix) {
                     Some(d) => {
@@ -404,20 +401,12 @@ priv fn lex_number(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -
     // the literal without its underscores
     text := s[st..i]
     if contains(text, '_') {
-        tbuf := alloc[u8](i - st)
-        tn := 0
-        for k in st..i {
-            if s[k] != '_' {
-                tbuf[tn] = s[k]
-                tn += 1
-            }
-        }
-        text = tbuf[..tn]
+        text = replace(text, "_", "")
     }
     if is_float {
         v, ok := parse_f64(text)
         if ok {
-            out.push(Token{t: Float(v, lexer_f32(text, v)), pos: p})
+            out.push(Token{t: Float(v, f32_of(text, v)), pos: p})
         } else {
             errs.push(Diag{pos: p, msg: "invalid float literal"})
             out.push(Token{t: Float(0.0, 0.0), pos: p})
@@ -446,19 +435,7 @@ priv fn lex_quoted(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -
         j += 1
     }
     if j < n && s[j] == q {
-        lit := s[i..j]
-        if q == '"' {
-            out.push(Token{t: Str(lit), pos: p})
-        } else {
-            if len(lit) != 1 {
-                errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
-            }
-            first: u8 = 0
-            if len(lit) > 0 {
-                first = lit[0]
-            }
-            out.push(Token{t: Int(u64(first), false), pos: p})
-        }
+        quoted_tok(q, s[i..j], p, out, errs)
         return j + 1
     }
     buf := vec[u8]()
@@ -519,19 +496,21 @@ priv fn lex_quoted(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -
     if !closed {
         errs.push(Diag{pos: p, msg: "unterminated string/char literal"})
     }
-    if q == '"' {
-        out.push(Token{t: Str(buf[..buf.len]), pos: p})
-    } else {
-        if buf.len != 1 {
-            errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
-        }
-        first: u8 = 0
-        if buf.len > 0 {
-            first = buf[0]
-        }
-        out.push(Token{t: Int(u64(first), false), pos: p})
-    }
+    quoted_tok(q, buf.items(), p, out, errs)
     return i
+}
+
+// the token of a string or character literal with the text `lit` (escapes resolved)
+priv fn quoted_tok(q: u8, lit: str, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) {
+    if q == '"' {
+        out.push(Token{t: Str(lit), pos: p})
+        return
+    }
+    if len(lit) != 1 {
+        errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
+    }
+    first: u8 = if len(lit) > 0 { lit[0] } else { 0 }
+    out.push(Token{t: Int(u64(first), false), pos: p})
 }
 
 // A byte at s[i] that starts no token: the error; returns the index behind the character.
@@ -572,7 +551,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         line_start = 3
     }
     out := tok_buf
-    out.len = 0
+    out.clear()
     out.reserve(n / 4 + 16)
     // bracket stack: '(' / '[' suppress newlines, '{' enables them (stk[..sp])
     stk := alloc[u8](64)
@@ -693,11 +672,8 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         i = bad_char(s, i, p, errs)
     }
     p := lexer_pos(file, line, i, line_start)
-    if out.len > 0 {
-        match out[out.len - 1].t {
-            Nl => {}
-            _ => out.push(Token{t: Nl, pos: p})
-        }
+    if !out.is_empty() && out.last().t != Nl {
+        out.push(Token{t: Nl, pos: p})
     }
     out.push(Token{t: Eof, pos: p})
     tok_buf = out

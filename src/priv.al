@@ -61,8 +61,8 @@ fn priv_decl_info(d: *Decl) -> (str, i64, bool, Pos) {
 fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
     any := false
     for i in 0..decls.len {
-        info := priv_decl_info(&decls[i])
-        if info.2 {
+        _, _, is_private, _ := priv_decl_info(&decls[i])
+        if is_private {
             any = true
             break
         }
@@ -253,9 +253,7 @@ priv fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
 
 priv fn opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
     match o {
-        Some(&t) => {
-            priv_type(r, t)
-        }
+        Some(&t) => priv_type(r, t)
         None => {}
     }
     return o
@@ -263,9 +261,7 @@ priv fn opt_type(r: *PrivCx, o: Opt[TypeAst]) -> Opt[TypeAst] {
 
 priv fn opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
     match o {
-        Some(&e) => {
-            expr(r, e)
-        }
+        Some(&e) => expr(r, e)
         None => {}
     }
     return o
@@ -321,11 +317,7 @@ priv fn callee(r: *PrivCx, c: *Expr) -> bool {
 
 priv fn expr(r: *PrivCx, e: *Expr) -> bool {
     return match e.k {
-        Int(v, _) => true
-        Float(v, _) => true
-        Str(s) => true
-        Bool(b) => true
-        Nil => true
+        Int(_, _), Float(_, _), Str(_), Bool(_), Nil => true
         Ident(n) => {
             nn := renamed(n)
             if nn != "" {
@@ -376,12 +368,7 @@ priv fn expr(r: *PrivCx, e: *Expr) -> bool {
                 for j in 0..arm.pats.len {
                     pat(r, &arm.pats[j])
                 }
-                match arm.guard {
-                    Some(g) => {
-                        expr(r, g)
-                    }
-                    None => {}
-                }
+                opt_pexpr(r, arm.guard)
                 block(r, &arm.body)
             }
             true
@@ -402,18 +389,12 @@ priv fn pat(r: *PrivCx, p: *Pat) -> bool {
             // the qualifier `Enum` of `Enum.Variant(..)` may be a private enum
             match qual {
                 Some(q) => {
-                    match q.k {
-                        Call(c, args) => {
-                            match c.k {
-                                Field(b, f) => {
-                                    expr(r, b)
-                                }
-                                _ => {}
-                            }
-                        }
-                        Field(b, f) => {
-                            expr(r, b)
-                        }
+                    x := match q.k {
+                        Call(c, _) => c
+                        _ => q
+                    }
+                    match x.k {
+                        Field(b, _) => expr(r, b)
                         _ => {}
                     }
                 }
@@ -466,23 +447,18 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
             expr(r, c)
             block(r, then)
             match els {
-                Some(eb) => {
-                    block(r, eb)
-                }
-                None => {}
+                Some(eb) => block(r, eb)
+                None => true
             }
-            true
         }
         While(c, body) => {
             expr(r, c)
             block(r, body)
         }
-        Loop(body) => block(r, body)
+        Loop(body), Block(body), Defer(body) => block(r, body)
         For(f) => {
             match f.var2 {
-                Some(&n2) => {
-                    *n2 = priv_name(r, *n2)
-                }
+                Some(&n2) => *n2 = priv_name(r, *n2)
                 None => {}
             }
             expr(r, f.lo)
@@ -492,17 +468,12 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
             block(r, f.body)
         }
         Return(v) => opt_pexpr(r, v)
-        Break => true
-        Labeled(label, st) => stmt(r, st)
-        BreakTo(label) => true
-        ContinueTo(label) => true
-        Continue => true
+        Break, Continue, BreakTo(_), ContinueTo(_) => true
+        Labeled(_, st) => stmt(r, st)
         Assert(c, msg) => {
             expr(r, c)
             opt_pexpr(r, msg)
         }
-        Block(b) => block(r, b)
-        Defer(b) => block(r, b)
         // a nested function is a local name: renamed like the variables of that spelling
         Fn(d) => priv_fn(r, d)
         When(w) => when_arms(r, w)

@@ -20,7 +20,7 @@ priv struct Parser {
 }
 
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
-    return Parser{toks: toks, i: 0, errs: errs, no_lit: false, hdr_name: -1, depth: 0, cost: 0, peak: 0, cost_peak: 0, budget: stack_budget(), too_deep: false}
+    return Parser{toks: toks, errs: errs, hdr_name: -1, budget: stack_budget()}
 }
 
 // Deeper nesting is an error instead of a stack overflow of the parser and the later phases.
@@ -49,7 +49,7 @@ priv fn nest(p: *Parser, c: i64) -> bool {
     if p.depth >= NEST_MAX || (p.budget >= 0 && p.cost + c > p.budget) {
         if !p.too_deep {
             p.too_deep = true
-            limit := if p.depth >= NEST_MAX { fmt("than ", NEST_MAX) } else { fmt("than the stack limit of ", p.budget / 3 * 4 / 1024, " KB allows", if host_windows() { "" } else { " (raise it with `ulimit -s`)" }) }
+            limit := if p.depth >= NEST_MAX { fmt("than ", NEST_MAX) } else { fmt("than the stack limit of ", p.budget / 3 * 4 / 1024, " KB allows", if TARGET_OS == Windows { "" } else { " (raise it with `ulimit -s`)" }) }
             p.errs.push(Diag{pos: p.pos(), msg: fmt("nesting is too deep (more levels of blocks, statements, `else if`, operators, calls and parentheses ", limit, ")")})
         }
         return false
@@ -98,29 +98,11 @@ fn parser_box[T](x: T) -> *T {
     return b
 }
 
-priv fn tk_p(t: Tk, c: i64) -> bool {
-    match t {
-        P(q) => q == c
-        _ => false
-    }
-}
-
-priv fn tk_kw(t: Tk, k: i64) -> bool {
-    match t {
-        Kw(q) => q == k
-        _ => false
-    }
-}
-
 priv fn tk_id(t: Tk) -> bool {
     match t {
         Id(_) => true
         _ => false
     }
-}
-
-priv fn cont(s: str, i: i64, lo: u8, hi: u8) -> bool {
-    return i < len(s) && s[i] >= lo && s[i] <= hi
 }
 
 // the text as valid UTF-8: every maximal invalid part becomes U+FFFD
@@ -134,6 +116,9 @@ priv fn utf8_lossy(s: str) -> str {
     }
     if valid {
         return s
+    }
+    fn cont(s: str, i: i64, lo: u8, hi: u8) -> bool {
+        return i < len(s) && s[i] >= lo && s[i] <= hi
     }
     out := vec[u8]()
     i := 0
@@ -183,17 +168,13 @@ priv fn utf8_lossy(s: str) -> str {
             }
         }
         if ok {
-            for k in i..i + n {
-                out.push(s[k])
-            }
+            out.extend(s[i..i + n])
         } else {
-            out.push(0xEF)
-            out.push(0xBF)
-            out.push(0xBD)
+            out.extend("\xEF\xBF\xBD")
         }
         i += n
     }
-    return out[..out.len]
+    return out.items()
 }
 
 priv fn peek(p: *Parser) -> Tk {
@@ -224,6 +205,14 @@ priv fn is_p(p: *Parser, c: i64) -> bool {
     }
 }
 
+// token i + n is the punctuation `c`
+priv fn is_p_at(p: *Parser, n: i64, c: i64) -> bool {
+    match p.peek_at(n) {
+        P(q) => q == c
+        _ => false
+    }
+}
+
 priv fn is_kw(p: *Parser, k: i64) -> bool {
     match p.toks[p.i].t {
         Kw(q) => q == k
@@ -232,21 +221,19 @@ priv fn is_kw(p: *Parser, k: i64) -> bool {
 }
 
 priv fn eat_p(p: *Parser, c: i64) -> bool {
-    if p.is_p(c) {
-        p.bump()
-        return true
-    } else {
+    if !p.is_p(c) {
         return false
     }
+    p.bump()
+    return true
 }
 
 priv fn eat_kw(p: *Parser, k: i64) -> bool {
-    if p.is_kw(k) {
-        p.bump()
-        return true
-    } else {
+    if !p.is_kw(k) {
         return false
     }
+    p.bump()
+    return true
 }
 
 priv fn tok_desc(p: *Parser) -> str {
@@ -258,16 +245,6 @@ priv fn tok_desc(p: *Parser) -> str {
         P(q) => fmt("`", lexer_p_text(q), "`")
         Nl => "end of line"
         Eof => "end of file"
-    }
-}
-
-// declaration words of other languages
-priv fn decl_habit(s: str) -> str {
-    return match s {
-        "let", "var", "mut", "auto", "val" => " (declare variables with `name := value` or `name: T = value`)"
-        "func", "def", "function", "pub" => " (functions are declared `fn name(a: A) -> R { ... }`)"
-        "type", "typedef", "using", "alias" => " (there are no type aliases: write the type out; a distinct type is a `struct`)"
-        _ => ""
     }
 }
 
@@ -287,25 +264,22 @@ priv fn word_habit(p: *Parser, j: i64) -> str {
     starts := j == 0
     if j > 0 {
         starts = match p.toks[j - 1].t {
-            Nl => true
-            P(q) => q == '{' || q == '}' || q == ';'
-            Kw(k) => k == KW_PRIV || k == KW_INLINE || k == KW_NOINLINE
+            Nl, P('{'), P('}'), P(';'), Kw(KW_PRIV), Kw(KW_INLINE), Kw(KW_NOINLINE) => true
             _ => false
         }
     }
     if !starts {
         return ""
     }
-    hint := decl_habit(s)
-    if hint == "" {
-        hint = match s {
-            "import" => " (use `use \"file.al\"`)"
-            "switch" => " (use `match`)"
-            "elif", "elsif" => " (use `else if`)"
-            _ => ""
-        }
+    return match s {
+        "let", "var", "mut", "auto", "val" => " (declare variables with `name := value` or `name: T = value`)"
+        "func", "def", "function", "pub" => " (functions are declared `fn name(a: A) -> R { ... }`)"
+        "type", "typedef", "using", "alias" => " (there are no type aliases: write the type out; a distinct type is a `struct`)"
+        "import" => " (use `use \"file.al\"`)"
+        "switch" => " (use `match`)"
+        "elif", "elsif" => " (use `else if`)"
+        _ => ""
     }
-    return hint
 }
 
 // tokens j and j + 1 are `++` or `--` written together
@@ -316,7 +290,7 @@ priv fn incr_at(p: *Parser, j: i64) -> bool {
     a := p.toks[j]
     b := p.toks[j + 1]
     same := match (a.t, b.t) {
-        (P(x), P(y)) => x == y && (x == '+' || x == '-')
+        (P('+'), P('+')), (P('-'), P('-')) => true
         _ => false
     }
     return same && a.pos.line == b.pos.line && a.pos.col + 1 == b.pos.col
@@ -349,7 +323,7 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
             // `fn f(in: i64)`, `for match in ..`
             named := starts_with(msg, "expected identifier") || starts_with(msg, "expected field name")
             match p.peek_at(1) {
-                P(q) if q == P_DECL || q == '=' || q == ':' || q == ',' || q == ')' || q == '.' || q == P_ADD_EQ || q == P_SUB_EQ => { named = true }
+                P(P_DECL), P('='), P(':'), P(','), P(')'), P('.'), P(P_ADD_EQ), P(P_SUB_EQ) => { named = true }
                 _ => {}
             }
             if named {
@@ -368,18 +342,16 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
         }
     }
     p.errs.push(Diag{pos: p.pos(), msg: fmt(msg, ", found ", d, hint)})
-    z: T
-    return (z, false)
+    return fail[T]()
 }
 
 // consumes the punctuation `c` or reports that it was expected; false after an error
 priv fn expect_p(p: *Parser, c: i64) -> bool {
     if p.eat_p(c) {
         return true
-    } else {
-        z, ok := p.err[bool](fmt("expected `", lexer_p_text(c), "`"))
-        return ok
     }
+    p.err[bool](fmt("expected `", lexer_p_text(c), "`"))
+    return false
 }
 
 priv fn ident(p: *Parser) -> (str, bool) {
@@ -425,9 +397,9 @@ fn file(p: *Parser) -> Vec[Decl] {
 priv fn sync_decl(p: *Parser, from: i64, inner: bool) {
     depth := 0
     for j in from..p.i {
-        if tk_p(p.toks[j].t, '{') {
+        if p.toks[j].t == P('{') {
             depth += 1
-        } else if tk_p(p.toks[j].t, '}') {
+        } else if p.toks[j].t == P('}') {
             depth -= 1
         }
     }
@@ -445,11 +417,7 @@ priv fn sync_decl(p: *Parser, from: i64, inner: bool) {
                 }
                 depth -= 1
             }
-            Kw(k) => {
-                if starts && (depth <= 0 || p.pos().col == 1) && (k == KW_FN || k == KW_STRUCT || k == KW_ENUM || k == KW_CONST || k == KW_TEST || k == KW_USE || k == KW_INLINE || k == KW_NOINLINE || k == KW_EXTERN || k == KW_PRIV || k == KW_WHEN) {
-                    return
-                }
-            }
+            Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_TEST), Kw(KW_USE), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_EXTERN), Kw(KW_PRIV), Kw(KW_WHEN) if starts && (depth <= 0 || p.pos().col == 1) => return
             Id(_) if starts && depth <= 0 => return
             _ => {}
         }
@@ -457,7 +425,7 @@ priv fn sync_decl(p: *Parser, from: i64, inner: bool) {
     }
 }
 
-fn tparams(p: *Parser) -> (Vec[str], bool) {
+priv fn tparams(p: *Parser) -> (Vec[str], bool) {
     v := vec[str]()
     if p.eat_p('[') {
         loop {
@@ -537,17 +505,15 @@ priv fn set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
             }
             Global(g)
         }
-        Test(t) => d
-        Use(path, upos) => d
-        When(w) => d
+        Test(_), Use(_, _), When(_) => d
     }
 }
 
 // ---------- functions ----------
 
 // a function declaration without parameters, result and body
-priv fn parser_fn(name: str, tparams: Vec[str], pos: Pos, inl: i64, ext: Opt[str]) -> FnDecl {
-    return FnDecl{name: name, tparams: tparams, params: vec[(str, TypeAst)](), ret: None, body: Block{stmts: vec[Stmt](), end: pos}, pos: pos, inl: inl, ext: ext}
+priv fn fn_head(name: str, tparams: Vec[str], pos: Pos, inl: i64, ext: Opt[str]) -> FnDecl {
+    return FnDecl{name: name, tparams: tparams, body: Block{end: pos}, pos: pos, inl: inl, ext: ext}
 }
 
 // The result of a function or of a function type: `-> R`, or nothing. A function without a
@@ -557,7 +523,7 @@ priv fn result(p: *Parser, ret: *Opt[TypeAst]) -> bool {
     if !p.eat_p(P_ARROW) {
         return true
     }
-    if p.is_p('(') && tk_p(p.peek_at(1), ')') {
+    if p.is_p('(') && p.is_p_at(1, ')') {
         p.errs.push(Diag{pos: rpos, msg: "a function without a result has no arrow: leave out `-> ()`"})
         p.bump()
         p.bump()
@@ -633,19 +599,19 @@ priv fn fn_decl(p: *Parser, pos: Pos, inl: i64, ext: Opt[str]) -> (FnDecl, bool)
     if !ok2 {
         return fail[FnDecl]()
     }
-    return p.fn_rest(parser_fn(name, tparams, pos, inl, ext))
+    return p.fn_rest(fn_head(name, tparams, pos, inl, ext))
 }
 
 // At `fn` where an expression starts: an anonymous function `fn(a: A, b: B) -> R { ... }`
 // (its parameters have names; without parameters a body follows), or a function type
 // `fn(A, B) -> R` (a type argument, the type of a literal)
 priv fn fn_expr(p: *Parser, pos: Pos) -> *Expr {
-    if tk_p(p.peek_at(1), '[') {
+    if p.is_p_at(1, '[') {
         p.errs.push(Diag{pos: pos, msg: "an anonymous function cannot have type parameters of its own (it may use the type parameters of the enclosing function): write `fn(a: T) -> R { ... }`, or declare a generic function at the top level"})
         return nil
     }
-    d := parser_fn("", vec[str](), pos, 0, None)
-    if tk_id(p.peek_at(2)) && tk_p(p.peek_at(3), ':') {
+    d := fn_head("", vec[str](), pos, 0, None)
+    if tk_id(p.peek_at(2)) && p.is_p_at(3, ':') {
         p.bump()
         if !p.fn_sig(&d) {
             return nil
@@ -844,14 +810,12 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
     if p.eat_kw(KW_EXTERN) {
         // extern "libfoo.so.1" fn name(a: A) -> R     (a C function; no body)
         // extern "libfoo.so.1" name: T                (a C variable; no initializer)
-        match p.bump() {
+        match p.peek() {
             Str(s) => {
+                p.bump()
                 ext = Some(utf8_lossy(s))
             }
-            _ => {
-                p.i -= 1
-                return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() -> i32`")
-            }
+            _ => return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() -> i32`")
         }
     }
     if p.is_kw(KW_FN) {
@@ -887,13 +851,11 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
         return p.kw_decl(pos)
     }
     if p.eat_kw(KW_TEST) {
-        name := match p.bump() {
+        name := match p.peek() {
             Str(s) => utf8_lossy(s)
-            _ => {
-                p.i -= 1
-                return p.err[Decl]("expected test name string")
-            }
+            _ => return p.err[Decl]("expected test name string")
         }
+        p.bump()
         body := p.block()
         if body == nil {
             return fail[Decl]()
@@ -909,14 +871,12 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
             }
             _ => {}
         }
-        match p.bump() {
+        match p.peek() {
             Str(s) => {
+                p.bump()
                 return (Use(utf8_lossy(s), pos), true)
             }
-            _ => {
-                p.i -= 1
-                return p.err[Decl]("expected a file path string or `std.<module>` after `use`")
-            }
+            _ => return p.err[Decl]("expected a file path string or `std.<module>` after `use`")
         }
     }
     if p.eat_kw(KW_WHEN) {
@@ -936,11 +896,13 @@ priv fn else_follows(p: *Parser) -> bool {
     while p.toks[j].t == Nl {
         j += 1
     }
-    if tk_kw(p.toks[j].t, KW_ELSE) {
-        p.i = j + 1
-        return true
+    match p.toks[j].t {
+        Kw(KW_ELSE) => {
+            p.i = j + 1
+            return true
+        }
+        _ => return false
     }
-    return false
 }
 
 // The branches of a `when` after the keyword: `cond { ... } else when cond { ... } else { ... }`.
@@ -954,35 +916,33 @@ priv fn when_arms(p: *Parser, top: bool) -> (Vec[WhenArm], bool) {
         p.unnest(COST_STMT)
     }
     cond: Opt[*Expr] = None
+    last := false
     loop {
-        c := p.header_expr()
-        if c == nil {
-            return fail[Vec[WhenArm]]()
+        if !last {
+            c := p.header_expr()
+            if c == nil {
+                return fail[Vec[WhenArm]]()
+            }
+            cond = Some(c)
         }
-        cond = Some(c)
-        last := false
-        loop {
-            arm := WhenArm{cond: cond, decls: vec[Decl](), body: nil}
-            if top {
-                ds, ok := p.decl_block()
-                if !ok {
-                    return fail[Vec[WhenArm]]()
-                }
-                arm.decls = ds
-            } else {
-                b := p.block()
-                if b == nil {
-                    return fail[Vec[WhenArm]]()
-                }
-                arm.body = b
+        arm := WhenArm{cond: cond}
+        if top {
+            ds, ok := p.decl_block()
+            if !ok {
+                return fail[Vec[WhenArm]]()
             }
-            arms.push(arm)
-            if last || !p.else_follows() {
-                return (arms, true)
+            arm.decls = ds
+        } else {
+            arm.body = p.block()
+            if arm.body == nil {
+                return fail[Vec[WhenArm]]()
             }
-            if p.eat_kw(KW_WHEN) {
-                break
-            }
+        }
+        arms.push(arm)
+        if last || !p.else_follows() {
+            return (arms, true)
+        }
+        if !p.eat_kw(KW_WHEN) {
             if !p.is_p('{') {
                 return p.err[Vec[WhenArm]]("expected `when` or `{` after `else` (a chain of compile-time choices is written `when a { } else when b { } else { }`)")
             }
@@ -990,7 +950,6 @@ priv fn when_arms(p: *Parser, top: bool) -> (Vec[WhenArm], bool) {
             last = true
         }
     }
-    return (arms, true)
 }
 
 // `when cond { decls } ...` at top level
@@ -1148,6 +1107,14 @@ priv lit_stack: Vec[(Opt[str], Expr)]
 priv arm_stack: Vec[MatchArm]
 priv pat_stack: Vec[Pat]
 
+// at the end of a statement: a newline, `;` or `}`
+priv fn at_end(p: *Parser) -> bool {
+    return match p.toks[p.i].t {
+        Nl, P(';'), P('}') => true
+        _ => false
+    }
+}
+
 // a block on the heap; nil after an error
 priv fn block(p: *Parser) -> *Block {
     // the body of a header that ends in a name: an error in its first statement is most
@@ -1171,7 +1138,7 @@ priv fn block(p: *Parser) -> *Block {
         s, ok := p.stmt()
         if ok {
             stmt_stack.push(s)
-            if !(p.peek() == Nl || p.is_p(';') || p.is_p('}')) {
+            if !p.at_end() {
                 p.err[bool]("expected end of statement")
                 p.sync_stmt()
             }
@@ -1253,46 +1220,38 @@ priv fn lit_in_header(e: *Expr) -> bool {
 
 // after `if`: the condition, the block and the `else` part; a nil condition after an error
 priv fn if_stmt(p: *Parser) -> (*Expr, *Block, Opt[*Block]) {
-    none: Opt[*Block] = None
     c := p.header_expr()
     if c == nil {
-        return (nil, nil, none)
+        return (nil, nil, None)
     }
     t := p.block()
     if t == nil {
-        return (nil, nil, none)
+        return (nil, nil, None)
     }
-    j := p.i
-    while p.toks[j].t == Nl {
-        j += 1
+    if !p.else_follows() {
+        return (c, t, None)
     }
-    if tk_kw(p.toks[j].t, KW_ELSE) {
-        p.i = j + 1
-        if p.is_kw(KW_IF) {
-            pos := p.pos()
-            p.bump()
-            if !p.nest(COST_ELSE_IF) {
-                return (nil, nil, none)
-            }
-            c2, t2, e2 := p.if_stmt()
-            p.unnest(COST_ELSE_IF)
-            if c2 == nil {
-                return (nil, nil, none)
-            }
-            eb := new[Block]()
-            eb.stmts = vec_one[Stmt](Stmt{k: If(c2, t2, e2), pos: pos})
-            eb.end = t2.end
-            ebo: Opt[*Block] = Some(eb)
-            return (c, t, ebo)
+    if p.is_kw(KW_IF) {
+        pos := p.pos()
+        p.bump()
+        if !p.nest(COST_ELSE_IF) {
+            return (nil, nil, None)
         }
-        e := p.block()
-        if e == nil {
-            return (nil, nil, none)
+        c2, t2, e2 := p.if_stmt()
+        p.unnest(COST_ELSE_IF)
+        if c2 == nil {
+            return (nil, nil, None)
         }
-        eo: Opt[*Block] = Some(e)
-        return (c, t, eo)
+        eb := new[Block]()
+        eb.stmts = vec_one[Stmt](Stmt{k: If(c2, t2, e2), pos: pos})
+        eb.end = t2.end
+        return (c, t, Some(eb))
     }
-    return (c, t, none)
+    e := p.block()
+    if e == nil {
+        return (nil, nil, None)
+    }
+    return (c, t, Some(e))
 }
 
 priv fn stmt(p: *Parser) -> (Stmt, bool) {
@@ -1309,19 +1268,15 @@ priv fn stmt(p: *Parser) -> (Stmt, bool) {
 }
 
 priv fn stmt_k(p: *Parser) -> (SK, bool) {
-    if p.is_kw(KW_PRIV) {
-        return p.err[SK]("`priv` applies to top-level declarations only; a local declaration is visible only in its block anyway")
-    }
     match p.peek() {
-        Kw(k) => {
-            if k == KW_EXTERN {
-                p.errs.push(Diag{pos: p.pos(), msg: "`extern` declarations stand at top level: a C function or variable of a library cannot be declared inside a function"})
-                return fail[SK]()
-            }
-            if k == KW_INLINE || k == KW_NOINLINE {
-                p.errs.push(Diag{pos: p.pos(), msg: fmt("`", lexer_kw_text(k), "` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`")})
-                return fail[SK]()
-            }
+        Kw(KW_PRIV) => return p.err[SK]("`priv` applies to top-level declarations only; a local declaration is visible only in its block anyway")
+        Kw(KW_EXTERN) => {
+            p.errs.push(Diag{pos: p.pos(), msg: "`extern` declarations stand at top level: a C function or variable of a library cannot be declared inside a function"})
+            return fail[SK]()
+        }
+        Kw(k) if k == KW_INLINE || k == KW_NOINLINE => {
+            p.errs.push(Diag{pos: p.pos(), msg: fmt("`", lexer_kw_text(k), "` applies to top-level functions only: a nested function is declared as `fn name(a: A) -> R { ... }`")})
+            return fail[SK]()
         }
         _ => {}
     }
@@ -1394,20 +1349,13 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             return fail[SK]()
         }
         hi: Opt[*Expr] = None
-        incl := false
-        if p.eat_p(P_RANGE) {
+        incl := p.is_p(P_RANGE_EQ)
+        if p.eat_p(P_RANGE) || p.eat_p(P_RANGE_EQ) {
             h := p.header_expr()
             if h == nil {
                 return fail[SK]()
             }
             hi = Some(h)
-        } else if p.eat_p(P_RANGE_EQ) {
-            h := p.header_expr()
-            if h == nil {
-                return fail[SK]()
-            }
-            hi = Some(h)
-            incl = true
         }
         step: Opt[*Expr] = None
         if p.eat_kw(KW_BY) {
@@ -1424,7 +1372,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         return (For(parser_box(ForStmt{var1: v1, var2: v2, lo: lo, hi: hi, incl: incl, step: step, body: body})), true)
     }
     if p.eat_kw(KW_RETURN) {
-        if p.peek() == Nl || p.is_p('}') || p.is_p(';') {
+        if p.at_end() {
             return (Return(None), true)
         }
         e := p.expr()
@@ -1442,7 +1390,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             _ => {}
         }
-        if !(p.peek() == Nl || p.is_p(';') || p.is_p('}')) {
+        if !p.at_end() {
             return p.err[SK]("`break` leaves a loop and takes at most a loop label (`break outer`): expected end of statement")
         }
         return (Break, true)
@@ -1455,7 +1403,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             _ => {}
         }
-        if !(p.peek() == Nl || p.is_p(';') || p.is_p('}')) {
+        if !p.at_end() {
             return p.err[SK]("`continue` takes at most a loop label (`continue outer`): expected end of statement")
         }
         return (Continue, true)
@@ -1490,24 +1438,26 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         return (Block(b), true)
     }
     // a labelled loop: `name: for ...`, `name: while ...`, `name: loop ...`
-    if tk_id(p.peek()) && tk_p(p.peek_at(1), ':') {
-        after := p.peek_at(2)
-        if tk_kw(after, KW_FOR) || tk_kw(after, KW_WHILE) || tk_kw(after, KW_LOOP) {
-            label, ok1 := p.ident()
-            if !ok1 {
-                return fail[SK]()
+    if tk_id(p.peek()) && p.is_p_at(1, ':') {
+        match p.peek_at(2) {
+            Kw(KW_FOR), Kw(KW_WHILE), Kw(KW_LOOP) => {
+                label, ok1 := p.ident()
+                if !ok1 {
+                    return fail[SK]()
+                }
+                p.bump()
+                inner, ok2 := p.stmt()
+                if !ok2 {
+                    return fail[SK]()
+                }
+                return (Labeled(label, parser_box(inner)), true)
             }
-            p.bump()
-            inner, ok2 := p.stmt()
-            if !ok2 {
-                return fail[SK]()
+            Kw(KW_IF), Kw(KW_MATCH), P('{') => {
+                p.bump()
+                p.bump()
+                return p.err[SK]("a label names a loop: expected `for`, `while` or `loop` after the label")
             }
-            return (Labeled(label, parser_box(inner)), true)
-        }
-        if tk_kw(after, KW_IF) || tk_kw(after, KW_MATCH) || tk_p(after, '{') {
-            p.bump()
-            p.bump()
-            return p.err[SK]("a label names a loop: expected `for`, `while` or `loop` after the label")
+            _ => {}
         }
         // a variable: `name: T` (zero value) or `name: T = value`
         name, ok1 := p.ident()
@@ -1520,7 +1470,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
     }
     // multi-let: a, b := e
     start := p.i
-    if tk_id(p.peek()) && tk_p(p.peek_at(1), ',') {
+    if tk_id(p.peek()) && p.is_p_at(1, ',') {
         pos := p.pos()
         names := vec[str]()
         n1, ok1 := p.ident()
@@ -1679,11 +1629,9 @@ priv fn binop(p: *Parser) -> Opt[(BinOp, i64)] {
 }
 
 priv fn bin(p: *Parser, min_prec: i64) -> *Expr {
-    d := p.depth
-    dc := p.cost
+    saved := (p.depth, p.cost)
     r := p.bin_chain(min_prec)
-    p.depth = d
-    p.cost = dc
+    p.depth, p.cost = saved
     return r
 }
 
@@ -1740,41 +1688,30 @@ priv fn unary(p: *Parser) -> *Expr {
 priv fn typeish(e: *Expr) -> bool {
     match e.k {
         Ident(_), TypeE(_) => true
-        Index(b, _) => {
-            match b.k {
-                Ident(_) => true
-                _ => false
-            }
-        }
+        Index(b, _) => match b.k { Ident(_) => true; _ => false }
         _ => false
     }
 }
 
-// the closure in `args`
-priv fn args_r(p: *Parser, close: i64) -> bool {
+priv fn args(p: *Parser, close: i64) -> (Vec[Expr], bool) {
+    save := p.no_lit
+    p.no_lit = false
+    base := expr_stack.len
+    defer {
+        expr_stack.truncate(base)
+        p.no_lit = save
+    }
     while !p.is_p(close) {
         e := p.expr()
         if e == nil {
-            return false
+            return fail[Vec[Expr]]()
         }
         expr_stack.push(*e)
         if !p.eat_p(',') {
             break
         }
     }
-    return p.expect_p(close)
-}
-
-fn args(p: *Parser, close: i64) -> (Vec[Expr], bool) {
-    save := p.no_lit
-    p.no_lit = false
-    base := expr_stack.len
-    defer {
-        expr_stack.truncate(base)
-    }
-    r := args_r(p, close)
-    p.no_lit = save
-    if !r {
+    if !p.expect_p(close) {
         return fail[Vec[Expr]]()
     }
     return (vec_of(expr_stack[base..]), true)
@@ -1782,11 +1719,9 @@ fn args(p: *Parser, close: i64) -> (Vec[Expr], bool) {
 
 priv fn postfix(p: *Parser) -> *Expr {
     // each link of a chain (`x.f(a)[i].g`) nests the tree one level deeper
-    d := p.depth
-    dc := p.cost
+    saved := (p.depth, p.cost)
     r := p.postfix_links()
-    p.depth = d
-    p.cost = dc
+    p.depth, p.cost = saved
     return r
 }
 
@@ -1832,19 +1767,15 @@ priv fn postfix_links(p: *Parser) -> *Expr {
                 }
                 _ => {}
             }
-            match p.bump() {
-                Id(n) => {
-                    e = node(Field(e, n), pos)
-                }
-                Int(n, _) => {
-                    e = node(Field(e, fmt(n)), pos)
-                }
+            match p.peek() {
+                Id(n) => e = node(Field(e, n), pos)
+                Int(n, _) => e = node(Field(e, fmt(n)), pos)
                 _ => {
-                    p.i -= 1
                     p.err[bool]("expected field name")
                     return nil
                 }
             }
+            p.bump()
         } else if p.is_p('{') && typeish(e) && (!p.no_lit || lit_in_header(e)) {
             p.bump()
             save := p.no_lit
@@ -1856,11 +1787,9 @@ priv fn postfix_links(p: *Parser) -> *Expr {
             }
             // `[_]T{...}`: the length is the number of elements
             match e.k {
-                TypeE(Array(n, t)) => {
-                    match n.k {
-                        Ident("_") => { e.k = TypeE(parser_box(TypeAst.Array(node(Int(u64(r.len), true), n.pos), t))) }
-                        _ => {}
-                    }
+                TypeE(Array(n, t)) => match n.k {
+                    Ident("_") => e.k = TypeE(parser_box(TypeAst.Array(node(Int(u64(r.len), true), n.pos), t)))
+                    _ => {}
                 }
                 _ => {}
             }
@@ -1873,54 +1802,45 @@ priv fn postfix_links(p: *Parser) -> *Expr {
 }
 
 priv fn index_tail(p: *Parser, base: *Expr, pos: Pos) -> *Expr {
-    if p.eat_p(P_RANGE) {
-        hi: Opt[*Expr] = None
-        if !p.is_p(']') {
-            h := p.expr()
-            if h == nil {
+    lo: Opt[*Expr] = None
+    if !p.eat_p(P_RANGE) {
+        first := p.expr()
+        if first == nil {
+            return nil
+        }
+        if !p.eat_p(P_RANGE) {
+            // an index: `a[i]`, `f[T, U]`
+            sb := expr_stack.len
+            defer {
+                expr_stack.truncate(sb)
+            }
+            expr_stack.push(*first)
+            while p.eat_p(',') {
+                e := p.expr()
+                if e == nil {
+                    return nil
+                }
+                expr_stack.push(*e)
+            }
+            if !p.expect_p(']') {
                 return nil
             }
-            hi = Some(h)
+            return node(Index(base, vec_of(expr_stack[sb..])), pos)
         }
-        if !p.expect_p(']') {
+        lo = Some(first)
+    }
+    hi: Opt[*Expr] = None
+    if !p.is_p(']') {
+        h := p.expr()
+        if h == nil {
             return nil
         }
-        return node(Slice(base, None, hi), pos)
-    }
-    first := p.expr()
-    if first == nil {
-        return nil
-    }
-    if p.eat_p(P_RANGE) {
-        hi: Opt[*Expr] = None
-        if !p.is_p(']') {
-            h := p.expr()
-            if h == nil {
-                return nil
-            }
-            hi = Some(h)
-        }
-        if !p.expect_p(']') {
-            return nil
-        }
-        return node(Slice(base, Some(first), hi), pos)
-    }
-    sb := expr_stack.len
-    defer {
-        expr_stack.truncate(sb)
-    }
-    expr_stack.push(*first)
-    while p.eat_p(',') {
-        e := p.expr()
-        if e == nil {
-            return nil
-        }
-        expr_stack.push(*e)
+        hi = Some(h)
     }
     if !p.expect_p(']') {
         return nil
     }
-    return node(Index(base, vec_of(expr_stack[sb..])), pos)
+    return node(Slice(base, lo, hi), pos)
 }
 
 priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
@@ -1936,7 +1856,7 @@ priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
             break
         }
         fname: Opt[str] = match p.peek() {
-            Id(n) if tk_p(p.peek_at(1), ':') => Some(n)
+            Id(n) if p.is_p_at(1, ':') => Some(n)
             _ => None
         }
         if is_some(fname) {
@@ -1952,9 +1872,6 @@ priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
             p.bump()
         }
         if !p.eat_p(',') {
-            while p.peek() == Nl {
-                p.bump()
-            }
             if !p.expect_p('}') {
                 return fail[Vec[(Opt[str], Expr)]]()
             }
@@ -1964,8 +1881,13 @@ priv fn lit_body(p: *Parser) -> (Vec[(Opt[str], Expr)], bool) {
     return (vec_of(lit_stack[sb..]), true)
 }
 
-// the closure in `primary` for a parenthesized expression or tuple
-priv fn primary_r(p: *Parser, pos: Pos) -> *Expr {
+// a parenthesized expression or a tuple, after the `(`
+priv fn paren(p: *Parser, pos: Pos) -> *Expr {
+    save := p.no_lit
+    p.no_lit = false
+    defer {
+        p.no_lit = save
+    }
     first := p.expr()
     if first == nil {
         return nil
@@ -1999,35 +1921,14 @@ priv fn primary_r(p: *Parser, pos: Pos) -> *Expr {
 
 priv fn primary(p: *Parser) -> *Expr {
     pos := p.pos()
-    match p.peek() {
-        Int(n, dec) => {
-            p.bump()
-            return node(EK.Int(n, dec), pos)
-        }
-        Float(f, g) => {
-            p.bump()
-            return node(EK.Float(f, g), pos)
-        }
-        Str(s) => {
-            p.bump()
-            return node(EK.Str(s), pos)
-        }
-        Id(n) => {
-            p.bump()
-            return node(Ident(n), pos)
-        }
-        Kw(KW_TRUE) => {
-            p.bump()
-            return node(Bool(true), pos)
-        }
-        Kw(KW_FALSE) => {
-            p.bump()
-            return node(Bool(false), pos)
-        }
-        Kw(KW_NIL) => {
-            p.bump()
-            return node(Nil, pos)
-        }
+    k: EK = match p.peek() {
+        Int(n, dec) => EK.Int(n, dec)
+        Float(f, g) => EK.Float(f, g)
+        Str(s) => EK.Str(s)
+        Id(n) => Ident(n)
+        Kw(KW_TRUE) => Bool(true)
+        Kw(KW_FALSE) => Bool(false)
+        Kw(KW_NIL) => Nil
         Kw(KW_IF) => {
             p.bump()
             c, t, eo := p.if_stmt()
@@ -2035,9 +1936,7 @@ priv fn primary(p: *Parser) -> *Expr {
                 return nil
             }
             match eo {
-                Some(e) => {
-                    return node(If(c, t, e), pos)
-                }
+                Some(e) => return node(If(c, t, e), pos)
                 None => {
                     p.errs.push(Diag{pos: pos, msg: "`if` used as an expression needs an `else` branch"})
                     return nil
@@ -2062,16 +1961,10 @@ priv fn primary(p: *Parser) -> *Expr {
             }
             return node(Match(scrut, r), pos)
         }
-        Kw(KW_FN) => {
-            return p.fn_expr(pos)
-        }
+        Kw(KW_FN) => return p.fn_expr(pos)
         P('(') => {
             p.bump()
-            save := p.no_lit
-            p.no_lit = false
-            r := primary_r(p, pos)
-            p.no_lit = save
-            return r
+            return p.paren(pos)
         }
         P('[') => {
             t, ok := p.ty()
@@ -2080,10 +1973,13 @@ priv fn primary(p: *Parser) -> *Expr {
             }
             return node(TypeE(parser_box(t)), pos)
         }
-        _ => {}
+        _ => {
+            p.err[bool]("expected expression")
+            return nil
+        }
     }
-    p.err[bool]("expected expression")
-    return nil
+    p.bump()
+    return node(k, pos)
 }
 
 // where an expression starts in the source (its `pos` may be that of an operator)
@@ -2108,46 +2004,20 @@ priv fn pats(es: *Vec[Expr]) -> Vec[Pat] {
 // an expression (a constant, or a name that lowering resolves).
 priv fn pat(e: *Expr) -> Pat {
     match e.k {
-        Ident("_") => {
-            return Wild
-        }
+        Ident("_") => return Wild
         Call(c, args) => {
-            name := ""
-            qual: Opt[*Expr] = None
-            is_variant := false
             match c.k {
-                Ident(n) => {
-                    name = n
-                    is_variant = true
-                }
-                Field(q, n) => {
-                    match q.k {
-                        TypeE(_) => {}
-                        _ => {
-                            if typeish(q) {
-                                name = n
-                                // lowering reads the qualifier from the whole expression
-                                // (if it is not an enum, `x.f(a)` is an ordinary call)
-                                qual = Some(e)
-                                is_variant = true
-                            }
-                        }
-                    }
-                }
+                Ident(n) => return Variant(n, pats(&args), parser_expr_start(c), None)
+                // lowering reads the qualifier from the whole expression (if it is not an
+                // enum, `x.f(a)` is an ordinary call)
+                Field(q, n) if typeish(q) && !lit_in_header(q) => return Variant(n, pats(&args), parser_expr_start(c), Some(e))
                 _ => {}
             }
-            if is_variant {
-                return Variant(name, pats(&args), parser_expr_start(c), qual)
-            }
         }
-        Tuple(es) => {
-            return Pat.Tuple(pats(&es), e.pos)
-        }
+        Tuple(es) => return Pat.Tuple(pats(&es), e.pos)
         Un(Addr, x) => {
             match x.k {
-                Ident(n) => {
-                    return Ref(n, e.pos)
-                }
+                Ident(n) => return Ref(n, e.pos)
                 _ => {}
             }
         }
@@ -2168,10 +2038,12 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
         }
         pos := p.pos()
         pb := pat_stack.len
+        defer {
+            pat_stack.truncate(pb)
+        }
         loop {
             e := p.expr()
             if e == nil {
-                pat_stack.truncate(pb)
                 return fail[Vec[MatchArm]]()
             }
             pat_stack.push(pat(e))
@@ -2180,7 +2052,6 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
             }
         }
         ps := vec_of(pat_stack[pb..])
-        pat_stack.truncate(pb)
         guard: Opt[*Expr] = None
         if p.eat_kw(KW_IF) {
             g := p.expr()
@@ -2207,7 +2078,7 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
             body = Block{stmts: vec_one[Stmt](s), end: p.pos()}
         }
         arm_stack.push(MatchArm{pats: ps, body: body, pos: pos, guard: guard})
-        if !(p.peek() == Nl || p.is_p(';') || p.is_p('}')) {
+        if !p.at_end() {
             return p.err[Vec[MatchArm]]("expected end of match arm")
         }
     }

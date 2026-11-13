@@ -275,7 +275,8 @@ priv fn bin_prec(op: BinOp) -> i64 {
     }
 }
 
-priv fn bin_text(op: BinOp) -> str {
+// the text of an operator (`+`, `&&`)
+fn ast_bin_text(op: BinOp) -> str {
     return match op {
         Mul => "*"
         Div => "/"
@@ -340,7 +341,7 @@ fn ast_expr_str(e: *Expr) -> str {
             }
             fmt(o, inner)
         }
-        Bin(op, a, b) => fmt(operand_str(a, bin_prec(op), false), " ", bin_text(op), " ", operand_str(b, bin_prec(op), true))
+        Bin(op, a, b) => fmt(operand_str(a, bin_prec(op), false), " ", ast_bin_text(op), " ", operand_str(b, bin_prec(op), true))
         Call(c, args) => fmt(operand_str(c, 10, false), "(", expr_list_str(&args), ")")
         Index(b, idx) => fmt(operand_str(b, 10, false), "[", expr_list_str(&idx), "]")
         Field(b, n) => fmt(operand_str(b, 10, false), ".", n)
@@ -353,16 +354,21 @@ fn ast_expr_str(e: *Expr) -> str {
 // the header of a function as it is declared: `fn name[T](a: A, b: B) -> R`; for an
 // anonymous function `fn(a: A, b: B) -> R` (for diagnostics and `alc sigs`)
 fn ast_sig_str(f: *FnDecl) -> str {
-    parts := vec[str]()
-    for i in 0..f.params.len {
-        parts.push(fmt(f.params[i].0, ": ", ast_type_str(&f.params[i].1)))
-    }
     r := match f.ret {
         Some(&t) => fmt(" -> ", ast_type_str(t))
         None => ""
     }
     head := if f.name == "" { "fn" } else { fmt("fn ", f.name, tparams_str(&f.tparams)) }
-    return fmt(head, "(", join(parts.items(), ", "), ")", r)
+    return fmt(head, "(", fields_str(&f.params), ")", r)
+}
+
+// `a: A, b: B`: parameters or fields
+priv fn fields_str(fs: *Vec[(str, TypeAst)]) -> str {
+    parts := vec[str]()
+    for i in 0..fs.len {
+        parts.push(fmt(fs[i].0, ": ", ast_type_str(&fs[i].1)))
+    }
+    return join(parts.items(), ", ")
 }
 
 // "[T, U]" of a declaration with type parameters, or nothing
@@ -375,11 +381,7 @@ priv fn tparams_str(t: *Vec[str]) -> str {
 
 // a struct as it is declared, on one line: `struct Name[T] { a: A, b: B }`
 fn ast_struct_str(s: *StructDecl) -> str {
-    parts := vec[str]()
-    for i in 0..s.fields.len {
-        parts.push(fmt(s.fields[i].0, ": ", ast_type_str(&s.fields[i].1)))
-    }
-    return fmt("struct ", s.name, tparams_str(&s.tparams), " { ", join(parts.items(), ", "), " }")
+    return fmt("struct ", s.name, tparams_str(&s.tparams), " { ", fields_str(&s.fields), " }")
 }
 
 // an enum as it is declared, on one line: `enum Name[T] { A, B(T) }`
@@ -400,7 +402,7 @@ fn ast_enum_str(e: *EnumDecl) -> str {
 // 1 and `k` in decimal (see priv.al). ast_plain gives the name as it was written.
 fn ast_plain(name: str) -> str {
     i := len(name)
-    while i > 0 && name[i - 1] >= '0' && name[i - 1] <= '9' {
+    while i > 0 && is_digit(name[i - 1]) {
         i -= 1
     }
     if i > 0 && i < len(name) && name[i - 1] == 1 {
@@ -416,13 +418,7 @@ fn ast_is_private(name: str) -> bool {
 
 // a text for the user (a diagnostic, a signature): every internal name in it as it was written
 fn ast_plain_text(s: str) -> str {
-    first := -1
-    for i in 0..len(s) {
-        if s[i] == 1 {
-            first = i
-            break
-        }
-    }
+    first := find(s, "\x01")
     if first < 0 {
         return s
     }
@@ -432,7 +428,7 @@ fn ast_plain_text(s: str) -> str {
     while i < len(s) {
         if s[i] == 1 {
             i += 1
-            while i < len(s) && s[i] >= '0' && s[i] <= '9' {
+            while i < len(s) && is_digit(s[i]) {
                 i += 1
             }
         } else {
@@ -467,7 +463,7 @@ priv sym_chunk_used: i64
 
 priv const SYM_CHUNK = 1 << 20
 
-fn ast_sym_hash(s: str) -> u64 {
+priv fn sym_hash(s: str) -> u64 {
     h := AST_SYM_H0
     for c in s {
         h = (h ^ u64(c)) * AST_SYM_HMUL
@@ -507,7 +503,7 @@ fn ast_sym(s: str) -> i64 {
     if id >= 0 {
         return id
     }
-    return ast_sym_hashed(s, ast_sym_hash(s))
+    return ast_sym_hashed(s, sym_hash(s))
 }
 
 // the symbol of a text, or -1 if it is none
@@ -516,19 +512,29 @@ fn ast_sym_find(s: str) -> i64 {
     if id >= 0 || len(sym_slots) == 0 {
         return id
     }
-    h := ast_sym_hash(s)
+    i := probe(s, sym_hash(s))
+    e := sym_slots[i]
+    if e == 0 {
+        return -1
+    }
+    return i64(e & 0xFFFFFFFF) - 1
+}
+
+// the slot of the text `s` with hash `h`: the one that holds its symbol, or the free slot
+// where it would go
+priv inline fn probe(s: str, h: u64) -> i64 {
     mask := len(sym_slots) - 1
     i := i64((h * SYM_MIX) >> sym_shift)
     tag := h & 0xFFFFFFFF00000000
     loop {
         e := sym_slots[i]
         if e == 0 {
-            return -1
+            return i
         }
         if e & 0xFFFFFFFF00000000 == tag {
             t := sym_texts[i64(e & 0xFFFFFFFF) - 1]
             if len(t) == len(s) && t == s {
-                return i64(e & 0xFFFFFFFF) - 1
+                return i
             }
         }
         i = (i + 1) & mask
@@ -546,22 +552,11 @@ fn ast_sym_hashed(s: str, h: u64) -> i64 {
     if sym_texts.len * 2 >= len(sym_slots) {
         sym_grow()
     }
-    mask := len(sym_slots) - 1
-    i := i64((h * SYM_MIX) >> sym_shift)
-    tag := h & 0xFFFFFFFF00000000
-    loop {
-        e := sym_slots[i]
-        if e == 0 {
-            break
-        }
-        if e & 0xFFFFFFFF00000000 == tag {
-            t := sym_texts[i64(e & 0xFFFFFFFF) - 1]
-            if len(t) == len(s) && t == s {
-                return i64(e & 0xFFFFFFFF) - 1
-            }
-        }
-        i = (i + 1) & mask
+    i := probe(s, h)
+    if sym_slots[i] != 0 {
+        return i64(sym_slots[i] & 0xFFFFFFFF) - 1
     }
+    tag := h & 0xFFFFFFFF00000000
     id := sym_texts.len
     // a slot keeps id + 1 in its low 32 bits
     assert id < 0x7FFFFFFF, "ast: too many symbols"

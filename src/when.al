@@ -72,10 +72,6 @@ struct WhenCx {
     fail_msg: str
 }
 
-fn when_new() -> WhenCx {
-    return WhenCx{}
-}
-
 // -D NAME=VALUE (`has_value` false for -D NAME); false if NAME was given before
 fn when_define(w: *WhenCx, name: str, value: str, has_value: bool) -> bool {
     if w.defs.has(name) {
@@ -86,10 +82,7 @@ fn when_define(w: *WhenCx, name: str, value: str, has_value: bool) -> bool {
 }
 
 priv fn add_name(m: *Map[str, Vec[i64]], n: str, i: i64) {
-    l, has := m.get(n)
-    if !has {
-        l = vec[i64]()
-    }
+    l, _ := m.get(n)
     l.push(i)
     m.set(n, l)
 }
@@ -333,8 +326,9 @@ priv fn const_val(w: *WhenCx, ci: i64, pos: Pos) -> Opt[WV] {
     w.fail = false
     want := ann_enum(w, c.decl, c.file, c.lib)
     v := ev(w, &c.decl.val, c.file, c.lib, want, true)
-    if is_some(v) {
-        v = typed(w, c.decl, v.unwrap(), c.file, c.lib)
+    match v {
+        Some(x) => v = typed(w, c.decl, x, c.file, c.lib)
+        None => {}
     }
     match v {
         Some(x) => {
@@ -485,8 +479,9 @@ priv fn ev(w: *WhenCx, e: *Expr, file: i64, lib: bool, want: i64, in_const: bool
         }
         Bin(op, a, b) => {
             if op == LAnd || op == LOr {
-                x := as_bool(w, ev(w, a, file, lib, -1, in_const), fmt("`", if op == LAnd { "&&" } else { "||" }, "`"), a.pos)
-                y := as_bool(w, ev(w, b, file, lib, -1, in_const), fmt("`", if op == LAnd { "&&" } else { "||" }, "`"), b.pos)
+                what := fmt("`", ast_bin_text(op), "`")
+                x := as_bool(w, ev(w, a, file, lib, -1, in_const), what, a.pos)
+                y := as_bool(w, ev(w, b, file, lib, -1, in_const), what, b.pos)
                 if !is_some(x) || !is_some(y) {
                     return None
                 }
@@ -508,7 +503,7 @@ priv fn ev(w: *WhenCx, e: *Expr, file: i64, lib: bool, want: i64, in_const: bool
                 }
                 return binary(w, op, xv.unwrap(), yv.unwrap(), e.pos)
             }
-            return fail[WV](w, e.pos, fmt("the operator `", bin_op_text(op), "` cannot be used in a `when` condition (only `==`, `!=`, `&&`, `||` and `!`); a constant can hold the result: `const BIG = ", ast_expr_str(e), "`"))
+            return fail[WV](w, e.pos, fmt("the operator `", ast_bin_text(op), "` cannot be used in a `when` condition (only `==`, `!=`, `&&`, `||` and `!`); a constant can hold the result: `const BIG = ", ast_expr_str(e), "`"))
         }
         _ => {}
     }
@@ -532,32 +527,9 @@ priv fn enum_of(v: Opt[WV]) -> i64 {
     }
 }
 
-priv fn bin_op_text(op: BinOp) -> str {
-    return match op {
-        Add => "+"
-        Sub => "-"
-        Mul => "*"
-        Div => "/"
-        Rem => "%"
-        And => "&"
-        Or => "|"
-        Xor => "^"
-        Shl => "<<"
-        Shr => ">>"
-        Eq => "=="
-        Ne => "!="
-        Lt => "<"
-        Le => "<="
-        Gt => ">"
-        Ge => ">="
-        LAnd => "&&"
-        LOr => "||"
-    }
-}
-
 // x (op) y for operands of the same type
 priv fn binary(w: *WhenCx, op: BinOp, x: WV, y: WV, pos: Pos) -> Opt[WV] {
-    mismatch := fmt("`", bin_op_text(op), "` on different types: ", kind_name(w, x), " and ", kind_name(w, y))
+    mismatch := fmt("`", ast_bin_text(op), "` on different types: ", kind_name(w, x), " and ", kind_name(w, y))
     match (x, y) {
         (I(a, ta), I(b, tb)) => {
             if ta != "" && tb != "" && ta != tb {
@@ -593,7 +565,7 @@ priv fn binary(w: *WhenCx, op: BinOp, x: WV, y: WV, pos: Pos) -> Opt[WV] {
         }
         _ => return fail[WV](w, pos, mismatch)
     }
-    return fail[WV](w, pos, fmt("`", bin_op_text(op), "` does not apply to ", kind_name(w, x)))
+    return fail[WV](w, pos, fmt("`", ast_bin_text(op), "` does not apply to ", kind_name(w, x)))
 }
 
 priv fn int_op(w: *WhenCx, op: BinOp, a: i64, b: i64, t: str, pos: Pos) -> Opt[WV] {
@@ -658,7 +630,7 @@ priv fn float_op(w: *WhenCx, op: BinOp, x: WV, y: WV, pos: Pos) -> Opt[WV] {
         Le => Some(B(a <= b))
         Gt => Some(B(a > b))
         Ge => Some(B(a >= b))
-        _ => fail[WV](w, pos, fmt("`", bin_op_text(op), "` does not apply to floats"))
+        _ => fail[WV](w, pos, fmt("`", ast_bin_text(op), "` does not apply to floats"))
     }
 }
 
@@ -933,12 +905,12 @@ priv fn def_value(w: *WhenCx, d: *ConstDecl, file: i64) -> (Opt[(WV, Expr)], str
             ts.push(t.t)
         }
     }
-    neg := ts.len > 0 && ts[0] == P('-')
+    neg := !ts.is_empty() && ts[0] == P('-')
     if !errs.is_empty() || ts.len != (if neg { 2 } else { 1 }) {
         return (none, bad)
     }
     bits, signed := int_type(tn)
-    match ts[ts.len - 1] {
+    match ts.last() {
         Int(n, dec) => {
             if tn == "float" || tn == "f32" || tn == "f64" {
                 f := if neg { -f64(n) } else { f64(n) }

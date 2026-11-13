@@ -195,10 +195,7 @@ priv fn path_file_stem(p: str) -> Opt[str] {
         Some(n) => n
         None => return None
     }
-    k := len(name) - 1
-    while k > 0 && name[k] != '.' {
-        k -= 1
-    }
+    k := rfind(name, ".")
     if k <= 0 {
         // no dot, or only a leading one
         return Some(name)
@@ -258,24 +255,20 @@ priv fn read_to_string(path: str) -> (str, str) {
 }
 
 priv fn std_text(name: str) -> Opt[str] {
-    mi := -1
-    for i in 0..STD_MODULES.len {
-        if STD_MODULES[i].0 == name {
-            mi = i
-            break
+    for m in STD_MODULES {
+        if m.0 != name {
+            continue
         }
-    }
-    if mi < 0 {
-        return None
-    }
-    dir, have_dir := env_get("ALC_STD_DIR")
-    if have_dir {
-        t, err := read_to_string(path_join(dir, fmt(name, ".al")))
-        if len(err) == 0 {
-            return Some(t)
+        dir, have_dir := env_get("ALC_STD_DIR")
+        if have_dir {
+            t, err := read_to_string(path_join(dir, fmt(name, ".al")))
+            if len(err) == 0 {
+                return Some(t)
+            }
         }
+        return Some(m.1)
     }
-    return Some(STD_MODULES[mi].1)
+    return None
 }
 
 priv struct Args {
@@ -359,69 +352,57 @@ priv fn parse_args() -> Args {
         usage("")
     }
     // the default target is the system the compiler runs on
-    if host_windows() {
+    if TARGET_OS == Windows {
         target_os = TargetWindows
     }
-    a := Args{cmd: av[0], input: "", output: None, emit_ir: false, emit_asm: false, unchecked: false, opt: 2, rest: vec[str](), defs: vec[(str, str, bool)](), all_targets: false, target_set: false}
+    a := Args{cmd: av[0], opt: 2}
     i := 1
     while i < av.len {
         s := av[i]
-        if s == "-o" {
-            i += 1
-            if i >= av.len {
-                usage("-o needs a path")
+        match s {
+            "-o" => {
+                i += 1
+                if i >= av.len {
+                    usage("-o needs a path")
+                }
+                a.output = Some(av[i])
             }
-            a.output = Some(av[i])
-        } else if s == "--target" {
-            i += 1
-            if i >= av.len {
-                usage("--target needs an operating system: linux or windows")
+            "--target" => {
+                i += 1
+                if i >= av.len {
+                    usage("--target needs an operating system: linux or windows")
+                }
+                a.target_set = true
+                match av[i] {
+                    "linux" => target_os = TargetLinux
+                    "windows" => target_os = TargetWindows
+                    _ => usage(fmt("unknown target ", av[i], " (linux or windows)"))
+                }
             }
-            a.target_set = true
-            if av[i] == "linux" {
-                target_os = TargetLinux
-            } else if av[i] == "windows" {
-                target_os = TargetWindows
-            } else {
-                usage(fmt("unknown target ", av[i], " (linux or windows)"))
+            "--json" => json = true
+            "--gui" => pe_gui = true
+            "--emit-ir" => a.emit_ir = true
+            "--emit-asm" => a.emit_asm = true
+            "--unchecked" => a.unchecked = true
+            "-O0" => a.opt = 0
+            "-D" => {
+                i += 1
+                if i >= av.len {
+                    usage("-D needs a constant: -D NAME=VALUE")
+                }
+                a.parse_define(av[i])
             }
-        } else if s == "--json" {
-            json = true
-        } else if s == "--gui" {
-            pe_gui = true
-        } else if s == "--emit-ir" {
-            a.emit_ir = true
-        } else if s == "--emit-asm" {
-            a.emit_asm = true
-        } else if s == "--unchecked" {
-            a.unchecked = true
-        } else if s == "-O0" {
-            a.opt = 0
-        } else if s == "-D" {
-            i += 1
-            if i >= av.len {
-                usage("-D needs a constant: -D NAME=VALUE")
+            _ if starts_with(s, "-D") => a.parse_define(s[2..])
+            "--all-targets" => a.all_targets = true
+            "-O1" => a.opt = 1
+            "-O2" => a.opt = 2
+            "--" => {
+                a.rest = vec_of(av[i + 1..av.len])
+                break
             }
-            a.parse_define(av[i])
-        } else if starts_with(s, "-D") {
-            a.parse_define(s[2..])
-        } else if s == "--all-targets" {
-            a.all_targets = true
-        } else if s == "-O1" {
-            a.opt = 1
-        } else if s == "-O2" {
-            a.opt = 2
-        } else if s == "--" {
-            a.rest = vec_of(av[i + 1..av.len])
-            break
-        } else if starts_with(s, "-") {
-            usage(fmt("unknown option ", s))
-        } else {
-            if len(a.input) == 0 {
-                a.input = s
-            } else {
-                usage(fmt("unexpected argument ", s))
-            }
+            _ if starts_with(s, "-") => usage(fmt("unknown option ", s))
+            _ if len(a.input) == 0 => a.input = s
+            _ => usage(fmt("unexpected argument ", s))
         }
         i += 1
     }
@@ -552,8 +533,8 @@ priv fn use_file(self: *Sources, file: i64, path: str, pos: Pos, out: *Vec[Item]
             }
             None => {
                 all := vec[str]()
-                for mi in 0..STD_MODULES.len {
-                    all.push(STD_MODULES[mi].0)
+                for m in STD_MODULES {
+                    all.push(m.0)
                 }
                 self.errs.push(Diag{pos: pos, msg: fmt("unknown module `std.", mname, "` (available: ", join(all.items(), ", "), ")")})
             }
@@ -725,31 +706,16 @@ priv fn json_str(s: str) -> str {
     o := vec[u8]()
     o.push('"')
     for c in s {
-        if c == '"' {
-            o.extend("\\\"")
-        } else if c == '\\' {
-            o.extend("\\\\")
-        } else if c == '\n' {
-            o.extend("\\n")
-        } else if c < 0x20 {
-            o.extend(concat("\\u", pad_left(hex(u64(c)), 4, '0')))
-        } else {
-            o.push(c)
+        match c {
+            '"' => o.extend("\\\"")
+            '\\' => o.extend("\\\\")
+            '\n' => o.extend("\\n")
+            _ if c < 0x20 => o.extend(concat("\\u", hex(u64(c), 4)))
+            _ => o.push(c)
         }
     }
     o.push('"')
     return o.items()
-}
-
-// sort key (file, line, col)
-priv fn report_less(a: Diag, b: Diag) -> bool {
-    if a.pos.file != b.pos.file {
-        return a.pos.file < b.pos.file
-    }
-    if a.pos.line != b.pos.line {
-        return a.pos.line < b.pos.line
-    }
-    return a.pos.col < b.pos.col
 }
 
 // names.get(file) or "?"
@@ -764,10 +730,19 @@ priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     if errs.is_empty() {
         return false
     }
-    sort_by(errs.items(), report_less)
+    // sorted by (file, line, col)
+    sort_by(errs.items(), fn(a: Diag, b: Diag) -> bool {
+        if a.pos.file != b.pos.file {
+            return a.pos.file < b.pos.file
+        }
+        if a.pos.line != b.pos.line {
+            return a.pos.line < b.pos.line
+        }
+        a.pos.col < b.pos.col
+    })
     // an error in the generated entry (the last file) follows from one in the program (a
     // second declaration named `main`)
-    while errs.len > 1 && file_name(names, errs[errs.len - 1].pos.file) == "<entry>" && file_name(names, errs[0].pos.file) != "<entry>" {
+    while errs.len > 1 && file_name(names, errs.last().pos.file) == "<entry>" && file_name(names, errs[0].pos.file) != "<entry>" {
         errs.pop()
     }
     if json {
@@ -861,7 +836,7 @@ priv fn sigs_visible(d: *Decl) -> bool {
 // modules, the input file and what they include; `when`s decided (finish). The index of the
 // first file of the program is the second result.
 priv fn load(ar: *Args) -> (Sources, i64) {
-    src := Sources{names: vec[str](), files: vec[SrcFile](), decls: vec[Decl](), errs: vec[Diag](), seen: map[str, bool](), std_files: vec[i64](), wc: when_new(), registered: 0, decided: vec[(WhenDecl, i64, i64)]()}
+    src := Sources{}
     for d in ar.defs {
         when_define(&src.wc, d.0, d.1, d.2)
     }
@@ -871,8 +846,7 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     // the file is the whole library (ALC_PRELUDE=src/prelude.al tests the sources as they are).
     // The layer declares TARGET_OS, which `when` conditions use.
     prelude := PRELUDE
-    layer_name := if target_os == TargetWindows { "prelude_windows.al" } else { "prelude_linux.al" }
-    layer := if target_os == TargetWindows { PRELUDE_WINDOWS } else { PRELUDE_LINUX }
+    layer_name, layer := if target_os == TargetWindows { ("prelude_windows.al", PRELUDE_WINDOWS) } else { ("prelude_linux.al", PRELUDE_LINUX) }
     pre_path, pre_set := env_get("ALC_PRELUDE")
     if pre_set {
         t, err := read_to_string(pre_path)
@@ -893,10 +867,7 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     src.add_text(fmt("<", layer_name[..len(layer_name) - 3], ">"), layer, None, true)
     // the core library is part of the language: always present, no `use` needed
     for name in CORE_MODULES {
-        text := match std_text(name) {
-            Some(t) => t
-            None => ""
-        }
+        text := std_text(name).or("")
         src.seen.set(fmt("<std/", name, ".al>"), true)
         src.add_text(fmt("<std/", name, ".al>"), text, None, true)
     }
@@ -915,13 +886,12 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     decls := vec[Decl]()
     taken := src.decls
     src.decls = vec[Decl]()
-    for x in 0..taken.len {
-        d := taken[x]
+    for d in taken {
         match d {
             Test(t) => {
                 fname := fmt("__test_", tests.len)
                 tests.push(t.name)
-                decls.push(Fn(FnDecl{name: fname, tparams: vec[str](), params: vec[(str, TypeAst)](), ret: None, body: t.body, pos: t.pos, inl: -1, ext: None}))
+                decls.push(Fn(FnDecl{name: fname, body: t.body, pos: t.pos, inl: -1}))
             }
             Fn(f) => {
                 if f.name == "main" {
@@ -948,8 +918,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     entry := vec[str]()
     entry.push("fn __entry(sp: i64) -> never {\n __rt_init(sp)\n")
     if test_mode {
-        for i in 0..tests.len {
-            name := tests[i]
+        for i, name in tests {
             // as a string literal of the entry source: every byte that cannot stand there as it is
             // becomes a \x escape
             esc := vec[u8]()
@@ -1001,7 +970,7 @@ priv fn typecheck(ar: *Args, src: *Sources, decls: *Vec[Decl], n_prelude: i64) -
 priv fn check_all(ar: *Args) -> i64 {
     names := vec[str]()
     // a diagnostic (its file an index into `names`) and the targets that report it (bits)
-    found := vec[(Diag, i64)]()
+    found := map[Diag, i64]()
     targets := []TargetOs{TargetLinux, TargetWindows}
     for t, target in targets {
         target_os = target
@@ -1024,27 +993,16 @@ priv fn check_all(ar: *Args) -> i64 {
                 }
             }
             nd := Diag{pos: Pos{file: f, line: d.pos.line, col: d.pos.col}, msg: ast_plain_text(d.msg)}
-            k := -1
-            for j in 0..found.len {
-                if found[j].0 == nd {
-                    k = j
-                    break
-                }
-            }
-            if k < 0 {
-                found.push((nd, 1 << t))
-            } else {
-                found[k].1 |= 1 << t
-            }
+            found.set(nd, found.get_or(nd, 0) | 1 << t)
         }
     }
     errs := vec[Diag]()
-    for x in found {
-        d := x.0
-        if x.1 != (1 << targets.len) - 1 {
+    for d in found.keys() {
+        bits := found.get_or(d, 0)
+        if bits != (1 << targets.len) - 1 {
             which := vec[str]()
             for t, target in targets {
-                if x.1 & (1 << t) != 0 {
+                if bits & (1 << t) != 0 {
                     which.push(if target == TargetLinux { "--target linux" } else { "--target windows" })
                 }
             }
@@ -1078,8 +1036,8 @@ priv fn real_main() -> i64 {
         if from == 0 {
             for x in 0..src.decls.len {
                 // private declarations of the library cannot be used from outside
-                info := priv_decl_info(&src.decls[x])
-                lib_private := info.2 && (info.3.file < n_prelude || contains(&src.std_files, info.3.file))
+                _, _, is_private, pos := priv_decl_info(&src.decls[x])
+                lib_private := is_private && (pos.file < n_prelude || contains(&src.std_files, pos.file))
                 if sigs_visible(&src.decls[x]) && !lib_private {
                     sdecls.push(src.decls[x])
                 }
@@ -1126,14 +1084,8 @@ priv fn real_main() -> i64 {
     out_path := match ar.output {
         Some(op) => op
         None => {
-            stem := match path_file_stem(ar.input) {
-                Some(s) => s
-                None => "a.out"
-            }
-            dir := match path_parent(ar.input) {
-                Some(dr) => dr
-                None => ""
-            }
+            stem := path_file_stem(ar.input).or("a.out")
+            dir := path_parent(ar.input).or("")
             cand := path_join(dir, stem)
             // the test runner gets its own name: `alc test` must not replace the program
             if target_os == TargetWindows {
@@ -1168,10 +1120,10 @@ priv fn real_main() -> i64 {
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
-        if target_os == TargetWindows && !host_windows() {
+        if target_os == TargetWindows && TARGET_OS != Windows {
             return run_windows(out_path, ar.rest.items())
         }
-        if target_os == TargetLinux && host_windows() {
+        if target_os == TargetLinux && TARGET_OS == Windows {
             driver_error(out_path, fmt("built `", out_path, "`, a Linux executable, which cannot run on Windows"))
             return 1
         }
