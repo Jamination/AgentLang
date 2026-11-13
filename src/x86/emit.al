@@ -794,6 +794,33 @@ priv fn item_size(it: *Item, o: i64) -> i64 {
     return if it.cc < 0 { 5 } else { 6 }
 }
 
+// Windows: `sub rsp, size` for a frame of a page or more, touching every page on the way down
+// (the stack grows through a guard page one page at a time): r11 counts the pages
+//     mov r11d, size / 4096
+//  l: sub rsp, 4096 ; test [rsp], rsp ; dec r11 ; jnz l
+//     sub rsp, size % 4096 ; test [rsp], rsp
+// (r11 is no argument register and is free at the entry)
+priv fn stack_probe(e: *Enc, size: i32) {
+    e.room()
+    for x in []u8{0x41, 0xBB} {
+        e.b1(x)
+    }
+    e.imm(i64(size / 4096), 4)
+    e.room()
+    for x in []u8{0x48, 0x81, 0xEC, 0x00, 0x10, 0x00, 0x00, 0x48, 0x85, 0x24, 0x24, 0x49, 0xFF, 0xCB, 0x75, 0xF0} {
+        e.b1(x)
+    }
+    rest := size % 4096
+    if rest > 0 {
+        si := minst_new(Sub, 8, R(RSP), I(i64(rest)))
+        enc_inst(e, &si)
+        e.room()
+        for x in []u8{0x48, 0x85, 0x24, 0x24} {
+            e.b1(x)
+        }
+    }
+}
+
 fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     // frame layout (computed in i64: a frame over 2 GiB cannot be addressed and is an error)
     off := 8 * mf.out_args
@@ -804,6 +831,11 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         off = (off + a - 1) / a * a
         slot_off.push(i32(off))
         off += sl.0
+    }
+    // Windows: the xmm registers to preserve, 16 bytes each above the slots
+    xmm_off := (off + 15) / 16 * 16
+    if alloc.used_xmm_saved.len > 0 {
+        off = xmm_off + 16 * alloc.used_xmm_saved.len
     }
     npush := i32(alloc.used_callee_saved.len)
     size64 := (off + 15) / 16 * 16
@@ -846,8 +878,17 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                 pi := minst_new(Push, 8, R(r), Opnd.None)
                 enc_inst(&enc, &pi)
             }
-            if size > 0 {
+            if size >= 4096 && target_os == TargetWindows {
+                stack_probe(&enc, size)
+            } else if size > 0 {
                 si := minst_new(Sub, 8, R(RSP), I(i64(size)))
+                enc_inst(&enc, &si)
+            }
+            for k, r in alloc.used_xmm_saved {
+                m := mem_new()
+                m.base = i32(RSP)
+                m.disp = i32(xmm_off + 16 * k)
+                si := minst_new(MovSd, 16, M(m), R(r))
                 enc_inst(&enc, &si)
             }
         }
@@ -860,6 +901,13 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             }
             if i.op == Ret {
                 // epilogue
+                for k, r in alloc.used_xmm_saved {
+                    m := mem_new()
+                    m.base = i32(RSP)
+                    m.disp = i32(xmm_off + 16 * k)
+                    li := minst_new(MovSd, 16, R(r), M(m))
+                    enc_inst(&enc, &li)
+                }
                 if size > 0 {
                     ai := minst_new(Add, 8, R(RSP), I(i64(size)))
                     enc_inst(&enc, &ai)
@@ -868,6 +916,9 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                     pi := minst_new(Pop, 8, R(alloc.used_callee_saved[y]), Opnd.None)
                     enc_inst(&enc, &pi)
                 }
+            }
+            if i.op == Syscall && target_os == TargetWindows && len(err) == 0 {
+                err = fmt("function `", mf.name, "` makes a Linux system call (`syscall`), which a Windows executable cannot make")
             }
             enc_inst(&enc, i)
         }

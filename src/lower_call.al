@@ -405,7 +405,14 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
         Direct(fid) => {
             match self.cx.module.funcs[fid].ext {
                 Some(x) => {
-                    return self.emit_extern_call(x, ptys, rty, args)
+                    if target_os != TargetWindows {
+                        return self.emit_extern_call(x, ptys, rty, args)
+                    }
+                    // Windows: every function has the C calling convention; a C function is
+                    // called through its import address table slot
+                    got := self.cx.module.externs[x].got
+                    a := self.ins(GAddr, I64, vec[i64](), got)
+                    callee = Ind(self.load_raw(a, I64, AK_PTR))
                 }
                 None => {}
             }
@@ -467,7 +474,8 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
             }
         }
         SRet => {
-            self.ins(op, Void, ir_args, k)
+            // (Windows: the callee also returns the hidden pointer, unused here)
+            self.ins(op, if target_os == TargetWindows { T.I64 } else { Void }, ir_args, k)
             res = self.mval(rty, sret_tmp)
         }
         Scalar(t) => {

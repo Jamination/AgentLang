@@ -1,0 +1,42 @@
+# Tests that are not run by `tests/run.sh --target windows`: "dir/name reason". Everything
+# else is built for Windows and run under Wine. The files, directories, processes and I/O
+# errors that the Linux-specific std tests cover are tested portably by
+# std/portable_files and std/portable_process.
+run/emit_asm runs the Linux compiler build/alc; makes Linux system calls (getpid)
+run/frame_too_large runs the Linux compiler build/alc; makes Linux system calls (getpid)
+run/link_too_large runs the Linux compiler build/alc; makes Linux system calls (getpid)
+run/io_error Linux system calls (getpid, unlink) and Linux paths (/tmp)
+run/lib_path_nul Linux system calls (unlink) and Linux paths (/tmp)
+run/lib_read_all_size Linux system calls (unlink) and Linux paths (/tmp, /proc)
+run/lib_alloc_limits Linux system calls (fork, wait4)
+run/lib_args_empty_argv Linux system calls (fork, execve with an empty argv)
+run/lib_fmtf_negative Linux system calls (fork, wait4)
+run/lib_stdout_errors Linux system calls (fork, dup2, fcntl) and /dev/full
+std/asset Linux system calls (getpid) and /proc files
+std/asset_data Linux system calls (getpid)
+std/asset_cloexec Linux close-on-exec of descriptors, seen through /proc
+std/asset_io_error Linux system calls (getpid) and /proc files
+std/image_ops Linux system calls (mkdir, unlink, getpid)
+std/os Linux programs (/bin/sh, head, tr) and system calls (chmod)
+std/os_spawn Linux programs (/bin/sh, sleep, echo) and /proc
+std/time_huge runs the Linux program timeout
+std/audio_mixer std.audio is Linux only (ALSA)
+std/audio_pitch_extreme std.audio is Linux only (ALSA)
+std/audio_wav std.audio is Linux only (ALSA); Linux system calls (unlink)
+sys/audio_null std.audio is Linux only (ALSA)
+std/input std.input is Linux only (evdev)
+std/input_actions std.input is Linux only (evdev)
+std/input_key_names std.input is Linux only (evdev)
+std/window_logic std.window is Linux only (X11)
+sys/window_nodisplay std.window is Linux only (X11)
+sys/window_x11 std.window is Linux only (X11)
+sys/starter_game std.window and std.input are Linux only
+unit/starter_controls std.window and std.input are Linux only
+sys/wayland std.wayland is Linux only
+check/wayland std.wayland is Linux only
+check/wayland_window std.wayland is Linux only
+sys/vk_triangle std.vk binds libvulkan.so.1 (Linux)
+sys/libc C libraries with Linux names (libc.so.6)
+sys/nested_fn_callback C libraries with Linux names (libc.so.6)
+sys/extern_data C libraries with Linux names (libc.so.6)
+fail/extern on Windows extern functions may take and return structs (Microsoft x64): other diagnostics

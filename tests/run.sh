@@ -1,5 +1,5 @@
 #!/bin/bash
-# Conformance test runner. Usage: tests/run.sh [path/to/alc] [filter]
+# Conformance test runner. Usage: tests/run.sh [--target windows] [path/to/alc] [filter]
 # tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
 #                     every line of NAME.err must appear in stderr; arguments from NAME.args,
 #                     default `a1 b2`)
@@ -14,18 +14,61 @@
 # tests/driver/NAME.sh is run with bash, the compiler as $1 and an empty scratch directory as
 #                     $2; it tests the command line (files, paths, exit codes) and must exit 0
 # Programs run with the repository root as working directory.
+#
+# --target windows builds the programs for Windows and runs them under Wine (in the prefix
+# $WINEPREFIX, default tmp/win/prefix-tests, created if missing; no window can open: DISPLAY
+# and WAYLAND_DISPLAY are removed). fail/ and check/ use `alc check --target windows`, unit/
+# runs `alc test` under Wine; driver/ tests the Linux command line and is not run. Tests that
+# cannot run on Windows are listed with the reason in tests/windows.skip.
 cd "$(dirname "$0")/.." || exit 2
+WIN=0
+if [[ ${1:-} == --target ]]; then
+  case ${2:-} in
+    windows) WIN=1 ;;
+    linux) ;;
+    *) echo "usage: tests/run.sh [--target linux|windows] [path/to/alc] [filter]"; exit 2 ;;
+  esac
+  shift 2
+fi
 ALC=${1:-./build/alc}
 FILTER=${2:-}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+TARGET=()
+RUN=()
+BIN=$TMP/bin
+declare -A WSKIP
+if [[ $WIN == 1 ]]; then
+  TARGET=(--target windows)
+  BIN=$TMP/bin.exe
+  export WINEPREFIX=${WINEPREFIX:-$PWD/tmp/win/prefix-tests}
+  export WINEDEBUG=-all WINEDLLOVERRIDES="mscoree=;mshtml="
+  unset DISPLAY WAYLAND_DISPLAY
+  command -v wine >/dev/null || { echo "tests/run.sh: --target windows needs wine"; exit 2; }
+  [[ -d $WINEPREFIX ]] || { mkdir -p "$WINEPREFIX" && wineboot -i >/dev/null 2>&1; }
+  # one wine server for the whole run (a starting server writes noise to standard error)
+  wineserver -p
+  wine cmd /c exit >/dev/null 2>&1
+  trap 'rm -rf "$TMP"; wineserver -k' EXIT
+  RUN=(wine)
+  while read -r key why; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    WSKIP[$key]=$why
+  done <tests/windows.skip
+fi
 pass=0; fail=0; skip=0
+# true (and reported as SKIP) if dir/name cannot run on Windows
+win_skip() {
+  [[ $WIN == 1 && -n "${WSKIP[$1]+x}" ]] || return 1
+  echo "SKIP $1: ${WSKIP[$1]}"; skip=$((skip+1))
+}
 for dir in tests/run tests/std tests/sys; do
 for src in $dir/*.al; do
   [[ -e "$src" ]] || continue
   name=$(basename "$src" .al)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
-  if [[ -f "$dir/$name.need" ]] && ! bash "$dir/$name.need" >/dev/null 2>&1; then
+  win_skip "${dir#tests/}/$name" && continue
+  if [[ $WIN == 0 && -f "$dir/$name.need" ]] && ! bash "$dir/$name.need" >/dev/null 2>&1; then
     why="prerequisite missing"
     [[ -f "$dir/$name.why" ]] && why=$(cat "$dir/$name.why")
     echo "SKIP $name: $why"; skip=$((skip+1)); continue
@@ -37,15 +80,15 @@ for src in $dir/*.al; do
   [[ -f "$dir/$name.checked" ]] && modes=("" "-O0")
   for mode in "${modes[@]}"; do
     label="$name [${mode:-default}]"
-    if ! $ALC build "$src" $mode -o "$TMP/bin" 2>"$TMP/cerr"; then
+    if ! $ALC build "${TARGET[@]}" "$src" $mode -o "$BIN" 2>"$TMP/cerr"; then
       echo "FAIL $label: compile error"; head -5 "$TMP/cerr"; fail=$((fail+1)); continue
     fi
     if [[ -f "$dir/$name.in" ]]; then
-      timeout 60 "$TMP/bin" <"$dir/$name.in" >"$TMP/out" 2>"$TMP/err"; code=$?
+      timeout 60 "${RUN[@]}" "$BIN" <"$dir/$name.in" >"$TMP/out" 2>"$TMP/err"; code=$?
     else
       args=(a1 b2)
       [[ -f "$dir/$name.args" ]] && read -ra args <"$dir/$name.args"
-      timeout 60 "$TMP/bin" "${args[@]}" >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
+      timeout 60 "${RUN[@]}" "$BIN" "${args[@]}" >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
     fi
     ok=1
     if ! cmp -s "$TMP/out" "$exp_out"; then
@@ -68,7 +111,8 @@ for src in tests/check/*.al; do
   [[ -e "$src" ]] || continue
   name=$(basename "$src" .al)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
-  if $ALC check "$src" 2>"$TMP/cerr" >/dev/null; then
+  win_skip "check/$name" && continue
+  if $ALC check "${TARGET[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
     pass=$((pass+1))
   else
     echo "FAIL check/$name: does not type-check"; head -5 "$TMP/cerr"; fail=$((fail+1))
@@ -78,7 +122,8 @@ for src in tests/fail/*.al; do
   [[ -e "$src" ]] || continue
   name=$(basename "$src" .al)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
-  if $ALC check "$src" 2>"$TMP/cerr" >/dev/null; then
+  win_skip "fail/$name" && continue
+  if $ALC check "${TARGET[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
     echo "FAIL $name: expected a compile error"; fail=$((fail+1)); continue
   fi
   ok=1
@@ -92,15 +137,17 @@ for src in tests/unit/*.al; do
   [[ -e "$src" ]] || continue
   name=$(basename "$src" .al)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
+  win_skip "unit/$name" && continue
   exp_code=0
   [[ -f "tests/unit/$name.code" ]] && exp_code=$(cat "tests/unit/$name.code")
-  $ALC test "$src" -o "$TMP/bin" >"$TMP/out" 2>"$TMP/err"; code=$?
+  ALC_WINE=$WIN $ALC test "${TARGET[@]}" "$src" -o "$BIN" >"$TMP/out" 2>"$TMP/err"; code=$?
   ok=1
   if ! cmp -s "$TMP/out" "tests/unit/$name.out"; then echo "FAIL unit/$name: stdout differs"; diff "tests/unit/$name.out" "$TMP/out" | head -10; ok=0; fi
   if [[ "$code" != "$exp_code" ]]; then echo "FAIL unit/$name: exit code $code, expected $exp_code"; ok=0; fi
   if [[ $ok == 1 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done
 for src in tests/driver/*.sh; do
+  [[ $WIN == 1 ]] && break
   [[ -e "$src" ]] || continue
   name=$(basename "$src" .sh)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue

@@ -1,0 +1,26 @@
+make_dir: true true true true
+write: true 14 true false
+read: true true 14 0
+read_bytes: true 14
+write_bytes: true 0
+empty: true 0
+mtime: true 0
+list: [b, empty, x.txt]
+rename: true false [b, empty, y.txt]
+replace: true true (z, true)
+big: true 300000 300000
+missing: false 2 no such file or directory
+directory: false 21 is a directory
+write into a missing directory: false 2 no such file or directory
+write a directory: false 21 is a directory
+remove a full directory: false 39 directory not empty
+remove a missing file: false 2 no such file or directory
+remove a directory as a file: false 21 is a directory
+list a missing directory: 0 2 no such file or directory
+rename a missing file: false 2 no such file or directory
+NUL in a path: (, false) 22 invalid argument
+load: true z false false
+cleanup: true true true true true true false
+a/b a/b b a /b
+a/b c.png gz x.tar /  
+stdin: 24 0 2

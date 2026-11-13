@@ -17,10 +17,21 @@ const VREG0 = 32
 INT_ARGS := [6]i64{RDI, RSI, RDX, RCX, R8, R9}
 INT_RETS := [4]i64{RAX, RDX, RCX, RSI}
 const NUM_FLOAT_ARGS = 8
+// Windows (Microsoft x64): the first four arguments by position, in these registers or in
+// xmm0-xmm3; the rest on the stack above 32 bytes of shadow space that the caller reserves
+WIN_INT_ARGS := [4]i64{RCX, RDX, R8, R9}
+const WIN_REG_ARGS = 4
 
-// rbx, rbp, r12-r15
+// rbx, rbp, r12-r15; Windows: rsi and rdi too (and xmm6-xmm15, see mir_xmm_saved). Calls are
+// still taken to clobber rsi, rdi and every xmm register on Windows (CALL_CLOBBER): a callee
+// that preserves them is never relied on, the function only saves them for its own caller.
 fn mir_callee_saved(r: i64) -> bool {
-    return r == 3 || r == 5 || r == 12 || r == 13 || r == 14 || r == 15
+    return r == 3 || r == 5 || r == 12 || r == 13 || r == 14 || r == 15 || (target_os == TargetWindows && (r == RSI || r == RDI))
+}
+
+// Windows: xmm6-xmm15 are preserved across calls
+fn mir_xmm_saved(r: i64) -> bool {
+    return target_os == TargetWindows && r >= XMM0 + 6 && r < XMM0 + 16
 }
 
 priv CALLER_SAVED_GPR := [9]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11}

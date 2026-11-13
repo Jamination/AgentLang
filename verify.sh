@@ -25,10 +25,11 @@ if [[ -n "$others" ]]; then echo "FAIL: non-AL files in src/:"; echo "$others"; 
 if ls Cargo.toml >/dev/null 2>&1; then echo "FAIL: Cargo.toml is still present"; fail=1; fi
 # the compiler calls no C function, so it is itself a static executable
 if readelf -l $ALC 2>&1 | grep -qE "INTERP|DYNAMIC"; then echo "FAIL: the compiler is not a static executable"; fail=1; fi
-if grep -n '^extern ' src/*.al src/*/*.al | grep -v '^src/prelude.al'; then echo "FAIL: the compiler declares C functions"; fail=1; fi
+# (the run-time library and its OS layers, which are compiled into programs, not into the compiler)
+if grep -nE '^(priv )?extern ' src/*.al src/*/*.al | grep -vE '^src/prelude(_linux|_windows)?\.al'; then echo "FAIL: the compiler declares C functions"; fail=1; fi
 # processes are only started in src/base.al: run_program (for `alc run` / `alc test`, which
 # start the program that was just built) and ensure_stack (the compiler restarting itself)
-spawns=$(grep -nE 'syscall\((57|58|59|56|322),' src/*.al src/*/*.al | grep -v '^src/base.al' | grep -v '^src/prelude.al')
+spawns=$(grep -nE 'syscall\((57|58|59|56|322),' src/*.al src/*/*.al | grep -v '^src/base.al' | grep -vE '^src/prelude(_linux|_windows)?\.al')
 if [[ -n "$spawns" ]]; then echo "FAIL: compiler sources start processes:"; echo "$spawns"; fail=1; fi
 if [[ $(grep -c 'run_program(' src/main.al) != 1 ]]; then echo "FAIL: expected exactly one run_program call in src/main.al"; fail=1; fi
 if grep -nEi '"(cc|gcc|clang|ld|as|llc|lld|nasm|rustc|cargo)"' src/*.al src/*/*.al; then echo "FAIL: external tool referenced"; fail=1; fi

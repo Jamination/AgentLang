@@ -1,0 +1,21 @@
+args: [a1, b2]
+[a b]
+[]
+[q"uote]
+[back\slash\]
+[end\\]
+[tab	here]
+[ünï]
+[\\"x]
+[-]
+status: 3 0
+both: out err  0
+spawn: true true true
+running: 0 false true
+kill: true 137 137 (137, true) false 3
+exit 300: 44
+panic: 1
+missing: false 2 no such file or directory
+empty: false 22
+not started: -1 10 false
+env:  false true

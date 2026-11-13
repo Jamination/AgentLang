@@ -1158,6 +1158,10 @@ priv fn lea_times(self: *Sel, d: i64, x: i64, c: i64, sz: u8) {
 
 // ---------- parameters ----------
 fn params(self: *Sel) {
+    if target_os == TargetWindows {
+        self.params_win()
+        return
+    }
     ni := 0
     nf := 0
     nstack := 0
@@ -1195,6 +1199,39 @@ fn params(self: *Sel) {
             }
             nstack += 1
         }
+    }
+}
+
+// Windows: parameter k is in the k-th argument register (rcx, rdx, r8, r9 or xmm0-xmm3) for
+// k < 4, else on the stack at word k above the return address (vectors take two words)
+priv fn params_win(self: *Sel) {
+    nstack := WIN_REG_ARGS
+    params := self.f.params
+    for pi in 0..params.len {
+        t := params[pi]
+        pv := self.param_of[pi]
+        want := pv >= 0 && self.needed[pv]
+        if pi < WIN_REG_ARGS {
+            if want {
+                d := self.vr(pv)
+                if t.is_fp() {
+                    self.e(MovSd, 8, R(d), R(XMM0 + pi))
+                } else {
+                    self.e(Mov, 8, R(d), R(WIN_INT_ARGS[pi]))
+                }
+            }
+            continue
+        }
+        if want {
+            d := self.vr(pv)
+            m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: i32(nstack)}
+            if t.is_fp() {
+                self.e(MovSd, fsz(t), R(d), M(m))
+            } else {
+                self.e(Mov, 8, R(d), M(m))
+            }
+        }
+        nstack += if t.is_vec() { 2 } else { 1 }
     }
 }
 
@@ -2174,6 +2211,34 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
     nstack := 0
     reg_moves := vec[(i64, Opnd, bool)]()
     stack_moves := vec[(i64, Opnd, u8)]()
+    if target_os == TargetWindows {
+        // by position: argument k in the k-th register (k < 4) or in stack word k (vectors
+        // take two); words 0-3 are the shadow space, which every call reserves
+        nstack = WIN_REG_ARGS
+        for ai, a in args {
+            at := self.f.insts[a].ty
+            if ai < WIN_REG_ARGS {
+                if at.is_fp() {
+                    reg_moves.push((XMM0 + ai, R(self.reg(a)), true))
+                } else {
+                    reg_moves.push((WIN_INT_ARGS[ai], self.mov_src(a), false))
+                }
+            } else if at.is_fp() {
+                stack_moves.push((nstack, R(self.reg(a)), fsz(at)))
+                nstack += if at.is_vec() { 2 } else { 1 }
+            } else {
+                ms := self.mov_src(a)
+                s := match ms {
+                    I(k) if fits32(k) => I(k)
+                    R(r) => R(r)
+                    _ => R(self.reg(a))
+                }
+                stack_moves.push((nstack, s, 0))
+                nstack += 1
+            }
+        }
+        args = nil
+    }
     for a in args {
         at := self.f.insts[a].ty
         if at.is_fp() {

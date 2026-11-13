@@ -32,6 +32,7 @@ use "x86/regalloc.al"
 use "x86/emit.al"
 use "x86/mod.al"
 use "elf.al"
+use "pe.al"
 use "priv.al"
 use "lower_mem.al"
 
@@ -40,11 +41,6 @@ priv const PRELUDE = embed("prelude.al")
 // prelude.al)
 priv const PRELUDE_LINUX = embed("prelude_linux.al")
 priv const PRELUDE_WINDOWS = embed("prelude_windows.al")
-
-// the operating system of the executable (--target); Linux unless the command line says
-// otherwise
-enum TargetOs { TargetLinux, TargetWindows }
-target_os: TargetOs
 
 // bundled modules that only exist for Linux: what a program built for Windows can use instead
 priv const LINUX_ONLY = [_](str, str){
@@ -57,6 +53,13 @@ priv const LINUX_ONLY = [_](str, str){
     ("audio", ""),
     ("vk", ""),
 }
+
+// the operating system the executable is built for (`--target linux|windows`); the default
+// is linux. Read by the back end (calling convention, frames), the linker (ELF or PE) and
+// wherever the run-time library is chosen.
+enum TargetOs { TargetLinux, TargetWindows }
+
+target_os: TargetOs
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
@@ -293,8 +296,8 @@ priv fn usage(why: str) -> never {
         eput(fmt(why, "\n"))
     }
     eput(concat("usage: alc <command> <file.al> [options]\n",
-        concat("commands:\n  build   compile to a static x86-64 Linux executable\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
-        "options:\n  -o <path>     output path (default: input without .al)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux (the default) or windows\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
 }
 
@@ -326,6 +329,18 @@ priv fn parse_args() -> Args {
                 usage("-o needs a path")
             }
             a.output = Some(av[i])
+        } else if s == "--target" {
+            i += 1
+            if i >= av.len {
+                usage("--target needs an operating system: linux or windows")
+            }
+            if av[i] == "linux" {
+                target_os = TargetLinux
+            } else if av[i] == "windows" {
+                target_os = TargetWindows
+            } else {
+                usage(fmt("unknown target ", av[i], " (linux or windows)"))
+            }
         } else if s == "--json" {
             json = true
         } else if s == "--emit-ir" {
@@ -340,12 +355,6 @@ priv fn parse_args() -> Args {
             a.opt = 1
         } else if s == "-O2" {
             a.opt = 2
-        } else if s == "--target" {
-            i += 1
-            if i >= av.len || !(av[i] == "linux" || av[i] == "windows") {
-                usage("--target needs `linux` or `windows`")
-            }
-            target_os = if av[i] == "windows" { TargetWindows } else { TargetLinux }
         } else if s == "--" {
             a.rest = vec_of(av[i + 1..av.len])
             break
@@ -602,12 +611,31 @@ priv fn real_main() -> i64 {
         usage(fmt("unknown command ", ar.cmd))
     }
     src := Sources{names: vec[str](), decls: vec[Decl](), errs: vec[Diag](), seen: map[str, bool](), std_files: vec[i64]()}
-    src.add_text("<prelude>", PRELUDE, None)
-    if target_os == TargetWindows {
-        src.add_text("<prelude_windows>", PRELUDE_WINDOWS, None)
-    } else {
-        src.add_text("<prelude_linux>", PRELUDE_LINUX, None)
+    // the run-time library: the prelude and the OS layer of the target. ALC_PRELUDE=<file>
+    // (development) reads the prelude from that file instead of the copy inside the compiler,
+    // and the layer from prelude_linux.al / prelude_windows.al next to it if that exists
+    prelude := PRELUDE
+    layer_name := if target_os == TargetWindows { "prelude_windows.al" } else { "prelude_linux.al" }
+    layer := if target_os == TargetWindows { PRELUDE_WINDOWS } else { PRELUDE_LINUX }
+    pre_path, pre_set := env_get("ALC_PRELUDE")
+    if pre_set {
+        t, err := read_to_string(pre_path)
+        if len(err) != 0 {
+            driver_error(pre_path, fmt("cannot read `", pre_path, "`: ", err))
+            return 1
+        }
+        prelude = t
+        lpath := match path_parent(pre_path) {
+            Some(d) => path_join(d, layer_name)
+            None => layer_name
+        }
+        lt, lerr := read_to_string(lpath)
+        if len(lerr) == 0 {
+            layer = lt
+        }
     }
+    src.add_text("<prelude>", prelude, None)
+    src.add_text(fmt("<", layer_name[..len(layer_name) - 3], ">"), layer, None)
     // the core library is part of the language: always present, no `use` needed
     for name in CORE_MODULES {
         text := match std_text(name) {
@@ -733,11 +761,6 @@ priv fn real_main() -> i64 {
     if ar.cmd == "check" {
         return 0
     }
-    if target_os == TargetWindows {
-        // (until the PE writer exists)
-        driver_error(ar.input, "--target windows: only `alc check` is implemented")
-        return 1
-    }
     module := cx.module
     mem("lowered")
     opt_optimize(&module, ar.opt)
@@ -754,7 +777,7 @@ priv fn real_main() -> i64 {
     }
     out := x86_compile(&module, ar.emit_asm)
     mem("compiled")
-    bytes, link_err := elf_link(&module, &out)
+    bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     if len(link_err) != 0 {
         driver_error(ar.input, link_err)
         return 1
@@ -772,7 +795,9 @@ priv fn real_main() -> i64 {
             }
             cand := path_join(dir, stem)
             // the test runner gets its own name: `alc test` must not replace the program
-            if test_mode {
+            if target_os == TargetWindows {
+                if test_mode { fmt(cand, ".test.exe") } else { fmt(cand, ".exe") }
+            } else if test_mode {
                 fmt(cand, ".test")
             } else if path_comps(cand).items() == path_comps(ar.input).items() {
                 fmt(cand, ".out")
@@ -805,6 +830,9 @@ priv fn real_main() -> i64 {
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
+        if target_os == TargetWindows {
+            return run_windows(out_path, ar.rest.items())
+        }
         code := run_program(out_path, ar.rest.items())
         if code < 0 {
             driver_error(out_path, fmt("cannot run `", out_path, "`: ", os_error(11)))
@@ -813,6 +841,47 @@ priv fn real_main() -> i64 {
         return code
     }
     return 0
+}
+
+// `alc run` / `alc test` of a Windows executable: under Wine if ALC_WINE=1 (with WINEPREFIX
+// set; no window can open: DISPLAY and WAYLAND_DISPLAY are removed), else it is only built
+priv fn run_windows(exe: str, argv: []str) -> i64 {
+    w, wset := env_get("ALC_WINE")
+    if !wset || w != "1" {
+        driver_error(exe, fmt("built `", exe, "`, a Windows executable, which cannot run here (ALC_WINE=1 runs it under Wine)"))
+        return 1
+    }
+    _, pset := env_get("WINEPREFIX")
+    if !pset {
+        driver_error(exe, "ALC_WINE=1 needs WINEPREFIX: the Wine prefix to run the program in")
+        return 1
+    }
+    wine := ""
+    path, has_path := env_get("PATH")
+    if has_path {
+        for d in split(path, ':') {
+            cand := path_join(if len(d) == 0 { "." } else { d }, "wine")
+            _, ok := file_id(cand)
+            if ok {
+                wine = cand
+                break
+            }
+        }
+    }
+    if len(wine) == 0 {
+        driver_error(exe, "ALC_WINE=1: `wine` is not on the PATH")
+        return 1
+    }
+    wargs := vec_one(exe)
+    wargs.extend(argv)
+    drop := []str{"DISPLAY", "WAYLAND_DISPLAY", "WINEDEBUG", "WINEDLLOVERRIDES"}
+    add := []str{"WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree=;mshtml="}
+    code := run_program_env(wine, wargs.items(), drop, add)
+    if code < 0 {
+        driver_error(exe, fmt("cannot run `", wine, "`: ", os_error(11)))
+        return 1
+    }
+    return code
 }
 
 fn main() -> i64 {

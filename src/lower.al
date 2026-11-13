@@ -967,9 +967,21 @@ fn flush_layout_errors(self: *Cx, pos: Pos) {
 }
 
 // ---------- ABI ----------
+// Linux: an aggregate of up to MAX_FLAT scalar leaves travels as those scalars (in registers
+// as far as they go); larger ones by reference, results through a hidden pointer.
+// Windows (the Microsoft x64 convention, for every function: AL function values are C
+// function pointers): an aggregate of 1, 2, 4 or 8 bytes travels as one integer of that size
+// (`win_packed`), any other by reference to a copy the caller makes; results the same way,
+// larger ones through a hidden pointer that the callee also returns (in rax).
 fn abi_param(self: *Cx, t: i64) -> ParamAbi {
     if self.types.is_scalar(t) {
         return Scalar(self.types.scalar_ir(t).0)
+    }
+    if target_os == TargetWindows {
+        match self.win_packed(t) {
+            Some(l) => return Flat(l)
+            None => return ByRef
+        }
     }
     if self.types.leaf_count(t) <= MAX_FLAT {
         l := self.types.leaf_list(t)
@@ -985,6 +997,13 @@ fn abi_ret(self: *Cx, t: i64) -> RetAbi {
     if self.types.is_scalar(t) {
         return Scalar(self.types.scalar_ir(t).0)
     }
+    if target_os == TargetWindows {
+        match self.win_packed(t) {
+            Some(l) if l.is_empty() => return RetAbi.None
+            Some(l) => return Flat(l)
+            None => return SRet
+        }
+    }
     if self.types.leaf_count(t) <= MAX_FLAT {
         l := self.types.leaf_list(t)
         if l.is_empty() {
@@ -993,6 +1012,20 @@ fn abi_ret(self: *Cx, t: i64) -> RetAbi {
         return Flat(l)
     }
     return SRet
+}
+
+// Windows: an aggregate of 1, 2, 4 or 8 bytes as the one integer leaf that holds all its bytes
+// (read and written as untyped memory), none for a zero-size one; None: by reference
+priv fn win_packed(self: *Cx, t: i64) -> Opt[Vec[Leaf]] {
+    it := match self.types.size_of(t) {
+        0 => return Some(vec[Leaf]())
+        1 => T.I8
+        2 => T.I16
+        4 => T.I32
+        8 => T.I64
+        _ => return None
+    }
+    return Some(vec_one(Leaf{off: 0, t: it, alias: AK_ANY}))
 }
 
 // the IR parameters and results of a function with parameter types `ptys` and result `rty`
@@ -1009,6 +1042,10 @@ fn fn_abi(self: *Cx, f: *Func, ptys: []i64, rty: i64) {
         }
         SRet => {
             f.params.push(I64)
+            if target_os == TargetWindows {
+                // the callee returns the hidden pointer
+                f.rets.push(I64)
+            }
         }
     }
     for pi in 0..len(ptys) {
@@ -1073,18 +1110,20 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
     self.fn_abi(&f, ptys.items(), rty)
     match d.ext {
         Some(lib) => {
-            // a C function: scalar arguments and result only
+            // a C function: scalar arguments and result only (Windows: structs too, passed as
+            // the Microsoft x64 convention passes them)
             bad := -1
             for i in 0..ptys.len + 1 {
                 t := if i < ptys.len { ptys[i] } else { rty }
-                if t != T_UNIT && t != T_NEVER && t != T_ERR && (!self.types.is_scalar(t) || is_some(self.types.vec_lanes(t))) {
+                if t != T_UNIT && t != T_NEVER && t != T_ERR && (!(self.types.is_scalar(t) || target_os == TargetWindows) || is_some(self.types.vec_lanes(t))) {
                     bad = t
                     break
                 }
             }
             if bad >= 0 {
                 tn := self.types.name(bad)
-                self.err(d.pos, fmt("extern function `", d.name, "`: ", tn, " cannot cross the C boundary (pass integers, floats and pointers)"))
+                what := if target_os == TargetWindows { "pass integers, floats, pointers and structs" } else { "pass integers, floats and pointers" }
+                self.err(d.pos, fmt("extern function `", d.name, "`: ", tn, " cannot cross the C boundary (", what, ")"))
             }
             got := self.module.globals.len
             self.module.globals.push(Global{name: fmt("got.", ast_plain(d.name)), size: 8, align: 8, data: Some(vec_fill(8, u8(0))), relocs: vec[(i64, RelocTarget)](), readonly: false})
