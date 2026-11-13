@@ -141,6 +141,9 @@ fn opt_pass(k: i64, f: *Func, p: fn(*Func) -> bool) -> bool {
         return false
     }
     prune_clean := sk_clean[PASS_PRUNE] == sk_gen + 1
+    // every pass but simplify_cfg (which folds branches first) asks for its first CFG analysis
+    // before it changes anything
+    ir_memo_pass(sk_gen, k != PASS_CFG)
     if p(f) {
         sk_gen += 1
         now := sk_gen + 1

@@ -475,6 +475,19 @@ priv memo_cfg: Cfg
 priv memo_has_loops: bool
 priv memo_loops: Loops
 
+// Skipping the check: the optimiser counts the changes of the function (no pass changes it
+// without saying so) and tells at the start of each pass the current count and whether the
+// pass asks for an analysis before it changes anything. When the memo was last checked at the
+// same count, the first such request needs no check.
+priv memo_cur: i64 // the change count while the current pass runs
+priv memo_at: i64 // the change count when the memo was last checked (-1: never)
+priv memo_trust: bool
+
+fn ir_memo_pass(gen: i64, asks_first: bool) {
+    memo_cur = gen
+    memo_trust = asks_first && memo_at == gen
+}
+
 fn ir_memo_begin(f: *Func) {
     ir_memo_end()
     memo_f = f
@@ -482,6 +495,8 @@ fn ir_memo_begin(f: *Func) {
 
 fn ir_memo_end() {
     memo_f = nil
+    memo_at = -1
+    memo_trust = false
     memo_sig = vec[i64]()
     memo_has_rpo = false
     memo_has_preds = false
@@ -494,6 +509,11 @@ priv fn memo_valid(f: *Func) -> bool {
     if f != memo_f {
         return false
     }
+    if memo_trust {
+        memo_trust = false
+        return true
+    }
+    memo_at = memo_cur
     n := f.blocks.len
     same := memo_sig.len == n
     if !same {
