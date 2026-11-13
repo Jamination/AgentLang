@@ -145,8 +145,8 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 - `std.dx12` (Windows): Direct3D 12 with `std.dx12_util` for the set-up and a sprite batcher
   for 2D (`examples/dx12_triangle.al`: swap chain on a window, frames in flight, resizing); a
   swap chain can use `win32_hwnd(w)` of a std.window window.
-- `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame; the mixer is
-  pure code and can be tested without a device.
+- `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
+  Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
 - `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`.
 
 A program that never opens a window or a device (a test run, a server, a tool) uses none of

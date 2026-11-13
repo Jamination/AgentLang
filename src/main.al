@@ -48,7 +48,7 @@ priv const LINUX_ONLY = [_](str, str){
     ("x11", ""),
     ("wayland", ""),
     ("alsa", ""),
-    ("audio", ""),
+
     ("vk", ""),
 }
 
@@ -82,6 +82,8 @@ priv const STD_MODULES = [_](str, str){
     ("input_linux", embed("../std/input_linux.al")),
     ("input_windows", embed("../std/input_windows.al")),
     ("audio", embed("../std/audio.al")),
+    ("audio_linux", embed("../std/audio_linux.al")),
+    ("audio_windows", embed("../std/audio_windows.al")),
     ("vk", embed("../std/vk.al")),
     ("dx12", embed("../std/dx12.al")),
     ("dx12_util", embed("../std/dx12_util.al")),

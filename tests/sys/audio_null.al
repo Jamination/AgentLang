@@ -1,4 +1,5 @@
-// std.audio device layer against ALSA's "null" PCM (discards the samples, needs no sound card).
+// std.audio device layer against the "null" device (Linux: ALSA's "null" PCM; Windows: the
+// built-in "null" device of std/audio_windows.al): discards the samples, needs no sound card.
 use std.audio
 
 fn main() {
@@ -9,7 +10,7 @@ fn main() {
     if !ok {
         return
     }
-    print(dev.rate, dev.channels, dev.buffer_frames > 0, dev.period_frames > 0, len(dev.buf) == dev.buffer_frames * 2)
+    print(dev.rate, dev.channels, dev.buffer_frames > 0, dev.period_frames > 0, dev.period_frames <= dev.buffer_frames)
     m := mixer_new(48000, 2, 8)
     beep := m.play(sound_tone(48000, 440.0, 0.25, 0.5), 1.0, 0.0, 1.0, false)
     hum := m.play(sound_tone(48000, 110.0, 0.1, 0.2), 0.5, -1.0, 1.0, true)

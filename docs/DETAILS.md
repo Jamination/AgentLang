@@ -572,7 +572,7 @@ both systems, except where this section says otherwise.
 - **Memory.** Arenas reserve the same address space (64 GiB, 16 GiB per region) and commit it
   in steps as it is used; committed memory counts against the system's commit limit.
 - **Not available** for `--target windows` (a compile error that names the module):
-  `std.x11`, `std.wayland`, `std.alsa`, `std.audio`, `std.vk`, `std.libc`. In
+  `std.x11`, `std.wayland`, `std.alsa`, `std.vk`, `std.libc`. In
   std.os, signals do not exist (`kill` with any signal but 0 ends the process; see
   [std/os.md](std/os.md)).
 - **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless

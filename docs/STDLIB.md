@@ -24,7 +24,7 @@ are `priv` do not appear: a program may reuse their names).
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
 | `std.input` | per-frame key / mouse / gamepad state, action maps | nothing (Windows: `xinput1_4.dll` or `xinput9_1_0.dll`, loaded when a gamepad is opened) | [std/input.md](std/input.md) |
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6`; Windows: `user32.dll`, `gdi32.dll` | [std/window.md](std/window.md) |
-| `std.audio` | WAV, software mixer, sound device output | `libasound.so.2` (device only) | [std/audio.md](std/audio.md) |
+| `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings generated from the mingw-w64 headers (Windows only) | `d3d12.dll`, `dxgi.dll`, `d3dcompiler_47.dll`, `user32.dll`, `kernel32.dll` | [std/dx12.md](std/dx12.md) |
@@ -37,8 +37,8 @@ dynamically linked executable that needs only the libraries of the functions it 
 For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
-`std.asset`, `std.os`, `std.image`, `std.input` and `std.window` work the same on Windows
-(through system DLLs; the differences are in their pages). `std.audio`, `std.wayland`,
+`std.asset`, `std.os`, `std.image`, `std.input`, `std.window` and `std.audio` (its device
+through WASAPI) work the same on Windows (the differences are in their pages). `std.wayland`,
 `std.vk`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
 compile error that names the module and the target. `std.dx12` and `std.dx12_util` are the
 other way round: Windows only (a Linux build stops at their Windows DLLs).

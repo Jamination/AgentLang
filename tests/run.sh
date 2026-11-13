@@ -22,9 +22,12 @@
 # --target windows builds the programs for Windows and runs them under Wine (in the prefix
 # $WINEPREFIX, default tmp/win/prefix-tests, created if missing; DISPLAY and WAYLAND_DISPLAY
 # are removed and the prefix uses Wine's null display driver: windows open and receive
-# messages, nothing is shown). fail/ and check/ use `alc check --target windows`, unit/
-# runs `alc test` under Wine; driver/ tests the Linux command line and is not run. Tests that
-# cannot run on Windows are listed with the reason in tests/windows.skip.
+# messages, nothing is shown; no sound can play: Wine's PulseAudio driver gets a server
+# address where none listens and ALSA an empty configuration, so Wine finds no audio device).
+# fail/ and check/ use `alc check --target windows`, unit/ runs `alc test` under Wine; driver/
+# tests the Linux command line and is not run; the prerequisite checks (NAME.need) are Linux
+# ones and are not run either. Tests that cannot run on Windows are listed with the reason in
+# tests/windows.skip.
 #
 # --host-wine alc.exe (with --target windows) tests a compiler built for Windows: alc.exe runs
 # under Wine and builds, checks and runs (`alc run` in the default mode, `alc test`) the
@@ -66,6 +69,8 @@ if [[ $WIN == 1 ]]; then
   export WINEPREFIX=${WINEPREFIX:-$PWD/tmp/win/prefix-tests}
   export WINEDEBUG=-all WINEDLLOVERRIDES="mscoree=;mshtml="
   unset DISPLAY WAYLAND_DISPLAY
+  : >"$TMP/alsa-none.conf"
+  export PULSE_SERVER=unix:$TMP/no-sound-server ALSA_CONFIG_PATH=$TMP/alsa-none.conf
   command -v wine >/dev/null || { echo "tests/run.sh: --target windows needs wine"; exit 2; }
   [[ -d $WINEPREFIX ]] || { mkdir -p "$WINEPREFIX" && wineboot -i >/dev/null 2>&1; }
   # one wine server for the whole run (a starting server writes noise to standard error); the

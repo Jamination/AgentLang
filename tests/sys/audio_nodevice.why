@@ -1,0 +1,1 @@
+Windows only (tests/run.sh --target windows, where Wine finds no sound device); on Linux the default device is this machine's
