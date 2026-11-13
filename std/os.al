@@ -45,7 +45,7 @@ struct Process {
 
 priv struct ProcessState {
     done: bool              // waited for: `status` is final and the id may belong to another process
-    status: i64
+    status: u8              // 0..255: exit status or 128 + signal (decode_status)
 }
 
 // Starts the program argv[0] (looked up in PATH as by `run`) with the arguments argv[1..], the
@@ -93,10 +93,10 @@ fn wait(p: Process) -> i64 {
             return -1
         }
         p.state.done = true
-        p.state.status = decode_status(i64(status[0]))
+        p.state.status = u8(decode_status(i64(status[0])))
     }
     __io_result(0)
-    return p.state.status
+    return i64(p.state.status)
 }
 
 // Does not wait: (status, true) if the process has ended (it is waited for then), (0, false)
@@ -122,10 +122,10 @@ fn try_wait(p: Process) -> (i64, bool) {
             return (0, false)
         }
         p.state.done = true
-        p.state.status = decode_status(i64(status[0]))
+        p.state.status = u8(decode_status(i64(status[0])))
     }
     __io_result(0)
-    return (p.state.status, true)
+    return (i64(p.state.status), true)
 }
 
 // Sends a signal (15 SIGTERM: asks to end, 9 SIGKILL: ends it, 2 SIGINT, 0: none, only checks

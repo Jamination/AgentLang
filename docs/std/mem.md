@@ -200,7 +200,7 @@ struct Entity {
     kind: Kind
     pos: vec2
     vel: vec2
-    hp: i64
+    hp: i32
     target: Handle      // zero Handle = none
     ttl: f32            // seconds to live, 0 = forever
 }
@@ -339,7 +339,7 @@ level, a frame scope per frame. The numbers at the end show that nothing is left
 ```
 struct Tile { kind: u8, height: u8 }
 struct Level { tiles: []Tile, w: i64, h: i64, name: str }
-struct Bullet { pos: vec2, vel: vec2, damage: i64 }
+struct Bullet { pos: vec2, vel: vec2, damage: i32 }
 
 fn load_level(n: i64) -> Level {
     lv := Level{w: 64 * n, h: 64, name: fmt("level ", n)}

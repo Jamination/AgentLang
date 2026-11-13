@@ -972,9 +972,10 @@ priv fn deflate_body(w: *BitWriter, src: []u8) {
     d.src = src
     d.syms = alloc[u32](BLOCK_SYMS)
     // head[h]: last position with hash h, prev[p & 32767]: the position before p with the same
-    // hash; both store position + 1 so that 0 means none
-    head := alloc[i64](32768)
-    prev := alloc[i64](32768)
+    // hash; both store position + 1 so that 0 means none. 32 bits: past 4 GiB of input a stored
+    // position wraps around to below the window and is ignored (fewer matches, never wrong ones)
+    head := alloc[u32](32768)
+    prev := alloc[u32](32768)
     n := len(src)
     base := cast[i64](ptr(src))
     plen := 0       // length of the match found at i - 1 that is waiting for a better one at i
@@ -985,9 +986,9 @@ priv fn deflate_body(w: *BitWriter, src: []u8) {
         mdist := 0
         if i + 3 <= n {
             h := hash3(src, i)
-            c := head[h] - 1
-            head[h] = i + 1
-            prev[i & 32767] = c + 1
+            c := i64(head[h]) - 1
+            prev[i & 32767] = head[h]
+            head[h] = u32(i + 1)
             maxlen := min(n - i, 258)
             best := max(plen, 2)
             if plen < MAX_LAZY && best < maxlen {
@@ -1005,7 +1006,7 @@ priv fn deflate_body(w: *BitWriter, src: []u8) {
                             }
                         }
                     }
-                    c = prev[c & 32767] - 1
+                    c = i64(prev[c & 32767]) - 1
                     chain -= 1
                 }
                 // a minimal match far away costs more than three literals
@@ -1026,7 +1027,7 @@ priv fn deflate_body(w: *BitWriter, src: []u8) {
                 if i + 3 <= n {
                     h := hash3(src, i)
                     prev[i & 32767] = head[h]
-                    head[h] = i + 1
+                    head[h] = u32(i + 1)
                 }
                 i += 1
             }

@@ -17,14 +17,15 @@ const HZ = 120.0
 enum Kind { Player, Rock, Shot, Spark }
 
 // One struct for every kind of entity: unused fields cost a few bytes, and every system is a
-// plain loop over the pool with no indirection.
+// plain loop over the pool with no indirection. Each field has a small type that holds its
+// values (hp is at most 3, colours are 32 bits): 40 bytes per entity, 8 of them the tag.
 struct Entity {
     kind: Kind
     pos: vec2
     vel: vec2
     radius: f32
     life: f32       // seconds left for shots and sparks; 0 = lives until destroyed
-    hp: i64
+    hp: i32         // 3 for the player, 2 for a rock; removed at 0
     color: u32      // 0xAABBGGRR, the byte order of the RGBA framebuffer
 }
 

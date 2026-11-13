@@ -50,7 +50,7 @@ and keep every system a simple loop:
 
 ```
 enum Kind { Player, Rock, Shot }
-struct Entity { kind: Kind, pos: vec2, vel: vec2, radius: f32, life: f32, hp: i64, color: u32 }
+struct Entity { kind: Kind, pos: vec2, vel: vec2, radius: f32, life: f32, hp: i32, color: u32 }
 
 for i in 0..g.ents.len {
     if !g.ents.is_live(i) { continue }
@@ -67,7 +67,7 @@ for i in 0..g.ents.len {
 variant, so adding a kind makes the compiler point at every place that has to handle it.
 
 ```
-enum Item { Weapon(i64, f32), Potion(i64), Key(str) }
+enum Item { Weapon(i32, f32), Potion(i32), Key(str) }
 
 fn describe(it: Item) -> str {
     match it {
