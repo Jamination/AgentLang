@@ -10,23 +10,11 @@ priv struct Site {
 }
 
 priv fn identity(op: Op) -> Opt[i64] {
-    if op == Add || op == Or || op == Xor {
-        return Some(0)
-    }
-    if op == Mul {
-        return Some(1)
-    }
-    if op == And {
-        return Some(-1)
-    }
-    return None
-}
-
-// acc_op.is_none() || acc_op == Some(op)
-priv fn none_or_same(acc_op: Opt[Op], op: Op) -> bool {
-    match acc_op {
-        Some(o) => o == op
-        None => true
+    return match op {
+        Add, Or, Xor => Some(0)
+        Mul => Some(1)
+        And => Some(-1)
+        _ => None
     }
 }
 
@@ -68,7 +56,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
                 ci := &f.insts[call]
                 if ci.op == Call && ci.k == fid && uses[call] == 1 && contains(li.args, call) {
                     x := if li.args[0] == call { li.args[1] } else { li.args[0] }
-                    if x != call && none_or_same(acc_op, li.op) {
+                    if x != call && (acc_op == None || acc_op == Some(li.op)) {
                         acc_op = Some(li.op)
                         sites.push(Site{block: b, call: call, acc: Some((last_v, x))})
                     }
@@ -80,10 +68,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         return false
     }
     // all sites must agree: with an accumulator, plain tail calls are fine too (acc unchanged)
-    ret_ty := Void
-    if f.rets.len > 0 {
-        ret_ty = f.rets[0]
-    }
+    ret_ty := if f.rets.is_empty() { Void } else { f.rets[0] }
     // split the entry: parameters stay, the body moves to a loop header
     header := f.new_block()
     entry_insts := f.blocks[0].insts
@@ -104,20 +89,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     f.blocks[0].term = Jmp(header)
     f.blocks[header].term = entry_term
     // successors of the old entry now come from the header
-    ss := f.succs(header)
-    for s in ss {
-        for ii in 0..f.blocks[s].insts.len {
-            v := f.blocks[s].insts[ii]
-            if f.insts[v].op != Phi {
-                break
-            }
-            pbs := f.insts[v].from()
-            for k in 0..pbs.len {
-                if pbs[k] == 0 {
-                    pbs[k] = header
-                }
-            }
-        }
+    for s in f.succs(header) {
+        f.phi_pred_replace(s, 0, header)
     }
     // sites located in the old entry block are now in the header
     for si in 0..sites.len {
@@ -173,9 +146,9 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         // new accumulator value
         new_acc: Opt[i64] = None
         match (acc_phi, s.acc) {
-            (Some(ap), Some(cx)) => {
+            (Some(ap), Some((comb, _))) => {
                 // read the operand again: parameters have been replaced by the loop phis
-                ci := &f.insts[cx.0]
+                ci := &f.insts[comb]
                 op := ci.op
                 x := if ci.args[0] == s.call { ci.args[1] } else { ci.args[0] }
                 nv := f.mk(op, ret_ty, vec_of([]i64{ap, x}), 0)
@@ -185,13 +158,9 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             _ => {}
         }
         // drop the call (and the combining instruction)
-        drop := vec[i64]()
-        match s.acc {
-            Some(cx) => {
-                drop.push(s.call)
-                drop.push(cx.0)
-            }
-            None => drop.push(s.call)
+        drop := match s.acc {
+            Some((comb, _)) => vec_two(s.call, comb)
+            None => vec_one(s.call)
         }
         blk := &f.blocks[b]
         n := 0

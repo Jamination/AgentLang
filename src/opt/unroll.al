@@ -17,18 +17,6 @@ priv struct Plan {
 
 priv const MAX_PARTIAL_SIZE = 400
 
-// the closure `back_of` of analyze: the back-edge input of a header phi, or NOV
-priv fn analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
-    i := &f.insts[ph]
-    n := i.args.len
-    for k in 0..n {
-        if i.from()[k] == latch {
-            return i.args[k]
-        }
-    }
-    return NOV
-}
-
 // the leading phis of block `h`
 priv fn header_phis(f: *Func, h: i64) -> Vec[i64] {
     hphis := vec[i64]()
@@ -57,14 +45,10 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
         Br(c0, t0, e0) => (c0, t0, e0)
         _ => return None
     }
-    back_true := false
-    exit_b := 0
-    if t == h && !in_loop[e] {
-        back_true = true
-        exit_b = e
+    back_true, exit_b := if t == h && !in_loop[e] {
+        (true, e)
     } else if e == h && !in_loop[t] {
-        back_true = false
-        exit_b = t
+        (false, t)
     } else {
         return None
     }
@@ -92,20 +76,15 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
     if pi.op != Phi || pi.args.len != 2 || !contains(&f.blocks[h].insts, i32(phi)) {
         return None
     }
-    start_opt: Opt[i64] = None
-    back := NOV
-    for k in 0..pi.args.len {
-        pb := pi.from()[k]
-        if pb == pre {
-            start_opt = f.is_const(pi.args[k])
-        } else if pb == latch {
-            back = pi.args[k]
-        }
+    s0 := pi.phi_input(pre)
+    if s0 == NOV {
+        return None
     }
-    start := match start_opt {
+    start := match f.is_const(s0) {
         Some(k) => k
         None => return None
     }
+    back := pi.phi_input(latch)
     if back != next || step == 0 {
         return None
     }
@@ -134,7 +113,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
         ln := 1
         cur := ph
         loop {
-            b := analyze_back_of(f, cur, latch)
+            b := f.insts[cur].phi_input(latch)
             if b == NOV || b == ph || !contains(&hphis, b) || ln > 16 {
                 break
             }
@@ -171,7 +150,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
                     return None
                 }
                 for a in inst.args {
-                    if def_block[a] != 0xFFFFFFFF && in_loop[def_block[a]] {
+                    if def_block[a] != NOV && in_loop[def_block[a]] {
                         return None
                     }
                 }
@@ -189,14 +168,14 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
     return None
 }
 
-// phi_in[&ph]
+// the (start, back-edge) inputs of header phi ph
 priv fn phi_in_at(phi_in: *Map[i64, (i64, i64)], ph: i64) -> (i64, i64) {
     x, found := phi_in.get(ph)
     assert found, "unroll: phi not in map"
     return x
 }
 
-// bmap[&b]
+// the copy of block b
 priv fn bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
     nb, found := bmap.get(b)
     assert found, "unroll: block not in map"
@@ -218,7 +197,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
     def_block := def_block_v.items()
     // is v an original value (below n0) defined inside the loop?
     fn loop_def(v: i64, n0: i64, def_block: []i32, in_loop: []bool) -> bool {
-        v < n0 && def_block[v] != 0xFFFFFFFF && in_loop[def_block[v]]
+        v < n0 && def_block[v] != NOV && in_loop[def_block[v]]
     }
     // the copy of v in the iteration that `m` describes
     fn look(m: *Vec[i64], v: i64, n0: i64, def_block: []i32, in_loop: []bool) -> i64 {
@@ -232,17 +211,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
     phi_in := map[i64, (i64, i64)]()
     for ph in hphis {
         i := &f.insts[ph]
-        s := NOV
-        bk := NOV
-        for k in 0..i.args.len {
-            pb := i.from()[k]
-            if pb == p.pre {
-                s = i.args[k]
-            } else if pb == p.latch {
-                bk = i.args[k]
-            }
-        }
-        phi_in.set(ph, (s, bk))
+        phi_in.set(ph, (i.phi_input(p.pre), i.phi_input(p.latch)))
     }
     // copy 0 is the original body; prev maps original values to their copy in the previous
     // iteration. Only values defined in the loop are ever looked up, so the two maps are
@@ -287,12 +256,10 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
                 if b == p.header && f.insts[v].op == Phi {
                     continue
                 }
-                op := f.insts[v].op
-                ty := f.insts[v].ty
-                k := f.insts[v].k
-                aux := f.insts[v].aux
-                nv := f.mk(op, ty, vec[i64](), k)
-                f.im(nv).aux = aux
+                // (a copy: mk may move the instructions)
+                src := f.insts[v]
+                nv := f.mk(src.op, src.ty, vec[i64](), src.k)
+                f.im(nv).aux = src.aux
                 cur[v] = nv
             }
         }
@@ -436,40 +403,30 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
 
 fn unroll_run(f: *Func) -> bool {
     changed := false
-    for it in 0..64 {
+    rounds: for it in 0..64 {
         if f.size() > 8000 {
             break
         }
         licm_make_preheaders(f)
         cfg, loops := cfg_loops(f)
         order := licm_loop_order(&loops)
-        plan: Opt[Plan] = None
         in_loop := vec_fill(f.blocks.len, false)
         def_block := vec[i32]()
         for li in order {
-            for b in loops.loops[li].blocks {
-                in_loop[b] = true
-            }
+            loops.mark_blocks(li, in_loop.items(), true)
             found := analyze(f, &cfg, &loops, li, in_loop.items(), &def_block)
-            for b in loops.loops[li].blocks {
-                in_loop[b] = false
-            }
+            loops.mark_blocks(li, in_loop.items(), false)
             match found {
                 Some(p) => {
-                    plan = Some(p)
-                    break
+                    apply(f, &p, &def_block)
+                    cleanup_prune_unreachable(f)
+                    changed = true
+                    continue rounds
                 }
                 None => {}
             }
         }
-        match plan {
-            Some(p) => {
-                apply(f, &p, &def_block)
-                cleanup_prune_unreachable(f)
-                changed = true
-            }
-            None => break
-        }
+        break
     }
     return changed
 }
