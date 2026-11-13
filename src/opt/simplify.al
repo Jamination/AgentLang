@@ -1974,19 +1974,19 @@ fn simplify_run(f: *Func) -> bool {
     for it in 0..50 {
         ch := false
         opt_trace("  fold", f)
-        if fold_insts(f) {
+        if opt_pass(7, f, fold_insts) {
             ch = true
         }
         opt_trace("  cfg", f)
-        if simplify_cfg(f) {
+        if opt_pass(8, f, simplify_cfg) {
             ch = true
         }
         opt_trace("  phis", f)
-        if cleanup_trivial_phis(f) {
+        if opt_pass(9, f, cleanup_trivial_phis) {
             ch = true
         }
         opt_trace("  dce", f)
-        if cleanup_dce(f) {
+        if opt_pass(PASS_DCE, f, cleanup_dce) {
             ch = true
         }
         if !ch {
