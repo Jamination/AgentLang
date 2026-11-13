@@ -75,12 +75,14 @@ fn licm_make_preheaders(f: *Func) -> bool {
             if f.insts[v].op != Phi {
                 break
             }
-            inst := clone(f.insts[v])
+            inst := &f.insts[v]
+            ity := inst.ty
+            ifrom := inst.from()
             out_vals := vec[(i64, i64)]()
             keep_args := vec[i64]()
             keep_pb := vec[i64]()
-            for k in 0..inst.pb.len {
-                pb := inst.pb[k]
+            for k in 0..inst.args.len {
+                pb := ifrom[k]
                 if contains(&outside, pb) {
                     out_vals.push((pb, inst.args[k]))
                 } else {
@@ -105,16 +107,13 @@ fn licm_make_preheaders(f: *Func) -> bool {
                     vals.push(x.1)
                     pbs.push(x.0)
                 }
-                np := f.mk(Phi, inst.ty, vals, 0)
-                f.im(np).pb = pbs
+                np := f.mk_phi_of(ity, vals.items(), pbs.items())
                 f.blocks[p].insts.push(np)
                 incoming = np
             }
             keep_args.push(incoming)
             keep_pb.push(p)
-            i := f.im(v)
-            i.args = keep_args
-            i.pb = keep_pb
+            f.im(v).phi_set(keep_args.items(), keep_pb.items())
         }
         changed = true
     }

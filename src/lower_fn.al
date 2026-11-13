@@ -180,7 +180,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             f := &cx.module.funcs[fi]
             for ii in 0..f.insts.len {
                 i := &f.insts[ii]
-                if (i.op == Load || i.op == Store) && i.aux >> 4 != 0 && cx.exposed.has(i.aux >> 4) {
+                if (i.op == Load || i.op == Store) && i.aux >> 4 != 0 && cx.exposed.has(i64(i.aux >> 4)) {
                     i.aux &= 15
                 }
             }
@@ -427,7 +427,7 @@ fn tyname(self: *Fx, t: i64) -> str {
 fn alloca(self: *Fx, size: i64, align: i64) -> i64 {
     v := self.f.mk(Alloca, I64, vec[i64](), max(size, 1))
     i := self.f.im(v)
-    i.aux = max(align, 1)
+    i.aux = i32(max(align, 1))
     self.allocas.push(v)
     return v
 }
@@ -449,14 +449,14 @@ fn add_off(self: *Fx, addr: i64, off: i64) -> i64 {
 fn load_raw(self: *Fx, addr: i64, t: T, alias: i64) -> i64 {
     v := self.ins(Load, t, vec_one(addr), 0)
     i := self.f.im(v)
-    i.aux = alias
+    i.aux = i32(alias)
     return v
 }
 
 fn store_raw(self: *Fx, addr: i64, val: i64, t: T, alias: i64) {
     v := self.ins(Store, t, vec_two(addr, val), 0)
     i := self.f.im(v)
-    i.aux = alias
+    i.aux = i32(alias)
 }
 
 fn sval(self: *Fx, ty: i64, v: i64) -> Val {

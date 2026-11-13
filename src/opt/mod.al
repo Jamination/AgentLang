@@ -85,6 +85,46 @@ priv inline fn keep_list(l: *Vec[i64]) {
     }
 }
 
+// the argument lists made while working move to one new buffer (a phi's with the blocks of
+// its inputs, without spare room); an empty one no longer points anywhere
+priv fn keep_args(f: *Func) {
+    total := 0
+    for v in 0..f.insts.len {
+        i := &f.insts[v]
+        n := len(i.args)
+        if n == 0 {
+            continue
+        }
+        if !in_main(cast[i64](ptr(i.args))) {
+            total += if i.op == Phi { 2 * n } else { n }
+        }
+    }
+    buf := mkslice[i64](__alloc_raw(total * 8), total)
+    at := 0
+    for v in 0..f.insts.len {
+        i := &f.insts[v]
+        n := len(i.args)
+        if n == 0 {
+            i.args = nil
+            i.cap = 0
+            continue
+        }
+        if in_main(cast[i64](ptr(i.args))) {
+            continue
+        }
+        memcopy(ptr(buf[at..]), ptr(i.args), n * 8)
+        if i.op == Phi {
+            memcopy(ptr(buf[at + n..]), ptr(i.from()), n * 8)
+            i.args = buf[at..at + n]
+            i.cap = i32(n)
+            at += 2 * n
+        } else {
+            i.args = buf[at..at + n]
+            at += n
+        }
+    }
+}
+
 priv fn keep_func(f: *Func) {
     if len(f.name) > 0 && !in_main(cast[i64](ptr(f.name))) {
         f.name = clone(f.name)
@@ -98,11 +138,7 @@ priv fn keep_func(f: *Func) {
     if len(f.insts.buf) > 0 && !in_main(cast[i64](ptr(f.insts.buf))) {
         f.insts = vec_of(f.insts.items())
     }
-    for v in 0..f.insts.len {
-        i := &f.insts[v]
-        keep_list(&i.args)
-        keep_list(&i.pb)
-    }
+    keep_args(f)
     if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
         f.blocks = vec_of(f.blocks.items())
     }

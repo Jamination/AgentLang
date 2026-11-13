@@ -78,8 +78,8 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     }
     start := NOV
     back := NOV
-    for k in 0..pi.pb.len {
-        pb := pi.pb[k]
+    for k in 0..pi.args.len {
+        pb := pi.from()[k]
         if pb == pre {
             start = pi.args[k]
         } else if pb == latch {
@@ -467,7 +467,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
             if f.insts[v].op != Phi {
                 break
             }
-            pbs := &f.insts[v].pb
+            pbs := f.insts[v].from()
             for k in 0..pbs.len {
                 if pbs[k] == pre {
                     pbs[k] = cur

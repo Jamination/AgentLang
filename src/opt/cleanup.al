@@ -25,21 +25,25 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
                 break
             }
             inst := &f.insts[v]
-            k := 0
-            while k < inst.pb.len {
-                p := inst.pb[k]
+            fr := inst.from()
+            // the inputs kept move down in place (in order)
+            m := 0
+            for k in 0..fr.len {
+                p := fr[k]
                 is_pred := false
                 if p >= 0 && p < n {
                     cnt, s0, s1 := f.succ_pair(p)
                     is_pred = cnt > 0 && s0 == b || cnt > 1 && s1 == b
                 }
-                if !is_pred {
-                    inst.pb.remove(k)
-                    inst.args.remove(k)
-                    changed = true
-                } else {
-                    k += 1
+                if is_pred {
+                    fr[m] = p
+                    inst.args[m] = inst.args[k]
+                    m += 1
                 }
+            }
+            if m != fr.len {
+                inst.args = inst.args[..m]
+                changed = true
             }
         }
     }

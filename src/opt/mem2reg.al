@@ -59,15 +59,12 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
             v = self.read_out(var_, p)
         }
     } else {
-        phi := self.f.mk(Phi, self.var_ty[var_], Vec[i64]{buf: alloc[i64](np), len: 0}, 0)
-        self.f.im(phi).pb = Vec[i64]{buf: alloc[i64](np), len: 0}
+        phi := self.f.mk_phi(self.var_ty[var_], np)
         self.def_in.iset(key, phi)
         self.new_phis.push((b, phi))
         for p in preds {
             a := self.read_out(var_, p)
-            inst := self.f.im(phi)
-            put(&inst.args, a)
-            put(&inst.pb, p)
+            self.f.im(phi).phi_add(a, p)
         }
         v = phi
     }

@@ -172,9 +172,10 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
                 continue
             }
             found := false
-            n := min(qinst.pb.len, qinst.args.len)
+            n := qinst.args.len
+            qfrom := qinst.from()
             for j in 0..n {
-                if qinst.pb[j] == latch && qinst.args[j] == p {
+                if qfrom[j] == latch && qinst.args[j] == p {
                     found = true
                     break
                 }
@@ -337,9 +338,10 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
                             if f.insts[v].op != Phi {
                                 continue
                             }
-                            for j in 0..f.insts[v].pb.len {
-                                if f.insts[v].pb[j] == b {
-                                    f.insts[v].pb[j] = nbk
+                            vfrom := f.insts[v].from()
+                            for j in 0..vfrom.len {
+                                if vfrom[j] == b {
+                                    vfrom[j] = nbk
                                 }
                             }
                         }
@@ -700,7 +702,7 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
             align := 1
             for c in g {
                 size = max(size, f.insts[allocas[members[c]]].k)
-                align = max(align, f.insts[allocas[members[c]]].aux)
+                align = max(align, i64(f.insts[allocas[members[c]]].aux))
             }
             sl := new_slot(mf, size, align)
             for c in g {
@@ -710,7 +712,7 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
     }
     for v in allocas {
         if slot_of[v] < 0 {
-            slot_of[v] = new_slot(mf, f.insts[v].k, f.insts[v].aux)
+            slot_of[v] = new_slot(mf, f.insts[v].k, i64(f.insts[v].aux))
         }
     }
     return slot_of
@@ -1165,7 +1167,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
     for p in phis {
         self.needed[p] = true
         inst := &self.f.insts[p]
-        ai := index_of(inst.pb.items(), b)
+        ai := index_of(inst.from(), b)
         if ai < 0 {
             continue
         }
@@ -2104,7 +2106,7 @@ priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
 priv fn call(self: *Sel, v: i64, i: *Inst) {
     self.mf.has_calls = true
     target: Opt[i64] = None
-    args := i.args.items()
+    args := i.args
     if i.op == CallInd {
         target = Some(i.args[0])
         args = args[1..]

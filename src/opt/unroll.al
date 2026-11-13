@@ -20,9 +20,9 @@ priv const MAX_PARTIAL_SIZE = 400
 // the closure `back_of` of analyze: the back-edge input of a header phi, or NOV
 priv fn analyze_back_of(f: *Func, ph: i64, latch: i64) -> i64 {
     i := &f.insts[ph]
-    n := min(i.pb.len, i.args.len)
+    n := i.args.len
     for k in 0..n {
-        if i.pb[k] == latch {
+        if i.from()[k] == latch {
             return i.args[k]
         }
     }
@@ -94,8 +94,8 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
     }
     start_opt: Opt[i64] = None
     back := NOV
-    for k in 0..pi.pb.len {
-        pb := pi.pb[k]
+    for k in 0..pi.args.len {
+        pb := pi.from()[k]
         if pb == pre {
             start_opt = f.is_const(pi.args[k])
         } else if pb == latch {
@@ -234,8 +234,8 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
         i := &f.insts[ph]
         s := NOV
         bk := NOV
-        for k in 0..i.pb.len {
-            pb := i.pb[k]
+        for k in 0..i.args.len {
+            pb := i.from()[k]
             if pb == p.pre {
                 s = i.args[k]
             } else if pb == p.latch {
@@ -307,16 +307,21 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
                     continue
                 }
                 nv := cur[v]
-                args := vec[i64]()
-                for a in f.insts[v].args {
-                    args.push(look(&cur, a, n0, def_block, in_loop))
+                nargs := f.insts[v].args.len
+                args := mkslice[i64](__alloc_raw(nargs * 8), nargs)
+                for ai in 0..nargs {
+                    args[ai] = look(&cur, f.insts[v].args[ai], n0, def_block, in_loop)
                 }
-                pb := vec[i64]()
-                for x in f.insts[v].pb {
-                    pb.push(bmap.get_or(x, x))
+                if f.insts[v].op == Phi {
+                    pb := mkslice[i64](__alloc_raw(nargs * 8), nargs)
+                    vfrom := f.insts[v].from()
+                    for ai in 0..nargs {
+                        pb[ai] = bmap.get_or(vfrom[ai], vfrom[ai])
+                    }
+                    f.im(nv).phi_set(args, pb)
+                } else {
+                    f.im(nv).args = args
                 }
-                f.im(nv).args = args
-                f.im(nv).pb = pb
                 f.blocks[nb].insts.push(nv)
             }
             src_term := if b == p.latch { clone(orig_latch_term) } else { clone(f.blocks[b].term) }
@@ -366,7 +371,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
                     }
                 }
                 if f.insts[v].op == Phi && b == p.exit {
-                    pbs := &f.insts[v].pb
+                    pbs := f.insts[v].from()
                     for k in 0..pbs.len {
                         if pbs[k] == p.latch {
                             pbs[k] = prev_latch
@@ -400,9 +405,10 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
                 bk := phi_in_at(&phi_in, ph).1
                 nv := if loop_def(bk, n0, def_block, in_loop) { prev[bk] } else { bk }
                 i := f.im(ph)
-                for k in 0..i.pb.len {
-                    if i.pb[k] == p.latch {
-                        i.pb[k] = prev_latch
+                ifrom := i.from()
+                for k in 0..ifrom.len {
+                    if ifrom[k] == p.latch {
+                        ifrom[k] = prev_latch
                         i.args[k] = nv
                     }
                 }

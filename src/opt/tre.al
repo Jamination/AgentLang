@@ -66,7 +66,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             if is_some(identity(li.op)) {
                 call := insts[n - 2]
                 ci := &f.insts[call]
-                if ci.op == Call && ci.k == fid && uses[call] == 1 && contains(&li.args, call) {
+                if ci.op == Call && ci.k == fid && uses[call] == 1 && contains(li.args, call) {
                     x := if li.args[0] == call { li.args[1] } else { li.args[0] }
                     if x != call && none_or_same(acc_op, li.op) {
                         acc_op = Some(li.op)
@@ -111,7 +111,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             if f.insts[v].op != Phi {
                 break
             }
-            pbs := &f.insts[v].pb
+            pbs := f.insts[v].from()
             for k in 0..pbs.len {
                 if pbs[k] == 0 {
                     pbs[k] = header
@@ -131,8 +131,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     for p in params {
         ty := f.insts[p].ty
         k := f.insts[p].k
-        phi := f.mk(Phi, ty, vec_of([]i64{p}), 0)
-        f.im(phi).pb = vec_of([]i64{0})
+        phi := f.mk_phi(ty, sites.len + 1)
+        f.im(phi).phi_add(p, 0)
         head.push(phi)
         pphi.push((k, p, phi))
     }
@@ -142,8 +142,8 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             idk := unwrap(identity(op))
             c := f.mk(Const, ret_ty, vec[i64](), ir_canon(ret_ty, idk))
             f.blocks[0].insts.push(c)
-            phi := f.mk(Phi, ret_ty, vec_of([]i64{c}), 0)
-            f.im(phi).pb = vec_of([]i64{0})
+            phi := f.mk_phi(ret_ty, sites.len + 1)
+            f.im(phi).phi_add(c, 0)
             head.push(phi)
             acc_phi = Some(phi)
         }
@@ -169,7 +169,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     for si in 0..sites.len {
         s := &sites[si]
         b := s.block
-        call_args := clone(f.insts[s.call].args)
+        call_args := vec_of(f.insts[s.call].args)
         // new accumulator value
         new_acc: Opt[i64] = None
         match (acc_phi, s.acc) {
@@ -210,15 +210,11 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         f.blocks[b].term = Jmp(header)
         for pp in pphi {
             a := call_args[pp.0]
-            i := f.im(pp.2)
-            i.args.push(a)
-            i.pb.push(b)
+            f.im(pp.2).phi_add(a, b)
         }
         match (acc_phi, new_acc) {
             (Some(ap), Some(nv)) => {
-                i := f.im(ap)
-                i.args.push(nv)
-                i.pb.push(b)
+                f.im(ap).phi_add(nv, b)
             }
             _ => {}
         }
