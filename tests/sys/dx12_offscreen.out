@@ -1,0 +1,33 @@
+compile error reported: true
+first device
+  ok 60 2 clear colour
+  ok 2 30 clear colour
+  ok 32 36 triangle
+  ok 20 44 triangle
+  ok 14 44 clear colour beside the triangle
+  ok 54 10 clear colour: a triangle behind the cleared depth
+  ok 4 4 sprite: atlas texel (0, 0)
+  ok 12 4 sprite: atlas texel (1, 0)
+  ok 4 12 sprite: atlas texel (0, 1)
+  ok 12 12 sprite: atlas texel (1, 1)
+  ok 18 4 clear colour beside the sprite
+  ok 56 56 rectangle
+  ok 4 52 half-transparent white over the clear colour
+  ok 28 4 mirrored sprite: atlas texel (1, 0) on the left
+  ok 36 4 mirrored sprite: atlas texel (0, 0) on the right
+WARP device
+  ok 60 2 clear colour
+  ok 2 30 clear colour
+  ok 32 36 triangle
+  ok 20 44 triangle
+  ok 14 44 clear colour beside the triangle
+  ok 54 10 clear colour: a triangle behind the cleared depth
+  ok 4 4 sprite: atlas texel (0, 0)
+  ok 12 4 sprite: atlas texel (1, 0)
+  ok 4 12 sprite: atlas texel (0, 1)
+  ok 12 12 sprite: atlas texel (1, 1)
+  ok 18 4 clear colour beside the sprite
+  ok 56 56 rectangle
+  ok 4 52 half-transparent white over the clear colour
+  ok 28 4 mirrored sprite: atlas texel (1, 0) on the left
+  ok 36 4 mirrored sprite: atlas texel (0, 0) on the right
