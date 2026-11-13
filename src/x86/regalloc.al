@@ -238,9 +238,7 @@ priv noinline fn lgrow(self: *Lists, n: i64) {
     self.pool.reserve(nb + nc)
     self.pool.len = nb + nc
     ob := self.beg[n]
-    for j in 0..l {
-        self.pool[nb + j] = self.pool[ob + j]
-    }
+    copy(self.pool[nb..nb + l], self.pool[ob..ob + l])
     self.beg[n] = nb
     self.cap[n] = nc
 }
@@ -555,12 +553,7 @@ priv fn conservative(self: *Irc, u: i64, v: i64) -> bool {
     // George's test from the side of the node with fewer neighbours first: cheap, and the
     // Briggs test below walks both neighbourhoods (quadratic for a node that interferes with
     // thousands of others and is the target of thousands of moves)
-    x := u
-    y := v
-    if self.adj.len[v] > self.adj.len[u] {
-        x = v
-        y = u
-    }
+    x, y := if self.adj.len[v] > self.adj.len[u] { (v, u) } else { (u, v) }
     george := true
     for t in self.adj.lget(x) {
         st := self.state[t]
@@ -579,8 +572,8 @@ priv fn conservative(self: *Irc, u: i64, v: i64) -> bool {
     // a stamp of this test)
     self.stamp += 1
     k := 0
-    for w in 0..2 {
-        for n in self.adj.lget(if w == 0 { u } else { v }) {
+    for w in [2]i64{u, v} {
+        for n in self.adj.lget(w) {
             if self.in_graph(n) && self.seen[n] != self.stamp {
                 self.seen[n] = self.stamp
                 if n < 32 || self.degree[n] >= self.k {
@@ -600,17 +593,12 @@ priv fn combine(self: *Irc, u: i64, v: i64) {
     self.state[v] = Coalesced
     self.alias[v] = u
     // a move may then be listed twice: harmless (its state is checked where it is used)
-    nm := self.node_moves(v)
+    // (before the merge, which empties v's lists)
+    self.enable_moves(v)
     if u >= 32 {
         self.move_list.merge_moves(u, v)
         self.act_list.merge_moves(u, v)
         self.cost[u] += self.cost[v]
-    }
-    for m in nm {
-        if self.mstate[m] == Active {
-            self.mstate[m] = Worklist
-            self.move_wl.push(m)
-        }
     }
     for t in self.adj.lget(v) {
         if self.in_graph(t) {
@@ -630,12 +618,7 @@ priv fn coalesce(self: *Irc, m: i64) {
     d, s := self.moves[m]
     x := self.get_alias(d)
     y := self.get_alias(s)
-    u := x
-    v := y
-    if y < 32 {
-        u = y
-        v = x
-    }
+    u, v := if y < 32 { (y, x) } else { (x, y) }
     if u == v {
         self.mstate[m] = Coalesced
         self.add_worklist(u)
@@ -672,10 +655,7 @@ priv fn freeze_moves(self: *Irc, u: i64) {
         x, y := self.moves[m]
         v := if self.get_alias(y) == self.get_alias(u) { self.get_alias(x) } else { self.get_alias(y) }
         self.mstate[m] = Frozen
-        if v >= 32 && self.state[v] == Freeze && !self.move_related(v) && self.degree[v] < self.k {
-            self.state[v] = Simplify
-            self.simplify_wl.push(v)
-        }
+        self.add_worklist(v)
     }
 }
 
@@ -796,14 +776,11 @@ priv fn select(g: *Irc, cls: u8, vcls: []u8, spilled: *Vec[i64], colors: *Vec[i6
     }
 }
 
-// spill weight helper
+// spill weight of a block at loop depth d: 10^min(d, 6)
+priv const DEPTH_W = [7]f64{1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0}
+
 priv fn depth_weight(d: i64) -> f64 {
-    // 10f64.powi(min(d, 6))
-    w: f64 = 1.0
-    for x in 0..min(d, 6) {
-        w *= 10.0
-    }
-    return w
+    return DEPTH_W[min(d, 6)]
 }
 
 // adds the call clobbers of class `mask` as neighbours of every virtual register of the
@@ -1005,14 +982,9 @@ struct Alloc {
 
 priv fn spill_slot(o: *Opnd, first_spill: i64) -> i64 {
     match o {
-        M(&m) => {
-            if m.kind == MK_SLOT && i64(m.id) >= first_spill && m.base == NOREG && m.idx == NOREG && m.disp == 0 {
-                return i64(m.id)
-            }
-        }
-        _ => {}
+        M(&m) if m.kind == MK_SLOT && i64(m.id) >= first_spill && m.base == NOREG && m.idx == NOREG && m.disp == 0 => return i64(m.id)
+        _ => return -1
     }
-    return -1
 }
 
 // index of the first entry of `st` for slot `s`, or -1
@@ -1035,7 +1007,7 @@ priv fn find_reg(st: *Vec[(i64, i64)], r: i64) -> i64 {
     return -1
 }
 
-// st.retain(|e| e.1 != d)
+// removes the entries held in register d
 priv fn retain_reg_ne(st: *Vec[(i64, i64)], d: i64) {
     n := 0
     for x in 0..st.len {
@@ -1047,7 +1019,7 @@ priv fn retain_reg_ne(st: *Vec[(i64, i64)], d: i64) {
     st.len = n
 }
 
-// st.retain(|e| e.0 != s)
+// removes the entries for slot s
 priv fn retain_slot_ne(st: *Vec[(i64, i64)], s: i64) {
     n := 0
     for x in 0..st.len {
@@ -1071,16 +1043,13 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
             the_pred[s] = b
         }
     }
-    no_state: Opt[Vec[(i64, i64)]] = None
-    out_state := vec_fill(nb, no_state)
+    out_state := vec_fill(nb, Opt[Vec[(i64, i64)]].None)
     du := vec_fill(DU_MAX, 0)
     for oi, b in order {
         st := vec[(i64, i64)]()
         if oi != 0 && npreds[b] == 1 {
             match out_state[the_pred[b]] {
-                Some(s) => {
-                    st = clone(s)
-                }
+                Some(s) => st = clone(s)
                 None => {}
             }
         }
@@ -1173,7 +1142,7 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
         }
     }
     for b in order {
-        // insts.retain(..)
+        // keep the instructions that are not dead stores
         insts := &mf.blocks[b].insts
         n := 0
         for x in 0..insts.len {
@@ -1209,12 +1178,8 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
         scratch_on()
         dec := decode(mf, order, n)
         vcls := vec_fill(n, u8(0))
-        for r in 16..32 {
-            vcls[r] = 1
-        }
-        for v in 0..mf.vclass.len {
-            vcls[32 + v] = mf.vclass[v]
-        }
+        fill(vcls[16..32], u8(1))
+        copy(vcls[32..], mf.vclass.items())
         lo_off := vec[i64]()
         lo := vec[i64]()
         liveness(mf, order, &dec, n, &lo_off, &lo)
@@ -1225,25 +1190,16 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             nv: nv,
             state: vec_fill(n, Initial),
             pmask: vec_fill(n, u64(0)),
-            adj_set: map[u64, bool](),
-            // a bit matrix up to 16 MB (11585 virtual registers), a hash set beyond
+            // a bit matrix up to 16 MB (11585 virtual registers), a hash set (adj_set) beyond
             adj_bits: if nv <= 11585 { vec_fill((nv * nv + 64) / 64, u64(0)) } else { vec[u64]() },
             adj: lists_new(n, 8),
             degree: vec_fill(n, 0),
-            moves: vec[(i64, i64)](),
-            mstate: vec[MS](),
             move_list: lists_new(n, 2),
             act_list: lists_new(n, 2),
             alias: vec_fill(n, 0),
             color: vec_fill(n, -1),
-            simplify_wl: vec[i64](),
-            freeze_wl: vec[i64](),
-            spill_wl: vec[i64](),
-            move_wl: vec[i64](),
-            stack: vec[i64](),
             cost: vec_fill(n, f64(0.0)),
             seen: vec_fill(n, 0),
-            stamp: 0,
             ratio: vec_fill(n, f64(0.0)),
             rdirty: vec_fill(n, true),
         }
@@ -1317,7 +1273,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
 // rewrites the virtual registers to their colours (in place; copies that became `mov r, r`
 // go away); returns the registers defined outside calls as a bit mask
 priv fn rewrite(mf: *MFunc, order: []i64, dec: *Dec, colors: []i64) -> u64 {
-    // (the mapping `|r| if r >= 32 { colors[r] } else { r }` as a table)
+    // (r >= 32 becomes colors[r], a machine register stays)
     table := vec_fill(len(colors), 0)
     for r in 0..len(colors) {
         table[r] = if r >= 32 { colors[r] } else { r }
@@ -1354,38 +1310,15 @@ priv fn rewrite(mf: *MFunc, order: []i64, dec: *Dec, colors: []i64) -> u64 {
 // can operand `b` of this instruction be a memory operand?
 priv fn b_can_be_mem(i: *MInst) -> bool {
     match i.a {
-        M(m) => {
-            return false
-        }
+        M(_) => return false
         _ => {}
     }
-    op := i.op
-    if op == Add || op == Sub || op == And || op == Or || op == Xor || op == Cmp || op == Imul ||
-        op == Addsd || op == Subsd || op == Mulsd || op == Divsd || op == Minsd || op == Maxsd ||
-        op == Sqrtsd || op == Cvtf || op == Ucomisd || op == Cvtsi2sd || op == Cvttsd2si || op == Cmov ||
-        op == Imul3 {
-        return true
+    match i.op {
+        Add, Sub, And, Or, Xor, Cmp, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Sqrtsd, Cvtf,
+            Ucomisd, Cvtsi2sd, Cvttsd2si, Cmov, Imul3, MovSd, Movzx, Movsx => true
+        Mov => i.sz == 8 || i.sz == 4
+        _ => false
     }
-    if op == Mov {
-        return i.sz == 8 || i.sz == 4
-    }
-    if op == MovSd {
-        return true
-    }
-    if op == Movzx || op == Movsx {
-        return true
-    }
-    return false
-}
-
-// is r one of the registers du[a..b]?
-priv fn du_has(du: []i64, a: i64, b: i64, r: i64) -> bool {
-    for j in a..b {
-        if du[j] == r {
-            return true
-        }
-    }
-    return false
 }
 
 // rewrites the instructions that use or define a spilled register: a memory operand where
@@ -1403,17 +1336,14 @@ priv fn spill(mf: *MFunc, order: []i64, dec: *Dec, spilled: []i64, unspillable: 
         k0 := dec.binst[oi]
         k1 := dec.binst[oi + 1]
         any := false
-        for k in k0..k1 {
+        scan: for k in k0..k1 {
             p := dec.ipos[k]
             h := du[p]
             for j in p + 1..p + 1 + (h & 255) + ((h >> 8) & 255) {
                 if slot_of[du[j]] >= 0 {
                     any = true
-                    break
+                    break scan
                 }
-            }
-            if any {
-                break
             }
         }
         if !any {
@@ -1463,8 +1393,8 @@ priv fn spill(mf: *MFunc, order: []i64, dec: *Dec, spilled: []i64, unspillable: 
                 mem := M(mem_slot(slot, 0))
                 mv := if cls == 1 { MovSd } else { Mov }
                 msz: u8 = if cls == 1 && mf.wide_xmm { 16 } else { 8 }
-                is_def := du_has(du, p + 1, q, v)
-                is_use := du_has(du, q, e, v)
+                is_def := contains(du[p + 1..q], v)
+                is_use := contains(du[q..e], v)
                 // direct forms that avoid a temporary
                 d, s, is_cp := i.is_copy()
                 if is_cp {
@@ -1491,7 +1421,7 @@ priv fn spill(mf: *MFunc, order: []i64, dec: *Dec, spilled: []i64, unspillable: 
                 }
                 if i.op == Mov && i.sz == 8 && i.a == R(v) && is_def && !is_use {
                     match i.b {
-                        I(c) if c >= -2147483648 && c <= 2147483647 => {
+                        I(c) if fits_i32(c) => {
                             i.a = mem
                             continue
                         }
