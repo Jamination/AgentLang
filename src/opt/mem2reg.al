@@ -6,6 +6,7 @@ priv struct Ctx {
     var_ty: Vec[T],
     nb: i64, // block count: the key of (var, block) is var * nb + block
     last_store: IMap,
+    has_store: []bool,
     def_in: IMap,
     new_phis: Vec[(i64, i64)],
     entry_consts: Vec[i64],
@@ -29,9 +30,11 @@ priv fn zero_of(self: *Ctx, t: T) -> i64 {
 }
 
 priv fn read_out(self: *Ctx, var_: i64, b: i64) -> i64 {
-    v := self.last_store.iget(var_ * self.nb + b)
-    if v >= 0 {
-        return v
+    if self.has_store[b] {
+        v := self.last_store.iget(var_ * self.nb + b)
+        if v >= 0 {
+            return v
+        }
     }
     return self.read_in(var_, b)
 }
@@ -56,19 +59,30 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
             v = self.read_out(var_, p)
         }
     } else {
-        phi := self.f.mk(Phi, self.var_ty[var_], vec[i64](), 0)
+        phi := self.f.mk(Phi, self.var_ty[var_], Vec[i64]{buf: alloc[i64](np), len: 0}, 0)
+        self.f.im(phi).pb = Vec[i64]{buf: alloc[i64](np), len: 0}
         self.def_in.iset(key, phi)
         self.new_phis.push((b, phi))
         for p in preds {
             a := self.read_out(var_, p)
             inst := self.f.im(phi)
-            inst.args.push(a)
-            inst.pb.push(p)
+            put(&inst.args, a)
+            put(&inst.pb, p)
         }
         v = phi
     }
     self.def_in.iset(key, v)
     return v
+}
+
+// push for a list that usually has room (push itself is not inlined)
+priv inline fn put(l: *Vec[i64], x: i64) {
+    if l.len < len(l.buf) {
+        l.buf[l.len] = x
+        l.len += 1
+    } else {
+        l.push(x)
+    }
 }
 
 fn mem2reg_run(f: *Func) -> bool {
@@ -95,16 +109,41 @@ priv fn run_once(f: *Func) -> bool {
     }
     rpo := f.rpo()
     n := f.insts.len
-    // users of each value (instruction users only, in reverse postorder) in one buffer:
-    // users of a are ulist[ustart[a]..ustart[a + 1]]; escape through terminators
-    ustart := alloc[i64](n + 1)
+    // The users of the pointers into allocas (instruction users only, in reverse postorder).
+    // `ptrs` is a superset of those pointers: the allocas of the entry block and constant
+    // offsets from such pointers (an argument is defined before its user in reverse postorder,
+    // except for a phi: the uses by phis are all recorded). The recorded (value, user) pairs go
+    // to one buffer by value: the users of a are ulist[ustart[a]..ustart[a + 1]].
+    ptrs := alloc[bool](n)
+    for v in f.blocks[0].insts {
+        if f.insts[v].op == Alloca {
+            ptrs[v] = true
+        }
+    }
     term_used := alloc[bool](n)
-    total := 0
+    pairs := vec[i64]()
     for b in rpo {
         for v in f.blocks[b].insts {
-            for a in f.insts[v].args {
-                ustart[a + 1] += 1
-                total += 1
+            i := &f.insts[v]
+            if i.op == Phi {
+                for a in i.args {
+                    put(&pairs, a)
+                    put(&pairs, v)
+                }
+                continue
+            }
+            for a in i.args {
+                if ptrs[a] {
+                    put(&pairs, a)
+                    put(&pairs, v)
+                }
+            }
+            if i.op == Add {
+                a0 := i.args[0]
+                a1 := i.args[1]
+                if ptrs[a0] && f.insts[a1].op == Const || ptrs[a1] && f.insts[a0].op == Const {
+                    ptrs[v] = true
+                }
             }
         }
         match f.blocks[b].term {
@@ -117,26 +156,28 @@ priv fn run_once(f: *Func) -> bool {
             _ => {}
         }
     }
-    for a in 0..n {
-        ustart[a + 1] += ustart[a]
+    total := pairs.len / 2
+    ustart := alloc[i64](n + 1)
+    for k in 0..total {
+        ustart[pairs[2 * k] + 1] += 1
+    }
+    for x in 0..n {
+        ustart[x + 1] += ustart[x]
     }
     ulist := mkslice[i64](__alloc_raw(total * 8), total)
     ufill := mkslice[i64](__alloc_raw(n * 8), n)
     memcopy(ptr(ufill), ptr(ustart), n * 8)
-    for b in rpo {
-        for v in f.blocks[b].insts {
-            for a in f.insts[v].args {
-                ulist[ufill[a]] = v
-                ufill[a] += 1
-            }
-        }
+    for k in 0..total {
+        x := pairs[2 * k]
+        ulist[ufill[x]] = pairs[2 * k + 1]
+        ufill[x] += 1
     }
-    // access: inst -> var (NOV: none)
-    access := vec_fill(n, NOV)
+    // access[v] = var + 1 for a load or store of a promoted slot (0: none)
+    access := alloc[i64](n)
     naccess := 0
     var_ty := vec[T]()
-    // derived_of[x] == a: x is a (constant offset) pointer into alloca a
-    derived_of := vec_fill(n, NOV)
+    // derived_of[x] == a + 1: x is a (constant offset) pointer into alloca a
+    derived_of := alloc[i64](n)
     derived := vec[(i64, i64)]()
     accs := vec[(i64, i64, T)]()
     slots := vec[(i64, T)]()
@@ -146,7 +187,7 @@ priv fn run_once(f: *Func) -> bool {
         }
         derived.clear()
         derived.push((a, 0))
-        derived_of[a] = a
+        derived_of[a] = a + 1
         accs.clear()
         qi := 0
         while qi < derived.len {
@@ -168,8 +209,8 @@ priv fn run_once(f: *Func) -> bool {
                     if oi.op != Const {
                         continue allocas
                     }
-                    if derived_of[u] != a {
-                        derived_of[u] = a
+                    if derived_of[u] != a + 1 {
+                        derived_of[u] = a + 1
                         derived.push((u, off + oi.k))
                     }
                 } else if inst.op == Load {
@@ -187,7 +228,7 @@ priv fn run_once(f: *Func) -> bool {
         // stored values must not be derived pointers of this alloca
         for acc in accs {
             u := acc.0
-            if f.insts[u].op == Store && derived_of[f.insts[u].args[1]] == a {
+            if f.insts[u].op == Store && derived_of[f.insts[u].args[1]] == a + 1 {
                 continue allocas
             }
         }
@@ -221,10 +262,10 @@ priv fn run_once(f: *Func) -> bool {
         for acc in accs {
             si := index_of(slots.items(), (acc.1, acc.2))
             if slot_var[si] != NOV {
-                if access[acc.0] == NOV {
+                if access[acc.0] == 0 {
                     naccess += 1
                 }
-                access[acc.0] = slot_var[si]
+                access[acc.0] = slot_var[si] + 1
             }
         }
     }
@@ -233,19 +274,21 @@ priv fn run_once(f: *Func) -> bool {
     }
     cfg := cfg_new(f)
     nb := f.blocks.len
-    // last store per (var, block)
-    last_store := imap_new(16)
+    // last store per (var, block); has_store[b]: block b stores to a var
+    last_store := imap_new(naccess)
+    has_store := alloc[bool](nb)
     for b in rpo {
         for v in f.blocks[b].insts {
-            var_ := access[v]
-            if var_ != NOV && f.insts[v].op == Store {
+            var_ := access[v] - 1
+            if var_ >= 0 && f.insts[v].op == Store {
                 last_store.iset(var_ * nb + b, f.insts[v].args[1])
+                has_store[b] = true
             }
         }
     }
     repl := vec_fill(n, NOV)
     nvar := var_ty.len
-    cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, nb: nb, last_store: last_store, def_in: imap_new(16), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}}
+    cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}}
     // the value of each var in the current block: cur_val[var] when cur_blk[var] == b
     cur_val := alloc[i64](nvar)
     cur_blk := vec_fill(nvar, NOV)
@@ -255,8 +298,8 @@ priv fn run_once(f: *Func) -> bool {
         kept := 0
         for ii in 0..insts.len {
             v := insts[ii]
-            var_ := access[v]
-            if var_ != NOV {
+            var_ := access[v] - 1
+            if var_ >= 0 {
                 if cx.f.insts[v].op == Store {
                     cur_val[var_] = cx.f.insts[v].args[1]
                     cur_blk[var_] = b
