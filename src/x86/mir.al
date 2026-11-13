@@ -1,6 +1,6 @@
 // Machine IR for x86-64.
 
-const NOREG = 0xFFFFFFFF
+const NOREG = -1
 const RAX = 0
 const RCX = 1
 const RDX = 2
@@ -31,30 +31,30 @@ struct Bits128 {
     hi: u64
 }
 
-priv enum MemKind {
-    Normal,
-    Global,   // disp is relative to global `id`
-    Slot,     // disp is relative to frame slot `id` (base is rsp)
-    InArg,    // incoming stack argument `id` (base is rsp)
-    OutArg,   // outgoing stack argument `id` (base is rsp)
-    FConst,   // float constant pool entry `id`
-}
+// kinds of memory operands (Mem.kind)
+const MK_NORMAL: u8 = 0
+const MK_GLOBAL: u8 = 1 // disp is relative to global `id`
+const MK_SLOT: u8 = 2   // disp is relative to frame slot `id` (base is rsp)
+const MK_INARG: u8 = 3  // incoming stack argument `id` (base is rsp)
+const MK_OUTARG: u8 = 4 // outgoing stack argument `id` (base is rsp)
+const MK_FCONST: u8 = 5 // float constant pool entry `id`
 
+// 20 bytes: an operand is 32, an instruction 80
 struct Mem {
-    base: i64
-    idx: i64
-    scale: u8
+    base: i32 // register or NOREG
+    idx: i32  // register or NOREG
     disp: i32
-    kind: MemKind
-    id: i64
+    id: i32
+    scale: u8
+    kind: u8
 }
 
 fn mem_new() -> Mem {
-    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: Normal, id: 0}
+    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_NORMAL, id: 0}
 }
 
 fn mem_slot(id: i64, disp: i32) -> Mem {
-    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: disp, kind: Slot, id: id}
+    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: disp, kind: MK_SLOT, id: i32(id)}
 }
 
 enum Opnd {
@@ -153,21 +153,25 @@ const CC_GE: u8 = 13
 const CC_LE: u8 = 14
 const CC_G: u8 = 15
 
+// 80 bytes. Calls, `ret` and `syscall` keep the fixed registers they read (argument and
+// result registers) in MFunc.xuses: operand b is I(start) there and sz2 the count.
 struct MInst {
     op: MOp
     sz: u8
     sz2: u8
     cc: u8
+    tgt: i32 // jump target block, called function, or the immediate third operand (imul3, shufps)
     a: Opnd
     b: Opnd
-    c: Opnd
-    tgt: i64
-    uses: Vec[i64]
-    defs: Vec[i64]
 }
 
 fn minst_new(op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
-    return MInst{op: op, sz: sz, sz2: 0, cc: 0, a: a, b: b, c: Opnd.None, tgt: 0, uses: vec[i64](), defs: vec[i64]()}
+    return MInst{op: op, sz: sz, sz2: 0, cc: 0, tgt: 0, a: a, b: b}
+}
+
+// does the instruction keep a list of fixed registers in MFunc.xuses?
+fn has_xuses(op: MOp) -> bool {
+    return op == Call || op == CallInd || op == Ret || op == Syscall
 }
 
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
@@ -197,6 +201,7 @@ struct MFunc {
     fconsts: Vec[Bits128]
     has_calls: bool
     wide_xmm: bool // some xmm value is a vector: spill slots hold 16 bytes
+    xuses: Vec[i64] // the fixed registers read by calls, `ret` and `syscall` (see MInst)
 }
 
 fn new_vreg(self: *MFunc, class: u8) -> i64 {
@@ -219,127 +224,207 @@ fn new_slot(self: *MFunc, size: i64, align: i64) -> i64 {
     return self.slots.len - 1
 }
 
-priv fn mem_regs(m: Mem, uses: *Vec[i64]) {
+// a call, `ret` or `syscall` that reads the fixed registers `regs`
+fn mir_with_uses(self: *MFunc, op: MOp, sz: u8, a: Opnd, regs: []i64) -> MInst {
+    i := minst_new(op, sz, a, I(self.xuses.len))
+    i.sz2 = u8(len(regs))
+    self.xuses.extend(regs)
+    return i
+}
+
+// the fixed registers read by a call, `ret` or `syscall`
+fn mir_xuses(self: *MFunc, i: *MInst) -> []i64 {
+    match i.b {
+        I(k) => return self.xuses[k..k + i64(i.sz2)]
+        _ => return nil
+    }
+}
+
+// ---------- registers defined and used by an instruction ----------
+// mir_decode writes the registers that instruction `i` defines and uses (including implicit
+// ones) to du[p..]: du[p] = nd | nu << 8 | flags << 16, then nd defs and nu uses. With
+// DU_CALL the instruction also defines the CALL_CLOBBER registers (after the nd listed
+// ones); with DU_COPY it is a copy (is_copy) and du[p + 1] / du[p + 2] are its dst / src.
+// The caller makes room for DU_MAX entries. Returns the position after the entry.
+const DU_CALL = 1
+const DU_COPY = 2
+const DU_MAX = 24
+
+CALL_CLOBBER := [25]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
+
+priv fn du_mem(m: *Mem, du: []i64, q0: i64) -> i64 {
+    q := q0
     if m.base != NOREG {
-        uses.push(m.base)
+        du[q] = i64(m.base)
+        q += 1
     }
     if m.idx != NOREG {
-        uses.push(m.idx)
+        du[q] = i64(m.idx)
+        q += 1
     }
+    return q
 }
 
-priv fn opnd_uses(o: Opnd, uses: *Vec[i64]) {
+priv fn du_opnd(o: *Opnd, du: []i64, q: i64) -> i64 {
     match o {
-        R(r) => uses.push(r)
-        M(m) => mem_regs(m, uses)
-        _ => {}
+        R(r) => {
+            du[q] = r
+            return q + 1
+        }
+        M(&m) => return du_mem(m, du, q)
+        _ => return q
     }
 }
 
-// registers defined and used by an instruction (including implicit ones)
-fn mir_defs_uses(i: *MInst, defs: *Vec[i64], uses: *Vec[i64]) {
-    defs.clear()
-    uses.clear()
+fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
+    nd := 0
+    q := p + 1
+    flags := 0
     match i.op {
         Mov, Movzx, Movsx, Lea, MovSd, Cvtsi2sd, Cvttsd2si, MovqToX, MovqToR, Setcc, Sqrtsd, Cvtf, Popcnt, Tzcnt, Lzcnt, Imul3 => {
-            match i.a {
-                R(r) => defs.push(r)
-                M(m) => mem_regs(m, uses)
-                _ => {}
+            match &i.a {
+                R(r) => {
+                    du[q] = r
+                    q += 1
+                    nd = 1
+                    match &i.b {
+                        R(s) => {
+                            du[q] = s
+                            q += 1
+                            if i.op == MovSd || (i.op == Mov && i.sz == 8) {
+                                flags = DU_COPY
+                            }
+                        }
+                        M(&m) => q = du_mem(m, du, q)
+                        _ => {}
+                    }
+                }
+                M(&m) => {
+                    q = du_mem(m, du, q)
+                    q = du_opnd(&i.b, du, q)
+                }
+                _ => q = du_opnd(&i.b, du, q)
             }
-            opnd_uses(i.b, uses)
         }
         Zero => {
-            match i.a {
-                R(r) => defs.push(r)
+            match &i.a {
+                R(r) => {
+                    du[q] = r
+                    q += 1
+                    nd = 1
+                }
                 _ => {}
             }
         }
         Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Cmov, Shl, Shr, Sar, Rol, Ror => {
-            match i.a {
+            match &i.a {
                 R(r) => {
-                    defs.push(r)
-                    uses.push(r)
+                    du[q] = r
+                    du[q + 1] = r
+                    q += 2
+                    nd = 1
                 }
-                M(m) => mem_regs(m, uses)
+                M(&m) => q = du_mem(m, du, q)
                 _ => {}
             }
-            opnd_uses(i.b, uses)
+            q = du_opnd(&i.b, du, q)
         }
         Neg, Not, Bswap => {
-            match i.a {
+            match &i.a {
                 R(r) => {
-                    defs.push(r)
-                    uses.push(r)
+                    du[q] = r
+                    du[q + 1] = r
+                    q += 2
+                    nd = 1
                 }
-                M(m) => mem_regs(m, uses)
+                M(&m) => q = du_mem(m, du, q)
                 _ => {}
             }
         }
         Cmp, Test, Ucomisd => {
-            opnd_uses(i.a, uses)
-            opnd_uses(i.b, uses)
+            q = du_opnd(&i.a, du, q)
+            q = du_opnd(&i.b, du, q)
         }
         Cqo => {
-            uses.push(RAX)
-            defs.push(RDX)
+            du[q] = RDX
+            du[q + 1] = RAX
+            q += 2
+            nd = 1
         }
         Idiv, Div => {
-            uses.push(RAX)
-            uses.push(RDX)
-            opnd_uses(i.a, uses)
-            defs.push(RAX)
-            defs.push(RDX)
+            du[q] = RAX
+            du[q + 1] = RDX
+            du[q + 2] = RAX
+            du[q + 3] = RDX
+            q = du_opnd(&i.a, du, q + 4)
+            nd = 2
         }
         Mul1, Imul1 => {
-            uses.push(RAX)
-            opnd_uses(i.a, uses)
-            defs.push(RAX)
-            defs.push(RDX)
+            du[q] = RAX
+            du[q + 1] = RDX
+            du[q + 2] = RAX
+            q = du_opnd(&i.a, du, q + 3)
+            nd = 2
         }
         Jmp, Jcc, Ud2 => {}
         Call, CallInd => {
-            opnd_uses(i.a, uses)
-            uses.extend(i.uses.items())
-            for r in CALLER_SAVED_GPR {
-                defs.push(r)
-            }
-            for x in 0..16 {
-                defs.push(XMM0 + x)
+            flags = DU_CALL
+            q = du_opnd(&i.a, du, q)
+            for r in mf.mir_xuses(i) {
+                du[q] = r
+                q += 1
             }
         }
         Ret => {
-            uses.extend(i.uses.items())
+            for r in mf.mir_xuses(i) {
+                du[q] = r
+                q += 1
+            }
         }
         Syscall => {
-            uses.extend(i.uses.items())
-            defs.push(RAX)
-            defs.push(RCX)
-            defs.push(R11)
+            du[q] = RAX
+            du[q + 1] = RCX
+            du[q + 2] = R11
+            q += 3
+            nd = 3
+            for r in mf.mir_xuses(i) {
+                du[q] = r
+                q += 1
+            }
         }
         RepMovsb => {
-            uses.push(RDI)
-            uses.push(RSI)
-            uses.push(RCX)
-            defs.push(RDI)
-            defs.push(RSI)
-            defs.push(RCX)
+            du[q] = RDI
+            du[q + 1] = RSI
+            du[q + 2] = RCX
+            du[q + 3] = RDI
+            du[q + 4] = RSI
+            du[q + 5] = RCX
+            q += 6
+            nd = 3
         }
         RepStosb => {
-            uses.push(RDI)
-            uses.push(RAX)
-            uses.push(RCX)
-            defs.push(RDI)
-            defs.push(RCX)
+            du[q] = RDI
+            du[q + 1] = RCX
+            du[q + 2] = RDI
+            du[q + 3] = RAX
+            du[q + 4] = RCX
+            q += 5
+            nd = 2
         }
-        Push => opnd_uses(i.a, uses)
+        Push => q = du_opnd(&i.a, du, q)
         Pop => {
-            match i.a {
-                R(r) => defs.push(r)
+            match &i.a {
+                R(r) => {
+                    du[q] = r
+                    q += 1
+                    nd = 1
+                }
                 _ => {}
             }
         }
     }
+    du[p] = nd | ((q - p - 1 - nd) << 8) | (flags << 16)
+    return q
 }
 
 // Renaming registers: the callers either apply a lookup table or substitute one register;
@@ -352,73 +437,73 @@ priv fn map_regs_lookup(r: i64, table: []i64) -> i64 {
     return r
 }
 
-priv fn map_regs_mo(o: Opnd, table: []i64) -> Opnd {
+priv fn map_regs_mo(o: *Opnd, table: []i64) {
     match o {
-        R(r) => R(map_regs_lookup(r, table))
+        R(&r) => *r = map_regs_lookup(*r, table)
         M(&m) => {
             if m.base != NOREG {
-                m.base = map_regs_lookup(m.base, table)
+                m.base = i32(map_regs_lookup(i64(m.base), table))
             }
             if m.idx != NOREG {
-                m.idx = map_regs_lookup(m.idx, table)
+                m.idx = i32(map_regs_lookup(i64(m.idx), table))
             }
-            o
         }
-        _ => o
+        _ => {}
     }
 }
 
 // apply a register mapping to all register operands: register r becomes table[r] when
 // r < len(table) and stays unchanged otherwise
 fn mir_map_regs(i: *MInst, table: []i64) {
-    i.a = map_regs_mo(i.a, table)
-    i.b = map_regs_mo(i.b, table)
-    i.c = map_regs_mo(i.c, table)
+    map_regs_mo(&i.a, table)
+    map_regs_mo(&i.b, table)
 }
 
-priv fn replace_reg_mo(o: Opnd, from: i64, to: i64) -> Opnd {
+priv fn replace_reg_mo(o: *Opnd, from: i64, to: i64) {
     match o {
-        R(r) if r == from => R(to)
-        M(&m) => {
-            if m.base != NOREG && m.base == from {
-                m.base = to
+        R(&r) => {
+            if *r == from {
+                *r = to
             }
-            if m.idx != NOREG && m.idx == from {
-                m.idx = to
-            }
-            o
         }
-        _ => o
+        M(&m) => {
+            if m.base != NOREG && i64(m.base) == from {
+                m.base = i32(to)
+            }
+            if m.idx != NOREG && i64(m.idx) == from {
+                m.idx = i32(to)
+            }
+        }
+        _ => {}
     }
 }
 
 // map_regs with `|r| if r == from { to } else { r }`
 fn mir_replace_reg(i: *MInst, from: i64, to: i64) {
-    i.a = replace_reg_mo(i.a, from, to)
-    i.b = replace_reg_mo(i.b, from, to)
-    i.c = replace_reg_mo(i.c, from, to)
+    replace_reg_mo(&i.a, from, to)
+    replace_reg_mo(&i.b, from, to)
 }
 
-priv fn count_reg_mo(o: Opnd, r: i64) -> i64 {
+priv fn count_reg_mo(o: *Opnd, r: i64) -> i64 {
     match o {
-        R(x) if x == r => 1
-        M(m) => {
+        R(x) if x == r => return 1
+        M(&m) => {
             n := 0
-            if m.base != NOREG && m.base == r {
+            if m.base != NOREG && i64(m.base) == r {
                 n += 1
             }
-            if m.idx != NOREG && m.idx == r {
+            if m.idx != NOREG && i64(m.idx) == r {
                 n += 1
             }
-            n
+            return n
         }
-        _ => 0
+        _ => return 0
     }
 }
 
 // number of register operand occurrences of r (the positions map_regs visits)
 fn mir_count_reg(i: *MInst, r: i64) -> i64 {
-    return count_reg_mo(i.a, r) + count_reg_mo(i.b, r) + count_reg_mo(i.c, r)
+    return count_reg_mo(&i.a, r) + count_reg_mo(&i.b, r)
 }
 
 priv N64 := [16]str{"rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"}
@@ -454,28 +539,28 @@ priv fn opnd_str(o: Opnd, sz: u8) -> str {
         M(m) => {
             s := "["
             match m.kind {
-                Normal => {}
-                Global => {
+                MK_GLOBAL => {
                     s = fmt(s, "g", m.id, " ")
                 }
-                Slot => {
+                MK_SLOT => {
                     s = fmt(s, "slot", m.id, " ")
                 }
-                InArg => {
+                MK_INARG => {
                     s = fmt(s, "inarg", m.id, " ")
                 }
-                OutArg => {
+                MK_OUTARG => {
                     s = fmt(s, "outarg", m.id, " ")
                 }
-                FConst => {
+                MK_FCONST => {
                     s = fmt(s, "fconst", m.id, " ")
                 }
+                _ => {}
             }
             if m.base != NOREG {
-                s = concat(s, reg_name(m.base, 8))
+                s = concat(s, reg_name(i64(m.base), 8))
             }
             if m.idx != NOREG {
-                s = fmt(s, "+", reg_name(m.idx, 8), "*", m.scale)
+                s = fmt(s, "+", reg_name(i64(m.idx), 8), "*", m.scale)
             }
             if m.disp != 0 {
                 // {:+}: always with a sign
@@ -510,8 +595,8 @@ fn mir_print_mfunc(f: *MFunc) -> str {
             if i.op == Shl || i.op == Shr || i.op == Sar || i.op == Rol || i.op == Ror {
                 bsz = 1
             }
-            bs := opnd_str(i.b, bsz)
-            c := opnd_str(i.c, i.sz)
+            bs := if has_xuses(i.op) { "" } else { opnd_str(i.b, bsz) }
+            c := if i.op == Imul3 || i.op == Shufps { fmt(i.tgt) } else { "" }
             parts := vec[str]()
             if len(a) != 0 {
                 parts.push(a)

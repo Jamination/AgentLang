@@ -48,12 +48,15 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
     return out
 }
 
+
 fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     fids := reachable_funcs(m)
     fpool := vec[Bits128]()
     fpool_ix := map[Bits128, i64]()
     funcs := vec[Compiled]()
     err := ""
+    align_v, align_set := env_get("ALC_ALIGN")
+    dbg, dbg_set := env_get("ALC_DEBUG")
     for fid in fids {
         f := &m.funcs[fid]
         // everything up to the machine code of this function is temporary (see work_begin)
@@ -62,18 +65,23 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         cleanup_trivial_phis(f)
         cleanup_dce(f)
         aliases := isel_split_critical_edges(f)
-        cfg := cfg_new(f)
-        loops := loops_new(f, &cfg)
-        depths := vec[i64]()
-        for b in 0..f.blocks.len {
-            depths.push(loops.depth(b))
+        // the loops (a function without a cycle has none: no need for dominators)
+        rpo := f.rpo()
+        loops: Loops
+        depths := vec_fill(f.blocks.len, 0)
+        if x86_has_cycle(f, rpo.items()) {
+            cfg := cfg_new(f)
+            loops = loops_new(f, &cfg)
+            for b in 0..f.blocks.len {
+                depths[b] = loops.depth(b)
+            }
         }
         opt_trace("isel", f)
-        mf := isel_select(f, m, depths.items(), aliases.items())
+        mf := isel_select(f, m, rpo.items(), loops, depths.items(), aliases.items())
         layout := block_layout(f)
         // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
         // benchmark suite the padding executed on every loop entry cost more than it gained.
-        align_v, align_set := env_get("ALC_ALIGN")
+        // (loops is empty without a cycle)
         if align_set {
             for li in 0..loops.loops.len {
                 innermost := true
@@ -108,7 +116,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
             }
             local.push(ix)
         }
-        dbg, dbg_set := env_get("ALC_DEBUG")
+        // (ALC_DEBUG read once above)
         if dbg_set && dbg == "mir" {
             eput(mir_print_mfunc(&mf))
         }
@@ -128,22 +136,40 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     return Output{funcs: funcs, fpool: fpool, err: err}
 }
 
+// is there an edge between reachable blocks that goes back in the reverse postorder (or a
+// block that jumps to itself)? Without one the function has no loop: a block dominates only
+// blocks after it in the order.
+fn x86_has_cycle(f: *Func, rpo: []i64) -> bool {
+    idx := vec_fill(f.blocks.len, -1)
+    for i, b in rpo {
+        idx[b] = i
+    }
+    for i, b in rpo {
+        k, s0, s1 := f.succ_pair(b)
+        if (k > 0 && idx[s0] <= i) || (k > 1 && idx[s1] <= i) {
+            return true
+        }
+    }
+    return false
+}
+
 // Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,
 // with blocks that inevitably trap moved to the end.
 priv fn block_layout(f: *Func) -> Vec[i64] {
     n := f.blocks.len
     seen := vec_fill(n, false)
     post := vec[i64]()
+    post.reserve(n)
     stack := vec_of([](i64, i64){(0, 0)})
     seen[0] = true
     while stack.len > 0 {
         top := stack.len - 1
         b := stack[top].0
         i := stack[top].1
-        ss := f.succs(b)
-        reverse(ss.items())
-        if i < ss.len {
-            s := ss[i]
+        // the successors in reverse order: else, then
+        k, s0, s1 := f.succ_pair(b)
+        if i < k {
+            s := if k == 2 && i == 0 { s1 } else { s0 }
             stack[top].1 = i + 1
             if !seen[s] {
                 seen[s] = true
