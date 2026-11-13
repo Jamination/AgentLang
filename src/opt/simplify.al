@@ -1052,12 +1052,29 @@ priv fn fold_insts_find(repl: *Vec[i64], v0: i64) -> i64 {
 priv fn fold_insts(f: *Func) -> bool {
     rpo := f.rpo()
     repl := vec_fill(f.insts.len, NOV)
-    uses := f.use_counts()
+    nrepl := 0
+    // the use counts are only read for an Xor or Or (simplify never makes one from another op)
+    has_xor_or := false
+    scan: for b in rpo {
+        for v in f.blocks[b].insts {
+            o := f.insts[v].op
+            if o == Xor || o == Or {
+                has_xor_or = true
+                break scan
+            }
+        }
+    }
+    uses := vec[i64]()
+    if has_xor_or {
+        uses = f.use_counts()
+    }
     cx := Ctx{f: f, new_insts: vec[i64](), changed: false, uses: uses}
     for b in rpo {
+        // the new list of the block is built in cx.new_insts (one buffer for all blocks) and
+        // copied back into the block's buffer when it fits
         old := cx.f.blocks[b].insts
         cx.f.blocks[b].insts = vec[i64]()
-        cx.new_insts = vec[i64]()
+        cx.new_insts.clear()
         for v in old {
             for ai in 0..cx.f.insts[v].args.len {
                 a := cx.f.insts[v].args[ai]
@@ -1072,17 +1089,26 @@ priv fn fold_insts(f: *Func) -> bool {
                         repl.resize(cx.f.insts.len, NOV)
                     }
                     repl[v] = w
+                    nrepl += 1
                     cx.changed = true
                 }
                 None => { cx.new_insts.push(v) }
             }
         }
-        cx.f.blocks[b].insts = cx.new_insts
-        cx.new_insts = vec[i64]()
+        k := cx.new_insts.len
+        if k <= len(old.buf) {
+            memcopy(ptr(old.buf), ptr(cx.new_insts.buf), k * 8)
+            old.len = k
+            cx.f.blocks[b].insts = old
+        } else {
+            cx.f.blocks[b].insts = vec_of(cx.new_insts.items())
+        }
     }
     changed := cx.changed
-    repl.resize(f.insts.len, NOV)
-    f.apply_repl(&repl)
+    if nrepl > 0 {
+        repl.resize(f.insts.len, NOV)
+        f.apply_repl(&repl)
+    }
     return changed
 }
 
@@ -1158,6 +1184,134 @@ priv fn retarget(f: *Func, p: i64, from: i64, to: i64) {
     }
 }
 
+// Cheap necessary conditions for a round of the steps of simplify_cfg to change anything: a
+// round whose step cannot find a candidate block is not run (it would build its tables only
+// to find nothing).
+
+// step 2: a block jumps to another one (not the entry) that has no other predecessor
+priv fn may_merge(f: *Func) -> bool {
+    n := f.blocks.len
+    cnt := alloc[i64](n)
+    for b in 0..n {
+        k, s0, s1 := f.succ_pair(b)
+        if k > 0 {
+            cnt[s0] += 1
+        }
+        if k > 1 {
+            cnt[s1] += 1
+        }
+    }
+    for b in 0..n {
+        match f.blocks[b].term {
+            Jmp(s) if s != 0 && s != b && cnt[s] == 1 => return true
+            _ => {}
+        }
+    }
+    return false
+}
+
+// step 3: an empty block (not the entry) that jumps to another one
+priv fn may_forward(f: *Func) -> bool {
+    for e in 1..f.blocks.len {
+        if f.blocks[e].insts.is_empty() {
+            match f.blocks[e].term {
+                Jmp(t) if t != e => return true
+                _ => {}
+            }
+        }
+    }
+    return false
+}
+
+// the condition of block b's two-way branch when b holds only phis and branches on one of them
+priv fn phi_branch(f: *Func, b: i64) -> i64 {
+    c, t, e := match f.blocks[b].term {
+        Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
+        _ => return NOV
+    }
+    binsts := &f.blocks[b].insts
+    if binsts.is_empty() || !all_phis(f, binsts) || !contains(binsts, c) {
+        return NOV
+    }
+    return c
+}
+
+// step 4: such a block whose condition is a constant on some edge from another block
+priv fn may_thread4(f: *Func) -> bool {
+    for b in 0..f.blocks.len {
+        c := phi_branch(f, b)
+        if c == NOV {
+            continue
+        }
+        ci := &f.insts[c]
+        for k in 0..ci.pb.len {
+            if ci.pb[k] != b && f.insts[ci.args[k]].op == Const {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+// step 5: such a block (not the entry) whose condition is a constant on every edge from
+// other blocks
+priv fn may_thread5(f: *Func) -> bool {
+    blocks: for b in 1..f.blocks.len {
+        c := phi_branch(f, b)
+        if c == NOV {
+            continue
+        }
+        ci := &f.insts[c]
+        for k in 0..ci.pb.len {
+            if ci.pb[k] == b || f.insts[ci.args[k]].op != Const {
+                continue blocks
+            }
+        }
+        return true
+    }
+    return false
+}
+
+// step 6: a two-way branch with an arm that may be a tiny side-effect-free block (the test of
+// simplify_cfg_side without the predecessor count)
+priv fn may_ifconv(f: *Func) -> bool {
+    for b in 0..f.blocks.len {
+        match f.blocks[b].term {
+            Br(_, t, e) if t != e => {
+                if may_side(f, t) || may_side(f, e) {
+                    return true
+                }
+            }
+            _ => {}
+        }
+    }
+    return false
+}
+
+priv fn may_side(f: *Func, x: i64) -> bool {
+    if x == 0 {
+        return false
+    }
+    match f.blocks[x].term {
+        Jmp(_) => {}
+        _ => return false
+    }
+    real := 0
+    for v in f.blocks[x].insts {
+        op := f.insts[v].op
+        cheap := op == Const || op == FConst || op == GAddr || op == FAddr || op == Add || op == Sub ||
+            op == And || op == Or || op == Xor || op == Shl || op == LShr || op == AShr || op == SExt ||
+            op == ZExt || op == Trunc
+        if !cheap {
+            return false
+        }
+        if !(op == Const || op == FConst || op == GAddr || op == FAddr) {
+            real += 1
+        }
+    }
+    return real <= 2
+}
+
 priv fn simplify_cfg(f: *Func) -> bool {
     changed := false
     // 1. fold constant / degenerate branches
@@ -1198,6 +1352,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         guard_merge += 1
         if guard_merge > 20000 {
             eput(fmt("simplify_cfg: step merge does not converge in ", f.name, "\n"))
+            break
+        }
+        if !may_merge(f) {
             break
         }
         // per-round tables live on the scratch heap (see base.al)
@@ -1265,6 +1422,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         guard_forward += 1
         if guard_forward > 20000 {
             eput(fmt("simplify_cfg: step forward does not converge in ", f.name, "\n"))
+            break
+        }
+        if !may_forward(f) {
             break
         }
         scratch_reset()
@@ -1339,6 +1499,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         if guard_thread4 > 20000 {
             eput(fmt("simplify_cfg: step thread4 does not converge in ", f.name, "\n"))
+            break
+        }
+        if !may_thread4(f) {
             break
         }
         scratch_reset()
@@ -1471,6 +1634,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         if guard_thread5 > 20000 {
             eput(fmt("simplify_cfg: step thread5 does not converge in ", f.name, "\n"))
+            break
+        }
+        if !may_thread5(f) {
             break
         }
         scratch_reset()
@@ -1650,6 +1816,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
     // 6. if-conversion: tiny side-effect-free arms become selects (conditional moves)
     loop {
         if !opt_enabled("ifconv") {
+            break
+        }
+        if !may_ifconv(f) {
             break
         }
         scratch_reset()
