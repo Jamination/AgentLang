@@ -168,6 +168,86 @@ fn wait_worker(pid: i64) -> i64 {
     return 128 + (st & 0x7F)
 }
 
+// A work queue that forked workers share: a pipe filled with the items (each below 2^32) and
+// closed for writing before the workers are forked. A read of a pipe is atomic, so every item
+// is taken (queue_take) by one process only, in the order of the items. Items that do not fit
+// into the pipe are left out. Returns the read end, or -1.
+fn queue_new(items: []i64) -> i64 {
+    fds: [1]i64
+    // O_CLOEXEC | O_NONBLOCK: a full pipe ends the filling (no waiting for a reader), and an
+    // empty one without a writer reads as end of file
+    if syscall(293, ptr(fds), 0x80800) != 0 {
+        return -1
+    }
+    rd := fds[0] & 0xFFFFFFFF
+    wr := fds[0] >> 32
+    n := len(items)
+    // room for all items if the system allows it (F_SETPIPE_SZ)
+    syscall(72, wr, 1031, 4 * n)
+    buf := alloc[u32](max(n, 1))
+    for i, x in items {
+        buf[i] = u32(x)
+    }
+    // a page at a time, until the pipe is full (what a short write leaves of an item is
+    // ignored by queue_take)
+    k := 0
+    while k < n {
+        c := min(1024, n - k)
+        if syscall(1, wr, cast[i64](ptr(buf)) + 4 * k, 4 * c) != 4 * c {
+            break
+        }
+        k += c
+    }
+    syscall(3, wr)
+    return rd
+}
+
+// the next item of the queue at fd, or -1 if it is empty
+fn queue_take(fd: i64) -> i64 {
+    x: [1]u32
+    loop {
+        r := syscall(0, fd, ptr(x), 4)
+        if r == -4 {
+            continue
+        }
+        if r != 4 {
+            return -1
+        }
+        return i64(x[0])
+    }
+}
+
+// A pipe through which forked workers report that they are done: (read end, write end), or
+// (-1, -1). Every worker closes its copy of the write end when it is done (a process that ends
+// closes it too); once this process has closed its own, pipe_wait_closed returns when all are.
+fn pipe_open() -> (i64, i64) {
+    fds: [1]i64
+    if syscall(293, ptr(fds), 0x80000) != 0 {
+        return (-1, -1)
+    }
+    return (fds[0] & 0xFFFFFFFF, fds[0] >> 32)
+}
+
+fn fd_close(fd: i64) {
+    if fd >= 0 {
+        syscall(3, fd)
+    }
+}
+
+// waits until every copy of the write end of the pipe whose read end is fd is closed
+fn pipe_wait_closed(fd: i64) {
+    buf: [8]u8
+    loop {
+        r := syscall(0, fd, ptr(buf), 8)
+        if r == -4 {
+            continue
+        }
+        if r <= 0 {
+            return
+        }
+    }
+}
+
 // Deep recursion needs a big stack: if the stack limit is below `bytes`, raise it and start
 // the program again (the limit only applies to a new process image). Call first in main.
 fn ensure_stack(bytes: i64) {

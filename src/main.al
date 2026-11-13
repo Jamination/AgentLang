@@ -698,6 +698,9 @@ priv fn real_main() -> i64 {
     mem("optimized")
     if ar.emit_ir {
         for fi in 0..module.funcs.len {
+            opt_finish(&module, fi)
+        }
+        for fi in 0..module.funcs.len {
             if module.funcs[fi].lowered {
                 put(ir_print_func(&module.funcs[fi], Some(&module)))
             }

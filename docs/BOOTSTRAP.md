@@ -173,17 +173,33 @@ Compiling the compiler (about 25,800 lines and the 2,700 of the prelude) takes a
 
 ## Parallel back end
 
-`x86_compile` compiles functions independently of each other. With at least 64 reachable
-functions and more than one CPU (the CPUs of `sched_getaffinity`, limited by a cgroup quota
-in `/sys/fs/cgroup/cpu.max`, at most 6) it forks workers (`fork_worker` in `src/base.al`) that
-each compile a share of the functions balanced by IR size and write the machine code,
-relocations and float constants into a mapping shared with the compiler (`emit_put_code`);
-the compiler compiles its own share meanwhile, then builds the float constant pool in the
-order of the functions, so the output is byte-identical to a sequential compile. Whatever a
-worker does not deliver (it crashed, failed or ran out of room) the compiler compiles itself;
-workers are silent unless `ALC_DEBUG` is set. `ALC_JOBS=n` sets the number of processes
+`x86_compile` compiles functions independently of each other. With more than one CPU (the
+CPUs of `sched_getaffinity`, limited by a cgroup quota in `/sys/fs/cgroup/cpu.max`, at most 6)
+it forks workers (`fork_worker` in `src/base.al`). The functions go into a queue, largest
+first: a pipe filled before the fork, from which every process (the compiler too) takes one
+function at a time (`queue_new`, `queue_take`), so all processes finish at about the same
+time. A worker writes each function's machine code, relocations and float constants into a
+mapping shared with the compiler (`emit_put_code`) and closes its end of a pipe when it is
+done; the compiler then builds the float constant pool in the order of the functions, so the
+output is byte-identical to a sequential compile.
+
+At `-O0` the optimiser is only `opt_first` per function (prune, mem2reg, DCE), which reads
+nothing of the module but the function: `opt_optimize` leaves it to the back end
+(`opt_finish`), and the workers optimise the functions they take before compiling them. As the
+reachable functions are only known from the optimised IR (prune and DCE remove calls), at
+`-O0` every lowered function is optimised and compiled (with at least 64 functions in the
+module; nearly all are reachable at `-O0`); each worker also reports the calls and function
+addresses of the optimised IR, from which the compiler computes the reachable functions as a
+sequential compile does and keeps only their code. Optimised builds compute the reachable
+functions first and send only those (at least 64) to the queue.
+
+A fork's changes to the IR are its own, so the compiler still has the unoptimised IR of the
+functions the workers took. Whatever a worker does not deliver (it crashed, failed, exited
+before it was done or ran out of room) the compiler optimises and compiles itself; workers
+are silent unless `ALC_DEBUG` is set. `ALC_JOBS=n` sets the number of processes
 (`ALC_JOBS=1`: sequential); `--emit-asm` and the per-function debug output (`ALC_DEBUG` other
-than `mem`) are always sequential.
+than `mem`) are always sequential, and `--emit-ir` optimises every function in the compiler
+before it prints them.
 
 ## Debugging switches
 

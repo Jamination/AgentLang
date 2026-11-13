@@ -382,6 +382,23 @@ fn opt_first(m: *Module, fid: i64, level: i64) {
     keep_func(f)
 }
 
+// At -O0 the optimisation is opt_first alone, which reads nothing of the module but the
+// function: opt_optimize leaves it to the back end, which runs it per function (opt_finish), in
+// its worker processes when it has some (see x86_compile).
+priv deferred: bool
+
+// the optimisation of function fid that opt_optimize left to the back end (nothing if done)
+fn opt_finish(m: *Module, fid: i64) {
+    if deferred {
+        opt_first(m, fid, 0)
+    }
+}
+
+// has opt_optimize left the optimisation to the back end?
+fn opt_deferred() -> bool {
+    return deferred
+}
+
 fn opt_optimize(m: *Module, level: i64) {
     n := m.funcs.len
     check_fail = vec_fill(n, false)
@@ -389,11 +406,12 @@ fn opt_optimize(m: *Module, level: i64) {
         nm := m.funcs[fid].name
         check_fail[fid] = nm == "__bounds_fail" || nm == "__div_fail" || nm == "__step_fail"
     }
+    if level == 0 {
+        deferred = true
+        return
+    }
     for fid in 0..n {
         opt_first(m, fid, level)
-    }
-    if level == 0 {
-        return
     }
     // call graph facts
     call_counts := vec_fill(n, 0)

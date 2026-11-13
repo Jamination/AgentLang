@@ -11,7 +11,37 @@ struct Output {
     err: str // the first function that cannot be compiled (stack frame too large), or ""
 }
 
-priv fn reachable_funcs(m: *Module) -> Vec[i64] {
+// The functions that each function calls or takes the address of, from its optimised IR: those
+// of function f are list[start[f]..start[f] + cnt[f]]; cnt[f] is -1 while they are not known.
+priv struct Refs {
+    start: Vec[i64]
+    cnt: Vec[i64]
+    list: Vec[i64]
+}
+
+priv fn refs_new(n: i64) -> Refs {
+    return Refs{start: vec_fill(n, 0), cnt: vec_fill(n, -1), list: vec[i64]()}
+}
+
+// records the references of function fid (in the order of its IR)
+priv fn refs_add(r: *Refs, m: *Module, fid: i64) {
+    r.start[fid] = r.list.len
+    f := &m.funcs[fid]
+    for bi in 0..f.blocks.len {
+        for v in f.blocks[bi].insts {
+            i := &f.insts[v]
+            if i.op == Call || i.op == FAddr {
+                r.list.push(i.k)
+            }
+        }
+    }
+    r.cnt[fid] = r.list.len - r.start[fid]
+}
+
+// The functions to compile, in increasing order: the entry, the functions whose address is in
+// global data, and whatever these call or take the address of (r: the references of every
+// function).
+priv fn reachable_funcs(m: *Module, r: *Refs) -> Vec[i64] {
     seen := vec_fill(m.funcs.len, false)
     work := vec_of([]i64{m.entry})
     seen[m.entry] = true
@@ -33,14 +63,11 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
     while work.len > 0 {
         f := work.pop()
         out.push(f)
-        func := &m.funcs[f]
-        for bi in 0..func.blocks.len {
-            for v in func.blocks[bi].insts {
-                i := &func.insts[v]
-                if (i.op == Call || i.op == FAddr) && !seen[i.k] {
-                    seen[i.k] = true
-                    work.push(i.k)
-                }
+        for x in r.start[f]..r.start[f] + r.cnt[f] {
+            k := r.list[x]
+            if !seen[k] {
+                seen[k] = true
+                work.push(k)
             }
         }
     }
@@ -63,12 +90,9 @@ priv struct Opts {
 }
 
 fn x86_compile(m: *Module, dump_asm: bool) -> Output {
-    fids := reachable_funcs(m)
     align_v, align_set := env_get("ALC_ALIGN")
     dbg, dbg_set := env_get("ALC_DEBUG")
     o := Opts{dump_asm: dump_asm, align: align_set, mir: dbg_set && dbg == "mir"}
-    no_done: Done
-    done := vec_fill(fids.len, no_done)
     // Functions are compiled independently of each other: with several CPUs, forked workers
     // compile parts of them (ALC_JOBS=n sets the number of processes). Debug output that is
     // written per function (mir, trace, verify) keeps the plain order.
@@ -80,11 +104,41 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
             nw = j
         }
     }
-    if nw > 1 && fids.len >= 64 && !dump_asm && (!dbg_set || dbg == "mem") {
-        compile_parallel(m, fids.items(), &o, nw, &done)
+    par := nw > 1 && !dump_asm && (!dbg_set || dbg == "mem")
+    n := m.funcs.len
+    fused := par && opt_deferred() && n >= 64
+    no_done: Done
+    // made[f]: the code of function f made by compile_spread (!ok: not made there)
+    made := vec_fill(n, no_done)
+    r := refs_new(n)
+    if fused {
+        // The optimisation left to the back end (-O0) runs in the workers too, before the
+        // reachable functions are known: all lowered functions are optimised and compiled (at
+        // -O0 nearly all are reachable; the code of the others is dropped), and their
+        // references give the reachable functions.
+        lowered := vec[i64]()
+        for f in 0..n {
+            if m.funcs[f].lowered {
+                lowered.push(f)
+            }
+        }
+        made = compile_spread(m, lowered.items(), &o, nw, &r)
     }
+    for f in 0..n {
+        if r.cnt[f] < 0 {
+            opt_finish(m, f)
+            refs_add(&r, m, f)
+        }
+    }
+    fids := reachable_funcs(m, &r)
+    if par && !fused && fids.len >= 64 {
+        made = compile_spread(m, fids.items(), &o, nw, &r)
+    }
+    done := vec_fill(fids.len, no_done)
     for i in 0..fids.len {
+        done[i] = made[fids[i]]
         if !done[i].ok {
+            opt_finish(m, fids[i])
             done[i] = compile_fn(m, fids[i], &o)
         }
     }
@@ -178,92 +232,129 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts) -> Done {
     return d
 }
 
-// Compiles the functions in nw processes: this one and nw - 1 forked workers, each with a
-// share balanced by IR size, largest first. A worker writes its results into a mapping shared
-// with this process; whatever a worker does not deliver (it failed, crashed or ran out of
-// room) stays !ok in `done` and is compiled here afterwards.
-priv fn compile_parallel(m: *Module, fids: []i64, o: *Opts, nw: i64, done: *Vec[Done]) {
-    n := len(fids)
+// Compiles the functions cand in nw processes: this one and nw - 1 forked workers. They take
+// the functions from a queue (queue_new), largest first, so that all finish at about the same
+// time; each function is optimised (what opt_optimize left to the back end, opt_finish), its
+// references are recorded in r and it is compiled. A worker writes its results into a mapping
+// shared with this process and then closes its copy of the write end of the pipe `fin` (so the
+// results are read without waiting for the worker to end). Returns the code by function: what
+// is not delivered (a worker failed, crashed or ran out of room) stays !ok and unknown in r,
+// for the caller to redo. A fork's changes to the IR are its own: this process still has the
+// IR of the functions of the workers as it was before.
+priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> Vec[Done] {
+    n := m.funcs.len
     sizes := vec_fill(n, 0)
-    order := vec_fill(n, 0)
-    for i in 0..n {
-        sizes[i] = m.funcs[fids[i]].insts.len
-        order[i] = i
+    order := vec_of(cand)
+    total := 0
+    for f in cand {
+        sizes[f] = m.funcs[f].insts.len
+        // the references (8 bytes per instruction at most) and the code (about 512)
+        total += 520 * sizes[f] + 4096
     }
+    // twice a fair share (a worker that runs out of room stops taking functions)
+    room := (1 << 22) + 2 * total / nw
     sort_by(order.items(), sizes.items(), fn(s: []i64, a: i64, b: i64) -> bool { s[a] > s[b] || (s[a] == s[b] && a < b) })
-    load := vec_fill(nw, 0)
-    room := vec_fill(nw, 1 << 22)
-    owner := vec_fill(n, 0)
-    for i in order {
-        w := 0
-        for x in 1..nw {
-            if load[x] < load[w] {
-                w = x
-            }
-        }
-        owner[i] = w
-        load[w] += sizes[i] + 1
-        room[w] += 512 * sizes[i] + 4096
-    }
+    q := queue_new(order.items())
+    fin_r, fin_w := pipe_open()
     base := vec_fill(nw, 0)
     pids := vec_fill(nw, -1)
+    // (a failed worker stays silent unless ALC_DEBUG is set)
+    dv, dset := env_get("ALC_DEBUG")
     for w in 1..nw {
-        base[w] = shared_map(room[w])
+        if q < 0 || fin_r < 0 {
+            break
+        }
+        base[w] = shared_map(room)
         if base[w] == 0 {
             continue
         }
-        // (a failed worker stays silent unless ALC_DEBUG is set)
-        dv, dset := env_get("ALC_DEBUG")
         pid := fork_worker(!dset)
         if pid == 0 {
-            worker(m, fids, owner.items(), w, base[w], room[w], o)
+            fd_close(fin_r)
+            spread_worker(m, q, base[w], room, o)
+            fd_close(fin_w)
             worker_exit(0)
         }
         pids[w] = pid
     }
-    for i in 0..n {
-        if owner[i] == 0 {
-            done[i] = compile_fn(m, fids[i], o)
+    fd_close(fin_w)
+    no_done: Done
+    done := vec_fill(n, no_done)
+    if q >= 0 {
+        loop {
+            f := queue_take(q)
+            if f < 0 {
+                break
+            }
+            opt_finish(m, f)
+            refs_add(r, m, f)
+            done[f] = compile_fn(m, f, o)
         }
+        fd_close(q)
     }
+    pipe_wait_closed(fin_r)
+    fd_close(fin_r)
     for w in 1..nw {
-        if pids[w] >= 0 && wait_worker(pids[w]) == 0 {
-            hdr := cast[*i64](base[w])
+        if pids[w] >= 0 && cast[*i64](base[w])[1] == 1 {
             off := 64
-            for r in 0..hdr[1] {
+            for k in 0..cast[*i64](base[w])[0] {
                 rec := cast[*i64](base[w] + off)
-                i := rec[0]
-                code, fc, next := emit_get_code(base[w], off + 8)
-                done[i] = Done{code: code, fconsts: fc, ok: true}
+                f := rec[0]
+                nr := rec[1]
+                r.start[f] = r.list.len
+                for x in 0..nr {
+                    r.list.push(rec[2 + x])
+                }
+                r.cnt[f] = nr
+                code, fc, next := emit_get_code(base[w], off + 16 + 8 * nr)
+                done[f] = Done{code: code, fconsts: fc, ok: true}
                 off = next
             }
         }
         if base[w] != 0 {
-            shared_unmap(base[w], room[w])
+            shared_unmap(base[w], room)
         }
     }
+    for w in 1..nw {
+        if pids[w] >= 0 {
+            wait_worker(pids[w])
+        }
+    }
+    return done
 }
 
-// a forked worker: compiles the functions of share w and writes them to the shared mapping
-// at base: words 0 (all written) and 1 (the number of records), then from byte 64 the records:
-// the index of the function, then its code (emit_put_code)
-priv fn worker(m: *Module, fids: []i64, owner: []i64, w: i64, base: i64, room: i64, o: *Opts) {
+// A forked worker of compile_spread: optimises and compiles the functions it takes from the
+// queue q and writes them to the shared mapping at base: words 0 (the number of records) and 1
+// (1: all records written), from byte 64 the records: the function, the number of its
+// references, the references, its code (emit_put_code).
+priv fn spread_worker(m: *Module, q: i64, base: i64, room: i64, o: *Opts) {
     hdr := cast[*i64](base)
     off := 64
-    for i in 0..len(fids) {
-        if owner[i] != w {
-            continue
+    r := refs_new(m.funcs.len)
+    loop {
+        f := queue_take(q)
+        if f < 0 {
+            break
         }
-        d := compile_fn(m, fids[i], o)
-        if off + 8 + emit_code_size(&d.code, &d.fconsts) > room {
-            return
+        opt_finish(m, f)
+        r.list.clear()
+        refs_add(&r, m, f)
+        d := compile_fn(m, f, o)
+        nr := r.list.len
+        if off + 16 + 8 * nr + emit_code_size(&d.code, &d.fconsts) > room {
+            // (this function is left to the compiler)
+            break
         }
         rec := cast[*i64](base + off)
-        rec[0] = i
-        off = emit_put_code(&d.code, &d.fconsts, base, off + 8)
-        hdr[1] += 1
+        rec[0] = f
+        rec[1] = nr
+        for x in 0..nr {
+            rec[2 + x] = r.list[x]
+        }
+        off = emit_put_code(&d.code, &d.fconsts, base, off + 16 + 8 * nr)
+        hdr[0] += 1
     }
-    hdr[0] = 1
+    hdr[1] = 1
 }
 
 // is there an edge between reachable blocks that goes back in the reverse postorder (or a
