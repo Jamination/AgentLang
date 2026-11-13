@@ -55,7 +55,7 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
                 }
                 None => {}
             }
-            if !self.cx.const_decls.has(n) {
+            if !self.cx.has_const(n) {
                 match self.global_place(n) {
                     Some(m) => return m
                     None => {}

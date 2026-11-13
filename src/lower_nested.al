@@ -30,7 +30,7 @@ const LOWER_NESTED_OUTER = -0x4000000000000000
 // The name `name` as seen from a function nested in `p`: a nested function of `p` (or of a
 // function around it) is visible, a variable is LOWER_NESTED_OUTER.
 fn lower_nested_outer(p: *Fx, name: str) -> Opt[(i64, i64)] {
-    id := ast_sym(name)
+    id := ast_sym_find(name)
     fx := p
     while fx != nil {
         match fx.local(id) {

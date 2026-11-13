@@ -336,9 +336,9 @@ fn unify(self: *Fx, t: *TypeAst, ty: i64, tparams: []str, env: *Map[str, i64]) -
 }
 
 fn call_rt(self: *Fx, name: str, targs: Vec[i64], args: Vec[Val], pos: Pos) -> Val {
-    di, found := self.cx.p_fn_names.get(name)
+    di, found := self.cx.p_fn_name(name)
     if !found {
-        di, found = self.cx.fn_names.get(name)
+        di, found = self.cx.fn_name(name)
     }
     if !found {
         self.err(pos, fmt("internal: runtime function `", name, "` is missing"))
@@ -577,7 +577,7 @@ priv fn recv_val(self: *Fx, recv: *Expr) -> Val {
             // `f[T]`: an instantiation of a generic function, not an element
             match b.k {
                 Ident(n) => {
-                    if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.global_decls.has(n) {
+                    if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.has_global(n) {
                         return self.expr(recv, None)
                     }
                 }
@@ -640,7 +640,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 }
                 None => {}
             }
-            if self.cx.global_decls.has(n) || self.cx.const_decls.has(n) {
+            if self.cx.has_global(n) || self.cx.has_const(n) {
                 fv := self.expr(c, None)
                 return self.call_indirect(fv, args, pos)
             }
@@ -665,7 +665,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                         lower_call_eval_all(self, args)
                         return val_err()
                     }
-                    is_var := is_some(self.lookup(n)) || (self.cx.global_decls.has(n) && !is_some(self.cx.find_fn(n)))
+                    is_var := is_some(self.lookup(n)) || (self.cx.has_global(n) && !is_some(self.cx.find_fn(n)))
                     if !is_var {
                         env := self.tenv
                         cands := self.cx.fn_candidates(n)

@@ -185,7 +185,7 @@ priv fn literal_type(s: *Fx, a: *Expr) -> i64 {
 // (`call_decl`, `call_overloaded` or `builtin`) finds them.
 fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], recv: Opt[Val], recv_e: *Expr, args0: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     cands := cands0
-    if self.cx.scope_prelude && !self.cx.p_fn_over.has(name) {
+    if self.cx.scope_prelude && !self.cx.has_p_fn_over(name) {
         // library code means the builtin, whatever the program declares under this name
         cands = vec[i64]()
     }

@@ -464,8 +464,8 @@ fn ast_sym_name(id: i64) -> str {
     return sym_texts[id]
 }
 
-// the symbol of a text
-fn ast_sym(s: str) -> i64 {
+// the symbol of a canonical text, or -1 for any other text
+priv fn canonical(s: str) -> i64 {
     p := cast[i64](ptr(s))
     base := cast[i64](ptr(sym_chunk))
     if p >= base + 8 && p < base + sym_chunk_used {
@@ -477,7 +477,41 @@ fn ast_sym(s: str) -> i64 {
             }
         }
     }
+    return -1
+}
+
+// the symbol of a text (a new text becomes one)
+fn ast_sym(s: str) -> i64 {
+    id := canonical(s)
+    if id >= 0 {
+        return id
+    }
     return ast_sym_hashed(s, ast_sym_hash(s))
+}
+
+// the symbol of a text, or -1 if it is none
+fn ast_sym_find(s: str) -> i64 {
+    id := canonical(s)
+    if id >= 0 || len(sym_slots) == 0 {
+        return id
+    }
+    h := ast_sym_hash(s)
+    mask := len(sym_slots) - 1
+    i := i64((h * SYM_MIX) >> sym_shift)
+    tag := h & 0xFFFFFFFF00000000
+    loop {
+        e := sym_slots[i]
+        if e == 0 {
+            return -1
+        }
+        if e & 0xFFFFFFFF00000000 == tag {
+            t := sym_texts[i64(e & 0xFFFFFFFF) - 1]
+            if len(t) == len(s) && t == s {
+                return i64(e & 0xFFFFFFFF) - 1
+            }
+        }
+        i = (i + 1) & mask
+    }
 }
 
 // the canonical text of `s`

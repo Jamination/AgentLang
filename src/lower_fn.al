@@ -91,7 +91,7 @@ struct Fx {
 }
 
 fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
-    edi, has_entry := cx.fn_names.get(entry)
+    edi, has_entry := cx.fn_name(entry)
     if has_entry {
         cx.entry_file = cx.fn_decls[edi].pos.file
         fid := cx.inst_fn(edi, vec[i64]())
@@ -115,8 +115,8 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             d := cx.fn_decls[di]
             eager := d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file)
             if d.tparams.is_empty() && eager {
-                l, has_l := cx.fn_over.get(d.name)
-                if has_l && contains(&l, di) && cx.fn_names.has(d.name) {
+                l, has_l := cx.fn_over_of(d.name)
+                if has_l && contains(&l, di) && cx.has_fn_name(d.name) {
                     cx.inst_fn(di, vec[i64]())
                 }
             }
@@ -124,8 +124,8 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         // two definitions of a name whose parameter types are the same once type aliases
         // are resolved (the texts differ, so the declaration pass did not see it)
         for n in cx.fn_over.keys() {
-            l, _ := cx.fn_over.get(n)
-            if l.len < 2 || !cx.fn_names.has(n) {
+            l, _ := cx.fn_over_of(n)
+            if l.len < 2 || !cx.has_fn_name(n) {
                 continue
             }
             for a in 1..l.len {
@@ -155,7 +155,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         // (the names are visited in the order of their declarations)
         cnames := vec[str]()
         for n in cx.const_decls.keys() {
-            d, _ := cx.const_decls.get(n)
+            d, _ := cx.const_decl(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
                 cnames.push(n)
             }
@@ -165,7 +165,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         }
         gnames := vec[str]()
         for n in cx.global_decls.keys() {
-            d, _ := cx.global_decls.get(n)
+            d, _ := cx.global_decl(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
                 gnames.push(n)
             }
@@ -618,9 +618,9 @@ priv fn unbind(start: i64) {
     binds.len = start
 }
 
-// the newest binding of symbol `id`, or -1
+// the newest binding of symbol `id`, or -1 (also for id -1: a text that is no symbol)
 priv fn top_binding(id: i64) -> i64 {
-    if id < bind_top.len {
+    if id >= 0 && id < bind_top.len {
         return bind_top[id]
     }
     return -1
@@ -703,7 +703,7 @@ priv fn run_defers_down_to(self: *Fx, depth: i64) {
 // nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
 // enclosing function, which a nested function cannot use.
 fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
-    id := ast_sym(name)
+    id := ast_sym_find(name)
     b := top_binding(id)
     // the newest binding is this function's if it has one
     if b >= 0 && binds[b].lvl == self.lvl {
@@ -1472,21 +1472,31 @@ fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
 
 // ---------- runtime failure blocks ----------
 fn loc_str(self: *Fx, pos: Pos) -> Val {
-    fname: str = ""
-    if pos.file >= 0 && pos.file < self.cx.file_names.len {
-        fname = self.cx.file_names[pos.file]
+    // the string global and length of "file:line", made once per line
+    gl, known := self.cx.locs.get((pos.file, pos.line))
+    if !known {
+        fname: str = ""
+        if pos.file >= 0 && pos.file < self.cx.file_names.len {
+            fname = self.cx.file_names[pos.file]
+        }
+        s := fmt(fname, ":", pos.line)
+        gl = (self.cx.string_global(s), len(s))
+        self.cx.locs.set((pos.file, pos.line), gl)
     }
-    s := fmt(fname, ":", pos.line)
-    return self.str_val(s)
+    return self.str_global_val(gl.0, gl.1)
 }
 
 fn str_val(self: *Fx, s: str) -> Val {
-    g := self.cx.string_global(s)
+    return self.str_global_val(self.cx.string_global(s), len(s))
+}
+
+// the str value of string global `g` of length `n`
+priv fn str_global_val(self: *Fx, g: i64, n: i64) -> Val {
     t := self.temp(T_STR)
     p := self.ins(GAddr, I64, vec[i64](), g)
-    n := self.iconst(I64, len(s))
+    nv := self.iconst(I64, n)
     v := self.mval(T_STR, t)
-    self.store_slice(v, p, n)
+    self.store_slice(v, p, nv)
     return v
 }
 

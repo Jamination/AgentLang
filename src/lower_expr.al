@@ -76,7 +76,7 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
             if self.bare_variant(n, None).2 != 0 {
                 return true
             }
-            d, has := self.cx.const_decls.get(n)
+            d, has := self.cx.const_decl(n)
             if has && !is_some(d.ty) {
                 return !self.cx.const_is_mem(n)
             }
@@ -233,7 +233,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             // f[T]: an instantiation of a generic function as a value
             match b.k {
                 Ident(n) => {
-                    if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.global_decls.has(n) {
+                    if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.has_global(n) {
                         env := self.tenv
                         saved := self.cx.errs.len
                         // collecting into an Option stops at the first failure
@@ -405,7 +405,7 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
         self.variant_ambiguous(n, pos)
         return val_err()
     }
-    if self.cx.const_decls.has(n) {
+    if self.cx.has_const(n) {
         if self.cx.const_is_mem(n) {
             // an aggregate or vector constant: read from its read-only memory
             match self.cx.const_global(n) {
@@ -428,7 +428,7 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
                     }
                     _ => {}
                 }
-                d, _ := self.cx.const_decls.get(n)
+                d, _ := self.cx.const_decl(n)
                 return self.const_val(c.0, cv, self.cx.const_expr_dec(&d.val, 0), expect, pos)
             }
             None => { return val_err() }
@@ -470,7 +470,7 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
 // the name of the constant that the place expression `e` is (a part of), if any
 priv fn const_root(self: *Fx, e: *Expr) -> Opt[str] {
     match e.k {
-        Ident(n) if !is_some(self.lookup(n)) && self.cx.const_decls.has(n) => Some(n)
+        Ident(n) if !is_some(self.lookup(n)) && self.cx.has_const(n) => Some(n)
         Field(b, _), Index(b, _) => self.const_root(b)
         _ => None
     }
@@ -525,7 +525,7 @@ priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                 }
                 None => {}
             }
-            if !self.cx.const_decls.has(n) {
+            if !self.cx.has_const(n) {
                 match self.global_place(n) {
                     Some(m) => {
                         return Some(m)
@@ -533,7 +533,7 @@ priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                     None => {}
                 }
             }
-            if self.cx.const_decls.has(n) || is_some(self.cx.find_fn(n)) {
+            if self.cx.has_const(n) || is_some(self.cx.find_fn(n)) {
                 self.err(e.pos, fmt("`", n, "` is not assignable"))
             } else {
                 hint := self.nested_hint(n, e.pos)
