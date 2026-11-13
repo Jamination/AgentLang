@@ -1,5 +1,6 @@
 #!/bin/bash
-# Conformance test runner. Usage: tests/run.sh [--target windows] [path/to/alc] [filter]
+# Conformance test runner.
+# Usage: tests/run.sh [--target windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
 # tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
 #                     every line of NAME.err must appear in stderr; arguments from NAME.args,
 #                     default `a1 b2`)
@@ -20,18 +21,35 @@
 # and WAYLAND_DISPLAY are removed). fail/ and check/ use `alc check --target windows`, unit/
 # runs `alc test` under Wine; driver/ tests the Linux command line and is not run. Tests that
 # cannot run on Windows are listed with the reason in tests/windows.skip.
+#
+# --host-wine alc.exe (with --target windows) tests a compiler built for Windows: alc.exe runs
+# under Wine and builds, checks and runs (`alc test`) the programs there; [path/to/alc] is
+# not given then, only the filter.
 cd "$(dirname "$0")/.." || exit 2
+usage() { echo "usage: tests/run.sh [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]"; exit 2; }
 WIN=0
-if [[ ${1:-} == --target ]]; then
-  case ${2:-} in
-    windows) WIN=1 ;;
-    linux) ;;
-    *) echo "usage: tests/run.sh [--target linux|windows] [path/to/alc] [filter]"; exit 2 ;;
-  esac
+HOST_EXE=
+while [[ ${1:-} == --target || ${1:-} == --host-wine ]]; do
+  if [[ $1 == --target ]]; then
+    case ${2:-} in
+      windows) WIN=1 ;;
+      linux) ;;
+      *) usage ;;
+    esac
+  else
+    [[ -n ${2:-} ]] || usage
+    HOST_EXE=$(realpath "$2") || exit 2
+  fi
   shift 2
+done
+[[ -n $HOST_EXE && $WIN == 0 ]] && usage
+if [[ -n $HOST_EXE ]]; then
+  ALC=
+  FILTER=${1:-}
+else
+  ALC=${1:-./build/alc}
+  FILTER=${2:-}
 fi
-ALC=${1:-./build/alc}
-FILTER=${2:-}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 TARGET=()
@@ -51,6 +69,12 @@ if [[ $WIN == 1 ]]; then
   wine cmd /c exit >/dev/null 2>&1
   trap 'rm -rf "$TMP"; wineserver -k' EXIT
   RUN=(wine)
+  if [[ -n $HOST_EXE ]]; then
+    # the compiler under Wine, as a command
+    printf '#!/bin/bash\nexec wine %q "$@"\n' "$HOST_EXE" >"$TMP/alc"
+    chmod +x "$TMP/alc"
+    ALC=$TMP/alc
+  fi
   while read -r key why; do
     [[ -z "$key" || "$key" == \#* ]] && continue
     WSKIP[$key]=$why

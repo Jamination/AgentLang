@@ -577,6 +577,13 @@ both systems, except where this section says otherwise.
   [std/os.md](std/os.md)).
 - **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless
   `ALC_WINE=1` (with `WINEPREFIX`) runs it under Wine.
+- **The compiler on Windows.** `alc build --target windows src/main.al -o alc.exe` (or
+  `build/alc.exe` of `./build.sh`) is the compiler for Windows. It writes the same executables
+  as the Linux compiler, for both targets; its default `--target` is `windows`. `alc run` /
+  `alc test` run the program directly (a `--target linux` executable is only built); paths may
+  use `\` and drive or UNC roots, and appear in diagnostics as written. It compiles on one
+  thread with a 1 GiB stack, sequentially (no parallel back end); see
+  [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
 
 ## Grammar
 

@@ -4,9 +4,10 @@
 repository and no build tool besides `alc`.
 
 ```
-./build.sh            # seed -> stage 1 -> stage 2 -> stage 3, installs build/alc
-./build.sh --quick    # seed -> build/alc only
-./build.sh --reseed   # full build, then replace the seed with the result
+./build.sh                  # seed -> stage 1 -> stage 2 -> stage 3, installs build/alc and build/alc.exe
+./build.sh --quick          # seed -> build/alc only
+./build.sh --reseed         # full build, then replace the seed with the result
+./build.sh --windows-check  # full build, then the cross-host fixpoint under Wine (below)
 ```
 
 | Stage | Built by | From | Purpose |
@@ -18,12 +19,16 @@ repository and no build tool besides `alc`.
 
 The comparison of stages 2 and 3 is the self-check: a compiler that miscompiles itself in a
 way that changes its behaviour produces a different stage 3. `build/alc` is stage 2.
-`verify.sh` runs the full build first and tests `build/alc`.
+`verify.sh` runs the full build first and tests `build/alc`. While stage 2 compiles stage 3, it
+also compiles the compiler for Windows, `build/alc.exe` (see [the compiler on
+Windows](#the-compiler-on-windows)).
 
 The seed is a static x86-64 Linux executable of about 2.8 MB. It only has to be replaced
 (`--reseed`, then commit `bootstrap/alc`) when the sources start to use a language feature
-the seed does not know; add the feature, build, reseed, then use it. `ALC_SEED=/path/to/alc`
-selects another seed.
+the seed does not know, or a run-time library function it does not have (stage 1 is linked
+with the seed's copy of the library, so a new `__os_*` function for the compiler is added
+first, then the seed is replaced, then the compiler calls it); add the feature, build,
+reseed, then use it. `ALC_SEED=/path/to/alc` selects another seed.
 
 Stage 1 is compiled by the seed and may therefore lay out types as an older compiler did (the
 seed before the change to 4-byte enum tags stored every tag in 8 bytes). The compiler never
@@ -188,7 +193,8 @@ Compiling the compiler (about 34,000 lines including the prelude) takes about 0.
 
 `x86_compile` compiles functions independently of each other. With more than one CPU (the
 CPUs of `sched_getaffinity`, limited by a cgroup quota in `/sys/fs/cgroup/cpu.max`, at most 6)
-it forks workers (`fork_worker` in `src/base.al`). The functions go into a queue, largest
+it forks workers (`fork_worker` in `src/base.al`; on Windows, which has no fork, the compile is
+always sequential: `can_fork`). The functions go into a queue, largest
 first: a pipe filled before the fork, from which every process (the compiler too) takes one
 function at a time (`queue_new`, `queue_take`), so all processes finish at about the same
 time. A worker writes each function's machine code, relocations and float constants into a
@@ -254,3 +260,31 @@ same, the differences are:
   `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
   `tests/windows.skip`).
 - `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine.
+
+## The compiler on Windows
+
+`alc build --target windows src/main.al -o alc.exe` makes the compiler for Windows; `build.sh`
+builds it as `build/alc.exe`. It runs the same front end, optimiser and back end and writes the
+same bytes as the Linux compiler: under Wine, `alc.exe` built by `build/alc` rebuilds itself
+byte for byte, and `alc.exe build --target linux src/main.al` is byte-identical to `build/alc`
+(`./build.sh --windows-check`; `tests/run.sh --target windows --host-wine build/alc.exe` runs
+the conformance suite with it).
+
+- **The host.** What the compiler needs of the system it runs on is in the OS layers of the
+  run-time library (the `__os_*` functions at the end of `src/prelude_linux.al` and
+  `src/prelude_windows.al`), reached through `src/base.al`; the compiler sources make no
+  system call and declare no `extern`. The default `--target` is the host.
+- **Stack.** The compiler needs a big stack (deep recursion in the front end and SSA
+  construction): `with_stack(1 GB, ...)` at the start of `main`. Linux raises the stack limit
+  and starts the compiler again (`ALC_STACK_SET` holds the original limit, which the programs
+  of `alc run` get back); Windows runs the compiler on a thread whose stack reserves 1 GB
+  (`CreateThread` with `STACK_SIZE_PARAM_IS_A_RESERVATION`, committed as it is used, with the
+  64 KiB stack guarantee for the overflow handler) while the first thread only waits for it:
+  only one thread ever runs AL code, so the arenas need no locking. (Other programs keep the
+  16 MiB of the PE header.) The nesting limit of the parser is measured against this stack.
+- **Parallelism.** None: there is no fork, so the back end takes its sequential path.
+- **Processes.** `alc run` / `alc test` start the program with `CreateProcessW` (arguments
+  quoted by the Microsoft rules) and wait for it; a Linux executable (`--target linux`) is
+  built but not run. `ALC_WINE` only applies on Linux.
+- **Paths** may use `\` and drive or UNC roots; the compiler joins paths with `/` and keeps
+  them as written in diagnostics and panic locations (so the executables are the same).

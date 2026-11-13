@@ -87,30 +87,41 @@ priv const STD_MODULES = [_](str, str){
 priv const CORE_MODULES = [4]str{"math", "rand", "time", "mem"}
 
 // ---------- paths ----------
+// Paths are taken as written: components are separated by `/` (on Windows also `\`), and the
+// compiler joins them with `/`. host_root (src/base.al) is the length of a root ("/"; on
+// Windows also "C:\", "C:", "\\server\share\").
+
 // `p` seen from `dir` (an absolute `p` stays as it is)
 priv fn path_join(dir: str, p: str) -> str {
-    if starts_with(p, "/") || len(dir) == 0 {
+    if host_root(p) > 0 || len(dir) == 0 {
         return p
     }
-    if ends_with(dir, "/") {
+    if host_sep(dir[len(dir) - 1]) {
         return concat(dir, p)
     }
     return fmt(dir, "/", p)
 }
 
-// the components of a path as far as comparing paths goes: a leading "/" is a component,
-// empty components and "." are dropped, except a "." at the start of a relative path
+// the components of a path as far as comparing paths goes: the root is a component, empty
+// components and "." are dropped, except a "." at the start of a relative path
 priv fn path_comps(p: str) -> Vec[str] {
     out := vec[str]()
-    if starts_with(p, "/") {
-        out.push("/")
+    root := host_root(p)
+    if root > 0 {
+        out.push(p[..root])
     }
     first := true
-    for c in split(p, '/') {
+    start := root
+    for i in root..len(p) + 1 {
+        if i < len(p) && !host_sep(p[i]) {
+            continue
+        }
+        c := p[start..i]
+        start = i + 1
         if len(c) == 0 {
             continue
         }
-        if c == "." && !(first && !starts_with(p, "/")) {
+        if c == "." && !(first && root == 0) {
             first = false
             continue
         }
@@ -123,10 +134,11 @@ priv fn path_comps(p: str) -> Vec[str] {
 // the path without trailing separators and trailing "." components
 priv fn path_trim(p: str) -> str {
     n := len(p)
+    keep := max(host_root(p), 1)
     loop {
-        if n > 1 && p[n - 1] == '/' {
+        if n > keep && host_sep(p[n - 1]) {
             n -= 1
-        } else if n >= 2 && p[n - 1] == '.' && p[n - 2] == '/' {
+        } else if n >= 2 && n > keep && p[n - 1] == '.' && host_sep(p[n - 2]) {
             n -= 1
         } else {
             break
@@ -138,8 +150,9 @@ priv fn path_trim(p: str) -> str {
 // the last component, unless the path ends in ".." or has none
 priv fn path_file_name(p: str) -> Opt[str] {
     t := path_trim(p)
+    root := host_root(t)
     k := len(t)
-    while k > 0 && t[k - 1] != '/' {
+    while k > root && !host_sep(t[k - 1]) {
         k -= 1
     }
     name := t[k..]
@@ -152,15 +165,16 @@ priv fn path_file_name(p: str) -> Opt[str] {
 // the path without its last component
 priv fn path_parent(p: str) -> Opt[str] {
     t := path_trim(p)
-    if len(t) == 0 || t == "/" {
+    root := host_root(t)
+    if len(t) == 0 || len(t) == root {
         return None
     }
     k := len(t)
-    while k > 0 && t[k - 1] != '/' {
+    while k > root && !host_sep(t[k - 1]) {
         k -= 1
     }
     // separators between the parent and the last component do not belong to the parent
-    while k > 1 && t[k - 1] == '/' {
+    while k > max(root, 1) && host_sep(t[k - 1]) {
         k -= 1
     }
     return Some(t[..k])
@@ -183,13 +197,14 @@ priv fn path_file_stem(p: str) -> Opt[str] {
     return Some(name[..k])
 }
 
-// the identity of an existing file (device and inode), or false
-priv fn file_id(path: str) -> (str, bool) {
-    st: [18]i64
-    if syscall(4, cstr(path), ptr(st)) != 0 {
-        return ("", false)
+// the path has a separator
+priv fn has_sep(p: str) -> bool {
+    for c in p {
+        if host_sep(c) {
+            return true
+        }
     }
-    return (fmt(st[0], ":", st[1]), true)
+    return false
 }
 
 // both paths name the same existing file (also through links)
@@ -226,20 +241,9 @@ priv fn os_error(errno: i64) -> str {
 
 // the content of a file: (text, error); the error text is empty on success
 priv fn read_to_string(path: str) -> (str, str) {
-    // read_file does not say why it failed: look at the file first
-    fd := syscall(2, cstr(path), 0, 0)
-    if fd < 0 {
-        return ("", os_error(-fd))
-    }
-    probe: [1]u8
-    r := syscall(0, fd, ptr(probe), 0)
-    syscall(3, fd)
-    if r < 0 && r != -4 {
-        return ("", os_error(-r))
-    }
     text, ok := read_file(path)
     if !ok {
-        return ("", os_error(5))
+        return ("", os_error(io_error()))
     }
     return (text, "")
 }
@@ -297,7 +301,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux (the default) or windows\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
 }
 
@@ -318,6 +322,10 @@ priv fn parse_args() -> Args {
     }
     if av.len < 2 {
         usage("")
+    }
+    // the default target is the system the compiler runs on
+    if host_windows() {
+        target_os = TargetWindows
     }
     a := Args{cmd: av[0], input: "", output: None, emit_ir: false, emit_asm: false, unchecked: false, opt: 2, rest: vec[str]()}
     i := 1
@@ -806,7 +814,7 @@ priv fn real_main() -> i64 {
             }
         }
     }
-    if find(out_path, "/") < 0 {
+    if host_root(out_path) == 0 && !has_sep(out_path) {
         out_path = fmt("./", out_path)
     }
     // the executable must not replace a source file of the program (`-o main.al`)
@@ -817,21 +825,22 @@ priv fn real_main() -> i64 {
         }
     }
     if !write_file(out_path, bytes) {
-        // write_file does not say why it failed: ask again
-        errno := 5
-        fd := syscall(2, cstr(out_path), 577, 420)
-        if fd < 0 {
-            errno = -fd
-        } else {
-            syscall(3, fd)
+        // (io_error(): why it failed)
+        errno := io_error()
+        if errno == 0 {
+            errno = 5
         }
         driver_error(out_path, fmt("cannot write `", out_path, "`: ", os_error(errno)))
         return 1
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
-        if target_os == TargetWindows {
+        if target_os == TargetWindows && !host_windows() {
             return run_windows(out_path, ar.rest.items())
+        }
+        if target_os == TargetLinux && host_windows() {
+            driver_error(out_path, fmt("built `", out_path, "`, a Linux executable, which cannot run on Windows"))
+            return 1
         }
         code := run_program(out_path, ar.rest.items())
         if code < 0 {
@@ -843,8 +852,9 @@ priv fn real_main() -> i64 {
     return 0
 }
 
-// `alc run` / `alc test` of a Windows executable: under Wine if ALC_WINE=1 (with WINEPREFIX
-// set; no window can open: DISPLAY and WAYLAND_DISPLAY are removed), else it is only built
+// `alc run` / `alc test` of a Windows executable on Linux: under Wine if ALC_WINE=1 (with
+// WINEPREFIX set; no window can open: DISPLAY and WAYLAND_DISPLAY are removed), else it is
+// only built
 priv fn run_windows(exe: str, argv: []str) -> i64 {
     w, wset := env_get("ALC_WINE")
     if !wset || w != "1" {
@@ -886,7 +896,10 @@ priv fn run_windows(exe: str, argv: []str) -> i64 {
 
 fn main() -> i64 {
     // deep recursion in the frontend and SSA construction: use a big stack
-    ensure_stack(1 << 30)
+    return with_stack(1 << 30, start)
+}
+
+priv fn start() -> i64 {
     t0 = clock_ns()
     return real_main()
 }

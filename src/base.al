@@ -17,15 +17,23 @@ fn vec_two[T](a: T, b: T) -> Vec[T] {
 }
 
 // ---------- process ----------
-// marks a file as executable (mode 0755)
+// The system the compiler runs on (its host) is reached through the OS layer of the run-time
+// library (the `__os_*` functions of src/prelude_linux.al / prelude_windows.al).
+
+// the compiler runs on Windows (else on Linux)
+fn host_windows() -> bool {
+    return __os_is_windows()
+}
+
+// marks a file as executable (mode 0755; nothing to do on Windows)
 fn make_executable(path: str) -> bool {
-    return syscall(90, cstr(path), 0o755) == 0
+    return __os_make_executable(cstr(path))
 }
 
 // runs a program with arguments and the current environment, waits for it and returns its
-// exit code (128 + signal number if a signal ended it, -1 if it could not be started). The
+// exit status (128 + signal number if a signal ended it, -1 if it could not be started). The
 // program gets the stack limit and environment the compiler was started with (see
-// ensure_stack).
+// with_stack).
 fn run_program(path: str, argv: []str) -> i64 {
     return run_program_env(path, argv, nil, nil)
 }
@@ -33,106 +41,56 @@ fn run_program(path: str, argv: []str) -> i64 {
 // run_program with a changed environment: the variables named in `drop` are removed and the
 // `NAME=value` entries of `add` appended
 fn run_program_env(path: str, argv: []str, drop: []str, add: []str) -> i64 {
-    flush()
-    cargs := alloc[i64](len(argv) + 2)
-    cargs[0] = cast[i64](cstr(path))
-    for i, a in argv {
-        cargs[i + 1] = cast[i64](cstr(a))
+    return __os_run(path, argv, drop, add)
+}
+
+// Deep recursion needs a big stack: calls f with a stack of at least `bytes` and returns its
+// result. Linux raises the stack limit and starts the compiler again; Windows runs f on a
+// thread with a stack of that size. Call first in main.
+fn with_stack(bytes: i64, f: fn() -> i64) -> i64 {
+    return __os_big_stack(bytes, f)
+}
+
+// the stack the compiler has (its limit), -1 if it is unlimited or not known
+fn stack_size() -> i64 {
+    return __os_stack_size()
+}
+
+// the identity of an existing file (device and inode, or volume and file index), or false
+fn file_id(path: str) -> (str, bool) {
+    dev, ino, ok := __os_file_id(cstr(path))
+    if !ok {
+        return ("", false)
     }
-    // the environment without the marker of ensure_stack, whose value is the original limit
-    env := cast[*i64](__argv + 8 * (__argc + 1))
-    n := 0
-    while env[n] != 0 {
-        n += 1
-    }
-    envp := alloc[i64](n + len(add) + 1)
-    k := 0
-    orig := -2
-    next: for i in 0..n {
-        e := from_cstr(cast[*u8](env[i]))
-        if starts_with(e, "ALC_STACK_SET=") {
-            v, ok := parse_i64(e[14..])
-            if ok {
-                orig = v
-            }
-            continue
-        }
-        for d in drop {
-            if len(e) > len(d) && e[len(d)] == '=' && starts_with(e, d) {
-                continue next
-            }
-        }
-        envp[k] = env[i]
-        k += 1
-    }
-    for a in add {
-        envp[k] = cast[i64](cstr(a))
-        k += 1
-    }
-    pid := syscall(57)
-    if pid < 0 {
-        return -1
-    }
-    if pid == 0 {
-        lim: [2]i64
-        if orig != -2 && syscall(97, 3, ptr(lim)) == 0 {
-            lim[0] = orig
-            syscall(160, 3, ptr(lim))
-        }
-        syscall(59, cargs[0], ptr(cargs), ptr(envp))
-        syscall(231, 127)
-    }
-    status: [1]i64
-    loop {
-        r := syscall(61, pid, ptr(status), 0, 0)
-        if r == -4 {
-            continue
-        }
-        if r < 0 {
-            return -1
-        }
-        break
-    }
-    st := status[0] & 0xFFFFFFFF
-    if st & 0x7F == 0 {
-        return (st >> 8) & 0xFF
-    }
-    return 128 + (st & 0x7F)
+    return (fmt(dev, ":", ino), true)
+}
+
+// a byte that separates path components on the host: `/`, on Windows also `\`
+fn host_sep(c: u8) -> bool {
+    return __os_is_sep(c)
+}
+
+// the length of the root at the start of a path on the host ("/" 1; on Windows also "C:\" 3,
+// "C:" 2, "\\server\share\" its length, "\" 1), 0 for a relative path
+fn host_root(p: str) -> i64 {
+    return __os_path_root(p)
 }
 
 // ---------- worker processes (the parallel back end) ----------
-// the number of CPUs this process may use, at least 1: those it may run on
-// (sched_getaffinity), limited by a cgroup v2 CPU quota (/sys/fs/cgroup/cpu.max:
-// "quota period", or "max period" without a limit)
+// the number of CPUs this process may use, at least 1
 fn cpu_count() -> i64 {
-    mask: [16]u64
-    n := syscall(204, 0, 128, ptr(mask))
-    if n <= 0 {
-        return 1
-    }
-    c := 0
-    for i in 0..min(n / 8, 16) {
-        c += i64(popcnt(mask[i]))
-    }
-    text, ok := read_file("/sys/fs/cgroup/cpu.max")
-    if ok {
-        parts := fields(text)
-        if parts.len == 2 {
-            q, qok := parse_i64(parts[0])
-            p, pok := parse_i64(parts[1])
-            if qok && pok && q > 0 && p > 0 {
-                c = min(c, (q + p - 1) / p)
-            }
-        }
-    }
-    return max(c, 1)
+    return __os_cpu_count()
+}
+
+// whether workers can be forked (not on Windows: the back end is sequential there)
+fn can_fork() -> bool {
+    return !__os_is_windows()
 }
 
 // a zeroed mapping of `bytes` that forked children share with this process (pages are only
 // allocated when touched): its address, or 0
 fn shared_map(bytes: i64) -> i64 {
-    // PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE
-    r := syscall(9, 0, bytes, 3, 0x4021, -1, 0)
+    r := __os_map_shared(bytes)
     if r < 0 && r > -4096 {
         return 0
     }
@@ -140,47 +98,24 @@ fn shared_map(bytes: i64) -> i64 {
 }
 
 fn shared_unmap(addr: i64, bytes: i64) {
-    syscall(11, addr, bytes)
+    __os_unmap(addr, bytes)
 }
 
 // fork after flushing standard output: 0 in the child, the child's pid in the parent, < 0 if
 // it failed. A quiet child writes its standard error to /dev/null (the parent redoes the work
 // of a child that fails, so its messages would only confuse).
 fn fork_worker(quiet: bool) -> i64 {
-    flush()
-    pid := syscall(57)
-    if pid == 0 && quiet {
-        fd := syscall(2, cstr("/dev/null"), 1)
-        if fd >= 0 {
-            syscall(33, fd, 2)
-        }
-    }
-    return pid
+    return __os_fork(quiet)
 }
 
 // ends a forked worker at once (its copy of the buffered output is not written)
 fn worker_exit(code: i64) {
-    syscall(231, code)
+    __os_exit(code)
 }
 
 // waits for a forked worker: its exit status, 128 + the signal that ended it, or -1
 fn wait_worker(pid: i64) -> i64 {
-    status: [1]i64
-    loop {
-        r := syscall(61, pid, ptr(status), 0, 0)
-        if r == -4 {
-            continue
-        }
-        if r < 0 {
-            return -1
-        }
-        break
-    }
-    st := status[0] & 0xFFFFFFFF
-    if st & 0x7F == 0 {
-        return (st >> 8) & 0xFF
-    }
-    return 128 + (st & 0x7F)
+    return __os_wait(pid, pid, true)
 }
 
 // A work queue that forked workers share: a pipe filled with the items (each below 2^32) and
@@ -188,121 +123,36 @@ fn wait_worker(pid: i64) -> i64 {
 // is taken (queue_take) by one process only, in the order of the items. Items that do not fit
 // into the pipe are left out. Returns the read end, or -1.
 fn queue_new(items: []i64) -> i64 {
-    fds: [1]i64
-    // O_CLOEXEC | O_NONBLOCK: a full pipe ends the filling (no waiting for a reader), and an
-    // empty one without a writer reads as end of file
-    if syscall(293, ptr(fds), 0x80800) != 0 {
-        return -1
-    }
-    rd := fds[0] & 0xFFFFFFFF
-    wr := fds[0] >> 32
-    n := len(items)
-    // room for all items if the system allows it (F_SETPIPE_SZ)
-    syscall(72, wr, 1031, 4 * n)
-    buf := alloc[u32](max(n, 1))
-    for i, x in items {
-        buf[i] = u32(x)
-    }
-    // a page at a time, until the pipe is full (what a short write leaves of an item is
-    // ignored by queue_take)
-    k := 0
-    while k < n {
-        c := min(1024, n - k)
-        if syscall(1, wr, cast[i64](ptr(buf)) + 4 * k, 4 * c) != 4 * c {
-            break
-        }
-        k += c
-    }
-    syscall(3, wr)
-    return rd
+    return __os_queue_new(items)
 }
 
 // the next item of the queue at fd, or -1 if it is empty
 fn queue_take(fd: i64) -> i64 {
     x: [1]u32
-    loop {
-        r := syscall(0, fd, ptr(x), 4)
-        if r == -4 {
-            continue
-        }
-        if r != 4 {
-            return -1
-        }
-        return i64(x[0])
+    if __os_read(fd, cast[i64](ptr(x)), 4) != 4 {
+        return -1
     }
+    return i64(x[0])
 }
 
 // A pipe through which forked workers report that they are done: (read end, write end), or
 // (-1, -1). Every worker closes its copy of the write end when it is done (a process that ends
 // closes it too); once this process has closed its own, pipe_wait_closed returns when all are.
 fn pipe_open() -> (i64, i64) {
-    fds: [1]i64
-    if syscall(293, ptr(fds), 0x80000) != 0 {
-        return (-1, -1)
-    }
-    return (fds[0] & 0xFFFFFFFF, fds[0] >> 32)
+    return __os_pipe()
 }
 
 fn fd_close(fd: i64) {
     if fd >= 0 {
-        syscall(3, fd)
+        __os_close(fd)
     }
 }
 
 // waits until every copy of the write end of the pipe whose read end is fd is closed
 fn pipe_wait_closed(fd: i64) {
     buf: [8]u8
-    loop {
-        r := syscall(0, fd, ptr(buf), 8)
-        if r == -4 {
-            continue
-        }
-        if r <= 0 {
-            return
-        }
+    while __os_read(fd, cast[i64](ptr(buf)), 8) > 0 {
     }
-}
-
-// Deep recursion needs a big stack: if the stack limit is below `bytes`, raise it and start
-// the program again (the limit only applies to a new process image). Call first in main.
-fn ensure_stack(bytes: i64) {
-    lim: [2]i64
-    if syscall(97, 3, ptr(lim)) != 0 {
-        return
-    }
-    unlimited := lim[0] == -1
-    if unlimited || lim[0] >= bytes {
-        return
-    }
-    // already restarted once: do not loop if the limit cannot be raised
-    done, restarted := env_get("ALC_STACK_SET")
-    if restarted {
-        return
-    }
-    want := bytes
-    if lim[1] != -1 && lim[1] < want {
-        want = lim[1]
-    }
-    if want <= lim[0] {
-        return
-    }
-    orig := lim[0]
-    lim[0] = want
-    if syscall(160, 3, ptr(lim)) != 0 {
-        return
-    }
-    // envp plus the marker, which holds the original limit (for run_program)
-    envp := cast[*i64](__argv + 8 * (__argc + 1))
-    n := 0
-    while envp[n] != 0 {
-        n += 1
-    }
-    nenv := alloc[i64](n + 2)
-    for i in 0..n {
-        nenv[i] = envp[i]
-    }
-    nenv[n] = cast[i64](cstr(fmt("ALC_STACK_SET=", orig)))
-    syscall(59, ptr("/proc/self/exe"), __argv, ptr(nenv))
 }
 
 // ---------- working memory ----------

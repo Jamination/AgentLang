@@ -98,7 +98,8 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     }
     // Functions are compiled independently of each other: with several CPUs, forked workers
     // compile parts of them (ALC_JOBS=n sets the number of processes). Debug output that is
-    // written per function (mir, trace, verify) keeps the plain order.
+    // written per function (mir, trace, verify) keeps the plain order. Where there is no fork
+    // (Windows) the compile is sequential.
     nw := min(cpu_count(), 6)
     jobs, jobs_set := env_get("ALC_JOBS")
     if jobs_set {
@@ -107,7 +108,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
             nw = j
         }
     }
-    par := nw > 1 && !dump_asm && (!dbg_set || dbg == "mem")
+    par := nw > 1 && can_fork() && !dump_asm && (!dbg_set || dbg == "mem")
     n := m.funcs.len
     fused := par && opt_deferred() && n >= 64
     no_done: Done

@@ -1576,7 +1576,7 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
         self.embeds.set(path, bytes)
         return Some(bytes)
     }
-    self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(path)))
+    self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(io_error())))
     return None
 }
 

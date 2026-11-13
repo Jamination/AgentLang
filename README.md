@@ -35,7 +35,8 @@ fn main() {
 
 ## Getting started
 
-Linux on x86-64 is the only requirement; the repository carries a seed compiler.
+Linux on x86-64 is the only requirement; the repository carries a seed compiler. The compiler
+runs on Linux and Windows (`build/alc.exe`), and builds for both (`--target linux|windows`).
 
 ```
 ./build.sh                          # the compiler compiles itself -> build/alc

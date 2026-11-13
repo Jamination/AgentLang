@@ -27,8 +27,11 @@ if ls Cargo.toml >/dev/null 2>&1; then echo "FAIL: Cargo.toml is still present";
 if readelf -l $ALC 2>&1 | grep -qE "INTERP|DYNAMIC"; then echo "FAIL: the compiler is not a static executable"; fail=1; fi
 # (the run-time library and its OS layers, which are compiled into programs, not into the compiler)
 if grep -nE '^(priv )?extern ' src/*.al src/*/*.al | grep -vE '^src/prelude(_linux|_windows)?\.al'; then echo "FAIL: the compiler declares C functions"; fail=1; fi
-# processes are only started in src/base.al: run_program (for `alc run` / `alc test`, which
-# start the program that was just built) and ensure_stack (the compiler restarting itself)
+# the same compiler for Windows (build.sh builds it; a reachable `syscall` would fail it)
+[[ $(head -c 2 build/alc.exe 2>/dev/null) == MZ ]] || { echo "FAIL: build/alc.exe (the compiler for Windows) was not built"; fail=1; }
+# processes are only started through src/base.al, by the OS layers of the run-time library:
+# run_program (for `alc run` / `alc test`, which start the program that was just built),
+# with_stack (the compiler restarting itself on Linux) and the parallel back end's workers
 spawns=$(grep -nE 'syscall\((57|58|59|56|322),' src/*.al src/*/*.al | grep -v '^src/base.al' | grep -vE '^src/prelude(_linux|_windows)?\.al')
 if [[ -n "$spawns" ]]; then echo "FAIL: compiler sources start processes:"; echo "$spawns"; fail=1; fi
 if [[ $(grep -c 'run_program(' src/main.al) != 1 ]]; then echo "FAIL: expected exactly one run_program call in src/main.al"; fail=1; fi

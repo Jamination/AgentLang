@@ -24,10 +24,9 @@ fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
 }
 
 // Deeper nesting is an error instead of a stack overflow of the parser and the later phases.
-// The compiler raises its stack limit to 1 GB at startup (ensure_stack), enough for
-// NEST_MAX levels of anything; where that is not possible, the stack each level costs (the
-// largest frames of the parser and lowering on that path, measured) is counted against 3/4
-// of the stack there is.
+// The compiler gets a stack of 1 GB at startup (with_stack), enough for NEST_MAX levels of
+// anything; where that is not possible, the stack each level costs (the largest frames of the
+// parser and lowering on that path, measured) is counted against 3/4 of the stack there is.
 priv const NEST_MAX = 2000
 priv const COST_STMT = 112 * 1024
 priv const COST_EXPR = 32 * 1024
@@ -36,11 +35,11 @@ priv const COST_ELSE_IF = 16 * 1024
 priv const COST_SMALL = 8 * 1024
 
 priv fn stack_budget() -> i64 {
-    lim: [2]i64
-    if syscall(97, 3, ptr(lim)) != 0 || lim[0] < 0 {
+    s := stack_size()
+    if s < 0 {
         return -1
     }
-    return lim[0] / 4 * 3
+    return s / 4 * 3
 }
 
 // enters one level of nesting that costs `c` bytes of stack; false (with an error, reported
@@ -50,7 +49,7 @@ priv fn nest(p: *Parser, c: i64) -> bool {
     if p.depth >= NEST_MAX || (p.budget >= 0 && p.cost + c > p.budget) {
         if !p.too_deep {
             p.too_deep = true
-            limit := if p.depth >= NEST_MAX { fmt("than ", NEST_MAX) } else { fmt("than the stack limit of ", p.budget / 3 * 4 / 1024, " KB allows (raise it with `ulimit -s`)") }
+            limit := if p.depth >= NEST_MAX { fmt("than ", NEST_MAX) } else { fmt("than the stack limit of ", p.budget / 3 * 4 / 1024, " KB allows", if host_windows() { "" } else { " (raise it with `ulimit -s`)" }) }
             p.errs.push(Diag{pos: p.pos(), msg: fmt("nesting is too deep (more levels of blocks, statements, `else if`, operators, calls and parentheses ", limit, ")")})
         }
         return false

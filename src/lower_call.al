@@ -186,57 +186,47 @@ fn lower_call_no_pre() -> [](i64, Val) {
 // the directory of a source file name (empty if there is none)
 fn lower_call_parent_dir(src: str) -> str {
     n := len(src)
+    root := host_root(src)
     // trailing separators do not form a component
-    while n > 1 && src[n - 1] == '/' {
+    while n > max(root, 1) && host_sep(src[n - 1]) {
         n -= 1
     }
-    if n == 0 || (n == 1 && src[0] == '/') {
+    if n == 0 || (n == root && host_sep(src[root - 1])) {
         return ""
     }
     i := n - 1
-    while i >= 0 && src[i] != '/' {
+    while i >= root && !host_sep(src[i]) {
         i -= 1
     }
-    if i < 0 {
-        return ""
+    if i < root {
+        return src[..root]
     }
-    while i > 0 && src[i - 1] == '/' {
+    while i > root && host_sep(src[i - 1]) {
         i -= 1
     }
-    if i == 0 {
-        return "/"
+    if i == root {
+        return src[..root]
     }
     return src[..i]
 }
 
 // `rel` seen from `dir` (an absolute `rel` stays as it is)
 fn lower_call_path_join(dir: str, rel: str) -> str {
-    if len(rel) > 0 && rel[0] == '/' {
+    if host_root(rel) > 0 {
         return rel
     }
     if len(dir) == 0 {
         return rel
     }
-    if dir[len(dir) - 1] == '/' {
+    if host_sep(dir[len(dir) - 1]) {
         return concat(dir, rel)
     }
     return fmt(dir, "/", rel)
 }
 
-// why `path` could not be read: the usual text for the errno and its number
-fn lower_call_io_error(path: str) -> str {
-    e := 0
-    fd := syscall(2, cstr(path), 0, 0)
-    if fd < 0 {
-        e = -fd
-    } else {
-        b: [1]u8
-        r := syscall(0, fd, ptr(b), 1)
-        if r < 0 {
-            e = -r
-        }
-        syscall(3, fd)
-    }
+// why a file could not be read: the usual text for its errno (io_error() of the failed read)
+// and the number
+fn lower_call_io_error(e: i64) -> str {
     text := match e {
         2 => "No such file or directory"
         13 => "Permission denied"
