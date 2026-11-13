@@ -62,7 +62,9 @@ enum TargetOs { TargetLinux, TargetWindows }
 target_os: TargetOs
 
 // modules bundled with the compiler: `use std.<name>`
-// (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy)
+// (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy).
+// A module with parts that differ per OS keeps them in `<name>_linux` / `<name>_windows`
+// entries: `use std.<name>` also loads the one for the target (add_text).
 priv const STD_MODULES = [_](str, str){
     ("math", embed("../std/math.al")),
     ("rand", embed("../std/rand.al")),
@@ -420,6 +422,20 @@ priv fn add_text(self: *Sources, name: str, text: str, dir: Opt[str]) {
                                 self.seen.set(key, true)
                                 self.std_files.push(self.names.len)
                                 self.add_text(fmt("<std/", mname, ".al>"), mtext, None)
+                                // the module's OS layer, if it has one: `<name>_linux` or
+                                // `<name>_windows` in STD_MODULES, for the target
+                                lname := fmt(mname, if target_os == TargetWindows { "_windows" } else { "_linux" })
+                                match std_text(lname) {
+                                    Some(ltext) => {
+                                        lkey := fmt("<std/", lname, ".al>")
+                                        if !self.seen.has(lkey) {
+                                            self.seen.set(lkey, true)
+                                            self.std_files.push(self.names.len)
+                                            self.add_text(lkey, ltext, None)
+                                        }
+                                    }
+                                    None => {}
+                                }
                             }
                         }
                         None => {
