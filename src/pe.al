@@ -6,86 +6,14 @@
 // (its `got` global) is its IAT entry, which the loader fills with the address of the
 // function or variable.
 
+use "objwrite.al"
+
 priv const BASE = 0x400000
 priv const SECT_ALIGN = 0x1000
 priv const FILE_ALIGN = 0x200
 
-priv fn align_up(x: i64, a: i64) -> i64 {
-    return (x + a - 1) / a * a
-}
-
-priv fn put16(v: *Vec[u8], x: i64) {
-    u := u64(x)
-    v.push(u8(u))
-    v.push(u8(u >> 8))
-}
-
-priv fn put32(v: *Vec[u8], x: i64) {
-    u := u64(x)
-    for k in 0..4 {
-        v.push(u8(u >> u64(8 * k)))
-    }
-}
-
-priv fn put64(v: *Vec[u8], x: i64) {
-    u := u64(x)
-    for k in 0..8 {
-        v.push(u8(u >> u64(8 * k)))
-    }
-}
-
-// writes the 8 bytes of x at buf[at..]
-priv fn set64(buf: *Vec[u8], at: i64, x: i64) {
-    u := u64(x)
-    for k in 0..8 {
-        buf[at + k] = u8(u >> u64(8 * k))
-    }
-}
-
-// the imported C functions and variables that the emitted code refers to, in a stable order
-priv fn used_imports(m: *Module, out: *Output) -> Vec[i64] {
-    used := vec_fill(m.externs.len, false)
-    by_got := map[i64, i64]()
-    for i in 0..m.externs.len {
-        by_got.set(m.externs[i].got, i)
-    }
-    for c in out.funcs {
-        for r in c.code.relocs {
-            match r.kind {
-                Abs32Global(g) => {
-                    i, found := by_got.get(g)
-                    if found {
-                        used[i] = true
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    res := vec[i64]()
-    for i in 0..m.externs.len {
-        if used[i] {
-            res.push(i)
-        }
-    }
-    return res
-}
-
 priv fn is_dll(lib: str) -> bool {
     return len(lib) > 4 && to_lower(lib[len(lib) - 4..]) == ".dll"
-}
-
-// the 8-byte pointers in the data of global g: to globals and functions
-priv fn patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr: *Vec[i64], func_addr: *Vec[i64]) {
-    for rl in g.relocs {
-        val := match rl.1 {
-            Global(tg, add) => gaddr[tg] + add
-            Func(f) => func_addr[f]
-        }
-        at := (ga - base_addr) + rl.0
-        assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
-        set64(buf, at, val)
-    }
 }
 
 priv struct Section {
@@ -101,7 +29,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     if len(out.err) != 0 {
         return ("", out.err)
     }
-    imports := used_imports(m, out)
+    imports := used_externs(m, out)
     for x in imports {
         lib := m.externs[x].lib
         if !is_dll(lib) {
@@ -120,44 +48,16 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     // ---- .text ----
     text_rva := SECT_ALIGN
     text := vec[u8]()
-    for c in out.funcs {
-        while text.len % 16 != 0 {
-            text.push(0xCC)
-        }
-        func_off[c.fid] = text.len
-        func_addr[c.fid] = BASE + text_rva + text.len
-        text.extend(c.code.bytes.items())
-    }
+    layout_text(&text, out, BASE + text_rva, &func_off, &func_addr)
     // ---- .rdata: float constants, read-only globals ----
     ro_rva := align_up(text_rva + text.len, SECT_ALIGN)
-    rodata := vec[u8]()
     fpool_addr := BASE + ro_rva
-    for bits in out.fpool {
-        put64(&rodata, i64(bits.lo))
-        put64(&rodata, i64(bits.hi))
-    }
-    for gi in 0..m.globals.len {
-        g := &m.globals[gi]
-        if g.readonly && live[gi] {
-            a := max(g.align, 1)
-            while rodata.len % a != 0 {
-                rodata.push(0)
-            }
-            gaddr[gi] = BASE + ro_rva + rodata.len
-            match g.data {
-                Some(d) => rodata.extend(d.items())
-                None => rodata.resize(rodata.len + g.size, 0)
-            }
-            rodata.push(0) // keep distinct addresses for empty strings
-        }
-    }
+    rodata := layout_rodata(m, out, live.items(), BASE + ro_rva, &gaddr)
     // the unwind information of the functions with a frame (4-byte aligned)
     unwind_rva := vec_fill(m.funcs.len, 0)
     for c in out.funcs {
-        if c.code.unwind.len > 0 {
-            while rodata.len % 4 != 0 {
-                rodata.push(0)
-            }
+        if !c.code.unwind.is_empty() {
+            rodata.resize(align_up(rodata.len, 4), 0)
             unwind_rva[c.fid] = ro_rva + rodata.len
             rodata.extend(c.code.unwind.items())
         }
@@ -168,7 +68,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     pd_rva := if rodata.is_empty() { ro_rva } else { align_up(ro_rva + rodata.len, SECT_ALIGN) }
     pdata := vec[u8]()
     for c in out.funcs {
-        if c.code.unwind.len > 0 {
+        if !c.code.unwind.is_empty() {
             put32(&pdata, func_addr[c.fid] - BASE)
             put32(&pdata, func_addr[c.fid] - BASE + c.code.bytes.len)
             put32(&pdata, unwind_rva[c.fid])
@@ -179,7 +79,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     idata := vec[u8]()
     libs := vec[str]()
     for x in imports {
-        if !contains(&libs, m.externs[x].lib) {
+        if !libs.contains(m.externs[x].lib) {
             libs.push(m.externs[x].lib)
         }
     }
@@ -217,9 +117,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
                 continue
             }
             // hint (0) and name, padded to an even length
-            if idata.len % 2 != 0 {
-                idata.push(0)
-            }
+            idata.resize(align_up(idata.len, 2), 0)
             hn := id_rva + idata.len
             put16(&idata, 0)
             idata.extend(m.externs[x].name)
@@ -232,51 +130,27 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
         name_rva := id_rva + idata.len
         idata.extend(l)
         idata.push(0)
-        d := vec[u8]()
-        put32(&d, id_rva + ilt)
-        put32(&d, 0)
-        put32(&d, 0)
-        put32(&d, name_rva)
-        put32(&d, id_rva + iat)
-        for j in 0..20 {
-            idata[20 * li + j] = d[j]
-        }
+        // the descriptor: lookup table, (time stamp, forwarder chain: 0), name, IAT
+        set32(&idata, 20 * li, id_rva + ilt)
+        set32(&idata, 20 * li + 12, name_rva)
+        set32(&idata, 20 * li + 16, id_rva + iat)
     }
     // ---- .data and .bss ----
     data_rva := if idata.is_empty() { id_rva } else { align_up(id_rva + idata.len, SECT_ALIGN) }
     data := vec[u8]()
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if !g.readonly && !is_iat[gi] {
-            match g.data {
-                Some(d) => {
-                    a := max(g.align, 1)
-                    while data.len % a != 0 {
-                        data.push(0)
-                    }
-                    gaddr[gi] = BASE + data_rva + data.len
-                    data.extend(d.items())
-                }
-                None => {}
+        match g.data {
+            Some(d) if !g.readonly && !is_iat[gi] => {
+                data.resize(align_up(data.len, max(g.align, 1)), 0)
+                gaddr[gi] = BASE + data_rva + data.len
+                data.extend(d.items())
             }
+            _ => {}
         }
     }
-    while data.len % 16 != 0 {
-        data.push(0)
-    }
-    bss_size := 0
-    for gi in 0..m.globals.len {
-        g := &m.globals[gi]
-        if !g.readonly && !is_some(g.data) {
-            a := min(max(g.align, 1), 64)
-            if g.size >= 64 {
-                a = max(a, 64)
-            }
-            bss_size = align_up(bss_size, a)
-            gaddr[gi] = BASE + data_rva + data.len + bss_size
-            bss_size += max(g.size, 1)
-        }
-    }
+    data.resize(align_up(data.len, 16), 0)
+    bss_size := layout_bss(m, BASE + data_rva + data.len, &gaddr)
     image_end := data_rva + data.len + bss_size
     // the code addresses code and data with 32-bit absolute and relative displacements
     if BASE + image_end > 0x7FFF_FFFF {
@@ -284,25 +158,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
             " bytes; at most ", 0x7FFF_FFFF - BASE, " fit (put large tables in memory from alloc instead)"))
     }
     // ---- relocations ----
-    for c in out.funcs {
-        fo := func_off[c.fid]
-        fa := func_addr[c.fid]
-        for r in c.code.relocs {
-            at := fo + r.off
-            val := match r.kind {
-                Abs32Global(g) => gaddr[g] + i64(r.addend)
-                Abs32Func(f) => func_addr[f] + i64(r.addend)
-                Abs32FConst(i) => fpool_addr + 16 * i + i64(r.addend)
-                Rel32Func(f) => func_addr[f] - (fa + r.off + 4)
-            }
-            assert val >= -2147483648 && val <= 2147483647, "relocation out of range"
-            assert at >= 0 && at + 4 <= text.len
-            v32 := u32(i32(val))
-            for k in 0..4 {
-                text[at + k] = u8(v32 >> u32(8 * k))
-            }
-        }
-    }
+    patch_text(&text, out, &func_off, &func_addr, &gaddr, fpool_addr)
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
         if g.relocs.is_empty() || is_iat[gi] || !live[gi] {
@@ -331,8 +187,9 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     }
     hdr_size := align_up(64 + 4 + 20 + 240 + 40 * secs.len, FILE_ALIGN)
     image_size := align_up(image_end, SECT_ALIGN)
-    if secs[secs.len - 1].vsize == 0 {
-        image_size = align_up(secs[secs.len - 1].rva + 1, SECT_ALIGN)
+    last := secs.last()
+    if last.vsize == 0 {
+        image_size = align_up(last.rva + 1, SECT_ALIGN)
     }
     // ---- headers ----
     h := vec[u8]()
@@ -388,26 +245,27 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     put32(&h, 16)
     // data directories: 1 = imports, 3 = exceptions (.pdata), 12 = import address table
     for d in 0..16 {
-        if d == 1 && !libs.is_empty() {
-            put32(&h, id_rva)
-            put32(&h, 20 * (nl + 1))
-        } else if d == 3 && !pdata.is_empty() {
-            put32(&h, pd_rva)
-            put32(&h, pdata.len)
-        } else if d == 12 && !libs.is_empty() {
-            put32(&h, id_rva + iat_lo)
-            put32(&h, iat_hi - iat_lo)
-        } else {
-            put64(&h, 0)
+        match d {
+            1 if !libs.is_empty() => {
+                put32(&h, id_rva)
+                put32(&h, 20 * (nl + 1))
+            }
+            3 if !pdata.is_empty() => {
+                put32(&h, pd_rva)
+                put32(&h, pdata.len)
+            }
+            12 if !libs.is_empty() => {
+                put32(&h, id_rva + iat_lo)
+                put32(&h, iat_hi - iat_lo)
+            }
+            _ => put64(&h, 0)
         }
     }
     // section table
     raw := hdr_size
     raw_at := vec[i64]()
     for s in secs {
-        nm := vec_of(s.name)
-        nm.resize(8, 0)
-        h.extend(nm.items())
+        h.extend(pad_right(s.name, 8, 0))
         put32(&h, s.vsize)
         put32(&h, s.rva)
         rs := align_up(s.data.len, FILE_ALIGN)

@@ -14,19 +14,23 @@ priv const R11 = 11
 const XMM0 = 16
 const VREG0 = 32
 
-INT_ARGS := [6]i64{RDI, RSI, RDX, RCX, R8, R9}
-INT_RETS := [4]i64{RAX, RDX, RCX, RSI}
+const INT_ARGS = [6]i64{RDI, RSI, RDX, RCX, R8, R9}
+const INT_RETS = [4]i64{RAX, RDX, RCX, RSI}
 const NUM_FLOAT_ARGS = 8
 // Windows (Microsoft x64): the first four arguments by position, in these registers or in
 // xmm0-xmm3; the rest on the stack above 32 bytes of shadow space that the caller reserves
-WIN_INT_ARGS := [4]i64{RCX, RDX, R8, R9}
+const WIN_INT_ARGS = [4]i64{RCX, RDX, R8, R9}
 const WIN_REG_ARGS = 4
 
 // rbx, rbp, r12-r15; Windows: rsi and rdi too (and xmm6-xmm15, see mir_xmm_saved). Calls are
 // still taken to clobber rsi, rdi and every xmm register on Windows (CALL_CLOBBER): a callee
 // that preserves them is never relied on, the function only saves them for its own caller.
 fn mir_callee_saved(r: i64) -> bool {
-    return r == 3 || r == 5 || r == 12 || r == 13 || r == 14 || r == 15 || (target_os == TargetWindows && (r == RSI || r == RDI))
+    match r {
+        3, 5, 12, 13, 14, 15 => true
+        RSI, RDI => target_os == TargetWindows
+        _ => false
+    }
 }
 
 // Windows: xmm6-xmm15 are preserved across calls
@@ -34,7 +38,10 @@ fn mir_xmm_saved(r: i64) -> bool {
     return target_os == TargetWindows && r >= XMM0 + 6 && r < XMM0 + 16
 }
 
-priv CALLER_SAVED_GPR := [9]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11}
+// does k fit in a sign-extended 32-bit immediate or displacement?
+fn fits_i32(k: i64) -> bool {
+    return k >= -2147483648 && k <= 2147483647
+}
 
 // the u128 of the float constant pool
 struct Bits128 {
@@ -187,13 +194,11 @@ fn has_xuses(op: MOp) -> bool {
 
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
 fn is_copy(self: *MInst) -> (i64, i64, bool) {
-    if self.op == Mov || self.op == MovSd {
-        match (&self.a, &self.b) {
-            (R(d), R(s)) if self.op == MovSd || self.sz == 8 => return (d, s, true)
-            _ => {}
-        }
+    match (self.op, &self.a, &self.b) {
+        (MovSd, R(d), R(s)) => return (d, s, true)
+        (Mov, R(d), R(s)) if self.sz == 8 => return (d, s, true)
+        _ => return (0, 0, false)
     }
-    return (0, 0, false)
 }
 
 struct MBlock {
@@ -223,13 +228,7 @@ fn new_vreg(self: *MFunc, class: u8) -> i64 {
 }
 
 fn class(self: *MFunc, r: i64) -> u8 {
-    if r < 16 {
-        return 0
-    } else if r < 32 {
-        return 1
-    } else {
-        return self.vclass[r - VREG0]
-    }
+    if r < 16 { 0 } else if r < 32 { 1 } else { self.vclass[r - VREG0] }
 }
 
 fn new_slot(self: *MFunc, size: i64, align: i64) -> i64 {
@@ -248,7 +247,7 @@ fn mir_with_uses(self: *MFunc, op: MOp, sz: u8, a: Opnd, regs: []i64) -> MInst {
 }
 
 // the fixed registers read by a call, `ret` or `syscall`
-fn mir_xuses(self: *MFunc, i: *MInst) -> []i64 {
+priv fn fixed_uses(self: *MFunc, i: *MInst) -> []i64 {
     match i.b {
         I(k) => return self.xuses[k..k + i64(i.sz2)]
         _ => return nil
@@ -265,7 +264,7 @@ const DU_CALL = 1
 const DU_COPY = 2
 const DU_MAX = 24
 
-CALL_CLOBBER := [25]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
+const CALL_CLOBBER = [25]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
 
 priv fn du_mem(m: *Mem, du: []i64, q0: i64) -> i64 {
     q := q0
@@ -385,16 +384,10 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
         Call, CallInd => {
             flags = DU_CALL
             q = du_opnd(&i.a, du, q)
-            for r in mf.mir_xuses(i) {
-                du[q] = r
-                q += 1
-            }
+            q += copy(du[q..], mf.fixed_uses(i))
         }
         Ret => {
-            for r in mf.mir_xuses(i) {
-                du[q] = r
-                q += 1
-            }
+            q += copy(du[q..], mf.fixed_uses(i))
         }
         Syscall => {
             du[q] = RAX
@@ -402,10 +395,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
             du[q + 2] = R11
             q += 3
             nd = 3
-            for r in mf.mir_xuses(i) {
-                du[q] = r
-                q += 1
-            }
+            q += copy(du[q..], mf.fixed_uses(i))
         }
         RepMovsb => {
             du[q] = RDI
@@ -476,11 +466,7 @@ fn mir_map_regs(i: *MInst, table: []i64) {
 
 priv fn replace_reg_mo(o: *Opnd, from: i64, to: i64) {
     match o {
-        R(&r) => {
-            if *r == from {
-                *r = to
-            }
-        }
+        R(&r) if *r == from => *r = to
         M(&m) => {
             if m.base != NOREG && i64(m.base) == from {
                 m.base = i32(to)
@@ -493,7 +479,7 @@ priv fn replace_reg_mo(o: *Opnd, from: i64, to: i64) {
     }
 }
 
-// map_regs with `|r| if r == from { to } else { r }`
+// map_regs with a table that maps only `from`, to `to`
 fn mir_replace_reg(i: *MInst, from: i64, to: i64) {
     replace_reg_mo(&i.a, from, to)
     replace_reg_mo(&i.b, from, to)
@@ -553,23 +539,16 @@ priv fn opnd_str(o: Opnd, sz: u8) -> str {
         FAddr(f) => fmt("&f", f)
         M(m) => {
             s := "["
-            match m.kind {
-                MK_GLOBAL => {
-                    s = fmt(s, "g", m.id, " ")
-                }
-                MK_SLOT => {
-                    s = fmt(s, "slot", m.id, " ")
-                }
-                MK_INARG => {
-                    s = fmt(s, "inarg", m.id, " ")
-                }
-                MK_OUTARG => {
-                    s = fmt(s, "outarg", m.id, " ")
-                }
-                MK_FCONST => {
-                    s = fmt(s, "fconst", m.id, " ")
-                }
-                _ => {}
+            k := match m.kind {
+                MK_GLOBAL => "g"
+                MK_SLOT => "slot"
+                MK_INARG => "inarg"
+                MK_OUTARG => "outarg"
+                MK_FCONST => "fconst"
+                _ => ""
+            }
+            if k != "" {
+                s = fmt(s, k, m.id, " ")
             }
             if m.base != NOREG {
                 s = concat(s, reg_name(i64(m.base), 8))
@@ -578,7 +557,7 @@ priv fn opnd_str(o: Opnd, sz: u8) -> str {
                 s = fmt(s, "+", reg_name(i64(m.idx), 8), "*", m.scale)
             }
             if m.disp != 0 {
-                // {:+}: always with a sign
+                // always with a sign
                 if m.disp > 0 {
                     s = concat(s, "+")
                 }
@@ -606,9 +585,9 @@ fn mir_print_mfunc(f: *MFunc) -> str {
             }
             line = fmt(line, i.sz, " ")
             a := opnd_str(i.a, i.sz)
-            bsz: u8 = i.sz
-            if i.op == Shl || i.op == Shr || i.op == Sar || i.op == Rol || i.op == Ror {
-                bsz = 1
+            bsz: u8 = match i.op {
+                Shl, Shr, Sar, Rol, Ror => 1
+                _ => i.sz
             }
             bs := if has_xuses(i.op) { "" } else { opnd_str(i.b, bsz) }
             c := if i.op == Imul3 || i.op == Shufps { fmt(i.tgt) } else { "" }

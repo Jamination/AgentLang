@@ -31,27 +31,23 @@ fn x86_live_data(m: *Module, out: *Output) -> Vec[bool] {
     for ci in 0..out.funcs.len {
         for r in out.funcs[ci].code.relocs {
             match r.kind {
-                Abs32Global(g) => {
-                    if !live[g] {
-                        live[g] = true
-                        work.push(g)
-                    }
+                Abs32Global(g) if !live[g] => {
+                    live[g] = true
+                    work.push(g)
                 }
                 _ => {}
             }
         }
     }
-    while work.len > 0 {
+    while !work.is_empty() {
         g := work.pop()
         for rl in m.globals[g].relocs {
             match rl.1 {
-                Global(t, _) => {
-                    if !live[t] {
-                        live[t] = true
-                        work.push(t)
-                    }
+                Global(t, _) if !live[t] => {
+                    live[t] = true
+                    work.push(t)
                 }
-                Func(_) => {}
+                _ => {}
             }
         }
     }
@@ -96,8 +92,7 @@ priv fn reachable_funcs(m: *Module, r: *Refs) -> Vec[i64] {
     // call must be compiled too)
     for gi in 0..m.globals.len {
         for rl in m.globals[gi].relocs {
-            t := rl.1
-            match t {
+            match rl.1 {
                 Func(f) if !seen[f] => {
                     seen[f] = true
                     work.push(f)
@@ -107,11 +102,10 @@ priv fn reachable_funcs(m: *Module, r: *Refs) -> Vec[i64] {
         }
     }
     out := vec[i64]()
-    while work.len > 0 {
+    while !work.is_empty() {
         f := work.pop()
         out.push(f)
-        for x in r.start[f]..r.start[f] + r.cnt[f] {
-            k := r.list[x]
+        for k in r.list[r.start[f]..r.start[f] + r.cnt[f]] {
             if !seen[k] {
                 seen[k] = true
                 work.push(k)
@@ -137,7 +131,7 @@ priv struct Opts {
 }
 
 fn x86_compile(m: *Module, dump_asm: bool) -> Output {
-    align_v, align_set := env_get("ALC_ALIGN")
+    _, align_set := env_get("ALC_ALIGN")
     dbg, dbg_set := env_get("ALC_DEBUG")
     o := Opts{dump_asm: dump_asm, align: align_set, mir: dbg_set && dbg == "mir"}
     if target_os == TargetWindows {
@@ -215,7 +209,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         if len(d.code.err) != 0 && len(err) == 0 {
             err = d.code.err
         }
-        funcs.push(Compiled{fid: fids[i], code: Code{bytes: d.code.bytes, relocs: d.code.relocs, unwind: d.code.unwind}})
+        funcs.push(Compiled{fid: fids[i], code: d.code})
     }
     return Output{funcs: funcs, fpool: fpool, err: err}
 }
@@ -230,7 +224,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts) -> Done {
     rpo := f.rpo()
     loops: Loops
     depths := vec_fill(f.blocks.len, 0)
-    if x86_has_cycle(f, rpo.items()) {
+    if has_cycle(f, rpo.items()) {
         cfg := cfg_new(f)
         loops = loops_new(f, &cfg)
         for b in 0..f.blocks.len {
@@ -244,19 +238,14 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts) -> Done {
     // benchmark suite the padding executed on every loop entry cost more than it gained.
     // (loops is empty without a cycle)
     if o.align {
-        for li in 0..loops.loops.len {
-            innermost := true
+        inner: for li in 0..loops.loops.len {
             for oi in 0..loops.loops.len {
-                match loops.loops[oi].parent {
-                    Some(p) if oi != li && p == li => innermost = false
-                    _ => {}
-                }
-                if !innermost {
-                    break
+                if oi != li && loops.loops[oi].parent == Some(li) {
+                    continue inner
                 }
             }
             header := loops.loops[li].header
-            if innermost && header != 0 {
+            if header != 0 {
                 mf.blocks[header].align = true
             }
         }
@@ -276,7 +265,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts) -> Done {
         put(mir_print_mfunc(&mf))
     }
     work_end()
-    d := Done{code: Code{bytes: clone(code.bytes), relocs: clone(code.relocs), err: clone(code.err), unwind: clone(code.unwind)}, fconsts: clone(mf.fconsts), ok: true}
+    d := Done{code: clone(code), fconsts: clone(mf.fconsts), ok: true}
     // the function's IR was rewritten on the work heap and is not needed again
     f.insts = vec[Inst]()
     f.blocks = vec[BlockData]()
@@ -353,9 +342,7 @@ priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> 
                 f := rec[0]
                 nr := rec[1]
                 r.start[f] = r.list.len
-                for x in 0..nr {
-                    r.list.push(rec[2 + x])
-                }
+                r.list.extend(mkslice[i64](cast[*i64](base[w] + off + 16), nr))
                 r.cnt[f] = nr
                 code, fc, next := emit_get_code(base[w], off + 16 + 8 * nr)
                 done[f] = Done{code: code, fconsts: fc, ok: true}
@@ -399,9 +386,7 @@ priv fn spread_worker(m: *Module, q: i64, base: i64, room: i64, o: *Opts) {
         rec := cast[*i64](base + off)
         rec[0] = f
         rec[1] = nr
-        for x in 0..nr {
-            rec[2 + x] = r.list[x]
-        }
+        copy(mkslice[i64](cast[*i64](base + off + 16), nr), r.list.items())
         off = emit_put_code(&d.code, &d.fconsts, base, off + 16 + 8 * nr)
         hdr[0] += 1
     }
@@ -411,7 +396,7 @@ priv fn spread_worker(m: *Module, q: i64, base: i64, room: i64, o: *Opts) {
 // is there an edge between reachable blocks that goes back in the reverse postorder (or a
 // block that jumps to itself)? Without one the function has no loop: a block dominates only
 // blocks after it in the order.
-fn x86_has_cycle(f: *Func, rpo: []i64) -> bool {
+priv fn has_cycle(f: *Func, rpo: []i64) -> bool {
     idx := vec_fill(f.blocks.len, -1)
     for i, b in rpo {
         idx[b] = i
@@ -434,10 +419,9 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
     post.reserve(n)
     stack := vec_of([](i64, i64){(0, 0)})
     seen[0] = true
-    while stack.len > 0 {
+    while !stack.is_empty() {
         top := stack.len - 1
-        b := stack[top].0
-        i := stack[top].1
+        b, i := stack[top]
         // the successors in reverse order: else, then
         k, s0, s1 := f.succ_pair(b)
         if i < k {
@@ -463,12 +447,11 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
             if cold[b] {
                 continue
             }
-            tm := f.blocks[b].term
-            c := match tm {
+            c := match f.blocks[b].term {
                 Trap, Term.None => true
                 Jmp(t) => cold[t]
-                Br(x, t, e) => cold[t] && cold[e]
-                Ret(vs) => false
+                Br(_, t, e) => cold[t] && cold[e]
+                Ret(_) => false
             }
             if c {
                 cold[b] = true
