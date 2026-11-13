@@ -13,7 +13,9 @@
 #                     expect it) is reported as SKIP with the first line of its standard output:
 #                     for what only the program can find out (no Direct3D 12 device under Wine).
 # tests/fail/NAME.al  must fail to compile; every line of NAME.err must appear in the diagnostics
-# tests/check/NAME.al must pass `alc check` (bindings for platforms this machine cannot run)
+# tests/check/NAME.al must pass `alc check` (bindings for platforms this machine cannot run;
+#                     with NAME.target, `alc check --target <its content>`: a Windows program
+#                     is then type-checked on Linux too)
 # tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
 # tests/driver/NAME.sh is run with bash, the compiler as $1 and an empty scratch directory as
 #                     $2; it tests the command line (files, paths, exit codes) and must exit 0
@@ -156,7 +158,9 @@ for src in tests/check/*.al; do
   name=$(basename "$src" .al)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
   win_skip "check/$name" && continue
-  if $ALC check "${TARGET[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
+  ctarget=("${TARGET[@]}")
+  [[ -f tests/check/$name.target ]] && ctarget=(--target "$(cat "tests/check/$name.target")")
+  if $ALC check "${ctarget[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
     pass=$((pass+1))
   else
     echo "FAIL check/$name: does not type-check"; head -5 "$TMP/cerr"; fail=$((fail+1))

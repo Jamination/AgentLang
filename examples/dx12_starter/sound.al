@@ -42,7 +42,7 @@ fn starter_sound() -> StarterSound {
         boom: burst_noise(0.40, 0.55, 2.0, 12),
         hurt: sweep(320.0, 70.0, 0.30, 0.5),
         over: sweep(440.0, 40.0, 1.20, 0.5),
-        music: render_loop(tracks, 132.0, 16),
+        music: render_music(tracks, 132.0, 16, true),
         music_on: true,
     }
     s.mixer.set_master_volume(0.8)                  // head room: effects on top of the music

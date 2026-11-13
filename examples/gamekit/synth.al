@@ -83,10 +83,11 @@ struct Track {
 
 priv struct Hit { at: i64, track: i64, pitch: f32 }
 
-// Renders the tracks as one loop of `beats` beats (each step a quarter beat) at `bpm`: a stereo
-// Sound for a looping voice. What still sounds at the end is added to the beginning, so the
-// loop has no seam.
-fn render_loop(tracks: []Track, bpm: f32, beats: i64) -> Sound {
+// Renders the tracks, `beats` beats long (each step a quarter beat) at `bpm`, as a stereo Sound.
+// `looped`: for a looping voice, exactly the length of the loop; what still sounds at the end
+// is added to the beginning, so the loop has no seam. Otherwise (a jingle) the last notes ring
+// out for up to two seconds after the end.
+fn render_music(tracks: []Track, bpm: f32, beats: i64, looped: bool) -> Sound {
     step_frames := i64(f32(AUDIO_RATE) * 60.0 / bpm / 4.0)
     total := step_frames * beats * 4
     tail := AUDIO_RATE * 2
@@ -115,6 +116,9 @@ fn render_loop(tracks: []Track, bpm: f32, beats: i64) -> Sound {
         m.play(tr.inst, tr.volume, tr.pan, h.pitch, false)
     }
     m.mix(out.samples[pos * 2..], total + tail - pos)
+    if !looped {
+        return out
+    }
     for i in 0..tail * 2 {
         out.samples[i] = clamp(out.samples[i] + out.samples[total * 2 + i], -1.0, 1.0)
     }
