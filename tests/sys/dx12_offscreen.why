@@ -1,0 +1,1 @@
+Direct3D 12 is Windows only: tests/run.sh --target windows (under Wine without a display it is reported as SKIP)

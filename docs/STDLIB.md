@@ -27,7 +27,8 @@ are `priv` do not appear: a program may reuse their names).
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
-| `std.dx12` | Direct3D 12 / DXGI bindings (type-check only: no Windows backend yet) | Windows DLLs | [std/dx12.md](std/dx12.md) |
+| `std.dx12` | Direct3D 12 / DXGI bindings generated from the mingw-w64 headers (Windows only) | `d3d12.dll`, `dxgi.dll`, `d3dcompiler_47.dll`, `user32.dll`, `kernel32.dll` | [std/dx12.md](std/dx12.md) |
+| `std.dx12_util` | on top of std.dx12: device with WARP fallback, fences, shader compilation with error text, buffers, readback, a sprite batcher for 2D games (Windows only) | the same | [std/dx12_util.md](std/dx12_util.md) |
 | `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
 | `std.libc`, `std.x11`, `std.alsa` | raw C declarations used by the modules above | the named library | source in `std/` |
 
@@ -39,7 +40,8 @@ Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core libra
 `std.asset`, `std.os`, `std.image` and `std.audio` (its device through WASAPI) work the same on
 Windows (the differences are in their pages). `std.input`, `std.window`, `std.wayland`,
 `std.vk`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
-compile error that names the module and the target.
+compile error that names the module and the target. `std.dx12` and `std.dx12_util` are the
+other way round: Windows only (a Linux build stops at their Windows DLLs).
 
 How to structure a game on top of these: [GAMES.md](GAMES.md).
 

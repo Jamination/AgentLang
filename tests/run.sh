@@ -9,6 +9,9 @@
 #                     driver, a sound device, a display, a shared library). NAME.need holds a
 #                     shell command that tells whether the prerequisite is there; if it fails
 #                     the test is reported as SKIP together with the text of NAME.why.
+#                     A program of run/, std/ or sys/ that ends with status 77 (and does not
+#                     expect it) is reported as SKIP with the first line of its standard output:
+#                     for what only the program can find out (no Direct3D 12 device under Wine).
 # tests/fail/NAME.al  must fail to compile; every line of NAME.err must appear in the diagnostics
 # tests/check/NAME.al must pass `alc check` (bindings for platforms this machine cannot run)
 # tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
@@ -122,6 +125,9 @@ for src in $dir/*.al; do
       args=(a1 b2)
       [[ -f "$dir/$name.args" ]] && read -ra args <"$dir/$name.args"
       timeout 60 "${cmd[@]}" "${args[@]}" >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
+    fi
+    if [[ $code == 77 && $exp_code != 77 ]]; then
+      echo "SKIP $label: $(head -1 "$TMP/out")"; skip=$((skip+1)); break
     fi
     ok=1
     if ! cmp -s "$TMP/out" "$exp_out"; then

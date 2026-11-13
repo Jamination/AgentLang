@@ -141,6 +141,8 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
   on a Wayland session through XWayland). `std.wayland` binds the Wayland client API for a
   program that wants to talk to the compositor itself.
 - `std.vk`: Vulkan through `x11_display(w)` / `x11_window(w)` for a surface.
+- Windows: `std.dx12` (Direct3D 12) with `std.dx12_util` for the set-up and a sprite batcher
+  for 2D (`examples/dx12_triangle.al`: swap chain on a window, frames in flight, resizing).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
 - `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`.
