@@ -279,42 +279,59 @@ priv fn local_opt(f: *Func, level: i64) {
     opt_trace("end-local-opt", f)
 }
 
+// first_done[fid]: opt_first has run for the function; clean_at[fid]: the passes that are clean
+// (see opt_pass) at its end (the function does not change until its local_opt)
+priv first_done: Vec[bool]
+priv clean_at: Vec[i64]
+
+// The first part of the optimisation of one function, also callable right after the function
+// is lowered (opt_optimize then skips it): prune, mem2reg, dce and, when optimising, simplify
+// and tail recursion. It reads nothing of the module but the function (not the alias classes
+// of loads and stores either) and makes no loads or stores.
+fn opt_first(m: *Module, fid: i64, level: i64) {
+    // (grown in the main arena, before work_begin)
+    if first_done.len < m.funcs.len {
+        first_done.resize(m.funcs.len, false)
+        clean_at.resize(m.funcs.len, 0)
+    }
+    f := &m.funcs[fid]
+    if !f.lowered || first_done[fid] {
+        return
+    }
+    first_done[fid] = true
+    work_begin()
+    ir_memo_begin(f)
+    // at -O0 only mem2reg adds instructions: keep the list in the main arena
+    ir_insts_main = level == 0
+    sk_forget()
+    opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
+    opt_pass(PASS_MEM2REG, f, mem2reg_run)
+    opt_pass(PASS_DCE, f, cleanup_dce)
+    if level > 0 {
+        simplify_run(f)
+        if opt_enabled("tre") && tre_run(f, fid) {
+            sk_forget()
+            opt_trace("after-tre", f)
+            simplify_run(f)
+        }
+        clean_at[fid] = sk_save()
+    }
+    // keep the function, drop the passes' temporary data (see work_begin in base.al)
+    ir_memo_end()
+    work_end()
+    ir_insts_main = false
+    keep_func(f)
+}
+
 fn opt_optimize(m: *Module, level: i64) {
     n := m.funcs.len
     check_fail = vec_fill(n, false)
-    // the passes that are clean (see opt_pass) at the end of each function's first part
-    clean_at := vec_fill(n, 0)
     for fid in 0..n {
         nm := m.funcs[fid].name
         check_fail[fid] = nm == "__bounds_fail" || nm == "__div_fail" || nm == "__step_fail"
     }
     for fid in 0..n {
-        f := &m.funcs[fid]
-        if f.lowered {
-            work_begin()
-            ir_memo_begin(f)
-            // at -O0 only mem2reg adds instructions: keep the list in the main arena
-            ir_insts_main = level == 0
-            sk_forget()
-            opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
-            opt_pass(PASS_MEM2REG, f, mem2reg_run)
-            opt_pass(PASS_DCE, f, cleanup_dce)
-            if level > 0 {
-                simplify_run(f)
-                if opt_enabled("tre") && tre_run(f, fid) {
-                    sk_forget()
-                    opt_trace("after-tre", f)
-                    simplify_run(f)
-                }
-                // the function is not changed until its local_opt
-                clean_at[fid] = sk_save()
-            }
-            // keep the function, drop the passes' temporary data (see work_begin in base.al)
-            ir_memo_end()
-            work_end()
-            ir_insts_main = false
-            keep_func(f)
-        }
+        opt_first(m, fid, level)
     }
     if level == 0 {
         return
