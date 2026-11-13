@@ -1502,7 +1502,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
         ptys = clone(fsig.0)
         rty = fsig.1
     }
-    final_vals := vec[Val]()
+    final_vals := Vec[Val]{buf: alloc[Val](vals.len), len: 0}
     for i in 0..vals.len {
         v := unwrap(vals[i])
         pt := ptys[i]
