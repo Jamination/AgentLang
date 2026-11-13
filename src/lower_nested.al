@@ -197,6 +197,7 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
     f := func_new(shown)
     f.noreturn = rty == T_NEVER
     cx.fn_abi(&f, ptys.items(), rty)
+    assert cx.module.funcs.len < 0x7FFFFFFF, "lower: too many functions"
     cx.module.funcs.push(f)
     cx.fn_sigs.push((clone(ptys), rty))
     cx.nested[idx].fid = fid

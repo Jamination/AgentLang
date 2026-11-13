@@ -223,6 +223,8 @@ fn intern(self: *Types, k: TyK) -> i64 {
         }
     }
     id := self.kinds.len
+    // type numbers fit in 32 bits (like every other id space of the compiler)
+    assert id < 0x7FFFFFFF, "types: too many types"
     self.kinds.push(clone(k))
     if k3.0 < 0 {
         self.lists.set(kl, id)

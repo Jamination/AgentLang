@@ -903,6 +903,8 @@ priv fn vr(self: *Sel, v: i64) -> i64 {
 priv fn fconst(self: *Sel, bits: Bits128) -> Mem {
     ix, has := self.fconst_ix.get(bits)
     if !has {
+        // (Mem.id is 32-bit)
+        assert self.mf.fconsts.len < 0x7FFFFFFF, "isel: too many float constants in a function"
         self.mf.fconsts.push(bits)
         ix = self.mf.fconsts.len - 1
         self.fconst_ix.set(bits, ix)

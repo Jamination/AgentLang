@@ -1093,6 +1093,8 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
         None => {}
     }
     is_ext := is_some(f.ext)
+    // function numbers are kept in 32 bits (MInst.tgt of a call)
+    assert self.module.funcs.len < 0x7FFFFFFF, "lower: too many functions"
     self.module.funcs.push(f)
     self.fn_sigs.push((ptys, rty))
     self.fn_insts.set((di, clone(targs).items()), fid)

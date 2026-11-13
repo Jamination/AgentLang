@@ -544,6 +544,8 @@ fn ast_sym_hashed(s: str, h: u64) -> i64 {
         i = (i + 1) & mask
     }
     id := sym_texts.len
+    // a slot keeps id + 1 in its low 32 bits
+    assert id < 0x7FFFFFFF, "ast: too many symbols"
     n := len(s)
     if sym_chunk_used + n + 8 > len(sym_chunk) {
         sym_chunk = alloc[u8](max(SYM_CHUNK, n + 8))
