@@ -95,7 +95,11 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     dynamic := !externs.is_empty()
     for x in externs {
         lib := m.externs[x].lib
-        if ends_with(lib, ".dll") || ends_with(lib, ".dylib") || find(lib, ".framework") >= 0 {
+        if ends_with(to_lower(lib), ".dll") {
+            return ("", fmt("`", m.externs[x].name, "` is imported from `", lib,
+                "`, a Windows library: build with --target windows (this build makes an x86-64 Linux executable)"))
+        }
+        if ends_with(lib, ".dylib") || find(lib, ".framework") >= 0 {
             return ("", fmt("`", m.externs[x].name, "` is imported from `", lib,
                 "`, which is not a Linux library; this compiler emits x86-64 Linux executables (bindings for other platforms can be type-checked with `alc check`)"))
         }

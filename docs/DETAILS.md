@@ -517,6 +517,21 @@ fn main() {
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
   different scalar type (except through `u8`), as in C.
 
+**Windows** (`--target windows`):
+
+- Functions and variables are imported from DLLs (`extern "kernel32.dll" fn GetStdHandle(n: u32) ->
+  *u8`, `extern "abi.dll" counter: i32`), through the executable's import address table: the
+  slot of each holds the address of the function or variable (a variable is not copied). The
+  library name is taken as written; a Linux library name (`libc.so.6`) is a build error.
+- Every function, AL or C, uses the Microsoft x64 calling convention: the first four
+  arguments by position in rcx, rdx, r8, r9 or xmm0-xmm3, the rest on the stack above 32 bytes
+  of shadow space. So an AL function is a C callback whatever its parameters are.
+- `extern` functions may also take and return structs (and tuples, enums with data) by value,
+  as C does there: one of 1, 2, 4 or 8 bytes travels as an integer of that size, any other is
+  passed as a pointer to a copy the caller makes and returned through a hidden pointer. Vector
+  types (`vec2` ... `quat`) cannot cross the C boundary.
+- C functions with a variable number of arguments (`printf`) cannot be declared.
+
 ## Windows
 
 `alc build --target windows f.al` writes `f.exe`, a Windows x86-64 console program (PE32+).
@@ -524,15 +539,8 @@ The run-time library (`src/prelude_windows.al`) calls only `kernel32.dll`; there
 run-time library. The same program prints the same output and ends with the same status on
 both systems, except where this section says otherwise.
 
-- **ABI.** Every function, AL or `extern`, uses the Microsoft x64 convention: arguments in
-  rcx, rdx, r8, r9 / xmm0-3 by position, 32 bytes of shadow space; structs of 1, 2, 4 or 8
-  bytes in a register, others by reference to a copy; results in rax / xmm0 or through a
-  hidden pointer; rbx, rbp, rdi, rsi, r12-r15, xmm6-15 preserved. Any AL function can thus be
-  given to Windows as a callback, and `extern` functions may take and return structs. Frames of
-  a page or more probe the stack; the stack is 16 MiB.
-- **Libraries.** `extern "kernel32.dll" fn ...` imports through the import table; a variable
-  (`extern "x.dll" name: T`) is reached through its import slot. A library name that is not
-  a `.dll` (`libc.so.6`) is an error. `syscall` is a build error.
+- **ABI and libraries**: [C interop](#c-interop) above. Frames of a page or more probe the
+  stack; the stack is 16 MiB. `syscall` is a build error.
 - **Text.** Arguments, environment variables, paths and console text are UTF-16 for Windows
   and UTF-8 for the program: unpaired surrogates in Windows names come out as their 3-byte
   (WTF-8) form and go back unchanged; invalid UTF-8 becomes U+FFFD. Output to a console is

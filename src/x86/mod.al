@@ -167,7 +167,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         if len(d.code.err) != 0 && len(err) == 0 {
             err = d.code.err
         }
-        funcs.push(Compiled{fid: fids[i], code: Code{bytes: d.code.bytes, relocs: d.code.relocs}})
+        funcs.push(Compiled{fid: fids[i], code: Code{bytes: d.code.bytes, relocs: d.code.relocs, unwind: d.code.unwind}})
     }
     return Output{funcs: funcs, fpool: fpool, err: err}
 }
@@ -228,7 +228,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts) -> Done {
         put(mir_print_mfunc(&mf))
     }
     work_end()
-    d := Done{code: Code{bytes: clone(code.bytes), relocs: clone(code.relocs), err: clone(code.err)}, fconsts: clone(mf.fconsts), ok: true}
+    d := Done{code: Code{bytes: clone(code.bytes), relocs: clone(code.relocs), err: clone(code.err), unwind: clone(code.unwind)}, fconsts: clone(mf.fconsts), ok: true}
     // the function's IR was rewritten on the work heap and is not needed again
     f.insts = vec[Inst]()
     f.blocks = vec[BlockData]()
