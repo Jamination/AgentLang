@@ -23,8 +23,8 @@
 # cannot run on Windows are listed with the reason in tests/windows.skip.
 #
 # --host-wine alc.exe (with --target windows) tests a compiler built for Windows: alc.exe runs
-# under Wine and builds, checks and runs (`alc test`) the programs there; [path/to/alc] is
-# not given then, only the filter.
+# under Wine and builds, checks and runs (`alc run` in the default mode, `alc test`) the
+# programs there; [path/to/alc] is not given then, only the filter.
 cd "$(dirname "$0")/.." || exit 2
 usage() { echo "usage: tests/run.sh [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]"; exit 2; }
 WIN=0
@@ -107,12 +107,16 @@ for src in $dir/*.al; do
     if ! $ALC build "${TARGET[@]}" "$src" $mode -o "$BIN" 2>"$TMP/cerr"; then
       echo "FAIL $label: compile error"; head -5 "$TMP/cerr"; fail=$((fail+1)); continue
     fi
+    # (with --host-wine the default mode runs the program through `alc run`: arguments, input
+    # and exit status pass through the compiler)
+    cmd=("${RUN[@]}" "$BIN")
+    [[ -n $HOST_EXE && -z $mode ]] && cmd=("$ALC" run "${TARGET[@]}" "$src" -o "$BIN" --)
     if [[ -f "$dir/$name.in" ]]; then
-      timeout 60 "${RUN[@]}" "$BIN" <"$dir/$name.in" >"$TMP/out" 2>"$TMP/err"; code=$?
+      timeout 60 "${cmd[@]}" <"$dir/$name.in" >"$TMP/out" 2>"$TMP/err"; code=$?
     else
       args=(a1 b2)
       [[ -f "$dir/$name.args" ]] && read -ra args <"$dir/$name.args"
-      timeout 60 "${RUN[@]}" "$BIN" "${args[@]}" >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
+      timeout 60 "${cmd[@]}" "${args[@]}" >"$TMP/out" 2>"$TMP/err" </dev/null; code=$?
     fi
     ok=1
     if ! cmp -s "$TMP/out" "$exp_out"; then

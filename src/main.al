@@ -55,8 +55,8 @@ priv const LINUX_ONLY = [_](str, str){
 }
 
 // the operating system the executable is built for (`--target linux|windows`); the default
-// is linux. Read by the back end (calling convention, frames), the linker (ELF or PE) and
-// wherever the run-time library is chosen.
+// is the one the compiler runs on (parse_args). Read by the back end (calling convention,
+// frames), the linker (ELF or PE) and wherever the run-time library is chosen.
 enum TargetOs { TargetLinux, TargetWindows }
 
 target_os: TargetOs
