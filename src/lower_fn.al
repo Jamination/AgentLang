@@ -12,15 +12,15 @@ struct Val {
 }
 
 fn val_unit() -> Val {
-    return Val{ty: T_UNIT, v: NOV, mem: false, alias: 0, lane: None}
+    return Val{ty: T_UNIT, v: NOV}
 }
 
 fn val_err() -> Val {
-    return Val{ty: T_ERR, v: NOV, mem: false, alias: 0, lane: None}
+    return Val{ty: T_ERR, v: NOV}
 }
 
 fn val_never() -> Val {
-    return Val{ty: T_NEVER, v: NOV, mem: false, alias: 0, lane: None}
+    return Val{ty: T_NEVER, v: NOV}
 }
 
 // Local names. Every variable or nested function declared in a scope is a binding. The
@@ -92,14 +92,12 @@ struct Fx {
 
 fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
     edi, has_entry := cx.fn_name(entry)
-    if has_entry {
-        cx.entry_file = cx.fn_decls[edi].pos.file
-        fid := cx.inst_fn(edi, vec[i64]())
-        cx.module.entry = fid
-    } else {
-        cx.err(Pos{file: 0, line: 0, col: 0}, fmt("missing entry function `", entry, "`"))
+    if !has_entry {
+        cx.err(Pos{}, fmt("missing entry function `", entry, "`"))
         return
     }
+    cx.entry_file = cx.fn_decls[edi].pos.file
+    cx.module.entry = cx.inst_fn(edi, vec[i64]())
     checked_all := false
     loop {
         while cx.work.len > 0 {
@@ -153,25 +151,17 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
         }
         // and force evaluation of user constants / globals
         // (the names are visited in the order of their declarations)
-        cnames := vec[str]()
         for n in cx.const_decls.keys() {
             d, _ := cx.const_decl(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
-                cnames.push(n)
+                cx.const_named(n)
             }
         }
-        for i in 0..cnames.len {
-            cx.const_named(cnames[i])
-        }
-        gnames := vec[str]()
         for n in cx.global_decls.keys() {
             d, _ := cx.global_decl(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
-                gnames.push(n)
+                cx.global(n)
             }
-        }
-        for i in 0..gnames.len {
-            cx.global(gnames[i])
         }
     }
     // exposed scalar fields lose their private alias class
@@ -191,11 +181,7 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
 priv fn lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
     d := cx.fn_decls[di]
     cx.scope_prelude = cx.internal_file(d.pos.file)
-    tenv := map[str, i64]()
-    for i in 0..min(d.tparams.len, targs.len) {
-        tenv.set(d.tparams[i], targs[i])
-    }
-    lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, nil)
+    lower_fn_lower_body(cx, fid, &d.params, &d.body, tparam_env(d.tparams, targs), d.name, d.pos, nil)
 }
 
 // buffers for the instructions, blocks and pending block lists of the functions being
@@ -239,12 +225,12 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         block_bufs[buf_depth] = slab
     }
     f.insts = inst_bufs[buf_depth]
-    f.insts.len = 0
+    f.insts.clear()
     f.has_vec = false
     f.blocks = block_bufs[buf_depth]
-    f.blocks.len = 0
+    f.blocks.clear()
     pend := pend_bufs[buf_depth]
-    pend.len = 0
+    pend.clear()
     buf_depth += 1
     fx := Fx{
         cx: cx,
@@ -267,13 +253,10 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     fx.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
     fx.cur = fx.f.new_block()
     pi := 0
-    match fx.cx.abi_ret(rty) {
-        SRet => {
-            p := fx.ins(Param, I64, vec[i64](), pi)
-            pi += 1
-            fx.sret = Some(p)
-        }
-        _ => {}
+    if fx.cx.abi_ret(rty) == SRet {
+        p := fx.ins(Param, I64, vec[i64](), pi)
+        pi += 1
+        fx.sret = Some(p)
     }
     for i in 0..params.len {
         pname := params[i].0
@@ -308,10 +291,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         }
     }
     want := rty != T_UNIT && rty != T_NEVER
-    expect: Opt[i64] = None
-    if want {
-        expect = Some(rty)
-    }
+    expect: Opt[i64] = if want { Some(rty) } else { None }
     v := fx.block_value(body, want, expect)
     if !fx.dead {
         if rty == T_NEVER {
@@ -336,11 +316,8 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     copy(entry[na..], b0.items())
     fx.f.blocks[0].insts = Vec[i32]{buf: entry, len: len(entry)}
     for bi in 0..fx.f.blocks.len {
-        match fx.f.blocks[bi].term {
-            Term.None => {
-                fx.f.blocks[bi].term = Trap
-            }
-            _ => {}
+        if fx.f.blocks[bi].term == Term.None {
+            fx.f.blocks[bi].term = Trap
         }
     }
     lf := fx.f
@@ -476,7 +453,7 @@ fn tag_i64(self: *Fx, tag: i64) -> i64 {
 }
 
 fn sval(self: *Fx, ty: i64, v: i64) -> Val {
-    return Val{ty: ty, v: v, mem: false, alias: 0, lane: None}
+    return Val{ty: ty, v: v}
 }
 
 // The place of global variable `n`; an `extern` variable is reached through its import slot.
@@ -615,13 +592,14 @@ fn push_scope(self: *Fx) {
 }
 
 fn pop_scope(self: *Fx) {
-    if !self.dead && self.scopes[self.scopes.len - 1].defers.len != 0 {
-        defers := clone(self.scopes[self.scopes.len - 1].defers)
+    s := self.scopes.last()
+    if !self.dead && !s.defers.is_empty() {
+        defers := clone(s.defers)
         for i in defers.len - 1..=0 by -1 {
             self.block(defers[i])
         }
     }
-    unbind(self.scopes[self.scopes.len - 1].start)
+    unbind(s.start)
     self.scopes.pop()
 }
 
@@ -726,9 +704,9 @@ fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
         return Some(binds[b].val)
     }
     if self.late.len != 0 {
-        match self.local(id) {
-            Some(x) => return Some(x)
-            None => {}
+        x := self.local(id)
+        if is_some(x) {
+            return x
         }
     }
     if self.parent != nil {
@@ -797,7 +775,7 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
     }
     if self.dead {
         v = val_never()
-    } else if v.mem && !self.scopes[self.scopes.len - 1].defers.is_empty() {
+    } else if v.mem && !self.scopes.last().defers.is_empty() {
         t := self.temp(v.ty)
         tv := self.mval(v.ty, t)
         self.store(tv, v)
@@ -813,7 +791,7 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
 
 // `break` / `continue`
 priv fn break_continue(fx: *Fx, pos: Pos, is_break: bool) {
-    if fx.loops.len == 0 {
+    if fx.loops.is_empty() {
         if fx.parent != nil {
             fx.err(pos, fmt("`break`/`continue` outside of a loop (the nested function `", fx.f.name, "` cannot leave a loop of the enclosing function: return a value and test it at the call)"))
         } else {
@@ -821,14 +799,9 @@ priv fn break_continue(fx: *Fx, pos: Pos, is_break: bool) {
         }
         return
     }
-    l := fx.loops[fx.loops.len - 1]
-    target := if is_break { l.brk } else { l.cont }
-    depth := l.scope_depth
-    fx.run_defers_down_to(depth)
-    fx.flush_pend()
-    fx.f.blocks[fx.cur].term = Jmp(target)
-    fx.cur = fx.f.new_block()
-    fx.dead = true
+    l := fx.loops.last()
+    fx.run_defers_down_to(l.scope_depth)
+    fx.terminate(Jmp(if is_break { l.brk } else { l.cont }))
 }
 
 // `break label` / `continue label`
@@ -856,12 +829,8 @@ priv fn break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
         return
     }
     l := fx.loops[idx]
-    target := if is_break { l.brk } else { l.cont }
     fx.run_defers_down_to(l.scope_depth)
-    fx.flush_pend()
-    fx.f.blocks[fx.cur].term = Jmp(target)
-    fx.cur = fx.f.new_block()
-    fx.dead = true
+    fx.terminate(Jmp(if is_break { l.brk } else { l.cont }))
 }
 
 priv fn stmt(self: *Fx, s: *Stmt) {
@@ -956,8 +925,8 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 Some(ta) => Some(self.cx.resolve(ta, &self.tenv))
                 None => None
             }
-            match init {
-                Some(e) => {
+            match (init, t) {
+                (Some(e), _) => {
                     v := self.expr(e, t)
                     match t {
                         Some(tt) => {
@@ -973,27 +942,18 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                     dst := self.mval(v.ty, addr)
                     self.store(dst, v)
                 }
-                None => {
-                    match t {
-                        Some(tt) => {
-                            addr := self.declare(name, tt, s.pos)
-                            dst := self.mval(tt, addr)
-                            self.zero(dst)
-                        }
-                        None => {
-                            self.err(s.pos, "a variable needs a type or an initializer")
-                        }
-                    }
+                (None, Some(tt)) => {
+                    addr := self.declare(name, tt, s.pos)
+                    dst := self.mval(tt, addr)
+                    self.zero(dst)
                 }
+                (None, None) => self.err(s.pos, "a variable needs a type or an initializer")
             }
         }
         Assign(lhs, op, rhs) => {
-            match lhs.k {
-                Ident("_") => {
-                    self.expr(rhs, None)
-                    return
-                }
-                _ => {}
+            if lhs.k == Ident("_") {
+                self.expr(rhs, None)
+                return
             }
             dst := match self.place(lhs) {
                 Some(d) => d
@@ -1011,12 +971,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 Some(bop) => {
                     cur := self.scalar(dst)
                     l := self.sval(dst.ty, cur)
-                    r: Val
-                    if bop == Shl || bop == Shr {
-                        r = self.expr(rhs, None)
-                    } else {
-                        r = self.expr(rhs, Some(dst.ty))
-                    }
+                    r := self.expr(rhs, if bop == Shl || bop == Shr { None } else { Some(dst.ty) })
                     v := self.binary_vals(bop, l, r, s.pos)
                     v2 := self.coerce(v, dst.ty, rhs.pos)
                     self.store(dst, v2)
@@ -1186,10 +1141,7 @@ priv fn do_return(self: *Fx, v: Opt[Val]) {
                     }
                 }
                 SRet => {
-                    sp := match self.sret {
-                        Some(p) => p
-                        None => panic("unwrap of None")
-                    }
+                    sp := unwrap(self.sret)
                     dst := self.mval(self.ret_ty, sp)
                     self.store(dst, rv)
                     if target_os == TargetWindows {
@@ -1270,10 +1222,10 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
 
 // is the value of block `b` an untyped float (`0.5`, `sqrt(2.0)`, an `if` of such values)?
 priv fn block_tail_untyped_float(self: *Fx, b: *Block) -> bool {
-    if b.stmts.len == 0 {
+    if b.stmts.is_empty() {
         return false
     }
-    match b.stmts[b.stmts.len - 1].k {
+    match b.stmts.last().k {
         If(_, t, Some(e)) => return block_tail_untyped_float(self, t) && block_tail_untyped_float(self, e)
         Expr(x) => {
             match x.k {
@@ -1489,7 +1441,7 @@ fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
 // `!`) whose value is a constant (`if DEBUG`, `if TARGET_OS == Windows`) becomes a jump. The
 // branch it rules out is still type-checked, but unreachable: pruned at every optimisation
 // level, together with the functions and data only it uses (ALC_DISABLE=constif: not done).
-fn if_br(self: *Fx, e: *Expr, t: i64, f: i64) {
+priv fn if_br(self: *Fx, e: *Expr, t: i64, f: i64) {
     self.cond_jump(e, t, f, opt_enabled("constif"))
 }
 
@@ -1573,10 +1525,7 @@ fn loc_str(self: *Fx, pos: Pos) -> Val {
     // the string global and length of "file:line", made once per line
     gl, known := self.cx.locs.get((pos.file, i64(pos.line)))
     if !known {
-        fname: str = ""
-        if pos.file >= 0 && pos.file < self.cx.file_names.len {
-            fname = self.cx.file_names[pos.file]
-        }
+        fname := if pos.file >= 0 && pos.file < self.cx.file_names.len { self.cx.file_names[pos.file] } else { "" }
         s := fmt(fname, ":", pos.line)
         gl = (self.cx.string_global(s), len(s))
         self.cx.locs.set((pos.file, i64(pos.line)), gl)
