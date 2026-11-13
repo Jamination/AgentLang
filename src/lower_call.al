@@ -356,7 +356,7 @@ priv fn emit_extern_call(self: *Fx, x: i64, ptys: []i64, rty: i64, args: Vec[Val
     got := self.cx.module.externs[x].got
     a := self.ins(GAddr, I64, vec[i64](), got)
     target := self.load_raw(a, I64, AK_PTR)
-    ir_args := vec_of([]i64{target})
+    ir_args := vec_one(target)
     for i in 0..min(args.len, len(ptys)) {
         v := args[i]
         pt := ptys[i]
@@ -370,7 +370,7 @@ priv fn emit_extern_call(self: *Fx, x: i64, ptys: []i64, rty: i64, args: Vec[Val
             } else {
                 op = ZExt
             }
-            s = self.ins(op, I32, vec_of([]i64{s}), 0)
+            s = self.ins(op, I32, vec_one(s), 0)
         }
         ir_args.push(s)
     }
@@ -485,7 +485,7 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
                 c := self.ins(op, Void, ir_args, k)
                 for i in 0..leaves.len {
                     l := leaves[i]
-                    p := self.ins(Proj, l.t, vec_of([]i64{c}), i)
+                    p := self.ins(Proj, l.t, vec_one(c), i)
                     a := self.add_off(tmp, i64(l.off))
                     self.store_raw(a, p, l.t, l.alias)
                 }
@@ -1640,22 +1640,22 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             match (fk, tk) {
                 (F64, Int(64, _)) => {
                     s := self.scalar(v)
-                    r := self.ins(FToBits, I64, vec_of([]i64{s}), 0)
+                    r := self.ins(FToBits, I64, vec_one(s), 0)
                     return Some(self.sval(to, r))
                 }
                 (Int(64, _), F64) => {
                     s := self.scalar(v)
-                    r := self.ins(BitsToF, F64, vec_of([]i64{s}), 0)
+                    r := self.ins(BitsToF, F64, vec_one(s), 0)
                     return Some(self.sval(to, r))
                 }
                 (F32, Int(32, _)) => {
                     s := self.scalar(v)
-                    r := self.ins(FToBits, I32, vec_of([]i64{s}), 0)
+                    r := self.ins(FToBits, I32, vec_one(s), 0)
                     return Some(self.sval(to, r))
                 }
                 (Int(32, _), F32) => {
                     s := self.scalar(v)
-                    r := self.ins(BitsToF, F32, vec_of([]i64{s}), 0)
+                    r := self.ins(BitsToF, F32, vec_one(s), 0)
                     return Some(self.sval(to, r))
                 }
                 (Int(64, _), Enum(_)) if self.cx.types.is_scalar(to) => {
@@ -1670,9 +1670,9 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                     n := l
                     if fs != ts {
                         a := self.iconst(I64, fs)
-                        bytes := self.ins(Mul, I64, vec_of([]i64{l, a}), 0)
+                        bytes := self.ins(Mul, I64, vec_two(l, a), 0)
                         b := self.iconst(I64, max(ts, 1))
-                        n = self.ins(UDiv, I64, vec_of([]i64{bytes, b}), 0)
+                        n = self.ins(UDiv, I64, vec_two(bytes, b), 0)
                     }
                     t := self.temp(to)
                     sv := self.mval(to, t)
@@ -1823,7 +1823,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 } else {
                     op = FMax
                 }
-                r = self.ins(op, it, vec_of([]i64{a, b}), 0)
+                r = self.ins(op, it, vec_two(a, b), 0)
             } else {
                 op: Op
                 if name == "sqrt" {
@@ -1831,7 +1831,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 } else {
                     op = FAbs
                 }
-                r = self.ins(op, it, vec_of([]i64{s}), 0)
+                r = self.ins(op, it, vec_one(s), 0)
             }
             return Some(self.sval(v.ty, r))
         }
@@ -1856,7 +1856,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 "clz" => Clz
                 _ => Op.Bswap
             }
-            r := self.ins(op, it, vec_of([]i64{s}), 0)
+            r := self.ins(op, it, vec_one(s), 0)
             return Some(self.sval(v.ty, r))
         }
         "rotl", "rotr" => {
@@ -1878,9 +1878,9 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             s := self.scalar(v)
             c := self.scalar(n)
             if nt.size() > it.size() {
-                c = self.ins(Trunc, it, vec_of([]i64{c}), 0)
+                c = self.ins(Trunc, it, vec_one(c), 0)
             } else if nt.size() < it.size() {
-                c = self.ins(ZExt, it, vec_of([]i64{c}), 0)
+                c = self.ins(ZExt, it, vec_one(c), 0)
             }
             op: Op
             if name == "rotl" {
@@ -1888,7 +1888,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             } else {
                 op = Rotr
             }
-            r := self.ins(op, it, vec_of([]i64{s, c}), 0)
+            r := self.ins(op, it, vec_two(s, c), 0)
             return Some(self.sval(v.ty, r))
         }
         "mulhi" => {
@@ -1945,7 +1945,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 } else {
                     hop = MulHiU
                 }
-                r := self.ins(hop, I64, vec_of([]i64{a, b}), 0)
+                r := self.ins(hop, I64, vec_two(a, b), 0)
                 return Some(self.sval(v.ty, r))
             }
             // narrower types: the full product fits in 64 bits
@@ -1958,12 +1958,12 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 ext = ZExt
                 shr = LShr
             }
-            wa := self.ins(ext, I64, vec_of([]i64{a}), 0)
-            wb := self.ins(ext, I64, vec_of([]i64{b}), 0)
-            prod := self.ins(Mul, I64, vec_of([]i64{wa, wb}), 0)
+            wa := self.ins(ext, I64, vec_one(a), 0)
+            wb := self.ins(ext, I64, vec_one(b), 0)
+            prod := self.ins(Mul, I64, vec_two(wa, wb), 0)
             bits := self.iconst(I64, it.size() * 8)
-            hi := self.ins(shr, I64, vec_of([]i64{prod, bits}), 0)
-            r := self.ins(Trunc, it, vec_of([]i64{hi}), 0)
+            hi := self.ins(shr, I64, vec_two(prod, bits), 0)
+            r := self.ins(Trunc, it, vec_one(hi), 0)
             return Some(self.sval(v.ty, r))
         }
         "memcopy", "memfill" => {
@@ -2019,7 +2019,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             m := self.expr(&args[0], Some(T_STR))
             m = self.coerce(m, T_STR, args[0].pos)
             loc := self.loc_str(pos)
-            return Some(self.call_rt("__panic", vec[i64](), vec_of([]Val{loc, m}), pos))
+            return Some(self.call_rt("__panic", vec[i64](), vec_two[Val](loc, m), pos))
         }
         "fmt" => {
             // evaluate everything first: output produced by the arguments themselves is not captured
@@ -2039,7 +2039,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             for i in 0..vals.len {
                 self.put_val(vals[i].0, vals[i].1, 0)
             }
-            return Some(self.call_rt("__cap_end", vec[i64](), vec_of([]Val{start}), pos))
+            return Some(self.call_rt("__cap_end", vec[i64](), vec_one[Val](start), pos))
         }
         "hash" => {
             if nargs != 1 {
@@ -2067,14 +2067,14 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 a := &args[i]
                 if i > 0 && name == "print" {
                     sp := self.str_val(" ")
-                    self.call_rt("__put_str", vec[i64](), vec_of([]Val{sp}), pos)
+                    self.call_rt("__put_str", vec[i64](), vec_one[Val](sp), pos)
                 }
                 v := self.expr(a, None)
                 self.put_val(v, a.pos, 0)
             }
             if name == "print" {
                 nl := self.str_val("\n")
-                self.call_rt("__put_str", vec[i64](), vec_of([]Val{nl}), pos)
+                self.call_rt("__put_str", vec[i64](), vec_one[Val](nl), pos)
             }
             return Some(val_unit())
         }
@@ -2088,7 +2088,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
 // the common tail of the scalar cases of `hash_val`: hash the 64-bit pattern `x`
 priv fn hash_u64(s: *Fx, x: i64, pos: Pos) -> Opt[i64] {
     a := s.sval(T_U64, x)
-    r := s.call_rt("__hash_u64", vec[i64](), vec_of([]Val{a}), pos)
+    r := s.call_rt("__hash_u64", vec[i64](), vec_one[Val](a), pos)
     return Some(s.scalar(r))
 }
 
@@ -2137,7 +2137,7 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
                         Some(x) => x
                         None => return None
                     }
-                    r := self.call_rt("__hash_mix", vec[i64](), vec_of([]Val{self.sval(T_U64, h), self.sval(T_U64, fh)}), pos)
+                    r := self.call_rt("__hash_mix", vec[i64](), vec_two[Val](self.sval(T_U64, h), self.sval(T_U64, fh)), pos)
                     h = self.scalar(r)
                 }
                 self.store_raw(res, h, I64, 0)
@@ -2157,16 +2157,16 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
             // -0.0 == 0.0, so both must hash alike
             x := self.scalar(v)
             z := self.ins(FConst, T.F64, vec[i64](), 0)
-            n := self.ins(FAdd, T.F64, vec_of([]i64{x, z}), 0)
-            bits := self.ins(FToBits, I64, vec_of([]i64{n}), 0)
+            n := self.ins(FAdd, T.F64, vec_two(x, z), 0)
+            bits := self.ins(FToBits, I64, vec_one(n), 0)
             return hash_u64(self, bits, pos)
         }
         Slice(et) => {
             r: Val
             if et == T_U8 {
-                r = self.call_rt("__hash_str", vec[i64](), vec_of([]Val{v}), pos)
+                r = self.call_rt("__hash_str", vec[i64](), vec_one[Val](v), pos)
             } else {
-                r = self.call_rt("__hash_slice", vec_of([]i64{et}), vec_of([]Val{v}), pos)
+                r = self.call_rt("__hash_slice", vec_one(et), vec_one[Val](v), pos)
             }
             return Some(self.scalar(r))
         }
@@ -2178,9 +2178,9 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
             self.store_slice(sv, v.v, nv)
             r: Val
             if et == T_U8 {
-                r = self.call_rt("__hash_str", vec[i64](), vec_of([]Val{sv}), pos)
+                r = self.call_rt("__hash_str", vec[i64](), vec_one[Val](sv), pos)
             } else {
-                r = self.call_rt("__hash_slice", vec_of([]i64{et}), vec_of([]Val{sv}), pos)
+                r = self.call_rt("__hash_slice", vec_one(et), vec_one[Val](sv), pos)
             }
             return Some(self.scalar(r))
         }
@@ -2214,12 +2214,12 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
                 }
                 x := self.scalar(col)
                 for k in 0..n {
-                    l := self.ins(VExt, T.F32, vec_of([]i64{x}), k)
+                    l := self.ins(VExt, T.F32, vec_one(x), k)
                     fh := match self.hash_val(self.sval(T_F32, l), pos) {
                         Some(y) => y
                         None => return None
                     }
-                    r := self.call_rt("__hash_mix", vec[i64](), vec_of([]Val{self.sval(T_U64, h), self.sval(T_U64, fh)}), pos)
+                    r := self.call_rt("__hash_mix", vec[i64](), vec_two[Val](self.sval(T_U64, h), self.sval(T_U64, fh)), pos)
                     h = self.scalar(r)
                 }
             }
@@ -2248,7 +2248,7 @@ priv fn hash_fields(s: *Fx, v: Val, names: Vec[str], pos: Pos) -> Opt[i64] {
         }
         a := s.sval(T_U64, h)
         b := s.sval(T_U64, fh)
-        r := s.call_rt("__hash_mix", vec[i64](), vec_of([]Val{a, b}), pos)
+        r := s.call_rt("__hash_mix", vec[i64](), vec_two[Val](a, b), pos)
         h = s.scalar(r)
     }
     return Some(h)
@@ -2260,7 +2260,7 @@ fn put_lit_pub(self: *Fx, s: str, pos: Pos) {
 
 priv fn put_lit(self: *Fx, s: str, pos: Pos) {
     v := self.str_val(s)
-    self.call_rt("__put_str", vec[i64](), vec_of([]Val{v}), pos)
+    self.call_rt("__put_str", vec[i64](), vec_one[Val](v), pos)
 }
 
 priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
@@ -2280,7 +2280,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 } else {
                     op = ZExt
                 }
-                s = self.ins(op, I64, vec_of([]i64{s}), 0)
+                s = self.ins(op, I64, vec_one(s), 0)
             }
             f := "__put_u64"
             t := T_U64
@@ -2289,30 +2289,30 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 t = T_I64
             }
             a := self.sval(t, s)
-            self.call_rt(f, vec[i64](), vec_of([]Val{a}), pos)
+            self.call_rt(f, vec[i64](), vec_one[Val](a), pos)
         }
         F32 => {
-            self.call_rt("__put_f32", vec[i64](), vec_of([]Val{v}), pos)
+            self.call_rt("__put_f32", vec[i64](), vec_one[Val](v), pos)
         }
         Vec(_), Quat, Mat4 => {
             self.put_vec(v, pos)
         }
         F64 => {
-            self.call_rt("__put_f64", vec[i64](), vec_of([]Val{v}), pos)
+            self.call_rt("__put_f64", vec[i64](), vec_one[Val](v), pos)
         }
         Bool => {
-            self.call_rt("__put_bool", vec[i64](), vec_of([]Val{v}), pos)
+            self.call_rt("__put_bool", vec[i64](), vec_one[Val](v), pos)
         }
         Ptr(_), Fn(_, _) => {
             s := self.scalar(v)
             a := self.sval(T_I64, s)
-            self.call_rt("__put_ptr", vec[i64](), vec_of([]Val{a}), pos)
+            self.call_rt("__put_ptr", vec[i64](), vec_one[Val](a), pos)
         }
         Slice(et) => {
             if et == T_U8 {
-                self.call_rt("__put_str", vec[i64](), vec_of([]Val{v}), pos)
+                self.call_rt("__put_str", vec[i64](), vec_one[Val](v), pos)
             } else {
-                self.call_rt("__put_slice", vec_of([]i64{et}), vec_of([]Val{v}), pos)
+                self.call_rt("__put_slice", vec_one(et), vec_one[Val](v), pos)
             }
         }
         Array(et, n) => {
@@ -2321,7 +2321,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
             sv := self.mval(sty, t)
             nv := self.iconst(I64, i64(n))
             self.store_slice(sv, v.v, nv)
-            self.call_rt("__put_slice", vec_of([]i64{et}), vec_of([]Val{sv}), pos)
+            self.call_rt("__put_slice", vec_one(et), vec_one[Val](sv), pos)
         }
         Struct(sid) => {
             if depth > 8 {
@@ -2332,7 +2332,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 Some(kv) => {
                     // a Map prints its entries: {key: value, ...} in insertion order
                     m := self.sval(self.cx.types.ptr_to(v.ty), v.v)
-                    self.call_rt("__put_map", vec_of([]i64{kv.0, kv.1}), vec_of([]Val{m}), pos)
+                    self.call_rt("__put_map", vec_two(kv.0, kv.1), vec_one[Val](m), pos)
                     return
                 }
                 None => {}
@@ -2390,7 +2390,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 bt := self.new_block()
                 bn := self.new_block()
                 c := self.iconst(I64, vi)
-                eq := self.ins(Eq, I8, vec_of([]i64{tag, c}), 0)
+                eq := self.ins(Eq, I8, vec_two(tag, c), 0)
                 self.br(eq, bt, bn)
                 self.switch_to(bt)
                 self.put_lit(vname, pos)

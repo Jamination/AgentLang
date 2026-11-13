@@ -284,7 +284,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                     n := items.len
                     bytes := self.iconst(I64, n * es)
                     bv := self.sval(T_I64, bytes)
-                    p := self.call_rt("__alloc_raw", vec[i64](), vec_of([]Val{bv}), e.pos)
+                    p := self.call_rt("__alloc_raw", vec[i64](), vec_one[Val](bv), e.pos)
                     pv := self.scalar(p)
                     for i in 0..items.len {
                         item := &items[i].1
@@ -702,7 +702,7 @@ fn to_i64(self: *Fx, v: Val) -> i64 {
         return s
     }
     op := if self.cx.types.is_signed(v.ty) { SExt } else { ZExt }
-    return self.ins(op, I64, vec_of([]i64{s}), 0)
+    return self.ins(op, I64, vec_one(s), 0)
 }
 
 // (ptr, len or NOV, elem type) of an indexable value
@@ -776,7 +776,7 @@ fn index_place(self: *Fx, b: *Expr, idx: *Expr, pos: Pos) -> Opt[Val] {
             _ => {}
         }
         if !both && self.cx.opts.checks {
-            c := self.ins(Ult, I8, vec_of([]i64{i, len_}), 0)
+            c := self.ins(Ult, I8, vec_two(i, len_), 0)
             self.check(c, 0, pos)
         }
     }
@@ -784,9 +784,9 @@ fn index_place(self: *Fx, b: *Expr, idx: *Expr, pos: Pos) -> Opt[Val] {
     off := i
     if es != 1 {
         c := self.iconst(I64, es)
-        off = self.ins(Mul, I64, vec_of([]i64{i, c}), 0)
+        off = self.ins(Mul, I64, vec_two(i, c), 0)
     }
-    a := self.ins(Add, I64, vec_of([]i64{ptr_, off}), 0)
+    a := self.ins(Add, I64, vec_two(ptr_, off), 0)
     ev := self.mval(et, a)
     // the elements of an array (or matrix) constant are part of the constant
     if bv.ro {
@@ -837,18 +837,18 @@ priv fn slice_expr(self: *Fx, b: *Expr, lo: Opt[*Expr], hi: Opt[*Expr], pos: Pos
         }
     }
     if self.cx.opts.checks {
-        c := self.ins(Ule, I8, vec_of([]i64{lo_v, hi_v}), 0)
+        c := self.ins(Ule, I8, vec_two(lo_v, hi_v), 0)
         self.check(c, 0, pos)
         if len_ != NOV && is_some(hi) {
-            c2 := self.ins(Ule, I8, vec_of([]i64{hi_v, len_}), 0)
+            c2 := self.ins(Ule, I8, vec_two(hi_v, len_), 0)
             self.check(c2, 0, pos)
         }
     }
     es := self.cx.types.size_of(et)
     c := self.iconst(I64, es)
-    off := self.ins(Mul, I64, vec_of([]i64{lo_v, c}), 0)
-    p := self.ins(Add, I64, vec_of([]i64{ptr_, off}), 0)
-    n := self.ins(Sub, I64, vec_of([]i64{hi_v, lo_v}), 0)
+    off := self.ins(Mul, I64, vec_two(lo_v, c), 0)
+    p := self.ins(Add, I64, vec_two(ptr_, off), 0)
+    n := self.ins(Sub, I64, vec_two(hi_v, lo_v), 0)
     sty := self.cx.types.slice(et)
     t := self.temp(sty)
     sv := self.mval(sty, t)
@@ -871,12 +871,12 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
                 it := self.irt(v.ty)
                 z := self.iconst(it, 0)
                 s := self.scalar(v)
-                r := self.ins(Sub, it, vec_of([]i64{z, s}), 0)
+                r := self.ins(Sub, it, vec_two(z, s), 0)
                 return self.sval(v.ty, r)
             } else if self.cx.types.is_float(v.ty) || is_some(self.cx.types.vec_lanes(v.ty)) {
                 it := self.irt(v.ty)
                 s := self.scalar(v)
-                r := self.ins(FNeg, it, vec_of([]i64{s}), 0)
+                r := self.ins(FNeg, it, vec_one(s), 0)
                 return self.sval(v.ty, r)
             } else {
                 tn := self.tyname(v.ty)
@@ -892,7 +892,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
             }
             s := self.scalar(v)
             one := self.iconst(I8, 1)
-            r := self.ins(Xor, I8, vec_of([]i64{s, one}), 0)
+            r := self.ins(Xor, I8, vec_two(s, one), 0)
             return self.sval(T_BOOL, r)
         }
         BitNot => {
@@ -908,7 +908,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
             it := self.irt(v.ty)
             s := self.scalar(v)
             m := self.iconst(it, -1)
-            r := self.ins(Xor, it, vec_of([]i64{s, m}), 0)
+            r := self.ins(Xor, it, vec_two(s, m), 0)
             return self.sval(v.ty, r)
         }
         Addr => {
@@ -931,7 +931,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
                     sz := self.cx.types.size_of(ty)
                     bytes := self.iconst(I64, sz)
                     bv := self.sval(T_I64, bytes)
-                    p := self.call_rt("__alloc_raw", vec[i64](), vec_of([]Val{bv}), pos)
+                    p := self.call_rt("__alloc_raw", vec[i64](), vec_one[Val](bv), pos)
                     pv := self.scalar(p)
                     dst := self.mval(ty, pv)
                     self.init_lit(dst, items.items(), pos)
@@ -1093,9 +1093,9 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         lv := self.scalar(l)
         rv := self.scalar(r)
         if rt.size() > it.size() {
-            rv = self.ins(Trunc, it, vec_of([]i64{rv}), 0)
+            rv = self.ins(Trunc, it, vec_one(rv), 0)
         } else if rt.size() < it.size() {
-            rv = self.ins(ZExt, it, vec_of([]i64{rv}), 0)
+            rv = self.ins(ZExt, it, vec_one(rv), 0)
         }
         o := Op.Shl
         if op != Shl {
@@ -1105,7 +1105,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
                 o = LShr
             }
         }
-        v := self.ins(o, it, vec_of([]i64{lv, rv}), 0)
+        v := self.ins(o, it, vec_two(lv, rv), 0)
         return self.sval(l.ty, v)
     }
     match self.vec_binary(op, l, r, pos) {
@@ -1161,7 +1161,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
                 }
                 a := self.scalar(l)
                 b := self.scalar(r)
-                v := self.ins(o, I8, vec_of([]i64{a, b}), 0)
+                v := self.ins(o, I8, vec_two(a, b), 0)
                 return self.sval(T_BOOL, v)
             }
             F64, F32 => { is_f = true }
@@ -1189,24 +1189,24 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
             }
             a := self.scalar(l)
             b := self.scalar(r)
-            v := self.ins(o, I8, vec_of([]i64{a, b}), 0)
+            v := self.ins(o, I8, vec_two(a, b), 0)
             return self.sval(T_BOOL, v)
         }
         if scalar_eq && eq_only && self.cx.types.is_scalar(l.ty) {
             a := self.scalar(l)
             b := self.scalar(r)
             o := if op == Eq { Op.Eq } else { Op.Ne }
-            v := self.ins(o, I8, vec_of([]i64{a, b}), 0)
+            v := self.ins(o, I8, vec_two(a, b), 0)
             return self.sval(T_BOOL, v)
         }
         if str_eq && eq_only {
-            v := self.call_rt("__str_eq", vec[i64](), vec_of([]Val{l, r}), pos)
+            v := self.call_rt("__str_eq", vec[i64](), vec_two[Val](l, r), pos)
             if op == Eq {
                 return v
             }
             s := self.scalar(v)
             one := self.iconst(I8, 1)
-            x := self.ins(Op.Xor, I8, vec_of([]i64{s, one}), 0)
+            x := self.ins(Op.Xor, I8, vec_two(s, one), 0)
             return self.sval(T_BOOL, x)
         }
         if agg_eq && eq_only {
@@ -1218,7 +1218,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
                 return self.sval(T_BOOL, e)
             }
             one := self.iconst(I8, 1)
-            x := self.ins(Op.Xor, I8, vec_of([]i64{e, one}), 0)
+            x := self.ins(Op.Xor, I8, vec_two(e, one), 0)
             return self.sval(T_BOOL, x)
         }
         tn := self.tyname(l.ty)
@@ -1253,7 +1253,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
             } else {
                 panic("internal error: entered unreachable code")
             }
-            v := self.ins(o, it, vec_of([]i64{a, b}), 0)
+            v := self.ins(o, it, vec_two(a, b), 0)
             return self.sval(l.ty, v)
         }
         F64, F32 => { is_f = true }
@@ -1276,7 +1276,7 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         a := self.scalar(l)
         b := self.scalar(r)
         it := self.irt(l.ty)
-        v := self.ins(o, it, vec_of([]i64{a, b}), 0)
+        v := self.ins(o, it, vec_two(a, b), 0)
         return self.sval(l.ty, v)
     }
     tn := self.tyname(l.ty)
@@ -1290,7 +1290,7 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
     fieldwise := false
     match self.cx.types.k(l.ty) {
         Slice(et) if et != T_U8 => {
-            v := self.call_rt("__slice_eq", vec_of([]i64{et}), vec_of([]Val{l, r}), pos)
+            v := self.call_rt("__slice_eq", vec_one(et), vec_two[Val](l, r), pos)
             return Some(self.scalar(v))
         }
         Array(et, n) => {
@@ -1307,7 +1307,7 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
             if et == T_U8 {
                 v = self.call_rt("__str_eq", vec[i64](), sl, pos)
             } else {
-                v = self.call_rt("__slice_eq", vec_of([]i64{et}), sl, pos)
+                v = self.call_rt("__slice_eq", vec_one(et), sl, pos)
             }
             return Some(self.scalar(v))
         }
@@ -1388,7 +1388,7 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
                 return None
             }
             ev := self.scalar(e)
-            acc = self.ins(And, I8, vec_of([]i64{acc, ev}), 0)
+            acc = self.ins(And, I8, vec_two(acc, ev), 0)
         }
         return Some(acc)
     }
@@ -1418,11 +1418,11 @@ priv fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b
                 z := self.iconst(it, 0)
                 v := z
                 if is_div {
-                    v = self.ins(Sub, it, vec_of([]i64{z, a}), 0)
+                    v = self.ins(Sub, it, vec_two(z, a), 0)
                 }
                 return self.sval(ty, v)
             }
-            v := self.ins(o, it, vec_of([]i64{a, b}), 0)
+            v := self.ins(o, it, vec_two(a, b), 0)
             return self.sval(ty, v)
         }
         None => {}
@@ -1430,17 +1430,17 @@ priv fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b
     // --unchecked drops only the zero check: MIN / -1 still wraps
     if self.cx.opts.checks {
         z := self.iconst(it, 0)
-        nz := self.ins(Ne, I8, vec_of([]i64{b, z}), 0)
+        nz := self.ins(Ne, I8, vec_two(b, z), 0)
         self.check(nz, 1, pos)
     }
     if !signed {
-        v := self.ins(o, it, vec_of([]i64{a, b}), 0)
+        v := self.ins(o, it, vec_two(a, b), 0)
         return self.sval(ty, v)
     }
     // signed: x / -1 wraps instead of trapping
     slot := self.alloca(it.size(), it.size())
     m1 := self.iconst(it, -1)
-    is_m1 := self.ins(Eq, I8, vec_of([]i64{b, m1}), 0)
+    is_m1 := self.ins(Eq, I8, vec_two(b, m1), 0)
     b_m1 := self.new_block()
     b_div := self.new_block()
     bj := self.new_block()
@@ -1450,12 +1450,12 @@ priv fn int_div(self: *Fx, is_div: bool, signed: bool, ty: i64, it: T, a: i64, b
     z2 := self.iconst(it, 0)
     v1 := z2
     if is_div {
-        v1 = self.ins(Sub, it, vec_of([]i64{z2, a}), 0)
+        v1 = self.ins(Sub, it, vec_two(z2, a), 0)
     }
     self.store_raw(slot, v1, it, 0)
     self.jmp(bj)
     self.switch_to(b_div)
-    v2 := self.ins(o, it, vec_of([]i64{a, b}), 0)
+    v2 := self.ins(o, it, vec_two(a, b), 0)
     self.store_raw(slot, v2, it, 0)
     self.jmp(bj)
     self.switch_to(bj)
@@ -1480,9 +1480,9 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             s := self.scalar(v)
             r := s
             if tb < fb {
-                r = self.ins(Trunc, tt, vec_of([]i64{s}), 0)
+                r = self.ins(Trunc, tt, vec_one(s), 0)
             } else if tb > fb {
-                r = self.ins(if fs { SExt } else { ZExt }, tt, vec_of([]i64{s}), 0)
+                r = self.ins(if fs { SExt } else { ZExt }, tt, vec_one(s), 0)
             }
             return self.sval(to, r)
         }
@@ -1490,35 +1490,35 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             ft := if to == T_F32 { T.F32 } else { T.F64 }
             s := self.scalar(v)
             if fb < 64 {
-                s = self.ins(if fs { SExt } else { ZExt }, I64, vec_of([]i64{s}), 0)
-                r := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
+                s = self.ins(if fs { SExt } else { ZExt }, I64, vec_one(s), 0)
+                r := self.ins(SIToF, ft, vec_one(s), 0)
                 return self.sval(to, r)
             }
             if fs {
-                r := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
+                r := self.ins(SIToF, ft, vec_one(s), 0)
                 return self.sval(to, r)
             }
             // u64: values >= 2^63 are halved (keeping the sticky bit), converted and doubled
             // (rounded once, also to f32)
             slot := self.alloca(8, 8)
             zero := self.iconst(I64, 0)
-            nonneg := self.ins(Sge, I8, vec_of([]i64{s, zero}), 0)
+            nonneg := self.ins(Sge, I8, vec_two(s, zero), 0)
             b_lo := self.new_block()
             b_hi := self.new_block()
             bj := self.new_block()
             d := self.dead
             self.br(nonneg, b_lo, b_hi)
             self.switch_to(b_lo)
-            r1 := self.ins(SIToF, ft, vec_of([]i64{s}), 0)
+            r1 := self.ins(SIToF, ft, vec_one(s), 0)
             self.store_raw(slot, r1, ft, 0)
             self.jmp(bj)
             self.switch_to(b_hi)
             one := self.iconst(I64, 1)
-            half := self.ins(LShr, I64, vec_of([]i64{s, one}), 0)
-            low := self.ins(And, I64, vec_of([]i64{s, one}), 0)
-            h := self.ins(Or, I64, vec_of([]i64{half, low}), 0)
-            hf := self.ins(SIToF, ft, vec_of([]i64{h}), 0)
-            r2 := self.ins(FAdd, ft, vec_of([]i64{hf, hf}), 0)
+            half := self.ins(LShr, I64, vec_two(s, one), 0)
+            low := self.ins(And, I64, vec_two(s, one), 0)
+            h := self.ins(Or, I64, vec_two(half, low), 0)
+            hf := self.ins(SIToF, ft, vec_one(h), 0)
+            r2 := self.ins(FAdd, ft, vec_two(hf, hf), 0)
             self.store_raw(slot, r2, ft, 0)
             self.jmp(bj)
             self.switch_to(bj)
@@ -1530,7 +1530,7 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             s := self.scalar(v)
             r := s
             if tb > 8 {
-                r = self.ins(ZExt, tt, vec_of([]i64{s}), 0)
+                r = self.ins(ZExt, tt, vec_one(s), 0)
             }
             return self.sval(to, r)
         }
@@ -1538,18 +1538,18 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             s := self.scalar(v)
             r := s
             if tb < 64 {
-                r = self.ins(Trunc, tt, vec_of([]i64{s}), 0)
+                r = self.ins(Trunc, tt, vec_one(s), 0)
             }
             return self.sval(to, r)
         }
         (F32, F64) => {
             s := self.scalar(v)
-            r := self.ins(FExt, T.F64, vec_of([]i64{s}), 0)
+            r := self.ins(FExt, T.F64, vec_one(s), 0)
             return self.sval(to, r)
         }
         (F64, F32) => {
             s := self.scalar(v)
-            r := self.ins(FTrunc, T.F32, vec_of([]i64{s}), 0)
+            r := self.ins(FTrunc, T.F32, vec_one(s), 0)
             return self.sval(to, r)
         }
         (F32, Int(tb, ts)), (F64, Int(tb, ts)) => {
@@ -1557,25 +1557,25 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             if tb == 64 && !ts {
                 // u64: values >= 2^63 are converted after subtracting 2^63, which is added back
                 if fk == F32 {
-                    s = self.ins(FExt, T.F64, vec_of([]i64{s}), 0)
+                    s = self.ins(FExt, T.F64, vec_one(s), 0)
                 }
                 slot := self.alloca(8, 8)
                 big := self.ins(FConst, T.F64, vec[i64](), 0x43E0000000000000)
-                ge := self.ins(FGe, I8, vec_of([]i64{s, big}), 0)
+                ge := self.ins(FGe, I8, vec_two(s, big), 0)
                 b_lo := self.new_block()
                 b_hi := self.new_block()
                 bj := self.new_block()
                 d := self.dead
                 self.br(ge, b_hi, b_lo)
                 self.switch_to(b_lo)
-                r1 := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
+                r1 := self.ins(FToSI, I64, vec_one(s), 0)
                 self.store_raw(slot, r1, I64, 0)
                 self.jmp(bj)
                 self.switch_to(b_hi)
-                sm := self.ins(FSub, T.F64, vec_of([]i64{s, big}), 0)
-                r2 := self.ins(FToSI, I64, vec_of([]i64{sm}), 0)
+                sm := self.ins(FSub, T.F64, vec_two(s, big), 0)
+                r2 := self.ins(FToSI, I64, vec_one(sm), 0)
                 top := self.iconst(I64, i64(0x8000000000000000))
-                r3 := self.ins(Xor, I64, vec_of([]i64{r2, top}), 0)
+                r3 := self.ins(Xor, I64, vec_two(r2, top), 0)
                 self.store_raw(slot, r3, I64, 0)
                 self.jmp(bj)
                 self.switch_to(bj)
@@ -1583,9 +1583,9 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
                 r := self.load_raw(slot, I64, 0)
                 return self.sval(to, r)
             }
-            r := self.ins(FToSI, I64, vec_of([]i64{s}), 0)
+            r := self.ins(FToSI, I64, vec_one(s), 0)
             if tb < 64 {
-                r = self.ins(Trunc, tt, vec_of([]i64{r}), 0)
+                r = self.ins(Trunc, tt, vec_one(r), 0)
             }
             return self.sval(to, r)
         }

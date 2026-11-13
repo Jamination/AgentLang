@@ -23,14 +23,31 @@ fn val_never() -> Val {
     return Val{ty: T_NEVER, v: NOV, mem: false, alias: 0, lane: None}
 }
 
+// Local names. Every variable or nested function declared in a scope is a binding. The
+// bindings of all functions being lowered (a nested function is lowered inside the one it is
+// written in) form one stack, the innermost function's last; per symbol, `bind_top` holds
+// its newest binding, which links to the one of the same symbol that it hides. A scope
+// removes its bindings when it is popped, a function all of its own when it is done.
 priv struct Scope {
-    vars: Map[str, (i64, i64)]
     defers: Vec[*Block]
-    // the nearest scope below that had names when this one was pushed (-1: none). Names are
-    // only added to the innermost scope and to scope 0, so `lookup` skips the empty ones
-    // between (a long `else if` chain nests thousands of them)
-    below: i64
+    // the first binding of the scope (`binds.len` when it was pushed)
+    start: i64
 }
+
+priv struct Binding {
+    sym: i64
+    // (type, address) as `lookup` reports them
+    val: (i64, i64)
+    // the index of its scope in `scopes` and the `lvl` of its function
+    scope: i64
+    lvl: i64
+    // the binding of the same symbol that this one hides, or -1
+    prev: i64
+}
+
+priv binds: Vec[Binding]
+// by symbol: the newest binding, or -1 (symbols beyond its length have none)
+priv bind_top: Vec[i64]
 
 priv struct LoopCtx {
     brk: i64
@@ -66,6 +83,11 @@ struct Fx {
     // the nested and anonymous functions lowered for this function: (declaration, index in
     // `cx.nested`)
     nested_done: Vec[(*FnDecl, i64)]
+    // the nesting level of the function (1 for a top-level one): its bindings carry it
+    lvl: i64
+    // names entered into scope 0 after inner scopes were pushed (a variable of an enclosing
+    // function, reported once): (symbol, type, address); found after the bindings
+    late: Vec[(i64, i64, i64)]
 }
 
 fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
@@ -183,6 +205,11 @@ priv block_bufs: Vec[Vec[BlockData]]
 priv pend_bufs: Vec[Vec[i64]]
 priv buf_depth: i64
 
+// instructions / blocks of a fresh slab, and the least free room a function starts with
+priv const INST_SLAB = 32768
+priv const BLOCK_SLAB = 4096
+priv const SLAB_MIN = 1024
+
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
 // top-level function (`parent` is nil), or a nested or anonymous function written in the
 // function that `parent` is lowering.
@@ -192,12 +219,24 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     rty := sig.1
     f := cx.module.funcs[fid]
     cx.module.funcs[fid] = func_new("")
-    // the instructions and blocks are built in buffers that are kept for the next function
-    // (one pair per level of nesting); the function gets copies of exact length
+    // the instructions and blocks are appended to the free rest of a slab (one per level of
+    // nesting); the function keeps the part it filled (its capacity is its length, so a later
+    // push moves it elsewhere) and the next function starts behind it. A function that
+    // outgrows the slab moves to a larger buffer, whose rest becomes the slab.
     if buf_depth == inst_bufs.len {
         inst_bufs.push(vec[Inst]())
         block_bufs.push(vec[BlockData]())
         pend_bufs.push(vec[i64]())
+    }
+    if len(inst_bufs[buf_depth].buf) < SLAB_MIN {
+        slab := vec[Inst]()
+        slab.reserve(INST_SLAB)
+        inst_bufs[buf_depth] = slab
+    }
+    if len(block_bufs[buf_depth].buf) < SLAB_MIN {
+        slab := vec[BlockData]()
+        slab.reserve(BLOCK_SLAB)
+        block_bufs[buf_depth] = slab
     }
     f.insts = inst_bufs[buf_depth]
     f.insts.len = 0
@@ -222,8 +261,9 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         traps: map[(i64, i64), i64](),
         labels: vec[(str, i64, i64)](),
         parent: parent,
+        lvl: buf_depth,
     }
-    fx.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block](), below: -1})
+    fx.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
     fx.cur = fx.f.new_block()
     pi := 0
     match fx.cx.abi_ret(rty) {
@@ -258,8 +298,8 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
             ByRef => {
                 p := fx.ins(Param, I64, vec[i64](), pi)
                 pi += 1
-                had := fx.scopes[0].vars.has(pname)
-                fx.scopes[0].vars.set(pname, (pt, p))
+                had := fx.in_scope(ast_sym(pname))
+                fx.scope_set(pname, (pt, p))
                 if had {
                     fx.cx.err(pos, fmt("duplicate parameter `", pname, "`"))
                 }
@@ -285,6 +325,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
             fx.do_return(Some(v2))
         }
     }
+    unbind(fx.scopes[0].start)
     fx.flush_pend()
     // finalize: allocas at the top of the entry block
     b0 := fx.f.blocks[0].insts
@@ -303,11 +344,15 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     }
     lf := fx.f
     buf_depth -= 1
-    inst_bufs[buf_depth] = lf.insts
-    block_bufs[buf_depth] = lf.blocks
+    ni := lf.insts.len
+    nb := lf.blocks.len
+    ib := lf.insts.buf
+    bb := lf.blocks.buf
+    inst_bufs[buf_depth] = Vec[Inst]{buf: ib[ni..], len: 0}
+    block_bufs[buf_depth] = Vec[BlockData]{buf: bb[nb..], len: 0}
     pend_bufs[buf_depth] = fx.pend
-    lf.insts = vec_of(lf.insts.items())
-    lf.blocks = vec_of(lf.blocks.items())
+    lf.insts = Vec[Inst]{buf: ib[..ni], len: ni}
+    lf.blocks = Vec[BlockData]{buf: bb[..nb], len: nb}
     lf.lowered = true
     cx.flush_layout_errors(pos)
     cx.module.funcs[fid] = lf
@@ -398,18 +443,18 @@ fn add_off(self: *Fx, addr: i64, off: i64) -> i64 {
         return addr
     }
     c := self.iconst(I64, off)
-    return self.ins(Add, I64, vec_of([]i64{addr, c}), 0)
+    return self.ins(Add, I64, vec_two(addr, c), 0)
 }
 
 fn load_raw(self: *Fx, addr: i64, t: T, alias: i64) -> i64 {
-    v := self.ins(Load, t, vec_of([]i64{addr}), 0)
+    v := self.ins(Load, t, vec_one(addr), 0)
     i := self.f.im(v)
     i.aux = alias
     return v
 }
 
 fn store_raw(self: *Fx, addr: i64, val: i64, t: T, alias: i64) {
-    v := self.ins(Store, t, vec_of([]i64{addr, val}), 0)
+    v := self.ins(Store, t, vec_two(addr, val), 0)
     i := self.f.im(v)
     i.aux = alias
 }
@@ -454,7 +499,7 @@ fn scalar(self: *Fx, v: Val) -> i64 {
             Some(kv) => {
                 // one f32 lane of a vector in memory
                 x := self.load_raw(v.v, kv.1, v.alias)
-                return self.ins(VExt, F32, vec_of([]i64{x}), kv.0)
+                return self.ins(VExt, F32, vec_one(x), kv.0)
             }
             None => {}
         }
@@ -474,7 +519,7 @@ fn store(self: *Fx, dst: Val, src: Val) {
         match dst.lane {
             Some(kv) => {
                 old := self.load_raw(dst.v, kv.1, dst.alias)
-                nv := self.ins(VIns, kv.1, vec_of([]i64{old, v}), kv.0)
+                nv := self.ins(VIns, kv.1, vec_two(old, v), kv.0)
                 self.store_raw(dst.v, nv, kv.1, dst.alias)
                 return
             }
@@ -550,22 +595,82 @@ fn coerce(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
 
 // ---------- scopes ----------
 fn push_scope(self: *Fx) {
-    t := self.scopes.len - 1
-    below := t
-    if t > 0 && self.scopes[t].vars.len == 0 {
-        below = self.scopes[t].below
-    }
-    self.scopes.push(Scope{vars: map[str, (i64, i64)](), defers: vec[*Block](), below: below})
+    self.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
 }
 
 fn pop_scope(self: *Fx) {
-    if !self.dead {
+    if !self.dead && self.scopes[self.scopes.len - 1].defers.len != 0 {
         defers := clone(self.scopes[self.scopes.len - 1].defers)
         for i in defers.len - 1..=0 by -1 {
             self.block(defers[i])
         }
     }
+    unbind(self.scopes[self.scopes.len - 1].start)
     self.scopes.pop()
+}
+
+// removes the bindings from `start` on, newest first
+priv fn unbind(start: i64) {
+    for bi in binds.len - 1..=start by -1 {
+        b := &binds[bi]
+        bind_top[b.sym] = b.prev
+    }
+    binds.len = start
+}
+
+// the newest binding of symbol `id`, or -1
+priv fn top_binding(id: i64) -> i64 {
+    if id < bind_top.len {
+        return bind_top[id]
+    }
+    return -1
+}
+
+// the binding of symbol `id` in function `self` (in any of its scopes), or -1
+priv fn own_binding(self: *Fx, id: i64) -> i64 {
+    b := top_binding(id)
+    // the bindings of a symbol go from the innermost function outwards
+    while b >= 0 && binds[b].lvl > self.lvl {
+        b = binds[b].prev
+    }
+    if b >= 0 && binds[b].lvl == self.lvl {
+        return b
+    }
+    return -1
+}
+
+// (type, address) of the local name `id` of function `self` (not of a function around it)
+fn local(self: *Fx, id: i64) -> Opt[(i64, i64)] {
+    b := self.own_binding(id)
+    if b >= 0 {
+        return Some(binds[b].val)
+    }
+    for l in self.late {
+        if l.0 == id {
+            return Some((l.1, l.2))
+        }
+    }
+    return None
+}
+
+// does the innermost scope have the name `id`?
+fn in_scope(self: *Fx, id: i64) -> bool {
+    b := top_binding(id)
+    return b >= 0 && binds[b].lvl == self.lvl && binds[b].scope == self.scopes.len - 1
+}
+
+// enters (or replaces) the name `name` in the innermost scope
+fn scope_set(self: *Fx, name: str, val: (i64, i64)) {
+    id := ast_sym(name)
+    if self.in_scope(id) {
+        binds[bind_top[id]].val = val
+        return
+    }
+    if id >= bind_top.len {
+        bind_top.resize(ast_sym_count(), -1)
+    }
+    binds.push(Binding{sym: id, val: val, scope: self.scopes.len - 1, lvl: self.lvl, prev: bind_top[id]})
+    bind_top[id] = binds.len - 1
 }
 
 priv fn run_defers_down_to(self: *Fx, depth: i64) {
@@ -598,18 +703,16 @@ priv fn run_defers_down_to(self: *Fx, depth: i64) {
 // nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
 // enclosing function, which a nested function cannot use.
 fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
-    si := self.scopes.len - 1
-    while si > 0 {
-        x, ok := self.scopes[si].vars.get(name)
-        if ok {
-            return Some(x)
-        }
-        si = self.scopes[si].below
+    id := ast_sym(name)
+    b := top_binding(id)
+    // the newest binding is this function's if it has one
+    if b >= 0 && binds[b].lvl == self.lvl {
+        return Some(binds[b].val)
     }
-    if self.scopes.len > 0 {
-        x, ok := self.scopes[0].vars.get(name)
-        if ok {
-            return Some(x)
+    if self.late.len != 0 {
+        match self.local(id) {
+            Some(x) => return Some(x)
+            None => {}
         }
     }
     if self.parent != nil {
@@ -623,15 +726,16 @@ priv fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
     if name == "_" {
         return addr
     }
-    old, known := self.scopes[self.scopes.len - 1].vars.get(name)
-    if known {
+    id := ast_sym(name)
+    if self.in_scope(id) {
+        old := binds[bind_top[id]].val
         if old.0 < 0 {
             self.err(pos, fmt("`", name, "` is already declared in this scope, as a nested function"))
         } else {
             self.err(pos, fmt("`", name, "` is already declared in this scope (use `=` to assign)"))
         }
     }
-    self.scopes[self.scopes.len - 1].vars.set(name, (ty, addr))
+    self.scope_set(name, (ty, addr))
     return addr
 }
 
@@ -1008,7 +1112,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 }
                 None => self.str_val("assertion failed")
             }
-            self.call_rt("__assert_fail", vec[i64](), vec_of([]Val{loc, m}), s.pos)
+            self.call_rt("__assert_fail", vec[i64](), vec_two[Val](loc, m), s.pos)
             if !self.dead {
                 self.terminate(Trap)
             }
@@ -1196,7 +1300,7 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                             s := self.scalar(sv)
                             if self.cx.opts.checks {
                                 z := self.iconst(it, 0)
-                                ok := self.ins(if self.cx.types.is_signed(ty) { Sgt } else { Ne }, I8, vec_of([]i64{s, z}), 0)
+                                ok := self.ins(if self.cx.types.is_signed(ty) { Sgt } else { Ne }, I8, vec_two(s, z), 0)
                                 self.check(ok, 2, se.pos)
                             }
                             step_dyn = Some(s)
@@ -1226,7 +1330,7 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             addr := self.declare(var1, ty, pos)
             iv := self.mval(ty, addr)
             self.store_raw(addr, lo_s, it, iv.alias)
-            c := self.ins(cmpop, I8, vec_of([]i64{lo_s, end}), 0)
+            c := self.ins(cmpop, I8, vec_two(lo_s, end), 0)
             self.br(c, bb, bx)
             self.switch_to(bb)
             self.loops.push(LoopCtx{brk: bx, cont: bc, scope_depth: self.scopes.len})
@@ -1239,31 +1343,31 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                 Some(s) => s
                 None => self.iconst(it, stepk)
             }
-            next := self.ins(Add, it, vec_of([]i64{cur, st}), 0)
+            next := self.ins(Add, it, vec_two(cur, st), 0)
             self.store_raw(addr, next, it, iv.alias)
             c2 := NOV
             if !is_some(step_dyn) && (stepk == 1 || stepk == -1) {
                 if incl {
                     // `cur + 1 <= end` would overflow at the largest value: `cur < end`
                     strict := if stepk > 0 { if signed { Slt } else { Ult } } else { if signed { Sgt } else { Ugt } }
-                    c2 = self.ins(strict, I8, vec_of([]i64{cur, end}), 0)
+                    c2 = self.ins(strict, I8, vec_two(cur, end), 0)
                 } else {
-                    c2 = self.ins(cmpop, I8, vec_of([]i64{next, end}), 0)
+                    c2 = self.ins(cmpop, I8, vec_two(next, end), 0)
                 }
             } else {
                 // a larger step may jump past the largest value: continue while there is
                 // room for one more step between cur and end (the distance is unsigned)
-                first := self.ins(cmpop, I8, vec_of([]i64{cur, end}), 0)
+                first := self.ins(cmpop, I8, vec_two(cur, end), 0)
                 diff := NOV
                 mag := st
                 if stepk > 0 {
-                    diff = self.ins(Sub, it, vec_of([]i64{end, cur}), 0)
+                    diff = self.ins(Sub, it, vec_two(end, cur), 0)
                 } else {
-                    diff = self.ins(Sub, it, vec_of([]i64{cur, end}), 0)
+                    diff = self.ins(Sub, it, vec_two(cur, end), 0)
                     mag = self.iconst(it, -stepk)
                 }
-                room := self.ins(if incl { Uge } else { Ugt }, I8, vec_of([]i64{diff, mag}), 0)
-                c2 = self.ins(And, I8, vec_of([]i64{first, room}), 0)
+                room := self.ins(if incl { Uge } else { Ugt }, I8, vec_two(diff, mag), 0)
+                c2 = self.ins(And, I8, vec_two(first, room), 0)
             }
             self.br(c2, bb, bx)
         }
@@ -1304,15 +1408,15 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             iaddr := self.declare(iname, T_I64, pos)
             zero := self.iconst(I64, 0)
             self.store_raw(iaddr, zero, I64, AK_I64)
-            c := self.ins(Slt, I8, vec_of([]i64{zero, ln}), 0)
+            c := self.ins(Slt, I8, vec_two(zero, ln), 0)
             self.br(c, bb, bx)
             self.switch_to(bb)
             self.push_scope()
             i := self.load_raw(iaddr, I64, AK_I64)
             es := self.cx.types.size_of(et)
             esz := self.iconst(I64, es)
-            off := self.ins(Mul, I64, vec_of([]i64{i, esz}), 0)
-            ea := self.ins(Add, I64, vec_of([]i64{p, off}), 0)
+            off := self.ins(Mul, I64, vec_two(i, esz), 0)
+            ea := self.ins(Add, I64, vec_two(p, off), 0)
             src := self.mval(et, ea)
             eaddr := self.declare(ename, et, pos)
             dst := self.mval(et, eaddr)
@@ -1325,9 +1429,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             self.switch_to(bc)
             cur := self.load_raw(iaddr, I64, AK_I64)
             one := self.iconst(I64, 1)
-            next := self.ins(Add, I64, vec_of([]i64{cur, one}), 0)
+            next := self.ins(Add, I64, vec_two(cur, one), 0)
             self.store_raw(iaddr, next, I64, AK_I64)
-            c2 := self.ins(Slt, I8, vec_of([]i64{next, ln}), 0)
+            c2 := self.ins(Slt, I8, vec_two(next, ln), 0)
             self.br(c2, bb, bx)
         }
     }
@@ -1421,7 +1525,7 @@ priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
         1 => "__div_fail"
         _ => "__step_fail"
     }
-    self.call_rt(name, vec[i64](), vec_of([]Val{loc}), pos)
+    self.call_rt(name, vec[i64](), vec_one[Val](loc), pos)
     if !self.dead {
         self.terminate(Trap)
     }

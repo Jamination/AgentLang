@@ -822,7 +822,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
             if payload {
                 l = self.load_any(part.v, T_STR)
             }
-            r := self.call_rt("__str_eq", vec[i64](), vec_of([]Val{l, pv}), rp.pos)
+            r := self.call_rt("__str_eq", vec[i64](), vec_two[Val](l, pv), rp.pos)
             c := self.scalar(r)
             self.br(c, ok_b, fail_b)
             return
@@ -830,7 +830,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
         if key != NOV {
             p := self.scalar(pv)
             op := if self.cx.types.is_float(rp.ty) { Op.FEq } else { Op.Eq }
-            eq := self.ins(op, I8, vec_of([]i64{key, p}), 0)
+            eq := self.ins(op, I8, vec_two(key, p), 0)
             self.br(eq, ok_b, fail_b)
             return
         }
@@ -850,7 +850,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
             }
         }
         c := self.iconst(I64, rp.vi)
-        eq := self.ins(Op.Eq, I8, vec_of([]i64{tag, c}), 0)
+        eq := self.ins(Op.Eq, I8, vec_two(tag, c), 0)
         if !subs_refutable(rp) {
             self.br(eq, ok_b, fail_b)
             return
@@ -867,7 +867,7 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
             p = self.scalar(part)
         }
         z := self.iconst(I64, 0)
-        ne := self.ins(Ne, I8, vec_of([]i64{p, z}), 0)
+        ne := self.ins(Ne, I8, vec_two(p, z), 0)
         b := self.new_block()
         self.br(ne, b, fail_b)
         self.switch_to(b)
@@ -938,7 +938,7 @@ priv fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(st
             tmp = self.mval(rp.ty, t)
             self.store(tmp, part)
         }
-        self.scopes[self.scopes.len - 1].vars.set(rp.name, (rp.ty, tmp.v))
+        self.scope_set(rp.name, (rp.ty, tmp.v))
         return
     }
     if rp.k == RP_REF {
@@ -958,7 +958,7 @@ priv fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(st
         }
         self.store(self.mval(pt, a), self.sval(pt, part.v))
         if !use_slots {
-            self.scopes[self.scopes.len - 1].vars.set(rp.name, (pt, a))
+            self.scope_set(rp.name, (pt, a))
         }
         return
     }
@@ -1341,7 +1341,7 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
     self.push_scope()
     if a.use_slots {
         for i in 0..a.slots.len {
-            self.scopes[self.scopes.len - 1].vars.set(a.slots[i].0, (a.slots[i].1, a.slots[i].2))
+            self.scope_set(a.slots[i].0, (a.slots[i].1, a.slots[i].2))
         }
     } else if a.pat_err {
         // the arm's variables are unknown: give them the error type, which is silent
@@ -1351,7 +1351,7 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
         }
         for i in 0..names.len {
             if names[i] != "_" {
-                self.scopes[self.scopes.len - 1].vars.set(names[i], (T_ERR, self.temp(T_ERR)))
+                self.scope_set(names[i], (T_ERR, self.temp(T_ERR)))
             }
         }
     } else if npats == 1 {

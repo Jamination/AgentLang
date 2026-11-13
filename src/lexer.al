@@ -368,10 +368,17 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             i += 1
             line += 1
             line_start = i
+            // the indentation of the next line
+            while i < n && s[i] == ' ' {
+                i += 1
+            }
             continue
         }
         if c == ' ' || c == '\t' || c == '\r' {
             i += 1
+            while i < n && s[i] == ' ' {
+                i += 1
+            }
             continue
         }
         if c == '/' && i + 1 < n && s[i + 1] == '/' {
@@ -383,8 +390,10 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         p := lexer_pos(file, line, i, line_start)
         if ident_tab[c] && !is_digit(c) {
             st := i
+            h := (AST_SYM_H0 ^ u64(c)) * AST_SYM_HMUL
             i += 1
             while i < n && ident_tab[s[i]] {
+                h = (h ^ u64(s[i])) * AST_SYM_HMUL
                 i += 1
             }
             w := src[st..i]
@@ -392,7 +401,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             if k >= 0 {
                 out.push(Token{t: Kw(k), pos: p})
             } else {
-                out.push(Token{t: Id(w), pos: p})
+                out.push(Token{t: Id(ast_sym_name(ast_sym_hashed(w, h))), pos: p})
             }
             continue
         }

@@ -513,7 +513,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
         Slice(et) => {
             // plain elements: one allocation and one memory copy
             name := if self.cx.has_heap(et, 0) { "__clone_slice" } else { "__clone_plain" }
-            return self.call_rt(name, vec_of([]i64{et}), vec_of([]Val{v}), pos)
+            return self.call_rt(name, vec_one(et), vec_one[Val](v), pos)
         }
         Array(et, n) => {
             t := self.temp(ty)
@@ -523,7 +523,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             self.store_slice(d, t, nv)
             s := self.mval(sty, self.temp(sty))
             self.store_slice(s, v.v, nv)
-            self.call_rt("__clone_elems", vec_of([]i64{et}), vec_of([]Val{d, s}), pos)
+            self.call_rt("__clone_elems", vec_one(et), vec_two[Val](d, s), pos)
             return self.mval(ty, t)
         }
         Struct(sid) => {
@@ -531,7 +531,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 Some(et) => {
                     // the live elements only: the spare capacity is uninitialised memory
                     name := if self.cx.has_heap(et, 0) { "__clone_vec" } else { "__clone_vec_plain" }
-                    return self.call_rt(name, vec_of([]i64{et}), vec_of([]Val{v}), pos)
+                    return self.call_rt(name, vec_one(et), vec_one[Val](v), pos)
                 }
                 None => {}
             }
@@ -540,7 +540,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                     m := self.sval(self.cx.types.ptr_to(ty), v.v)
                     kp := self.sval(T_BOOL, self.iconst(I8, lower_expr_bool_i64(!self.cx.has_heap(kv.0, 0))))
                     vp := self.sval(T_BOOL, self.iconst(I8, lower_expr_bool_i64(!self.cx.has_heap(kv.1, 0))))
-                    return self.call_rt("__clone_map", vec_of([]i64{kv.0, kv.1}), vec_of([]Val{m, kp, vp}), pos)
+                    return self.call_rt("__clone_map", vec_two(kv.0, kv.1), vec_of([]Val{m, kp, vp}), pos)
                 }
                 None => {}
             }
@@ -587,7 +587,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 bt := self.new_block()
                 bn := self.new_block()
                 c := self.iconst(I64, vi)
-                eq := self.ins(Eq, I8, vec_of([]i64{tag, c}), 0)
+                eq := self.ins(Eq, I8, vec_two(tag, c), 0)
                 self.br(eq, bt, bn)
                 self.switch_to(bt)
                 offs := self.cx.types.variant_offsets(eid, vi)

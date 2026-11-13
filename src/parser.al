@@ -1169,7 +1169,7 @@ priv fn if_stmt(p: *Parser) -> (*Expr, *Block, Opt[*Block]) {
                 return (nil, nil, none)
             }
             eb := new[Block]()
-            eb.stmts = vec_of([]Stmt{Stmt{k: If(c2, t2, e2), pos: pos}})
+            eb.stmts = vec_one[Stmt](Stmt{k: If(c2, t2, e2), pos: pos})
             eb.end = t2.end
             ebo: Opt[*Block] = Some(eb)
             return (c, t, ebo)
@@ -1446,7 +1446,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
     }
     // `a.x, v[i] = f()`: the parts of a tuple go to several places
     if p.is_p(',') {
-        lhs := vec_of([]Expr{*e})
+        lhs := vec_one[Expr](*e)
         while p.eat_p(',') {
             e2 := p.expr()
             if e2 == nil {
@@ -1478,7 +1478,7 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         if v == nil {
             return fail[SK]()
         }
-        return (Let(vec_of([]str{name}), v), true)
+        return (Let(vec_one[str](name), v), true)
     }
     if p.eat_p('=') {
         v := p.expr()
@@ -2085,7 +2085,7 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
             if !ok {
                 return fail[Vec[MatchArm]]()
             }
-            body = Block{stmts: vec_of([]Stmt{s}), end: p.pos()}
+            body = Block{stmts: vec_one[Stmt](s), end: p.pos()}
         }
         arm_stack.push(MatchArm{pats: ps, body: body, pos: pos, guard: guard})
         if !(p.peek() == Nl || p.is_p(';') || p.is_p('}')) {

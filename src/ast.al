@@ -421,3 +421,119 @@ fn ast_plain_text(s: str) -> str {
     }
     return out.items()
 }
+
+// ---------- symbols ----------
+// Every identifier is interned: its text gets a number (a symbol) and one canonical copy of
+// its bytes, which the lexer puts into the tokens. Lowering keys its tables by symbol.
+// ast_sym finds the symbol of a canonical text without hashing: the 8 bytes in front of
+// the text hold its number. Any other text of the same bytes is found through the hash table.
+
+// FNV-1a: the start value and the factor per byte (the lexer hashes identifiers as it reads them)
+const AST_SYM_H0: u64 = 0xcbf29ce484222325
+const AST_SYM_HMUL: u64 = 0x100000001b3
+
+priv sym_texts: Vec[str]
+priv sym_hashes: Vec[u64]
+// open addressing (linear probing), a power of two long: 0 for a free slot, else the upper
+// half of the symbol's hash and the symbol + 1 in the lower half. The home slot of a hash is
+// given by the top bits of hash * SYM_MIX (FNV alone leaves short texts clustered).
+priv sym_slots: []u64
+priv sym_shift: u64
+priv const SYM_MIX: u64 = 0x9E3779B97F4A7C15
+// the canonical texts are appended to the current chunk, each behind its number
+priv sym_chunk: []u8
+priv sym_chunk_used: i64
+
+priv const SYM_CHUNK = 1 << 20
+
+fn ast_sym_hash(s: str) -> u64 {
+    h := AST_SYM_H0
+    for c in s {
+        h = (h ^ u64(c)) * AST_SYM_HMUL
+    }
+    return h
+}
+
+// the number of symbols so far (symbols are 0 .. ast_sym_count() - 1)
+fn ast_sym_count() -> i64 {
+    return sym_texts.len
+}
+
+// the canonical text of symbol `id`
+fn ast_sym_name(id: i64) -> str {
+    return sym_texts[id]
+}
+
+// the symbol of a text
+fn ast_sym(s: str) -> i64 {
+    p := cast[i64](ptr(s))
+    base := cast[i64](ptr(sym_chunk))
+    if p >= base + 8 && p < base + sym_chunk_used {
+        id := *cast[*i64](p - 8)
+        if id >= 0 && id < sym_texts.len {
+            t := sym_texts[id]
+            if cast[i64](ptr(t)) == p && len(t) == len(s) {
+                return id
+            }
+        }
+    }
+    return ast_sym_hashed(s, ast_sym_hash(s))
+}
+
+// the canonical text of `s`
+fn ast_intern(s: str) -> str {
+    id := ast_sym(s)
+    return sym_texts[id]
+}
+
+// the symbol of `s`, whose hash is `h`; a new text becomes a symbol
+fn ast_sym_hashed(s: str, h: u64) -> i64 {
+    if sym_texts.len * 2 >= len(sym_slots) {
+        sym_grow()
+    }
+    mask := len(sym_slots) - 1
+    i := i64((h * SYM_MIX) >> sym_shift)
+    tag := h & 0xFFFFFFFF00000000
+    loop {
+        e := sym_slots[i]
+        if e == 0 {
+            break
+        }
+        if e & 0xFFFFFFFF00000000 == tag {
+            t := sym_texts[i64(e & 0xFFFFFFFF) - 1]
+            if len(t) == len(s) && t == s {
+                return i64(e & 0xFFFFFFFF) - 1
+            }
+        }
+        i = (i + 1) & mask
+    }
+    id := sym_texts.len
+    n := len(s)
+    if sym_chunk_used + n + 8 > len(sym_chunk) {
+        sym_chunk = alloc[u8](max(SYM_CHUNK, n + 8))
+        sym_chunk_used = 0
+    }
+    at := sym_chunk_used
+    *cast[*i64](cast[i64](ptr(sym_chunk)) + at) = id
+    copy(sym_chunk[at + 8..at + 8 + n], s)
+    sym_chunk_used = at + 8 + n
+    sym_texts.push(sym_chunk[at + 8..at + 8 + n])
+    sym_hashes.push(h)
+    sym_slots[i] = tag | u64(id + 1)
+    return id
+}
+
+priv fn sym_grow() {
+    n := max(len(sym_slots) * 2, 8192)
+    sym_slots = alloc[u64](n)
+    sym_shift = u64(64 - ctz(u64(n)))
+    mask := n - 1
+    for id in 0..sym_texts.len {
+        h := sym_hashes[id]
+        i := i64((h * SYM_MIX) >> sym_shift)
+        while sym_slots[i] != 0 {
+            i = (i + 1) & mask
+        }
+        sym_slots[i] = (h & 0xFFFFFFFF00000000) | u64(id + 1)
+    }
+}
