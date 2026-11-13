@@ -8,13 +8,6 @@ priv struct ExitAlias {
     header: i64
 }
 
-priv fn term_is_ret(t: Term) -> bool {
-    match t {
-        Ret(vs) => true
-        _ => false
-    }
-}
-
 // can the back edge latch -> header stay unsplit? returns the aliases needed after the loop
 priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_block: *Vec[i32], cx: *SplitCx, latch: i64, header: i64, other: i64, c: i64) -> (Vec[ExitAlias], bool) {
     none := vec[ExitAlias]()
@@ -99,8 +92,9 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
             }
             trap_exits.push(s)
         }
-        if term_is_ret(f.blocks[b].term) {
-            return (none, false)
+        match f.blocks[b].term {
+            Ret(_) => return (none, false)
+            _ => {}
         }
     }
     // Instruction selection may evaluate address arithmetic and compares lazily at their
@@ -166,23 +160,17 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
             return (none, false)
         }
         partner := -1
-        for q in phis {
-            qinst := &f.insts[q]
+        cands: for q in phis {
             if q == p {
                 continue
             }
-            found := false
-            n := qinst.args.len
+            qinst := &f.insts[q]
             qfrom := qinst.from()
-            for j in 0..n {
+            for j in 0..qinst.args.len {
                 if qfrom[j] == latch && qinst.args[j] == p {
-                    found = true
-                    break
+                    partner = q
+                    break cands
                 }
-            }
-            if found {
-                partner = q
-                break
             }
         }
         if partner < 0 {
@@ -302,7 +290,7 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
                             cfg = cfg_new(f)
                             loops = loops_new(f, &cfg)
                             def_block = f.block_of()
-                            cx = SplitCx{der: vec_fill(f.insts.len, false), inl: vec_fill(nb, false), built: false, uoff: vec[i32](), uuser: vec[i32](), ublk: vec[i32](), uord: vec[i32]()}
+                            cx = SplitCx{der: vec_fill(f.insts.len, false), inl: vec_fill(nb, false)}
                         }
                         al, ok := split_critical_edges_analyze(f, &cfg, &loops, &def_block, &cx, b, s, other, c)
                         if ok {
@@ -377,10 +365,6 @@ priv fn osz(t: T) -> u8 {
     }
 }
 
-priv fn fits32(k: i64) -> bool {
-    return k >= -2147483648 && k <= 2147483647
-}
-
 // operation size of an xmm type: scalar single, scalar double, packed
 priv fn fsz(t: T) -> u8 {
     match t {
@@ -396,14 +380,6 @@ priv fn fsz_mem(t: T) -> u8 {
         F32 => 4
         F64, V2 => 8
         _ => 16
-    }
-}
-
-// is v the integer constant k? (`f.is_const(v) == Some(k)`)
-priv fn const_is(f: *Func, v: i64, k: i64) -> bool {
-    match f.is_const(v) {
-        Some(x) => x == k
-        None => false
     }
 }
 
@@ -468,17 +444,8 @@ priv fn slot_effect(f: *Func, v: i64, root: *Vec[i32], cand: *Vec[i32], allocas:
         Store => return (slot_cand(root, cand, i.args[0]), -1, false)
         MemCpy, MemSet => {
             w := slot_cand(root, cand, i.args[0])
-            r := -1
-            if i.op == MemCpy {
-                r = slot_cand(root, cand, i.args[1])
-            }
-            kill := false
-            if w >= 0 && allocas[root[i.args[0]]] == i.args[0] {
-                match f.is_const(i.args[2]) {
-                    Some(n) => kill = n == f.insts[i.args[0]].k
-                    None => {}
-                }
-            }
+            r := if i.op == MemCpy { slot_cand(root, cand, i.args[1]) } else { -1 }
+            kill := w >= 0 && allocas[root[i.args[0]]] == i.args[0] && f.is_const(i.args[2]) == Some(f.insts[i.args[0]].k)
             return (w, r, kill)
         }
         _ => return (-1, -1, false)
@@ -563,20 +530,10 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i32] {
                 }
             }
         }
-        match f.blocks[bi].term {
-            Br(c, _, _) => {
-                if root[c] >= 0 {
-                    escaped[root[c]] = true
-                }
+        for a in term_args(&f.blocks[bi].term) {
+            if root[a] >= 0 {
+                escaped[root[a]] = true
             }
-            Ret(vs) => {
-                for a in vs {
-                    if root[a] >= 0 {
-                        escaped[root[a]] = true
-                    }
-                }
-            }
-            _ => {}
         }
     }
     // candidates: allocas worth sharing
@@ -616,9 +573,7 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i32] {
         while changed {
             changed = false
             for b in nb - 1..=0 by -1 {
-                for x in 0..w {
-                    live[x] = 0
-                }
+                fill(live.items(), u64(0))
                 for sb in succs[b] {
                     for x in 0..w {
                         live[x] |= live_in[sb * w + x]
@@ -644,9 +599,7 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i32] {
         // interference: a write while the other one is live, or a read and a write in one copy
         interf := vec_fill(k * w, u64(0))
         for b in 0..nb {
-            for x in 0..w {
-                live[x] = 0
-            }
+            fill(live.items(), u64(0))
             for sb in succs[b] {
                 for x in 0..w {
                     live[x] |= live_in[sb * w + x]
@@ -737,29 +690,13 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
     s := Sel{
         f: f,
         m: m,
-        mf: MFunc{
-            name: f.name,
-            blocks: vec[MBlock](),
-            vclass: vec[u8](),
-            slots: vec[(i64, i64)](),
-            out_args: 0,
-            fconsts: vec[Bits128](),
-            has_calls: false,
-            wide_xmm: wide_xmm,
-            xuses: vec[i64](),
-        },
+        mf: MFunc{name: f.name, wide_xmm: wide_xmm},
         vreg: vec_fill(n, i32(NOREG)),
         uses: f.use_counts(),
         needed: vec_fill(n, false),
         addr_only: vec_fill(n, true),
         blk_of: f.block_of(),
-        slot_of: vec[i32](),
-        projs: map[i64, Vec[(i64, i64)]](),
-        out: vec[MInst](),
-        fconst_ix: map[Bits128, i64](),
         clob: Vec[i32]{buf: alloc[i32](n), len: n},
-        cur_clob: 0,
-        cur_block: 0,
         ea_q: ea_q,
         ea_loop: ea_loop,
         param_of: vec_fill(f.params.len, -1),
@@ -789,10 +726,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 }
                 Proj => {
                     a0 := i.args[0]
-                    pl, has := s.projs.get(a0)
-                    if !has {
-                        pl = vec[(i64, i64)]()
-                    }
+                    pl, _ := s.projs.get(a0)
                     pl.push((i.k, i64(v)))
                     s.projs.set(a0, pl)
                     s.addr_only[a0] = false
@@ -813,16 +747,8 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
             }
         }
         bclob[bi] = i32(nclob)
-        match b.term {
-            Br(c, t, e) => {
-                s.addr_only[c] = false
-            }
-            Ret(vs) => {
-                for v in vs {
-                    s.addr_only[v] = false
-                }
-            }
-            _ => {}
+        for a in term_args(&b.term) {
+            s.addr_only[a] = false
         }
     }
     s.slot_of = alloca_slots(f, &s.mf)
@@ -912,8 +838,8 @@ priv fn fconst(self: *Sel, bits: Bits128) -> Mem {
     return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_FCONST, id: i32(ix)}
 }
 
-// the frame slot of the alloca v (`self.slot_of[&v]`)
-priv fn isel_slot_of(s: *Sel, v: i64) -> i64 {
+// the frame slot of the alloca v
+priv fn slot(s: *Sel, v: i64) -> i64 {
     sl := i64(s.slot_of[v])
     assert sl >= 0, "isel: alloca without a slot"
     return sl
@@ -922,7 +848,7 @@ priv fn isel_slot_of(s: *Sel, v: i64) -> i64 {
 // a register holding v at the current point (materializes constants and addresses)
 priv fn reg(self: *Sel, v: i64) -> i64 {
     i := &self.f.insts[v]
-    if i.op == Const && (fits32(i.k) || self.blk_of[v] == self.cur_block) {
+    if i.op == Const && (fits_i32(i.k) || self.blk_of[v] == self.cur_block) {
         r := new_vreg(&self.mf, 0)
         self.e(Mov, 8, R(r), I(i.k))
         return r
@@ -949,7 +875,7 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
     }
     if i.op == Alloca {
         r := new_vreg(&self.mf, 0)
-        sl := isel_slot_of(self, v)
+        sl := self.slot(v)
         self.e(Lea, 8, R(r), M(mem_slot(sl, 0)))
         return r
     }
@@ -968,7 +894,7 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
 // register or 32-bit immediate
 priv fn rmi(self: *Sel, v: i64) -> Opnd {
     match self.f.is_const(v) {
-        Some(k) if fits32(k) => I(k)
+        Some(k) if fits_i32(k) => I(k)
         _ => R(self.reg(v))
     }
 }
@@ -996,9 +922,7 @@ priv fn load_mem(self: *Sel, v: i64) -> Opt[Mem] {
 priv fn rmi_mem(self: *Sel, v: i64, ty: T) -> Opnd {
     if (ty == I32 || ty == I64) && self.f.insts[v].ty == ty {
         match self.load_mem(v) {
-            Some(m) => {
-                return M(m)
-            }
+            Some(m) => return M(m)
             None => {}
         }
     }
@@ -1023,11 +947,6 @@ priv fn xm(self: *Sel, v: i64) -> Opnd {
 }
 
 // ---------- addressing modes ----------
-priv fn foldable_add_leafy(s: *Sel, a: i64) -> bool {
-    op := s.f.insts[a].op
-    return op == Const || op == GAddr || op == Alloca
-}
-
 priv fn foldable_add(self: *Sel, v: i64) -> bool {
     i := &self.f.insts[v]
     if i.op != Add || i.ty != I64 {
@@ -1037,7 +956,13 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
         return true
     }
     // x + const never lengthens live ranges
-    return foldable_add_leafy(self, i.args[0]) || foldable_add_leafy(self, i.args[1])
+    fn leafy(op: Op) -> bool {
+        match op {
+            Const, GAddr, Alloca => true
+            _ => false
+        }
+    }
+    return leafy(self.f.insts[i.args[0]].op) || leafy(self.f.insts[i.args[1]].op)
 }
 
 // `mem`: the address is the operand of one memory access (every value on the way to v has one
@@ -1045,7 +970,7 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
 // by another user
 priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
     i := &self.f.insts[v]
-    if i.op == Const && fits32(i.k) && fits32(i64(m.disp) + i.k) {
+    if i.op == Const && fits_i32(i.k) && fits_i32(i64(m.disp) + i.k) {
         m.disp += i32(i.k)
         return
     }
@@ -1056,7 +981,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
     }
     if i.op == Alloca && m.kind == MK_NORMAL && m.base == NOREG {
         m.kind = MK_SLOT
-        m.id = i32(isel_slot_of(self, v))
+        m.id = i32(self.slot(v))
         return
     }
     if i.op == Add && depth < 8 && self.foldable_add(v) {
@@ -1067,24 +992,16 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
         return
     }
     if (i.op == Shl || i.op == Mul) && m.idx == NOREG && i.ty == I64 {
-        match self.f.is_const(i.args[1]) {
-            Some(k) => {
-                scale: u8 = 0
-                if i.op == Shl {
-                    if k >= 1 && k <= 3 {
-                        scale = u8(1) << k
-                    }
-                } else if k == 2 || k == 4 || k == 8 {
-                    scale = u8(k)
-                }
-                if scale != 0 {
-                    x := i.args[0]
-                    m.idx = i32(self.reg(x))
-                    m.scale = scale
-                    return
-                }
-            }
-            None => {}
+        scale: u8 = match (i.op, self.f.is_const(i.args[1])) {
+            (Shl, Some(k)) if k >= 1 && k <= 3 => u8(1) << k
+            (Mul, Some(k)) if k == 2 || k == 4 || k == 8 => u8(k)
+            _ => 0
+        }
+        if scale != 0 {
+            x := i.args[0]
+            m.idx = i32(self.reg(x))
+            m.scale = scale
+            return
         }
     }
     if i.op == Mul && m.idx == NOREG && i.ty == I64 && mem && self.uses[v] == 1 && self.blk_of[v] == self.cur_block {
@@ -1092,10 +1009,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
         // by what the scale cannot take). Not for an address computed into a register: there
         // `lea; shl; add` (the Mul selected on its own) beats a `lea` with a scaled index and
         // a base, which takes 2 cycles on AMD Zen
-        c, s := match self.f.is_const(i.args[1]) {
-            Some(k) => lea_factor(k)
-            None => (0, 0)
-        }
+        c, s := lea_factor(self.f.is_const(i.args[1]).or(0))
         if c != 0 {
             t := new_vreg(&self.mf, 0)
             self.lea_times(t, self.reg(i.args[0]), c, 8)
@@ -1157,7 +1071,7 @@ priv fn lea_times(self: *Sel, d: i64, x: i64, c: i64, sz: u8) {
 }
 
 // ---------- parameters ----------
-fn params(self: *Sel) {
+priv fn params(self: *Sel) {
     if target_os == TargetWindows {
         self.params_win()
         return
@@ -1257,25 +1171,20 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
         cls := self.class_of(p)
         d := self.vr(p)
         si := &self.f.insts[src]
-        so: Opnd
-        if si.op == Const {
-            so = I(si.k)
-        } else if si.op == GAddr {
-            so = Opnd.GAddr(si.k, 0)
-        } else if si.op == FAddr {
-            so = Opnd.FAddr(si.k)
-        } else if si.op == FConst && si.k == 0 {
-            so = Opnd.None
-        } else if si.op == FConst {
-            so = M(self.fconst(Bits128{lo: u64(si.k), hi: 0}))
-        } else if si.op == Alloca {
-            so = M(mem_slot(isel_slot_of(self, src), 0))
-        } else {
-            r := self.reg(src)
-            if r == d {
-                continue
+        so := match si.op {
+            Const => I(si.k)
+            GAddr => Opnd.GAddr(si.k, 0)
+            FAddr => Opnd.FAddr(si.k)
+            FConst if si.k == 0 => Opnd.None
+            FConst => M(self.fconst(Bits128{lo: u64(si.k), hi: 0}))
+            Alloca => M(mem_slot(self.slot(src), 0))
+            _ => {
+                r := self.reg(src)
+                if r == d {
+                    continue
+                }
+                R(r)
             }
-            so = R(r)
         }
         moves.push((d, so, cls))
     }
@@ -1351,9 +1260,7 @@ priv fn cmp_flags(self: *Sel, c: i64) -> (u8, u8) {
         y := b
         // constant on the left: swap
         if is_some(self.f.is_const(x)) && !is_some(self.f.is_const(y)) {
-            tmp := x
-            x = y
-            y = tmp
+            swap(&x, &y)
             op = op.swap_cmp()
         }
         cc := match op {
@@ -1368,7 +1275,7 @@ priv fn cmp_flags(self: *Sel, c: i64) -> (u8, u8) {
             Ugt => CC_A
             _ => CC_AE
         }
-        if const_is(self.f, y, 0) && (op == Eq || op == Ne || op == Slt || op == Sle || op == Sgt || op == Sge) && !self.can_fold_load(x) {
+        if self.f.is_const(y) == Some(0) && (op == Eq || op == Ne || op == Slt || op == Sle || op == Sgt || op == Sge) && !self.can_fold_load(x) {
             // test x, x  (or test a, b for (a & b) ==/!= 0)
             xi := &self.f.insts[x]
             if (op == Eq || op == Ne) && xi.op == And && self.uses[x] == 1 && self.blk_of[x] == self.cur_block {
@@ -1385,7 +1292,7 @@ priv fn cmp_flags(self: *Sel, c: i64) -> (u8, u8) {
         }
         // memory operands: cmp [mem], imm  /  cmp reg, [mem]
         match self.f.is_const(y) {
-            Some(k) if fits32(k) => {
+            Some(k) if fits_i32(k) => {
                 match self.load_mem(x) {
                     Some(m) => {
                         self.e(Cmp, sz, M(m), I(k))
@@ -1452,19 +1359,14 @@ priv fn term(self: *Sel, b: i64) {
         Br(c, t, e) => {
             // an unsplit loop back edge: its phi copies go before the compare
             for s in ([2]i64{t, e}) {
-                has_phi := false
-                if self.f.blocks[s].insts.len > 0 {
-                    has_phi = self.f.insts[self.f.blocks[s].insts[0]].op == Phi
-                }
-                if has_phi {
+                ins := &self.f.blocks[s].insts
+                if ins.len > 0 && self.f.insts[ins[0]].op == Phi {
                     self.phi_copies(b, s)
                 }
             }
             ci := &self.f.insts[c]
             if ci.op.is_cmp() {
-                cf := self.cmp_flags(c)
-                cc := cf.0
-                extra := cf.1
+                cc, extra := self.cmp_flags(c)
                 if extra == 0 {
                     self.jcc(cc, t)
                     self.jmp(e)
@@ -1505,12 +1407,7 @@ priv fn term(self: *Sel, b: i64) {
             for mv in moves {
                 v := mv.1
                 isf := self.f.insts[v].ty.is_fp()
-                o: Opnd
-                if !isf {
-                    o = self.mov_src(v)
-                } else {
-                    o = R(self.reg(v))
-                }
+                o := if isf { R(self.reg(v)) } else { self.mov_src(v) }
                 srcs.push((mv.0, o, isf))
             }
             for sv in srcs {
@@ -1528,16 +1425,12 @@ priv fn term(self: *Sel, b: i64) {
 // a source operand for a full-width integer move: immediate, symbol address or register
 priv fn mov_src(self: *Sel, v: i64) -> Opnd {
     i := &self.f.insts[v]
-    if i.op == Const {
-        return I(i.k)
+    match i.op {
+        Const => I(i.k)
+        GAddr => Opnd.GAddr(i.k, 0)
+        FAddr => Opnd.FAddr(i.k)
+        _ => R(self.reg(v))
     }
-    if i.op == GAddr {
-        return Opnd.GAddr(i.k, 0)
-    }
-    if i.op == FAddr {
-        return Opnd.FAddr(i.k)
-    }
-    return R(self.reg(v))
 }
 
 // ---------- instructions ----------
@@ -1549,13 +1442,9 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     sz := osz(ty)
     wide := ty == I32 || ty == I64
     if commutative && wide && !self.can_fold_load(b) && self.can_fold_load(a) {
-        tmp := a
-        a = b
-        b = tmp
+        swap(&a, &b)
     } else if commutative && !self.can_fold_load(b) && !is_some(self.f.is_const(a)) && self.uses[a] > 1 && self.uses[b] == 1 && !is_some(self.f.is_const(b)) {
-        tmp := a
-        a = b
-        b = tmp
+        swap(&a, &b)
     }
     d := self.vr(v)
     ar := self.reg(a)
@@ -1564,18 +1453,12 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     self.e(mop, sz, R(d), bo)
 }
 
-priv fn fbinop_is_c(s: *Sel, x: i64) -> bool {
-    return s.f.insts[x].op == FConst
-}
-
 priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     i := &self.f.insts[v]
     a := i.args[0]
     b := i.args[1]
-    if commutative && !self.can_fold_load(b) && (fbinop_is_c(self, a) || self.can_fold_load(a) || (self.uses[a] > 1 && self.uses[b] == 1 && !fbinop_is_c(self, b))) {
-        tmp := a
-        a = b
-        b = tmp
+    if commutative && !self.can_fold_load(b) && (self.f.insts[a].op == FConst || self.can_fold_load(a) || (self.uses[a] > 1 && self.uses[b] == 1 && self.f.insts[b].op != FConst)) {
+        swap(&a, &b)
     }
     d := self.vr(v)
     ar := self.reg(a)
@@ -1587,20 +1470,19 @@ priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
 
 priv fn zext_free(self: *Sel, v: i64) -> bool {
     i := &self.f.insts[v]
-    op := i.op
     if i.ty != I32 {
         return false
     }
-    if op == Shl || op == LShr || op == AShr || op == Rotl || op == Rotr {
+    match i.op {
         // a shift or rotation by 0 (also a count in a register that is 0 modulo 32) leaves
         // the register as it was, upper half included
-        return match self.f.is_const(i.args[1]) {
+        Shl, LShr, AShr, Rotl, Rotr => match self.f.is_const(i.args[1]) {
             Some(k) => k & 31 != 0
             None => false
         }
+        Add, Sub, Mul, And, Or, Xor, Load, ZExt, SDiv, UDiv, SRem, URem, Bswap => true
+        _ => false
     }
-    return op == Add || op == Sub || op == Mul || op == And || op == Or || op == Xor ||
-        op == Load || op == ZExt || op == SDiv || op == UDiv || op == SRem || op == URem || op == Bswap
 }
 
 // value extended to 32 bits (for narrow division/shift inputs)
@@ -1660,7 +1542,7 @@ priv fn inst(self: *Sel, v: i64) {
         }
         Sub => {
             // 0 - x => neg
-            if const_is(self.f, i.args[0], 0) {
+            if self.f.is_const(i.args[0]) == Some(0) {
                 d := self.vr(v)
                 r := self.reg(i.args[1])
                 self.e(Mov, 8, R(d), R(r))
@@ -1673,15 +1555,10 @@ priv fn inst(self: *Sel, v: i64) {
             a := i.args[0]
             b := i.args[1]
             if is_some(self.f.is_const(a)) {
-                tmp := a
-                a = b
-                b = tmp
+                swap(&a, &b)
             }
             d := self.vr(v)
-            c, s := match self.f.is_const(b) {
-                Some(k) => lea_factor(k)
-                None => (0, 0)
-            }
+            c, s := lea_factor(self.f.is_const(b).or(0))
             if c != 0 {
                 // a * (c << s), c = 3, 5, 9: lea and shl (latency 2) instead of imul (3)
                 self.lea_times(d, self.reg(a), c, osz(ty))
@@ -1690,7 +1567,7 @@ priv fn inst(self: *Sel, v: i64) {
                 }
             } else {
                 match self.f.is_const(b) {
-                    Some(k) if fits32(k) => {
+                    Some(k) if fits_i32(k) => {
                         ar := self.reg(a)
                         mi := minst_new(Imul3, osz(ty), R(d), R(ar))
                         mi.tgt = i32(k)
@@ -1727,7 +1604,7 @@ priv fn inst(self: *Sel, v: i64) {
         }
         Or => self.binop(v, MOp.Or, true)
         Xor => {
-            if const_is(self.f, i.args[1], -1) {
+            if self.f.is_const(i.args[1]) == Some(-1) {
                 d := self.vr(v)
                 r := self.reg(i.args[0])
                 self.e(Mov, 8, R(d), R(r))
@@ -1878,14 +1755,13 @@ priv fn inst(self: *Sel, v: i64) {
         SIToF => {
             d := self.vr(v)
             st := self.f.insts[i.args[0]].ty
-            s: Opnd
-            if st == I32 || st == I64 {
-                s = match self.load_mem(i.args[0]) {
+            s := if st == I32 || st == I64 {
+                match self.load_mem(i.args[0]) {
                     Some(m) => M(m)
                     None => R(self.reg(i.args[0]))
                 }
             } else {
-                s = R(self.ext32(i.args[0], true))
+                R(self.ext32(i.args[0], true))
             }
             self.e(Zero, 8, R(d), Opnd.None)
             mi := minst_new(Cvtsi2sd, if st == I64 { 8 } else { 4 }, R(d), s)
@@ -1916,14 +1792,12 @@ priv fn inst(self: *Sel, v: i64) {
             b := self.mov_src(i.args[2])
             self.e(Mov, 8, R(d), b)
             ci := &self.f.insts[c]
-            cc: u8
-            if ci.op.is_icmp() {
-                cf := self.cmp_flags(c)
-                cc = cf.0
+            cc := if ci.op.is_icmp() {
+                self.cmp_flags(c).0
             } else {
                 r := self.reg(c)
                 self.e(Test, 1, R(r), R(r))
-                cc = CC_NE
+                CC_NE
             }
             mi := minst_new(Cmov, if ty == I64 { 8 } else { 4 }, R(d), R(a))
             mi.cc = cc
@@ -1981,12 +1855,7 @@ priv fn inst(self: *Sel, v: i64) {
                     self.e(MovSd, fsz_mem(ty), M(m), R(r))
                 }
             } else {
-                src: Opnd
-                if vi.op == Const && fits32(vi.k) {
-                    src = I(vi.k)
-                } else {
-                    src = R(self.reg(val))
-                }
+                src: Opnd = if vi.op == Const && fits_i32(vi.k) { I(vi.k) } else { R(self.reg(val)) }
                 m := self.addr(i.args[0])
                 self.e(Mov, sz_of(ty), M(m), src)
             }
@@ -2032,32 +1901,23 @@ priv fn inst(self: *Sel, v: i64) {
         }
         VBuild => {
             d := self.vr(v)
-            consts := vec[Opt[u32]]()
             all_const := true
-            for a in i.args {
-                if self.f.insts[a].op == FConst {
-                    consts.push(Some(u32(self.f.insts[a].k)))
-                } else {
-                    consts.push(None)
+            bits := Bits128{lo: 0, hi: 0}
+            for k, a in i.args {
+                if self.f.insts[a].op != FConst {
                     all_const = false
+                    break
+                }
+                // bits |= (c as u128) << (32 * k), on the two halves
+                c := u32(self.f.insts[a].k)
+                sh := (32 * k) & 127
+                if sh < 64 {
+                    bits.lo |= u64(c) << sh
+                } else {
+                    bits.hi |= u64(c) << (sh - 64)
                 }
             }
             if all_const {
-                // bits |= (c as u128) << (32 * k), on the two halves
-                bits := Bits128{lo: 0, hi: 0}
-                for k in 0..consts.len {
-                    match consts[k] {
-                        Some(c) => {
-                            sh := (32 * k) & 127
-                            if sh < 64 {
-                                bits.lo |= u64(c) << sh
-                            } else {
-                                bits.hi |= u64(c) << (sh - 64)
-                            }
-                        }
-                        None => {}
-                    }
-                }
                 if bits.lo == 0 && bits.hi == 0 {
                     self.e(Zero, 8, R(d), Opnd.None)
                 } else {
@@ -2160,9 +2020,7 @@ priv fn inst(self: *Sel, v: i64) {
             // (no other arm is a compare)
             if i.op.is_cmp() {
                 d := self.vr(v)
-                cf := self.cmp_flags(v)
-                cc := cf.0
-                extra := cf.1
+                cc, extra := self.cmp_flags(v)
                 s := minst_new(Setcc, 1, R(d), Opnd.None)
                 s.cc = cc
                 self.out.push(s)
@@ -2174,8 +2032,7 @@ priv fn inst(self: *Sel, v: i64) {
                     self.e(if extra == 1 { MOp.And } else { MOp.Or }, 4, R(d), R(t))
                 }
             } else {
-                // the variant name without its `Op` prefix, as `{:?}` prints it
-                panic(fmt("isel: unhandled op ", fmt(i.op)[2..]))
+                panic(fmt("isel: unhandled op ", i.op))
             }
         }
     }
@@ -2198,6 +2055,14 @@ priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
 }
 
 priv fn call(self: *Sel, v: i64, i: *Inst) {
+    // a stack argument word: a 32-bit immediate or a register
+    fn stack_src(s: *Sel, a: i64) -> Opnd {
+        match s.mov_src(a) {
+            I(k) if fits_i32(k) => I(k)
+            R(r) => R(r)
+            _ => R(s.reg(a))
+        }
+    }
     self.mf.has_calls = true
     target: Opt[i64] = None
     args := i.args
@@ -2227,13 +2092,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
                 stack_moves.push((nstack, R(self.reg(a)), fsz(at)))
                 nstack += if at.is_vec() { 2 } else { 1 }
             } else {
-                ms := self.mov_src(a)
-                s := match ms {
-                    I(k) if fits32(k) => I(k)
-                    R(r) => R(r)
-                    _ => R(self.reg(a))
-                }
-                stack_moves.push((nstack, s, 0))
+                stack_moves.push((nstack, stack_src(self, a), 0))
                 nstack += 1
             }
         }
@@ -2255,13 +2114,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             reg_moves.push((INT_ARGS[ni], s, false))
             ni += 1
         } else {
-            ms := self.mov_src(a)
-            s := match ms {
-                I(k) if fits32(k) => I(k)
-                R(r) => R(r)
-                _ => R(self.reg(a))
-            }
-            stack_moves.push((nstack, s, 0))
+            stack_moves.push((nstack, stack_src(self, a), 0))
             nstack += 1
         }
     }
@@ -2314,12 +2167,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             // multi-value results: assign registers in order of result index
             by_idx := clone(ps)
             sort_by(by_idx.items(), fn(a: (i64, i64), b: (i64, i64)) -> bool { a.0 < b.0 || (a.0 == b.0 && a.1 < b.1) })
-            maxi := -1
-            for p in by_idx {
-                if p.0 > maxi {
-                    maxi = p.0
-                }
-            }
+            maxi := by_idx.last().0
             // result types: from callee signature when known, else from projections
             types := vec[T]()
             if i.op == Call {
@@ -2349,8 +2197,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
                 }
             }
             for kp in by_idx {
-                k := kp.0
-                p := kp.1
+                k, p := kp
                 if !self.needed[p] {
                     continue
                 }
