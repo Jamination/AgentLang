@@ -517,6 +517,21 @@ fn main() {
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
   different scalar type (except through `u8`), as in C.
 
+**Windows** (`--target windows`):
+
+- Functions and variables are imported from DLLs (`extern "kernel32.dll" fn GetStdHandle(n: u32) ->
+  *u8`, `extern "abi.dll" counter: i32`), through the executable's import address table: the
+  slot of each holds the address of the function or variable (a variable is not copied). The
+  library name is taken as written; a Linux library name (`libc.so.6`) is a build error.
+- Every function, AL or C, uses the Microsoft x64 calling convention: the first four
+  arguments by position in rcx, rdx, r8, r9 or xmm0-xmm3, the rest on the stack above 32 bytes
+  of shadow space. So an AL function is a C callback whatever its parameters are.
+- `extern` functions may also take and return structs (and tuples, enums with data) by value,
+  as C does there: one of 1, 2, 4 or 8 bytes travels as an integer of that size, any other is
+  passed as a pointer to a copy the caller makes and returned through a hidden pointer. Vector
+  types (`vec2` ... `quat`) cannot cross the C boundary.
+- C functions with a variable number of arguments (`printf`) cannot be declared.
+
 ## Grammar
 
 Statements end at a newline or `;`; the arms of a `match` are separated the same way. In the

@@ -59,7 +59,8 @@ executables before and after); the conventions below describe the result.
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
-| `src/elf.al` | ELF writer |
+| `src/elf.al` | ELF writer (Linux) |
+| `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
 
 Conventions:
@@ -217,4 +218,28 @@ before it prints them.
 `ALC_DEBUG=verify` (IR verifier between passes), `trace`, `mir`, `unroll`, `mem`;
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
 `partial`, `thread4`, `thread5`, `ifconv`); `ALC_STD_DIR=<dir>` reads bundled modules from
-`<dir>` instead of the copies inside the compiler; `ALC_ALIGN=1` aligns inner loops.
+`<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the run-time
+library from `<file>` instead of the copy inside the compiler; `ALC_ALIGN=1` aligns inner loops.
+
+## Windows target
+
+`--target windows` sets `target_os` (`src/main.al`); the front end and the optimiser are the
+same, the differences are:
+
+- **Calling convention** (Microsoft x64, for every function, so that any AL function value is
+  a C callback). `abi_param` / `abi_ret` (`src/lower.al`): an aggregate of 1, 2, 4 or 8 bytes
+  is one integer leaf read and written as untyped memory, any other goes by reference (a copy
+  the caller makes) or, as a result, through a hidden pointer that the callee also returns;
+  `extern` calls take the same path as calls of AL functions, through the IAT slot. The back
+  end (`params_win` and `call` in `src/x86/isel.al`) assigns registers by position, numbers
+  stack arguments by position (words 0-3 are the shadow space every call reserves).
+- **Preserved registers.** rsi, rdi (`mir_callee_saved`) and xmm6-xmm15 (`mir_xmm_saved`,
+  saved in the frame) are saved by a function that writes them. Calls are still taken to
+  clobber them (`CALL_CLOBBER` is the Linux set), which keeps the register allocator the same.
+- **Stack probes.** A frame of 4096 bytes or more is allocated a page at a time, touching each
+  page (`stack_probe` in `src/x86/emit.al`): the stack grows through a guard page.
+- **Linking** (`pe_link`): the image is loaded at 0x400000 without base relocations (the code
+  uses 32-bit absolute addresses, as on Linux), sections `.text`, `.rdata`, `.idata` (import
+  descriptors, lookup tables, the IAT, which holds the import slots), `.data` (with the zero
+  data); the entry point is `__entry`, stack reserve 16 MiB. A reachable `syscall` is an error.
+- `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine.
