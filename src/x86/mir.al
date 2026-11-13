@@ -205,6 +205,8 @@ struct MFunc {
 }
 
 fn new_vreg(self: *MFunc, class: u8) -> i64 {
+    // registers are kept in i32 fields and tables (Mem, isel, regalloc)
+    assert self.vclass.len < 0x7FFFFFFF - VREG0, "isel: too many virtual registers in a function"
     self.vclass.push(class)
     return VREG0 + (self.vclass.len - 1)
 }

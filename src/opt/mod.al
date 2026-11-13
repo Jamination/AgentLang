@@ -79,7 +79,7 @@ priv fn in_main(p: i64) -> bool {
     return p >= __heap_base && p < __heap_end
 }
 
-priv inline fn keep_list(l: *Vec[i64]) {
+priv inline fn keep_list[T](l: *Vec[T]) {
     if len(l.buf) > 0 && !in_main(cast[i64](ptr(l.buf))) {
         *l = vec_of(l.items())
     }
@@ -134,27 +134,29 @@ priv fn keep_args(f: *Func) {
 // instruction later on is smaller. Not done when an instruction or terminator in a block uses
 // an orphan (the function is kept as it is then).
 
-// the new number of every instruction (-1: dropped), how many stay and the words their lists
-// take (see drop_orphans), or (nil, 0, 0); in the scratch region
-priv fn orphan_map(f: *Func) -> ([]i64, i64, i64) {
+// the new number of every instruction (-1: dropped), how many stay, the words their argument
+// lists take and the length of all block lists (see drop_orphans), or (nil, 0, 0, 0); in the
+// scratch region
+priv fn orphan_map(f: *Func) -> ([]i32, i64, i64, i64) {
     n := f.insts.len
     scratch_on()
-    m := mkslice[i64](__alloc_raw(n * 8), n)
+    m := mkslice[i32](__alloc_raw(n * 4), n)
     scratch_off()
-    memfill(ptr(m), 0xFF, n * 8)
+    memfill(ptr(m), 0xFF, n * 4)
     for b in 0..f.blocks.len {
         for v in f.blocks[b].insts {
             m[v] = 0
         }
     }
     total := 0
+    lists := 0
     for b in 0..f.blocks.len {
-        total += f.blocks[b].insts.len
+        lists += f.blocks[b].insts.len
         for v in f.blocks[b].insts {
             i := &f.insts[v]
             for a in i.args {
                 if m[a] < 0 {
-                    return (nil, 0, 0)
+                    return (nil, 0, 0, 0)
                 }
             }
             total += if i.op == Phi { 2 * i.args.len } else { i.args.len }
@@ -162,13 +164,13 @@ priv fn orphan_map(f: *Func) -> ([]i64, i64, i64) {
         match f.blocks[b].term {
             Br(c, _, _) => {
                 if m[c] < 0 {
-                    return (nil, 0, 0)
+                    return (nil, 0, 0, 0)
                 }
             }
             Ret(vs) => {
                 for x in vs {
                     if m[x] < 0 {
-                        return (nil, 0, 0)
+                        return (nil, 0, 0, 0)
                     }
                 }
             }
@@ -178,17 +180,17 @@ priv fn orphan_map(f: *Func) -> ([]i64, i64, i64) {
     c := 0
     for v in 0..n {
         if m[v] == 0 {
-            m[v] = c
+            m[v] = i32(c)
             c += 1
         }
     }
-    return (m, c, total)
+    return (m, c, total, lists)
 }
 
 // the instructions of the blocks, renumbered by m, in new memory of the main arena (also their
-// argument lists, the lists of the blocks and the values returned: `total` words); the
-// instruction list is compacted in place when it is in the main arena
-priv fn drop_orphans(f: *Func, m: []i64, c: i64, total: i64) {
+// argument lists and the values returned: `total` words, and the lists of the blocks: `lists`
+// numbers); the instruction list is compacted in place when it is in the main arena
+priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
     n := f.insts.len
     ins := f.insts
     if !in_main(cast[i64](ptr(f.insts.buf))) {
@@ -209,7 +211,7 @@ priv fn drop_orphans(f: *Func, m: []i64, c: i64, total: i64) {
             i.cap = 0
         } else {
             for k in 0..na {
-                buf[at + k] = m[i.args[k]]
+                buf[at + k] = i64(m[i.args[k]])
             }
             if i.op == Phi {
                 memcopy(ptr(buf[at + na..]), ptr(i.from()), na * 8)
@@ -225,20 +227,22 @@ priv fn drop_orphans(f: *Func, m: []i64, c: i64, total: i64) {
     }
     ins.len = c
     f.insts = ins
+    lbuf := mkslice[i32](__alloc_raw(lists * 4), lists)
+    at = 0
     for b in 0..f.blocks.len {
         blk := &f.blocks[b]
         nl := blk.insts.len
         for k in 0..nl {
-            buf[at + k] = m[blk.insts[k]]
+            lbuf[at + k] = m[blk.insts[k]]
         }
-        blk.insts = Vec[i64]{buf: buf[at..at + nl], len: nl}
+        blk.insts = Vec[i32]{buf: lbuf[at..at + nl], len: nl}
         at += nl
         match blk.term {
-            Br(&x, _, _) => *x = m[*x]
+            Br(&x, _, _) => *x = i64(m[*x])
             Ret(vs) => {
                 nvs := vec_fill(vs.len, 0)
                 for k in 0..vs.len {
-                    nvs[k] = m[vs[k]]
+                    nvs[k] = i64(m[vs[k]])
                 }
                 blk.term = Ret(nvs)
             }
@@ -260,9 +264,9 @@ priv fn keep_func(f: *Func) {
     if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
         f.blocks = vec_of(f.blocks.items())
     }
-    m, c, total := orphan_map(f)
+    m, c, total, lists := orphan_map(f)
     if len(m) > 0 {
-        drop_orphans(f, m, c, total)
+        drop_orphans(f, m, c, total, lists)
         scratch_reset()
         return
     }

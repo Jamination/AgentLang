@@ -5,10 +5,10 @@ priv fn numberable(op: Op) -> bool {
     return op.is_pure() || op == SDiv || op == UDiv || op == SRem || op == URem || op == Proj
 }
 
-priv fn run_find(repl: []i64, v0: i64) -> i64 {
+priv fn run_find(repl: []i32, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
-        v = repl[v]
+        v = i64(repl[v])
     }
     return v
 }
@@ -18,10 +18,10 @@ priv fn run_find(repl: []i64, v0: i64) -> i64 {
 // it is in scope. Entries go in the reverse order they came (the walk leaves a block after its
 // children), so the table is a stack with hash chains.
 priv struct Table {
-    head: []i64 // per hash bucket: the newest entry, -1 if none
-    ent: Vec[i64] // the instruction
-    next: Vec[i64] // the older entry of the same bucket
-    bucket: Vec[i64]
+    head: []i32 // per hash bucket: the newest entry, -1 if none
+    ent: Vec[i32] // the instruction
+    next: Vec[i32] // the older entry of the same bucket
+    bucket: Vec[i32]
 }
 
 priv fn table_new(n: i64) -> Table {
@@ -29,9 +29,9 @@ priv fn table_new(n: i64) -> Table {
     while cap < 2 * n {
         cap *= 2
     }
-    head := mkslice[i64](__alloc_raw(cap * 8), cap)
-    memfill(ptr(head), 0xFF, cap * 8)
-    return Table{head: head, ent: vec[i64](), next: vec[i64](), bucket: vec[i64]()}
+    head := mkslice[i32](__alloc_raw(cap * 4), cap)
+    memfill(ptr(head), 0xFF, cap * 4)
+    return Table{head: head, ent: vec[i32](), next: vec[i32](), bucket: vec[i32]()}
 }
 
 // the arguments of instruction i in key order
@@ -86,7 +86,7 @@ priv fn lookup(t: *Table, f: *Func, v: i64, h: i64) -> i64 {
     while e >= 0 {
         w := t.ent[e]
         if same_key(i, &f.insts[w]) {
-            return w
+            return i64(w)
         }
         e = t.next[e]
     }
@@ -95,10 +95,10 @@ priv fn lookup(t: *Table, f: *Func, v: i64, h: i64) -> i64 {
 
 priv fn add(t: *Table, v: i64, h: i64) {
     bk := h & (len(t.head) - 1)
-    t.ent.push(v)
+    t.ent.push(i32(v))
     t.next.push(t.head[bk])
-    t.bucket.push(bk)
-    t.head[bk] = t.ent.len - 1
+    t.bucket.push(i32(bk))
+    t.head[bk] = i32(t.ent.len - 1)
 }
 
 // remove the entries above `mark`
@@ -129,7 +129,7 @@ priv fn known_set(known: *Vec[u8], c: i64, s: u8) {
 
 fn gvn_run(f: *Func) -> bool {
     cfg := cfg_new(f)
-    repl := vec_fill(f.insts.len, NOV)
+    repl := vec_fill(f.insts.len, i32(NOV))
     table := table_new(f.insts.len)
     known := Vec[u8]{buf: alloc[u8](f.insts.len), len: f.insts.len}
     changed := false
@@ -195,12 +195,12 @@ fn gvn_run(f: *Func) -> bool {
                 continue
             }
             h := key_hash(&f.insts[v])
-            w := lookup(&table, f, v, h)
+            w := lookup(&table, f, i64(v), h)
             if w != NOV {
-                repl[v] = w
+                repl[v] = i32(w)
                 changed = true
             } else {
-                add(&table, v, h)
+                add(&table, i64(v), h)
                 insts[kept] = v
                 kept += 1
             }
@@ -228,10 +228,10 @@ fn gvn_run(f: *Func) -> bool {
             ci -= 1
         }
     }
-    extra := vec[i64]()
+    extra := vec[i32]()
     for c in bool_consts {
         if c != NOV {
-            extra.push(c)
+            extra.push(i32(c))
         }
     }
     if !extra.is_empty() {

@@ -54,7 +54,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             continue
         }
         n := insts.len
-        last_v := insts[n - 1]
+        last_v := i64(insts[n - 1])
         li := &f.insts[last_v]
         // plain tail call: [call; ret call] or [call; ret] for no result
         if li.op == Call && li.k == fid && ((rv.is_empty() && f.rets.is_empty()) || (rv.len == 1 && rv[0] == last_v && uses[last_v] == 1)) {
@@ -64,7 +64,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         // accumulator form: [call; r = op(x, call); ret r] with the call right before
         if rv.len == 1 && rv[0] == last_v && n >= 2 && uses[last_v] == 1 && li.ty.is_int() {
             if is_some(identity(li.op)) {
-                call := insts[n - 2]
+                call := i64(insts[n - 2])
                 ci := &f.insts[call]
                 if ci.op == Call && ci.k == fid && uses[call] == 1 && contains(li.args, call) {
                     x := if li.args[0] == call { li.args[1] } else { li.args[0] }
@@ -87,13 +87,13 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     // split the entry: parameters stay, the body moves to a loop header
     header := f.new_block()
     entry_insts := f.blocks[0].insts
-    f.blocks[0].insts = vec[i64]()
+    f.blocks[0].insts = vec[i32]()
     params := vec[i64]()
-    keep := vec[i64]()
-    moved := vec[i64]()
+    keep := vec[i32]()
+    moved := vec[i32]()
     for v in entry_insts {
         if f.insts[v].op == Param {
-            params.push(v)
+            params.push(i64(v))
             keep.push(v)
         } else {
             moved.push(v)
@@ -127,13 +127,13 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     }
     // parameter phis (one per declared parameter that has a Param instruction)
     pphi := vec[(i64, i64, i64)]() // (index, param value, phi)
-    head := vec[i64]()
+    head := vec[i32]()
     for p in params {
         ty := f.insts[p].ty
         k := f.insts[p].k
         phi := f.mk_phi(ty, sites.len + 1)
         f.im(phi).phi_add(p, 0)
-        head.push(phi)
+        head.push(i32(phi))
         pphi.push((k, p, phi))
     }
     acc_phi: Opt[i64] = None
@@ -141,10 +141,10 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         Some(op) => {
             idk := unwrap(identity(op))
             c := f.mk(Const, ret_ty, vec[i64](), ir_canon(ret_ty, idk))
-            f.blocks[0].insts.push(c)
+            f.blocks[0].insts.push(i32(c))
             phi := f.mk_phi(ret_ty, sites.len + 1)
             f.im(phi).phi_add(c, 0)
-            head.push(phi)
+            head.push(i32(phi))
             acc_phi = Some(phi)
         }
         None => {}
@@ -152,9 +152,9 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     head.extend(moved.items())
     f.blocks[header].insts = head
     // uses of parameters become uses of the phis (except in the phis' own entry inputs)
-    repl := vec_fill(f.insts.len, NOV)
+    repl := vec_fill(f.insts.len, i32(NOV))
     for pp in pphi {
-        repl[pp.1] = pp.2
+        repl[pp.1] = i32(pp.2)
     }
     f.apply_repl(&repl)
     for pp in pphi {
@@ -197,14 +197,14 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         n := 0
         for ii in 0..blk.insts.len {
             v := blk.insts[ii]
-            if !contains(&drop, v) {
+            if !contains(&drop, i64(v)) {
                 blk.insts[n] = v
                 n += 1
             }
         }
         blk.insts.len = n
         match new_acc {
-            Some(nv) if is_some(s.acc) => f.blocks[b].insts.push(nv)
+            Some(nv) if is_some(s.acc) => f.blocks[b].insts.push(i32(nv))
             _ => {}
         }
         f.blocks[b].term = Jmp(header)

@@ -225,7 +225,7 @@ enum Term {
 }
 
 struct BlockData {
-    insts: Vec[i64]
+    insts: Vec[i32]
     term: Term
 }
 
@@ -405,7 +405,9 @@ fn succ_pair(self: *Func, b: i64) -> (i64, i64, i64) {
 }
 
 fn new_block(self: *Func) -> i64 {
-    self.blocks.push(BlockData{insts: vec[i64](), term: Term.None})
+    // block and instruction numbers are kept in i32 tables (NOV, as an i32, is -1)
+    assert self.blocks.len < 0x7FFFFFFF, "ir: too many blocks in a function"
+    self.blocks.push(BlockData{insts: vec[i32](), term: Term.None})
     return self.blocks.len - 1
 }
 
@@ -422,6 +424,7 @@ fn mk(self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     if ty.is_vec() {
         self.has_vec = true
     }
+    assert self.insts.len < 0x7FFFFFFF, "ir: too many instructions in a function"
     self.insts.push(Inst{op: op, ty: ty, args: args.items(), k: k, aux: 0, cap: 0})
     return self.insts.len - 1
 }
@@ -493,7 +496,7 @@ fn phi_remove(self: *Inst, k: i64) {
 
 fn push(self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.mk(op, ty, args, k)
-    self.blocks[b].insts.push(v)
+    self.blocks[b].insts.push(i32(v))
     return v
 }
 
@@ -733,8 +736,8 @@ fn term_uses(self: *Func, b: i64) -> Vec[i64] {
     }
 }
 
-fn use_counts(self: *Func) -> Vec[i64] {
-    c := Vec[i64]{buf: alloc[i64](self.insts.len), len: self.insts.len}
+fn use_counts(self: *Func) -> Vec[i32] {
+    c := Vec[i32]{buf: alloc[i32](self.insts.len), len: self.insts.len}
     for bi in 0..self.blocks.len {
         b := &self.blocks[bi]
         for v in b.insts {
@@ -757,22 +760,22 @@ fn use_counts(self: *Func) -> Vec[i64] {
     return c
 }
 
-priv fn apply_repl_find(map: *Vec[i64], v: i64) -> i64 {
+priv fn apply_repl_find(map: *Vec[i32], v: i64) -> i64 {
     r := v
     while map[r] != NOV {
-        r = map[r]
+        r = i64(map[r])
     }
     c := v
     while map[c] != NOV {
-        n := map[c]
-        map[c] = r
+        n := i64(map[c])
+        map[c] = i32(r)
         c = n
     }
     return r
 }
 
 // apply a replacement map (map[v] = replacement or NOV) to all uses
-fn apply_repl(self: *Func, map: *Vec[i64]) {
+fn apply_repl(self: *Func, map: *Vec[i32]) {
     if map.len < self.insts.len {
         map.resize(self.insts.len, NOV)
     }
@@ -805,11 +808,12 @@ fn apply_repl(self: *Func, map: *Vec[i64]) {
     }
 }
 
-fn block_of(self: *Func) -> Vec[i64] {
-    bo := vec_fill(self.insts.len, 0xFFFFFFFF)
+// the block of every instruction in a block (NOV for the others)
+fn block_of(self: *Func) -> Vec[i32] {
+    bo := vec_fill(self.insts.len, i32(NOV))
     for bi in 0..self.blocks.len {
         for v in self.blocks[bi].insts {
-            bo[v] = bi
+            bo[v] = i32(bi)
         }
     }
     return bo
@@ -826,12 +830,12 @@ fn size(self: *Func) -> i64 {
 // ---------- CFG analysis ----------
 struct Cfg {
     rpo: Vec[i64]
-    rpo_idx: Vec[i64]
+    rpo_idx: Vec[i32] // NOV: unreachable
     preds: Vec[Vec[i64]]
-    idom: Vec[i64]
+    idom: Vec[i32]
     children: Vec[Vec[i64]]
-    pre: Vec[i64]
-    post: Vec[i64]
+    pre: Vec[i32]
+    post: Vec[i32]
 }
 
 fn cfg_new(f: *Func) -> Cfg {
@@ -891,37 +895,37 @@ priv fn rpo_preds_of(f: *Func, rpo: Vec[i64]) -> Vec[Vec[i64]] {
 
 priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
     n := f.blocks.len
-    rpo_idx := vec_fill(n, 0xFFFFFFFF)
+    rpo_idx := vec_fill(n, i32(NOV))
     for i in 0..rpo.len {
-        rpo_idx[rpo[i]] = i
+        rpo_idx[rpo[i]] = i32(i)
     }
     preds := rpo_preds_of(f, rpo)
-    idom := vec_fill(n, 0xFFFFFFFF)
+    idom := vec_fill(n, i32(NOV))
     idom[0] = 0
     changed := true
     while changed {
         changed = false
         for bi in 1..rpo.len {
             b := rpo[bi]
-            nw := 0xFFFFFFFF
+            nw := i32(NOV)
             for p in preds[b] {
-                if idom[p] == 0xFFFFFFFF {
+                if idom[p] == NOV {
                     continue
                 }
-                if nw == 0xFFFFFFFF {
-                    nw = p
+                if nw == NOV {
+                    nw = i32(p)
                 } else {
                     x := p
-                    y := nw
+                    y := i64(nw)
                     while x != y {
                         while rpo_idx[x] > rpo_idx[y] {
-                            x = idom[x]
+                            x = i64(idom[x])
                         }
                         while rpo_idx[y] > rpo_idx[x] {
-                            y = idom[y]
+                            y = i64(idom[y])
                         }
                     }
-                    nw = x
+                    nw = i32(x)
                 }
             }
             if idom[b] != nw {
@@ -939,8 +943,8 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
         b := rpo[bi]
         add(&children[idom[b]], b)
     }
-    pre := zeros(n)
-    post := zeros(n)
+    pre := Vec[i32]{buf: alloc[i32](n), len: n}
+    post := Vec[i32]{buf: alloc[i32](n), len: n}
     t := 0
     // every block is on the stack at most once
     sb := raw(n)
@@ -955,13 +959,13 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
             c := children[b][i]
             si[sp - 1] = i + 1
             t += 1
-            pre[c] = t
+            pre[c] = i32(t)
             sb[sp] = c
             si[sp] = 0
             sp += 1
         } else {
             t += 1
-            post[b] = t
+            post[b] = i32(t)
             sp -= 1
         }
     }
@@ -969,7 +973,7 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
 }
 
 fn reachable(self: *Cfg, b: i64) -> bool {
-    return self.rpo_idx[b] != 0xFFFFFFFF
+    return self.rpo_idx[b] != NOV
 }
 
 // a dominates b (reflexive)

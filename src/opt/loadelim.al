@@ -3,14 +3,14 @@
 priv struct Avail {
     m: MemRef,
     ty: T,
-    val: i64,
-    pending_store: i64, // a store not yet observed by any possible reader (NOV: none)
+    val: i32,
+    pending_store: i32, // a store not yet observed by any possible reader (NOV: none)
 }
 
-priv fn run_find(repl: []i64, v0: i64) -> i64 {
+priv fn run_find(repl: []i32, v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
-        v = repl[v]
+        v = i64(repl[v])
     }
     return v
 }
@@ -18,7 +18,7 @@ priv fn run_find(repl: []i64, v0: i64) -> i64 {
 fn loadelim_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     esc := alias_escaped_cached(f, opt_gen())
-    repl := vec_fill(f.insts.len, NOV)
+    repl := vec_fill(f.insts.len, i32(NOV))
     dead := alloc[bool](f.insts.len)
     changed := false
     // state at the end of each block, reused by a child that has that block as its only
@@ -64,18 +64,18 @@ fn loadelim_run(f: *Func) -> bool {
             }
             op := f.insts[v].op
             if op == Load {
-                m := alias_memref(f, v)
+                m := alias_memref(f, i64(v))
                 ty := f.insts[v].ty
                 hit := NOV
                 for k in 0..st.len {
                     a := &st[k]
                     if a.ty == ty && alias_must_alias(&a.m, &m) {
-                        hit = a.val
+                        hit = i64(a.val)
                         break
                     }
                 }
                 if hit != NOV {
-                    repl[v] = hit
+                    repl[v] = i32(hit)
                     dead[v] = true
                     changed = true
                 } else {
@@ -89,7 +89,7 @@ fn loadelim_run(f: *Func) -> bool {
                     st.push(Avail{m: m, ty: ty, val: v, pending_store: NOV})
                 }
             } else if op == Store {
-                m := alias_memref(f, v)
+                m := alias_memref(f, i64(v))
                 ty := f.insts[v].ty
                 val := f.insts[v].args[1]
                 // a previous unobserved store to exactly this location is dead
@@ -109,7 +109,7 @@ fn loadelim_run(f: *Func) -> bool {
                     }
                 }
                 st.len = n
-                st.push(Avail{m: m, ty: ty, val: val, pending_store: v})
+                st.push(Avail{m: m, ty: ty, val: i32(val), pending_store: v})
             } else if op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet {
                 // may read or write anything reachable: only non-escaped stack slots survive
                 n := 0

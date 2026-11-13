@@ -31,8 +31,8 @@ priv fn bmap_at(bmap: *Vec[i64], b: i64) -> i64 {
 // inline one call site: `call` (in block `cb`) to callee `g`. The uses of the call's results
 // are not rewritten here: `repl` gets their replacements (applied once by inline_run; a value
 // taken from the caller is looked up in it). Returns by how much cost(f) grew.
-priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], returns: *bool) -> i64 {
-    pos := index_of(f.blocks[cb].insts.items(), call)
+priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], returns: *bool) -> i64 {
+    pos := index_of(f.blocks[cb].insts.items(), i32(call))
     assert pos >= 0
     call_inst := clone(f.insts[call])
     // the call goes, the continuation block gets a terminator
@@ -82,7 +82,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
         }
     }
     rets := vec[(i64, Vec[i64])]()
-    allocas := vec[i64]()
+    allocas := vec[i32]()
     for gb in grpo {
         nb := bmap[gb]
         for gv in g.blocks[gb].insts {
@@ -113,9 +113,9 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
                 f.im(nv).args = args
             }
             if gi.op == Alloca {
-                allocas.push(nv)
+                allocas.push(i32(nv))
             } else {
-                f.blocks[nb].insts.push(nv)
+                f.blocks[nb].insts.push(i32(nv))
                 if counts(gi.op) {
                     grown += 1
                 }
@@ -157,7 +157,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
             } else {
                 z = f.mk(Const, rt, vec[i64](), 0)
             }
-            f.blocks[0].insts.insert(0, z)
+            f.blocks[0].insts.insert(0, i32(z))
             results.push(z)
         } else if rets.len == 1 {
             results.push(rets[0].1[k])
@@ -171,7 +171,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
                 pbs.push(rets[ri].0)
             }
             phi := f.mk_phi_of(rt, vals.items(), pbs.items())
-            f.blocks[cont].insts.insert(k, phi)
+            f.blocks[cont].insts.insert(k, i32(phi))
             results.push(phi)
         }
     }
@@ -179,7 +179,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
         repl.resize(f.insts.len, NOV)
     }
     if nrets == 1 {
-        repl[call] = results[0]
+        repl[call] = i32(results[0])
     } else if nrets > 1 {
         // projections of the call
         for b in 0..f.blocks.len {
@@ -187,7 +187,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
                 v := f.blocks[b].insts[ii]
                 i := &f.insts[v]
                 if i.op == Proj && i.args[0] == call {
-                    repl[v] = results[i.k]
+                    repl[v] = i32(results[i.k])
                 }
             }
         }
@@ -208,10 +208,10 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
 }
 
 // the final replacement of v
-priv fn repl_find(repl: *Vec[i64], v: i64) -> i64 {
+priv fn repl_find(repl: *Vec[i32], v: i64) -> i64 {
     r := v
     while r < repl.len && repl[r] != NOV {
-        r = repl[r]
+        r = i64(repl[r])
     }
     return r
 }
@@ -295,7 +295,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
     any := false
     budget := 400
     // replacements of the results of inlined calls, applied at the end
-    repl := vec[i64]()
+    repl := vec[i32]()
     caller_size := cost(&m.funcs[fid])
     // Where the search for the next call can start in the reverse postorder. Whether a call
     // can be inlined depends only on its callee. The blocks before the block of the call just
@@ -352,7 +352,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                         limit = pol.small
                     }
                     if size <= limit {
-                        found = Some((b, v, g))
+                        found = Some((b, i64(v), g))
                         start = ri
                         break search
                     }

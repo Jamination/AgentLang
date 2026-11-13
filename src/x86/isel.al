@@ -16,7 +16,7 @@ priv fn term_is_ret(t: Term) -> bool {
 }
 
 // can the back edge latch -> header stay unsplit? returns the aliases needed after the loop
-priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_block: *Vec[i64], cx: *SplitCx, latch: i64, header: i64, other: i64, c: i64) -> (Vec[ExitAlias], bool) {
+priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_block: *Vec[i32], cx: *SplitCx, latch: i64, header: i64, other: i64, c: i64) -> (Vec[ExitAlias], bool) {
     none := vec[ExitAlias]()
     if !cfg.reachable(latch) || !cfg.dom(header, latch) {
         return (none, false)
@@ -40,18 +40,18 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
         if f.insts[v].op != Phi {
             break
         }
-        phis.push(v)
+        phis.push(i64(v))
     }
     if phis.is_empty() {
         return (none, false)
     }
     // the branch condition (and what gets folded into it) must not read the header phis
-    fn is_hphi(f: *Func, def_block: *Vec[i64], header: i64, v: i64) -> bool {
-        f.insts[v].op == Phi && def_block[v] == header
+    fn is_hphi(f: *Func, def_block: *Vec[i32], header: i64, v: i64) -> bool {
+        f.insts[v].op == Phi && i64(def_block[v]) == header
     }
     // operands folded into the compare are evaluated after the copies: they must not
     // depend on a header phi through anything that gets folded (addresses, test operands)
-    fn tree_has(f: *Func, v: i64, depth: i64, def_block: *Vec[i64], header: i64) -> bool {
+    fn tree_has(f: *Func, v: i64, depth: i64, def_block: *Vec[i32], header: i64) -> bool {
         if is_hphi(f, def_block, header, v) {
             return true
         }
@@ -128,7 +128,7 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
             ui := &f.insts[u]
             if ui.op == Add || ui.op == Sub || ui.op == Shl || ui.op == Mul || ui.op == And || ui.op.is_cmp() {
                 cx.der[u] = true
-                derived.push(u)
+                derived.push(i64(u))
             }
         }
     }
@@ -142,7 +142,7 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
     // that receives them on the back edge
     for x in derived[phis.len..] {
         for j in cx.uoff[x]..cx.uoff[x + 1] {
-            b := cx.ublk[j]
+            b := i64(cx.ublk[j])
             if cfg.reachable(b) && !loops.contains(li, b) {
                 return (none, false)
             }
@@ -152,9 +152,9 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
     used := vec[(i64, i64, i64)]()
     for p in phis {
         for j in cx.uoff[p]..cx.uoff[p + 1] {
-            b := cx.ublk[j]
+            b := i64(cx.ublk[j])
             if cfg.reachable(b) && !loops.contains(li, b) {
-                used.push((cx.uord[j], b, p))
+                used.push((i64(cx.uord[j]), b, p))
             }
         }
     }
@@ -202,10 +202,10 @@ priv struct SplitCx {
     // the uses of value v: uuser[uoff[v]..uoff[v + 1]] (the using instruction, -1 for a
     // terminator), ublk (its block) and uord (its position in the function: blocks in order,
     // instructions, then the terminator, each operand in order)
-    uoff: Vec[i64]
-    uuser: Vec[i64]
-    ublk: Vec[i64]
-    uord: Vec[i64]
+    uoff: Vec[i32]
+    uuser: Vec[i32]
+    ublk: Vec[i32]
+    uord: Vec[i32]
 }
 
 priv fn term_args(t: *Term) -> []i64 {
@@ -223,7 +223,7 @@ priv fn uses_index(cx: *SplitCx, f: *Func) {
     cx.built = true
     n := f.insts.len
     nb := f.blocks.len
-    cnt := vec_fill(n + 1, 0)
+    cnt := Vec[i32]{buf: alloc[i32](n + 1), len: n + 1}
     for b in 0..nb {
         for v in f.blocks[b].insts {
             for a in f.insts[v].args {
@@ -237,20 +237,20 @@ priv fn uses_index(cx: *SplitCx, f: *Func) {
     for v in 0..n {
         cnt[v + 1] += cnt[v]
     }
-    total := cnt[n]
+    total := i64(cnt[n])
     cx.uoff = clone(cnt)
-    cx.uuser = vec_fill(total, 0)
-    cx.ublk = vec_fill(total, 0)
-    cx.uord = vec_fill(total, 0)
+    cx.uuser = Vec[i32]{buf: alloc[i32](total), len: total}
+    cx.ublk = Vec[i32]{buf: alloc[i32](total), len: total}
+    cx.uord = Vec[i32]{buf: alloc[i32](total), len: total}
     ord := 0
     for b in 0..nb {
         for v in f.blocks[b].insts {
             for a in f.insts[v].args {
                 x := cnt[a]
                 cnt[a] = x + 1
-                cx.uuser[x] = v
-                cx.ublk[x] = b
-                cx.uord[x] = ord
+                cx.uuser[x] = i32(v)
+                cx.ublk[x] = i32(b)
+                cx.uord[x] = i32(ord)
                 ord += 1
             }
         }
@@ -258,8 +258,8 @@ priv fn uses_index(cx: *SplitCx, f: *Func) {
             x := cnt[a]
             cnt[a] = x + 1
             cx.uuser[x] = -1
-            cx.ublk[x] = b
-            cx.uord[x] = ord
+            cx.ublk[x] = i32(b)
+            cx.uord[x] = i32(ord)
             ord += 1
         }
     }
@@ -281,7 +281,7 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
     ready := false
     cfg: Cfg
     loops: Loops
-    def_block: Vec[i64]
+    def_block: Vec[i32]
     cx: SplitCx
     aliases := vec[ExitAlias]()
     // decide first (on the unmodified CFG), then split
@@ -302,7 +302,7 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
                             cfg = cfg_new(f)
                             loops = loops_new(f, &cfg)
                             def_block = f.block_of()
-                            cx = SplitCx{der: vec_fill(f.insts.len, false), inl: vec_fill(nb, false), built: false, uoff: vec[i64](), uuser: vec[i64](), ublk: vec[i64](), uord: vec[i64]()}
+                            cx = SplitCx{der: vec_fill(f.insts.len, false), inl: vec_fill(nb, false), built: false, uoff: vec[i32](), uuser: vec[i32](), ublk: vec[i32](), uord: vec[i32]()}
                         }
                         al, ok := split_critical_edges_analyze(f, &cfg, &loops, &def_block, &cx, b, s, other, c)
                         if ok {
@@ -411,23 +411,23 @@ priv struct Sel {
     f: *Func
     m: *Module
     mf: MFunc
-    vreg: Vec[i64]
-    uses: Vec[i64]
+    vreg: Vec[i32]
+    uses: Vec[i32]
     needed: Vec[bool]
     addr_only: Vec[bool]
-    blk_of: Vec[i64]
-    slot_of: Vec[i64] // the frame slot of each alloca, or -1
+    blk_of: Vec[i32]
+    slot_of: Vec[i32] // the frame slot of each alloca, or -1
     projs: Map[i64, Vec[(i64, i64)]]
     out: Vec[MInst] // the instructions of the block being selected, in chunks (see isel_select)
     fconst_ix: Map[Bits128, i64]
     // memory-clobber counter position of each instruction within its block (for load folding)
-    clob: Vec[i64]
-    cur_clob: i64
-    cur_block: i64
+    clob: Vec[i32]
+    cur_clob: i32
+    cur_block: i32
     // a header phi whose old value is found in another phi after its loop: that phi and the
     // loop, or -1
-    ea_q: Vec[i64]
-    ea_loop: Vec[i64]
+    ea_q: Vec[i32]
+    ea_loop: Vec[i32]
     param_of: Vec[i64] // the Param instruction of each parameter, or -1
     loops: Loops
 }
@@ -451,17 +451,17 @@ priv fn bits_clear(b: *Vec[u64], base: i64, i: i64) {
 }
 
 // the candidate number of the alloca an address is derived from, or -1
-priv fn slot_cand(root: *Vec[i64], cand: *Vec[i64], a: i64) -> i64 {
+priv fn slot_cand(root: *Vec[i32], cand: *Vec[i32], a: i64) -> i64 {
     r := root[a]
     if r < 0 {
         return -1
     }
-    return cand[r]
+    return i64(cand[r])
 }
 
 // the memory effect of instruction v on the candidate allocas: (written, read, killed): the
 // candidate numbers or -1; killed when the whole alloca is overwritten
-priv fn slot_effect(f: *Func, v: i64, root: *Vec[i64], cand: *Vec[i64], allocas: *Vec[i64]) -> (i64, i64, bool) {
+priv fn slot_effect(f: *Func, v: i64, root: *Vec[i32], cand: *Vec[i32], allocas: *Vec[i64]) -> (i64, i64, bool) {
     i := &f.insts[v]
     match i.op {
         Load => return (-1, slot_cand(root, cand, i.args[0]), false)
@@ -486,13 +486,13 @@ priv fn slot_effect(f: *Func, v: i64, root: *Vec[i64], cand: *Vec[i64], allocas:
 }
 
 // the frame slot of every alloca (by instruction; -1 for other instructions)
-priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
+priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i32] {
     n := f.insts.len
-    slot_of := vec_fill(n, -1)
+    slot_of := vec_fill(n, i32(-1))
     allocas := vec[i64]()
     for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
-            allocas.push(v)
+            allocas.push(i64(v))
         }
     }
     if allocas.is_empty() {
@@ -500,13 +500,13 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
     }
     nb := f.blocks.len
     // the alloca (index into allocas) an address is derived from, or -1
-    root := vec_fill(n, -1)
+    root := vec_fill(n, i32(-1))
     for ai in 0..allocas.len {
-        root[allocas[ai]] = ai
+        root[allocas[ai]] = i32(ai)
     }
     // (the passes visit the Adds in block order; after the first pass only the Adds without
     // a root yet can change)
-    adds := vec[i64]()
+    adds := vec[i32]()
     changed := false
     for bi in 0..nb {
         for v in f.blocks[bi].insts {
@@ -580,11 +580,11 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
         }
     }
     // candidates: allocas worth sharing
-    cand := vec_fill(allocas.len, -1)
+    cand := vec_fill(allocas.len, i32(-1))
     members := vec[i64]()
     for ai in 0..allocas.len {
         if !escaped[ai] && f.insts[allocas[ai]].k >= 16 && members.len < 4096 {
-            cand[ai] = members.len
+            cand[ai] = i32(members.len)
             members.push(ai)
         }
     }
@@ -598,7 +598,7 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
         for b in 0..nb {
             eff_off[b] = eff.len
             for v in f.blocks[b].insts {
-                wr, rd, kill := slot_effect(f, v, &root, &cand, &allocas)
+                wr, rd, kill := slot_effect(f, i64(v), &root, &cand, &allocas)
                 if wr >= 0 || rd >= 0 {
                     eff.push((wr, rd, kill))
                 }
@@ -706,13 +706,13 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
             }
             sl := new_slot(mf, size, align)
             for c in g {
-                slot_of[allocas[members[c]]] = sl
+                slot_of[allocas[members[c]]] = i32(sl)
             }
         }
     }
     for v in allocas {
         if slot_of[v] < 0 {
-            slot_of[v] = new_slot(mf, f.insts[v].k, i64(f.insts[v].aux))
+            slot_of[v] = i32(new_slot(mf, f.insts[v].k, i64(f.insts[v].aux)))
         }
     }
     return slot_of
@@ -721,13 +721,13 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
 // (rpo and loops: of f as it is now; loops is empty for a function without a cycle)
 fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, aliases: []ExitAlias) -> MFunc {
     n := f.insts.len
-    ea_q := vec_fill(n, -1)
-    ea_loop := vec_fill(n, -1)
+    ea_q := vec_fill(n, i32(-1))
+    ea_loop := vec_fill(n, i32(-1))
     for a in aliases {
         for li in 0..loops.loops.len {
             if loops.loops[li].header == a.header {
-                ea_q[a.p] = a.q
-                ea_loop[a.p] = li
+                ea_q[a.p] = i32(a.q)
+                ea_loop[a.p] = i32(li)
                 break
             }
         }
@@ -748,16 +748,16 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
             wide_xmm: wide_xmm,
             xuses: vec[i64](),
         },
-        vreg: vec_fill(n, NOREG),
+        vreg: vec_fill(n, i32(NOREG)),
         uses: f.use_counts(),
         needed: vec_fill(n, false),
         addr_only: vec_fill(n, true),
         blk_of: f.block_of(),
-        slot_of: vec[i64](),
+        slot_of: vec[i32](),
         projs: map[i64, Vec[(i64, i64)]](),
         out: vec[MInst](),
         fconst_ix: map[Bits128, i64](),
-        clob: vec_fill(n, 0),
+        clob: Vec[i32]{buf: alloc[i32](n), len: n},
         cur_clob: 0,
         cur_block: 0,
         ea_q: ea_q,
@@ -771,13 +771,13 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         s.mf.blocks.push(MBlock{insts: vec[MInst](), succs: f.succs(b), depth: if b < len(depths) { depths[b] } else { 0 }, align: false})
     }
     // per-value facts
-    bclob := vec_fill(nb, 0) // the clobber count at the end of each block
+    bclob := Vec[i32]{buf: alloc[i32](nb), len: nb} // the clobber count at the end of each block
     for bi in 0..nb {
         b := &f.blocks[bi]
         nclob := 0
         for pi in 0..b.insts.len {
             v := b.insts[pi]
-            s.clob[v] = nclob
+            s.clob[v] = i32(nclob)
             i := &f.insts[v]
             if cleanup_is_root(i.op) {
                 nclob += 1
@@ -793,13 +793,13 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                     if !has {
                         pl = vec[(i64, i64)]()
                     }
-                    pl.push((i.k, v))
+                    pl.push((i.k, i64(v)))
                     s.projs.set(a0, pl)
                     s.addr_only[a0] = false
                 }
                 Param => {
                     if i.k >= 0 && i.k < s.param_of.len {
-                        s.param_of[i.k] = v
+                        s.param_of[i.k] = i64(v)
                     }
                     for a in i.args {
                         s.addr_only[a] = false
@@ -812,7 +812,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 }
             }
         }
-        bclob[bi] = nclob
+        bclob[bi] = i32(nclob)
         match b.term {
             Br(c, t, e) => {
                 s.addr_only[c] = false
@@ -832,7 +832,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
     starts := vec[i64]()
     for ri in rpo.len - 1..=0 by -1 {
         b := rpo[ri]
-        s.cur_block = b
+        s.cur_block = i32(b)
         s.cur_clob = bclob[b]
         s.out.clear()
         starts.clear()
@@ -840,7 +840,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         starts.push(0)
         s.term(b)
         for vi in f.blocks[b].insts.len - 1..=0 by -1 {
-            v := f.blocks[b].insts[vi]
+            v := i64(f.blocks[b].insts[vi])
             op := f.insts[v].op
             if op == Const && s.needed[v] {
                 // a wide constant kept in a register (so that loops do not rebuild it)
@@ -895,9 +895,9 @@ priv fn class_of(self: *Sel, v: i64) -> u8 {
 priv fn vr(self: *Sel, v: i64) -> i64 {
     if self.vreg[v] == NOREG {
         c := self.class_of(v)
-        self.vreg[v] = new_vreg(&self.mf, c)
+        self.vreg[v] = i32(new_vreg(&self.mf, c))
     }
-    return self.vreg[v]
+    return i64(self.vreg[v])
 }
 
 priv fn fconst(self: *Sel, bits: Bits128) -> Mem {
@@ -912,7 +912,7 @@ priv fn fconst(self: *Sel, bits: Bits128) -> Mem {
 
 // the frame slot of the alloca v (`self.slot_of[&v]`)
 priv fn isel_slot_of(s: *Sel, v: i64) -> i64 {
-    sl := s.slot_of[v]
+    sl := i64(s.slot_of[v])
     assert sl >= 0, "isel: alloca without a slot"
     return sl
 }
@@ -951,9 +951,9 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
         self.e(Lea, 8, R(r), M(mem_slot(sl, 0)))
         return r
     }
-    q := self.ea_q[v]
+    q := i64(self.ea_q[v])
     if q >= 0 {
-        if !contains(&self.loops, self.ea_loop[v], self.cur_block) {
+        if !contains(&self.loops, i64(self.ea_loop[v]), i64(self.cur_block)) {
             // after the loop the old value of this phi lives in its partner
             self.needed[q] = true
             return self.vr(q)
@@ -1157,7 +1157,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
         if self.f.insts[v].op != Phi {
             break
         }
-        phis.push(v)
+        phis.push(i64(v))
     }
     for p in phis {
         self.needed[p] = true
@@ -1552,7 +1552,7 @@ priv fn inst(self: *Sel, v: i64) {
                     b := i.args[1]
                     ra := i64(m.base)
                     rb := i64(m.idx)
-                    direct := self.vreg[a] == ra && self.vreg[b] == rb
+                    direct := i64(self.vreg[a]) == ra && i64(self.vreg[b]) == rb
                     if direct && self.dies_here(a) {
                         self.e(Mov, 8, R(d), R(ra))
                         self.e(MOp.Add, 8, R(d), R(rb))
@@ -2091,7 +2091,7 @@ priv fn dies_here(self: *Sel, v: i64) -> bool {
 priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
     // x + const where x dies here: two-address add coalesces
     for a in i.args {
-        if self.vreg[a] == base {
+        if i64(self.vreg[a]) == base {
             return self.dies_here(a)
         }
     }

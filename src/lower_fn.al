@@ -61,14 +61,14 @@ struct Fx {
     cur: i64
     dead: bool
     // instructions of block `cur` not yet in its list: pend[pend_base..] (see flush_pend)
-    pend: Vec[i64]
+    pend: Vec[i32]
     pend_base: i64
     scopes: Vec[Scope]
     loops: Vec[LoopCtx]
     tenv: Map[str, i64]
     ret_ty: i64
     sret: Opt[i64]
-    allocas: Vec[i64]
+    allocas: Vec[i32]
     traps: Map[(i64, i64), i64]
     // labels of the enclosing labelled loops: (name, index of the loop in `loops`, line)
     labels: Vec[(str, i64, i64)]
@@ -202,7 +202,7 @@ priv fn lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
 // lowered, one set per level of nesting (see lower_fn_lower_body)
 priv inst_bufs: Vec[Vec[Inst]]
 priv block_bufs: Vec[Vec[BlockData]]
-priv pend_bufs: Vec[Vec[i64]]
+priv pend_bufs: Vec[Vec[i32]]
 priv buf_depth: i64
 
 // instructions / blocks of a fresh slab, and the least free room a function starts with
@@ -226,7 +226,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     if buf_depth == inst_bufs.len {
         inst_bufs.push(vec[Inst]())
         block_bufs.push(vec[BlockData]())
-        pend_bufs.push(vec[i64]())
+        pend_bufs.push(vec[i32]())
     }
     if len(inst_bufs[buf_depth].buf) < SLAB_MIN {
         slab := vec[Inst]()
@@ -258,7 +258,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         tenv: tenv,
         ret_ty: rty,
         sret: None,
-        allocas: vec[i64](),
+        allocas: vec[i32](),
         traps: map[(i64, i64), i64](),
         labels: vec[(str, i64, i64)](),
         parent: parent,
@@ -331,10 +331,10 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     // finalize: allocas at the top of the entry block
     b0 := fx.f.blocks[0].insts
     na := fx.allocas.len
-    entry := alloc[i64](na + b0.len)
+    entry := alloc[i32](na + b0.len)
     copy(entry, fx.allocas.items())
     copy(entry[na..], b0.items())
-    fx.f.blocks[0].insts = Vec[i64]{buf: entry, len: len(entry)}
+    fx.f.blocks[0].insts = Vec[i32]{buf: entry, len: len(entry)}
     for bi in 0..fx.f.blocks.len {
         match fx.f.blocks[bi].term {
             Term.None => {
@@ -364,7 +364,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
 // (`flush_pend`): a block's list is allocated once, at its final length.
 fn ins(self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.f.mk(op, ty, args, k)
-    self.pend.push(v)
+    self.pend.push(i32(v))
     return v
 }
 
@@ -429,7 +429,7 @@ fn alloca(self: *Fx, size: i64, align: i64) -> i64 {
     v := self.f.mk(Alloca, I64, vec[i64](), max(size, 1))
     i := self.f.im(v)
     i.aux = i32(max(align, 1))
-    self.allocas.push(v)
+    self.allocas.push(i32(v))
     return v
 }
 
