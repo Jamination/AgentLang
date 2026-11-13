@@ -26,7 +26,7 @@ the seed does not know; add the feature, build, reseed, then use it. `ALC_SEED=/
 selects another seed.
 
 Stage 1 is compiled by the seed and may therefore lay out types as an older compiler did (the
-seed before the change to 1-byte enum tags stored every tag in 8 bytes). The compiler never
+seed before the change to 4-byte enum tags stored every tag in 8 bytes). The compiler never
 depends on the layout of its own types: no `sizeof` or `cast` of an enum, and the records the
 parallel back end shares between processes (`emit_put_code`, the reachability records in
 `src/x86/mod.al`) are written and read field by field.

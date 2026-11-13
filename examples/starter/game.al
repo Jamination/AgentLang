@@ -18,7 +18,7 @@ enum Kind { Player, Rock, Shot, Spark }
 
 // One struct for every kind of entity: unused fields cost a few bytes, and every system is a
 // plain loop over the pool with no indirection. Each field has a small type that holds its
-// values (hp is at most 3, colours are 32 bits): 36 bytes per entity, 1 of them the tag.
+// values (hp is at most 3, colours are 32 bits): 36 bytes per entity, 4 of them the tag.
 struct Entity {
     kind: Kind
     pos: vec2

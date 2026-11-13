@@ -1,6 +1,6 @@
-sizes 1 2 3 4 8 16 24 20 8 16 24 24
-opt 2 2 2 4 8 16 3 4 24
-structs 2 12 16 10 6 3
+sizes 4 4 8 8 8 16 24 20 12 16 24 24
+opt 8 8 8 8 8 16 12 8 24
+structs 8 20 16 40 24 12
 Red Blue 2 1 299 256 2
 green Blue Tagged{c: Green, b: 9} [Red, Green, Blue]
 Blue [Red, Red, Green, Red]

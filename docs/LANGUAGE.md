@@ -114,7 +114,7 @@ test "areas" {
   to and never read is reported as a compile error.)
 - Every type has a zero value (0, `false`, `nil`, empty slice, the first variant of an enum, all
   fields zero); `x: T` declares a zeroed variable. `sizeof[T]()` is the size in bytes. Layout
-  follows the C rules; an enum is a 1-byte tag (2 bytes beyond 256 variants), then the payload.
+  follows the C rules; an enum is a 4-byte tag (a `u32`), then the payload at its alignment.
 
 ## Declarations
 

@@ -1659,9 +1659,9 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                     r := self.ins(BitsToF, F32, vec_one(s), 0)
                     return Some(self.sval(to, r))
                 }
-                (Int(64, _), Enum(e)) if self.cx.types.is_scalar(to) => {
+                (Int(64, _), Enum(_)) if self.cx.types.is_scalar(to) => {
                     s := self.scalar(v)
-                    r := self.ins(Trunc, self.cx.types.tag_ir(e), vec_one(s), 0)
+                    r := self.ins(Trunc, I32, vec_one(s), 0)
                     return Some(self.sval(to, r))
                 }
                 (Slice(fe), Slice(te)) => {
@@ -2113,7 +2113,7 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
         Enum(eid) => {
             // the variant, mixed with the hashes of its payload values
             res := self.alloca(8, 8)
-            tag := self.load_tag(v.v, eid)
+            tag := self.load_tag(v.v)
             h0 := match hash_u64(self, self.tag_i64(tag), pos) {
                 Some(x) => x
                 None => return None
@@ -2128,7 +2128,7 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
                 }
                 bt := self.new_block()
                 bn := self.new_block()
-                c := self.tag_const(eid, vi)
+                c := self.tag_const(vi)
                 is_v := self.ins(Eq, I8, vec_two(tag, c), 0)
                 self.br(is_v, bt, bn)
                 self.switch_to(bt)
@@ -2384,7 +2384,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
             if simple {
                 tag = self.scalar(v)
             } else {
-                tag = self.load_tag(v.v, eid)
+                tag = self.load_tag(v.v)
             }
             bj := self.new_block()
             for vi in 0..variants.len {
@@ -2392,7 +2392,7 @@ priv fn put_val(self: *Fx, v: Val, pos: Pos, depth: i64) {
                 ptys := variants[vi].1
                 bt := self.new_block()
                 bn := self.new_block()
-                c := self.tag_const(eid, vi)
+                c := self.tag_const(vi)
                 eq := self.ins(Eq, I8, vec_two(tag, c), 0)
                 self.br(eq, bt, bn)
                 self.switch_to(bt)

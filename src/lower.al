@@ -922,16 +922,14 @@ fn inst_enum(self: *Cx, ei: i64, targs: Vec[i64], pos: Pos) -> i64 {
     if !simple {
         self.types.instantiating += 1
     }
-    tag := types_tag_bytes(d.variants.len)
     self.types.enums.push(EnumInfo{
         name: name,
         decl: ei,
         targs: clone(targs),
         variants: vec[(str, Vec[i64])](),
         simple: simple,
-        tag: tag,
-        size: tag,
-        align: tag,
+        size: ENUM_TAG,
+        align: ENUM_TAG,
         state: if simple { 2 } else { 3 },
     })
     ty := self.types.intern(Enum(eid))
@@ -2076,7 +2074,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
                     // a variant of an enum without data
                     vi := self.variant_of(self.types.enums[eid].decl, n)
                     if vi >= 0 && self.types.enums[eid].simple {
-                        put_le(data, off, u64(vi), self.types.enums[eid].tag)
+                        put_le(data, off, u64(vi), ENUM_TAG)
                         return true
                     }
                     return false

@@ -841,16 +841,15 @@ priv fn pat_test(self: *Fx, rp: *RPat, part: Val, payload: bool, key: i64, top: 
         return
     }
     if rp.k == RP_VARIANT {
-        eid := enum_of(self, rp.ty)
         tag := key
         if tag == NOV {
             if self.cx.types.is_scalar(rp.ty) {
                 tag = self.scalar(part)
             } else {
-                tag = self.load_tag(part.v, eid)
+                tag = self.load_tag(part.v)
             }
         }
-        c := self.tag_const(eid, rp.vi)
+        c := self.tag_const(rp.vi)
         eq := self.ins(Op.Eq, I8, vec_two(tag, c), 0)
         if !subs_refutable(rp) {
             self.br(eq, ok_b, fail_b)
@@ -1436,7 +1435,7 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     // scrutinee: scalar value, or tag for payload enums
     key: i64
     if payload_enum {
-        key = self.load_tag(sv.v, enum_id.or(0))
+        key = self.load_tag(sv.v)
     } else if self.cx.types.is_scalar(sv.ty) {
         key = self.scalar(sv)
     } else if sv.ty == T_STR || is_tuple {

@@ -460,14 +460,14 @@ fn store_raw(self: *Fx, addr: i64, val: i64, t: T, alias: i64) {
     i.aux = i32(alias)
 }
 
-// the tag of a value of the enum with data `eid` at `addr`
-fn load_tag(self: *Fx, addr: i64, eid: i64) -> i64 {
-    return self.load_raw(addr, self.cx.types.tag_ir(eid), AK_ANY)
+// the tag of a value of an enum with data at `addr`
+fn load_tag(self: *Fx, addr: i64) -> i64 {
+    return self.load_raw(addr, I32, AK_ANY)
 }
 
-// variant number `vi` as a tag of enum `eid`
-fn tag_const(self: *Fx, eid: i64, vi: i64) -> i64 {
-    return self.iconst(self.cx.types.tag_ir(eid), vi)
+// variant number `vi` as a tag
+fn tag_const(self: *Fx, vi: i64) -> i64 {
+    return self.iconst(I32, vi)
 }
 
 // a tag (or the value of an enum without data, which is never 64 bits wide) as an i64

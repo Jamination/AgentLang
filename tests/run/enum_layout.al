@@ -1,5 +1,5 @@
-// Enum layout: the tag is the smallest unsigned integer that holds the variant number (1 byte
-// up to 256 variants, 2 bytes up to 65,536), the payloads follow at their natural alignment.
+// Enum layout: the tag is a u32 (4 bytes, also for an enum of 300 variants), the payloads
+// follow at their natural alignment.
 
 enum Color { Red, Green, Blue }
 enum Big {

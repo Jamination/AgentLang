@@ -491,8 +491,8 @@ fn main() {
 - Parameters and results must be integers, `bool`, `f32`/`f64`, pointers or function values;
   C structs are passed by pointer (AL structs have C layout: natural alignment). C `int` is
   `i32`, `long`/`size_t` are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.
-- C enums are bound as integer constants (`const VK_FORMAT_R8G8B8A8_UNORM: i32 = 37`): an AL enum
-  is 1 or 2 bytes, not C's 4. An AL enum in an `extern` signature is passed as a C `int`.
+- An AL enum without data is exactly a C `int` (4 bytes, the variant number): it may stand for a C
+  enum numbered 0, 1, 2, ...; other C enums are bound as integer constants (`VK_FORMAT_...: i32`).
 - `cstr(s: str) -> *u8` is a NUL-terminated copy of `s`; `from_cstr(p: *u8) -> str` is the text
   of a C string (not copied; `""` for `nil`). String literals are NUL-terminated already:
   `ptr("literal")` can be passed directly.

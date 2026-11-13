@@ -54,17 +54,15 @@ struct StructInfo {
     state: i64
 }
 
-// The tag of an enum is the smallest unsigned integer that holds its variant number (1 byte for
-// up to 256 variants, 2 up to 65,536, else 4); the payloads of a variant follow it at their
-// natural alignment, as the fields of a struct whose first field is the tag. An enum without
-// data is just the tag.
+// The tag of an enum is a u32 (ENUM_TAG bytes, the IR type I32: the size of a C `int`); the
+// payloads of a variant follow it at their natural alignment, as the fields of a struct whose
+// first field is the tag. An enum without data is just the tag.
 struct EnumInfo {
     name: str
     decl: i64
     targs: Vec[i64]
     variants: Vec[(str, Vec[i64])]
     simple: bool
-    tag: i64 // bytes of the tag
     size: i64
     align: i64
     state: i64
@@ -429,9 +427,8 @@ priv fn layout_enum(self: *Types, eid: i64) {
     }
     self.enums[eid].state = 1
     nv := self.enums[eid].variants.len
-    tag := self.enums[eid].tag
-    size := tag
-    align := tag
+    size := ENUM_TAG
+    align := ENUM_TAG
     // the bytes the payloads occupy, as start << 32 | end
     spans := vec[i64]()
     for i in 0..nv {
@@ -501,31 +498,12 @@ priv fn run_pieces(o0: i64, e: i64) -> i64 {
     return n
 }
 
-// the tag of an enum with `n` variants: its size in bytes
-fn types_tag_bytes(n: i64) -> i64 {
-    if n <= 0x100 {
-        return 1
-    }
-    if n <= 0x10000 {
-        return 2
-    }
-    return 4
-}
-
-// the IR type of the tag of enum `eid`
-fn tag_ir(self: *Types, eid: i64) -> T {
-    return match self.enums[eid].tag {
-        1 => I8
-        2 => I16
-        _ => I32
-    }
-}
+// bytes of the tag of every enum (its IR type is I32)
+const ENUM_TAG = 4
 
 // the fields of variant `var_` laid out like a struct: the tag, then the payload types
 priv fn variant_fields(self: *Types, eid: i64, var_: i64) -> Vec[i64] {
-    tag := self.enums[eid].tag
-    tys := vec[i64]()
-    tys.push(if tag == 1 { T_U8 } else if tag == 2 { T_U16 } else { T_U32 })
+    tys := vec_one(T_U32)
     tys.extend(self.enums[eid].variants[var_].1.items())
     return tys
 }
@@ -625,7 +603,7 @@ fn scalar_ir(self: *Types, t: i64) -> (T, i64) {
         Int(16, _) => (I16, AK_I16)
         Int(32, _) => (I32, AK_I32)
         Int(_, _) => (I64, AK_I64)
-        Enum(e) if self.enums[e].simple => (self.tag_ir(e), AK_TAG)
+        Enum(e) if self.enums[e].simple => (I32, AK_TAG)
         F64 => (T.F64, AK_F64)
         F32 => (T.F32, AK_F32)
         Vec(2) => (V2, AK_VEC)
@@ -703,11 +681,11 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
         }
         Enum(e) => {
             if self.enums[e].simple {
-                out.push(Leaf{off: base, t: self.tag_ir(e), alias: AK_TAG})
+                out.push(Leaf{off: base, t: I32, alias: AK_TAG})
                 return
             }
             self.layout_enum(e)
-            out.push(Leaf{off: base, t: self.tag_ir(e), alias: AK_ANY})
+            out.push(Leaf{off: base, t: I32, alias: AK_ANY})
             for r in self.enums[e].runs {
                 o := r >> 32
                 end := r & 0xFFFFFFFF
