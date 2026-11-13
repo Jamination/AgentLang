@@ -562,8 +562,9 @@ both systems, except where this section says otherwise.
   `error_text` says `windows error N`.
 - **Status and panics.** The exit status is the low 8 bits of the code, as on Linux
   (`exit(300)` ends with 44). Panics write the same messages and end with status 1; access
-  violations, stack overflow and integer division faults (`--unchecked`) are caught by a
-  vectored exception handler and reported as the Linux signal handler reports them. Standard
+  violations, stack overflow and integer division faults (`--unchecked`) are reported as the
+  Linux signal handler reports them: in the program's code by a vectored exception handler;
+  in a DLL only if the DLL does not handle the exception itself (unhandled exception filter). Standard
   output that cannot be written (a closed pipe) stops the program with `panic: cannot write
   to standard output: broken pipe` (Linux: the program ends silently through SIGPIPE).
 - **`alc test`.** Each `test` block runs in a process of its own, as with `fork` on Linux:

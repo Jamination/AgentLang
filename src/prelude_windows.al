@@ -28,6 +28,8 @@ priv extern "kernel32.dll" fn ExitProcess(code: u32)
 priv extern "kernel32.dll" fn SetErrorMode(mode: u32) -> u32
 priv extern "kernel32.dll" fn AddVectoredExceptionHandler(first: u32, handler: fn(i64) -> i32) -> i64
 priv extern "kernel32.dll" fn SetThreadStackGuarantee(size: *u32) -> i32
+priv extern "kernel32.dll" fn SetUnhandledExceptionFilter(filter: fn(i64) -> i32) -> i64
+priv extern "kernel32.dll" fn GetModuleHandleW(name: *u16) -> i64
 priv extern "kernel32.dll" fn VirtualAlloc(addr: i64, size: i64, kind: u32, protect: u32) -> i64
 priv extern "kernel32.dll" fn VirtualFree(addr: i64, size: i64, kind: u32) -> i32
 priv extern "kernel32.dll" fn VirtualQuery(addr: i64, info: *i64, size: i64) -> i64
@@ -113,15 +115,30 @@ fn __os_error_text(e: i64) -> str {
 }
 
 // ---------- start, end, faults ----------
+// Faults become the panics of the Linux signal handler. A vectored handler takes those in the
+// program's own code (and stack overflow anywhere) before anything else sees them; a fault
+// in a DLL is left to the DLL's own exception handlers, and reaches the unhandled exception
+// filter (which walks the stack through AL frames by their unwind information) only if none
+// of them takes it.
 priv in_fault: bool
+// the program's image: [image_lo, image_hi)
+priv image_lo: i64
+priv image_hi: i64
 
-// a vectored exception handler: faults become the panics of the Linux signal handler
-priv fn on_exception(info: i64) -> i32 {
-    code := cast[*u32](cast[*i64](info)[0])[0]
+priv fn fault(info: i64, anywhere: bool) -> i32 {
+    rec := cast[*i64](info)[0]
+    code := cast[*u32](rec)[0]
+    at := cast[*i64](rec)[2]
+    mine := at >= image_lo && at < image_hi
     match code {
-        0xC0000094, 0xC0000095 => {}         // integer division by zero / overflow
-        0xC0000005, 0xC0000006, 0xC00000FD => {}     // access violation, in-page error, stack overflow
-        _ => return 0                        // EXCEPTION_CONTINUE_SEARCH
+        0xC0000094, 0xC0000095, 0xC0000005, 0xC0000006 => {
+            // integer division by zero / overflow, access violation, in-page error
+            if !mine && !anywhere {
+                return 0                     // EXCEPTION_CONTINUE_SEARCH
+            }
+        }
+        0xC00000FD => {}                     // stack overflow
+        _ => return 0
     }
     if in_fault {
         ExitProcess(1)
@@ -133,14 +150,27 @@ priv fn on_exception(info: i64) -> i32 {
     __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
 }
 
+priv fn on_exception(info: i64) -> i32 {
+    return fault(info, false)
+}
+
+priv fn on_unhandled(info: i64) -> i32 {
+    return fault(info, true)
+}
+
 // sp: what the loader passes (the PEB), not used
 fn __rt_init(sp: i64) {
     // no error dialogs: SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
     SetErrorMode(0x8003)
+    // the image: e_lfanew at 0x3C, SizeOfImage at 24 + 56 after the PE signature
+    image_lo = GetModuleHandleW(nil)
+    pe := image_lo + i64(cast[*u32](image_lo + 0x3C)[0])
+    image_hi = image_lo + i64(cast[*u32](pe + 80)[0])
     // room for the handler after a stack overflow
     g: u32 = 0x10000
     SetThreadStackGuarantee(&g)
     AddVectoredExceptionHandler(1, on_exception)
+    SetUnhandledExceptionFilter(on_unhandled)
 }
 
 fn __os_exit(code: i64) -> never {
