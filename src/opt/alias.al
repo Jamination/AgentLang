@@ -218,7 +218,7 @@ struct MemRef {
 
 fn alias_memref(f: *Func, v: i64) -> MemRef {
     i := &f.insts[v]
-    return MemRef{addr: decompose(f, i.args[0]), size: i.ty.size(), class: i.aux, ptr: i.args[0]}
+    return MemRef{addr: decompose(f, i.args[0]), size: i.ty.size(), class: i64(i.aux), ptr: i.args[0]}
 }
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {

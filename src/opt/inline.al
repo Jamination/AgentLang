@@ -53,7 +53,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
             if f.insts[v].op != Phi {
                 break
             }
-            pbs := &f.insts[v].pb
+            pbs := f.insts[v].from()
             for k in 0..pbs.len {
                 if pbs[k] == cb {
                     pbs[k] = cont
@@ -91,29 +91,26 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
                 continue
             }
             nv := vmap[gv]
-            args := vec[i64]()
-            for a in gi.args {
-                args.push(vmap[a])
-            }
-            pb := vec[i64]()
-            for p in gi.pb {
-                pb.push(bmap[p])
-            }
-            // drop phi inputs from blocks that were unreachable in the callee
-            if gi.op == Phi && contains(&pb, 0xFFFFFFFF) {
+            n := gi.args.len
+            if gi.op == Phi {
+                // drop phi inputs from blocks that were unreachable in the callee
                 a2 := vec[i64]()
                 p2 := vec[i64]()
-                for k in 0..pb.len {
-                    if pb[k] != 0xFFFFFFFF {
-                        a2.push(args[k])
-                        p2.push(pb[k])
+                gfrom := gi.from()
+                for k in 0..n {
+                    p := bmap[gfrom[k]]
+                    if p != 0xFFFFFFFF {
+                        a2.push(vmap[gi.args[k]])
+                        p2.push(p)
                     }
                 }
-                f.im(nv).args = a2
-                f.im(nv).pb = p2
-            } else {
+                f.im(nv).phi_set(a2.items(), p2.items())
+            } else if n > 0 {
+                args := mkslice[i64](__alloc_raw(n * 8), n)
+                for k in 0..n {
+                    args[k] = vmap[gi.args[k]]
+                }
                 f.im(nv).args = args
-                f.im(nv).pb = pb
             }
             if gi.op == Alloca {
                 allocas.push(nv)
@@ -169,12 +166,11 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i64], ret
             for ri in 0..rets.len {
                 vals.push(rets[ri].1[k])
             }
-            phi := f.mk(Phi, rt, vals, 0)
             pbs := vec[i64]()
             for ri in 0..rets.len {
                 pbs.push(rets[ri].0)
             }
-            f.im(phi).pb = pbs
+            phi := f.mk_phi_of(rt, vals.items(), pbs.items())
             f.blocks[cont].insts.insert(k, phi)
             results.push(phi)
         }

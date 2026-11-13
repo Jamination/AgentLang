@@ -203,13 +203,17 @@ fn negate_icmp(self: Op) -> Op {
     }
 }
 
+// 48 bytes. `args` is a view of memory of its own, never shared with another instruction
+// (the passes write through it). A phi's buffer has room for `cap` inputs and holds the block
+// each input comes from `cap` words after the input (`from()`): its inputs are changed only
+// through the phi functions below, and `clone` of a phi instruction loses the blocks.
 struct Inst {
     op: Op
     ty: T
-    args: Vec[i64]
+    args: []i64
     k: i64
-    aux: i64
-    pb: Vec[i64] // phi predecessor blocks, parallel to args
+    aux: i32
+    cap: i32 // phis: room for inputs in the buffer of args
 }
 
 enum Term {
@@ -235,6 +239,9 @@ struct Func {
     inl: i64 // inlining hint: 1 = always, -1 = never, 0 = auto
     noreturn: bool
     lowered: bool
+    // mk has made an instruction of a vector type (since insts was last emptied): isel sizes
+    // spill slots by it, also for instructions no longer in the list (see keep_func)
+    has_vec: bool
     // a C function in a shared library: index into Module.externs
     ext: Opt[i64]
 }
@@ -288,6 +295,7 @@ fn func_new(name: str) -> Func {
         inl: 0,
         noreturn: false,
         lowered: false,
+        has_vec: false,
         ext: None,
     }
 }
@@ -411,8 +419,76 @@ fn mk(self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
         self.insts.reserve(self.insts.len + 1)
         work_resume()
     }
-    self.insts.push(Inst{op: op, ty: ty, args: args, k: k, aux: 0, pb: vec[i64]()})
+    if ty.is_vec() {
+        self.has_vec = true
+    }
+    self.insts.push(Inst{op: op, ty: ty, args: args.items(), k: k, aux: 0, cap: 0})
     return self.insts.len - 1
+}
+
+// ---------- phis ----------
+// a phi with no inputs yet and room for n
+fn mk_phi(self: *Func, ty: T, n: i64) -> i64 {
+    v := self.mk(Phi, ty, vec[i64](), 0)
+    c := max(n, 1)
+    i := &self.insts[v]
+    i.args = mkslice[i64](__alloc_raw(2 * c * 8), 0)
+    i.cap = i32(c)
+    return v
+}
+
+// a phi with input vals[k] from block bs[k]
+fn mk_phi_of(self: *Func, ty: T, vals: []i64, bs: []i64) -> i64 {
+    v := self.mk(Phi, ty, vec[i64](), 0)
+    self.insts[v].phi_set(vals, bs)
+    return v
+}
+
+// the blocks the inputs of a phi come from, parallel to its args (a view of its buffer)
+fn from(self: *Inst) -> []i64 {
+    return mkslice[i64](cast[i64](ptr(self.args)) + i64(self.cap) * 8, len(self.args))
+}
+
+// replaces all inputs of a phi
+fn phi_set(self: *Inst, vals: []i64, bs: []i64) {
+    n := len(vals)
+    c := max(n, 1)
+    buf := mkslice[i64](__alloc_raw(2 * c * 8), 2 * c)
+    memcopy(ptr(buf), ptr(vals), n * 8)
+    memcopy(cast[*i64](cast[i64](ptr(buf)) + c * 8), ptr(bs), n * 8)
+    self.args = buf[..n]
+    self.cap = i32(c)
+}
+
+// a new input of a phi
+fn phi_add(self: *Inst, val: i64, b: i64) {
+    n := len(self.args)
+    c := i64(self.cap)
+    if n == c {
+        nc := max(2 * c, 2)
+        buf := mkslice[i64](__alloc_raw(2 * nc * 8), 2 * nc)
+        memcopy(ptr(buf), ptr(self.args), n * 8)
+        memcopy(cast[*i64](cast[i64](ptr(buf)) + nc * 8), ptr(self.from()), n * 8)
+        self.args = buf[..n]
+        self.cap = i32(nc)
+        c = nc
+    }
+    full := mkslice[i64](cast[i64](ptr(self.args)), 2 * c)
+    full[n] = val
+    full[c + n] = b
+    self.args = full[..n + 1]
+}
+
+// removes input k of a phi (the others keep their order)
+fn phi_remove(self: *Inst, k: i64) {
+    n := len(self.args)
+    c := i64(self.cap)
+    full := mkslice[i64](cast[i64](ptr(self.args)), 2 * c)
+    for j in k..n - 1 {
+        full[j] = full[j + 1]
+        full[c + j] = full[c + j + 1]
+    }
+    self.args = full[..n - 1]
 }
 
 fn push(self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
@@ -773,14 +849,24 @@ fn cfg_new(f: *Func) -> Cfg {
     return memo_cfg
 }
 
-priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
-    n := f.blocks.len
-    rpo_idx := vec_fill(n, 0xFFFFFFFF)
-    for i in 0..rpo.len {
-        rpo_idx[rpo[i]] = i
+// cfg_new(f).preds without the rest of the analysis
+fn cfg_preds(f: *Func) -> Vec[Vec[i64]] {
+    if !memo_valid(f) {
+        return rpo_preds_of(f, f.rpo_compute())
     }
-    // predecessors among the reachable blocks, in reverse postorder
-    cnt := zeros(n)
+    if memo_has_cfg {
+        return memo_cfg.preds
+    }
+    if !memo_has_rpo {
+        memo_rpo = f.rpo_compute()
+        memo_has_rpo = true
+    }
+    return rpo_preds_of(f, memo_rpo)
+}
+
+// the predecessors among the reachable blocks (those of rpo), in reverse postorder
+priv fn rpo_preds_of(f: *Func, rpo: Vec[i64]) -> Vec[Vec[i64]] {
+    cnt := zeros(f.blocks.len)
     for b in rpo {
         k, s0, s1 := f.succ_pair(b)
         if k > 0 {
@@ -800,6 +886,16 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
             add(&preds[s1], b)
         }
     }
+    return preds
+}
+
+priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
+    n := f.blocks.len
+    rpo_idx := vec_fill(n, 0xFFFFFFFF)
+    for i in 0..rpo.len {
+        rpo_idx[rpo[i]] = i
+    }
+    preds := rpo_preds_of(f, rpo)
     idom := vec_fill(n, 0xFFFFFFFF)
     idom[0] = 0
     changed := true
@@ -1156,7 +1252,7 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
             for ai in 0..i.args.len {
                 a := i.args[ai]
                 if i.op == Phi {
-                    s.push(fmt(" [b", i.pb[ai], ": %", a, "]"))
+                    s.push(fmt(" [b", i.from()[ai], ": %", a, "]"))
                 } else {
                     s.push(fmt(" %", a))
                 }
@@ -1216,13 +1312,13 @@ fn ir_verify(f: *Func) -> str {
                 if seen_non_phi {
                     return fmt("phi %", v, " after non-phi in b", b)
                 }
-                pbs := clone(i.pb)
+                pbs := vec_of(i.from())
                 sort(pbs.items())
                 ps := clone(cfg.preds[b])
                 sort(ps.items())
                 ps.dedup()
                 if pbs.items() != ps.items() {
-                    return fmt("phi %", v, " in b", b, " has inputs from ", i.pb.items(), " but predecessors are ", cfg.preds[b].items())
+                    return fmt("phi %", v, " in b", b, " has inputs from ", i.from(), " but predecessors are ", cfg.preds[b].items())
                 }
                 for k in 0..i.args.len {
                     a := i.args[k]
@@ -1230,8 +1326,8 @@ fn ir_verify(f: *Func) -> str {
                     if db == 0xFFFFFFFF {
                         return fmt("phi %", v, " in b", b, " uses %", a, " which is not defined in reachable code")
                     }
-                    if !cfg.dom(db, i.pb[k]) {
-                        return fmt("phi %", v, " in b", b, ": input %", a, " (b", db, ") does not dominate predecessor b", i.pb[k])
+                    if !cfg.dom(db, i.from()[k]) {
+                        return fmt("phi %", v, " in b", b, ": input %", a, " (b", db, ") does not dominate predecessor b", i.from()[k])
                     }
                 }
             } else {
