@@ -435,8 +435,7 @@ fn unroll_run(f: *Func) -> bool {
             break
         }
         licm_make_preheaders(f)
-        cfg := cfg_new(f)
-        loops := loops_new(f, &cfg)
+        cfg, loops := cfg_loops(f)
         order := licm_loop_order(&loops)
         plan: Opt[Plan] = None
         in_loop := vec_fill(f.blocks.len, false)

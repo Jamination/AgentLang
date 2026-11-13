@@ -212,13 +212,13 @@ priv fn ctx_fbits(ty: T, r: f64) -> i64 {
 
 priv fn konst(self: *Ctx, ty: T, k: i64) -> i64 {
     v := self.f.mk(Const, ty, vec[i64](), ir_canon(ty, k))
-    self.new_insts.push(v)
+    put(&self.new_insts, v)
     return v
 }
 
 priv fn mk(self: *Ctx, op: Op, ty: T, args: Vec[i64]) -> i64 {
     v := self.f.mk(op, ty, args, 0)
-    self.new_insts.push(v)
+    put(&self.new_insts, v)
     return v
 }
 
@@ -246,12 +246,18 @@ priv fn simplify_small(k: i64) -> bool {
 }
 
 priv fn simplify_is_not(s: *Ctx, n: i64, x: i64) -> bool {
-    ni := s.f.insts[n]
+    ni := &s.f.insts[n]
     return ni.op == Xor && opt_is(s.c(ni.args[1]), -1) && ni.args[0] == x
 }
 
 // returns Some(w) when v should be replaced by the existing value w
 priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
+    // ops without a rule below (most instructions): nothing to copy or match
+    match self.f.insts[v].op {
+        Const, FConst, Param, GAddr, FAddr, Alloca, Load, Store, Call, CallInd, Syscall, Proj, Phi,
+        MemCpy, MemSet => return None
+        _ => {}
+    }
     inst := self.f.insts[v]
     ty := inst.ty
     op := inst.op
@@ -294,7 +300,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                     self.set_const(v, 0)
                     return None
                 } else if op == Xor && k == 1 && ty == I8 && self.op(a).is_cmp() {
-                    ai := self.f.insts[a]
+                    ai := &self.f.insts[a]
                     if ai.op.is_icmp() {
                         self.set(v, ai.op.negate_icmp(), clone(ai.args), 0)
                         return None
@@ -392,7 +398,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // (x op c1) op c2 for associative ops
             if hk {
                 k2 := k
-                ai := self.f.insts[a]
+                ai := &self.f.insts[a]
                 if ai.op == op && (op == Add || op == Mul || op == And || op == Or || op == Xor) {
                     k1, hk1 := unopt(self.c(ai.args[1]))
                     if hk1 {
@@ -424,7 +430,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // (x + c1) << c2  =>  (x << c2) + (c1 << c2) ; (x + c1) * c2  =>  x * c2 + c1 * c2
             if hk {
                 k2 := k
-                ai := self.f.insts[a]
+                ai := &self.f.insts[a]
                 if (op == Shl || op == Mul) && ai.op == Add {
                     k1, hk1 := unopt(self.c(ai.args[1]))
                     prod_small := false
@@ -446,8 +452,8 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 }
             }
             if op == Xor || op == Or {
-                ai := self.f.insts[a]
-                bi := self.f.insts[b]
+                ai := &self.f.insts[a]
+                bi := &self.f.insts[b]
                 ua := 2
                 if a < self.uses.len {
                     ua = self.uses[a]
@@ -513,7 +519,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             }
             // x + (0 - y) => x - y
             if op == Add {
-                bi := self.f.insts[b]
+                bi := &self.f.insts[b]
                 if bi.op == Sub && opt_is(self.c(bi.args[0]), 0) {
                     y := bi.args[1]
                     self.set(v, Sub, vec_of([]i64{a, y}), 0)
@@ -601,7 +607,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // comparisons of booleans with constants
             k, hk := unopt(self.c(b))
             if hk {
-                ai := self.f.insts[a]
+                ai := &self.f.insts[a]
                 if (op == Eq || op == Ne) && at == I8 && ai.op.is_cmp() {
                     truth := (op == Ne) == (k == 0)
                     // (cmp != 0) or (cmp == 1) => cmp ; (cmp == 0) or (cmp != 1) => !cmp
@@ -636,8 +642,10 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 if (op == Eq || op == Ne) && ai.op == Add {
                     k1, hk1 := unopt(self.c(ai.args[1]))
                     if hk1 {
+                        // (ai is not valid after konst)
+                        x := ai.args[0]
                         nk := self.konst(at, k - k1)
-                        self.set(v, op, vec_of([]i64{ai.args[0], nk}), 0)
+                        self.set(v, op, vec_of([]i64{x, nk}), 0)
                         return None
                     }
                 }
@@ -683,7 +691,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 self.set_const(v, r)
                 return None
             }
-            ai := self.f.insts[a]
+            ai := &self.f.insts[a]
             if (op == SExt && ai.op == SExt) || (op == ZExt && ai.op == ZExt) {
                 self.set(v, op, vec_of([]i64{ai.args[0]}), 0)
             } else if op == SExt && ai.op == ZExt {
@@ -737,7 +745,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             return None
         }
         FToBits => {
-            i := self.f.insts[inst.args[0]]
+            i := &self.f.insts[inst.args[0]]
             if i.op == FConst {
                 k := i.k
                 self.set_const(v, k)
@@ -779,13 +787,13 @@ priv fn is_finite(x: f64) -> bool {
 }
 
 priv fn masked_by_is_len_m1(s: *Ctx, lenv: i64, m: i64) -> bool {
-    mi := s.f.insts[m]
+    mi := &s.f.insts[m]
     return mi.op == Add && mi.args[0] == lenv && opt_is(s.c(mi.args[1]), -1)
 }
 
 // is v always of the form (x & (len - 1)), directly or through phis?
 priv fn masked_by(self: *Ctx, v: i64, lenv: i64, depth: i64, root: i64) -> bool {
-    i := self.f.insts[v]
+    i := &self.f.insts[v]
     if i.op == And {
         return masked_by_is_len_m1(self, lenv, i.args[0]) || masked_by_is_len_m1(self, lenv, i.args[1])
     }
@@ -810,7 +818,7 @@ priv fn sat_sub(a: i64, b: i64) -> i64 {
 
 // upper bound on the number of significant bits of an unsigned value
 priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
-    i := self.f.insts[v]
+    i := &self.f.insts[v]
     tb := max(i64(i.ty.bits()), 1)
     if depth == 0 {
         return tb
@@ -848,7 +856,7 @@ priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
 }
 
 priv fn match_rotate_is_complement(s: *Ctx, bits: i64, m: i64, n: i64) -> bool {
-    mi := s.f.insts[m]
+    mi := &s.f.insts[m]
     if !(mi.op == Sub && mi.args[1] == n) {
         return false
     }
@@ -860,10 +868,10 @@ priv fn match_rotate_is_complement(s: *Ctx, bits: i64, m: i64, n: i64) -> bool {
 
 priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
     bits := i64(ty.bits())
-    ai := self.f.insts[a]
-    bi := self.f.insts[b]
-    shr: Inst
-    shl: Inst
+    ai := &self.f.insts[a]
+    bi := &self.f.insts[b]
+    shr := ai
+    shl := bi
     if ai.op == LShr && bi.op == Shl {
         shr = ai
         shl = bi
@@ -1049,15 +1057,50 @@ priv fn fold_insts_find(repl: *Vec[i64], v0: i64) -> i64 {
     return v
 }
 
+// push for a list that usually has room (push itself is not inlined)
+priv inline fn put(l: *Vec[i64], x: i64) {
+    if l.len < len(l.buf) {
+        l.buf[l.len] = x
+        l.len += 1
+    } else {
+        l.push(x)
+    }
+}
+
 priv fn fold_insts(f: *Func) -> bool {
     rpo := f.rpo()
-    repl := vec_fill(f.insts.len, NOV)
-    uses := f.use_counts()
+    // made at the first replacement
+    repl := vec[i64]()
+    nrepl := 0
+    // The use counts are only read for an Xor or Or with two And arguments that are not new.
+    // simplify never makes an Xor or Or of another op, and an old instruction becomes an And
+    // only from a URem: without those at the start the counts are never read.
+    has_xor_or := false
+    has_and := false
+    scan: for b in rpo {
+        for v in f.blocks[b].insts {
+            o := f.insts[v].op
+            if o == Xor || o == Or {
+                has_xor_or = true
+            } else if o == And || o == URem {
+                has_and = true
+            }
+            if has_xor_or && has_and {
+                break scan
+            }
+        }
+    }
+    uses := vec[i64]()
+    if has_xor_or && has_and {
+        uses = f.use_counts()
+    }
     cx := Ctx{f: f, new_insts: vec[i64](), changed: false, uses: uses}
     for b in rpo {
+        // the new list of the block is built in cx.new_insts (one buffer for all blocks) and
+        // copied back into the block's buffer when it fits
         old := cx.f.blocks[b].insts
         cx.f.blocks[b].insts = vec[i64]()
-        cx.new_insts = vec[i64]()
+        cx.new_insts.clear()
         for v in old {
             for ai in 0..cx.f.insts[v].args.len {
                 a := cx.f.insts[v].args[ai]
@@ -1072,17 +1115,26 @@ priv fn fold_insts(f: *Func) -> bool {
                         repl.resize(cx.f.insts.len, NOV)
                     }
                     repl[v] = w
+                    nrepl += 1
                     cx.changed = true
                 }
-                None => { cx.new_insts.push(v) }
+                None => put(&cx.new_insts, v)
             }
         }
-        cx.f.blocks[b].insts = cx.new_insts
-        cx.new_insts = vec[i64]()
+        k := cx.new_insts.len
+        if k <= len(old.buf) {
+            memcopy(ptr(old.buf), ptr(cx.new_insts.buf), k * 8)
+            old.len = k
+            cx.f.blocks[b].insts = old
+        } else {
+            cx.f.blocks[b].insts = vec_of(cx.new_insts.items())
+        }
     }
     changed := cx.changed
-    repl.resize(f.insts.len, NOV)
-    f.apply_repl(&repl)
+    if nrepl > 0 {
+        repl.resize(f.insts.len, NOV)
+        f.apply_repl(&repl)
+    }
     return changed
 }
 
@@ -1158,6 +1210,194 @@ priv fn retarget(f: *Func, p: i64, from: i64, to: i64) {
     }
 }
 
+// Cheap necessary conditions for a round of the steps of simplify_cfg to change anything: a
+// round whose step cannot find a candidate block is not run (it would build its tables only
+// to find nothing).
+
+// the steps that may change something, as bits: 1 merge, 2 forward, 4 thread4, 8 thread5,
+// 16 ifconv (what may_merge .. may_ifconv tell, in one pass over the blocks)
+priv fn cfg_candidates(f: *Func) -> i64 {
+    n := f.blocks.len
+    cnt := alloc[i64](n)
+    for b in 0..n {
+        k, s0, s1 := f.succ_pair(b)
+        if k > 0 {
+            cnt[s0] += 1
+        }
+        if k > 1 {
+            cnt[s1] += 1
+        }
+    }
+    bits := 0
+    for b in 0..n {
+        match f.blocks[b].term {
+            Jmp(s) => {
+                if s != 0 && s != b && cnt[s] == 1 {
+                    bits |= 1
+                }
+                if b != 0 && s != b && f.blocks[b].insts.is_empty() {
+                    bits |= 2
+                }
+            }
+            Br(c, t, e) if t != e => {
+                if bits & 16 == 0 && (may_side(f, t) || may_side(f, e)) {
+                    bits |= 16
+                }
+                if bits & 12 != 12 && t != b && e != b {
+                    binsts := &f.blocks[b].insts
+                    if !binsts.is_empty() && all_phis(f, binsts) && contains(binsts, c) {
+                        ci := &f.insts[c]
+                        any_const := false
+                        all_const := true
+                        for k in 0..ci.pb.len {
+                            p := ci.pb[k]
+                            is_const := f.insts[ci.args[k]].op == Const
+                            if p != b && is_const {
+                                any_const = true
+                            }
+                            if p == b || !is_const {
+                                all_const = false
+                            }
+                        }
+                        if any_const {
+                            bits |= 4
+                        }
+                        if all_const && b != 0 {
+                            bits |= 8
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    return bits
+}
+
+// step 2: a block jumps to another one (not the entry) that has no other predecessor
+priv fn may_merge(f: *Func) -> bool {
+    n := f.blocks.len
+    cnt := alloc[i64](n)
+    for b in 0..n {
+        k, s0, s1 := f.succ_pair(b)
+        if k > 0 {
+            cnt[s0] += 1
+        }
+        if k > 1 {
+            cnt[s1] += 1
+        }
+    }
+    for b in 0..n {
+        match f.blocks[b].term {
+            Jmp(s) if s != 0 && s != b && cnt[s] == 1 => return true
+            _ => {}
+        }
+    }
+    return false
+}
+
+// step 3: an empty block (not the entry) that jumps to another one
+priv fn may_forward(f: *Func) -> bool {
+    for e in 1..f.blocks.len {
+        if f.blocks[e].insts.is_empty() {
+            match f.blocks[e].term {
+                Jmp(t) if t != e => return true
+                _ => {}
+            }
+        }
+    }
+    return false
+}
+
+// the condition of block b's two-way branch when b holds only phis and branches on one of them
+priv fn phi_branch(f: *Func, b: i64) -> i64 {
+    c, t, e := match f.blocks[b].term {
+        Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
+        _ => return NOV
+    }
+    binsts := &f.blocks[b].insts
+    if binsts.is_empty() || !all_phis(f, binsts) || !contains(binsts, c) {
+        return NOV
+    }
+    return c
+}
+
+// step 4: such a block whose condition is a constant on some edge from another block
+priv fn may_thread4(f: *Func) -> bool {
+    for b in 0..f.blocks.len {
+        c := phi_branch(f, b)
+        if c == NOV {
+            continue
+        }
+        ci := &f.insts[c]
+        for k in 0..ci.pb.len {
+            if ci.pb[k] != b && f.insts[ci.args[k]].op == Const {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+// step 5: such a block (not the entry) whose condition is a constant on every edge from
+// other blocks
+priv fn may_thread5(f: *Func) -> bool {
+    blocks: for b in 1..f.blocks.len {
+        c := phi_branch(f, b)
+        if c == NOV {
+            continue
+        }
+        ci := &f.insts[c]
+        for k in 0..ci.pb.len {
+            if ci.pb[k] == b || f.insts[ci.args[k]].op != Const {
+                continue blocks
+            }
+        }
+        return true
+    }
+    return false
+}
+
+// step 6: a two-way branch with an arm that may be a tiny side-effect-free block (the test of
+// simplify_cfg_side without the predecessor count)
+priv fn may_ifconv(f: *Func) -> bool {
+    for b in 0..f.blocks.len {
+        match f.blocks[b].term {
+            Br(_, t, e) if t != e => {
+                if may_side(f, t) || may_side(f, e) {
+                    return true
+                }
+            }
+            _ => {}
+        }
+    }
+    return false
+}
+
+priv fn may_side(f: *Func, x: i64) -> bool {
+    if x == 0 {
+        return false
+    }
+    match f.blocks[x].term {
+        Jmp(_) => {}
+        _ => return false
+    }
+    real := 0
+    for v in f.blocks[x].insts {
+        op := f.insts[v].op
+        cheap := op == Const || op == FConst || op == GAddr || op == FAddr || op == Add || op == Sub ||
+            op == And || op == Or || op == Xor || op == Shl || op == LShr || op == AShr || op == SExt ||
+            op == ZExt || op == Trunc
+        if !cheap {
+            return false
+        }
+        if !(op == Const || op == FConst || op == GAddr || op == FAddr) {
+            real += 1
+        }
+    }
+    return real <= 2
+}
+
 priv fn simplify_cfg(f: *Func) -> bool {
     changed := false
     // 1. fold constant / degenerate branches
@@ -1192,6 +1432,10 @@ priv fn simplify_cfg(f: *Func) -> bool {
     if cleanup_prune_unreachable(f) {
         changed = true
     }
+    // One scan finds which steps have a candidate block; while no step has changed anything
+    // (`scanned`), a step without one is not run (afterwards each round checks its own)
+    cand := cfg_candidates(f)
+    scanned := true
     // 2. merge straight-line blocks
     guard_merge := 0
     loop {
@@ -1200,14 +1444,21 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step merge does not converge in ", f.name, "\n"))
             break
         }
+        if scanned {
+            if cand & 1 == 0 {
+                break
+            }
+        } else if !may_merge(f) {
+            break
+        }
         // per-round tables live on the scratch heap (see base.al)
         scratch_reset()
+        // (the CFG analyses are kept for the next pass: not on the scratch heap)
+        rpo, preds := f.rpo_preds()
         scratch_on()
-        preds := f.preds()
         merged := false
         repl := vec_fill(f.insts.len, NOV)
         dead := vec_fill(f.blocks.len, false)
-        rpo := f.rpo()
         scratch_off()
         for b in rpo {
             if dead[b] {
@@ -1258,6 +1509,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         f.apply_repl(&repl)
         changed = true
+        scanned = false
     }
     // 3. skip empty forwarding blocks
     guard_forward := 0
@@ -1267,12 +1519,16 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step forward does not converge in ", f.name, "\n"))
             break
         }
+        if scanned {
+            if cand & 2 == 0 {
+                break
+            }
+        } else if !may_forward(f) {
+            break
+        }
         scratch_reset()
-        scratch_on()
-        preds := f.preds()
+        rpo, preds := f.rpo_preds()
         did := false
-        rpo := f.rpo()
-        scratch_off()
         for e in rpo {
             if e == 0 || !f.blocks[e].insts.is_empty() {
                 continue
@@ -1329,6 +1585,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // 4. thread jumps through blocks that only branch on a phi of constants
     guard_thread4 := 0
@@ -1341,16 +1598,22 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step thread4 does not converge in ", f.name, "\n"))
             break
         }
+        if scanned {
+            if cand & 4 == 0 {
+                break
+            }
+        } else if !may_thread4(f) {
+            break
+        }
         scratch_reset()
+        rpo, preds := f.rpo_preds()
         scratch_on()
-        preds := f.preds()
         uses := f.use_counts()
         // blocks whose edges or phis changed this round: their entries in preds / phi lists are
         // stale, so they wait for the next round (one threading per round made long chains of
         // `&&` / `||` quadratic in time and memory)
         touched := vec_fill(f.blocks.len, false)
         did := false
-        rpo := f.rpo()
         scratch_off()
         blocks: for b in rpo {
             c, t, e := match f.blocks[b].term {
@@ -1460,6 +1723,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // 5. a merge block that only re-tests a flag every predecessor sets to a constant:
     //    send each predecessor straight to its destination
@@ -1473,9 +1737,16 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step thread5 does not converge in ", f.name, "\n"))
             break
         }
+        if scanned {
+            if cand & 8 == 0 {
+                break
+            }
+        } else if !may_thread5(f) {
+            break
+        }
         scratch_reset()
-        scratch_on()
         cfg := cfg_new(f)
+        scratch_on()
         def_block := f.block_of()
         scratch_off()
         did := false
@@ -1646,18 +1917,23 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // 6. if-conversion: tiny side-effect-free arms become selects (conditional moves)
     loop {
         if !opt_enabled("ifconv") {
             break
         }
+        if scanned {
+            if cand & 16 == 0 {
+                break
+            }
+        } else if !may_ifconv(f) {
+            break
+        }
         scratch_reset()
-        scratch_on()
-        preds := f.preds()
+        rpo, preds := f.rpo_preds()
         did := false
-        rpo := f.rpo()
-        scratch_off()
         for b in rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 => (c1, t1, e1)
@@ -1772,6 +2048,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // normalize `br c, t, t`
     for b in 0..f.blocks.len {
@@ -1791,19 +2068,19 @@ fn simplify_run(f: *Func) -> bool {
     for it in 0..50 {
         ch := false
         opt_trace("  fold", f)
-        if fold_insts(f) {
+        if opt_pass(7, f, fold_insts) {
             ch = true
         }
         opt_trace("  cfg", f)
-        if simplify_cfg(f) {
+        if opt_pass(8, f, simplify_cfg) {
             ch = true
         }
         opt_trace("  phis", f)
-        if cleanup_trivial_phis(f) {
+        if opt_pass(9, f, cleanup_trivial_phis) {
             ch = true
         }
         opt_trace("  dce", f)
-        if cleanup_dce(f) {
+        if opt_pass(PASS_DCE, f, cleanup_dce) {
             ch = true
         }
         if !ch {

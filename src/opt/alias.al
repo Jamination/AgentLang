@@ -98,10 +98,49 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     return None
 }
 
+// alias_escaped_allocas, remembered for the IR of a change count `gen` (opt_gen(), for IR not
+// changed since the current pass began; -1: not to be remembered). The result is not to be
+// changed.
+priv esc_f: *Func
+priv esc_gen: i64
+priv esc_last: Vec[bool]
+
+fn alias_escaped_cached(f: *Func, gen: i64) -> Vec[bool] {
+    if gen >= 0 && f == esc_f && gen == esc_gen {
+        return esc_last
+    }
+    esc := alias_escaped_allocas(f)
+    if gen >= 0 {
+        esc_f = f
+        esc_gen = gen
+        esc_last = esc
+    }
+    return esc
+}
+
+// the remembered result for change count `gen`, if there is one
+fn alias_escaped_known(f: *Func, gen: i64) -> (Vec[bool], bool) {
+    if gen >= 0 && f == esc_f && gen == esc_gen {
+        return (esc_last, true)
+    }
+    return (vec[bool](), false)
+}
+
 // allocas whose address may be observed by something other than direct loads/stores
 fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     n := f.insts.len
-    esc := vec_fill(n, false)
+    esc := Vec[bool]{buf: alloc[bool](n), len: n}
+    any := false
+    for v in f.blocks[0].insts {
+        if f.insts[v].op == Alloca {
+            any = true
+            break
+        }
+    }
+    if !any {
+        // nothing is derived from an alloca: nothing escapes
+        return esc
+    }
     // derived[v] = alloca this pointer value is derived from
     derived := vec_fill(n, NOV)
     for v in f.blocks[0].insts {
@@ -147,17 +186,27 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
                     }
                 }
             }
-            tu := f.term_uses(b)
-            for u in tu {
-                d := derived[u]
-                if d != NOV && !esc[d] {
-                    esc[d] = true
-                    changed = true
+            match f.blocks[b].term {
+                Br(c, _, _) => esc_use(&esc, &derived, c, &changed)
+                Ret(vs) => {
+                    for u in vs {
+                        esc_use(&esc, &derived, u, &changed)
+                    }
                 }
+                _ => {}
             }
         }
     }
     return esc
+}
+
+// a terminator uses u: the alloca it is derived from escapes
+priv inline fn esc_use(esc: *Vec[bool], derived: *Vec[i64], u: i64, changed: *bool) {
+    d := derived[u]
+    if d != NOV && !esc[d] {
+        esc[d] = true
+        *changed = true
+    }
 }
 
 struct MemRef {

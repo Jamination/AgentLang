@@ -68,11 +68,119 @@ fn opt_trace(what: str, f: *Func) {
     }
 }
 
+// ---------- keeping a function after work_end() ----------
+// After work_end() the parts of the function made while working are in the discarded work
+// region; they get new memory in the main arena (as `clone(*f)` would). A list still in the
+// main arena (never moved while working) is kept: nothing else refers to it. A list made while
+// working that is empty but has room is replaced too (a later push would write into the
+// discarded region).
+priv fn in_main(p: i64) -> bool {
+    // the main arena is the one in use after work_end()
+    return p >= __heap_base && p < __heap_end
+}
+
+priv inline fn keep_list(l: *Vec[i64]) {
+    if len(l.buf) > 0 && !in_main(cast[i64](ptr(l.buf))) {
+        *l = vec_of(l.items())
+    }
+}
+
+priv fn keep_func(f: *Func) {
+    if len(f.name) > 0 && !in_main(cast[i64](ptr(f.name))) {
+        f.name = clone(f.name)
+    }
+    if len(f.params.buf) > 0 && !in_main(cast[i64](ptr(f.params.buf))) {
+        f.params = clone(f.params)
+    }
+    if len(f.rets.buf) > 0 && !in_main(cast[i64](ptr(f.rets.buf))) {
+        f.rets = clone(f.rets)
+    }
+    if len(f.insts.buf) > 0 && !in_main(cast[i64](ptr(f.insts.buf))) {
+        f.insts = vec_of(f.insts.items())
+    }
+    for v in 0..f.insts.len {
+        i := &f.insts[v]
+        keep_list(&i.args)
+        keep_list(&i.pb)
+    }
+    if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
+        f.blocks = vec_of(f.blocks.items())
+    }
+    for b in 0..f.blocks.len {
+        blk := &f.blocks[b]
+        keep_list(&blk.insts)
+        match blk.term {
+            Ret(&vs) => keep_list(vs)
+            _ => {}
+        }
+    }
+}
+
+// ---------- passes that cannot change anything are not run ----------
+// Every pass is a function of the IR of the function and tells whether it changed it (also for
+// what the passes it calls do; unroll_run and bce_run may add preheaders without saying so and
+// count as a change). `sk_gen` counts the changes; a pass that reported no change when it was
+// last run at the current count would report no change again: it is skipped.
+priv sk_gen: i64
+priv sk_clean: [16]i64 // sk_gen + 1 when pass k last reported no change
+
+// keys of the passes (simplify_run's parts use 7..9)
+const PASS_PRUNE = 0
+const PASS_MEM2REG = 1
+const PASS_DCE = 2
+const PASS_GVN = 3
+const PASS_CHECKMERGE = 4
+const PASS_LOADELIM = 5
+const PASS_LICM = 6
+
+fn opt_pass(k: i64, f: *Func, p: fn(*Func) -> bool) -> bool {
+    if sk_clean[k] == sk_gen + 1 {
+        return false
+    }
+    if p(f) {
+        sk_gen += 1
+        return true
+    }
+    sk_clean[k] = sk_gen + 1
+    return false
+}
+
+// the number of reported changes so far: equal numbers at the starts of two passes mean the
+// same IR (every work session starts with a new number)
+fn opt_gen() -> i64 {
+    return sk_gen
+}
+
+// the IR may have changed in any way
+priv fn sk_forget() {
+    sk_gen += 1
+}
+
+// the passes that are clean now, as a bit set
+priv fn sk_save() -> i64 {
+    bits := 0
+    for k in 0..16 {
+        if sk_clean[k] == sk_gen + 1 {
+            bits |= 1 << k
+        }
+    }
+    return bits
+}
+
+priv fn sk_restore(bits: i64) {
+    sk_forget()
+    for k in 0..16 {
+        if bits & (1 << k) != 0 {
+            sk_clean[k] = sk_gen + 1
+        }
+    }
+}
+
 priv fn local_opt(f: *Func, level: i64) {
     opt_trace("local_opt", f)
-    cleanup_prune_unreachable(f)
-    mem2reg_run(f)
-    cleanup_dce(f)
+    opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
+    opt_pass(PASS_MEM2REG, f, mem2reg_run)
+    opt_pass(PASS_DCE, f, cleanup_dce)
     if level == 0 {
         return
     }
@@ -83,22 +191,22 @@ priv fn local_opt(f: *Func, level: i64) {
             ch = true
         }
         opt_trace("gvn", f)
-        if opt_enabled("gvn") && gvn_run(f) {
+        if opt_enabled("gvn") && opt_pass(PASS_GVN, f, gvn_run) {
             ch = true
         }
-        if opt_enabled("checkmerge") && checkmerge_run(f) {
+        if opt_enabled("checkmerge") && opt_pass(PASS_CHECKMERGE, f, checkmerge_run) {
             ch = true
         }
         opt_trace("loadelim", f)
-        if opt_enabled("loadelim") && loadelim_run(f) {
+        if opt_enabled("loadelim") && opt_pass(PASS_LOADELIM, f, loadelim_run) {
             ch = true
         }
         opt_trace("mem2reg", f)
-        if mem2reg_run(f) {
+        if opt_pass(PASS_MEM2REG, f, mem2reg_run) {
             ch = true
         }
         opt_trace("licm", f)
-        if opt_enabled("licm") && licm_run(f) {
+        if opt_enabled("licm") && opt_pass(PASS_LICM, f, licm_run) {
             ch = true
         }
         opt_trace("simplify2", f)
@@ -112,7 +220,12 @@ priv fn local_opt(f: *Func, level: i64) {
     opt_trace("unroll-phase", f)
     // fully unroll small constant-trip loops (inner loops become constant as outer ones go)
     for it in 0..6 {
-        if !opt_enabled("unroll") || !unroll_run(f) {
+        if !opt_enabled("unroll") {
+            break
+        }
+        unrolled := unroll_run(f)
+        sk_forget()
+        if !unrolled {
             break
         }
         opt_trace("after-unroll", f)
@@ -125,19 +238,19 @@ priv fn local_opt(f: *Func, level: i64) {
             if simplify_run(f) {
                 ch = true
             }
-            if opt_enabled("gvn") && gvn_run(f) {
+            if opt_enabled("gvn") && opt_pass(PASS_GVN, f, gvn_run) {
                 ch = true
             }
-            if opt_enabled("checkmerge") && checkmerge_run(f) {
+            if opt_enabled("checkmerge") && opt_pass(PASS_CHECKMERGE, f, checkmerge_run) {
                 ch = true
             }
-            if opt_enabled("loadelim") && loadelim_run(f) {
+            if opt_enabled("loadelim") && opt_pass(PASS_LOADELIM, f, loadelim_run) {
                 ch = true
             }
-            if mem2reg_run(f) {
+            if opt_pass(PASS_MEM2REG, f, mem2reg_run) {
                 ch = true
             }
-            if opt_enabled("licm") && licm_run(f) {
+            if opt_enabled("licm") && opt_pass(PASS_LICM, f, licm_run) {
                 ch = true
             }
             if simplify_run(f) {
@@ -150,21 +263,70 @@ priv fn local_opt(f: *Func, level: i64) {
     }
     // hoist bounds checks out of counted loops, then clean up what that exposes
     for it in 0..3 {
-        if !opt_enabled("bce") || !bce_run(f) {
+        if !opt_enabled("bce") {
+            break
+        }
+        hoisted := bce_run(f)
+        sk_forget()
+        if !hoisted {
             break
         }
         opt_trace("after-bce", f)
-        gvn_run(f)
+        opt_pass(PASS_GVN, f, gvn_run)
         if opt_enabled("checkmerge") {
-            checkmerge_run(f)
+            opt_pass(PASS_CHECKMERGE, f, checkmerge_run)
         }
         opt_trace("after-bce-gvn", f)
         simplify_run(f)
-        licm_run(f)
+        opt_pass(PASS_LICM, f, licm_run)
         simplify_run(f)
     }
-    cleanup_dce(f)
+    opt_pass(PASS_DCE, f, cleanup_dce)
     opt_trace("end-local-opt", f)
+}
+
+// first_done[fid]: opt_first has run for the function; clean_at[fid]: the passes that are clean
+// (see opt_pass) at its end (the function does not change until its local_opt)
+priv first_done: Vec[bool]
+priv clean_at: Vec[i64]
+
+// The first part of the optimisation of one function, also callable right after the function
+// is lowered (opt_optimize then skips it): prune, mem2reg, dce and, when optimising, simplify
+// and tail recursion. It reads nothing of the module but the function (not the alias classes
+// of loads and stores either) and makes no loads or stores.
+fn opt_first(m: *Module, fid: i64, level: i64) {
+    // (grown in the main arena, before work_begin)
+    if first_done.len < m.funcs.len {
+        first_done.resize(m.funcs.len, false)
+        clean_at.resize(m.funcs.len, 0)
+    }
+    f := &m.funcs[fid]
+    if !f.lowered || first_done[fid] {
+        return
+    }
+    first_done[fid] = true
+    work_begin()
+    ir_memo_begin(f)
+    // at -O0 only mem2reg adds instructions: keep the list in the main arena
+    ir_insts_main = level == 0
+    sk_forget()
+    opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
+    opt_pass(PASS_MEM2REG, f, mem2reg_run)
+    opt_pass(PASS_DCE, f, cleanup_dce)
+    if level > 0 {
+        simplify_run(f)
+        if opt_enabled("tre") && tre_run(f, fid) {
+            sk_forget()
+            opt_trace("after-tre", f)
+            simplify_run(f)
+        }
+        clean_at[fid] = sk_save()
+    }
+    // keep the function, drop the passes' temporary data (see work_begin in base.al)
+    ir_memo_end()
+    work_end()
+    ir_insts_main = false
+    keep_func(f)
 }
 
 fn opt_optimize(m: *Module, level: i64) {
@@ -175,23 +337,7 @@ fn opt_optimize(m: *Module, level: i64) {
         check_fail[fid] = nm == "__bounds_fail" || nm == "__div_fail" || nm == "__step_fail"
     }
     for fid in 0..n {
-        f := &m.funcs[fid]
-        if f.lowered {
-            work_begin()
-            cleanup_prune_unreachable(f)
-            mem2reg_run(f)
-            cleanup_dce(f)
-            if level > 0 {
-                simplify_run(f)
-                if opt_enabled("tre") && tre_run(f, fid) {
-                    opt_trace("after-tre", f)
-                    simplify_run(f)
-                }
-            }
-            // keep the function, drop the passes' temporary data (see work_begin in base.al)
-            work_end()
-            m.funcs[fid] = clone(*f)
-        }
+        opt_first(m, fid, level)
     }
     if level == 0 {
         return
@@ -242,16 +388,21 @@ fn opt_optimize(m: *Module, level: i64) {
     }
     pol := Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000}
     done := vec_fill(n, false)
+    costs := vec_fill(n, -1)
     for fid in order {
         if m.funcs[fid].lowered {
             work_begin()
+            ir_memo_begin(&m.funcs[fid])
+            sk_restore(clean_at[fid])
             local_opt(&m.funcs[fid], level)
-            if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol) {
+            if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol, costs.items()) {
+                sk_forget()
                 opt_trace("after-inline", &m.funcs[fid])
                 local_opt(&m.funcs[fid], level)
             }
+            ir_memo_end()
             work_end()
-            m.funcs[fid] = clone(m.funcs[fid])
+            keep_func(&m.funcs[fid])
         }
         done[fid] = true
     }

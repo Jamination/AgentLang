@@ -22,9 +22,8 @@ priv fn const_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
 }
 
 fn checkmerge_run(f: *Func) -> bool {
-    preds := f.preds()
+    rpo, preds := f.rpo_preds()
     changed := false
-    rpo := f.rpo()
     for b in rpo {
         c, ok, trap := match f.blocks[b].term {
             Br(c0, t0, e0) => (c0, t0, e0)
