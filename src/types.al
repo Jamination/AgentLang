@@ -54,14 +54,23 @@ struct StructInfo {
     state: i64
 }
 
+// The tag of an enum is the smallest unsigned integer that holds its variant number (1 byte for
+// up to 256 variants, 2 up to 65,536, else 4); the payloads of a variant follow it at their
+// natural alignment, as the fields of a struct whose first field is the tag. An enum without
+// data is just the tag.
 struct EnumInfo {
     name: str
     decl: i64
     targs: Vec[i64]
     variants: Vec[(str, Vec[i64])]
     simple: bool
+    tag: i64 // bytes of the tag
     size: i64
+    align: i64
     state: i64
+    // an enum with data, once laid out: the runs of bytes its payloads occupy (start << 32 |
+    // end), which a copy reads and writes besides the tag (`piece`)
+    runs: Vec[i64]
 }
 
 struct Leaf {
@@ -106,6 +115,8 @@ priv const AK_F64 = 4
 const AK_PTR = 5
 priv const AK_F32 = 6
 const AK_VEC = 7
+// enum tags (enums without data; tags of enums with data are read with AK_ANY)
+priv const AK_TAG = 8
 
 fn types_may_alias_class(a: i64, b: i64) -> bool {
     ka := a & 15
@@ -413,36 +424,116 @@ priv fn layout_enum(self: *Types, eid: i64) {
         self.layout_errors.push(fmt("enum `", n, "` contains itself by value (use a pointer)"))
         self.enums[eid].state = 2
         self.enums[eid].size = 8
+        self.enums[eid].align = 8
         return
     }
     self.enums[eid].state = 1
-    vars := vec[Vec[i64]]()
-    for i in 0..self.enums[eid].variants.len {
-        vars.push(clone(self.enums[eid].variants[i].1))
-    }
-    size := 8
-    for i in 0..vars.len {
-        o, s0, a := self.layout_fields(vars[i].items())
-        s := (s0 + 7) / 8 * 8
-        size = max(size, 8 + s)
+    nv := self.enums[eid].variants.len
+    tag := self.enums[eid].tag
+    size := tag
+    align := tag
+    // the bytes the payloads occupy, as start << 32 | end
+    spans := vec[i64]()
+    for i in 0..nv {
+        tys := variant_fields(self, eid, i)
+        offs, s, a := self.layout_fields(tys.items())
+        size = max(size, s)
+        align = max(align, a)
+        for j in 1..tys.len {
+            n := self.size_of(tys[j])
+            if n > 0 {
+                spans.push(offs[j] << 32 | min(offs[j] + n, 0xFFFFFFFF))
+            }
+        }
     }
     e := &self.enums[eid]
     if e.state == 2 {
         return
     }
-    e.size = size
+    e.size = (size + align - 1) / align * align
+    e.align = align
     e.state = 2
+    e.runs = merge_spans(spans.items())
+}
+
+// the spans (start << 32 | end) sorted and merged where they overlap or touch
+priv fn merge_spans(spans: []i64) -> Vec[i64] {
+    sort(spans)
+    out := vec[i64]()
+    for s in spans {
+        if out.len > 0 && (s >> 32) <= (out[out.len - 1] & 0xFFFFFFFF) {
+            last := out[out.len - 1]
+            out[out.len - 1] = ((last >> 32) << 32) | max(last & 0xFFFFFFFF, s & 0xFFFFFFFF)
+        } else {
+            out.push(s)
+        }
+    }
+    return out
+}
+
+// the size of the copy piece at offset `o` of a run that ends at `e`: the largest naturally
+// aligned 8, 4, 2 or 1 bytes within the run
+priv fn piece(o: i64, e: i64) -> i64 {
+    c := 8
+    while o % c != 0 || o + c > e {
+        c /= 2
+    }
+    return c
+}
+
+// the number of pieces of the run from `o` to `e` (without walking a long one)
+priv fn run_pieces(o0: i64, e: i64) -> i64 {
+    o := o0
+    n := 0
+    while o < e && o % 8 != 0 {
+        o += piece(o, e)
+        n += 1
+    }
+    if o < e {
+        k := (e - o) / 8
+        n += k
+        o += 8 * k
+    }
+    while o < e {
+        o += piece(o, e)
+        n += 1
+    }
+    return n
+}
+
+// the tag of an enum with `n` variants: its size in bytes
+fn types_tag_bytes(n: i64) -> i64 {
+    if n <= 0x100 {
+        return 1
+    }
+    if n <= 0x10000 {
+        return 2
+    }
+    return 4
+}
+
+// the IR type of the tag of enum `eid`
+fn tag_ir(self: *Types, eid: i64) -> T {
+    return match self.enums[eid].tag {
+        1 => I8
+        2 => I16
+        _ => I32
+    }
+}
+
+// the fields of variant `var_` laid out like a struct: the tag, then the payload types
+priv fn variant_fields(self: *Types, eid: i64, var_: i64) -> Vec[i64] {
+    tag := self.enums[eid].tag
+    tys := vec[i64]()
+    tys.push(if tag == 1 { T_U8 } else if tag == 2 { T_U16 } else { T_U32 })
+    tys.extend(self.enums[eid].variants[var_].1.items())
+    return tys
 }
 
 // offsets of payload fields of a variant, relative to the enum start
 fn variant_offsets(self: *Types, eid: i64, var_: i64) -> Vec[i64] {
-    tys := clone(self.enums[eid].variants[var_].1)
-    offs, s, a := self.layout_fields(tys.items())
-    out := vec[i64]()
-    for o in offs {
-        out.push(o + 8)
-    }
-    return out
+    offs := self.layout_fields(variant_fields(self, eid, var_).items()).0
+    return vec_of(offs.items()[1..])
 }
 
 fn tuple_offsets(self: *Types, tys: []i64) -> Vec[i64] {
@@ -484,7 +575,11 @@ fn align_of(self: *Types, t: i64) -> i64 {
     match self.k(t) {
         Err, Unit, Never, Bool => 1
         Int(b, _) => b / 8
-        F64, Ptr(_), Fn(_, _), Slice(_), Enum(_) => 8
+        F64, Ptr(_), Fn(_, _), Slice(_) => 8
+        Enum(e) => {
+            self.layout_enum(e)
+            self.enums[e].align
+        }
         F32, Quat, Mat4, Vec(_) => 4
         Array(e, _) => self.align_of(e)
         Struct(s) => {
@@ -529,7 +624,8 @@ fn scalar_ir(self: *Types, t: i64) -> (T, i64) {
         Bool, Int(8, _) => (I8, AK_ANY)
         Int(16, _) => (I16, AK_I16)
         Int(32, _) => (I32, AK_I32)
-        Int(_, _), Enum(_) => (I64, AK_I64)
+        Int(_, _) => (I64, AK_I64)
+        Enum(e) if self.enums[e].simple => (self.tag_ir(e), AK_TAG)
         F64 => (T.F64, AK_F64)
         F32 => (T.F32, AK_F32)
         Vec(2) => (V2, AK_VEC)
@@ -607,13 +703,22 @@ fn leaves(self: *Types, t: i64, base: i64, out: *Vec[Leaf]) {
         }
         Enum(e) => {
             if self.enums[e].simple {
-                out.push(Leaf{off: base, t: I64, alias: AK_I64})
-            } else {
-                sz := self.size_of(t)
-                o := 0
-                while o < sz {
-                    out.push(Leaf{off: base + o, t: I64, alias: AK_ANY})
-                    o += 8
+                out.push(Leaf{off: base, t: self.tag_ir(e), alias: AK_TAG})
+                return
+            }
+            self.layout_enum(e)
+            out.push(Leaf{off: base, t: self.tag_ir(e), alias: AK_ANY})
+            for r in self.enums[e].runs {
+                o := r >> 32
+                end := r & 0xFFFFFFFF
+                while o < end {
+                    c := piece(o, end)
+                    pt := if c == 8 { I64 } else if c == 4 { I32 } else if c == 2 { I16 } else { I8 }
+                    out.push(Leaf{off: base + o, t: pt, alias: AK_ANY})
+                    o += c
+                    if out.len > 4096 {
+                        return
+                    }
                 }
             }
         }
@@ -697,7 +802,17 @@ priv fn count_leaves(self: *Types, t: i64) -> i64 {
         }
         Slice(_) => return 2
         Mat4 => return 4
-        Enum(_) => return self.size_of(t) / 8
+        Enum(e) => {
+            if self.enums[e].simple {
+                return 1
+            }
+            self.layout_enum(e)
+            n := 1
+            for r in self.enums[e].runs {
+                n = sat_add(n, run_pieces(r >> 32, r & 0xFFFFFFFF))
+            }
+            return n
+        }
         Err, Unit, Never => return 0
         _ => return 1
     }

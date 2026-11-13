@@ -569,7 +569,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             // the same variant; its payload values that own storage are cloned
             tv := self.clone_copy(v)
             nvar := self.cx.types.enums[eid].variants.len
-            tag := self.load_raw(v.v, I64, AK_ANY)
+            tag := self.load_tag(v.v, eid)
             bj := self.new_block()
             for vi in 0..nvar {
                 ptys := vec[i64]()
@@ -586,7 +586,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 }
                 bt := self.new_block()
                 bn := self.new_block()
-                c := self.iconst(I64, vi)
+                c := self.tag_const(eid, vi)
                 eq := self.ins(Eq, I8, vec_two(tag, c), 0)
                 self.br(eq, bt, bn)
                 self.switch_to(bt)

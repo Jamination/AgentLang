@@ -1085,8 +1085,12 @@ priv fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: 
                 x := self.expr(o, oexp)
                 vi := self.variant_tag(c, x.ty)
                 if vi >= 0 && x.mem {
-                    tag := self.load_raw(x.v, I64, AK_ANY)
-                    k := self.iconst(I64, vi)
+                    eid := match self.cx.types.k(x.ty) {
+                        Enum(e) => e
+                        _ => 0
+                    }
+                    tag := self.load_tag(x.v, eid)
+                    k := self.tag_const(eid, vi)
                     v := self.ins(if op == Eq { Op.Eq } else { Op.Ne }, I8, vec_two(tag, k), 0)
                     return self.sval(T_BOOL, v)
                 }
@@ -1364,8 +1368,8 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
         Enum(eid) => {
             // the same variant, and equal payload values
             res := self.temp(T_BOOL)
-            tl := self.load_raw(l.v, I64, AK_ANY)
-            tr := self.load_raw(r.v, I64, AK_ANY)
+            tl := self.load_tag(l.v, eid)
+            tr := self.load_tag(r.v, eid)
             same := self.ins(Op.Eq, I8, vec_two(tl, tr), 0)
             self.store_raw(res, same, I8, 0)
             bj := self.new_block()
@@ -1380,7 +1384,7 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
                 }
                 bt := self.new_block()
                 bn := self.new_block()
-                c := self.iconst(I64, vi)
+                c := self.tag_const(eid, vi)
                 is_v := self.ins(Op.Eq, I8, vec_two(tl, c), 0)
                 self.br(is_v, bt, bn)
                 self.switch_to(bt)
@@ -1571,10 +1575,13 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             }
             return self.sval(to, r)
         }
-        (Enum(_), Int(tb, _)) if self.cx.types.is_scalar(v.ty) => {
+        (Enum(e), Int(tb, _)) if self.cx.types.is_scalar(v.ty) => {
             s := self.scalar(v)
             r := s
-            if tb < 64 {
+            fb := 8 * self.cx.types.enums[e].tag
+            if tb > fb {
+                r = self.ins(ZExt, tt, vec_one(s), 0)
+            } else if tb < fb {
                 r = self.ins(Trunc, tt, vec_one(s), 0)
             }
             return self.sval(to, r)
@@ -1856,14 +1863,14 @@ fn construct_variant(self: *Fx, ei: i64, vi: i64, args: []Expr, expect: Opt[i64]
         return val_err()
     }
     if self.cx.types.enums[eid].simple {
-        v := self.iconst(I64, vi)
+        v := self.tag_const(eid, vi)
         return self.sval(ety, v)
     }
     t := self.temp(ety)
     dst := self.mval(ety, t)
     self.zero(dst)
-    tag := self.iconst(I64, vi)
-    self.store_raw(t, tag, I64, AK_ANY)
+    tag := self.tag_const(eid, vi)
+    self.store_raw(t, tag, self.cx.types.tag_ir(eid), AK_ANY)
     offs := self.cx.types.variant_offsets(eid, vi)
     for i in 0..len(args) {
         a := &args[i]
