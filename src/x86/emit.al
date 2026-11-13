@@ -154,18 +154,14 @@ priv fn op(self: *Enc, p66: bool, pfx: u8, w: bool, opc: i64, reg: u8, rm: *RM, 
     need_sib := rm.idx >= 0 || base == 4
     md: u8 = 2
     dsz := 4
-    if has_reloc {
-        md = 2
-        dsz = 4
-    } else if rm.disp == 0 && base != 5 {
-        md = 0
-        dsz = 0
-    } else if rm.disp >= -128 && rm.disp <= 127 {
-        md = 1
-        dsz = 1
-    } else {
-        md = 2
-        dsz = 4
+    if !has_reloc {
+        if rm.disp == 0 && base != 5 {
+            md = 0
+            dsz = 0
+        } else if rm.disp >= -128 && rm.disp <= 127 {
+            md = 1
+            dsz = 1
+        }
     }
     if need_sib {
         self.b1((md << 6) | regf | 4)
@@ -181,25 +177,17 @@ priv fn op(self: *Enc, p66: bool, pfx: u8, w: bool, opc: i64, reg: u8, rm: *RM, 
     }
 }
 
-// the four bytes of x, least significant first
-priv fn put_le32(out: *Vec[u8], x: i32) {
-    u := u32(x)
-    out.push(u8(u))
-    out.push(u8(u >> 8))
-    out.push(u8(u >> 16))
-    out.push(u8(u >> 24))
-}
-
 priv fn disp32(self: *Enc, rm: *RM) {
     match rm.reloc {
-        Some(k) => {
-            self.relocs.push(Reloc{off: self.out.len, kind: k, addend: rm.disp})
-            self.imm(0, 4)
-        }
-        None => {
-            self.imm(i64(rm.disp), 4)
-        }
+        Some(k) => self.reloc32(k, rm.disp)
+        None => self.imm(i64(rm.disp), 4)
     }
+}
+
+// a 32-bit field that the linker fills in
+priv fn reloc32(self: *Enc, kind: RelocKind, addend: i32) {
+    self.relocs.push(Reloc{off: self.out.len, kind: kind, addend: addend})
+    self.imm(0, 4)
 }
 
 // the low n bytes of k, least significant first
@@ -257,7 +245,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             (R(d), I(k)) => {
                 d8 := u8(d & 15)
                 if sz == 8 && !(k >= 0 && k <= 0xFFFFFFFF) {
-                    if k >= -2147483648 && k <= 2147483647 {
+                    if fits_i32(k) {
                         rm := rm_reg(d)
                         e.op(false, 0, true, 0xC7, 0, &rm, false)
                         e.imm(k, 4)
@@ -281,8 +269,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                 }
                 e.b1(0xB8 | (d8 & 7))
                 kind, addend := addr_reloc(&i.b)
-                e.relocs.push(Reloc{off: e.out.len, kind: kind, addend: addend})
-                e.imm(0, 4)
+                e.reloc32(kind, addend)
             }
             (R(d), M(_)) => {
                 rm := e.rm(&i.b)
@@ -297,14 +284,13 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             (M(_), I(k)) => {
                 rm := e.rm(&i.a)
                 e.op(p66, 0, w, if sz == 1 { 0xC6 } else { 0xC7 }, 0, &rm, false)
-                e.imm(k, if sz == 1 { 1 } else if sz == 2 { 2 } else { 4 })
+                e.imm(k, min(i64(sz), 4))
             }
             (M(_), GAddr(_, _)), (M(_), FAddr(_)) => {
                 rm := e.rm(&i.a)
                 e.op(false, 0, true, 0xC7, 0, &rm, false)
                 kind, addend := addr_reloc(&i.b)
-                e.relocs.push(Reloc{off: e.out.len, kind: kind, addend: addend})
-                e.imm(0, 4)
+                e.reloc32(kind, addend)
             }
             _ => panic(fmt("encoder: bad mov ", *i))
         }
@@ -382,7 +368,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                 rm := e.rm(&i.a)
                 force := sz == 1 && byte_reg_needs_rex(&i.a)
                 e.op(p66, 0, w, if sz == 1 { 0xF6 } else { 0xF7 }, 0, &rm, force)
-                e.imm(k, if sz == 1 { 1 } else if sz == 2 { 2 } else { 4 })
+                e.imm(k, min(i64(sz), 4))
             }
             R(s) => {
                 rm := e.rm(&i.a)
@@ -458,8 +444,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
         }
         Call => {
             e.b1(0xE8)
-            e.relocs.push(Reloc{off: e.out.len, kind: Rel32Func(i64(i.tgt)), addend: 0})
-            e.imm(0, 4)
+            e.reloc32(Rel32Func(i64(i.tgt)), 0)
         }
         CallInd => {
             rm := e.rm(&i.a)
@@ -609,47 +594,18 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
 }
 
 priv fn sets_flags(op: MOp) -> bool {
-    return op == Add || op == Sub || op == And || op == Or || op == Xor || op == Cmp || op == Test ||
-        op == Imul || op == Imul3 || op == Neg || op == Shl || op == Shr || op == Sar || op == Rol ||
-        op == Ror || op == Idiv || op == Div || op == Mul1 || op == Imul1 || op == Ucomisd ||
-        op == Popcnt || op == Tzcnt || op == Lzcnt || op == Zero || op == Call || op == CallInd ||
-        op == Syscall || op == Bswap
+    match op {
+        Add, Sub, And, Or, Xor, Cmp, Test, Imul, Imul3, Neg, Shl, Shr, Sar, Rol, Ror, Idiv, Div,
+            Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap => true
+        _ => false
+    }
 }
 
 priv fn reads_flags(op: MOp) -> bool {
-    return op == Jcc || op == Setcc || op == Cmov
-}
-
-priv fn peephole_resolve(b0: i64, fwd: *Vec[i64]) -> i64 {
-    b := b0
-    n := 0
-    while fwd[b] != b && n < 64 {
-        b = fwd[b]
-        n += 1
+    match op {
+        Jcc, Setcc, Cmov => true
+        _ => false
     }
-    return b
-}
-
-// the `add` replacement of step 3 of the peephole for a `lea`, if there is one
-priv fn peephole_lea_add(i: *MInst) -> Opt[Opnd] {
-    add: Opt[Opnd] = None
-    if i.op == Lea {
-        match (&i.a, &i.b) {
-            (R(d), M(m)) if m.kind == MK_NORMAL => {
-                base := i64(m.base)
-                idx := i64(m.idx)
-                if base == d && idx == NOREG && i32(m.disp) != 0 {
-                    add = Some(I(i64(m.disp)))
-                } else if base == d && idx != NOREG && u8(m.scale) == 1 && i32(m.disp) == 0 && idx != d {
-                    add = Some(R(idx))
-                } else if idx == d && u8(m.scale) == 1 && i32(m.disp) == 0 && base != NOREG && base != d {
-                    add = Some(R(base))
-                }
-            }
-            _ => {}
-        }
-    }
-    return add
 }
 
 // Post-allocation cleanups that depend on the final layout. The prologue and the epilogues
@@ -658,6 +614,34 @@ priv fn peephole_lea_add(i: *MInst) -> Opt[Opnd] {
 // these rewrites, and an epilogue before a `ret` decides nothing in step 3: either way the
 // flags are dead at the end of the block.)
 priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
+    // the end of a chain of forwarded jumps
+    fn resolve(b0: i64, fwd: *Vec[i64]) -> i64 {
+        b := b0
+        n := 0
+        while fwd[b] != b && n < 64 {
+            b = fwd[b]
+            n += 1
+        }
+        b
+    }
+    // the `add` replacement of step 3 for a `lea`, if there is one
+    fn lea_add(i: *MInst) -> Opt[Opnd] {
+        match (i.op, &i.a, &i.b) {
+            (Lea, R(d), M(m)) if m.kind == MK_NORMAL => {
+                base := i64(m.base)
+                idx := i64(m.idx)
+                if base == d && idx == NOREG && m.disp != 0 {
+                    return Some(I(i64(m.disp)))
+                } else if base == d && idx != NOREG && m.scale == 1 && m.disp == 0 && idx != d {
+                    return Some(R(idx))
+                } else if idx == d && m.scale == 1 && m.disp == 0 && base != NOREG && base != d {
+                    return Some(R(base))
+                }
+            }
+            _ => {}
+        }
+        None
+    }
     nb := mf.blocks.len
     entry := layout[0]
     // 1. thread jumps through blocks that only contain `jmp X`
@@ -675,7 +659,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
         insts := &mf.blocks[b].insts
         x := insts.len - 1
         while x >= 0 && (insts[x].op == Jmp || insts[x].op == Jcc) {
-            insts[x].tgt = i32(peephole_resolve(i64(insts[x].tgt), &fwd))
+            insts[x].tgt = i32(resolve(i64(insts[x].tgt), &fwd))
             x -= 1
         }
     }
@@ -684,7 +668,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
         reach := vec_fill(nb, false)
         work := vec_of([]i64{entry})
         reach[entry] = true
-        while work.len > 0 {
+        while !work.is_empty() {
             b := work.pop()
             insts := &mf.blocks[b].insts
             x := insts.len - 1
@@ -697,7 +681,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
                 x -= 1
             }
         }
-        // layout.retain(|b| reach[b])
+        // keep the reachable blocks
         n := 0
         for x in 0..layout.len {
             if reach[layout[x]] {
@@ -705,7 +689,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
                 n += 1
             }
         }
-        layout.len = n
+        layout.truncate(n)
     }
     // 2. fallthrough and branch inversion (the prologue is never a `jcc`: with it, a block
     // ending in `jcc; jmp` has a single jcc exactly when it has one without it)
@@ -717,18 +701,15 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
         if n >= 2 && insts[n - 1].op == Jmp && insts[n - 2].op == Jcc {
             single_jcc := n < 3 || insts[n - 3].op != Jcc
             if i64(insts[n - 2].tgt) == i64(insts[n - 1].tgt) && single_jcc {
-                insts[n - 2] = insts[n - 1]
-                insts.len = n - 1
+                insts[n - 2] = insts.pop()
             } else if i64(insts[n - 2].tgt) == next && single_jcc {
-                f := insts[n - 1].tgt
                 insts[n - 2].cc ^= 1
-                insts[n - 2].tgt = f
-                insts.len = n - 1
+                insts[n - 2].tgt = insts.pop().tgt
             }
         }
         n2 := insts.len
         if n2 >= 1 && insts[n2 - 1].op == Jmp && i64(insts[n2 - 1].tgt) == next {
-            insts.len = n2 - 1
+            insts.truncate(n2 - 1)
         }
     }
     // 3. flag-clobbering shorter forms when flags are dead:
@@ -746,8 +727,8 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
                 _ => false
             }
             zero := i.op == Mov && a_low_reg && i.b == I(0)
-            add := peephole_lea_add(i)
-            if !zero && !is_some(add) {
+            add := lea_add(i)
+            if !zero && is_none(add) {
                 continue
             }
             // the flags must be dead after the instruction
@@ -760,18 +741,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
                     break
                 }
             }
-            a := i.a
-            sz := i.sz
-            if zero {
-                insts[k] = minst_new(Zero, 4, a, Opnd.None)
-            } else {
-                match add {
-                    Some(src) => {
-                        insts[k] = minst_new(Add, sz, a, src)
-                    }
-                    None => {}
-                }
-            }
+            insts[k] = if zero { minst_new(Zero, 4, i.a, Opnd.None) } else { minst_new(Add, i.sz, i.a, add.unwrap()) }
         }
     }
 }
@@ -858,18 +828,17 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     slot_off := vec[i32]()
     slot_off.reserve(mf.slots.len)
     for sl in mf.slots {
-        a := min(max(sl.1, 1), 16)
-        off = (off + a - 1) / a * a
+        off = align_up(off, min(max(sl.1, 1), 16))
         slot_off.push(i32(off))
         off += sl.0
     }
     // Windows: the xmm registers to preserve, 16 bytes each above the slots
-    xmm_off := (off + 15) / 16 * 16
+    xmm_off := align_up(off, 16)
     if alloc.used_xmm_saved.len > 0 {
         off = xmm_off + 16 * alloc.used_xmm_saved.len
     }
     npush := i32(alloc.used_callee_saved.len)
-    size64 := (off + 15) / 16 * 16
+    size64 := align_up(off, 16)
     if (8 + 8 * i64(npush) + size64) % 16 != 0 {
         size64 += 8
     }
@@ -898,6 +867,13 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     bpos := vec_fill(mf.blocks.len, 0)  // where each block starts in enc.out
     bitem := vec_fill(mf.blocks.len, 0) // the items before it
     unwind := vec[u8]()
+    // the save slot of the k-th preserved xmm register
+    fn xmm_slot(xmm_off: i64, k: i64) -> Opnd {
+        m := mem_new()
+        m.base = i32(RSP)
+        m.disp = i32(xmm_off + 16 * k)
+        M(m)
+    }
     for b in layout {
         if mf.blocks[b].align {
             items.push(Item{pos: enc.out.len, tgt: -1, cc: -1, long: false})
@@ -936,10 +912,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                 }
             }
             for k, r in alloc.used_xmm_saved {
-                m := mem_new()
-                m.base = i32(RSP)
-                m.disp = i32(xmm_off + 16 * k)
-                si := minst_new(MovSd, 16, M(m), R(r))
+                si := minst_new(MovSd, 16, xmm_slot(xmm_off, k), R(r))
                 enc_inst(&enc, &si)
                 o := xmm_off + 16 * k
                 if o / 16 < 0x10000 {
@@ -965,10 +938,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             if i.op == Ret {
                 // epilogue
                 for k, r in alloc.used_xmm_saved {
-                    m := mem_new()
-                    m.base = i32(RSP)
-                    m.disp = i32(xmm_off + 16 * k)
-                    li := minst_new(MovSd, 16, R(r), M(m))
+                    li := minst_new(MovSd, 16, R(r), xmm_slot(xmm_off, k))
                     enc_inst(&enc, &li)
                 }
                 if size > 0 {
@@ -1043,10 +1013,10 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             if it.cc >= 0 {
                 bytes.push(0x0F)
                 bytes.push(0x80 | u8(it.cc))
-                put_le32(&bytes, i32(t - (o + 6)))
+                put32(&bytes, t - (o + 6))
             } else {
                 bytes.push(0xE9)
-                put_le32(&bytes, i32(t - (o + 5)))
+                put32(&bytes, t - (o + 5))
             }
         } else {
             d := t - (o + 2)
@@ -1074,12 +1044,8 @@ fn emit_pool_fconsts(code: *Code, local: []i64) {
 // words (offset, kind, payload, addend), each constant as 2 words, the error text (padded),
 // the unwind information (padded).
 
-priv fn pad8(n: i64) -> i64 {
-    return (n + 7) / 8 * 8
-}
-
 fn emit_code_size(code: *Code, fc: *Vec[Bits128]) -> i64 {
-    return 40 + pad8(code.bytes.len) + 32 * code.relocs.len + 16 * fc.len + pad8(len(code.err)) + pad8(code.unwind.len)
+    return 40 + align_up(code.bytes.len, 8) + 32 * code.relocs.len + 16 * fc.len + align_up(len(code.err), 8) + align_up(code.unwind.len, 8)
 }
 
 // writes code at q; returns the offset after it
@@ -1094,27 +1060,15 @@ fn emit_put_code(code: *Code, fc: *Vec[Bits128], base: i64, q0: i64) -> i64 {
     if code.bytes.len > 0 {
         memcopy(cast[*u8](base + q), ptr(code.bytes.buf), code.bytes.len)
     }
-    q += pad8(code.bytes.len)
+    q += align_up(code.bytes.len, 8)
     for r in code.relocs {
         w := cast[*i64](base + q)
         w[0] = r.off
-        match r.kind {
-            Abs32Global(x) => {
-                w[1] = 0
-                w[2] = x
-            }
-            Abs32Func(x) => {
-                w[1] = 1
-                w[2] = x
-            }
-            Rel32Func(x) => {
-                w[1] = 2
-                w[2] = x
-            }
-            Abs32FConst(x) => {
-                w[1] = 3
-                w[2] = x
-            }
+        w[1], w[2] = match r.kind {
+            Abs32Global(x) => (0, x)
+            Abs32Func(x) => (1, x)
+            Rel32Func(x) => (2, x)
+            Abs32FConst(x) => (3, x)
         }
         w[3] = i64(r.addend)
         q += 32
@@ -1128,11 +1082,11 @@ fn emit_put_code(code: *Code, fc: *Vec[Bits128], base: i64, q0: i64) -> i64 {
     if len(code.err) > 0 {
         memcopy(cast[*u8](base + q), ptr(code.err), len(code.err))
     }
-    q += pad8(len(code.err))
+    q += align_up(len(code.err), 8)
     if code.unwind.len > 0 {
         memcopy(cast[*u8](base + q), ptr(code.unwind.buf), code.unwind.len)
     }
-    return q + pad8(code.unwind.len)
+    return q + align_up(code.unwind.len, 8)
 }
 
 // reads the code at q (into the current arena): (code, float constants, offset after it)
@@ -1145,7 +1099,7 @@ fn emit_get_code(base: i64, q0: i64) -> (Code, Vec[Bits128], i64) {
     nu := h[4]
     q := q0 + 40
     bytes := vec_of(mkslice[u8](cast[*u8](base + q), nb))
-    q += pad8(nb)
+    q += align_up(nb, 8)
     relocs := vec[Reloc]()
     relocs.reserve(nr)
     for k in 0..nr {
@@ -1167,9 +1121,9 @@ fn emit_get_code(base: i64, q0: i64) -> (Code, Vec[Bits128], i64) {
         q += 16
     }
     err := clone(mkslice[u8](cast[*u8](base + q), ne))
-    q += pad8(ne)
+    q += align_up(ne, 8)
     unwind := vec_of(mkslice[u8](cast[*u8](base + q), nu))
-    q += pad8(nu)
+    q += align_up(nu, 8)
     return (Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind}, fc, q)
 }
 
