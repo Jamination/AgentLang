@@ -25,6 +25,12 @@ The seed is a static x86-64 Linux executable of about 2.8 MB. It only has to be 
 the seed does not know; add the feature, build, reseed, then use it. `ALC_SEED=/path/to/alc`
 selects another seed.
 
+Stage 1 is compiled by the seed and may therefore lay out types as an older compiler did (the
+seed before the change to 1-byte enum tags stored every tag in 8 bytes). The compiler never
+depends on the layout of its own types: no `sizeof` or `cast` of an enum, and the records the
+parallel back end shares between processes (`emit_put_code`, the reachability records in
+`src/x86/mod.al`) are written and read field by field.
+
 ## History
 
 The compiler was first written in Rust (the last such state is tagged `rust-final` in git) and
