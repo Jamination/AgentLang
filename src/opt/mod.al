@@ -10,25 +10,15 @@ priv env_has_disable: bool
 priv fn read_env() {
     if !env_read {
         env_read = true
-        d, has_d := env_get("ALC_DEBUG")
+        d, _ := env_get("ALC_DEBUG")
         env_debug = d
-        v, found := env_get("ALC_DISABLE")
-        env_disable = v
-        env_has_disable = found
+        env_disable, env_has_disable = env_get("ALC_DISABLE")
     }
 }
 
 fn opt_enabled(name: str) -> bool {
     read_env()
-    if env_has_disable {
-        for x in split(env_disable, ',') {
-            if x == name {
-                return false
-            }
-        }
-        return true
-    }
-    return true
+    return !env_has_disable || !split(env_disable, ',').contains(name)
 }
 
 // check_fail[k]: function k ends the program for a failed run-time check (__bounds_fail,
@@ -53,6 +43,7 @@ fn opt_is_check_trap(f: *Func, b: i64) -> bool {
     }
     return true
 }
+
 fn opt_trace(what: str, f: *Func) {
     read_env()
     v := env_debug
@@ -223,7 +214,7 @@ priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
                 at += na
             }
         }
-        ins.buf[nv] = i
+        ins[nv] = i
     }
     ins.len = c
     f.insts = ins
@@ -255,15 +246,9 @@ priv fn keep_func(f: *Func) {
     if len(f.name) > 0 && !in_main(cast[i64](ptr(f.name))) {
         f.name = clone(f.name)
     }
-    if len(f.params.buf) > 0 && !in_main(cast[i64](ptr(f.params.buf))) {
-        f.params = clone(f.params)
-    }
-    if len(f.rets.buf) > 0 && !in_main(cast[i64](ptr(f.rets.buf))) {
-        f.rets = clone(f.rets)
-    }
-    if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
-        f.blocks = vec_of(f.blocks.items())
-    }
+    keep_list(&f.params)
+    keep_list(&f.rets)
+    keep_list(&f.blocks)
     m, c, total, lists := orphan_map(f)
     if len(m) > 0 {
         drop_orphans(f, m, c, total, lists)
@@ -271,9 +256,7 @@ priv fn keep_func(f: *Func) {
         return
     }
     scratch_reset()
-    if len(f.insts.buf) > 0 && !in_main(cast[i64](ptr(f.insts.buf))) {
-        f.insts = vec_of(f.insts.items())
-    }
+    keep_list(&f.insts)
     keep_args(f)
     for b in 0..f.blocks.len {
         blk := &f.blocks[b]
@@ -380,7 +363,8 @@ priv fn local_opt(f: *Func, level: i64) {
     if level == 0 {
         return
     }
-    for it in 0..4 {
+    // one round of the scalar passes; true if one changed something
+    fn one_round(f: *Func) -> bool {
         ch := false
         opt_trace("simplify", f)
         if simplify_run(f) {
@@ -409,7 +393,10 @@ priv fn local_opt(f: *Func, level: i64) {
         if simplify_run(f) {
             ch = true
         }
-        if !ch {
+        return ch
+    }
+    for it in 0..4 {
+        if !one_round(f) {
             break
         }
     }
@@ -429,34 +416,11 @@ priv fn local_opt(f: *Func, level: i64) {
             break
         }
         opt_trace("after-unroll", f)
-        dbg, has_dbg := env_get("ALC_DEBUG")
-        if has_dbg && dbg == "unroll" {
+        if env_debug == "unroll" {
             eput(fmt("after unroll:\n", ir_print_func(f, None), "\n"))
         }
         for it2 in 0..3 {
-            ch := false
-            if simplify_run(f) {
-                ch = true
-            }
-            if opt_enabled("gvn") && opt_pass(PASS_GVN, f, gvn_run) {
-                ch = true
-            }
-            if opt_enabled("checkmerge") && opt_pass(PASS_CHECKMERGE, f, checkmerge_run) {
-                ch = true
-            }
-            if opt_enabled("loadelim") && opt_pass(PASS_LOADELIM, f, loadelim_run) {
-                ch = true
-            }
-            if opt_pass(PASS_MEM2REG, f, mem2reg_run) {
-                ch = true
-            }
-            if opt_enabled("licm") && opt_pass(PASS_LICM, f, licm_run) {
-                ch = true
-            }
-            if simplify_run(f) {
-                ch = true
-            }
-            if !ch {
+            if !one_round(f) {
                 break
             }
         }
@@ -499,10 +463,7 @@ priv clean_end: Vec[i64]
 // The cleanups the back end runs first (prune, trivial phis, DCE), each skipped where the
 // optimiser left the function clean for it.
 fn opt_backend_cleanup(f: *Func, fid: i64) {
-    bits := 0
-    if fid < clean_end.len {
-        bits = clean_end[fid]
-    }
+    bits := if fid < clean_end.len { clean_end[fid] } else { 0 }
     sk_restore(bits)
     opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
     opt_pass(PASS_PHIS, f, cleanup_trivial_phis)
@@ -610,7 +571,7 @@ fn opt_optimize(m: *Module, level: i64) {
         }
         stack := vec_of([](i64, i64){(root, 0)})
         state[root] = 1
-        while stack.len > 0 {
+        while !stack.is_empty() {
             top := &stack[stack.len - 1]
             fx := top.0
             if top.1 < callees[fx].len {

@@ -102,7 +102,7 @@ fn cleanup_dce(f: *Func) -> bool {
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
         before := b.insts.len
-        // retain(|v| live[v])
+        // keep the live instructions, in order
         kept := 0
         for i in 0..before {
             v := b.insts[i]
@@ -168,7 +168,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
     if any {
         for bi in 0..f.blocks.len {
             b := &f.blocks[bi]
-            // retain(|v| repl[v] == NOV)
+            // keep the instructions that are not replaced, in order
             kept := 0
             for i in 0..b.insts.len {
                 v := b.insts[i]

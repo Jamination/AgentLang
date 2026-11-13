@@ -129,13 +129,12 @@ fn gvn_run(f: *Func) -> bool {
     // the walk over the dominator tree: (b, -1, ..) enters block b; (-1, mark, c, old) leaves
     // a block: entries above `mark` go, known[c] (if c is not NOV) is old again
     stack := vec_of([](i64, i64, i64, u8){(0, -1, NOV, u8(0))})
-    while stack.len > 0 {
-        step := stack.pop()
-        b := step.0
+    while !stack.is_empty() {
+        b, top, fact_c, fact_v := stack.pop()
         if b < 0 {
-            pop_to(&table, step.1)
-            if step.2 != NOV {
-                known_set(&known, step.2, step.3)
+            pop_to(&table, top)
+            if fact_c != NOV {
+                known_set(&known, fact_c, fact_v)
             }
             continue
         }
@@ -203,21 +202,15 @@ fn gvn_run(f: *Func) -> bool {
                 c := repl_find(repl.items(), c0)
                 kn := known_at(&known, c)
                 if kn != 0 {
-                    if kn == 2 {
-                        f.blocks[b].term = Jmp(t)
-                    } else {
-                        f.blocks[b].term = Jmp(e)
-                    }
+                    f.blocks[b].term = Jmp(if kn == 2 { t } else { e })
                     changed = true
                 }
             }
             _ => {}
         }
         stack.push((-1, mark, fact, fact_old))
-        ci := cfg.children[b].len - 1
-        while ci >= 0 {
+        for ci in cfg.children[b].len - 1..=0 by -1 {
             stack.push((cfg.children[b][ci], -1, NOV, u8(0)))
-            ci -= 1
         }
     }
     extra := vec[i32]()
