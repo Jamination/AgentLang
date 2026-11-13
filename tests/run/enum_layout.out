@@ -1,0 +1,28 @@
+sizes 1 2 3 4 8 16 24 20 8 16 24 24
+opt 2 2 2 4 8 16 3 4 24
+structs 2 12 16 10 6 3
+Red Blue 2 1 299 256 2
+green Blue Tagged{c: Green, b: 9} [Red, Green, Blue]
+Blue [Red, Red, Green, Red]
+[Red, Green, Blue, Red, Green, Blue, Red, Green, Blue, Red] 3
+Mixed{a: 1, o: Some(65535), c: Green, x: -5} Mixed{a: 1, o: None, c: Green, x: -5} false true
+50 Blue
+true false false true
+true true false true false
+true true true true false
+true false true
+true true false
+{Red: 4, Green: 3, Blue: 3}
+3 last true true false
+3 13 9 false
+T1(hello) T1(hello) true
+T1(a) T1(b) true
+green 0 255 256 299 -1
+3.0 6.0 -1.0 -1.0 0.0
+200 43000 5 -5 750 499 4
+2
+42
+Circle(3.0) Rect(3.0, 4.0)
+257
+Blue Rect(7.0, 908.0) V298
+B2(255, 1) S1(65535) I1(-1) F1(1.5) L1(-9) V(vec4(1.0, 2.0, 3.0, 4.0)) Some(Some(1))
