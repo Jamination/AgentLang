@@ -94,7 +94,10 @@ else
   echo "FAIL: Vulkan offscreen triangle"; head -5 $BIN/vk_triangle.out; fail=1
 fi
 for m in dx12 metal; do
-  if $ALC check tests/check/${m}_triangle.al 2>$BIN/check_$m.err; then
+  # a sample written for one target (tests/check/NAME.target) is checked for that target
+  topt=()
+  [[ -f tests/check/${m}_triangle.target ]] && topt=(--target "$(< tests/check/${m}_triangle.target)")
+  if $ALC check "${topt[@]}" tests/check/${m}_triangle.al 2>$BIN/check_$m.err; then
     echo "$m bindings and sample: pass alc check"
   else
     echo "FAIL: $m sample does not type-check"; head -5 $BIN/check_$m.err; fail=1

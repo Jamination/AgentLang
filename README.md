@@ -58,6 +58,7 @@ runs on Linux and Windows (`build/alc.exe`), and builds for both (`--target linu
 - [Standard library](docs/STDLIB.md): strings, collections, files, math, images, windows,
   input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
+- [Testing on Windows](docs/WINDOWS_TEST.md): checks to run on a real Windows machine
 - [How the compiler is built and organised](docs/BOOTSTRAP.md)
 
 ## Examples
