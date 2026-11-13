@@ -1049,14 +1049,6 @@ priv fn sdiv_magic(self: *Ctx, n: i64, ty: T, d: i64) -> i64 {
     return self.mk(Add, ty, vec_of([]i64{q, sign}))
 }
 
-priv fn fold_insts_find(repl: *Vec[i32], v0: i64) -> i64 {
-    v := v0
-    while v < repl.len && repl[v] != NOV {
-        v = i64(repl[v])
-    }
-    return v
-}
-
 // push for a list that usually has room (push itself is not inlined)
 priv inline fn put(l: *Vec[i32], x: i32) {
     if l.len < len(l.buf) {
@@ -1104,7 +1096,7 @@ priv fn fold_insts(f: *Func) -> bool {
         for v in old {
             for ai in 0..cx.f.insts[v].args.len {
                 a := cx.f.insts[v].args[ai]
-                r := fold_insts_find(&repl, a)
+                r := repl_find(repl.items(), a)
                 if r != a {
                     cx.f.insts[v].args[ai] = r
                 }

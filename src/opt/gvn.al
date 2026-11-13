@@ -5,14 +5,6 @@ priv fn numberable(op: Op) -> bool {
     return op.is_pure() || op == SDiv || op == UDiv || op == SRem || op == URem || op == Proj
 }
 
-priv fn run_find(repl: []i32, v0: i64) -> i64 {
-    v := v0
-    while repl[v] != NOV {
-        v = i64(repl[v])
-    }
-    return v
-}
-
 // The instructions in scope, by their key (op, type, arguments (the two of a commutative op in
 // increasing order), k). An entry is the instruction itself: its key fields do not change while
 // it is in scope. Entries go in the reverse order they came (the walk leaves a block after its
@@ -154,7 +146,7 @@ fn gvn_run(f: *Func) -> bool {
             p := cfg.preds[b][0]
             match f.blocks[p].term {
                 Br(c0, t, e) if t != e => {
-                    c := run_find(repl.items(), c0)
+                    c := repl_find(repl.items(), c0)
                     fact = c
                     fact_old = known_at(&known, c)
                     known_set(&known, c, if t == b { u8(2) } else { u8(1) })
@@ -170,7 +162,7 @@ fn gvn_run(f: *Func) -> bool {
             v := insts[ii]
             for ai in 0..f.insts[v].args.len {
                 a := f.insts[v].args[ai]
-                r := run_find(repl.items(), a)
+                r := repl_find(repl.items(), a)
                 // a condition decided by a dominating branch is a constant here
                 kn := known_at(&known, r)
                 if kn != 0 {
@@ -208,7 +200,7 @@ fn gvn_run(f: *Func) -> bool {
         insts.len = kept
         match f.blocks[b].term {
             Br(c0, t, e) => {
-                c := run_find(repl.items(), c0)
+                c := repl_find(repl.items(), c0)
                 kn := known_at(&known, c)
                 if kn != 0 {
                     if kn == 2 {

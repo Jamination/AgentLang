@@ -7,14 +7,6 @@ priv struct Avail {
     pending_store: i32, // a store not yet observed by any possible reader (NOV: none)
 }
 
-priv fn run_find(repl: []i32, v0: i64) -> i64 {
-    v := v0
-    while repl[v] != NOV {
-        v = i64(repl[v])
-    }
-    return v
-}
-
 fn loadelim_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     esc := alias_escaped_cached(f, opt_gen())
@@ -57,7 +49,7 @@ fn loadelim_run(f: *Func) -> bool {
             v := f.blocks[b].insts[ii]
             for ai in 0..f.insts[v].args.len {
                 a := f.insts[v].args[ai]
-                r := run_find(repl.items(), a)
+                r := repl_find(repl.items(), a)
                 if r != a {
                     f.insts[v].args[ai] = r
                 }

@@ -73,7 +73,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         for gv in g.blocks[gb].insts {
             gi := &g.insts[gv]
             if gi.op == Param {
-                vmap[gv] = repl_find(repl, call_inst.args[gi.k])
+                vmap[gv] = repl_find(repl.items(), call_inst.args[gi.k])
                 continue
             }
             nv := f.mk(gi.op, gi.ty, vec[i64](), gi.k)
@@ -205,15 +205,6 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         }
     }
     return grown
-}
-
-// the final replacement of v
-priv fn repl_find(repl: *Vec[i32], v: i64) -> i64 {
-    r := v
-    while r < repl.len && repl[r] != NOV {
-        r = i64(repl[r])
-    }
-    return r
 }
 
 struct Policy {

@@ -119,14 +119,6 @@ fn cleanup_dce(f: *Func) -> bool {
     return changed
 }
 
-priv fn trivial_phis_res(repl: *Vec[i32], v0: i64) -> i64 {
-    v := v0
-    while repl[v] != NOV {
-        v = i64(repl[v])
-    }
-    return v
-}
-
 // remove phis whose inputs are all the same value
 fn cleanup_trivial_phis(f: *Func) -> bool {
     // the phis in block order (they come first in their blocks)
@@ -153,7 +145,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
             same := NOV
             trivial := true
             for a0 in f.insts[v].args {
-                a := trivial_phis_res(&repl, a0)
+                a := repl_find(repl.items(), a0)
                 if a == v || a == same {
                     continue
                 }
