@@ -92,37 +92,6 @@ fn lexer_p_text(c: i64) -> str {
     return b
 }
 
-// the keyword index of an identifier-shaped word, or -1
-priv fn kw_index(w: str) -> i64 {
-    n := len(w)
-    if n < 2 || n > 8 {
-        return -1
-    }
-    k := match w[0] {
-        'a' => KW_ASSERT
-        'b' => if n == 2 { KW_BY } else { KW_BREAK }
-        'c' => if n == 5 { KW_CONST } else { KW_CONTINUE }
-        'd' => KW_DEFER
-        'e' => if w[1] == 'l' { KW_ELSE } else if w[1] == 'n' { KW_ENUM } else { KW_EXTERN }
-        'f' => if n == 2 { KW_FN } else if n == 3 { KW_FOR } else { KW_FALSE }
-        'i' => if n == 2 { if w[1] == 'f' { KW_IF } else { KW_IN } } else { KW_INLINE }
-        'l' => KW_LOOP
-        'm' => KW_MATCH
-        'n' => if n == 3 { KW_NIL } else { KW_NOINLINE }
-        'p' => KW_PRIV
-        'r' => KW_RETURN
-        's' => KW_STRUCT
-        't' => if n == 4 { if w[1] == 'e' { KW_TEST } else { KW_TRUE } } else { -1 }
-        'u' => KW_USE
-        'w' => KW_WHILE
-        _ => -1
-    }
-    if k >= 0 && w == KEYWORDS[k] {
-        return k
-    }
-    return -1
-}
-
 // ---------- f32 value of a float literal ----------
 // `f32(v)` of the f64 value `v` rounds twice: wrong when `v` is exactly half-way between two
 // f32 values but the literal is not. Then the literal is compared exactly with `v`.
@@ -297,14 +266,39 @@ priv fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
     return Pos{file: file, line: line, col: at - line_start + 1}
 }
 
-// bytes that continue an identifier: [A-Za-z0-9_] (filled on first use)
+// bytes that continue an identifier: [A-Za-z0-9_]; the class of a byte that starts a token
+// (CL_*); the keyword index of a symbol, or -1. Filled on first use.
 priv ident_tab: [256]bool
+priv byte_cls: [256]u8
+priv kw_of_sym: Vec[i64]
 priv ident_tab_ready: bool
+
+priv const CL_IDENT = 1
+priv const CL_DIGIT = 2
+// punctuation of one byte that never starts a longer one
+priv const CL_P1 = 3
+// punctuation that may be the start of a longer one (punct_len decides)
+priv const CL_P = 4
 
 priv fn ident_tab_init() {
     for c in 0..256 {
         b := u8(c)
         ident_tab[c] = is_alnum(b) || b == '_'
+        byte_cls[c] = if is_alpha(b) || b == '_' { CL_IDENT } else if is_digit(b) { CL_DIGIT } else { 0 }
+    }
+    for b in "~()[]{},;@" {
+        byte_cls[b] = CL_P1
+    }
+    for b in "<>.:-=&|!+*/%^" {
+        byte_cls[b] = CL_P
+    }
+    // keywords are symbols too (interned first, so their numbers are small)
+    for k in 0..KEYWORDS.len {
+        id := ast_sym(KEYWORDS[k])
+        if id >= kw_of_sym.len {
+            kw_of_sym.resize(id + 1, -1)
+        }
+        kw_of_sym[id] = k
     }
     ident_tab_ready = true
 }
@@ -335,6 +329,227 @@ priv fn punct_len(c: u8, c1: u8, c2: u8) -> i64 {
     }
 }
 
+// A number literal at s[i]: its token; returns the index behind it.
+priv fn lex_number(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -> i64 {
+    st := i
+    c := s[i]
+    if c == '0' && i + 1 < len(s) && (s[i + 1] == 'x' || s[i + 1] == 'b' || s[i + 1] == 'o') {
+        radix := match s[i + 1] {
+            'x' => 16
+            'b' => 2
+            _ => 8
+        }
+        i += 2
+        v: u64 = 0
+        any := false
+        big := false
+        bad := false
+        while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
+            if s[i] != '_' {
+                match to_digit(s[i], radix) {
+                    Some(d) => {
+                        if v > (0xFFFFFFFFFFFFFFFF - u64(d)) / u64(radix) {
+                            big = true
+                        }
+                        v = v * u64(radix) + u64(d)
+                    }
+                    None => {
+                        if !bad {
+                            errs.push(Diag{pos: p, msg: fmt("invalid digit `", s[i..i + 1], "` in a base-", radix, " integer literal")})
+                        }
+                        bad = true
+                    }
+                }
+                any = true
+            }
+            i += 1
+        }
+        if !any {
+            errs.push(Diag{pos: p, msg: "empty integer literal"})
+        }
+        if big {
+            errs.push(Diag{pos: p, msg: "integer literal too large"})
+            v = 0
+        }
+        out.push(Token{t: Int(v, false), pos: p})
+        return i
+    }
+    while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
+        i += 1
+    }
+    is_float := false
+    // after a `.` a number is a tuple field: `t.0.1` is (t.0).1
+    field := out.len > 0 && out[out.len - 1].t == P('.')
+    if !field && i + 1 < len(s) && s[i] == '.' && is_digit(s[i + 1]) {
+        is_float = true
+        i += 1
+        while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
+            i += 1
+        }
+    }
+    if !field && i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+        j := i + 1
+        if j < len(s) && (s[j] == '+' || s[j] == '-') {
+            j += 1
+        }
+        if j < len(s) && is_digit(s[j]) {
+            is_float = true
+            i = j
+            while i < len(s) && is_digit(s[i]) {
+                i += 1
+            }
+        }
+    }
+    // the literal without its underscores
+    text := s[st..i]
+    if contains(text, '_') {
+        tbuf := alloc[u8](i - st)
+        tn := 0
+        for k in st..i {
+            if s[k] != '_' {
+                tbuf[tn] = s[k]
+                tn += 1
+            }
+        }
+        text = tbuf[..tn]
+    }
+    if is_float {
+        v, ok := parse_f64(text)
+        if ok {
+            out.push(Token{t: Float(v, lexer_f32(text, v)), pos: p})
+        } else {
+            errs.push(Diag{pos: p, msg: "invalid float literal"})
+            out.push(Token{t: Float(0.0, 0.0), pos: p})
+        }
+    } else {
+        v, ok := parse_u64(text)
+        if ok {
+            out.push(Token{t: Int(v, true), pos: p})
+        } else {
+            errs.push(Diag{pos: p, msg: "integer literal too large"})
+            out.push(Token{t: Int(0, true), pos: p})
+        }
+    }
+    return i
+}
+
+// A string or character literal that starts with the quote s[i]: its token; returns the
+// index behind it.
+priv fn lex_quoted(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -> i64 {
+    n := len(s)
+    q := s[i]
+    i += 1
+    // without escapes the literal is the text between the quotes
+    j := i
+    while j < n && s[j] != q && s[j] != '\n' && s[j] != '\\' {
+        j += 1
+    }
+    if j < n && s[j] == q {
+        lit := s[i..j]
+        if q == '"' {
+            out.push(Token{t: Str(lit), pos: p})
+        } else {
+            if len(lit) != 1 {
+                errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
+            }
+            first: u8 = 0
+            if len(lit) > 0 {
+                first = lit[0]
+            }
+            out.push(Token{t: Int(u64(first), false), pos: p})
+        }
+        return j + 1
+    }
+    buf := vec[u8]()
+    closed := false
+    while i < len(s) {
+        d := s[i]
+        if d == q {
+            closed = true
+            i += 1
+            break
+        }
+        if d == '\n' {
+            break
+        }
+        if d == '\\' && i + 1 < len(s) && s[i + 1] != '\n' {
+            i += 1
+            e := s[i]
+            shown, elen := char_at(s, i)
+            i += 1
+            match e {
+                'n' => buf.push('\n')
+                't' => buf.push('\t')
+                'r' => buf.push('\r')
+                '0' => buf.push(0)
+                '\\' => buf.push('\\')
+                '"' => buf.push('"')
+                '\'' => buf.push('\'')
+                'x' => {
+                    v: u32 = 0
+                    k := 0
+                    while k < 2 && i < len(s) {
+                        match to_digit(s[i], 16) {
+                            Some(dg) => {
+                                v = v * 16 + u32(dg)
+                                i += 1
+                                k += 1
+                            }
+                            None => {
+                                break
+                            }
+                        }
+                    }
+                    if k != 2 {
+                        errs.push(Diag{pos: p, msg: "\\x escape needs two hex digits"})
+                    }
+                    buf.push(u8(v))
+                }
+                _ => {
+                    errs.push(Diag{pos: p, msg: fmt("unknown escape \\", shown)})
+                    i += elen - 1
+                }
+            }
+            continue
+        }
+        buf.push(d)
+        i += 1
+    }
+    if !closed {
+        errs.push(Diag{pos: p, msg: "unterminated string/char literal"})
+    }
+    if q == '"' {
+        out.push(Token{t: Str(buf[..buf.len]), pos: p})
+    } else {
+        if buf.len != 1 {
+            errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
+        }
+        first: u8 = 0
+        if buf.len > 0 {
+            first = buf[0]
+        }
+        out.push(Token{t: Int(u64(first), false), pos: p})
+    }
+    return i
+}
+
+// A byte at s[i] that starts no token: the error; returns the index behind the character.
+priv fn bad_char(s: str, i: i64, p: Pos, errs: *Vec[Diag]) -> i64 {
+    shown, clen := char_at(s, i)
+    if clen > 1 {
+        // the code point too: the character may be invisible (U+00A0, U+200B)
+        cp := u64(s[i]) & (0x7F >> u64(clen))
+        for k in 1..clen {
+            cp = (cp << 6) | u64(s[i + k] & 0x3F)
+        }
+        shown = fmt(shown, "' (U+", to_upper(hex(cp, 4)), ")")
+    } else {
+        shown = fmt(shown, "'")
+    }
+    errs.push(Diag{pos: p, msg: fmt("unexpected character '", shown)})
+    return i + clen
+}
+
 // the tokens of one file at a time (lexer_lex reuses the buffer)
 priv tok_buf: Vec[Token]
 
@@ -356,13 +571,14 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     out := tok_buf
     out.len = 0
     out.reserve(n / 4 + 16)
-    // bracket stack: '(' / '[' suppress newlines, '{' enables them
-    stack := vec[u8]()
+    // bracket stack: '(' / '[' suppress newlines, '{' enables them (stk[..sp])
+    stk := alloc[u8](64)
+    sp := 0
     while i < n {
         c := s[i]
         if c == '\n' {
-            sig := stack.len == 0 || stack[stack.len - 1] == '{'
-            if sig && out.len > 0 && ends_stmt(out[out.len - 1].t) {
+            sig := sp == 0 || stk[sp - 1] == '{'
+            if sig && out.len > 0 && ends_stmt(out.buf[out.len - 1].t) {
                 out.push(Token{t: Nl, pos: lexer_pos(file, line, i, line_start)})
             }
             i += 1
@@ -388,7 +604,12 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             continue
         }
         p := lexer_pos(file, line, i, line_start)
-        if ident_tab[c] && !is_digit(c) {
+        // room for one token: the hot paths below store it without `push`
+        if out.len == len(out.buf) {
+            out.reserve(out.len + 1)
+        }
+        cls := byte_cls[c]
+        if cls == CL_IDENT {
             st := i
             h := (AST_SYM_H0 ^ u64(c)) * AST_SYM_HMUL
             i += 1
@@ -396,114 +617,51 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 h = (h ^ u64(s[i])) * AST_SYM_HMUL
                 i += 1
             }
-            w := src[st..i]
-            k := kw_index(w)
-            if k >= 0 {
-                out.push(Token{t: Kw(k), pos: p})
+            id := ast_sym_hashed(src[st..i], h)
+            if id < kw_of_sym.len && kw_of_sym[id] >= 0 {
+                out.buf[out.len] = Token{t: Kw(kw_of_sym[id]), pos: p}
             } else {
-                out.push(Token{t: Id(ast_sym_name(ast_sym_hashed(w, h))), pos: p})
+                out.buf[out.len] = Token{t: Id(ast_sym_name(id)), pos: p}
             }
+            out.len += 1
             continue
         }
-        if is_digit(c) {
-            st := i
-            if c == '0' && i + 1 < len(s) && (s[i + 1] == 'x' || s[i + 1] == 'b' || s[i + 1] == 'o') {
-                radix := match s[i + 1] {
-                    'x' => 16
-                    'b' => 2
-                    _ => 8
+        if cls == CL_P1 || cls == CL_P {
+            c1: u8 = 0
+            c2: u8 = 0
+            plen := 1
+            if cls == CL_P {
+                c1 = if i + 1 < n { s[i + 1] } else { 0 }
+                c2 = if i + 2 < n { s[i + 2] } else { 0 }
+                plen = punct_len(c, c1, c2)
+            } else if c == '(' || c == '[' || c == '{' {
+                if sp == len(stk) {
+                    more := alloc[u8](2 * sp)
+                    copy(more, stk)
+                    stk = more
                 }
-                i += 2
-                v: u64 = 0
-                any := false
-                big := false
-                bad := false
-                while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
-                    if s[i] != '_' {
-                        match to_digit(s[i], radix) {
-                            Some(d) => {
-                                if v > (0xFFFFFFFFFFFFFFFF - u64(d)) / u64(radix) {
-                                    big = true
-                                }
-                                v = v * u64(radix) + u64(d)
-                            }
-                            None => {
-                                if !bad {
-                                    errs.push(Diag{pos: p, msg: fmt("invalid digit `", s[i..i + 1], "` in a base-", radix, " integer literal")})
-                                }
-                                bad = true
-                            }
-                        }
-                        any = true
-                    }
-                    i += 1
-                }
-                if !any {
-                    errs.push(Diag{pos: p, msg: "empty integer literal"})
-                }
-                if big {
-                    errs.push(Diag{pos: p, msg: "integer literal too large"})
-                    v = 0
-                }
-                out.push(Token{t: Int(v, false), pos: p})
-                continue
-            }
-            while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
-                i += 1
-            }
-            is_float := false
-            // after a `.` a number is a tuple field: `t.0.1` is (t.0).1
-            field := out.len > 0 && out[out.len - 1].t == P('.')
-            if !field && i + 1 < len(s) && s[i] == '.' && is_digit(s[i + 1]) {
-                is_float = true
-                i += 1
-                while i < len(s) && (is_digit(s[i]) || s[i] == '_') {
-                    i += 1
+                stk[sp] = c
+                sp += 1
+            } else if c == ')' || c == ']' || c == '}' {
+                // (an unmatched closing bracket is left to the parser)
+                if sp > 0 {
+                    sp -= 1
                 }
             }
-            if !field && i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-                j := i + 1
-                if j < len(s) && (s[j] == '+' || s[j] == '-') {
-                    j += 1
-                }
-                if j < len(s) && is_digit(s[j]) {
-                    is_float = true
-                    i = j
-                    while i < len(s) && is_digit(s[i]) {
-                        i += 1
-                    }
-                }
+            code := i64(c)
+            if plen >= 2 {
+                code |= i64(c1) << 8
             }
-            // the literal without its underscores
-            text := s[st..i]
-            if contains(text, '_') {
-                tbuf := alloc[u8](i - st)
-                tn := 0
-                for k in st..i {
-                    if s[k] != '_' {
-                        tbuf[tn] = s[k]
-                        tn += 1
-                    }
-                }
-                text = tbuf[..tn]
+            if plen == 3 {
+                code |= i64(c2) << 16
             }
-            if is_float {
-                v, ok := parse_f64(text)
-                if ok {
-                    out.push(Token{t: Float(v, lexer_f32(text, v)), pos: p})
-                } else {
-                    errs.push(Diag{pos: p, msg: "invalid float literal"})
-                    out.push(Token{t: Float(0.0, 0.0), pos: p})
-                }
-            } else {
-                v, ok := parse_u64(text)
-                if ok {
-                    out.push(Token{t: Int(v, true), pos: p})
-                } else {
-                    errs.push(Diag{pos: p, msg: "integer literal too large"})
-                    out.push(Token{t: Int(0, true), pos: p})
-                }
-            }
+            out.buf[out.len] = Token{t: P(code), pos: p}
+            out.len += 1
+            i += plen
+            continue
+        }
+        if cls == CL_DIGIT {
+            i = lex_number(s, i, p, &out, errs)
             continue
         }
         if c == '`' {
@@ -526,138 +684,10 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             continue
         }
         if c == '"' || c == '\'' {
-            q := c
-            i += 1
-            // without escapes the literal is the text between the quotes
-            j := i
-            while j < n && s[j] != q && s[j] != '\n' && s[j] != '\\' {
-                j += 1
-            }
-            if j < n && s[j] == q {
-                lit := s[i..j]
-                i = j + 1
-                if q == '"' {
-                    out.push(Token{t: Str(lit), pos: p})
-                } else {
-                    if len(lit) != 1 {
-                        errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
-                    }
-                    first: u8 = 0
-                    if len(lit) > 0 {
-                        first = lit[0]
-                    }
-                    out.push(Token{t: Int(u64(first), false), pos: p})
-                }
-                continue
-            }
-            buf := vec[u8]()
-            closed := false
-            while i < len(s) {
-                d := s[i]
-                if d == q {
-                    closed = true
-                    i += 1
-                    break
-                }
-                if d == '\n' {
-                    break
-                }
-                if d == '\\' && i + 1 < len(s) && s[i + 1] != '\n' {
-                    i += 1
-                    e := s[i]
-                    shown, elen := char_at(s, i)
-                    i += 1
-                    match e {
-                        'n' => buf.push('\n')
-                        't' => buf.push('\t')
-                        'r' => buf.push('\r')
-                        '0' => buf.push(0)
-                        '\\' => buf.push('\\')
-                        '"' => buf.push('"')
-                        '\'' => buf.push('\'')
-                        'x' => {
-                            v: u32 = 0
-                            n := 0
-                            while n < 2 && i < len(s) {
-                                match to_digit(s[i], 16) {
-                                    Some(dg) => {
-                                        v = v * 16 + u32(dg)
-                                        i += 1
-                                        n += 1
-                                    }
-                                    None => {
-                                        break
-                                    }
-                                }
-                            }
-                            if n != 2 {
-                                errs.push(Diag{pos: p, msg: "\\x escape needs two hex digits"})
-                            }
-                            buf.push(u8(v))
-                        }
-                        _ => {
-                            errs.push(Diag{pos: p, msg: fmt("unknown escape \\", shown)})
-                            i += elen - 1
-                        }
-                    }
-                    continue
-                }
-                buf.push(d)
-                i += 1
-            }
-            if !closed {
-                errs.push(Diag{pos: p, msg: "unterminated string/char literal"})
-            }
-            if q == '"' {
-                out.push(Token{t: Str(buf[..buf.len]), pos: p})
-            } else {
-                if buf.len != 1 {
-                    errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
-                }
-                first: u8 = 0
-                if buf.len > 0 {
-                    first = buf[0]
-                }
-                out.push(Token{t: Int(u64(first), false), pos: p})
-            }
+            i = lex_quoted(s, i, p, &out, errs)
             continue
         }
-        c1: u8 = if i + 1 < n { s[i + 1] } else { 0 }
-        c2: u8 = if i + 2 < n { s[i + 2] } else { 0 }
-        plen := punct_len(c, c1, c2)
-        if plen > 0 {
-            if c == '(' || c == '[' || c == '{' {
-                stack.push(c)
-            } else if c == ')' || c == ']' || c == '}' {
-                // (an unmatched closing bracket is left to the parser)
-                if stack.len > 0 {
-                    stack.pop()
-                }
-            }
-            code := i64(c)
-            if plen >= 2 {
-                code |= i64(c1) << 8
-            }
-            if plen == 3 {
-                code |= i64(c2) << 16
-            }
-            out.push(Token{t: P(code), pos: p})
-            i += plen
-        } else {
-            shown, clen := char_at(s, i)
-            if clen > 1 {
-                // the code point too: the character may be invisible (U+00A0, U+200B)
-                cp := u64(s[i]) & (0x7F >> u64(clen))
-                for k in 1..clen {
-                    cp = (cp << 6) | u64(s[i + k] & 0x3F)
-                }
-                shown = fmt(shown, "' (U+", to_upper(hex(cp, 4)), ")")
-            } else {
-                shown = fmt(shown, "'")
-            }
-            errs.push(Diag{pos: p, msg: fmt("unexpected character '", shown)})
-            i += clen
-        }
+        i = bad_char(s, i, p, errs)
     }
     p := lexer_pos(file, line, i, line_start)
     if out.len > 0 {
