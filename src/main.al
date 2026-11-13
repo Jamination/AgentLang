@@ -50,7 +50,6 @@ priv const LINUX_ONLY = [_](str, str){
     ("alsa", ""),
     ("input", ""),
     ("window", "std.dx12 binds the user32 window functions"),
-    ("audio", ""),
     ("vk", ""),
 }
 
@@ -80,6 +79,8 @@ priv const STD_MODULES = [_](str, str){
     ("window", embed("../std/window.al")),
     ("input", embed("../std/input.al")),
     ("audio", embed("../std/audio.al")),
+    ("audio_linux", embed("../std/audio_linux.al")),
+    ("audio_windows", embed("../std/audio_windows.al")),
     ("vk", embed("../std/vk.al")),
     ("dx12", embed("../std/dx12.al")),
     ("metal", embed("../std/metal.al")),

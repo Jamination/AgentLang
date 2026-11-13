@@ -20,10 +20,7 @@ std/image_ops Linux system calls (mkdir, unlink, getpid)
 std/os Linux programs (/bin/sh, head, tr) and system calls (chmod)
 std/os_spawn Linux programs (/bin/sh, sleep, echo) and /proc
 std/time_huge runs the Linux program timeout
-std/audio_mixer std.audio is Linux only (ALSA)
-std/audio_pitch_extreme std.audio is Linux only (ALSA)
-std/audio_wav std.audio is Linux only (ALSA); Linux system calls (unlink)
-sys/audio_null std.audio is Linux only (ALSA)
+std/audio_wav Linux system calls (unlink) and Linux paths (/tmp)
 std/input std.input is Linux only (evdev)
 std/input_actions std.input is Linux only (evdev)
 std/input_key_names std.input is Linux only (evdev)

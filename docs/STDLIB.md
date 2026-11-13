@@ -24,7 +24,7 @@ are `priv` do not appear: a program may reuse their names).
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
 | `std.input` | per-frame key / mouse state, action maps | nothing | [std/input.md](std/input.md) |
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` | [std/window.md](std/window.md) |
-| `std.audio` | WAV, software mixer, sound device output | `libasound.so.2` (device only) | [std/audio.md](std/audio.md) |
+| `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings (type-check only: no Windows backend yet) | Windows DLLs | [std/dx12.md](std/dx12.md) |
@@ -36,8 +36,8 @@ dynamically linked executable that needs only the libraries of the functions it 
 For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
-`std.asset`, `std.os` and `std.image` work the same on Windows (through kernel32.dll; the
-differences are in their pages). `std.input`, `std.window`, `std.audio`, `std.wayland`,
+`std.asset`, `std.os`, `std.image` and `std.audio` (its device through WASAPI) work the same on
+Windows (the differences are in their pages). `std.input`, `std.window`, `std.wayland`,
 `std.vk`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
 compile error that names the module and the target.
 

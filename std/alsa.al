@@ -68,3 +68,9 @@ extern "libasound.so.2" fn snd_pcm_sw_params_set_start_threshold(pcm: *u8, param
 extern "libasound.so.2" fn snd_pcm_sw_params_set_avail_min(pcm: *u8, params: *u8, frames: u64) -> i32
 extern "libasound.so.2" fn snd_pcm_sw_params(pcm: *u8, params: *u8) -> i32
 extern "libasound.so.2" fn snd_strerror(errnum: i32) -> *u8
+// device name hints: snd_device_name_hint(-1, "pcm", &hints) lists every PCM as a nil-terminated
+// array; snd_device_name_get_hint(hint, "NAME" | "DESC" | "IOID") returns a malloc'ed string
+// (nil if absent; free it with libc free)
+extern "libasound.so.2" fn snd_device_name_hint(card: i32, iface: *u8, hints: ***u8) -> i32
+extern "libasound.so.2" fn snd_device_name_get_hint(hint: *u8, id: *u8) -> *u8
+extern "libasound.so.2" fn snd_device_name_free_hint(hints: **u8) -> i32

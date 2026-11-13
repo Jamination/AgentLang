@@ -1,0 +1,9 @@
+devices: []
+default opens: false true
+error: WASAPI: no playback device (GetDefaultAudioEndpoint: HRESULT 0x80070490, E_NOTFOUND)
+named opens: false
+error: WASAPI: no playback device named "Speakers (none)" (audio_devices() lists them)
+bad format opens: false
+error: audio_open: bad format (0 Hz, 2 channels)
+0 0
+null opens: true true 2400 600

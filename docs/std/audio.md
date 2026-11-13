@@ -1,18 +1,20 @@
 # std.audio: sounds, WAV files, mixer and audio output
 
-`use std.audio` (Linux only: it loads std.alsa, so with `--target windows` the `use` is a
-compile error) provides
+`use std.audio` provides
 
 - `Sound`: decoded PCM audio in memory, plus tone / noise generators,
 - WAV decoding and encoding,
 - `Mixer`: a software mixer with a fixed pool of voices (volume, pan, pitch, looping),
-- `AudioDevice`: playback through ALSA, fed from the game loop.
+- `AudioDevice`: playback fed from the game loop, through ALSA on Linux and WASAPI on Windows
+  (`--target windows`), with the same functions and behaviour.
 
 Sounds, WAV and the mixer are pure AL: a program that uses only them stays a static
 executable and its output is bit-for-bit reproducible, so game audio can be tested by
-checksumming the mix. Only the four `audio_*` device functions call ALSA
-(`libasound.so.2`, declared in `std.alsa`); using one of them makes the program dynamically
-linked.
+checksumming the mix. Only the `audio_*` device functions use the system: on Linux ALSA
+(`libasound.so.2`, declared in `std.alsa`; using one of them makes the program dynamically
+linked), on Windows `ole32.dll` (COM) and the audio engine behind it. The device code is in the
+module's OS layers, `std/audio_linux.al` and `std/audio_windows.al`, which `use std.audio`
+loads for the target.
 
 ## Sound
 
@@ -95,17 +97,66 @@ Behaviour:
 
 | Function | |
 |----------|---|
-| `audio_open(rate, channels) -> (*AudioDevice, bool)` | open the default playback device, 16-bit, about 50 ms buffer |
-| `audio_open(name: str, rate, channels, latency_ms) -> (*AudioDevice, bool)` | open a named ALSA device (`"default"`, `"hw:0"`, `"null"`) with a chosen buffer length |
+| `audio_open(rate, channels) -> (*AudioDevice, bool)` | open the default playback device with about 50 ms of buffer |
+| `audio_open(name: str, rate, channels, latency_ms) -> (*AudioDevice, bool)` | open a named device (see [Devices](#devices)) with a chosen buffer length |
 | `audio_pump(d, m: *Mixer) -> i64` | mix and write as many frames as the device accepts right now; never waits |
 | `audio_write(d, m: *Mixer, frames) -> i64` | mix and write exactly `frames` frames, waiting while the buffer is full |
-| `audio_close(d)` | stop and close |
+| `audio_close(d)` | stop at once and close |
+| `audio_error() -> str` | why the last `audio_open` failed; `""` after a successful one |
+| `audio_devices() -> []str` | the names of the playback devices `audio_open` accepts (allocates) |
 
-`AudioDevice` fields: `rate`, `channels`, `buffer_frames` (device buffer = output latency),
-`period_frames`, `underruns` (recovered stalls). The mixer must have the device's rate and
-channel count. `audio_open` returns `(nil, false)` when there is no usable device (ALSA may
-print a diagnostic to standard error); all other device functions accept a nil or closed
-device and do nothing, so a game runs unchanged on a machine without sound.
+`AudioDevice` fields: `rate`, `channels` (the format the program opened, which the mixer must
+have), `buffer_frames` (device buffer = output latency) and `period_frames` (the device's
+transfer unit), both in frames of `rate`, `underruns` (stalls: the buffer ran dry), `lost`
+(Windows: the device is gone, see [Device loss](#device-loss)), and `os`, the OS layer's own
+state. `audio_open` returns `(nil, false)` when there is no usable device (ALSA may also print
+a diagnostic to standard error) and `audio_error()` says why; all other device functions
+accept a nil or closed device and do nothing, so a game runs unchanged on a machine without
+sound.
+
+### Devices
+
+| | Linux (ALSA) | Windows (WASAPI) |
+|---|---|---|
+| `"default"` | the ALSA `default` PCM | the default playback endpoint (role "console"); follows it when the user picks another default (checked once a second, the stream moves) |
+| `"null"` | ALSA's null PCM: discards everything, never waits | the same, built in: discards everything, never waits |
+| other names | any ALSA PCM name (`"hw:0"`, `"plughw:CARD=PCH"`, `"pipewire"`) | the friendly name of an active endpoint (`"Speakers (Realtek(R) Audio)"`) or its endpoint ID string |
+| `audio_devices()` | the PCM names of the ALSA configuration and the cards that can play | the friendly names of the active playback endpoints |
+
+**Formats.** On Linux the device is opened as 16-bit at the program's rate and channel count;
+ALSA's plug layer converts. On Windows the stream is opened in shared mode in the audio
+engine's mix format exactly as it reports it (`GetMixFormat`: usually 32-bit float at 44.1 or
+48 kHz with 2 or more channels), and std.audio converts itself: a different rate by linear
+interpolation (as the mixer's pitch), channels by the same rules as ALSA's plug layer (a mono
+program plays on the first two channels, a stereo program on front left and right with further
+channels silent, a mono device gets the average), and the samples to the mix format's type
+(32-bit float, or 16, 24 or 32-bit integers). `buffer_frames` is the engine's buffer for the
+requested latency (it may round up), `period_frames` the engine period (usually 10 ms).
+
+**`audio_error()` texts on Windows** name the call and the HRESULT: `WASAPI: no playback device
+(GetDefaultAudioEndpoint: HRESULT 0x80070490, E_NOTFOUND)` when the system has no active
+playback device (also under Wine without a sound server), `WASAPI: no playback device named
+"..." (audio_devices() lists them)`, `WASAPI: <call> failed: HRESULT 0x...` otherwise (for
+example `CoCreateInstance(MMDeviceEnumerator)` when the audio service is not running), and
+`audio_open: bad format (...)` for a rate or channel count below 1. On Linux they are the ALSA
+error text: `snd_pcm_open(name): No such file or directory`.
+
+**COM.** On Windows `audio_open` and `audio_devices` initialise COM on the calling thread as a
+single-threaded apartment (`CoInitializeEx`, balanced at `audio_close`); a thread that already
+uses the multithreaded apartment keeps it. Call the device functions from one thread.
+
+### Device loss
+
+On Windows a device can go away while it plays: unplugged headphones or USB speakers, a
+disabled endpoint, a changed format in the sound settings, the audio service restarting
+(`AUDCLNT_E_DEVICE_INVALIDATED`, or any other failing call). Then the stream is released and
+`lost` becomes true; `audio_pump` returns 0 and does not advance the mixer (the sounds pause,
+as when ALSA fails on Linux), `audio_write` returns early with the frames written so far after
+waiting for up to the length of the missing frames (at most 100 ms, so a loop around it does
+not spin). Both open the device again by the same name, at once and then at most every 500 ms;
+for `"default"` that is the new default device. When that works `lost` is false again and the
+sounds continue where they paused. A device that stays away costs no memory per attempt. On
+Linux, `lost` stays false: a device that fails ends playback (`audio_pump` returns 0).
 
 ### Pumping from the game loop
 
@@ -186,15 +237,32 @@ loaded: true 96000 frames, 2 channels, 48000 Hz
 played 96000 frames
 ```
 
+[examples/audio_tone.al](../../examples/audio_tone.al) plays a melody on the default device the
+way a game does (notes started from the frame loop, one `audio_pump` per frame), on both
+systems.
+
+## Testing the Windows device
+
+`tests/run.sh --target windows` runs the device tests under Wine without any sound device
+(`sys/audio_nodevice`: the documented error; `sys/audio_null`). `tests/winaudio/run.sh`
+tests WASAPI end to end under Wine against a private PipeWire server whose only outputs are
+null sinks (stereo 48 kHz and 5.1 at 44.1 kHz; it checks that before playing anything): it
+records the sinks' monitors while `tests/winaudio/tone.al` plays a known signal through
+`audio_pump` and `audio_write` at several rates and channel counts, and checks frequency,
+amplitude, channel order, continuity and length (`check.al`), counts underruns of a stalling
+loop, and restarts the server under a playing program to check device loss. It needs
+`pipewire`, `pipewire-pulse` and Wine.
+
 ## std.alsa
 
-`use std.alsa` (included by `std.audio`) declares the ALSA PCM functions used above and the
+`use std.alsa` (Linux only; included by `std.audio` for Linux) declares the ALSA PCM functions used above and the
 usual rest of the playback API with their C names and signatures: `snd_pcm_open`,
 `snd_pcm_set_params`, `snd_pcm_get_params`, `snd_pcm_writei`, `snd_pcm_readi`,
 `snd_pcm_avail`, `snd_pcm_avail_update`, `snd_pcm_delay`, `snd_pcm_recover`, `snd_pcm_wait`,
 `snd_pcm_prepare`, `snd_pcm_start`, `snd_pcm_drop`, `snd_pcm_drain`, `snd_pcm_pause`,
 `snd_pcm_resume`, `snd_pcm_state`, `snd_pcm_nonblock`, `snd_pcm_close`, the
-`snd_pcm_hw_params_*` / `snd_pcm_sw_params_*` functions for explicit configuration, and
-`snd_strerror`; constants `SND_PCM_STREAM_*`, `SND_PCM_NONBLOCK`, `SND_PCM_FORMAT_*`,
+`snd_pcm_hw_params_*` / `snd_pcm_sw_params_*` functions for explicit configuration,
+`snd_strerror`, and the device name hints (`snd_device_name_hint`,
+`snd_device_name_get_hint`, `snd_device_name_free_hint`); constants `SND_PCM_STREAM_*`, `SND_PCM_NONBLOCK`, `SND_PCM_FORMAT_*`,
 `SND_PCM_ACCESS_RW_INTERLEAVED`, `SND_PCM_STATE_*`. Handles are `*u8`, frame counts `i64` /
 `u64`, results are negative `errno` values on failure.
