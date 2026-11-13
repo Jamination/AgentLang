@@ -90,3 +90,7 @@ The compiler compiles its own 34,000 lines in about 0.12 s without optimisation 
 | `examples/`, `bench/` | sample programs; the benchmarks in AL and C |
 | `tests/` | conformance suite (`tests/run.sh`) and fuzzers (`tests/gen/`) |
 | `verify.sh` | everything: self-compilation to a fixed point, tests, benchmarks |
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
