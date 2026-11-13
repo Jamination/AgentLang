@@ -171,6 +171,20 @@ Compiling the compiler (about 25,800 lines and the 2,700 of the prelude) takes a
   needs its type from the other arms (`needs_type`) is lowered after all others. `covers`
   is the whole unreachable-pattern rule.
 
+## Parallel back end
+
+`x86_compile` compiles functions independently of each other. With at least 64 reachable
+functions and more than one CPU (the CPUs of `sched_getaffinity`, limited by a cgroup quota
+in `/sys/fs/cgroup/cpu.max`, at most 6) it forks workers (`fork_worker` in `src/base.al`) that
+each compile a share of the functions balanced by IR size and write the machine code,
+relocations and float constants into a mapping shared with the compiler (`emit_put_code`);
+the compiler compiles its own share meanwhile, then builds the float constant pool in the
+order of the functions, so the output is byte-identical to a sequential compile. Whatever a
+worker does not deliver (it crashed, failed or ran out of room) the compiler compiles itself;
+workers are silent unless `ALC_DEBUG` is set. `ALC_JOBS=n` sets the number of processes
+(`ALC_JOBS=1`: sequential); `--emit-asm` and the per-function debug output (`ALC_DEBUG` other
+than `mem`) are always sequential.
+
 ## Debugging switches
 
 `ALC_DEBUG=verify` (IR verifier between passes), `trace`, `mir`, `unroll`, `mem`;

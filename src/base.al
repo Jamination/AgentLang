@@ -85,6 +85,89 @@ fn run_program(path: str, argv: []str) -> i64 {
     return 128 + (st & 0x7F)
 }
 
+// ---------- worker processes (the parallel back end) ----------
+// the number of CPUs this process may use, at least 1: those it may run on
+// (sched_getaffinity), limited by a cgroup v2 CPU quota (/sys/fs/cgroup/cpu.max:
+// "quota period", or "max period" without a limit)
+fn cpu_count() -> i64 {
+    mask: [16]u64
+    n := syscall(204, 0, 128, ptr(mask))
+    if n <= 0 {
+        return 1
+    }
+    c := 0
+    for i in 0..min(n / 8, 16) {
+        c += i64(popcnt(mask[i]))
+    }
+    text, ok := read_file("/sys/fs/cgroup/cpu.max")
+    if ok {
+        parts := fields(text)
+        if parts.len == 2 {
+            q, qok := parse_i64(parts[0])
+            p, pok := parse_i64(parts[1])
+            if qok && pok && q > 0 && p > 0 {
+                c = min(c, (q + p - 1) / p)
+            }
+        }
+    }
+    return max(c, 1)
+}
+
+// a zeroed mapping of `bytes` that forked children share with this process (pages are only
+// allocated when touched): its address, or 0
+fn shared_map(bytes: i64) -> i64 {
+    // PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE
+    r := syscall(9, 0, bytes, 3, 0x4021, -1, 0)
+    if r < 0 && r > -4096 {
+        return 0
+    }
+    return r
+}
+
+fn shared_unmap(addr: i64, bytes: i64) {
+    syscall(11, addr, bytes)
+}
+
+// fork after flushing standard output: 0 in the child, the child's pid in the parent, < 0 if
+// it failed. A quiet child writes its standard error to /dev/null (the parent redoes the work
+// of a child that fails, so its messages would only confuse).
+fn fork_worker(quiet: bool) -> i64 {
+    flush()
+    pid := syscall(57)
+    if pid == 0 && quiet {
+        fd := syscall(2, cstr("/dev/null"), 1)
+        if fd >= 0 {
+            syscall(33, fd, 2)
+        }
+    }
+    return pid
+}
+
+// ends a forked worker at once (its copy of the buffered output is not written)
+fn worker_exit(code: i64) {
+    syscall(231, code)
+}
+
+// waits for a forked worker: its exit status, 128 + the signal that ended it, or -1
+fn wait_worker(pid: i64) -> i64 {
+    status: [1]i64
+    loop {
+        r := syscall(61, pid, ptr(status), 0, 0)
+        if r == -4 {
+            continue
+        }
+        if r < 0 {
+            return -1
+        }
+        break
+    }
+    st := status[0] & 0xFFFFFFFF
+    if st & 0x7F == 0 {
+        return (st >> 8) & 0xFF
+    }
+    return 128 + (st & 0x7F)
+}
+
 // Deep recursion needs a big stack: if the stack limit is below `bytes`, raise it and start
 // the program again (the limit only applies to a new process image). Call first in main.
 fn ensure_stack(bytes: i64) {
