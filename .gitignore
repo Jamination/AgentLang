@@ -20,3 +20,6 @@ bench/bin/
 !/tools/**/*.*
 !/bench/**/*.*
 !/tests/one_target
+
+# scratch output of bench/run.sh (after the rules above, which would re-include it)
+/bench/bin/
