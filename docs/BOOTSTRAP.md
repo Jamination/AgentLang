@@ -23,15 +23,15 @@ way that changes its behaviour produces a different stage 3. `build/alc` is stag
 also compiles the compiler for Windows, `build/alc.exe` (see [the compiler on
 Windows](#the-compiler-on-windows)).
 
-The seed is a static x86-64 Linux executable of about 2.8 MB. It only has to be replaced
+The seed is a static x86-64 Linux executable of about 3.7 MB. It only has to be replaced
 (`--reseed`, then commit `bootstrap/alc`) when the sources start to use a language feature
-the seed does not know, or a run-time library function it does not have (stage 1 is linked
-with the seed's copy of the library, so a new `__os_*` function for the compiler is added
-first, then the seed is replaced, then the compiler calls it); add the feature, build,
-reseed, then use it. `ALC_SEED=/path/to/alc` selects another seed. So the compiler sources
-(`src/*.al` except the run-time library) do not use `when` until the seed knows it; the
-run-time library (`src/prelude*.al`) and the bundled modules (`std/`) are compiled by the new
-compiler and may.
+the seed does not know, or a run-time library function it does not have: stage 1 is linked
+with the seed's copy of the library, so add the feature or library function, build, reseed,
+then use it. `ALC_SEED=/path/to/alc` selects another seed. What the compiler needs of its
+host is not in the library but in `src/host_linux.al` / `src/host_windows.al` (system calls,
+`extern` kernel32.dll functions), which are compiler sources: a new host function goes there
+and needs no reseed. The run-time library (`src/prelude*.al`) and the bundled modules (`std/`)
+are compiled by the new compiler.
 
 Stage 1 is compiled by the seed and may therefore lay out types as an older compiler did (the
 seed before the change to 4-byte enum tags stored every tag in 8 bytes). The compiler never
@@ -58,9 +58,10 @@ executables before and after); the conventions below describe the result.
 
 | Path | Contents |
 |------|----------|
-| `src/main.al` | driver: arguments, source loading (files and the `when`s that include them), bundled modules, diagnostics output; lists every other file |
+| `src/main.al` | driver: arguments, source loading (files and the `when`s that include them), bundled modules, diagnostics output; lists every other file except the parts below that one or two files include themselves |
 | `src/when.al` | `when` (deciding conditions, the branches of function bodies) and `-D NAME=VALUE` |
-| `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), processes, the working-memory regions |
+| `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), `align_up`, paths (`path_join`, `path_parent`), `file_name`, `os_error`, processes, the working-memory regions |
+| `src/host_linux.al`, `host_windows.al` | the compiler's host (the functions listed at the top of `base.al`: running programs, the big stack, worker processes): included by `base.al` with `when TARGET_OS == ...` |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
@@ -70,6 +71,7 @@ executables before and after); the conventions below describe the result.
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
 | `src/elf.al` | ELF writer (Linux) |
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table |
+| `src/objwrite.al` | what the two writers share (little-endian output, the layout of text, read-only data, bss, relocations): included by `elf.al` and `pe.al` |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
 | `src/prelude_linux.al`, `prelude_windows.al` | its OS layer for the target (`--target`): system calls on Linux, kernel32.dll on Windows; the functions a layer defines are listed at the top of `prelude.al` |
 
@@ -141,7 +143,7 @@ stored in bulk (the instruction lists of the blocks, the passes' tables: `Vec[i3
 `NOV` reads as -1). The places that make new numbers (`mk`, `new_block`, `new_vreg`, and
 those of types, symbols, functions and frame slots) assert that they fit in 32 bits.
 
-Compiling the compiler (about 34,000 lines including the prelude) takes about 0.11 s at `-O0` and 0.83 s optimised, using about 0.12 GB (`bench/compile.sh`).
+Compiling the compiler (about 36,500 lines including the run-time library) takes about 0.12 s at `-O0` and 0.84 s optimised, using about 0.12 GB (`bench/compile.sh`).
 `ALC_DEBUG=mem` prints memory and time after each phase.
 
 ## Notes on language features
@@ -224,7 +226,7 @@ Compiling the compiler (about 34,000 lines including the prelude) takes about 0.
 
 `x86_compile` compiles functions independently of each other. With more than one CPU (the
 CPUs of `sched_getaffinity`, limited by a cgroup quota in `/sys/fs/cgroup/cpu.max`, at most 6)
-it forks workers (`fork_worker` in `src/base.al`; on Windows, which has no fork, the compile is
+it forks workers (`fork_worker` in `src/host_linux.al`; on Windows, which has no fork, the compile is
 always sequential: `can_fork`). The functions go into a queue, largest
 first: a pipe filled before the fork, from which every process (the compiler too) takes one
 function at a time (`queue_new`, `queue_take`), so all processes finish at about the same
@@ -303,10 +305,11 @@ byte for byte, and `alc.exe build --target linux src/main.al` is byte-identical 
 (`./build.sh --windows-check`; `tests/run.sh --target windows --host-wine build/alc.exe` runs
 the conformance suite with it).
 
-- **The host.** What the compiler needs of the system it runs on is in the OS layers of the
-  run-time library (the `__os_*` functions at the end of `src/prelude_linux.al` and
-  `src/prelude_windows.al`), reached through `src/base.al`; the compiler sources make no
-  system call and declare no `extern`. The default `--target` is the host.
+- **The host.** What the compiler needs of the system it runs on is in `src/host_linux.al`
+  (system calls) and `src/host_windows.al` (kernel32.dll `extern`s), one of which `src/base.al`
+  includes with `when TARGET_OS == ...`; files, paths and the environment go through the OS
+  layers of the run-time library (the `__os_*` functions of `src/prelude_linux.al` and
+  `src/prelude_windows.al`). The default `--target` is the host.
 - **Stack.** The compiler needs a big stack (deep recursion in the front end and SSA
   construction): `with_stack(1 GB, ...)` at the start of `main`. Linux raises the stack limit
   and starts the compiler again (`ALC_STACK_SET` holds the original limit, which the programs
