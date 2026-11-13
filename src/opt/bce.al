@@ -623,8 +623,7 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: 
 // removes the checks that can never fail, in every loop (nothing here changes the loops)
 priv fn eliminate(f: *Func) -> bool {
     licm_make_preheaders(f)
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
+    cfg, loops := cfg_loops(f)
     def_block := vec[i64]()
     in_loop := vec_fill(f.blocks.len, false)
     did := false
@@ -652,8 +651,7 @@ fn bce_run(f: *Func) -> bool {
     }
     for it in 0..200 {
         licm_make_preheaders(f)
-        cfg := cfg_new(f)
-        loops := loops_new(f, &cfg)
+        cfg, loops := cfg_loops(f)
         order := licm_loop_order(&loops)
         // one analysis serves every loop of the round except the ancestors of a loop that
         // changed (their block lists and dominators are stale); deeper loops come first.

@@ -1070,19 +1070,26 @@ priv fn fold_insts(f: *Func) -> bool {
     // made at the first replacement
     repl := vec[i64]()
     nrepl := 0
-    // the use counts are only read for an Xor or Or (simplify never makes one from another op)
+    // The use counts are only read for an Xor or Or with two And arguments that are not new.
+    // simplify never makes an Xor or Or of another op, and an old instruction becomes an And
+    // only from a URem: without those at the start the counts are never read.
     has_xor_or := false
+    has_and := false
     scan: for b in rpo {
         for v in f.blocks[b].insts {
             o := f.insts[v].op
             if o == Xor || o == Or {
                 has_xor_or = true
+            } else if o == And || o == URem {
+                has_and = true
+            }
+            if has_xor_or && has_and {
                 break scan
             }
         }
     }
     uses := vec[i64]()
-    if has_xor_or {
+    if has_xor_or && has_and {
         uses = f.use_counts()
     }
     cx := Ctx{f: f, new_insts: vec[i64](), changed: false, uses: uses}
@@ -1377,8 +1384,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         // per-round tables live on the scratch heap (see base.al)
         scratch_reset()
         // (the CFG analyses are kept for the next pass: not on the scratch heap)
-        preds := f.preds()
-        rpo := f.rpo()
+        rpo, preds := f.rpo_preds()
         scratch_on()
         merged := false
         repl := vec_fill(f.insts.len, NOV)
@@ -1446,9 +1452,8 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        preds := f.preds()
+        rpo, preds := f.rpo_preds()
         did := false
-        rpo := f.rpo()
         for e in rpo {
             if e == 0 || !f.blocks[e].insts.is_empty() {
                 continue
@@ -1521,8 +1526,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        preds := f.preds()
-        rpo := f.rpo()
+        rpo, preds := f.rpo_preds()
         scratch_on()
         uses := f.use_counts()
         // blocks whose edges or phis changed this round: their entries in preds / phi lists are
@@ -1838,9 +1842,8 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        preds := f.preds()
+        rpo, preds := f.rpo_preds()
         did := false
-        rpo := f.rpo()
         for b in rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 => (c1, t1, e1)

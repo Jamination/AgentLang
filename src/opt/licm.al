@@ -29,8 +29,7 @@ fn licm_loop_order(loops: *Loops) -> Vec[i64] {
 }
 
 fn licm_make_preheaders(f: *Func) -> bool {
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
+    cfg, loops := cfg_loops(f)
     changed := false
     for li in 0..loops.loops.len {
         h := loops.loops[li].header
@@ -130,8 +129,7 @@ priv fn run_guaranteed(cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> boo
 
 fn licm_run(f: *Func) -> bool {
     changed := licm_make_preheaders(f)
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
+    cfg, loops := cfg_loops(f)
     if loops.loops.is_empty() {
         return changed
     }

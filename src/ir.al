@@ -537,6 +537,22 @@ fn preds(self: *Func) -> Vec[Vec[i64]] {
     return memo_preds
 }
 
+// rpo and preds with one check of the memo
+fn rpo_preds(self: *Func) -> (Vec[i64], Vec[Vec[i64]]) {
+    if !memo_valid(self) {
+        return (self.rpo_compute(), self.preds_compute())
+    }
+    if !memo_has_rpo {
+        memo_rpo = self.rpo_compute()
+        memo_has_rpo = true
+    }
+    if !memo_has_preds {
+        memo_preds = self.preds_compute()
+        memo_has_preds = true
+    }
+    return (memo_rpo, memo_preds)
+}
+
 // reverse postorder of reachable blocks
 fn rpo(self: *Func) -> Vec[i64] {
     if !memo_valid(self) {
@@ -856,6 +872,27 @@ priv struct Loop {
 struct Loops {
     loops: Vec[Loop]
     loop_of: Vec[Opt[i64]] // innermost loop per block
+}
+
+// cfg_new and loops_new with one check of the memo
+fn cfg_loops(f: *Func) -> (Cfg, Loops) {
+    if !memo_valid(f) {
+        cfg := cfg_compute(f, f.rpo_compute())
+        return (cfg, loops_compute(f, &cfg))
+    }
+    if !memo_has_cfg {
+        if !memo_has_rpo {
+            memo_rpo = f.rpo_compute()
+            memo_has_rpo = true
+        }
+        memo_cfg = cfg_compute(f, memo_rpo)
+        memo_has_cfg = true
+    }
+    if !memo_has_loops {
+        memo_loops = loops_compute(f, &memo_cfg)
+        memo_has_loops = true
+    }
+    return (memo_cfg, memo_loops)
 }
 
 fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
