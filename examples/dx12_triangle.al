@@ -5,15 +5,15 @@
 // Options: --no-vsync (present as fast as possible), --warp (the software rasterizer),
 // --debug (the debug layer, if the Graphics Tools are installed), --frames N (quit after N
 // frames), --remove-device N (remove the device after N frames, to see how a lost device is
-// reported). Escape or closing the window quits.
+// reported). Escape or closing the window quits, F11 or Alt+Enter toggles fullscreen.
 //
-// It shows the parts of a real-time program: a flip-model swap chain on the window, two frames
-// in flight (one command allocator and fence value per back buffer), root constants, a sprite
-// overlay from std.dx12_util, resizing the swap chain with the window (ResizeBuffers), vsync,
-// reporting a removed device, and a clean shutdown that waits for the GPU and releases everything.
-//
-// The window is made here with user32 directly; once std.window runs on Windows this part becomes
-// window_open / poll / size / win32_hwnd(w).
+// It shows the parts of a real-time program: a std.window window whose HWND (win32_hwnd) gets
+// a flip-model swap chain, two frames in flight (one command allocator and fence value per back
+// buffer), root constants, a sprite overlay from std.dx12_util, resizing the swap chain with the
+// window (ResizeBuffers; std.window keeps the loop running while the user drags the window's
+// edge), vsync, reporting a removed device, and a clean shutdown that waits for the GPU and
+// releases everything.
+use std.window
 use std.dx12_util
 
 const FRAMES = 2
@@ -34,61 +34,6 @@ V vs_main(float2 pos : POSITION, float4 color : COLOR) {
 }
 float4 ps_main(V i) : SV_TARGET { return i.color; }
 `
-
-// ---- the window ------------------------------------------------------------------------------
-
-// written by the window procedure, which gets no context argument
-win_width: i64
-win_height: i64
-win_closed: bool
-
-fn window_proc(hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64 {
-    if msg == WM_SIZE {
-        win_width = lparam & 0xffff
-        win_height = (lparam >> 16) & 0xffff
-        return 0
-    }
-    if msg == WM_KEYDOWN && wparam == VK_ESCAPE {
-        DestroyWindow(hwnd)
-        return 0
-    }
-    if msg == WM_DESTROY {
-        win_closed = true
-        PostQuitMessage(0)
-        return 0
-    }
-    DefWindowProcW(hwnd, msg, wparam, lparam)
-}
-
-fn window_create(title: str, width: i64, height: i64) -> *u8 {
-    instance := GetModuleHandleW(nil)
-    class_name := utf16("ALDx12Triangle")
-    class := WNDCLASSEXW{
-        cbSize: u32(sizeof[WNDCLASSEXW]()), style: CS_HREDRAW | CS_VREDRAW, lpfnWndProc: window_proc,
-        hInstance: instance, hCursor: LoadCursorW(nil, cast[*u16](IDC_ARROW)), lpszClassName: class_name,
-    }
-    assert RegisterClassExW(&class) != 0, "RegisterClassExW"
-    rect := RECT{0, 0, i32(width), i32(height)}
-    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, 0)
-    hwnd := CreateWindowExW(0, class_name, utf16(title), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        rect.right - rect.left, rect.bottom - rect.top, nil, nil, instance, nil)
-    assert hwnd != nil, "CreateWindowExW"
-    ShowWindow(hwnd, SW_SHOW)
-    client: RECT
-    GetClientRect(hwnd, &client)
-    win_width = i64(client.right - client.left)
-    win_height = i64(client.bottom - client.top)
-    hwnd
-}
-
-// Handles the queued window messages.
-fn window_pump() {
-    msg: MSG
-    while PeekMessageW(&msg, nil, 0, 0, PM_REMOVE) != 0 {
-        TranslateMessage(&msg)
-        DispatchMessageW(&msg)
-    }
-}
 
 // ---- Direct3D 12 -----------------------------------------------------------------------------
 
@@ -304,24 +249,41 @@ fn main() -> i64 {
     }
     app.g = g
     print(fmt("device: ", g.adapter_name, if g.warp { " (WARP)" } else { "" }))
-    hwnd := window_create("AL Direct3D 12 triangle", 1280, 720)
-    app.width = max(win_width, 1)
-    app.height = max(win_height, 1)
-    create_swap_chain(&app, hwnd)
+    w, opened := window_open(WindowDesc{title: "AL Direct3D 12 triangle", width: 1280, height: 720, resizable: true})
+    if !opened {
+        eprint("cannot open a window")
+        gpu_close(&app.g)
+        return 1
+    }
+    width, height := w.size()
+    app.width = max(width, 1)
+    app.height = max(height, 1)
+    create_swap_chain(&app, win32_hwnd(w))
     create_pipeline(&app)
 
     start := clock_ns()
     frames := 0
     resizes := 0
-    while !win_closed && frames != max_frames {
-        window_pump()
-        if win_closed { break }
-        if win_width == 0 || win_height == 0 {      // minimized: nothing to draw into
-            Sleep(16)
+    while !w.should_close() && frames != max_frames {
+        // events: during a drag of the window's edge poll returns every 10-16 ms with the new size
+        w.poll()
+        inp := &w.input
+        if inp.key_pressed(KEY_ESCAPE) {
+            w.closing = true
+        }
+        if inp.key_pressed(KEY_F11) || (inp.key_pressed(KEY_ENTER) && inp.alt_down()) {
+            w.set_fullscreen(!w.fullscreen)
+        }
+        if w.should_close() {
+            break
+        }
+        width, height = w.size()
+        if width == 0 || height == 0 {              // nothing to draw into
+            sleep_ms(16)
             continue
         }
-        if win_width != app.width || win_height != app.height {
-            resize(&app, win_width, win_height)
+        if width != app.width || height != app.height {
+            resize(&app, width, height)
             resizes += 1
         }
         if frames == remove_at {
@@ -344,6 +306,6 @@ fn main() -> i64 {
     elapsed := f64(clock_ns() - start) / 1e9
     print(fmt("frames: ", frames, ", resizes: ", resizes, ", ", fmtf(f64(frames) / fmax(elapsed, 1e-9), 1), " frames per second"))
     destroy(&app)
-    if !win_closed { DestroyWindow(hwnd) }
+    w.close()
     0
 }
