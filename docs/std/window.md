@@ -1,16 +1,21 @@
 # std.window: windows, events and software presentation
 
-`use std.window` opens a native window (X11 on Linux), delivers its events, keeps the
-per-frame input state (`std.input`, included automatically) and can show an RGBA framebuffer
-without any GPU API. It also hands out the native handles needed to create a Vulkan surface.
-Linux only: with `--target windows`, `use std.window` is a compile error (std.dx12 binds the
-user32 window functions).
+`use std.window` opens a native window (X11 on Linux, Win32 on Windows), delivers its events,
+keeps the per-frame input state (`std.input`, included automatically) and can show an RGBA
+framebuffer without any GPU API. It also hands out the native handles needed to create a
+Vulkan surface (Linux) or a DXGI swapchain (Windows). The API and the events are the same on
+both systems; the differences are listed in [Windows](#windows).
 
-A program that calls `window_open` is dynamically linked against `libX11.so.6` (and libc).
-On a Wayland session it runs through XWayland; a program that wants to talk to the compositor
-itself uses the bindings of [std.wayland](wayland.md).
-The helper functions that need no display (`key_from_keysym`, `fit_rect`, `blit_fit`, ...)
-do not pull the library in.
+The window system lives in the module's OS layer: `std/window_linux.al` (X11) or
+`std/window_windows.al` (Win32), loaded with `use std.window` for the target.
+
+- **Linux:** a program that calls `window_open` is dynamically linked against `libX11.so.6`
+  (and libc). On a Wayland session it runs through XWayland; a program that wants to talk to
+  the compositor itself uses the bindings of [std.wayland](wayland.md). The helper functions
+  that need no display (`key_from_keysym`, `fit_rect`, `blit_fit`, ...) do not pull the
+  library in.
+- **Windows:** the program imports `user32.dll`, `gdi32.dll` and `kernel32.dll` (all part of
+  Windows); no C run-time library.
 
 ## Opening a window
 
@@ -27,11 +32,12 @@ if !ok { ... no display: run headless or exit ... }
 | `width`, `height: i64` | size of the drawable area in pixels; 0 means 640 x 480 |
 | `resizable: bool` | let the user resize the window (default: fixed size) |
 | `fullscreen: bool` | start fullscreen |
-| `display: str` | X display to connect to, e.g. `":1"`; empty means `$DISPLAY` |
+| `display: str` | X display to connect to, e.g. `":1"`; empty means `$DISPLAY` (not used on Windows) |
 
 `window_open` returns `(nil, false)` when the display cannot be reached (no X server,
-`DISPLAY` unset); it never aborts the program for that. The `Window` is allocated once from
-the arena; no other window function allocates from the arena.
+`DISPLAY` unset; on Windows: the window cannot be created); it never aborts the program for
+that. The `Window` is allocated once from the arena; no other window function allocates from
+the arena.
 
 ## Functions
 
@@ -49,12 +55,14 @@ the arena; no other window function allocates from the arena.
 | `present(w, pixels: []u8, pw, ph) -> bool` | show an RGBA8 framebuffer of `pw` x `ph` pixels |
 | `mouse_in_frame(w, pw, ph) -> vec2` | mouse position in pixels of a framebuffer shown with `present` |
 | `close(w)` | destroy the window and disconnect |
-| `x11_display(w) -> *u8` | the Xlib `Display*` (nil after `close`) |
-| `x11_window(w) -> u64` | the X11 window id |
+| `x11_display(w) -> *u8` | Linux: the Xlib `Display*` (nil after `close`) |
+| `x11_window(w) -> u64` | Linux: the X11 window id |
+| `win32_hwnd(w) -> *u8` | Windows: the `HWND` (nil after `close`) |
 
 Public fields of `Window`: `input` (an `Input`, see [input.md](input.md)), `events` (the
-`EventQueue`), `width`, `height`, `closing`, `fullscreen`, `cursor_hidden`. The remaining
-fields are the backend's handles.
+`EventQueue`), `width`, `height`, `closing`, `fullscreen`, `cursor_hidden`. The field `os`
+(a `WindowOs`, different per system) holds the backend's handles. The native-handle accessors
+exist only on their system, like the backend's helpers below.
 
 ### Frames and events
 
@@ -91,9 +99,11 @@ is true, `present` returns false and the other calls do nothing.
 
 Keyboard details: key codes come from the unshifted symbol of the key on the user's layout.
 Auto-repeat arrives as `EventKeyDown` with `repeat` set (it sets `key_repeated`, not
-`key_pressed`). Text arrives separately as `EventText`, already composed by the X input method
-(layout, shift, dead keys, compose sequences) and delivered as Unicode code points; control
-characters are filtered out. Mouse wheel motion is `EventWheel`, not a button.
+`key_pressed`). Text arrives separately as `EventText`, already composed by the system's input
+method (layout, shift, dead keys, compose sequences / IME) and delivered as Unicode code points;
+control characters are filtered out. `mods` of key and mouse events are the modifiers held
+before the event (pressing Shift reports no Shift, releasing it does). Mouse wheel motion is
+`EventWheel`, not a button.
 
 ### Software presentation
 
@@ -104,12 +114,13 @@ with black bars. A game can therefore render at a fixed internal resolution (say
 and let the window be any size, including fullscreen; `mouse_in_frame(w, pw, ph)` converts the
 pointer position back to framebuffer pixels.
 
-`present` converts into a window-sized buffer and sends it with `XPutImage`. The buffer lives
-on the C heap and is reallocated only when the window size changes. The cost is one pass over
-the window's pixels plus the transfer to the X server: fine for 2D and retro-style rendering,
-not a replacement for a GPU at 4K. There is no vertical sync on this path: pace the loop
-yourself (sleep, as in the example). `present` returns false for a closed window or a display
-that is not 24/32-bit true color.
+`present` converts into a window-sized buffer and draws it at 1:1: with `XPutImage` on Linux
+(C heap; returns false for a display that is not 24/32-bit true color), with GDI's
+`StretchDIBits` from a top-down 32-bit DIB on Windows (process heap). The buffer is
+reallocated only when the window size changes. The cost is one pass over the window's pixels
+plus the transfer: fine for 2D and retro-style rendering, not a replacement for a GPU at 4K.
+There is no vertical sync on this path: pace the loop yourself (sleep, as in the example).
+`present` returns false for a closed window.
 
 The pure helpers behind it are public: `fit_rect(dw, dh, sw, sh) -> (x, y, w, h)` (the centered
 aspect-preserving rectangle) and `blit_fit(dst: []u32, dw, dh, src: []u8, sw, sh, swap_rb)`
@@ -121,7 +132,15 @@ For `VK_KHR_xlib_surface`, pass `x11_display(w)` as `dpy` and `x11_window(w)` as
 `VkXlibSurfaceCreateInfoKHR`. Recreate the swapchain on `EventResize`. Do not mix `present`
 with a GPU swapchain on the same window.
 
-### X11 helpers
+### Direct3D 12 (Windows)
+
+Pass `win32_hwnd(w)` to `IDXGIFactory2.CreateSwapChainForHwnd` ([std.dx12](dx12.md)) and
+resize the buffers on `EventResize` (`size(w)` is the client size in pixels). A program that
+renders with Direct3D never calls `present`. std.dx12 declares Win32 names publicly (`RECT`,
+`MSG`, `CreateWindowExW`, ...); the ones std.window uses are private to it, so a program can use
+both modules.
+
+### X11 helpers (Linux)
 
 | Function | |
 |----------|---|
@@ -135,6 +154,53 @@ structs `XEvent` (an opaque 192-byte block read with `x_event_type`, `x_event_x`
 `x_event_detail`, ... ), `XSizeHints`, `XColor`, and constants with an `X_` prefix
 (`X_KEY_PRESS`, `X_STRUCTURE_NOTIFY_MASK`, ...). Use it for anything this module does not
 cover; the display and window id of a `Window` are valid arguments for all of it.
+
+### Win32 helpers (Windows)
+
+| Function | |
+|----------|---|
+| `key_from_vk(vk: u32, scan: u32, extended: bool, ch: u32) -> i64` | `KEY_*` code for a virtual key with the scan code and extended flag of its message and its unshifted character (`MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR)`) |
+| `event_from_win32_button(msg: u32, wparam: u64, x, y, mods) -> Event` | mouse press / release for `WM_LBUTTONDOWN` .. `WM_XBUTTONUP` (`EventNone` for other messages) |
+
+## Windows
+
+The same program runs on Windows with the same events; what differs:
+
+- **Pixels and DPI.** The process is made per-monitor DPI aware (v2; system aware before
+  Windows 10 1703) when the first window opens. `width`, `height`, `size(w)`, `EventResize` and
+  mouse positions are physical pixels, as on X11, and Windows does not rescale the picture. A
+  window opens with a client area of the requested pixels and keeps that pixel size when it
+  moves to a monitor of another scale, so on a 200 % display it looks half as large as on a
+  100 % one; choose the size from the screen or use fullscreen.
+- **Fullscreen** is a borderless window covering the monitor the window is on (no change of
+  display mode); windowed restores the previous position and size.
+- **Keys.** Keys that type a character are named by their unshifted character on the layout,
+  as on X11 (on QWERTZ the key right of T is `KEY_Z`). Letter and digit keys whose character
+  has no key code (the digit row of AZERTY, non-Latin layouts) fall back to their virtual key:
+  `KEY_1`, `KEY_A`, ... (X11 reports `KEY_UNKNOWN` for those it cannot name). The navigation
+  keys of the keypad are `KEY_KP_*` whatever the state of Num Lock, as on X11. AltGr is one
+  `KEY_RALT` (the left Ctrl that Windows sends with it is dropped). Print Screen, of which
+  Windows reports only the release, gives a press and a release when it is released. When both
+  Shift keys are held, Windows reports only the last release; the window releases both then.
+- **Text** comes from `WM_CHAR` (layout, dead keys, IME); characters outside the BMP arrive as
+  one code point. As on X11, Alt+letter also types the letter.
+- **Mouse.** While a button is held the window keeps the pointer (positions outside the window,
+  as with the X11 grab). One `EventWheel` step per notch (`WHEEL_DELTA`, 120); finer motion of
+  touchpads accumulates into steps; `y > 0` away from the user, `x > 0` to the right.
+- **System keys.** Alt and F10 do not enter the window-menu mode (which would stop the game);
+  Alt+F4 is an `EventClose`, Alt+Space still opens the window menu.
+- **Minimizing** keeps the size (no `EventResize` to 0 x 0).
+- **Moving and resizing.** While the user drags or resizes the window (or a window menu is
+  open), Windows runs a loop of its own inside the message dispatch. `poll` pumps messages on a
+  fiber of its own and leaves that loop on a timer, so it returns every 10-16 ms during the drag
+  and the game keeps running, with `EventResize` as the size changes.
+- **Timing of events.** Events caused by the program's own calls (`set_fullscreen`, creating a
+  swapchain) arrive at the next `poll`, as on X11.
+- A program built with `--target windows` is a console program: started from Explorer it also
+  gets a console window.
+
+`examples/win32_input.al` prints every event it receives on either system: the quickest way
+to see what a keyboard, mouse or gamepad delivers.
 
 ## Structuring a game on top of it
 
@@ -242,11 +308,6 @@ fn render(g: *Game, fb: []u8, alpha: f32) {
     }
 }
 
-fn nap(ns: i64) {
-    ts := [2]i64{0, ns}
-    syscall(35, ptr(ts), 0)              // nanosleep
-}
-
 fn main() {
     w, ok := window_open(WindowDesc{title: "AL game loop", width: 960, height: 540, resizable: true})
     if !ok {
@@ -295,7 +356,7 @@ fn main() {
         w.present(fb, FB_W, FB_H)
         audio_pump(dev, mixer)
         frames += 1
-        nap(4_000_000)
+        sleep_ns(4_000_000)
     }
     print("frames:", frames, "beeps:", game.beeps)
     audio_close(dev)
@@ -308,8 +369,16 @@ that many frames, which is handy for automated smoke tests.
 
 ## Testing
 
-Window logic that does not need a display (key mapping, event translation, scaling) is covered
-by `tests/std/window_logic`. `tests/sys/window_x11` exercises a real window, but only on the
-display named by the environment variable `AL_TEST_DISPLAY` (for example an `Xvfb` instance:
+Window logic that does not need a display is covered by `tests/std/window_fit` (scaling and
+conversion, both systems) and `tests/std/window_logic` (X11 key mapping and event translation).
+`tests/sys/window_x11` exercises a real X11 window, but only on the display named by the
+environment variable `AL_TEST_DISPLAY` (for example an `Xvfb` instance:
 `Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./build/alc window`); without it the
 test is skipped, so the test suite never opens a window on the desktop it runs on.
+
+On Windows (`tests/run.sh --target windows`, under Wine with its null display driver: windows
+exist and get messages, nothing is shown), `tests/sys/window_win32` opens a real Win32 window
+and checks the key table, posted and `SendInput` keyboard messages, text, mouse buttons and
+wheel, focus loss, `present` (pixels read back with `GetPixel`), the pointer, fullscreen, close
+requests and leaving a modal move loop; `tests/sys/window_dx12` uses std.window together with
+std.dx12. Both are skipped on Linux.

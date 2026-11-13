@@ -24,14 +24,9 @@ std/audio_mixer std.audio is Linux only (ALSA)
 std/audio_pitch_extreme std.audio is Linux only (ALSA)
 std/audio_wav std.audio is Linux only (ALSA); Linux system calls (unlink)
 sys/audio_null std.audio is Linux only (ALSA)
-std/input std.input is Linux only (evdev)
-std/input_actions std.input is Linux only (evdev)
-std/input_key_names std.input is Linux only (evdev)
-std/window_logic std.window is Linux only (X11)
-sys/window_nodisplay std.window is Linux only (X11)
-sys/window_x11 std.window is Linux only (X11)
-sys/starter_game std.window and std.input are Linux only
-unit/starter_controls std.window and std.input are Linux only
+std/window_logic the X11 translation helpers of std.window (key_from_keysym, XEvent accessors) exist only on Linux
+sys/window_nodisplay an X11 display name (WindowDesc.display) means nothing on Windows
+sys/window_x11 needs an X server (AL_TEST_DISPLAY)
 sys/wayland std.wayland is Linux only
 check/wayland std.wayland is Linux only
 check/wayland_window std.wayland is Linux only

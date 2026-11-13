@@ -1,0 +1,27 @@
+open: false false bad index: false false
+poll closed: false
+down 0 pressed 0 released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 1 pressed 1 released 0 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 2 pressed 2 released 1 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 3 pressed 3 released 2 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 4 pressed 4 released 3 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 5 pressed 5 released 4 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 6 pressed 6 released 5 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 7 pressed 7 released 6 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 8 pressed 8 released 7 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 9 pressed 9 released 8 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 10 pressed 10 released 9 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down pressed released 10 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 -1.000
+down pressed released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 1.000
+down pressed released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 -1.000 0.000
+down pressed released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 1.000 0.000
+down pressed released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 1.000 -1.000
+down pressed released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 -1.000 1.000
+down 0 pressed 0 released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down 0 pressed released axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down pressed released 0 axes 0.000 0.000 -1.000 0.000 0.000 -1.000 0.000 0.000
+down pressed released axes 1.000 -1.000 1.000 -1.000 1.000 0.004 0.000 0.000
+down pressed released axes -0.500 0.250 -1.000 0.125 0.000 1.000 0.000 0.000
+stick: vec2(-0.40141228, 0.20070614) vec2(0.0, 0.0)
+jump: true true
+closed: false false

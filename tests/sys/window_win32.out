@@ -1,0 +1,107 @@
+open: true
+title: [65, 76, 32, 233, 116, 233, 32, 55357, 56832]
+client: [0, 0, 320, 200] size: (320, 200) resizable: false per-monitor dpi: true
+first poll
+  EventFocus 0 0
+key table
+unmapped key codes: 0
+1 Unknown Unknown Apostrophe F Z Minus 
+Event{kind: EventMouseDown, key: 4, x: 3, y: 4, codepoint: 0, mods: 4, repeat: false} EventNone
+keys (posted)
+  EventKeyDown A mods 0 repeat false
+  EventKeyDown A mods 0 repeat true
+  EventKeyUp A mods 0 repeat false
+  EventKeyDown LShift mods 0 repeat false
+  EventKeyUp LShift mods 1 repeat false
+  EventKeyDown RShift mods 0 repeat false
+  EventKeyUp RShift mods 1 repeat false
+  EventKeyDown RCtrl mods 0 repeat false
+  EventKeyUp RCtrl mods 2 repeat false
+  EventKeyDown Left mods 0 repeat false
+  EventKeyDown Kp4 mods 0 repeat false
+  EventKeyDown KpEnter mods 0 repeat false
+  EventKeyDown Kp7 mods 0 repeat false
+  EventKeyDown F1 mods 0 repeat false
+  EventKeyDown Minus mods 0 repeat false
+  EventKeyDown Unknown mods 0 repeat false
+  EventKeyDown PrintScreen mods 0 repeat false
+  EventKeyUp PrintScreen mods 0 repeat false
+  EventKeyDown LAlt mods 0 repeat false
+  EventKeyUp LAlt mods 4 repeat false
+  EventText 97 mods 0
+  EventText 97 mods 0
+  EventText 55 mods 0
+  EventText 45 mods 0
+held: true true false pressed: true repeated: false
+text (posted)
+  EventText 120 mods 0
+  EventText 233 mods 0
+  EventText 128512 mods 0
+  EventText 32 mods 0
+text: [120, 233, 128512, 32]
+focus lost
+  EventKeyDown D mods 0 repeat false
+  EventText 100 mods 0
+held before poll: true
+  EventUnfocus 0 0
+held after poll: false false focused: false
+  EventFocus 0 0
+keys (SendInput)
+  EventKeyDown LShift mods 0 repeat false
+  EventKeyDown H mods 1 repeat false
+  EventText 72 mods 1
+  EventKeyUp H mods 1 repeat false
+  EventKeyUp LShift mods 1 repeat false
+  EventKeyDown I mods 0 repeat false
+  EventText 105 mods 0
+  EventKeyUp I mods 0 repeat false
+  EventKeyDown LShift mods 0 repeat false
+  EventKeyDown 1 mods 1 repeat false
+  EventText 33 mods 1
+  EventKeyUp 1 mods 1 repeat false
+  EventKeyUp LShift mods 1 repeat false
+  EventKeyDown LCtrl mods 0 repeat false
+  EventKeyDown RCtrl mods 2 repeat false
+  EventKeyUp RCtrl mods 2 repeat false
+  EventKeyUp LCtrl mods 2 repeat false
+text: Hi!
+mouse (posted)
+  EventMouseMove 0 16 20 mods 0
+  EventMouseDown 0 16 20 mods 0
+  EventMouseMove 0 -10 -5 mods 0
+  EventMouseUp 0 -10 -5 mods 0
+  EventMouseDown 1 2 1 mods 0
+  EventMouseUp 1 2 1 mods 0
+  EventMouseDown 2 4 3 mods 0
+  EventMouseUp 2 4 3 mods 0
+  EventMouseDown 3 6 5 mods 0
+  EventMouseUp 3 6 5 mods 0
+  EventMouseDown 4 8 7 mods 0
+  EventMouseUp 4 8 7 mods 0
+  EventWheel 0 1
+  EventWheel 0 -1
+  EventWheel 0 -1
+  EventWheel 0 1
+  EventWheel 1 0
+mouse: vec2(8.0, 7.0) vec2(-8.0, -13.0) wheel: vec2(1.0, 0.0) pressed: true down: false
+in frame: vec2(-16.64, 2.24) vec2(8.0, 7.0)
+present
+presented: true
+000000 0000ff 00ff00 ff0000 ffffff 000000 
+pointer
+hidden: true shown: true false
+fullscreen
+before poll: (320, 200)
+  EventResize 1024 768
+covers the monitor: true popup: true
+  EventResize 320 200
+windowed: (320, 200) popup: false
+title: [114, 101, 110, 97, 109, 101, 100]
+menu key and move loop
+poll returned inside the loop: true
+quick: true
+close
+  EventClose 0 0
+should_close: true still there: true
+closed: true true true false
+events after close: 0

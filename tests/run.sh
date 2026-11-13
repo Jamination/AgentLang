@@ -17,8 +17,9 @@
 # Programs run with the repository root as working directory.
 #
 # --target windows builds the programs for Windows and runs them under Wine (in the prefix
-# $WINEPREFIX, default tmp/win/prefix-tests, created if missing; no window can open: DISPLAY
-# and WAYLAND_DISPLAY are removed). fail/ and check/ use `alc check --target windows`, unit/
+# $WINEPREFIX, default tmp/win/prefix-tests, created if missing; DISPLAY and WAYLAND_DISPLAY
+# are removed and the prefix uses Wine's null display driver: windows open and receive
+# messages, nothing is shown). fail/ and check/ use `alc check --target windows`, unit/
 # runs `alc test` under Wine; driver/ tests the Linux command line and is not run. Tests that
 # cannot run on Windows are listed with the reason in tests/windows.skip.
 #
@@ -64,7 +65,11 @@ if [[ $WIN == 1 ]]; then
   unset DISPLAY WAYLAND_DISPLAY
   command -v wine >/dev/null || { echo "tests/run.sh: --target windows needs wine"; exit 2; }
   [[ -d $WINEPREFIX ]] || { mkdir -p "$WINEPREFIX" && wineboot -i >/dev/null 2>&1; }
-  # one wine server for the whole run (a starting server writes noise to standard error)
+  # one wine server for the whole run (a starting server writes noise to standard error); the
+  # null display driver must be set before the server starts the desktop, hence the restart
+  wineserver -p
+  wine reg add 'HKCU\Software\Wine\Drivers' /v Graphics /d null /f >/dev/null 2>&1
+  wineserver -k
   wineserver -p
   wine cmd /c exit >/dev/null 2>&1
   trap 'rm -rf "$TMP"; wineserver -k' EXIT

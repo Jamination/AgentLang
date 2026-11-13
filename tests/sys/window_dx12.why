@@ -1,0 +1,1 @@
+std.window + std.dx12 test: runs with tests/run.sh --target windows (under Wine, null display driver)

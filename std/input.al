@@ -1,6 +1,8 @@
 // std.input: platform-independent input state. A window (std.window) or a test feeds `Event`s
 // into an `Input`; the game reads per-frame key / mouse / text state from it and maps keys to
-// game actions with an `ActionMap`. Nothing here allocates per frame.
+// game actions with an `ActionMap`. Nothing here allocates per frame. The gamepad device
+// (gamepad_open / gamepad_poll / gamepad_close) is in the OS layer: std/input_linux.al
+// (joystick devices) or std/input_windows.al (XInput).
 
 // ---- key codes (dense, independent of the platform's key symbols) ----
 const KEY_UNKNOWN = 0
@@ -217,7 +219,8 @@ fn clear_events(q: *EventQueue) {
 
 // ---- gamepad state ----
 
-// One gamepad: button state bits and axes in -1..1. Zero value = not connected.
+// One gamepad: button state bits and axes in -1..1. Zero value = not connected. `fd` is the
+// device: a file descriptor on Linux, the XInput user index on Windows.
 struct Gamepad {
     fd: i64
     connected: bool
@@ -478,21 +481,7 @@ fn key_from_name(name: str) -> i64 {
     KEY_UNKNOWN
 }
 
-// ---- gamepad (Linux joystick devices /dev/input/js*) ----
-
-// Opens gamepad number `index` (/dev/input/js<index>) without blocking; false if there is none.
-fn gamepad_open(g: *Gamepad, index: i64) -> bool {
-    gamepad_close(g)
-    m := mark()
-    fd := syscall(2, cstr(fmt("/dev/input/js", index)), 0x80800, 0)    // O_RDONLY | O_NONBLOCK | O_CLOEXEC
-    release(m)
-    if fd < 0 {
-        return false
-    }
-    g.fd = fd
-    g.connected = true
-    true
-}
+// ---- gamepad ----
 
 // Applies one raw joystick event (kind 1 = button, 2 = axis; bit 0x80 marks initial state).
 fn gamepad_event(g: *Gamepad, kind: u8, number: u8, value: i16) {
@@ -506,37 +495,6 @@ fn gamepad_event(g: *Gamepad, kind: u8, number: u8, value: i16) {
     } else if kind & 0x7F == 2 && n < PAD_AXIS_COUNT {
         g.axes[n] = fmax(f32(value) / 32767.0, -1.0)
     }
-}
-
-// Reads all pending events of an open gamepad; false once it is disconnected. Call it after
-// begin_frame (after the window's poll) every frame.
-fn gamepad_poll(g: *Gamepad) -> bool {
-    if !g.connected {
-        return false
-    }
-    ev: [8]u8
-    loop {
-        r := syscall(0, g.fd, ptr(ev), 8)
-        if r == -4 {
-            continue
-        }
-        if r != 8 {
-            if r != -11 {
-                gamepad_close(g)
-            }
-            break
-        }
-        gamepad_event(g, ev[6], ev[7], i16(u16(ev[4]) | u16(ev[5]) << 8))
-    }
-    g.connected
-}
-
-// Closes the device and clears the state.
-fn gamepad_close(g: *Gamepad) {
-    if g.connected {
-        syscall(3, g.fd)
-    }
-    *g = Gamepad{}
 }
 
 priv fn input_pad_state(g: *Gamepad, button: i64) -> u8 {

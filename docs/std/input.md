@@ -5,15 +5,15 @@
 - `Event` / `EventQueue`: window and input events as plain data,
 - `Input`: the keyboard, mouse, text and gamepad state of the current frame, driven by events,
 - `ActionMap`: bindings from game actions to keys and buttons, so game code never names a key,
-- `Gamepad`: Linux joystick devices (`/dev/input/js*`).
+- `Gamepad`: one game controller: Linux joystick devices (`/dev/input/js*`), XInput on
+  Windows.
 
-Linux only for now: the gamepad reads Linux joystick devices with system calls, so with
-`--target windows` `use std.input` is a compile error.
-
-The module is pure AL (the gamepad uses plain system calls), so programs using it stay static
-executables, and everything except opening a gamepad device is testable by feeding events by
-hand. `std.window` includes this module, owns an `Input` and an `EventQueue` per window and
-fills both in `poll`.
+Everything except the gamepad device is pure AL and the same on Linux and Windows; the device
+functions (`gamepad_open`, `gamepad_poll`, `gamepad_close`) are in the module's OS layer
+(`std/input_linux.al`: plain system calls, so programs stay static executables;
+`std/input_windows.al`: XInput). Everything except opening a gamepad device is testable by
+feeding events by hand. `std.window` includes this module, owns an `Input` and an
+`EventQueue` per window and fills both in `poll`.
 
 No function here allocates per frame. `action_map`, `action` and the `bind` functions allocate
 (set-up time); `gamepad_open` allocates temporarily and releases it again.
@@ -133,15 +133,17 @@ register the names in the order of the constants. Gamepad bindings read `Input.p
 
 ## Gamepad
 
-`struct Gamepad { fd, connected, buttons, axes }` reads the kernel joystick interface. Button
-and axis numbers are those of the driver; the `PAD_*` constants match the common Xbox-style
-layout (xpad), other pads may differ. Triggers are axes from -1 (released) to 1.
+`struct Gamepad { fd, connected, buttons, axes }` holds one controller. Button and axis
+numbers follow the Linux joystick numbering of an Xbox-style pad (xpad); on Linux they are
+those of the driver (other pads may differ), on Windows XInput's state is translated into
+them. Triggers are axes from -1 (released) to 1.
 
 | Function | |
 |----------|---|
-| `gamepad_open(g: *Gamepad, index: i64) -> bool` | open `/dev/input/js<index>` non-blocking; false if absent |
+| `gamepad_open(g: *Gamepad, index: i64) -> bool` | Linux: open `/dev/input/js<index>` non-blocking; Windows: XInput controller `index` (0..3); false if absent |
 | `gamepad_poll(g) -> bool` | read all pending events; false once unplugged. Call after `begin_frame` / `poll(window)` each frame |
 | `gamepad_close(g)` | close and clear |
+| `gamepad_xinput(g, buttons: u16, left_trigger: u8, right_trigger: u8, lx, ly, rx, ry: i16)` | Windows: apply one XInput state (the fields of `XINPUT_GAMEPAD`) as `gamepad_poll` does (tests, replays) |
 | `gamepad_event(g, kind: u8, number: u8, value: i16)` | apply one raw joystick event (what `gamepad_poll` does per event; useful for tests and replays) |
 | `pad_down(g, button)`, `pad_pressed(g, button)`, `pad_released(g, button)` | button state |
 | `pad_axis(g, axis) -> f32` | axis in -1..1 (sticks: right / down positive) |
@@ -151,6 +153,19 @@ layout (xpad), other pads may differ. Triggers are axes from -1 (released) to 1.
 so the pad embedded in the window's `Input` needs only `gamepad_open(&w.input.pad, 0)` once and
 `gamepad_poll(&w.input.pad)` per frame. Hot-plugging is not detected automatically: when
 `gamepad_poll` returns false, try `gamepad_open` again from time to time.
+
+**Windows (XInput).** The controller is read with `XInputGetState` of `xinput1_4.dll`
+(Windows 8 and later), else `xinput9_1_0.dll`, loaded when the first gamepad is opened (a
+program without gamepads never loads it); the guide button (`PAD_GUIDE`) comes from the
+undocumented `XInputGetStateEx` where the DLL has it, else it is never pressed. `gamepad_poll`
+reads the current state each frame and turns changes of the buttons into pressed / released
+edges; the state at `gamepad_open` counts as the initial state (no edges), like the initial
+events of a Linux device. Mapping: A, B, X, Y, LB, RB, Back, Start, Guide, left / right stick
+button as `PAD_A` .. `PAD_RSTICK`; sticks as `PAD_AXIS_LX` / `LY` / `RX` / `RY` (right / down
+positive, so XInput's y is negated; raw values without a dead zone, use `pad_stick`); triggers
+as `PAD_AXIS_LT` / `RT` from -1 to 1; the D-pad as `PAD_AXIS_DPAD_X` / `DPAD_Y` with values -1,
+0, 1 (right / down positive), as xpad reports it. Only XInput controllers (Xbox-compatible) are
+seen; other HID gamepads need a driver that offers XInput.
 
 ## Example
 
