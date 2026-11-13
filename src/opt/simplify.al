@@ -181,13 +181,13 @@ priv fn fbits(ty: T, r: f64) -> i64 {
 
 priv fn konst(self: *Ctx, ty: T, k: i64) -> i64 {
     v := self.f.mk(Const, ty, vec[i64](), ir_canon(ty, k))
-    put(&self.new_insts, i32(v))
+    push_fast(&self.new_insts, i32(v))
     return v
 }
 
 priv fn mk(self: *Ctx, op: Op, ty: T, args: Vec[i64]) -> i64 {
     v := self.f.mk(op, ty, args, 0)
-    put(&self.new_insts, i32(v))
+    push_fast(&self.new_insts, i32(v))
     return v
 }
 
@@ -952,16 +952,6 @@ priv fn sdiv_magic(self: *Ctx, n: i64, ty: T, d: i64) -> i64 {
     return self.mk(Add, ty, vec_of([]i64{q, sign}))
 }
 
-// push for a list that usually has room (push itself is not inlined)
-priv inline fn put(l: *Vec[i32], x: i32) {
-    if l.len < len(l.buf) {
-        l.buf[l.len] = x
-        l.len += 1
-    } else {
-        l.push(x)
-    }
-}
-
 priv fn fold_insts(f: *Func) -> bool {
     rpo := f.rpo()
     // made at the first replacement
@@ -1013,7 +1003,7 @@ priv fn fold_insts(f: *Func) -> bool {
                     nrepl += 1
                     cx.changed = true
                 }
-                None => put(&cx.new_insts, v)
+                None => push_fast(&cx.new_insts, v)
             }
         }
         k := cx.new_insts.len
@@ -1052,26 +1042,6 @@ priv fn all_phis(f: *Func, binsts: *Vec[i32]) -> bool {
         }
     }
     return true
-}
-
-// redirect the edge p -> from to p -> to
-priv fn retarget(f: *Func, p: i64, from: i64, to: i64) {
-    match f.blocks[p].term {
-        Jmp(&x) => {
-            if *x == from {
-                *x = to
-            }
-        }
-        Br(_, &x, &y) => {
-            if *x == from {
-                *x = to
-            }
-            if *y == from {
-                *y = to
-            }
-        }
-        _ => {}
-    }
 }
 
 // Cheap necessary conditions for a round of the steps of simplify_cfg to change anything: a
@@ -1345,19 +1315,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 // successors of s now come from b
                 nsucc, s0, s1 := f.succ_pair(b)
                 for si in 0..nsucc {
-                    ss := if si == 0 { s0 } else { s1 }
-                    for ii in 0..f.blocks[ss].insts.len {
-                        v := f.blocks[ss].insts[ii]
-                        if f.insts[v].op != Phi {
-                            break
-                        }
-                        pb := f.insts[v].from()
-                        for pk in 0..pb.len {
-                            if pb[pk] == s {
-                                pb[pk] = b
-                            }
-                        }
-                    }
+                    f.phi_pred_replace(if si == 0 { s0 } else { s1 }, s, b)
                 }
                 merged = true
             }
@@ -1413,7 +1371,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     }
                 }
                 // redirect p -> e to p -> t
-                retarget(f, p, e, t)
+                f.retarget(p, e, t)
                 if t_has_phi {
                     for ii in 0..f.blocks[t].insts.len {
                         v := f.blocks[t].insts[ii]
@@ -1551,7 +1509,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                         uses[nv] += 1
                     }
                 }
-                retarget(f, p, b, target)
+                f.retarget(p, b, target)
                 touched[b] = true
                 touched[p] = true
                 touched[target] = true
@@ -1746,7 +1704,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
             }
             // retarget the predecessors
             for d in dest {
-                retarget(f, d.0, b, d.1)
+                f.retarget(d.0, b, d.1)
             }
             did = true
             break

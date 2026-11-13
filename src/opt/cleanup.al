@@ -51,7 +51,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
 }
 
 fn cleanup_is_root(op: Op) -> bool {
-    return op == Store || op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet
+    return op == Store || op.clobbers()
 }
 
 fn cleanup_dce(f: *Func) -> bool {

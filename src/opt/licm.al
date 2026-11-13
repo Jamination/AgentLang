@@ -1,7 +1,6 @@
 // Loop-invariant code motion (with preheader creation).
 
 // predecessors of the header `h` of loop `li` that are outside the loop
-// (cfg.preds[h].iter().copied().filter(|p| !loops.contains(li, *p)).collect())
 fn licm_outside_preds(cfg: *Cfg, loops: *Loops, li: i64, h: i64) -> Vec[i64] {
     outside := vec[i64]()
     for p in cfg.preds[h] {
@@ -12,19 +11,13 @@ fn licm_outside_preds(cfg: *Cfg, loops: *Loops, li: i64, h: i64) -> Vec[i64] {
     return outside
 }
 
-// loop indices, deepest loops first; stable
-// (order.sort_by(|a, b| loops.loops[*b].depth.cmp(&loops.loops[*a].depth)))
+// loop indices, deepest loops first (sort_by is stable)
 fn licm_loop_order(loops: *Loops) -> Vec[i64] {
     order := vec[i64]()
     for li in 0..loops.loops.len {
         order.push(li)
-        k := order.len - 1
-        while k > 0 && loops.loops[order[k - 1]].depth < loops.loops[li].depth {
-            order[k] = order[k - 1]
-            k -= 1
-        }
-        order[k] = li
     }
+    sort_by(order.items(), loops, fn(loops: *Loops, a: i64, b: i64) -> bool { loops.loops[a].depth > loops.loops[b].depth })
     return order
 }
 
@@ -52,24 +45,10 @@ fn licm_make_preheaders(f: *Func) -> bool {
         preheaders_made += 1
         f.blocks[p].term = Jmp(h)
         for o in outside {
-            match f.blocks[o].term {
-                Jmp(&t) => {
-                    if *t == h {
-                        *t = p
-                    }
-                }
-                Br(_, &a, &b) => {
-                    if *a == h {
-                        *a = p
-                    }
-                    if *b == h {
-                        *b = p
-                    }
-                }
-                _ => {}
-            }
+            f.retarget(o, h, p)
         }
-        // fix header phis
+        // fix header phis: their inputs from outside come from p (through a phi in p if they
+        // differ)
         hinsts := clone(f.blocks[h].insts)
         for v in hinsts {
             if f.insts[v].op != Phi {
@@ -78,38 +57,31 @@ fn licm_make_preheaders(f: *Func) -> bool {
             inst := &f.insts[v]
             ity := inst.ty
             ifrom := inst.from()
-            out_vals := vec[(i64, i64)]()
+            vals := vec[i64]()
+            pbs := vec[i64]()
             keep_args := vec[i64]()
             keep_pb := vec[i64]()
             for k in 0..inst.args.len {
                 pb := ifrom[k]
                 if contains(&outside, pb) {
-                    out_vals.push((pb, inst.args[k]))
+                    vals.push(inst.args[k])
+                    pbs.push(pb)
                 } else {
                     keep_args.push(inst.args[k])
                     keep_pb.push(pb)
                 }
             }
             all_same := true
-            for x in out_vals {
-                if x.1 != out_vals[0].1 {
+            for x in vals {
+                if x != vals[0] {
                     all_same = false
                     break
                 }
             }
-            incoming := 0
-            if all_same {
-                incoming = out_vals[0].1
-            } else {
-                vals := vec[i64]()
-                pbs := vec[i64]()
-                for x in out_vals {
-                    vals.push(x.1)
-                    pbs.push(x.0)
-                }
-                np := f.mk_phi_of(ity, vals.items(), pbs.items())
-                f.blocks[p].insts.push(i32(np))
-                incoming = np
+            incoming := vals[0]
+            if !all_same {
+                incoming = f.mk_phi_of(ity, vals.items(), pbs.items())
+                f.blocks[p].insts.push(i32(incoming))
             }
             keep_args.push(incoming)
             keep_pb.push(p)
@@ -120,8 +92,8 @@ fn licm_make_preheaders(f: *Func) -> bool {
     return changed
 }
 
-// exiting.iter().all(|e| cfg.dom(b, *e)) && l.latches.iter().all(|t| cfg.dom(b, *t))
-priv fn run_guaranteed(cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> bool {
+// b dominates every exit and every latch of the loop: it runs on every iteration that completes
+priv fn guaranteed(cfg: *Cfg, exiting: []i64, latches: []i64, b: i64) -> bool {
     for e in exiting {
         if !cfg.dom(b, e) {
             return false
@@ -160,9 +132,7 @@ fn licm_run(f: *Func) -> bool {
             continue
         }
         pre := outside[0]
-        for b in l.blocks {
-            in_loop[b] = true
-        }
+        loops.mark_blocks(li, in_loop.items(), true)
         // the blocks in reverse postorder (their positions in it are distinct)
         blocks := vec[i64]()
         for b in l.blocks {
@@ -181,7 +151,7 @@ fn licm_run(f: *Func) -> bool {
                 o := f.insts[v].op
                 if o == Store {
                     stores.push(alias_memref(f, i64(v)))
-                } else if o == Call || o == CallInd || o == Syscall || o == MemCpy || o == MemSet {
+                } else if o.clobbers() {
                     has_call = true
                 }
             }
@@ -209,7 +179,7 @@ fn licm_run(f: *Func) -> bool {
                     invariant_args := true
                     for a in i.args {
                         db := def_block[a]
-                        if !(db == 0xFFFFFFFF || !in_loop[db]) {
+                        if !(db == NOV || !in_loop[db]) {
                             invariant_args = false
                             break
                         }
@@ -223,18 +193,13 @@ fn licm_run(f: *Func) -> bool {
                                 Some(k) => k != 0 && !(k == -1 && (i.op == SDiv || i.op == SRem))
                                 None => false
                             }
-                            ok = safe_const || run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
+                            ok = safe_const || guaranteed(&cfg, exiting.items(), l.latches.items(), b)
                         } else if i.op == Load {
                             m := alias_memref(f, i64(v))
-                            private := false
-                            safe_addr := false
-                            match m.addr.base {
-                                Alloca(x) => {
-                                    private = !esc[x]
-                                    safe_addr = is_some(m.addr.off)
-                                }
-                                Global(g) => safe_addr = is_some(m.addr.off)
-                                Unknown(u) => {}
+                            private, safe_addr := match m.addr.base {
+                                Alloca(x) => (!esc[x], is_some(m.addr.off))
+                                Global(_) => (false, is_some(m.addr.off))
+                                Unknown(_) => (false, false)
                             }
                             if !has_call || private {
                                 aliased := false
@@ -244,7 +209,7 @@ fn licm_run(f: *Func) -> bool {
                                         break
                                     }
                                 }
-                                if !aliased && (safe_addr || run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)) {
+                                if !aliased && (safe_addr || guaranteed(&cfg, exiting.items(), l.latches.items(), b)) {
                                     ok = true
                                 }
                             }
@@ -266,9 +231,7 @@ fn licm_run(f: *Func) -> bool {
             }
             changed = true
         }
-        for b in l.blocks {
-            in_loop[b] = false
-        }
+        loops.mark_blocks(li, in_loop.items(), false)
     }
     return changed
 }

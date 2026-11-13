@@ -18,12 +18,7 @@ priv fn zero_of(self: *Ctx, t: T) -> i64 {
     if z0 != NOV {
         return z0
     }
-    z := 0
-    if t.is_fp() {
-        z = self.f.mk(FConst, t, vec[i64](), 0)
-    } else {
-        z = self.f.mk(Const, t, vec[i64](), 0)
-    }
+    z := self.f.mk(if t.is_fp() { FConst } else { Const }, t, vec[i64](), 0)
     self.entry_consts.push(i32(z))
     self.zero[i64(t)] = z
     return z
@@ -48,16 +43,11 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
     preds := self.preds[b]
     np := preds.len
     v := 0
-    if np == 0 {
+    // (a single predecessor that is b itself: a self-loop of a single block)
+    if np == 0 || np == 1 && preds[0] == b {
         v = self.zero_of(self.var_ty[var_])
     } else if np == 1 {
-        p := preds[0]
-        // guard against a self-loop of a single block
-        if p == b {
-            v = self.zero_of(self.var_ty[var_])
-        } else {
-            v = self.read_out(var_, p)
-        }
+        v = self.read_out(var_, preds[0])
     } else {
         phi := self.f.mk_phi(self.var_ty[var_], np)
         self.def_in.iset(key, phi)
@@ -70,16 +60,6 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
     }
     self.def_in.iset(key, v)
     return v
-}
-
-// push for a list that usually has room (push itself is not inlined)
-priv inline fn put(l: *Vec[i32], x: i32) {
-    if l.len < len(l.buf) {
-        l.buf[l.len] = x
-        l.len += 1
-    } else {
-        l.push(x)
-    }
 }
 
 // the last mem2reg_run ended with a round that changed nothing (not at its round limit)
@@ -152,15 +132,15 @@ priv fn run_once(f: *Func, first: bool) -> bool {
             i := &f.insts[v]
             if i.op == Phi {
                 for a in i.args {
-                    put(&pairs, i32(a))
-                    put(&pairs, v)
+                    push_fast(&pairs, i32(a))
+                    push_fast(&pairs, v)
                 }
                 continue
             }
             for a in i.args {
                 if ptrs[a] {
-                    put(&pairs, i32(a))
-                    put(&pairs, v)
+                    push_fast(&pairs, i32(a))
+                    push_fast(&pairs, v)
                 }
             }
             if i.op == Add {

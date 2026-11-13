@@ -168,6 +168,14 @@ fn is_pure(self: Op) -> bool {
     }
 }
 
+// may read or write any memory the function can reach (calls, bulk memory operations)
+fn clobbers(self: Op) -> bool {
+    match self {
+        Call, CallInd, Syscall, MemCpy, MemSet => true
+        _ => false
+    }
+}
+
 fn swap_cmp(self: Op) -> Op {
     match self {
         Slt => Sgt
@@ -341,6 +349,16 @@ priv inline fn add(l: *Vec[i64], x: i64) {
     l.len += 1
 }
 
+// push for a list that usually has room (push itself is not inlined)
+inline fn push_fast(l: *Vec[i32], x: i32) {
+    if l.len < len(l.buf) {
+        l.buf[l.len] = x
+        l.len += 1
+    } else {
+        l.push(x)
+    }
+}
+
 // A hash map from non-negative integers to instruction numbers for the passes (open
 // addressing, linear probing); `iget` gives -1 for a missing key. Faster than a `Map` for
 // these keys.
@@ -459,6 +477,12 @@ fn from(self: *Inst) -> []i64 {
     return mkslice[i64](cast[i64](ptr(self.args)) + i64(self.cap) * 8, len(self.args))
 }
 
+// the input of a phi from block b, or NOV
+fn phi_input(self: *Inst, b: i64) -> i64 {
+    k := index_of(self.from(), b)
+    return if k < 0 { NOV } else { self.args[k] }
+}
+
 // replaces all inputs of a phi
 fn phi_set(self: *Inst, vals: []i64, bs: []i64) {
     n := len(vals)
@@ -499,6 +523,41 @@ fn phi_remove(self: *Inst, k: i64) {
         full[c + j] = full[c + j + 1]
     }
     self.args = full[..n - 1]
+}
+
+// in the leading phis of block b, the inputs from block old come from block cur
+fn phi_pred_replace(self: *Func, b: i64, old: i64, cur: i64) {
+    for v in self.blocks[b].insts {
+        if self.insts[v].op != Phi {
+            break
+        }
+        pbs := self.insts[v].from()
+        for k in 0..pbs.len {
+            if pbs[k] == old {
+                pbs[k] = cur
+            }
+        }
+    }
+}
+
+// redirects the edge p -> old to p -> cur (the terminator only)
+fn retarget(self: *Func, p: i64, old: i64, cur: i64) {
+    match self.blocks[p].term {
+        Jmp(&x) => {
+            if *x == old {
+                *x = cur
+            }
+        }
+        Br(_, &x, &y) => {
+            if *x == old {
+                *x = cur
+            }
+            if *y == old {
+                *y = cur
+            }
+        }
+        _ => {}
+    }
 }
 
 fn push(self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
@@ -1117,6 +1176,13 @@ fn contains(self: *Loops, li: i64, b: i64) -> bool {
         cur = self.loops[cur].parent.or(-1)
     }
     return false
+}
+
+// sets in_loop[b] to on for the blocks b of loop li
+fn mark_blocks(self: *Loops, li: i64, in_loop: []bool, on: bool) {
+    for b in self.loops[li].blocks {
+        in_loop[b] = on
+    }
 }
 
 // ---------- printer ----------

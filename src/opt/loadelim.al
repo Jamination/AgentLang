@@ -54,74 +54,76 @@ fn loadelim_run(f: *Func) -> bool {
                     f.insts[v].args[ai] = r
                 }
             }
-            op := f.insts[v].op
-            if op == Load {
-                m := alias_memref(f, i64(v))
-                ty := f.insts[v].ty
-                hit := NOV
-                for k in 0..st.len {
-                    a := &st[k]
-                    if a.ty == ty && alias_must_alias(&a.m, &m) {
-                        hit = i64(a.val)
-                        break
-                    }
-                }
-                if hit != NOV {
-                    repl[v] = i32(hit)
-                    dead[v] = true
-                    changed = true
-                } else {
-                    // this load observes any aliasing pending store
+            match f.insts[v].op {
+                Load => {
+                    m := alias_memref(f, i64(v))
+                    ty := f.insts[v].ty
+                    hit := NOV
                     for k in 0..st.len {
                         a := &st[k]
-                        if a.pending_store != NOV && alias_may_alias(&a.m, &m, esc.items()) {
-                            a.pending_store = NOV
+                        if a.ty == ty && alias_must_alias(&a.m, &m) {
+                            hit = i64(a.val)
+                            break
                         }
                     }
-                    st.push(Avail{m: m, ty: ty, val: v, pending_store: NOV})
-                }
-            } else if op == Store {
-                m := alias_memref(f, i64(v))
-                ty := f.insts[v].ty
-                val := f.insts[v].args[1]
-                // a previous unobserved store to exactly this location is dead
-                for k in 0..st.len {
-                    a := &st[k]
-                    if a.pending_store != NOV && alias_must_alias(&a.m, &m) {
-                        dead[a.pending_store] = true
+                    if hit != NOV {
+                        repl[v] = i32(hit)
+                        dead[v] = true
                         changed = true
+                    } else {
+                        // this load observes any aliasing pending store
+                        for k in 0..st.len {
+                            a := &st[k]
+                            if a.pending_store != NOV && alias_may_alias(&a.m, &m, esc.items()) {
+                                a.pending_store = NOV
+                            }
+                        }
+                        st.push(Avail{m: m, ty: ty, val: v, pending_store: NOV})
                     }
                 }
-                // st.retain(|a| !may_alias(&a.m, &m, &esc))
-                n := 0
-                for k in 0..st.len {
-                    if !alias_may_alias(&st[k].m, &m, esc.items()) {
-                        st[n] = st[k]
-                        n += 1
+                Store => {
+                    m := alias_memref(f, i64(v))
+                    ty := f.insts[v].ty
+                    val := f.insts[v].args[1]
+                    // a previous unobserved store to exactly this location is dead
+                    for k in 0..st.len {
+                        a := &st[k]
+                        if a.pending_store != NOV && alias_must_alias(&a.m, &m) {
+                            dead[a.pending_store] = true
+                            changed = true
+                        }
                     }
-                }
-                st.len = n
-                st.push(Avail{m: m, ty: ty, val: i32(val), pending_store: v})
-            } else if op == Call || op == CallInd || op == Syscall || op == MemCpy || op == MemSet {
-                // may read or write anything reachable: only non-escaped stack slots survive
-                n := 0
-                for k in 0..st.len {
-                    match st[k].m.addr.base {
-                        Alloca(x) if !esc[x] => {
+                    // keep the entries that cannot alias m, in order
+                    n := 0
+                    for k in 0..st.len {
+                        if !alias_may_alias(&st[k].m, &m, esc.items()) {
                             st[n] = st[k]
                             n += 1
                         }
-                        _ => {}
+                    }
+                    st.len = n
+                    st.push(Avail{m: m, ty: ty, val: i32(val), pending_store: v})
+                }
+                // these take raw pointers that may point into any alloca passed to them
+                MemCpy, MemSet => st.clear()
+                Call, CallInd, Syscall => {
+                    // may read or write anything reachable: only non-escaped stack slots survive
+                    n := 0
+                    for k in 0..st.len {
+                        match st[k].m.addr.base {
+                            Alloca(x) if !esc[x] => {
+                                st[n] = st[k]
+                                n += 1
+                            }
+                            _ => {}
+                        }
+                    }
+                    st.len = n
+                    for k in 0..st.len {
+                        st[k].pending_store = NOV
                     }
                 }
-                st.len = n
-                if op == MemCpy || op == MemSet {
-                    // these take raw pointers that may point into any alloca passed to them
-                    st.clear()
-                }
-                for k in 0..st.len {
-                    st[k].pending_store = NOV
-                }
+                _ => {}
             }
         }
         out_state[b] = Some(st)
