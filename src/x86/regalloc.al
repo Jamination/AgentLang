@@ -17,33 +17,96 @@ priv struct Dec {
     du: Vec[i64]    // mir_decode entries of all instructions in `order`
     ipos: Vec[i64]  // the entry of each instruction (numbered in `order`), then the end
     binst: Vec[i64] // the first instruction of each block (by position in `order`), then the total
+    // for liveness: the registers that some block uses before defining them ("globals"), in
+    // the order in which they are first met, and the number of each (or -1)
+    globals: Vec[i64]
+    gidx: Vec[i64]
+    // per block: the globals it uses before defining them (gen[gen_off[oi]..gen_off[oi + 1]]),
+    // and the registers it defines (kill, likewise; the call clobbers not included: a call
+    // sets kill_call[oi])
+    gen_off: Vec[i64]
+    gen: Vec[i64]
+    kill_off: Vec[i64]
+    kill: Vec[i64]
+    kill_call: Vec[bool]
 }
 
-priv fn decode(mf: *MFunc, order: []i64) -> Dec {
+priv fn decode(mf: *MFunc, order: []i64, n: i64) -> Dec {
+    no := len(order)
     total := 0
     for b in order {
         total += mf.blocks[b].insts.len
     }
     du := vec_fill(total * 4 + 4 * DU_MAX, 0)
     ipos := vec_fill(total + 1, 0)
-    binst := vec_fill(len(order) + 1, 0)
+    binst := vec_fill(no + 1, 0)
+    globals := vec[i64]()
+    gidx := vec_fill(n, -1)
+    def_in := vec_fill(n, -1) // the block whose forward scan defined the register last
+    gen_off := vec_fill(no + 1, 0)
+    gen := vec_fill(total + DU_MAX, 0)
+    kill_off := vec_fill(no + 1, 0)
+    kill := vec_fill(total + DU_MAX, 0)
+    kill_call := vec_fill(no, false)
+    ng := 0
+    nk := 0
     p := 0
     k := 0
     for oi, b in order {
         binst[oi] = k
+        gen_off[oi] = ng
+        kill_off[oi] = nk
         insts := &mf.blocks[b].insts
         for x in 0..insts.len {
             if p + DU_MAX > du.len {
                 du.resize(2 * du.len, 0)
             }
+            if ng + DU_MAX > gen.len {
+                gen.resize(2 * gen.len, 0)
+            }
+            if nk + DU_MAX > kill.len {
+                kill.resize(2 * kill.len, 0)
+            }
             ipos[k] = p
-            p = mir_decode(mf, &insts[x], du.items(), p)
+            q0 := mir_decode(mf, &insts[x], du.items(), p)
+            h := du[p]
+            q := p + 1 + (h & 255)
+            for j in q..q0 {
+                u := du[j]
+                if def_in[u] != oi {
+                    g := gidx[u]
+                    if g < 0 {
+                        g = globals.len
+                        gidx[u] = g
+                        globals.push(u)
+                    }
+                    gen[ng] = g
+                    ng += 1
+                }
+            }
+            for j in p + 1..q {
+                d := du[j]
+                if def_in[d] != oi {
+                    def_in[d] = oi
+                    kill[nk] = d
+                    nk += 1
+                }
+            }
+            if h & (DU_CALL << 16) != 0 {
+                kill_call[oi] = true
+                for r in CALL_CLOBBER {
+                    def_in[r] = oi
+                }
+            }
+            p = q0
             k += 1
         }
     }
-    binst[len(order)] = k
+    binst[no] = k
     ipos[k] = p
-    return Dec{du: du, ipos: ipos, binst: binst}
+    gen_off[no] = ng
+    kill_off[no] = nk
+    return Dec{du: du, ipos: ipos, binst: binst, globals: globals, gidx: gidx, gen_off: gen_off, gen: gen, kill_off: kill_off, kill: kill, kill_call: kill_call}
 }
 
 // ---------- liveness ----------
@@ -53,73 +116,38 @@ priv fn decode(mf: *MFunc, order: []i64) -> Dec {
 // order in which they are first met.
 priv fn liveness(mf: *MFunc, order: []i64, dec: *Dec, n: i64, lo_off: *Vec[i64], lo: *Vec[i64]) {
     no := len(order)
-    du := dec.du.items()
-    gidx := vec_fill(n, -1)
-    globals := vec[i64]()
-    def_in := vec_fill(n, -1) // the block whose forward scan defined the register last
-    for oi in 0..no {
-        for k in dec.binst[oi]..dec.binst[oi + 1] {
-            p := dec.ipos[k]
-            h := du[p]
-            nd := h & 255
-            q := p + 1 + nd
-            for j in q..q + ((h >> 8) & 255) {
-                u := du[j]
-                if def_in[u] != oi && gidx[u] < 0 {
-                    gidx[u] = globals.len
-                    globals.push(u)
-                }
-            }
-            for j in p + 1..q {
-                def_in[du[j]] = oi
-            }
-            if h & (DU_CALL << 16) != 0 {
-                for r in CALL_CLOBBER {
-                    def_in[r] = oi
-                }
-            }
-        }
-    }
     *lo_off = vec_fill(no + 1, 0)
     *lo = vec[i64]()
+    globals := &dec.globals
+    gidx := &dec.gidx
     ng := globals.len
     if ng == 0 {
         return
     }
     nw := (ng + 63) / 64
+    // gen: used before being defined; kill: defined (a use before the definition in the
+    // same block is gen, so gen and kill can share a register)
     gen := vec_fill(no * nw, u64(0))
     kill := vec_fill(no * nw, u64(0))
     live_in := vec_fill(no * nw, u64(0))
     live_out := vec_fill(no * nw, u64(0))
     for oi in 0..no {
         base := oi * nw
-        for k in dec.binst[oi + 1] - 1..=dec.binst[oi] by -1 {
-            p := dec.ipos[k]
-            h := du[p]
-            nd := h & 255
-            q := p + 1 + nd
-            for j in p + 1..q {
-                g := gidx[du[j]]
-                if g >= 0 {
-                    bit := u64(1) << u64(g & 63)
-                    gen[base + (g >> 6)] &= ~bit
-                    kill[base + (g >> 6)] |= bit
-                }
+        for x in dec.gen_off[oi]..dec.gen_off[oi + 1] {
+            g := dec.gen[x]
+            gen[base + (g >> 6)] |= u64(1) << u64(g & 63)
+        }
+        for x in dec.kill_off[oi]..dec.kill_off[oi + 1] {
+            g := gidx[dec.kill[x]]
+            if g >= 0 {
+                kill[base + (g >> 6)] |= u64(1) << u64(g & 63)
             }
-            if h & (DU_CALL << 16) != 0 {
-                for r in CALL_CLOBBER {
-                    g := gidx[r]
-                    if g >= 0 {
-                        bit := u64(1) << u64(g & 63)
-                        gen[base + (g >> 6)] &= ~bit
-                        kill[base + (g >> 6)] |= bit
-                    }
-                }
-            }
-            for j in q..q + ((h >> 8) & 255) {
-                g := gidx[du[j]]
+        }
+        if dec.kill_call[oi] {
+            for r in CALL_CLOBBER {
+                g := gidx[r]
                 if g >= 0 {
-                    gen[base + (g >> 6)] |= u64(1) << u64(g & 63)
+                    kill[base + (g >> 6)] |= u64(1) << u64(g & 63)
                 }
             }
         }
@@ -168,7 +196,9 @@ priv fn liveness(mf: *MFunc, order: []i64, dec: *Dec, n: i64, lo_off: *Vec[i64],
 }
 
 // ---------- per-node lists in one pool ----------
-// A list that outgrows its room moves to the end of the pool with twice the room.
+// Every list starts with room for c0 elements; a list that outgrows its room moves to the end
+// of the pool with twice the room. (The pool is not zeroed: an element is only read after it
+// was written.)
 priv struct Lists {
     beg: Vec[i64]
     len: Vec[i64]
@@ -176,9 +206,13 @@ priv struct Lists {
     pool: Vec[i64]
 }
 
-priv fn lists_new(n: i64) -> Lists {
-    l := Lists{beg: vec_fill(n, 0), len: vec_fill(n, 0), cap: vec_fill(n, 0), pool: vec[i64]()}
-    l.pool.reserve(4 * n)
+priv fn lists_new(n: i64, c0: i64) -> Lists {
+    l := Lists{beg: vec_fill(n, 0), len: vec_fill(n, 0), cap: vec_fill(n, c0), pool: vec[i64]()}
+    for x in 0..n {
+        l.beg[x] = x * c0
+    }
+    l.pool.reserve(2 * n * c0)
+    l.pool.len = n * c0
     return l
 }
 
@@ -193,9 +227,10 @@ priv inline fn lpush(self: *Lists, n: i64, x: i64) {
 
 priv noinline fn lgrow(self: *Lists, n: i64) {
     l := self.len[n]
-    nc := if l == 0 { 4 } else { 2 * l }
+    nc := max(4, 2 * l)
     nb := self.pool.len
-    self.pool.resize(nb + nc, 0)
+    self.pool.reserve(nb + nc)
+    self.pool.len = nb + nc
     ob := self.beg[n]
     for j in 0..l {
         self.pool[nb + j] = self.pool[ob + j]
@@ -441,7 +476,7 @@ priv fn enable_moves(self: *Irc, n: i64) {
     }
 }
 
-priv fn decrement_degree(self: *Irc, m: i64) {
+priv inline fn decrement_degree(self: *Irc, m: i64) {
     if m < 32 {
         return
     }
@@ -449,20 +484,25 @@ priv fn decrement_degree(self: *Irc, m: i64) {
     // saturating_sub(1)
     self.degree[m] = if d > 0 { d - 1 } else { 0 }
     if d == self.k {
-        self.enable_moves(m)
-        for a in self.adj.lget(m) {
-            if self.in_graph(a) {
-                self.enable_moves(a)
-            }
+        self.degree_fell(m)
+    }
+}
+
+// the degree of m fell below k
+priv fn degree_fell(self: *Irc, m: i64) {
+    self.enable_moves(m)
+    for a in self.adj.lget(m) {
+        if self.in_graph(a) {
+            self.enable_moves(a)
         }
-        if self.state[m] == Spill {
-            if self.move_related(m) {
-                self.state[m] = Freeze
-                self.freeze_wl.push(m)
-            } else {
-                self.state[m] = Simplify
-                self.simplify_wl.push(m)
-            }
+    }
+    if self.state[m] == Spill {
+        if self.move_related(m) {
+            self.state[m] = Freeze
+            self.freeze_wl.push(m)
+        } else {
+            self.state[m] = Simplify
+            self.simplify_wl.push(m)
         }
     }
 }
@@ -470,9 +510,20 @@ priv fn decrement_degree(self: *Irc, m: i64) {
 priv fn simplify(self: *Irc, n: i64) {
     self.state[n] = Stack
     self.stack.push(n)
+    k := self.k
     for m in self.adj.lget(n) {
-        if self.in_graph(m) {
-            self.decrement_degree(m)
+        // (in_graph and decrement_degree)
+        if m < 32 {
+            continue
+        }
+        st := self.state[m]
+        if st == Stack || st == Coalesced {
+            continue
+        }
+        d := self.degree[m]
+        self.degree[m] = if d > 0 { d - 1 } else { 0 }
+        if d == k {
+            self.degree_fell(m)
         }
     }
 }
@@ -1039,14 +1090,16 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                     i.a = R(st[fi].1)
                 }
             }
-            mir_decode(mf, i, du.items(), 0)
-            h := du[0]
-            for j in 1..1 + (h & 255) {
-                retain_reg_ne(&st, du[j])
-            }
-            if h & (DU_CALL << 16) != 0 {
-                for r in CALL_CLOBBER {
-                    retain_reg_ne(&st, r)
+            if st.len > 0 {
+                mir_decode(mf, i, du.items(), 0)
+                h := du[0]
+                for j in 1..1 + (h & 255) {
+                    retain_reg_ne(&st, du[j])
+                }
+                if h & (DU_CALL << 16) != 0 {
+                    for r in CALL_CLOBBER {
+                        retain_reg_ne(&st, r)
+                    }
                 }
             }
             if is_store {
@@ -1135,7 +1188,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
         // the graphs of a round are thrown away at the start of the next one
         scratch_reset()
         scratch_on()
-        dec := decode(mf, order)
+        dec := decode(mf, order, n)
         vcls := vec_fill(n, u8(0))
         for r in 16..32 {
             vcls[r] = 1
@@ -1156,12 +1209,12 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             adj_set: map[u64, bool](),
             // a bit matrix up to 16 MB (11585 virtual registers), a hash set beyond
             adj_bits: if nv <= 11585 { vec_fill((nv * nv + 64) / 64, u64(0)) } else { vec[u64]() },
-            adj: lists_new(n),
+            adj: lists_new(n, 8),
             degree: vec_fill(n, 0),
             moves: vec[(i64, i64)](),
             mstate: vec[MS](),
-            move_list: lists_new(n),
-            act_list: lists_new(n),
+            move_list: lists_new(n, 2),
+            act_list: lists_new(n, 2),
             alias: vec_fill(n, 0),
             color: vec_fill(n, -1),
             simplify_wl: vec[i64](),
