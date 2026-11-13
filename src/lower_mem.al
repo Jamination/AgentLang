@@ -86,9 +86,7 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
                 continue
             }
         }
-        saved := self.cx.errs.len
-        t := self.cx.resolve(pt, &env)
-        self.cx.errs.truncate(saved)
+        t := self.resolve_quiet(pt, &env)
         if t != ty {
             return false
         }
@@ -108,9 +106,7 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
             }
             continue
         }
-        saved := self.cx.errs.len
-        t := self.cx.resolve(pt, &env)
-        self.cx.errs.truncate(saved)
+        t := self.resolve_quiet(pt, &env)
         if !literal_ok(self, a, t) {
             return false
         }
@@ -118,12 +114,23 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
     return true
 }
 
+// `resolve` without its error messages
+priv fn resolve_quiet(self: *Fx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
+    saved := self.cx.errs.len
+    r := self.cx.resolve(t, env)
+    self.cx.errs.truncate(saved)
+    return r
+}
+
 // can the untyped literal (or constant) `a` be a value of type `t`?
 priv fn literal_ok(s: *Fx, a: *Expr, t: i64) -> bool {
     k := s.cx.types.k(t)
     match a.k {
         Nil => {
-            return lower_call_is_ptr(k) || lower_call_is_fn(k) || lower_call_is_slice(k)
+            return match k {
+                Ptr(_), Fn(_, _), Slice(_) => true
+                _ => false
+            }
         }
         _ => {}
     }
@@ -148,18 +155,16 @@ priv fn literal_type(s: *Fx, a: *Expr) -> i64 {
         Nil => {
             return -1
         }
-        Ident(n) => {
-            if !is_some(s.lookup(n)) {
-                bv := s.bare_variant(n, None)
-                if bv.2 == 2 {
+        Ident(n) if !is_some(s.lookup(n)) => {
+            ei, _, kind := s.bare_variant(n, None)
+            if kind == 2 {
+                return -1
+            }
+            if kind == 1 {
+                if s.cx.enum_decls[ei].tparams.len != 0 {
                     return -1
                 }
-                if bv.2 == 1 {
-                    if s.cx.enum_decls[bv.0].tparams.len != 0 {
-                        return -1
-                    }
-                    return s.cx.inst_enum(bv.0, vec[i64](), a.pos)
-                }
+                return s.cx.inst_enum(ei, vec[i64](), a.pos)
             }
         }
         _ => {}
@@ -198,9 +203,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
             nrecv = 1
             all = alloc[Expr](len(args0) + 1)
             all[0] = *recv_e
-            for i in 0..len(args0) {
-                all[i + 1] = args0[i]
-            }
+            copy(all[1..], args0)
             args = all[1..]
         }
         None => {}
@@ -234,10 +237,8 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
             if alive.len == 1 {
                 d := self.cx.fn_decls[alive[0]]
                 if d.tparams.len == 0 {
-                    saved := self.cx.errs.len
                     empty := map[str, i64]()
-                    t := self.cx.resolve(&d.params[nrecv + i].1, &empty)
-                    self.cx.errs.truncate(saved)
+                    t := self.resolve_quiet(&d.params[nrecv + i].1, &empty)
                     if t != T_ERR {
                         exp = Some(t)
                     }
@@ -269,6 +270,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
         }
         alive = keep
     }
+    plain := ast_plain(name)
     r: Val
     if alive.len == 1 {
         r = self.call_decl(alive[0], explicit, recv, args, expect, pos, lower_call_no_pre())
@@ -279,7 +281,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
         usable := true
         match recv {
             Some(rv) => {
-                if is_method_builtin(ast_plain(name)) {
+                if is_method_builtin(plain) {
                     self.memo.push((&all[0], rv))
                     bargs = all
                 } else {
@@ -300,7 +302,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
             Some(t) => t.len != 0
             None => false
         }
-        if usable && has_targs && ast_plain(name) != "sizeof" && ast_plain(name) != "cast" && ast_plain(name) != "mkslice" {
+        if usable && has_targs && !contains([]str{"sizeof", "cast", "mkslice"}, plain) {
             usable = false
             self.err(pos, fmt("the builtin `", name, "` takes no type arguments, and no declared `", name, "` accepts these"))
             lower_call_eval_all(self, bargs)
@@ -308,12 +310,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
         r = val_err()
         if usable {
             saved := self.cx.errs.len
-            match self.builtin(ast_plain(name), lower_call_as_slice(explicit), bargs, expect, pos) {
-                Some(v) => {
-                    r = v
-                }
-                None => {}
-            }
+            r = self.builtin(plain, lower_call_as_slice(explicit), bargs, expect, pos).or(val_err())
             if r.ty == T_ERR && self.cx.errs.len > saved && cands.len != 0 {
                 // the declared functions were tried first: say so
                 e := &self.cx.errs[saved]
@@ -327,34 +324,33 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
 }
 
 // ---------- the library's Vec and Map ----------
-// the element type of the library's `Vec[T]` (a user struct that is also named Vec is not one)
-priv fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
+// the type arguments of the library's struct `name` with `n` of them, if `t` is one (a user
+// struct of the same name is not); empty otherwise
+priv fn lib_targs(self: *Cx, t: i64, name: str, n: i64) -> Vec[i64] {
     match self.types.k(t) {
         Struct(sid) => {
-            di, has := self.p_struct_names.get("Vec")
+            di, has := self.p_struct_names.get(name)
             si := &self.types.structs[sid]
-            if has && si.decl == di && si.targs.len == 1 {
-                return Some(si.targs[0])
+            if has && si.decl == di && si.targs.len == n {
+                return si.targs
             }
         }
         _ => {}
     }
-    return None
+    no: Vec[i64]
+    return no
+}
+
+// the element type of the library's `Vec[T]`
+priv fn vec_elem(self: *Cx, t: i64) -> Opt[i64] {
+    ts := self.lib_targs(t, "Vec", 1)
+    return if ts.len == 0 { None } else { Some(ts[0]) }
 }
 
 // the key and value types of the library's `Map[K, V]`
 fn map_kv(self: *Cx, t: i64) -> Opt[(i64, i64)] {
-    match self.types.k(t) {
-        Struct(sid) => {
-            di, has := self.p_struct_names.get("Map")
-            si := &self.types.structs[sid]
-            if has && si.decl == di && si.targs.len == 2 {
-                return Some((si.targs[0], si.targs[1]))
-            }
-        }
-        _ => {}
-    }
-    return None
+    ts := self.lib_targs(t, "Map", 2)
+    return if ts.len == 0 { None } else { Some((ts[0], ts[1])) }
 }
 
 // `len(m)` of a `Map`: its field `len`
@@ -362,7 +358,7 @@ fn map_len(self: *Fx, v: Val) -> Opt[Val] {
     if !is_some(self.cx.map_kv(v.ty)) {
         return None
     }
-    match self.field_of(v, "len", Pos{file: 0, line: 0, col: 0}) {
+    match self.field_of(v, "len", Pos{}) {
         Some(p) => Some(self.rvalue(p))
         None => None
     }
@@ -409,17 +405,17 @@ priv fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
         Slice(_) => return true
         Array(e, n) => return n != 0 && self.has_heap(e, depth + 1)
         Struct(sid) => {
-            for i in 0..self.types.structs[sid].fields.len {
-                if self.has_heap(self.types.structs[sid].fields[i].1, depth + 1) {
+            for f in self.types.structs[sid].fields {
+                if self.has_heap(f.1, depth + 1) {
                     return true
                 }
             }
             return false
         }
         Enum(eid) => {
-            for vi in 0..self.types.enums[eid].variants.len {
-                for i in 0..self.types.enums[eid].variants[vi].1.len {
-                    if self.has_heap(self.types.enums[eid].variants[vi].1[i], depth + 1) {
+            for va in self.types.enums[eid].variants {
+                for pt in va.1 {
+                    if self.has_heap(pt, depth + 1) {
                         return true
                     }
                 }
@@ -427,8 +423,8 @@ priv fn has_heap(self: *Cx, t: i64, depth: i64) -> bool {
             return false
         }
         Tuple(ts) => {
-            for i in 0..ts.len {
-                if self.has_heap(ts[i], depth + 1) {
+            for x in ts {
+                if self.has_heap(x, depth + 1) {
                     return true
                 }
             }
@@ -462,8 +458,8 @@ fn clone_builtin(self: *Fx, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     return self.clone_val(v, pos, 0)
 }
 
-// a copy of the bytes of `v` in a fresh temporary
-priv fn clone_copy(self: *Fx, v: Val) -> Val {
+// a copy of the bytes of `v` in a fresh temporary (`v` itself if it is not in memory)
+fn copy_temp(self: *Fx, v: Val) -> Val {
     if !v.mem {
         return v
     }
@@ -507,7 +503,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
     }
     if depth > 40 || !self.cx.has_heap(ty, 0) {
         // nothing to duplicate
-        return self.clone_copy(v)
+        return self.copy_temp(v)
     }
     match self.cx.types.k(ty) {
         Slice(et) => {
@@ -538,8 +534,8 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
             match self.cx.map_kv(ty) {
                 Some(kv) => {
                     m := self.sval(self.cx.types.ptr_to(ty), v.v)
-                    kp := self.sval(T_BOOL, self.iconst(I8, lower_expr_bool_i64(!self.cx.has_heap(kv.0, 0))))
-                    vp := self.sval(T_BOOL, self.iconst(I8, lower_expr_bool_i64(!self.cx.has_heap(kv.1, 0))))
+                    kp := self.sval(T_BOOL, self.iconst(I8, i64(!self.cx.has_heap(kv.0, 0))))
+                    vp := self.sval(T_BOOL, self.iconst(I8, i64(!self.cx.has_heap(kv.1, 0))))
                     return self.call_rt("__clone_map", vec_two(kv.0, kv.1), vec_of([]Val{m, kp, vp}), pos)
                 }
                 None => {}
@@ -550,7 +546,7 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 names.push(self.cx.types.structs[sid].fields[i].0)
                 tys.push(self.cx.types.structs[sid].fields[i].1)
             }
-            tv := self.clone_copy(v)
+            tv := self.copy_temp(v)
             clone_fields(self, v, tv, names, tys, pos, depth)
             return tv
         }
@@ -561,13 +557,13 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
                 names.push(fmt(i))
                 tys.push(ts[i])
             }
-            tv := self.clone_copy(v)
+            tv := self.copy_temp(v)
             clone_fields(self, v, tv, names, tys, pos, depth)
             return tv
         }
         Enum(eid) => {
             // the same variant; its payload values that own storage are cloned
-            tv := self.clone_copy(v)
+            tv := self.copy_temp(v)
             nvar := self.cx.types.enums[eid].variants.len
             tag := self.load_tag(v.v)
             bj := self.new_block()
@@ -611,5 +607,5 @@ priv fn clone_val(self: *Fx, v: Val, pos: Pos, depth: i64) -> Val {
         }
         _ => {}
     }
-    return self.clone_copy(v)
+    return self.copy_temp(v)
 }
