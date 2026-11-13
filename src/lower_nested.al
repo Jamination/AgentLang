@@ -208,7 +208,7 @@ fn call_nested(self: *Fx, idx: i64, recv: Opt[Val], args: []Expr, expect: Opt[i6
         lower_call_eval_all(self, args)
         return val_err()
     }
-    return self.call_fn(self.cx.nested[idx].decl, -1, idx, None, recv, args, expect, pos, lower_call_no_pre())
+    return self.call_fn(self.cx.nested[idx].decl, -1, idx, None, recv, args, expect, pos, nil)
 }
 
 // the nested or anonymous function `idx` as a value

@@ -776,10 +776,7 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
     if self.dead {
         v = val_never()
     } else if v.mem && !self.scopes.last().defers.is_empty() {
-        t := self.temp(v.ty)
-        tv := self.mval(v.ty, t)
-        self.store(tv, v)
-        v = tv
+        v = self.copy_temp(v)
     } else if v.mem && self.cx.types.is_scalar(v.ty) {
         s := self.scalar(v)
         v = self.sval(v.ty, s)
@@ -1489,10 +1486,7 @@ priv fn const_cond(self: *Fx, e: *Expr) -> Opt[bool] {
     if !self.no_locals(e) {
         return None
     }
-    saved := self.cx.errs.len
-    r := self.cx.const_eval(e)
-    self.cx.errs.truncate(saved)
-    return match r {
+    return match self.cx.const_eval_quiet(e) {
         Some(Bool(b)) => Some(b)
         _ => None
     }

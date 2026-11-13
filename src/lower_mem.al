@@ -36,9 +36,7 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
             if t.len != d.tparams.len {
                 return false
             }
-            for j in 0..t.len {
-                env.set(d.tparams[j], t[j])
-            }
+            env = tparam_env(d.tparams, t)
         }
         None => {}
     }
@@ -86,7 +84,7 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
                 continue
             }
         }
-        t := self.resolve_quiet(pt, &env)
+        t := self.cx.resolve_quiet(pt, &env)
         if t != ty {
             return false
         }
@@ -106,20 +104,12 @@ priv fn decl_accepts(self: *Fx, d: *FnDecl, explicit: Opt[Vec[i64]], recv: Opt[V
             }
             continue
         }
-        t := self.resolve_quiet(pt, &env)
+        t := self.cx.resolve_quiet(pt, &env)
         if !literal_ok(self, a, t) {
             return false
         }
     }
     return true
-}
-
-// `resolve` without its error messages
-priv fn resolve_quiet(self: *Fx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
-    saved := self.cx.errs.len
-    r := self.cx.resolve(t, env)
-    self.cx.errs.truncate(saved)
-    return r
 }
 
 // can the untyped literal (or constant) `a` be a value of type `t`?
@@ -238,7 +228,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
                 d := self.cx.fn_decls[alive[0]]
                 if d.tparams.len == 0 {
                     empty := map[str, i64]()
-                    t := self.resolve_quiet(&d.params[nrecv + i].1, &empty)
+                    t := self.cx.resolve_quiet(&d.params[nrecv + i].1, &empty)
                     if t != T_ERR {
                         exp = Some(t)
                     }
@@ -273,7 +263,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
     plain := ast_plain(name)
     r: Val
     if alive.len == 1 {
-        r = self.call_decl(alive[0], explicit, recv, args, expect, pos, lower_call_no_pre())
+        r = self.call_decl(alive[0], explicit, recv, args, expect, pos, nil)
     } else if alive.len > 1 {
         r = self.call_overloaded(alive.items(), explicit, recv, args, expect, pos)
     } else {

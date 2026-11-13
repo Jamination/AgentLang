@@ -196,14 +196,6 @@ priv struct SplitCx {
     uord: Vec[i32]
 }
 
-priv fn term_args(t: *Term) -> []i64 {
-    match t {
-        Br(&c, _, _) => return mkslice[i64](cast[*i64](c), 1)
-        Ret(vs) => return vs.items()
-        _ => return nil
-    }
-}
-
 priv fn uses_index(cx: *SplitCx, f: *Func) {
     if cx.built {
         return

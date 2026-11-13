@@ -808,11 +808,12 @@ fn rpo_compute(self: *Func) -> Vec[i64] {
     return Vec[i64]{buf: order[k..n], len: n - k}
 }
 
-fn term_uses(self: *Func, b: i64) -> Vec[i64] {
-    match self.blocks[b].term {
-        Br(c, _, _) => vec_one(c)
-        Ret(v) => clone(v)
-        _ => vec[i64]()
+// the values a terminator uses (a view, no copy)
+fn term_args(t: *Term) -> []i64 {
+    match t {
+        Br(&c, _, _) => return mkslice[i64](cast[*i64](c), 1)
+        Ret(vs) => return vs.items()
+        _ => return nil
     }
 }
 
@@ -1414,8 +1415,7 @@ fn ir_verify(f: *Func) -> str {
                 }
             }
         }
-        tu := f.term_uses(b)
-        for a in tu {
+        for a in term_args(&blk.term) {
             db := def_block[a]
             if db == NOV || !cfg.dom(db, b) {
                 return fmt("terminator of b", b, " uses %", a, " which does not dominate it")

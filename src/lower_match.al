@@ -310,10 +310,7 @@ priv fn is_const(s: *Fx, e: *Expr) -> bool {
         Int(_, _), Float(_, _), Str(_), Bool(_), Nil => return true
         _ => {}
     }
-    saved := s.cx.errs.len
-    r := is_some(s.cx.const_eval(e))
-    s.cx.errs.truncate(saved)
-    return r
+    return is_some(s.cx.const_eval_quiet(e))
 }
 
 // does the name `n` denote anything in an expression?
@@ -883,9 +880,7 @@ priv fn pat_bind(self: *Fx, rp: *RPat, part: Val, payload: bool, slots: *Vec[(st
     }
     if rp.k == RP_REF {
         // the address escapes: a scalar field loses its private alias class
-        if part.alias >> 4 != 0 {
-            self.cx.exposed.set(part.alias >> 4, true)
-        }
+        self.cx.expose(part.alias)
         pt := self.cx.types.ptr_to(rp.ty)
         a: i64
         if use_slots {
@@ -928,13 +923,10 @@ priv fn bool_pat(s: *Fx, rp: *RPat) -> i64 {
     if rp.k != RP_CONST {
         return -1
     }
-    saved := s.cx.errs.len
-    r := match s.cx.const_eval(rp.e) {
+    return match s.cx.const_eval_quiet(rp.e) {
         Some(Bool(b)) => if b { 1 } else { 0 }
         _ => -1
     }
-    s.cx.errs.truncate(saved)
-    return r
 }
 
 // ---------- arms that cannot be reached ----------
@@ -946,10 +938,7 @@ priv fn const_key(s: *Fx, rp: *RPat) -> Opt[CV] {
         Ident(n) if is_some(s.lookup(n)) => return None
         _ => {}
     }
-    saved := s.cx.errs.len
-    r := s.cx.const_eval(rp.e)
-    s.cx.errs.truncate(saved)
-    return r
+    return s.cx.const_eval_quiet(rp.e)
 }
 
 // Does the pattern `a` match every value that `b` matches? Only the plain cases: `a` matches
@@ -1633,15 +1622,5 @@ priv fn decl_pos(cx: *Cx, t: i64) -> Opt[Pos] {
         Enum(eid) => return Some(cx.enum_decls[cx.types.enums[eid].decl].pos)
         Ptr(x), Slice(x), Array(x, _) => return decl_pos(cx, x)
         _ => return None
-    }
-}
-
-// names that a call resolves before it looks for a variant: builtin functions and types
-fn lower_match_builtin_name(n: str) -> bool {
-    match n {
-        "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
-        "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed" => true
-        "panic", "fmt", "hash", "put", "print" => true
-        _ => is_some(lower_builtin_type(n))
     }
 }

@@ -121,7 +121,7 @@ fn priv_hint(self: *Cx, n: str) -> str {
     if !found {
         return ""
     }
-    fname := self.file_of(pos.file, "?")
+    fname := file_name(&self.file_names, pos.file)
     return fmt(" (`", n, "` is declared `priv` in ", fname, ", line ", pos.line, ": a private declaration is visible only inside its own file; remove `priv` there to use it from other files)")
 }
 
@@ -646,16 +646,8 @@ fn internal_file(self: *Cx, file: i64) -> bool {
     return file < self.n_prelude || file == self.entry_file
 }
 
-// the name of file `f`, or `none` for an unknown file
-priv fn file_of(self: *Cx, f: i64, none: str) -> str {
-    if f >= 0 && f < self.file_names.len {
-        return self.file_names[f]
-    }
-    return none
-}
-
 fn pos_str(self: *Cx, p: Pos) -> str {
-    fname := self.file_of(p.file, "?")
+    fname := file_name(&self.file_names, p.file)
     return fmt(fname, ":", p.line, ":", p.col)
 }
 
@@ -677,6 +669,49 @@ fn tparam_env(tparams: Vec[str], targs: Vec[i64]) -> Map[str, i64] {
 
 fn err(self: *Cx, pos: Pos, msg: str) {
     self.errs.push(Diag{pos: pos, msg: msg})
+}
+
+// the address of a value with alias class `alias` escapes: a scalar field loses its private
+// class (`exposed`, applied when the function is finished)
+fn expose(self: *Cx, alias: i64) {
+    if alias >> 4 != 0 {
+        self.exposed.set(alias >> 4, true)
+    }
+}
+
+// the member names of a struct (its fields) or tuple ("0", "1", ...); none for other types
+fn member_names(self: *Cx, ty: i64) -> Vec[str] {
+    names := vec[str]()
+    match self.types.k(ty) {
+        Struct(sid) => {
+            for f in self.types.structs[sid].fields {
+                names.push(f.0)
+            }
+        }
+        Tuple(ts) => {
+            for i in 0..ts.len {
+                names.push(fmt(i))
+            }
+        }
+        _ => {}
+    }
+    return names
+}
+
+// `resolve` without its error messages
+fn resolve_quiet(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
+    saved := self.errs.len
+    r := self.resolve(t, env)
+    self.errs.truncate(saved)
+    return r
+}
+
+// `const_eval` without its error messages
+fn const_eval_quiet(self: *Cx, e: *Expr) -> Opt[CV] {
+    saved := self.errs.len
+    r := self.const_eval(e)
+    self.errs.truncate(saved)
+    return r
 }
 
 // ---------- types ----------
@@ -1480,9 +1515,10 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
             return None
         }
     }
-    src := self.file_of(pos.file, "")
-    dir := if starts_with(src, "<") { env_get("ALC_STD_DIR").0 } else { lower_call_parent_dir(src) }
-    path := lower_call_path_join(dir, rel)
+    // (an unknown file is "?", whose directory is "")
+    src := file_name(&self.file_names, pos.file)
+    dir := if starts_with(src, "<") { env_get("ALC_STD_DIR").0 } else { path_parent(src).or("") }
+    path := path_join(dir, rel)
     cached, hit := self.embeds.get(path)
     if hit {
         return Some(cached)
@@ -1492,7 +1528,7 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
         self.embeds.set(path, bytes)
         return Some(bytes)
     }
-    self.err(args[0].pos, fmt("cannot embed `", path, "`: ", lower_call_io_error(io_error())))
+    self.err(args[0].pos, fmt("cannot embed `", path, "`: ", os_error(io_error())))
     return None
 }
 

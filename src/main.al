@@ -98,18 +98,8 @@ priv const CORE_MODULES = [4]str{"math", "rand", "time", "mem"}
 // ---------- paths ----------
 // Paths are taken as written: components are separated by `/` (on Windows also `\`), and the
 // compiler joins them with `/`. host_root (src/base.al) is the length of a root ("/"; on
-// Windows also "C:\", "C:", "\\server\share\").
-
-// `p` seen from `dir` (an absolute `p` stays as it is)
-priv fn path_join(dir: str, p: str) -> str {
-    if host_root(p) > 0 || len(dir) == 0 {
-        return p
-    }
-    if host_sep(dir[len(dir) - 1]) {
-        return concat(dir, p)
-    }
-    return fmt(dir, "/", p)
-}
+// Windows also "C:\", "C:", "\\server\share\"); path_join, path_trim and path_parent are there
+// too (lowering resolves `embed` paths with them).
 
 // the components of a path as far as comparing paths goes: the root is a component, empty
 // components and "." are dropped, except a "." at the start of a relative path
@@ -140,22 +130,6 @@ priv fn path_comps(p: str) -> Vec[str] {
     return out
 }
 
-// the path without trailing separators and trailing "." components
-priv fn path_trim(p: str) -> str {
-    n := len(p)
-    keep := max(host_root(p), 1)
-    loop {
-        if n > keep && host_sep(p[n - 1]) {
-            n -= 1
-        } else if n >= 2 && n > keep && p[n - 1] == '.' && host_sep(p[n - 2]) {
-            n -= 1
-        } else {
-            break
-        }
-    }
-    return p[..n]
-}
-
 // the last component, unless the path ends in ".." or has none
 priv fn path_file_name(p: str) -> Opt[str] {
     t := path_trim(p)
@@ -169,24 +143,6 @@ priv fn path_file_name(p: str) -> Opt[str] {
         return None
     }
     return Some(name)
-}
-
-// the path without its last component
-priv fn path_parent(p: str) -> Opt[str] {
-    t := path_trim(p)
-    root := host_root(t)
-    if len(t) == 0 || len(t) == root {
-        return None
-    }
-    k := len(t)
-    while k > root && !host_sep(t[k - 1]) {
-        k -= 1
-    }
-    // separators between the parent and the last component do not belong to the parent
-    while k > max(root, 1) && host_sep(t[k - 1]) {
-        k -= 1
-    }
-    return Some(t[..k])
 }
 
 // the file name without its last extension
@@ -218,31 +174,6 @@ priv fn same_file(a: str, b: str) -> bool {
     ia, oka := file_id(a)
     ib, okb := file_id(b)
     return oka && okb && ia == ib
-}
-
-// the text for an errno, as in diagnostics: "No such file or directory (os error 2)"
-priv fn os_error(errno: i64) -> str {
-    text := match errno {
-        1 => "Operation not permitted"
-        2 => "No such file or directory"
-        5 => "Input/output error"
-        11 => "Resource temporarily unavailable"
-        12 => "Cannot allocate memory"
-        13 => "Permission denied"
-        17 => "File exists"
-        20 => "Not a directory"
-        21 => "Is a directory"
-        23 => "Too many open files in system"
-        24 => "Too many open files"
-        26 => "Text file busy"
-        27 => "File too large"
-        28 => "No space left on device"
-        30 => "Read-only file system"
-        36 => "File name too long"
-        40 => "Too many levels of symbolic links"
-        _ => fmt("Unknown error ", errno)
-    }
-    return fmt(text, " (os error ", errno, ")")
 }
 
 // the content of a file: (text, error); the error text is empty on success
@@ -716,14 +647,6 @@ priv fn json_str(s: str) -> str {
     }
     o.push('"')
     return o.items()
-}
-
-// names.get(file) or "?"
-priv fn file_name(names: *Vec[str], file: i64) -> str {
-    if file >= 0 && file < names.len {
-        return names[file]
-    }
-    return "?"
 }
 
 priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {

@@ -113,13 +113,6 @@ priv fn any_unbound(tparams: *Vec[str], env: *Map[str, i64]) -> bool {
     return false
 }
 
-fn lower_call_is_ptr(k: TyK) -> bool {
-    match k {
-        Ptr(_) => true
-        _ => false
-    }
-}
-
 fn lower_call_is_fn(k: TyK) -> bool {
     match k {
         Fn(_, _) => true
@@ -141,68 +134,6 @@ fn lower_call_as_slice(o: Opt[Vec[i64]]) -> Opt[[]i64] {
         Some(v) => Some(v.items())
         None => None
     }
-}
-
-// the empty list of already evaluated arguments
-fn lower_call_no_pre() -> [](i64, Val) {
-    return [](i64, Val){}
-}
-
-// the directory of a source file name (empty if there is none)
-fn lower_call_parent_dir(src: str) -> str {
-    n := len(src)
-    root := host_root(src)
-    // trailing separators do not form a component
-    while n > max(root, 1) && host_sep(src[n - 1]) {
-        n -= 1
-    }
-    if n == 0 || (n == root && host_sep(src[root - 1])) {
-        return ""
-    }
-    i := n - 1
-    while i >= root && !host_sep(src[i]) {
-        i -= 1
-    }
-    if i < root {
-        return src[..root]
-    }
-    while i > root && host_sep(src[i - 1]) {
-        i -= 1
-    }
-    if i == root {
-        return src[..root]
-    }
-    return src[..i]
-}
-
-// `rel` seen from `dir` (an absolute `rel` stays as it is)
-fn lower_call_path_join(dir: str, rel: str) -> str {
-    if host_root(rel) > 0 {
-        return rel
-    }
-    if len(dir) == 0 {
-        return rel
-    }
-    if host_sep(dir[len(dir) - 1]) {
-        return concat(dir, rel)
-    }
-    return fmt(dir, "/", rel)
-}
-
-// why a file could not be read: the usual text for its errno (io_error() of the failed read)
-// and the number
-fn lower_call_io_error(e: i64) -> str {
-    text := match e {
-        2 => "No such file or directory"
-        13 => "Permission denied"
-        20 => "Not a directory"
-        21 => "Is a directory"
-        _ => ""
-    }
-    if len(text) == 0 {
-        return fmt("os error ", e)
-    }
-    return fmt(text, " (os error ", e, ")")
 }
 
 fn unify(self: *Fx, t: *TypeAst, ty: i64, tparams: []str, env: *Map[str, i64]) -> bool {
@@ -542,7 +473,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
             // a variant; in a call, a builtin function or type of the same name wins
             // (`len(x)`, `i64(x)`): such a variant is constructed as `Enum.Variant(..)`
             bv := self.bare_variant(n, expect)
-            if bv.2 != 0 && !lower_match_builtin_name(n) {
+            if bv.2 != 0 && !lower_mem_is_builtin(n) && is_none(lower_builtin_type(n)) {
                 if bv.2 == 1 {
                     return self.construct_variant(bv.0, bv.1, args, expect, pos)
                 }
@@ -555,7 +486,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 return self.call_shared(n, cands, None, None, c, args, expect, pos)
             }
             if cands.len == 1 {
-                return self.call_decl(cands[0], None, None, args, expect, pos, lower_call_no_pre())
+                return self.call_decl(cands[0], None, None, args, expect, pos, nil)
             }
             if cands.len > 1 {
                 return self.call_overloaded(cands.items(), None, None, args, expect, pos)
@@ -624,7 +555,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                                 return self.call_shared(n, cands, Some(tys), None, c, args, expect, pos)
                             }
                             if cands.len == 1 {
-                                return self.call_decl(cands[0], Some(tys), None, args, expect, pos, lower_call_no_pre())
+                                return self.call_decl(cands[0], Some(tys), None, args, expect, pos, nil)
                             }
                             if cands.len > 1 {
                                 return self.call_overloaded(cands.items(), Some(tys), None, args, expect, pos)
@@ -656,7 +587,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                                     return self.call_shared(name, cands, Some(tys), Some(rv), recv, args, expect, pos)
                                 }
                                 if cands.len == 1 {
-                                    return self.call_decl(cands[0], Some(tys), Some(rv), args, expect, pos, lower_call_no_pre())
+                                    return self.call_decl(cands[0], Some(tys), Some(rv), args, expect, pos, nil)
                                 }
                                 return self.call_overloaded(cands.items(), Some(tys), Some(rv), args, expect, pos)
                             }
@@ -714,7 +645,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 return self.call_shared(name, cands, None, Some(rv), recv, args, expect, pos)
             }
             if cands.len == 1 {
-                return self.call_decl(cands[0], None, Some(rv), args, expect, pos, lower_call_no_pre())
+                return self.call_decl(cands[0], None, Some(rv), args, expect, pos, nil)
             }
             if cands.len > 1 {
                 return self.call_overloaded(cands.items(), None, Some(rv), args, expect, pos)
@@ -874,12 +805,10 @@ priv fn param_accepts_adjust(s: *Fx, is_recv: bool, ty: i64, t: i64) -> bool {
 // a type written in declaration `d`, resolved as `d`'s own file sees it (a prelude function
 // keeps meaning the prelude's types where the user shadows their names); errors are dropped
 priv fn resolve_in(s: *Fx, d: *FnDecl, pt: *TypeAst, env: *Map[str, i64]) -> i64 {
-    saved := s.cx.errs.len
     save_scope := s.cx.scope_prelude
     s.cx.scope_prelude = s.cx.internal_file(d.pos.file)
-    t := s.cx.resolve(pt, env)
+    t := s.cx.resolve_quiet(pt, env)
     s.cx.scope_prelude = save_scope
-    s.cx.errs.truncate(saved)
     return t
 }
 
@@ -1142,11 +1071,9 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
                 if vn == "" {
                     continue
                 }
-                saved := self.cx.errs.len
                 empty := map[str, i64]()
-                t0 := self.cx.resolve(&self.cx.fn_decls[ranked[0].1].params[off + i].1, &empty)
-                t1 := self.cx.resolve(&self.cx.fn_decls[ranked[1].1].params[off + i].1, &empty)
-                self.cx.errs.truncate(saved)
+                t0 := self.cx.resolve_quiet(&self.cx.fn_decls[ranked[0].1].params[off + i].1, &empty)
+                t1 := self.cx.resolve_quiet(&self.cx.fn_decls[ranked[1].1].params[off + i].1, &empty)
                 match (self.cx.types.k(t0), self.cx.types.k(t1)) {
                     (Enum(_), Enum(_)) if t0 != t1 => {
                         s := lower_call_call_overloaded_sigs(self, cands)
@@ -1200,9 +1127,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             return val_err()
         }
         Some(tys) if generic => {
-            for j in 0..d.tparams.len {
-                env.set(d.tparams[j], tys[j])
-            }
+            env = tparam_env(d.tparams, tys)
         }
         Some(t) if t.len != 0 => {
             self.err(pos, fmt("function `", d.name, "` is not generic"))
@@ -1358,9 +1283,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
                     v = val_err()
                 }
                 (Ptr(inner), _) if inner == v.ty && v.mem && !v.ro => {
-                    if v.alias >> 4 != 0 {
-                        self.cx.exposed.set(v.alias >> 4, true)
-                    }
+                    self.cx.expose(v.alias)
                     v = self.sval(pt, v.v)
                 }
                 (Ptr(inner), _) if inner == v.ty && v.ty != T_ERR => {
@@ -1937,21 +1860,7 @@ priv fn hash_val(self: *Fx, v: Val, pos: Pos) -> Opt[i64] {
             self.store_slice(sv, v.v, nv)
             return self.hash_val(sv, pos)
         }
-        Struct(sid) => {
-            names := vec[str]()
-            nf := self.cx.types.structs[sid].fields.len
-            for j in 0..nf {
-                names.push(self.cx.types.structs[sid].fields[j].0)
-            }
-            return hash_fields(self, v, names, pos)
-        }
-        Tuple(ts) => {
-            names := vec[str]()
-            for i in 0..ts.len {
-                names.push(fmt(i))
-            }
-            return hash_fields(self, v, names, pos)
-        }
+        Struct(_), Tuple(_) => return hash_fields(self, v, self.cx.member_names(v.ty), pos)
         Vec(_), Quat, Mat4 => {
             // lane by lane as f32 values, like `==` compares them
             h := self.iconst(I64, 0x51ed270b)

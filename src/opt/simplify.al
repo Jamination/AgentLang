@@ -210,10 +210,6 @@ priv fn op(self: *Ctx, v: i64) -> Op {
     return self.f.insts[v].op
 }
 
-priv fn small(k: i64) -> bool {
-    return k >= i64(i32(0x80000000)) && k <= 0x7FFFFFFF
-}
-
 priv fn is_not(s: *Ctx, n: i64, x: i64) -> bool {
     ni := &s.f.insts[n]
     return ni.op == Xor && s.c(ni.args[1]) == Some(-1) && ni.args[0] == x
@@ -429,7 +425,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 if (op == Shl || op == Mul) && ai.op == Add {
                     match self.c(ai.args[1]) {
                         Some(k1) => match fold_bin(op, ty, k1, k2) {
-                            Some(kf) if small(kf) => {
+                            Some(kf) if fits_i32(kf) => {
                                 x := ai.args[0]
                                 inner := self.mk(op, ty, vec_of([]i64{x, b}))
                                 kc := self.konst(ty, kf)
@@ -1611,8 +1607,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                         }
                     }
                 }
-                tu := f.term_uses(bb)
-                for a in tu {
+                for a in term_args(&f.blocks[bb].term) {
                     if i64(def_block[a]) == b && !(cfg.dom(t, bb) || cfg.dom(e, bb)) {
                         continue blocks2
                     }

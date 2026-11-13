@@ -357,12 +357,12 @@ priv fn layout_fields(self: *Types, tys: []i64) -> (Vec[i64], i64, i64) {
     for t in tys {
         a := self.align_of(t)
         s := self.size_of(t)
-        off = (off + a - 1) / a * a
+        off = align_up(off, a)
         offs.push(off)
         off += s
         align = max(align, a)
     }
-    size := (off + align - 1) / align * align
+    size := align_up(off, align)
     return (offs, size, align)
 }
 
@@ -440,7 +440,7 @@ priv fn layout_enum(self: *Types, eid: i64) {
     if e.state == 2 {
         return
     }
-    e.size = (size + align - 1) / align * align
+    e.size = align_up(size, align)
     e.align = align
     e.state = 2
     e.runs = merge_spans(spans.items())

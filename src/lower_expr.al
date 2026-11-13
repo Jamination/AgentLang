@@ -631,11 +631,7 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
                 return Some(v)
             }
             tn := self.tyname(bv.ty)
-            names := vec[str]()
-            fields := self.cx.types.structs[sid].fields
-            for i in 0..fields.len {
-                names.push(fields[i].0)
-            }
+            names := self.cx.member_names(bv.ty)
             self.err(pos, fmt(tn, " has no field `", name, "` (fields: ", join(names.items(), ", "), ")"))
             return None
         }
@@ -938,9 +934,7 @@ priv fn unary(self: *Fx, op: UnOp, x: *Expr, expect: Opt[i64], pos: Pos) -> Val 
                         self.err(pos, "cannot take the address of a vector component (copy it to a variable first)")
                         return val_err()
                     }
-                    if p.alias >> 4 != 0 {
-                        self.cx.exposed.set(p.alias >> 4, true)
-                    }
+                    self.cx.expose(p.alias)
                     pt := self.cx.types.ptr_to(p.ty)
                     return self.sval(pt, p.v)
                 }
@@ -1238,18 +1232,9 @@ priv fn eq_vals(self: *Fx, l: Val, r: Val, pos: Pos) -> Opt[i64] {
             }
             return Some(self.scalar(v))
         }
-        Struct(sid) => {
+        Struct(_), Tuple(_) => {
             fieldwise = true
-            fields := self.cx.types.structs[sid].fields
-            for i in 0..fields.len {
-                names.push(fields[i].0)
-            }
-        }
-        Tuple(ts) => {
-            fieldwise = true
-            for i in 0..ts.len {
-                names.push(fmt(i))
-            }
+            names = self.cx.member_names(l.ty)
         }
         Enum(eid) => {
             // the same variant, and equal payload values

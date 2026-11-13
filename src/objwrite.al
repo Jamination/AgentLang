@@ -1,10 +1,6 @@
 // What the executable writers (elf.al, pe.al) share: little-endian byte output and the parts
 // of the image they lay out alike (text, read-only data, bss, the relocations).
 
-fn align_up(x: i64, a: i64) -> i64 {
-    (x + a - 1) / a * a
-}
-
 // x as u16, little endian
 fn put16(v: *Vec[u8], x: i64) {
     u := u64(x)
