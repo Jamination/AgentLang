@@ -2,7 +2,7 @@
 
 AL is a small, statically typed, compiled language designed to be written by AI agents.
 `alc` compiles a whole program (`alc build main.al`, no build system) directly to a static
-x86-64 Linux executable (or, with `--target windows`, a Windows x86-64 console executable). The compiler reports all errors of a program at once (also in functions
+x86-64 Linux executable. The compiler reports all errors of a program at once (also in functions
 that are never called; generic ones: see [Generics](#generics)) as `file:line:col: error: ...`.
 
 - Integers wrap; division by zero and out-of-bounds indexing stop the program with a `file:line`
@@ -838,16 +838,11 @@ fn main() {
 ```
 alc build file.al [-o out]     compile; the executable is the source path without `.al`
 alc run file.al [-- args...]   compile (writing the executable as build does) and run; exit status of the program
-alc test file.al               compile and run all `test` blocks, each in its own process (`main` is not run and
-                               need not exist); per test its output, then `ok   name` / `FAIL name`; status 1 if any failed;
-                               the test runner is written to `file.test`
+alc test file.al               compile and run all `test` blocks, each in its own process (`main` is not run and need not exist);
+                               per test its output, then `ok   name` / `FAIL name`; status 1 if any failed; the test runner is written to `file.test`
 alc check file.al              type-check only
 alc sigs file.al [-- std]      one line per declaration: `file:line: signature`; `-- std` adds the library's
-options: --unchecked  -O0  --json  --emit-ir  --emit-asm  --target linux|windows
-
---target windows              a Windows x86-64 console executable (PE), named `file.exe` by default;
-                               `alc run` / `alc test` run it under Wine when ALC_WINE=1 (and WINEPREFIX) is set,
-                               otherwise they only build it. C interop on Windows: DETAILS.md
+options: --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`: DETAILS.md#c-interop)
 ```
 
 Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`
@@ -892,7 +887,6 @@ cross length normalize lerp`, matrices, quaternions): [std/math.md](std/math.md)
 extern "libc.so.6" fn getenv(name: *u8) -> *u8
 extern "libm.so.6" fn cosf(x: f32) -> f32
 extern "libc.so.6" environ: **u8           // a C variable: read, assign, `&environ`; no initializer
-
 home := from_cstr(getenv(ptr("HOME")))     // string literals are NUL-terminated in memory
 p := cstr(path)                            // NUL-terminated copy of any str
 ```

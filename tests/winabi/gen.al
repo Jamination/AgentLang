@@ -1,5 +1,5 @@
 // Generates the Windows calling convention test: abi.c (a DLL built with MinGW) and abi.al.
-//   ./build/alc run tests/winabi/gen.al        (from the repository root; rewrites both files)
+//   gen <dir>        writes <dir>/abi.c and <dir>/abi.al (run.sh does this in a scratch directory)
 // Every function g<k> of the DLL hashes the bytes of its arguments into the exported variable
 // `last_hash` and returns a value made from that hash; abi.al calls it and checks both. c<k>
 // calls an AL function of the same signature with fixed arguments and checks its result the
@@ -213,8 +213,12 @@ fn main() {
     al.push("    c0 := counter\n    counter = 7\n    b := bump()\n    p: *i32 = &counter\n    data_ok := c0 == 100 && b == 8 && *p == 8\n")
     al.push(fmt("    print(\"passed\", passed, \"of\", ", 2 * sigs.len, ", \"data\", data_ok)\n"))
     al.push(fmt("    if passed == ", 2 * sigs.len, " && data_ok { 0 } else { 1 }\n}\n"))
-    if !write_file("tests/winabi/abi.c", join(c.items(), "")) || !write_file("tests/winabi/abi.al", join(al.items(), "")) {
-        panic("cannot write tests/winabi/abi.c or abi.al (run from the repository root)")
+    a := args()
+    if a.len != 2 {
+        panic("usage: gen <dir> (writes <dir>/abi.c and <dir>/abi.al)")
+    }
+    if !write_file(fmt(a[1], "/abi.c"), join(c.items(), "")) || !write_file(fmt(a[1], "/abi.al"), join(al.items(), "")) {
+        panic(fmt("cannot write abi.c or abi.al in ", a[1]))
     }
     print(sigs.len, "signatures")
 }
