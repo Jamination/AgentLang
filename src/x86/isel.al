@@ -377,27 +377,20 @@ priv struct Sel {
     needed: Vec[bool]
     addr_only: Vec[bool]
     blk_of: Vec[i64]
-    slot_of: Map[i64, i64]
+    slot_of: Vec[i64] // the frame slot of each alloca, or -1
     projs: Map[i64, Vec[(i64, i64)]]
-    out: Vec[MInst]
+    out: Vec[MInst] // the instructions of the block being selected, in chunks (see isel_select)
     fconst_ix: Map[Bits128, i64]
     // memory-clobber counter position of each instruction within its block (for load folding)
-    pos_in_block: Vec[i64]
     clob: Vec[i64]
     cur_clob: i64
     cur_block: i64
-    exit_alias: Map[i64, (i64, i64)]
+    // a header phi whose old value is found in another phi after its loop: that phi and the
+    // loop, or -1
+    ea_q: Vec[i64]
+    ea_loop: Vec[i64]
+    param_of: Vec[i64] // the Param instruction of each parameter, or -1
     loops: Loops
-}
-
-// moves the instructions selected into s.out to the end of rev, in reverse order
-priv fn drain_rev(s: *Sel, rev: *Vec[MInst]) {
-    k := s.out.len - 1
-    while k >= 0 {
-        rev.push(s.out[k])
-        k -= 1
-    }
-    s.out.clear()
 }
 
 // ---------- frame slots of allocas ----------
@@ -453,16 +446,19 @@ priv fn slot_effect(f: *Func, v: i64, root: *Vec[i64], cand: *Vec[i64], allocas:
     }
 }
 
-// the frame slot of every alloca
-priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
-    slot_of := map[i64, i64]()
+// the frame slot of every alloca (by instruction; -1 for other instructions)
+priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
+    n := f.insts.len
+    slot_of := vec_fill(n, -1)
     allocas := vec[i64]()
     for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
             allocas.push(v)
         }
     }
-    n := f.insts.len
+    if allocas.is_empty() {
+        return slot_of
+    }
     nb := f.blocks.len
     // the alloca (index into allocas) an address is derived from, or -1
     root := vec_fill(n, -1)
@@ -507,10 +503,20 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
                 }
             }
         }
-        for a in f.term_uses(bi) {
-            if root[a] >= 0 {
-                escaped[root[a]] = true
+        match f.blocks[bi].term {
+            Br(c, _, _) => {
+                if root[c] >= 0 {
+                    escaped[root[c]] = true
+                }
             }
+            Ret(vs) => {
+                for a in vs {
+                    if root[a] >= 0 {
+                        escaped[root[a]] = true
+                    }
+                }
+            }
+            _ => {}
         }
     }
     // candidates: allocas worth sharing
@@ -525,6 +531,20 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
     k := members.len
     if k >= 2 {
         w := (k + 63) / 64
+        // the instructions with an effect on the candidates, per block in order: (written,
+        // read, killed) in eff[eff_off[b]..eff_off[b + 1]]
+        eff_off := vec_fill(nb + 1, 0)
+        eff := vec[(i64, i64, bool)]()
+        for b in 0..nb {
+            eff_off[b] = eff.len
+            for v in f.blocks[b].insts {
+                wr, rd, kill := slot_effect(f, v, &root, &cand, &allocas)
+                if wr >= 0 || rd >= 0 {
+                    eff.push((wr, rd, kill))
+                }
+            }
+        }
+        eff_off[nb] = eff.len
         // live: some path leads to a read without a whole overwrite before it
         live_in := vec_fill(nb * w, u64(0))
         live := vec_fill(w, u64(0))
@@ -544,9 +564,8 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
                         live[x] |= live_in[sb * w + x]
                     }
                 }
-                insts := &f.blocks[b].insts
-                for ii in insts.len - 1..=0 by -1 {
-                    wr, rd, kill := slot_effect(f, insts[ii], &root, &cand, &allocas)
+                for ei in eff_off[b + 1] - 1..=eff_off[b] by -1 {
+                    wr, rd, kill := eff[ei]
                     if kill {
                         bits_clear(&live, 0, wr)
                     }
@@ -573,9 +592,8 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
                     live[x] |= live_in[sb * w + x]
                 }
             }
-            insts := &f.blocks[b].insts
-            for ii in insts.len - 1..=0 by -1 {
-                wr, rd, kill := slot_effect(f, insts[ii], &root, &cand, &allocas)
+            for ei in eff_off[b + 1] - 1..=eff_off[b] by -1 {
+                wr, rd, kill := eff[ei]
                 if wr >= 0 {
                     for x in 0..w {
                         interf[wr * w + x] |= live[x]
@@ -628,13 +646,13 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
             }
             sl := new_slot(mf, size, align)
             for c in g {
-                slot_of.set(allocas[members[c]], sl)
+                slot_of[allocas[members[c]]] = sl
             }
         }
     }
     for v in allocas {
-        if !slot_of.has(v) {
-            slot_of.set(v, new_slot(mf, f.insts[v].k, f.insts[v].aux))
+        if slot_of[v] < 0 {
+            slot_of[v] = new_slot(mf, f.insts[v].k, f.insts[v].aux)
         }
     }
     return slot_of
@@ -643,11 +661,13 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
 // (cfg and loops: of f as it is now)
 fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, aliases: []ExitAlias) -> MFunc {
     n := f.insts.len
-    exit_alias := map[i64, (i64, i64)]()
+    ea_q := vec_fill(n, -1)
+    ea_loop := vec_fill(n, -1)
     for a in aliases {
         for li in 0..loops.loops.len {
             if loops.loops[li].header == a.header {
-                exit_alias.set(a.p, (a.q, li))
+                ea_q[a.p] = a.q
+                ea_loop[a.p] = li
                 break
             }
         }
@@ -678,32 +698,35 @@ fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, ali
         needed: vec_fill(n, false),
         addr_only: vec_fill(n, true),
         blk_of: f.block_of(),
-        slot_of: map[i64, i64](),
+        slot_of: vec[i64](),
         projs: map[i64, Vec[(i64, i64)]](),
         out: vec[MInst](),
         fconst_ix: map[Bits128, i64](),
-        pos_in_block: vec_fill(n, 0),
         clob: vec_fill(n, 0),
         cur_clob: 0,
         cur_block: 0,
-        exit_alias: exit_alias,
+        ea_q: ea_q,
+        ea_loop: ea_loop,
+        param_of: vec_fill(f.params.len, -1),
         loops: loops,
     }
-    for b in 0..f.blocks.len {
+    nb := f.blocks.len
+    s.mf.blocks.reserve(nb)
+    for b in 0..nb {
         s.mf.blocks.push(MBlock{insts: vec[MInst](), succs: f.succs(b), depth: if b < len(depths) { depths[b] } else { 0 }, align: false})
     }
     // per-value facts
-    for bi in 0..f.blocks.len {
+    bclob := vec_fill(nb, 0) // the clobber count at the end of each block
+    for bi in 0..nb {
         b := &f.blocks[bi]
         nclob := 0
         for pi in 0..b.insts.len {
             v := b.insts[pi]
-            s.pos_in_block[v] = pi
             s.clob[v] = nclob
-            if cleanup_is_root(f.insts[v].op) {
+            i := &f.insts[v]
+            if cleanup_is_root(i.op) {
                 nclob += 1
             }
-            i := &f.insts[v]
             match i.op {
                 Load => {}
                 Store => {
@@ -719,6 +742,14 @@ fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, ali
                     s.projs.set(a0, pl)
                     s.addr_only[a0] = false
                 }
+                Param => {
+                    if i.k >= 0 && i.k < s.param_of.len {
+                        s.param_of[i.k] = v
+                    }
+                    for a in i.args {
+                        s.addr_only[a] = false
+                    }
+                }
                 _ => {
                     for a in i.args {
                         s.addr_only[a] = false
@@ -726,8 +757,8 @@ fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, ali
                 }
             }
         }
-        bt := b.term
-        match bt {
+        bclob[bi] = nclob
+        match b.term {
             Br(c, t, e) => {
                 s.addr_only[c] = false
             }
@@ -741,47 +772,50 @@ fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, ali
     }
     s.slot_of = alloca_slots(f, &s.mf)
     rpo := cfg.rpo
+    // Each block is selected backwards: the terminator, then the instructions from the last
+    // one, then (entry block) the parameters. Every piece appends its instructions to s.out
+    // in order (a chunk); the block is the chunks in the reverse order.
+    starts := vec[i64]()
     for ri in rpo.len - 1..=0 by -1 {
         b := rpo[ri]
         s.cur_block = b
-        nroot := 0
-        for v in f.blocks[b].insts {
-            if cleanup_is_root(f.insts[v].op) {
-                nroot += 1
-            }
-        }
-        s.cur_clob = nroot
-        rev := vec[MInst]()
-        // terminator (with phi copies for the unique successor)
+        s.cur_clob = bclob[b]
         s.out.clear()
+        starts.clear()
+        // terminator (with phi copies for the unique successor)
+        starts.push(0)
         s.term(b)
-        drain_rev(&s, &rev)
         for vi in f.blocks[b].insts.len - 1..=0 by -1 {
             v := f.blocks[b].insts[vi]
             op := f.insts[v].op
             if op == Const && s.needed[v] {
                 // a wide constant kept in a register (so that loops do not rebuild it)
+                starts.push(s.out.len)
                 d := s.vr(v)
-                rev.push(minst_new(Mov, 8, R(d), I(f.insts[v].k)))
+                s.out.push(minst_new(Mov, 8, R(d), I(f.insts[v].k)))
                 continue
             }
             if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr || op == FAddr || op == Proj {
                 continue
             }
             if cleanup_is_root(op) || s.needed[v] {
-                s.out.clear()
+                starts.push(s.out.len)
                 s.cur_clob = s.clob[v]
                 s.inst(v)
-                drain_rev(&s, &rev)
             }
         }
         if b == 0 {
-            s.out.clear()
+            starts.push(s.out.len)
             s.params()
-            drain_rev(&s, &rev)
         }
-        reverse(rev.items())
-        s.mf.blocks[b].insts = rev
+        insts := vec[MInst]()
+        insts.reserve(s.out.len)
+        end := s.out.len
+        for c in starts.len - 1..=0 by -1 {
+            insts.extend(s.out[starts[c]..end])
+            end = starts[c]
+        }
+        s.mf.blocks[b].insts = insts
     }
     return s.mf
 }
@@ -824,8 +858,8 @@ priv fn fconst(self: *Sel, bits: Bits128) -> Mem {
 
 // the frame slot of the alloca v (`self.slot_of[&v]`)
 priv fn isel_slot_of(s: *Sel, v: i64) -> i64 {
-    sl, ok := s.slot_of.get(v)
-    assert ok, "isel: alloca without a slot"
+    sl := s.slot_of[v]
+    assert sl >= 0, "isel: alloca without a slot"
     return sl
 }
 
@@ -863,12 +897,12 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
         self.e(Lea, 8, R(r), M(mem_slot(sl, 0)))
         return r
     }
-    qa, has := self.exit_alias.get(v)
-    if has {
-        if !contains(&self.loops, qa.1, self.cur_block) {
+    q := self.ea_q[v]
+    if q >= 0 {
+        if !contains(&self.loops, self.ea_loop[v], self.cur_block) {
             // after the loop the old value of this phi lives in its partner
-            self.needed[qa.0] = true
-            return self.vr(qa.0)
+            self.needed[q] = true
+            return self.vr(q)
         }
     }
     self.needed[v] = true
@@ -1023,20 +1057,11 @@ fn params(self: *Sel) {
     ni := 0
     nf := 0
     nstack := 0
-    // locate Param instructions by index
-    by_index := map[i64, i64]()
-    for bi in 0..self.f.blocks.len {
-        for v in self.f.blocks[bi].insts {
-            if self.f.insts[v].op == Param {
-                by_index.set(self.f.insts[v].k, v)
-            }
-        }
-    }
     params := self.f.params
     for pi in 0..params.len {
         t := params[pi]
-        pv, has := by_index.get(pi)
-        want := has && self.needed[pv]
+        pv := self.param_of[pi]
+        want := pv >= 0 && self.needed[pv]
         if t.is_fp() {
             if nf < NUM_FLOAT_ARGS {
                 if want {

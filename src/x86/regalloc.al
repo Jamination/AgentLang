@@ -182,25 +182,30 @@ priv fn lists_new(n: i64) -> Lists {
     return l
 }
 
-priv fn lpush(self: *Lists, n: i64, x: i64) {
+priv inline fn lpush(self: *Lists, n: i64, x: i64) {
     l := self.len[n]
     if l == self.cap[n] {
-        nc := if l == 0 { 4 } else { 2 * l }
-        nb := self.pool.len
-        self.pool.resize(nb + nc, 0)
-        ob := self.beg[n]
-        for j in 0..l {
-            self.pool[nb + j] = self.pool[ob + j]
-        }
-        self.beg[n] = nb
-        self.cap[n] = nc
+        self.lgrow(n)
     }
     self.pool[self.beg[n] + l] = x
     self.len[n] = l + 1
 }
 
+priv noinline fn lgrow(self: *Lists, n: i64) {
+    l := self.len[n]
+    nc := if l == 0 { 4 } else { 2 * l }
+    nb := self.pool.len
+    self.pool.resize(nb + nc, 0)
+    ob := self.beg[n]
+    for j in 0..l {
+        self.pool[nb + j] = self.pool[ob + j]
+    }
+    self.beg[n] = nb
+    self.cap[n] = nc
+}
+
 // the list of n (a view: valid until the list changes)
-priv fn lget(self: *Lists, n: i64) -> []i64 {
+priv inline fn lget(self: *Lists, n: i64) -> []i64 {
     b := self.beg[n]
     return self.pool[b..b + self.len[n]]
 }
@@ -224,21 +229,28 @@ priv fn merge_moves(self: *Lists, u: i64, v: i64) {
 // a set of registers with constant-time insertion and removal whose members can be walked
 // in time proportional to their number
 priv struct RegSet {
-    members: Vec[i64]
+    members: Vec[i64] // the first cnt elements
+    cnt: i64
     pos: Vec[i64] // index in members, or -1
 }
 
-priv fn add(self: *RegSet, r: i64) {
+priv fn regset_new(n: i64) -> RegSet {
+    return RegSet{members: vec_fill(n, 0), cnt: 0, pos: vec_fill(n, -1)}
+}
+
+priv inline fn add(self: *RegSet, r: i64) {
     if self.pos[r] < 0 {
-        self.pos[r] = self.members.len
-        self.members.push(r)
+        self.pos[r] = self.cnt
+        self.members[self.cnt] = r
+        self.cnt += 1
     }
 }
 
-priv fn remove(self: *RegSet, r: i64) {
+priv inline fn remove(self: *RegSet, r: i64) {
     p := self.pos[r]
     if p >= 0 {
-        last := self.members.pop()
+        self.cnt -= 1
+        last := self.members[self.cnt]
         if last != r {
             self.members[p] = last
             self.pos[last] = p
@@ -248,10 +260,10 @@ priv fn remove(self: *RegSet, r: i64) {
 }
 
 priv fn clear_all(self: *RegSet) {
-    for r in self.members {
-        self.pos[r] = -1
+    for x in 0..self.cnt {
+        self.pos[self.members[x]] = -1
     }
-    self.members.clear()
+    self.cnt = 0
 }
 
 // ---------- the interference graph ----------
@@ -280,10 +292,11 @@ priv enum MS {
 priv struct Irc {
     k: i64 // colours of the class being coloured
     n: i64
+    nv: i64 // virtual registers: n - 32
     state: Vec[NS]
     pmask: Vec[u64]          // the machine registers each node interferes with
     adj_set: Map[u64, bool]  // the edges between virtual registers (graphs too large for adj_bits)
-    adj_bits: Vec[u64]       // the same as a triangular bit matrix (empty: adj_set is used)
+    adj_bits: Vec[u64]       // the same as a bit matrix, nv x nv (empty: adj_set is used)
     adj: Lists
     degree: Vec[i64]
     moves: Vec[(i64, i64)]
@@ -302,46 +315,30 @@ priv struct Irc {
     stamp: i64
 }
 
-priv fn add_edge(self: *Irc, u: i64, v: i64) {
-    if u == v {
-        return
-    }
-    if u < 32 {
-        if v < 32 {
-            // between machine registers: never asked for
-            return
-        }
-        bit := u64(1) << u64(u)
-        if self.pmask[v] & bit != 0 {
-            return
-        }
+// the edge between machine register r and virtual register v, if new
+priv inline fn pre_edge(self: *Irc, r: i64, v: i64) {
+    bit := u64(1) << u64(r)
+    if self.pmask[v] & bit == 0 {
         self.pmask[v] |= bit
-        self.adj.lpush(v, u)
+        self.adj.lpush(v, r)
         self.degree[v] += 1
-        return
     }
-    if v < 32 {
-        bit := u64(1) << u64(v)
-        if self.pmask[u] & bit != 0 {
-            return
-        }
-        self.pmask[u] |= bit
-        self.adj.lpush(u, v)
-        self.degree[u] += 1
-        return
-    }
-    a := min(u, v) - 32
-    b := max(u, v) - 32
+}
+
+// the edge between virtual registers u != v, if new (the lists of u, then of v)
+priv fn virt_edge(self: *Irc, u: i64, v: i64) {
     if self.adj_bits.len > 0 {
-        x := b * (b - 1) / 2 + a
+        x := (u - 32) * self.nv + (v - 32)
         w := self.adj_bits[x >> 6]
         bit := u64(1) << u64(x & 63)
         if w & bit != 0 {
             return
         }
         self.adj_bits[x >> 6] = w | bit
+        y := (v - 32) * self.nv + (u - 32)
+        self.adj_bits[y >> 6] |= u64(1) << u64(y & 63)
     } else {
-        key := (u64(a) << 32) | u64(b)
+        key := (u64(min(u, v)) << 32) | u64(max(u, v))
         if self.adj_set.has(key) {
             return
         }
@@ -353,6 +350,24 @@ priv fn add_edge(self: *Irc, u: i64, v: i64) {
     self.degree[v] += 1
 }
 
+priv fn add_edge(self: *Irc, u: i64, v: i64) {
+    if u == v {
+        return
+    }
+    if u < 32 {
+        if v >= 32 {
+            self.pre_edge(u, v)
+        }
+        // (between machine registers: never asked for)
+        return
+    }
+    if v < 32 {
+        self.pre_edge(v, u)
+        return
+    }
+    self.virt_edge(u, v)
+}
+
 // (an edge between two machine registers is never asked for)
 priv fn has_edge(self: *Irc, u: i64, v: i64) -> bool {
     if u < 32 {
@@ -361,19 +376,17 @@ priv fn has_edge(self: *Irc, u: i64, v: i64) -> bool {
     if v < 32 {
         return (self.pmask[u] >> u64(v)) & 1 != 0
     }
-    a := min(u, v) - 32
-    b := max(u, v) - 32
     if self.adj_bits.len > 0 {
-        x := b * (b - 1) / 2 + a
+        x := (u - 32) * self.nv + (v - 32)
         return (self.adj_bits[x >> 6] >> u64(x & 63)) & 1 != 0
     }
-    return self.adj_set.has((u64(a) << 32) | u64(b))
+    return self.adj_set.has((u64(min(u, v)) << 32) | u64(max(u, v)))
 }
 
 // is the neighbour m still in the graph? (Callers walk self.adj[n] and skip the others: a
 // list of the remaining neighbours per call filled the arena with gigabytes for nodes that
 // interfere with thousands of others.)
-priv fn in_graph(self: *Irc, m: i64) -> bool {
+priv inline fn in_graph(self: *Irc, m: i64) -> bool {
     st := self.state[m]
     return !(st == Stack || st == Coalesced)
 }
@@ -727,7 +740,7 @@ priv fn depth_weight(d: i64) -> f64 {
 // adds the call clobbers of class `mask` as neighbours of every virtual register of the
 // class in `live` (what adding the edges clobber x live member gives, list by list)
 priv fn clobber_edges(g: *Irc, live: *RegSet, vcls: []u8, cls: u8, mask: u64) {
-    for l in live.members {
+    for l in live.members[..live.cnt] {
         if l < 32 || vcls[l] != cls {
             continue
         }
@@ -744,6 +757,43 @@ priv fn clobber_edges(g: *Irc, live: *RegSet, vcls: []u8, cls: u8, mask: u64) {
     }
 }
 
+// the edges of a definition of df with the members of `live` of its class (add_edge(l, df)
+// for each member l in order)
+priv fn def_edges(g: *Irc, live: *RegSet, vcls: []u8, df: i64) {
+    c := vcls[df]
+    ms := live.members[..live.cnt]
+    if df < 32 {
+        for l in ms {
+            if l >= 32 && vcls[l] == c {
+                g.pre_edge(df, l)
+            }
+        }
+        return
+    }
+    if g.adj_bits.len == 0 {
+        for l in ms {
+            if l != df && vcls[l] == c {
+                g.add_edge(l, df)
+            }
+        }
+        return
+    }
+    row := (df - 32) * g.nv - 32
+    for l in ms {
+        if l == df || vcls[l] != c {
+            continue
+        }
+        if l < 32 {
+            g.pre_edge(l, df)
+            continue
+        }
+        x := row + l
+        if (g.adj_bits[x >> 6] >> u64(x & 63)) & 1 == 0 {
+            g.virt_edge(l, df)
+        }
+    }
+}
+
 // the interference graphs of both classes; returns the move worklist of class 1 (that of
 // class 0 is g.move_wl)
 priv fn build(g: *Irc, mf: *MFunc, order: []i64, dec: *Dec, vcls: []u8, lo_off: *Vec[i64], lo: *Vec[i64]) -> Vec[i64] {
@@ -751,16 +801,32 @@ priv fn build(g: *Irc, mf: *MFunc, order: []i64, dec: *Dec, vcls: []u8, lo_off: 
     du := dec.du.items()
     mwl1 := vec[i64]()
     // the live set as the walk of each class sees it (a copy leaves the set of its class
-    // for a moment, which changes the order of its members)
-    live0 := RegSet{members: vec[i64](), pos: vec_fill(n, -1)}
-    live1 := RegSet{members: vec[i64](), pos: vec_fill(n, -1)}
+    // for a moment, which changes the order of its members); a class without virtual
+    // registers gets no edges and needs no set
+    use0 := false
+    use1 := false
+    for v in 32..n {
+        if vcls[v] == 0 {
+            use0 = true
+        } else {
+            use1 = true
+        }
+    }
+    live0 := regset_new(if use0 { n } else { 0 })
+    live1 := regset_new(if use1 { n } else { 0 })
     for oi, b in order {
         w := depth_weight(mf.blocks[b].depth)
-        live0.clear_all()
-        live1.clear_all()
-        for x in lo_off[oi]..lo_off[oi + 1] {
-            live0.add(lo[x])
-            live1.add(lo[x])
+        if use0 {
+            live0.clear_all()
+            for x in lo_off[oi]..lo_off[oi + 1] {
+                live0.add(lo[x])
+            }
+        }
+        if use1 {
+            live1.clear_all()
+            for x in lo_off[oi]..lo_off[oi + 1] {
+                live1.add(lo[x])
+            }
         }
         for k in dec.binst[oi + 1] - 1..=dec.binst[oi] by -1 {
             p := dec.ipos[k]
@@ -787,28 +853,36 @@ priv fn build(g: *Irc, mf: *MFunc, order: []i64, dec: *Dec, vcls: []u8, lo_off: 
                     g.act_list.lpush(d, mi)
                     g.act_list.lpush(s, mi)
                     if c == 0 {
-                        live0.remove(s)
+                        if use0 {
+                            live0.remove(s)
+                        }
                         g.move_wl.push(mi)
                     } else {
-                        live1.remove(s)
+                        if use1 {
+                            live1.remove(s)
+                        }
                         mwl1.push(mi)
                     }
                 }
             }
             for j in p + 1..q {
                 df := du[j]
-                c := vcls[df]
-                live := if c == 0 { &live0 } else { &live1 }
-                for l in live.members {
-                    if l != df && vcls[l] == c && !(l < 32 && df < 32) {
-                        g.add_edge(l, df)
+                if vcls[df] == 0 {
+                    if use0 {
+                        def_edges(g, &live0, vcls, df)
                     }
+                } else if use1 {
+                    def_edges(g, &live1, vcls, df)
                 }
             }
             call := h & (DU_CALL << 16) != 0
             if call {
-                clobber_edges(g, &live0, vcls, 0, CLOBBER_GPR)
-                clobber_edges(g, &live1, vcls, 1, CLOBBER_XMM)
+                if use0 {
+                    clobber_edges(g, &live0, vcls, 0, CLOBBER_GPR)
+                }
+                if use1 {
+                    clobber_edges(g, &live1, vcls, 1, CLOBBER_XMM)
+                }
             }
             // simultaneous defs interfere with each other (the call clobbers are machine
             // registers, which need no edges among themselves)
@@ -824,19 +898,31 @@ priv fn build(g: *Irc, mf: *MFunc, order: []i64, dec: *Dec, vcls: []u8, lo_off: 
                     }
                 }
             }
-            for j in p + 1..q {
-                live0.remove(du[j])
-                live1.remove(du[j])
-            }
-            if call {
-                for r in CALL_CLOBBER {
-                    live0.remove(r)
-                    live1.remove(r)
+            if use0 {
+                for j in p + 1..q {
+                    live0.remove(du[j])
+                }
+                if call {
+                    for r in CALL_CLOBBER {
+                        live0.remove(r)
+                    }
+                }
+                for j in q..e {
+                    live0.add(du[j])
                 }
             }
-            for j in q..e {
-                live0.add(du[j])
-                live1.add(du[j])
+            if use1 {
+                for j in p + 1..q {
+                    live1.remove(du[j])
+                }
+                if call {
+                    for r in CALL_CLOBBER {
+                        live1.remove(r)
+                    }
+                }
+                for j in q..e {
+                    live1.add(du[j])
+                }
             }
         }
     }
@@ -1064,11 +1150,12 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
         g := Irc{
             k: 15,
             n: n,
+            nv: nv,
             state: vec_fill(n, Initial),
             pmask: vec_fill(n, u64(0)),
             adj_set: map[u64, bool](),
-            // a bit matrix up to 16 MB (16384 virtual registers), a hash set beyond
-            adj_bits: if nv <= 16384 { vec_fill((nv * (nv - 1) / 2 + 64) / 64, u64(0)) } else { vec[u64]() },
+            // a bit matrix up to 16 MB (11585 virtual registers), a hash set beyond
+            adj_bits: if nv <= 11585 { vec_fill((nv * nv + 64) / 64, u64(0)) } else { vec[u64]() },
             adj: lists_new(n),
             degree: vec_fill(n, 0),
             moves: vec[(i64, i64)](),
