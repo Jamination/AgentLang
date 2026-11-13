@@ -1214,6 +1214,66 @@ priv fn retarget(f: *Func, p: i64, from: i64, to: i64) {
 // round whose step cannot find a candidate block is not run (it would build its tables only
 // to find nothing).
 
+// the steps that may change something, as bits: 1 merge, 2 forward, 4 thread4, 8 thread5,
+// 16 ifconv (what may_merge .. may_ifconv tell, in one pass over the blocks)
+priv fn cfg_candidates(f: *Func) -> i64 {
+    n := f.blocks.len
+    cnt := alloc[i64](n)
+    for b in 0..n {
+        k, s0, s1 := f.succ_pair(b)
+        if k > 0 {
+            cnt[s0] += 1
+        }
+        if k > 1 {
+            cnt[s1] += 1
+        }
+    }
+    bits := 0
+    for b in 0..n {
+        match f.blocks[b].term {
+            Jmp(s) => {
+                if s != 0 && s != b && cnt[s] == 1 {
+                    bits |= 1
+                }
+                if b != 0 && s != b && f.blocks[b].insts.is_empty() {
+                    bits |= 2
+                }
+            }
+            Br(c, t, e) if t != e => {
+                if bits & 16 == 0 && (may_side(f, t) || may_side(f, e)) {
+                    bits |= 16
+                }
+                if bits & 12 != 12 && t != b && e != b {
+                    binsts := &f.blocks[b].insts
+                    if !binsts.is_empty() && all_phis(f, binsts) && contains(binsts, c) {
+                        ci := &f.insts[c]
+                        any_const := false
+                        all_const := true
+                        for k in 0..ci.pb.len {
+                            p := ci.pb[k]
+                            is_const := f.insts[ci.args[k]].op == Const
+                            if p != b && is_const {
+                                any_const = true
+                            }
+                            if p == b || !is_const {
+                                all_const = false
+                            }
+                        }
+                        if any_const {
+                            bits |= 4
+                        }
+                        if all_const && b != 0 {
+                            bits |= 8
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    return bits
+}
+
 // step 2: a block jumps to another one (not the entry) that has no other predecessor
 priv fn may_merge(f: *Func) -> bool {
     n := f.blocks.len
@@ -1372,6 +1432,10 @@ priv fn simplify_cfg(f: *Func) -> bool {
     if cleanup_prune_unreachable(f) {
         changed = true
     }
+    // One scan finds which steps have a candidate block; while no step has changed anything
+    // (`scanned`), a step without one is not run (afterwards each round checks its own)
+    cand := cfg_candidates(f)
+    scanned := true
     // 2. merge straight-line blocks
     guard_merge := 0
     loop {
@@ -1380,7 +1444,11 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step merge does not converge in ", f.name, "\n"))
             break
         }
-        if !may_merge(f) {
+        if scanned {
+            if cand & 1 == 0 {
+                break
+            }
+        } else if !may_merge(f) {
             break
         }
         // per-round tables live on the scratch heap (see base.al)
@@ -1441,6 +1509,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         f.apply_repl(&repl)
         changed = true
+        scanned = false
     }
     // 3. skip empty forwarding blocks
     guard_forward := 0
@@ -1450,7 +1519,11 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step forward does not converge in ", f.name, "\n"))
             break
         }
-        if !may_forward(f) {
+        if scanned {
+            if cand & 2 == 0 {
+                break
+            }
+        } else if !may_forward(f) {
             break
         }
         scratch_reset()
@@ -1512,6 +1585,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // 4. thread jumps through blocks that only branch on a phi of constants
     guard_thread4 := 0
@@ -1524,7 +1598,11 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step thread4 does not converge in ", f.name, "\n"))
             break
         }
-        if !may_thread4(f) {
+        if scanned {
+            if cand & 4 == 0 {
+                break
+            }
+        } else if !may_thread4(f) {
             break
         }
         scratch_reset()
@@ -1645,6 +1723,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // 5. a merge block that only re-tests a flag every predecessor sets to a constant:
     //    send each predecessor straight to its destination
@@ -1658,7 +1737,11 @@ priv fn simplify_cfg(f: *Func) -> bool {
             eput(fmt("simplify_cfg: step thread5 does not converge in ", f.name, "\n"))
             break
         }
-        if !may_thread5(f) {
+        if scanned {
+            if cand & 8 == 0 {
+                break
+            }
+        } else if !may_thread5(f) {
             break
         }
         scratch_reset()
@@ -1834,13 +1917,18 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // 6. if-conversion: tiny side-effect-free arms become selects (conditional moves)
     loop {
         if !opt_enabled("ifconv") {
             break
         }
-        if !may_ifconv(f) {
+        if scanned {
+            if cand & 16 == 0 {
+                break
+            }
+        } else if !may_ifconv(f) {
             break
         }
         scratch_reset()
@@ -1960,6 +2048,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         cleanup_prune_unreachable(f)
         changed = true
+        scanned = false
     }
     // normalize `br c, t, t`
     for b in 0..f.blocks.len {
