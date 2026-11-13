@@ -1,4 +1,0 @@
-docs/std/math.md said every transcendental function is within 1 ulp in f32 and f64. The f64 tan
-(sin / cos) is 2 ulp from glibc on ~0.2% of inputs, e.g. tan(-37.0) = 0.8407712554027599,
-glibc 0.8407712554027597 (tmp/fz/mathfz.py, 90k inputs). std/math.al's own header already said
-"tan ... 2 ulp". Fixed the doc.
