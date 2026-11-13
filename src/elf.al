@@ -1,86 +1,14 @@
 // Static ELF64 executable writer and linker.
 
+use "objwrite.al"
+
 priv const BASE = 0x400000
 
-priv fn align_up(x: i64, a: i64) -> i64 {
-    return (x + a - 1) / a * a
-}
-
-// x as u16, little endian
-priv fn put16(v: *Vec[u8], x: i64) {
-    u := u64(x)
-    v.push(u8(u))
-    v.push(u8(u >> 8))
-}
-
-// x as u32, little endian
-priv fn put32(v: *Vec[u8], x: i64) {
-    u := u64(x)
-    for k in 0..4 {
-        v.push(u8(u >> u64(8 * k)))
-    }
-}
-
-// x as u64, little endian
-priv fn put64(v: *Vec[u8], x: i64) {
-    u := u64(x)
-    for k in 0..8 {
-        v.push(u8(u >> u64(8 * k)))
-    }
-}
-
-// Imported C functions and variables that the emitted code refers to, in a stable order.
-priv fn used_externs(m: *Module, out: *Output) -> Vec[i64] {
-    used := vec_fill(m.externs.len, false)
-    by_got := map[i64, i64]()
-    for i in 0..m.externs.len {
-        by_got.set(m.externs[i].got, i)
-    }
-    for ci in 0..out.funcs.len {
-        c := &out.funcs[ci]
-        for r in c.code.relocs {
-            match r.kind {
-                Abs32Global(g) => {
-                    i, found := by_got.get(g)
-                    if found {
-                        used[i] = true
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    res := vec[i64]()
-    for i in 0..m.externs.len {
-        if used[i] {
-            res.push(i)
-        }
-    }
-    return res
-}
-
-priv fn link_patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr: *Vec[i64], func_addr: *Vec[i64]) {
-    for rl in g.relocs {
-        off := rl.0
-        val := match rl.1 {
-            Global(tg, add) => gaddr[tg] + add
-            Func(f) => func_addr[f]
-        }
-        at := (ga - base_addr) + off
-        assert at >= 0 && at + 8 <= buf.len, "data relocation out of range"
-        u := u64(val)
-        for k in 0..8 {
-            buf[at + k] = u8(u >> u64(8 * k))
-        }
-    }
-}
-
 // offset of a section name in the section header string table
-priv fn link_name_of(shstr: str, s: str) -> i64 {
-    pat := fmt("\0", s, "\0")
-    p := find(shstr, pat)
+priv fn name_of(shstr: str, s: str) -> i64 {
+    p := find(shstr, fmt("\0", s, "\0"))
     assert p >= 0, "unknown section name"
-    return p + 1
+    p + 1
 }
 
 // A program that uses no C function or variable is a static executable. Otherwise the output
@@ -112,43 +40,14 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     // _start: mov rdi, rsp ; call entry ; ud2
     text.extend([]u8{0x48, 0x89, 0xE7, 0xE8, 0, 0, 0, 0, 0x0F, 0x0B})
     func_addr := vec_fill(m.funcs.len, 0)
-    func_size := vec_fill(m.funcs.len, 0)
     func_off := vec_fill(m.funcs.len, 0)
-    for ci in 0..out.funcs.len {
-        c := &out.funcs[ci]
-        while text.len % 16 != 0 {
-            text.push(0xCC)
-        }
-        func_off[c.fid] = text.len
-        func_addr[c.fid] = BASE + text_off + text.len
-        func_size[c.fid] = c.code.bytes.len
-        text.extend(c.code.bytes.items())
-    }
+    layout_text(&text, out, BASE + text_off, &func_off, &func_addr)
     // ---- rodata ----
     ro_off := align_up(text_off + text.len, 16)
-    rodata := vec[u8]()
     fpool_addr := BASE + ro_off
-    for bits in out.fpool {
-        put64(&rodata, i64(bits.lo))
-        put64(&rodata, i64(bits.hi))
-    }
     gaddr := vec_fill(m.globals.len, 0)
     live := x86_live_data(m, out)
-    for gi in 0..m.globals.len {
-        g := &m.globals[gi]
-        if g.readonly && live[gi] {
-            a := max(g.align, 1)
-            while rodata.len % a != 0 {
-                rodata.push(0)
-            }
-            gaddr[gi] = BASE + ro_off + rodata.len
-            match g.data {
-                Some(d) => rodata.extend(d.items())
-                None => rodata.resize(rodata.len + g.size, 0)
-            }
-            rodata.push(0) // keep distinct addresses for empty strings
-        }
-    }
+    rodata := layout_rodata(m, out, live.items(), BASE + ro_off, &gaddr)
     // ---- dynamic linking tables (read-only part) ----
     interp_at := 0
     interp_len := 0
@@ -159,9 +58,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     rela_at := 0
     needed := vec[i64]() // offsets of library names in dynstr
     if dynamic {
-        while rodata.len % 8 != 0 {
-            rodata.push(0)
-        }
+        rodata.resize(align_up(rodata.len, 8), 0)
         interp := "/lib64/ld-linux-x86-64.so.2\0"
         interp_at = BASE + ro_off + rodata.len
         interp_len = len(interp)
@@ -169,7 +66,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         dynstr := vec_of([]u8{0})
         libs := vec[str]()
         for x in externs {
-            if !contains(&libs, m.externs[x].lib) {
+            if !libs.contains(m.externs[x].lib) {
                 libs.push(m.externs[x].lib)
             }
         }
@@ -193,9 +90,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         dynstr_at = BASE + ro_off + rodata.len
         dynstr_len = dynstr.len
         rodata.extend(dynstr.items())
-        while rodata.len % 8 != 0 {
-            rodata.push(0)
-        }
+        rodata.resize(align_up(rodata.len, 8), 0)
         dynsym_at = BASE + ro_off + rodata.len
         rodata.extend(dynsym.items())
         // SysV hash table with one empty bucket: nothing is exported
@@ -204,12 +99,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         put32(&rodata, 1)
         put32(&rodata, nsym)
         put32(&rodata, 0)
-        for x in 0..nsym {
-            put32(&rodata, 0)
-        }
-        while rodata.len % 8 != 0 {
-            rodata.push(0)
-        }
+        rodata.resize(align_up(rodata.len + 4 * nsym, 8), 0)
         rela_at = BASE + ro_off + rodata.len
         rodata.resize(rodata.len + 24 * externs.len, 0)
     }
@@ -219,26 +109,19 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     data := vec[u8]()
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if !g.readonly {
-            match g.data {
-                Some(d) => {
-                    a := max(g.align, 1)
-                    while data.len % a != 0 {
-                        data.push(0)
-                    }
-                    gaddr[gi] = BASE + data_off + data.len
-                    data.extend(d.items())
-                }
-                None => {}
+        match g.data {
+            Some(d) if !g.readonly => {
+                data.resize(align_up(data.len, max(g.align, 1)), 0)
+                gaddr[gi] = BASE + data_off + data.len
+                data.extend(d.items())
             }
+            _ => {}
         }
     }
     dyn_at := 0
     dyn_len := 0
     if dynamic {
-        while data.len % 8 != 0 {
-            data.push(0)
-        }
+        data.resize(align_up(data.len, 8), 0)
         dyn_at = BASE + data_off + data.len
         d := vec[(i64, i64)]()
         for n in needed {
@@ -263,79 +146,35 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         dyn_len = BASE + data_off + data.len - dyn_at
         // one R_X86_64_GLOB_DAT relocation per import slot
         base := rela_at - (BASE + ro_off)
-        for k in 0..externs.len {
-            x := externs[k]
-            r := vec[u8]()
-            put64(&r, gaddr[m.externs[x].got])
-            put64(&r, ((k + 1) << 32) | 6)
-            put64(&r, 0)
-            assert base + 24 * k + 24 <= rodata.len
-            for j in 0..24 {
-                rodata[base + 24 * k + j] = r[j]
-            }
+        for k, x in externs {
+            at := base + 24 * k
+            assert at + 24 <= rodata.len
+            set64(&rodata, at, gaddr[m.externs[x].got])
+            set64(&rodata, at + 8, ((k + 1) << 32) | 6)
         }
     }
-    while data.len % 16 != 0 {
-        data.push(0)
-    }
+    data.resize(align_up(data.len, 16), 0)
     bss_addr := BASE + data_off + data.len
-    bss_size := 0
-    for gi in 0..m.globals.len {
-        g := &m.globals[gi]
-        if !g.readonly && !is_some(g.data) {
-            a := min(max(g.align, 1), 64)
-            if g.size >= 64 {
-                a = max(a, 64)
-            }
-            bss_size = align_up(bss_size, a)
-            gaddr[gi] = bss_addr + bss_size
-            bss_size += max(g.size, 1)
-        }
-    }
+    bss_size := layout_bss(m, bss_addr, &gaddr)
     // the code addresses code and data with 32-bit absolute and relative displacements
     if bss_addr + bss_size > 0x7FFF_FFFF {
         return ("", fmt("the program's code and global variables take ", bss_addr + bss_size - BASE,
             " bytes; at most ", 0x7FFF_FFFF - BASE, " fit (put large tables in memory from alloc instead)"))
     }
     // ---- relocations ----
-    entry_addr := func_addr[m.entry]
     start_addr := BASE + text_off
-    rel := i32(entry_addr - (start_addr + 8))
-    for k in 0..4 {
-        text[4 + k] = u8(u32(rel) >> u32(8 * k))
-    }
-    for ci in 0..out.funcs.len {
-        c := &out.funcs[ci]
-        fo := func_off[c.fid]
-        fa := func_addr[c.fid]
-        for r in c.code.relocs {
-            at := fo + r.off
-            val := match r.kind {
-                Abs32Global(g) => gaddr[g] + i64(r.addend)
-                Abs32Func(f) => func_addr[f] + i64(r.addend)
-                Abs32FConst(i) => fpool_addr + 16 * i + i64(r.addend)
-                Rel32Func(f) => func_addr[f] - (fa + r.off + 4)
-            }
-            assert val >= -2147483648 && val <= 2147483647, "relocation out of range"
-            assert at >= 0 && at + 4 <= text.len
-            v32 := u32(i32(val))
-            for k in 0..4 {
-                text[at + k] = u8(v32 >> u32(8 * k))
-            }
-        }
-    }
+    set32(&text, 4, func_addr[m.entry] - (start_addr + 8))
+    patch_text(&text, out, &func_off, &func_addr, &gaddr, fpool_addr)
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if g.relocs.is_empty() {
+        // (writable globals are all live)
+        if g.relocs.is_empty() || !live[gi] {
             continue
         }
         if g.readonly {
-            if !live[gi] {
-                continue
-            }
-            link_patch_data(&rodata, BASE + ro_off, g, gaddr[gi], &gaddr, &func_addr)
+            patch_data(&rodata, BASE + ro_off, g, gaddr[gi], &gaddr, &func_addr)
         } else if is_some(g.data) {
-            link_patch_data(&data, BASE + data_off, g, gaddr[gi], &gaddr, &func_addr)
+            patch_data(&data, BASE + data_off, g, gaddr[gi], &gaddr, &func_addr)
         }
     }
     // ---- symbols ----
@@ -344,16 +183,15 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     nsyms := 1
     for ci in 0..out.funcs.len {
         c := &out.funcs[ci]
-        f := &m.funcs[c.fid]
         name_off := strtab.len
-        strtab.extend(f.name)
+        strtab.extend(m.funcs[c.fid].name)
         strtab.push(0)
         put32(&symtab, name_off)
         symtab.push(2) // STB_LOCAL, STT_FUNC
         symtab.push(0)
         put16(&symtab, 1)
         put64(&symtab, func_addr[c.fid])
-        put64(&symtab, func_size[c.fid])
+        put64(&symtab, c.code.bytes.len)
         nsyms += 1
     }
     shstr := "\0.text\0.rodata\0.data\0.bss\0.symtab\0.strtab\0.shstrtab\0.dynstr\0.dynsym\0.dynamic\0"
@@ -377,7 +215,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     sh := vec[u8]()
     // one section header (the name is looked up in the section name table `names`)
     fn section(sh: *Vec[u8], names: str, name: str, ty: i64, flags: i64, addr: i64, off: i64, size: i64, link: i64, info: i64, align: i64, entsize: i64) {
-        put32(sh, if name == "" { 0 } else { link_name_of(names, name) })
+        put32(sh, if name == "" { 0 } else { name_of(names, name) })
         put32(sh, ty)
         put64(sh, flags)
         put64(sh, addr)
@@ -440,8 +278,6 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     }
     segment(&h, 0x6474e551, 6, 0, 0, 0, 0, 16)
     assert h.len <= file.len
-    for k in 0..h.len {
-        file[k] = h[k]
-    }
+    copy(file[..], h.items())
     return (file.items(), "")
 }
