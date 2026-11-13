@@ -61,6 +61,7 @@ executables before and after); the conventions below describe the result.
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
 | `src/elf.al` | ELF writer |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
+| `src/prelude_linux.al`, `prelude_windows.al` | its OS layer for the target (`--target`): system calls on Linux, kernel32.dll on Windows; the functions a layer defines are listed at the top of `prelude.al` |
 
 Conventions:
 

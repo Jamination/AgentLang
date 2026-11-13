@@ -7,6 +7,9 @@
 - `ActionMap`: bindings from game actions to keys and buttons, so game code never names a key,
 - `Gamepad`: Linux joystick devices (`/dev/input/js*`).
 
+Linux only for now: the gamepad reads Linux joystick devices with system calls, so with
+`--target windows` `use std.input` is a compile error.
+
 The module is pure AL (the gamepad uses plain system calls), so programs using it stay static
 executables, and everything except opening a gamepad device is testable by feeding events by
 hand. `std.window` includes this module, owns an `Input` and an `EventQueue` per window and

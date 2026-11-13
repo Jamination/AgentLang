@@ -3,14 +3,14 @@
 Read on demand. [LANGUAGE.md](LANGUAGE.md) is the reference an agent reads in full; this file
 holds the fine print that only a minority of programs needs: the exact rules of name
 resolution (overloading, builtin names, enum variants, `priv`), details of constants, `match`,
-method calls and nested functions, bounds checks, region limits, `clone` cost, C interop, and
-the grammar.
+method calls and nested functions, bounds checks, region limits, `clone` cost, C interop,
+programs for Windows, and the grammar.
 
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
 [Method calls](#method-calls) · [Bounds checks](#bounds-checks) · [Regions](#regions) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Grammar](#grammar)
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 
@@ -516,6 +516,55 @@ fn main() {
   or a struct of vectors can be handed to a GPU API as is.
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
   different scalar type (except through `u8`), as in C.
+
+## Windows
+
+`alc build --target windows f.al` writes `f.exe`, a Windows x86-64 console program (PE32+).
+The run-time library (`src/prelude_windows.al`) calls only `kernel32.dll`; there is no C
+run-time library. The same program prints the same output and ends with the same status on
+both systems, except where this section says otherwise.
+
+- **ABI.** Every function, AL or `extern`, uses the Microsoft x64 convention: arguments in
+  rcx, rdx, r8, r9 / xmm0-3 by position, 32 bytes of shadow space; structs of 1, 2, 4 or 8
+  bytes in a register, others by reference to a copy; results in rax / xmm0 or through a
+  hidden pointer; rbx, rbp, rdi, rsi, r12-r15, xmm6-15 preserved. Any AL function can thus be
+  given to Windows as a callback, and `extern` functions may take and return structs. Frames of
+  a page or more probe the stack; the stack is 16 MiB.
+- **Libraries.** `extern "kernel32.dll" fn ...` imports through the import table; a variable
+  (`extern "x.dll" name: T`) is reached through its import slot. A library name that is not
+  a `.dll` (`libc.so.6`) is an error. `syscall` is a build error.
+- **Text.** Arguments, environment variables, paths and console text are UTF-16 for Windows
+  and UTF-8 for the program: unpaired surrogates in Windows names come out as their 3-byte
+  (WTF-8) form and go back unchanged; invalid UTF-8 becomes U+FFFD. Output to a console is
+  written with `WriteConsoleW` (so UTF-8 displays), output to a file or pipe byte for byte.
+  Console input arrives as UTF-8 with `"\r\n"` as `"\n"`; Ctrl+Z at the start of a line ends it.
+- **`args()`** is `GetCommandLineW` split by the rules of the Microsoft C library (quotes,
+  backslashes before quotes, `""` inside quotes); `args()[0]` is the program as the command
+  line names it. **`env_get`** compares names without regard to case.
+- **Paths** may use `\` as well as `/`, a drive (`C:/x`, `C:x`) or `\\server\share\`; the
+  path functions of std.asset know these roots and build paths with `/`. Paths longer than
+  260 UTF-16 units need long-path support enabled in Windows. `current_dir()` is in Windows
+  form (`C:\Users\me`).
+- **Errors.** `io_error()` is the Linux errno of the same meaning (file not found 2, access
+  denied 13, a directory where a file is expected 21, file exists 17, directory not empty 39,
+  disk full 28, broken pipe 32, ...); a Windows error without one is 0x10000 + its code, and
+  `error_text` says `windows error N`.
+- **Status and panics.** The exit status is the low 8 bits of the code, as on Linux
+  (`exit(300)` ends with 44). Panics write the same messages and end with status 1; access
+  violations, stack overflow and integer division faults (`--unchecked`) are caught by a
+  vectored exception handler and reported as the Linux signal handler reports them. Standard
+  output that cannot be written (a closed pipe) stops the program with `panic: cannot write
+  to standard output: broken pipe` (Linux: the program ends silently through SIGPIPE).
+- **`alc test`.** Each `test` block runs in a process of its own, as with `fork` on Linux:
+  the test runner starts itself again (`AL_TEST_ONE=k`) for every block.
+- **Memory.** Arenas reserve the same address space (64 GiB, 16 GiB per region) and commit it
+  in steps as it is used; committed memory counts against the system's commit limit.
+- **Not available** for `--target windows` (a compile error that names the module): `std.input`,
+  `std.window`, `std.x11`, `std.wayland`, `std.alsa`, `std.audio`, `std.vk`, `std.libc`. In
+  std.os, signals do not exist (`kill` with any signal but 0 ends the process; see
+  [std/os.md](std/os.md)).
+- **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless
+  `ALC_WINE=1` (with `WINEPREFIX`) runs it under Wine.
 
 ## Grammar
 

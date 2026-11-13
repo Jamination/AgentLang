@@ -1,5 +1,7 @@
 # std.wayland: Wayland client bindings
 
+Linux only: with `--target windows`, `use std.wayland` is a compile error.
+
 `use std.wayland` gives a program what it needs to talk to a Wayland compositor itself:
 `libwayland-client`, the protocols `wayland` (core), `xdg-shell` and `xdg-decoration-unstable-v1`,
 and the parts of `libxkbcommon` (keyboard) and `libwayland-cursor` (pointer image) that a window

@@ -3,6 +3,8 @@
 `use std.window` opens a native window (X11 on Linux), delivers its events, keeps the
 per-frame input state (`std.input`, included automatically) and can show an RGBA framebuffer
 without any GPU API. It also hands out the native handles needed to create a Vulkan surface.
+Linux only: with `--target windows`, `use std.window` is a compile error (std.dx12 binds the
+user32 window functions).
 
 A program that calls `window_open` is dynamically linked against `libX11.so.6` (and libc).
 On a Wayland session it runs through XWayland; a program that wants to talk to the compositor

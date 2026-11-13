@@ -1,7 +1,8 @@
 # std.asset: files, paths, asset loading, config and JSON
 
 `use std.asset`. Source: `std/asset.al`. Everything goes through raw Linux system calls: a
-program using this module stays a static, libc-free executable.
+program using this module stays a static, libc-free executable. Built with `--target windows`
+it calls kernel32.dll and also accepts Windows paths: see [Windows](#windows).
 
 - file and directory operations, path helpers
 - `Assets`: loads files relative to a root directory, caches them, and tells when a file
@@ -59,6 +60,31 @@ views of their argument and do not allocate.
 `path_stem` and `path_ext` follow Python's `pathlib.PurePath(p).stem` / `.suffix` (without its
 dot) for every path whose last component is not empty or `.`. Unlike `pathlib`, the last
 component is taken from the text as it is: `a/b/` has an empty one, `a/.` has `.`.
+
+### Windows
+
+With `--target windows`, `\` separates components as well as `/`, and a path may start with a
+root: a drive with a separator (`C:/x`, `C:\x`: absolute), a drive alone (`C:x`: relative to
+the working directory of drive C), `\\server\share\`, or a separator (the current drive).
+`path_join` treats any root in `b` as absolute and joins a bare drive without a separator;
+`path_dir` and `path_base` never split a root; everything they build uses `/`, which Windows
+accepts everywhere. Names compare without regard to case in Windows itself, but
+`list_dir` returns them as stored and sorts them by byte value.
+
+| Call | Linux | Windows |
+|------|-------|---------|
+| `path_join("C:", "x")` | `C:/x` | `C:x` |
+| `path_join("a", "C:\x")` | `a/C:\x` | `C:\x` |
+| `path_join("a\", "b")` | `a\/b` | `a/b` |
+| `path_dir("C:\x")` | empty | `C:\` |
+| `path_dir("a\b/c")` | `a\b` | `a\b` |
+| `path_base("C:x")` | `C:x` | `x` |
+
+The file functions convert paths to UTF-16 (`CreateFileW`, `FindFirstFileW`, ...); paths of
+more than 260 UTF-16 units need long-path support enabled in Windows. A directory has size 0
+(Linux: the size of its entry table). `remove_file` of a read-only file fails with
+`permission denied` (Linux removes it if the directory is writable). `modified_time` has a
+resolution of 100 ns.
 
 ## Asset loader
 

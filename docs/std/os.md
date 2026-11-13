@@ -3,7 +3,8 @@
 `use std.os`. Source: `std/os.al`. For tools and build scripts: start other programs and read
 what they print, or let them run alongside; shared memory; find out about the process itself,
 and work with files and directories. Raw
-Linux system calls, no libc: a program using this module stays a static executable.
+Linux system calls, no libc: a program using this module stays a static executable. Built with
+`--target windows` it calls kernel32.dll; the differences are listed under [Windows](#windows).
 
 `use std.os` also loads [std.asset](asset.md), where the file and directory functions live
 (there is one set of them, not two).
@@ -150,3 +151,31 @@ through their result and `io_error()`, none panics.
 Not there: changing the working directory or the environment of this process, feeding the
 standard input of a program from a string, time limits (use `timeout`, or `try_wait` and
 `kill`).
+
+## Windows
+
+With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
+`CreateFileMappingW`, ...); the same calls give the same results except:
+
+- **Finding the program.** A name without `/`, `\` or a drive is looked up in the
+  directories of `PATH` (separated by `;`), with `.exe` appended if the name has no extension;
+  a path is used as it is (also with `.exe` appended if it has no extension). Run batch files
+  (`.bat`, `.cmd`) as `[]str{"cmd", "/c", file, ...}`.
+- **Arguments** are joined into one command line with the quoting of the Microsoft C library,
+  so a program that splits its command line by those rules (every AL program, every C
+  program) gets `argv` back unchanged. `cmd.exe` has rules of its own: arguments with quotes or
+  `&|<>^` reach it altered.
+- **Status.** The exit code of the program, of which the low 8 bits are the status as on Linux.
+  A program ended by an exception gets the status of the matching Linux signal: access
+  violation and stack overflow 139 (SIGSEGV), integer or float faults 136 (SIGFPE), illegal
+  instruction 132, fail-fast 134 (SIGABRT), Ctrl+C 130 (SIGINT).
+- **Signals.** There are none. `kill(p, 0)` checks that the process can be waited for;
+  `kill(p, s)` with any other `s` from 1 to 64 ends the process at once (`TerminateProcess`)
+  with the exit code 128 + `s`, so `wait` returns 137 after `kill(p, 9)` and 143 after
+  `kill(p, 15)` as on Linux. A process cannot handle or ignore it.
+- **Shared memory.** `shm_create` makes a file mapping object in the paging file; the
+  "descriptor" is its handle, which is not inherited by programs this process starts.
+  `map_shared` / `map_readonly` map such a handle or the handle of an open file; `close_fd`
+  closes a handle.
+- **The process.** `process_id()` is the Windows process id; `current_dir()` is in Windows form
+  (`C:\work\game`).

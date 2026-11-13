@@ -1,5 +1,8 @@
 # std.vk: Vulkan bindings
 
+The bindings import `libvulkan.so.1`: Linux only, with `--target windows` `use std.vk` is a
+compile error.
+
 `use std.vk` gives an AL program the Vulkan API: core 1.0 to 1.3 plus `VK_KHR_surface`,
 `VK_KHR_swapchain`, `VK_KHR_xlib_surface`, `VK_KHR_xcb_surface`, `VK_KHR_wayland_surface` and
 `VK_EXT_debug_utils`. It is a binding, not an engine: the names, structs and call sequences are

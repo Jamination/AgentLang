@@ -3,7 +3,8 @@
 Always available (no `use`). Source: `std/time.al`.
 
 Times are `f64` seconds unless the name ends in `_ns` or `_ms`. Nothing here allocates, and
-everything goes through raw system calls (`clock_gettime`, `nanosleep`).
+everything goes through raw system calls (`clock_gettime`, `nanosleep`; with `--target windows`
+`QueryPerformanceCounter`, `GetSystemTimeAsFileTime` and a high-resolution waitable timer).
 
 Only `time_now`, `time_ns`, `wall_time`, the `sleep_*` functions, `Stopwatch` and
 `tick(*FrameClock)` look at the real clock. `FixedStep`, `Timer` and `tick_at` work purely on
@@ -22,7 +23,8 @@ the numbers they are given. Keep it that way in a game: read the clock once per 
 | `sleep_until(t: f64)` | Sleeps until `time_now()` reaches `t`; returns at once if that moment has passed (or `t` is NaN); a moment more than 292 years away is limited to that. For frame pacing without drift: `next += 1.0 / 60.0; sleep_until(next)`. |
 
 Sleeping is accurate to a fraction of a millisecond on an idle machine, never shorter than
-asked.
+asked. (Windows: where the high-resolution timer is missing, before Windows 10 1803, sleeping
+falls back to `Sleep` and its 1 to 16 ms granularity.)
 
 ## Stopwatch
 

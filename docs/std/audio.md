@@ -1,6 +1,7 @@
 # std.audio: sounds, WAV files, mixer and audio output
 
-`use std.audio` provides
+`use std.audio` (Linux only: it loads std.alsa, so with `--target windows` the `use` is a
+compile error) provides
 
 - `Sound`: decoded PCM audio in memory, plus tone / noise generators,
 - WAV decoding and encoding,

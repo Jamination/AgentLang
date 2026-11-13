@@ -792,7 +792,7 @@ is_some(o: Opt[T]) -> bool   is_none(o: Opt[T]) -> bool   unwrap(o: Opt[T]) -> T
 read_file(path: str) -> (str, bool)        // the whole file; ("", false) if it cannot be opened or read
 write_file(path: str, data: str) -> bool   // creates or replaces the file; false on failure
 read_all(fd: i64) -> str                   // everything up to end of input; read_all(0) reads standard input
-io_error() -> i64                          // Linux error number of the last read_file / write_file / read_all; 0 after success
+io_error() -> i64                          // Linux error number (on Windows too) of the last read_file / write_file / read_all; 0 after success
 error_text(e: i64) -> str                  // "no such file or directory" (2), "permission denied" (13), "is a directory" (21), "file exists" (17), ...; "no error" for 0; "os error N" for other numbers
 args() -> []str                            // args()[0] is the program's path; `alc run f.al -- a "b c"` gives ["./f", "a", "b c"]; started with an empty argv (execve): [""] (Linux supplies an empty argv[0]; before 5.18: [])
 env_get(name: str) -> (str, bool)          // an environment variable; ("", false) if it is not set
@@ -843,7 +843,7 @@ alc test file.al               compile and run all `test` blocks, each in its ow
                                the test runner is written to `file.test`
 alc check file.al              type-check only
 alc sigs file.al [-- std]      one line per declaration: `file:line: signature`; `-- std` adds the library's
-options: --unchecked  -O0  --json  --emit-ir  --emit-asm
+options: --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows .exe; differences: DETAILS.md#windows)
 ```
 
 Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`

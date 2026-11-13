@@ -35,6 +35,12 @@ A program is a static, libc-free executable unless it reaches an `extern` functi
 dynamically linked executable that needs only the libraries of the functions it can reach.
 For example a game that uses `std.audio` only to mix into a buffer stays static.
 
+Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
+`std.asset`, `std.os` and `std.image` work the same on Windows (through kernel32.dll; the
+differences are in their pages). `std.input`, `std.window`, `std.audio`, `std.wayland`,
+`std.vk`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
+compile error that names the module and the target.
+
 How to structure a game on top of these: [GAMES.md](GAMES.md).
 
 Language fine print that few programs need (exact overloading and `priv` rules, bounds-check
