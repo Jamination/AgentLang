@@ -98,6 +98,26 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     return None
 }
 
+// alias_escaped_allocas, remembered for the IR of a change count `gen` (opt_gen(), for IR not
+// changed since the current pass began; -1: not to be remembered). The result is not to be
+// changed.
+priv esc_f: *Func
+priv esc_gen: i64
+priv esc_last: Vec[bool]
+
+fn alias_escaped_cached(f: *Func, gen: i64) -> Vec[bool] {
+    if gen >= 0 && f == esc_f && gen == esc_gen {
+        return esc_last
+    }
+    esc := alias_escaped_allocas(f)
+    if gen >= 0 {
+        esc_f = f
+        esc_gen = gen
+        esc_last = esc
+    }
+    return esc
+}
+
 // allocas whose address may be observed by something other than direct loads/stores
 fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     n := f.insts.len

@@ -145,6 +145,12 @@ fn opt_pass(k: i64, f: *Func, p: fn(*Func) -> bool) -> bool {
     return false
 }
 
+// the number of reported changes so far: equal numbers at the starts of two passes mean the
+// same IR (every work session starts with a new number)
+fn opt_gen() -> i64 {
+    return sk_gen
+}
+
 // the IR may have changed in any way
 priv fn sk_forget() {
     sk_gen += 1

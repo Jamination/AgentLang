@@ -17,7 +17,7 @@ priv fn run_find(repl: []i64, v0: i64) -> i64 {
 
 fn loadelim_run(f: *Func) -> bool {
     cfg := cfg_new(f)
-    esc := alias_escaped_allocas(f)
+    esc := alias_escaped_cached(f, opt_gen())
     repl := vec_fill(f.insts.len, NOV)
     dead := alloc[bool](f.insts.len)
     changed := false
