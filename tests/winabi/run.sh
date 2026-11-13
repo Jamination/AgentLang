@@ -7,6 +7,9 @@
 # walks. Each program is built in the three modes of tests/run.sh. Wine runs with no display
 # (no window can open) in the prefix $WINEPREFIX (default: tmp/win/prefix-winabi, created on
 # first use).
+# gui.c starts gui.al built with --gui (the GUI subsystem) with no standard handles, with
+# pipes, panicking, and from a console (the launcher runs in a terminal made by `script`, so
+# that Wine gives it a working console; the child's lines must appear in that terminal).
 cd "$(dirname "$0")/../.." || exit 2
 ALC=${1:-./build/alc}
 command -v x86_64-w64-mingw32-gcc >/dev/null || { echo "winabi: SKIP: x86_64-w64-mingw32-gcc is not installed"; exit 0; }
@@ -41,5 +44,28 @@ for prog in abi frames; do
     fi
   done
 done
+# --gui: no handles, pipes, a panic, a console
+if ! $ALC build --target windows --gui tests/winabi/gui.al -o "$TMP/gui.exe" 2>"$TMP/cerr" ||
+   ! x86_64-w64-mingw32-gcc -O2 -o "$TMP/gui_test.exe" tests/winabi/gui.c; then
+  echo "FAIL gui: build"; head -5 "$TMP/cerr"; fail=$((fail+1))
+else
+  launch="cd $(printf %q "$TMP") && timeout 120 wine gui_test.exe; echo \"status \$?\""
+  if command -v script >/dev/null; then
+    "${wine_env[@]}" script -qec "$launch" /dev/null </dev/null >"$TMP/gui.out" 2>&1
+  else
+    "${wine_env[@]}" bash -c "$launch" </dev/null >"$TMP/gui.out" 2>&1
+  fi
+  # the cases' results in gui_result.txt, the console case's output in the terminal's transcript
+  # (without carriage returns and the escape sequences of Wine's console)
+  tr -d '\r' <"$TMP/gui.out" | sed $'s/\e\\[[0-9;?]*[A-Za-z]//g' >"$TMP/gui.txt"
+  res=$TMP/gui_result.txt
+  if grep -q '^status 0$' "$TMP/gui.txt" && [[ $(grep -c '^ok ' "$res" 2>/dev/null) -ge 3 ]] &&
+     ! grep -q '^FAIL' "$res" && { grep -q '^skip console' "$res" || grep -q 'out 999' "$TMP/gui.txt"; }; then
+    pass=$((pass+1))
+    grep -q '^skip console' "$res" && echo "gui: console case skipped (no working console under Wine)"
+  else
+    echo "FAIL gui"; cat "$res" 2>/dev/null | head -10; grep '^status' "$TMP/gui.txt"; fail=$((fail+1))
+  fi
+fi
 echo "winabi: $pass passed, $fail failed"
 [[ $fail == 0 ]]

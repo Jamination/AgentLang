@@ -37,6 +37,9 @@ inline fn __os_exit(code: i64) {
     syscall(231, code)
 }
 
+// nothing to add to the message on standard error
+inline fn __os_panic(kind: str, loc: str, msg: str) {}
+
 // writes n bytes at p to fd, also after interruptions and, on a non-blocking fd, waiting
 // until it takes more (EAGAIN: poll); returns 0 or the error number of the failed write
 fn __write_all(fd: i64, p: i64, n: i64) -> i64 {

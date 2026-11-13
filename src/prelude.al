@@ -5,6 +5,8 @@
 // (kernel32.dll). Each layer defines the same functions:
 //   __rt_init(sp)                  called first by the generated entry point
 //   __os_exit(code) -> never       ends the process (output is flushed by the callers)
+//   __os_panic(kind, loc, msg)     after a panic message was written to standard error (Windows
+//                                  GUI programs: a message box)
 //   __write_all(fd, p, n) -> errno writes everything (fd 1 / 2: standard output / error)
 //   __os_read(fd, p, n)            bytes read, 0 at the end, or -errno
 //   __os_open(path, write)         a descriptor or -errno (path: NUL-terminated)
@@ -55,6 +57,7 @@ fn __die(kind: str, loc: str, msg: str) -> never {
         __err(msg)
     }
     __err("\n")
+    __os_panic(kind, loc, msg)
     __os_exit(1)
 }
 

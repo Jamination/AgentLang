@@ -377,7 +377,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     put32(&h, image_size)
     put32(&h, hdr_size)
     put32(&h, 0) // checksum
-    put16(&h, 3) // console subsystem
+    put16(&h, if pe_gui { 2 } else { 3 }) // subsystem: GUI (--gui) or console
     put16(&h, 0x8100) // NX compatible, terminal server aware (no ASLR: the image is not relocatable)
     put64(&h, 16 << 20) // stack reserve
     put64(&h, 64 << 10) // stack commit

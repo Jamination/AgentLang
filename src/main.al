@@ -57,6 +57,8 @@ priv const LINUX_ONLY = [_](str, str){
 enum TargetOs { TargetLinux, TargetWindows }
 
 target_os: TargetOs
+// `--gui` (Windows only): the PE gets the GUI subsystem instead of the console one (pe_link)
+pe_gui: bool
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy).
@@ -307,7 +309,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --gui         windows: a GUI program (no console window of its own)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
     exit(2)
 }
 
@@ -357,6 +359,8 @@ priv fn parse_args() -> Args {
             }
         } else if s == "--json" {
             json = true
+        } else if s == "--gui" {
+            pe_gui = true
         } else if s == "--emit-ir" {
             a.emit_ir = true
         } else if s == "--emit-asm" {
@@ -385,6 +389,9 @@ priv fn parse_args() -> Args {
     }
     if len(a.input) == 0 {
         usage("")
+    }
+    if pe_gui && target_os != TargetWindows {
+        usage("--gui is for Windows executables: add --target windows")
     }
     return a
 }

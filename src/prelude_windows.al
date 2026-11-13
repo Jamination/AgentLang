@@ -11,6 +11,10 @@
 // - Errors: Windows error codes are mapped to the Linux errno of the same meaning
 //   (errno_of); a code without one becomes 0x10000 + the code ("windows error N").
 // - Exit status: the low 8 bits of the code, as on Linux.
+// - GUI programs (`alc build --gui`, subsystem 2 in the image header): no console of their
+//   own. Started from a console they attach to it (gui_console); a standard handle that does
+//   not exist reads as empty and swallows output; a panic also shows a message box when its
+//   message would otherwise only reach a console or nothing (__os_panic).
 
 priv extern "kernel32.dll" fn GetStdHandle(which: u32) -> i64
 priv extern "kernel32.dll" fn GetConsoleMode(h: i64, mode: *u32) -> i32
@@ -70,6 +74,10 @@ priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
 priv extern "kernel32.dll" fn CreateThread(security: i64, stack: i64, start: fn(i64) -> u32, arg: i64, flags: u32, id: i64) -> i64
 priv extern "kernel32.dll" fn GetCurrentThreadStackLimits(low: *i64, high: *i64)
 priv extern "kernel32.dll" fn GetActiveProcessorCount(group: u16) -> u32
+priv extern "kernel32.dll" fn AttachConsole(pid: u32) -> i32
+priv extern "kernel32.dll" fn SetStdHandle(which: u32, h: i64) -> i32
+priv extern "kernel32.dll" fn LoadLibraryW(name: *u16) -> i64
+priv extern "kernel32.dll" fn GetProcAddress(module: i64, name: *u8) -> i64
 
 priv const INVALID_HANDLE = -1
 priv const INFINITE: u32 = 0xFFFFFFFF
@@ -176,6 +184,100 @@ fn __rt_init(sp: i64) {
     SetThreadStackGuarantee(&g)
     AddVectoredExceptionHandler(1, on_exception)
     SetUnhandledExceptionFilter(on_unhandled)
+    // Subsystem, 92 bytes after the PE signature: 2 = GUI (--gui), 3 = console
+    if cast[*u16](pe + 92)[0] == 2 {
+        gui = true
+        gui_console()
+    }
+}
+
+// ---------- GUI programs ----------
+priv gui: bool
+
+// Started from a console (a terminal, cmd, PowerShell), a GUI program attaches to it so that
+// print and panic messages show there; standard handles the starter redirected to a file or a
+// pipe stay as they are. Standard input is not taken from the console (the shell goes on
+// reading it): without redirection it stays empty. A handle that is no working console after
+// attaching (AttachConsole may set the standard handles itself; Wine without a terminal gives
+// dead ones) is cleared: output goes nowhere.
+priv fn gui_console() {
+    // standard input, output, error
+    ids := [3]u32{0xFFFFFFF6, 0xFFFFFFF5, 0xFFFFFFF4}
+    given: [3]bool
+    for k in 0..3 {
+        h := GetStdHandle(ids[k])
+        // a file or a pipe (FILE_TYPE_DISK, FILE_TYPE_PIPE), not a console nobody attached
+        given[k] = h != 0 && h != INVALID_HANDLE && GetFileType(h) != 2
+    }
+    if (given[1] && given[2]) || AttachConsole(0xFFFFFFFF) == 0 {           // ATTACH_PARENT_PROCESS
+        return
+    }
+    if !given[0] {
+        SetStdHandle(ids[0], 0)
+    }
+    name: [8]u16
+    mode: u32
+    for k in 1..3 {
+        if given[k] {
+            continue
+        }
+        h := GetStdHandle(ids[k])
+        if h == 0 || h == INVALID_HANDLE || GetConsoleMode(h, &mode) == 0 {
+            // GENERIC_READ | GENERIC_WRITE (GetConsoleMode needs both), FILE_SHARE_READ | WRITE, OPEN_EXISTING
+            h = CreateFileW(wide_c(name[..], ptr("CONOUT$")), 0xC0000000, 3, 0, 3, 0, 0)
+            if h != INVALID_HANDLE && GetConsoleMode(h, &mode) == 0 {
+                CloseHandle(h)
+                h = INVALID_HANDLE
+            }
+        }
+        SetStdHandle(ids[k], if h == INVALID_HANDLE { 0 } else { h })
+    }
+}
+
+// Called by __die after the message went to standard error. In a GUI program whose standard
+// error is a console or nothing (started from Explorer, or from a terminal behind the game's
+// window) the message is also shown in a message box, so a game that stops says why; with
+// standard error redirected to a file or a pipe it is only written there. No allocation (the
+// panic may be "out of memory"); user32.dll is loaded only here.
+priv in_panic_box: bool
+priv box_text: [1024]u8
+priv box_wide: [1040]u16
+
+fn __os_panic(kind: str, loc: str, msg: str) {
+    if !gui || in_panic_box {
+        return
+    }
+    in_panic_box = true
+    h := handle(2)
+    if h != 0 && h != INVALID_HANDLE && !is_console(2, h) {
+        return
+    }
+    n := 0
+    for part in [4]str{kind, loc, if len(msg) > 0 { ": " } else { "" }, msg} {
+        c := min(len(part), len(box_text) - 1 - n)
+        memcopy(cast[i64](ptr(box_text)) + n, cast[i64](ptr(part)), c)
+        n += c
+    }
+    units, _ := to_utf16(ptr(box_text), n, ptr(box_wide), false)
+    box_wide[units] = 0
+    lib: [16]u16
+    user32 := LoadLibraryW(wide_c(lib[..], ptr("user32.dll")))
+    box := if user32 == 0 { 0 } else { GetProcAddress(user32, ptr("MessageBoxW")) }
+    if box == 0 {
+        return
+    }
+    // the title: the executable's file name
+    path: [520]u16
+    k := i64(GetModuleFileNameW(0, ptr(path), 519))
+    path[k] = 0
+    start := 0
+    for i in 0..k {
+        if path[i] == '\\' || path[i] == '/' {
+            start = i + 1
+        }
+    }
+    // MB_OK | MB_ICONERROR | MB_TASKMODAL | MB_SETFOREGROUND | MB_TOPMOST
+    cast[fn(i64, *u16, *u16, u32) -> i32](box)(0, ptr(box_wide), &path[start], 0x52010)
 }
 
 fn __os_exit(code: i64) -> never {
@@ -391,6 +493,9 @@ priv fn console_write(fd: i64, h: i64, p: i64, n: i64) -> i64 {
 // writes n bytes at p to fd; returns 0 or the error number of the failed write
 fn __write_all(fd: i64, p: i64, n: i64) -> i64 {
     h := handle(fd)
+    if fd >= 0 && fd <= 2 && (h == 0 || h == INVALID_HANDLE) {
+        return 0                                   // no such standard handle: output goes nowhere
+    }
     if (fd == 1 || fd == 2) && is_console(fd, h) {
         return console_write(fd, h, p, n)
     }
@@ -460,6 +565,9 @@ priv fn console_read(h: i64, p: i64, n: i64) -> i64 {
 // bytes read, 0 at the end (also of a pipe whose writer is gone), or -errno
 fn __os_read(fd: i64, p: i64, n: i64) -> i64 {
     h := handle(fd)
+    if fd == 0 && (h == 0 || h == INVALID_HANDLE) {
+        return 0                                   // no standard input: empty
+    }
     if fd == 0 && is_console(0, h) {
         return console_read(h, p, n)
     }
