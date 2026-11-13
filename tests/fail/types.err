@@ -1,4 +1,4 @@
-types.al:5:12: error: operands have different types: i64 and f64
+types.al:5:12: error: operands have different types: i64 and f32
 expects 2 argument(s), got 1
 types.al:7:10: error: unknown identifier `undefined_name`
 has no field `foo`

@@ -23,8 +23,8 @@ fn main() {
 
     // uniform floats
     n := 200000
-    sum32 := 0.0
-    sum64 := 0.0
+    sum32: f64 = 0.0
+    sum64: f64 = 0.0
     in_range := true
     for i in 0..n {
         f := r.next_f32()
@@ -99,8 +99,8 @@ fn main() {
     // geometry
     unit := true
     inside := true
-    sx := 0.0
-    sz := 0.0
+    sx: f64 = 0.0
+    sz: f64 = 0.0
     half2 := 0
     half3 := 0
     for i in 0..50000 {
@@ -125,8 +125,8 @@ fn main() {
     print("inside", inside, "uniform", near(f64(half2) / 50000.0, 0.25, 0.01), near(f64(half3) / 50000.0, 0.125, 0.01))
 
     // gaussian
-    s1 := 0.0
-    s2 := 0.0
+    s1: f64 = 0.0
+    s2: f64 = 0.0
     within := 0
     for i in 0..n {
         g := f64(r.normal(5.0, 2.0))

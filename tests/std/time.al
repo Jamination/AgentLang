@@ -60,7 +60,8 @@ fn main() {
     print("| steps", total, fs.steps, "alpha in [0,1)", fs.alpha() >= 0.0 && fs.alpha() < 1.0)
     putf(f64(fs.alpha()), 2)
     putc('\n')
-    // one second in 1 ms frames is exactly 60 steps; the cap drops time after a stall
+    // one second in 1 ms frames is exactly 60 steps; the cap drops time after a stall (the
+    // literals here and below call the f32 overloads of advance, timer and tick)
     fs = fixed_step(60.0)
     total = 0
     for i in 0..1000 {

@@ -1191,8 +1191,13 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
     be := self.new_block()
     bj := self.new_block()
     self.cond_br(c, bt, be)
-    self.switch_to(bt)
-    v1 := self.block_value(t, want, expect)
+    // an untyped float as the value of the then-branch takes the type of the else-branch:
+    // that one is lowered first
+    swap := want && !is_some(expect) && block_tail_untyped_float(self, t) && !block_tail_untyped_float(self, e)
+    b1 := if swap { e } else { t }
+    b2 := if swap { t } else { e }
+    self.switch_to(if swap { be } else { bt })
+    v1 := self.block_value(b1, want, expect)
     d1 := self.dead
     slot: Opt[Val] = None
     if want && !d1 && v1.ty != T_UNIT && v1.ty != T_ERR {
@@ -1202,19 +1207,19 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
         slot = Some(sv)
     }
     self.jmp(bj)
-    self.switch_to(be)
+    self.switch_to(if swap { bt } else { be })
     exp2 := match slot {
         Some(s) => Some(s.ty)
         None => expect
     }
-    v2 := self.block_value(e, want, exp2)
+    v2 := self.block_value(b2, want, exp2)
     d2 := self.dead
     res := val_unit()
     if want {
         match slot {
             Some(sv) => {
                 if !d2 {
-                    v2c := self.coerce(v2, sv.ty, e.end)
+                    v2c := self.coerce(v2, sv.ty, b2.end)
                     self.store(sv, v2c)
                 }
                 res = sv
@@ -1228,7 +1233,7 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
                         res = sv
                     } else if v1.ty == T_UNIT {
                         tn := self.tyname(v2.ty)
-                        self.err(e.end, fmt("`if` branches have different types: () and ", tn))
+                        self.err(b2.end, fmt("`if` branches have different types: () and ", tn))
                     }
                 } else if v1.ty == T_ERR || v2.ty == T_ERR {
                     res = val_err()
@@ -1243,6 +1248,23 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
         return val_never()
     }
     return res
+}
+
+// is the value of block `b` an untyped float (`0.5`, `sqrt(2.0)`, an `if` of such values)?
+priv fn block_tail_untyped_float(self: *Fx, b: *Block) -> bool {
+    if b.stmts.len == 0 {
+        return false
+    }
+    match b.stmts[b.stmts.len - 1].k {
+        If(_, t, Some(e)) => return block_tail_untyped_float(self, t) && block_tail_untyped_float(self, e)
+        Expr(x) => {
+            match x.k {
+                If(_, t, e) => return block_tail_untyped_float(self, t) && block_tail_untyped_float(self, e)
+                _ => return self.untyped_float(x) || self.untyped_math(x)
+            }
+        }
+        _ => return false
+    }
 }
 
 priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Expr], incl: bool, step_o: Opt[*Expr], body: *Block, pos: Pos) {

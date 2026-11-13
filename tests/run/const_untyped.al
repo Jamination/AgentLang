@@ -1,4 +1,5 @@
-// untyped constants: an f32 use rounds the literal once; typed u64; hex bit patterns
+// untyped constants: an f32 use (also the default, `print(H)`) rounds the literal once, an f64
+// use gives the f64 nearest to it; typed u64; hex bit patterns
 const H = 1.00000005960464477539062500000001
 const NH = -1.00000005960464477539062500000001
 const B: u64 = 18446744073709551615
@@ -9,5 +10,5 @@ fn main() {
     y: f32 = NH
     z: i8 = M
     w: u64 = W
-    print(x, y, H, B, z, w, u64(-1), u8(-1))
+    print(x, y, H, f64(H), B, z, w, u64(-1), u8(-1))
 }

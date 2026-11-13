@@ -387,6 +387,13 @@ fn get_f64(c: *Config, key: str, default: f64) -> f64 {
     return if ok { x } else { default }
 }
 
+// the value of key as an f32 (rounded once from the text), or `default` if the key is missing
+// or not a number
+fn get_f32(c: *Config, key: str, default: f32) -> f32 {
+    x, ok := parse_f32(c.values.get_or(key, ""))
+    return if ok { x } else { default }
+}
+
 // the value of key as a boolean (true/yes/on/1 or false/no/off/0, lower case), or `default`
 fn get_bool(c: *Config, key: str, default: bool) -> bool {
     match c.values.get_or(key, "") {
@@ -750,6 +757,16 @@ fn as_str(v: *Json, default: str) -> str {
 // the number, or `default` if v is nil or not a number
 fn as_f64(v: *Json, default: f64) -> f64 {
     return if v != nil && v.kind == JsonNumber { v.num } else { default }
+}
+
+// the number as an f32 (rounded once from the text as written), or `default` if v is nil or
+// not a number
+fn as_f32(v: *Json, default: f32) -> f32 {
+    if v == nil || v.kind != JsonNumber {
+        return default
+    }
+    x, ok := parse_f32(v.text)
+    return if ok { x } else { f32(v.num) }
 }
 
 // the number as an integer (exact for integers written without fraction or exponent,

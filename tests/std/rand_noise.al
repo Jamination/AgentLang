@@ -8,7 +8,7 @@ fn main() {
     repeat := true
     lo: f32 = 1.0
     hi: f32 = -1.0
-    sum := 0.0
+    sum: f64 = 0.0
     for iy in -40..40 {
         for ix in -40..40 {
             lattice = lattice && noise2(f32(ix), f32(iy)) == 0.0 && noise3(f32(ix), f32(iy), 3.0) == 0.0

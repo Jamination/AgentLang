@@ -29,7 +29,7 @@ fn mm_mul(n: i64, a: [][]f64, b: [][]f64) -> [][]f64 {
         p := a[i]
         q := m[i]
         for j in 0..n {
-            t := 0.0
+            t: f64 = 0.0
             r := c[j]
             for k in 0..n {
                 t += p[k] * r[k]
@@ -45,7 +45,7 @@ fn main() {
     a := mm_gen(n, 1.0)
     b := mm_gen(n, 2.0)
     m := mm_mul(n, a, b)
-    trace := 0.0
+    trace: f64 = 0.0
     for i in 0..n {
         trace += m[i][i]
     }

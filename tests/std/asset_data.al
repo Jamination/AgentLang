@@ -29,6 +29,7 @@ fn main() {
     print(c.get_str("name", "?"), "|", c.get_str("video.title", "?"), "|", c.get_str("missing", "fallback"), "|", len(c.get_str("input.empty", "?")), "|", c.get_str("input.url", ""))
     print(c.get_i64("video.width", 0), c.get_i64("video.height", 0), c.get_i64("name", -1), c.get_i64("volume", -1), c.get_i64("missing", 42))
     print(c.get_f64("volume", 0.0), c.get_f64("input.sensitivity", 0.0), c.get_f64("video.width", 0.0), c.get_f64("name", 1.5))
+    print(c.get_f32("volume", 0.0), c.get_f32("input.sensitivity", 0.0), c.get_f32("video.width", 0.0), c.get_f32("name", 1.5), c.get_f32("missing", 0.1))
     print(c.get_bool("fullscreen", false), c.get_bool("input.invert", true), c.get_bool("name", true), c.get_bool("missing", false))
     print(c.get_str("input.color", "?"), "|", c.get_str("input.quoted", "?"), "|", c.get_str("input.url", "?"))
     print(c.has("video.width"), c.has("width"), c.has("input.empty"), c.keys.len, c.values.len)
@@ -50,6 +51,9 @@ fn main() {
     print(root.get("name").as_str("?"), root.get("hp").as_i64(0), root.get("speed").as_f64(0.0), root.get("speed").as_i64(0), root.get("id").as_i64(0))
     pos := root.get("pos")
     print(pos.count(), pos.at(0).as_f64(0.0), pos.at(1).as_i64(0), pos.at(2).as_f64(9.0), pos.at(3) == nil, pos.at(-1) == nil)
+    // as_f32 rounds once from the text: f32(as_f64(..)) would give 1.0 here
+    near, _ := json_parse("[1.00000005960464477539062500000001]")
+    print(root.get("speed").as_f32(0.0), pos.at(0).as_f32(0.0), pos.at(2).as_f32(9.0), root.get("name").as_f32(-1.0), near.at(0).as_f32(0.0), f32(near.at(0).as_f64(0.0)))
     print(root.get("alive").as_bool(false), root.get("shield").as_bool(true), root.get("parent").is_null(), root.get("nope").is_null(), root.get("name").is_null())
     // chains tolerate missing members and wrong kinds
     print(root.get("weapon").get("kind").as_str("?"), root.get("weapon").get("damage").as_i64(0), root.get("weapon").get("mods").count(), root.get("weapon").get("nope").get("deeper").at(3).as_i64(-1))

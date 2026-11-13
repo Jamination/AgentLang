@@ -82,7 +82,16 @@ class Gen:
                 t = r.choice(["i16", "u8", "i8", "u16"])
                 return f"f64({self.expr(env, t, depth - 1)})"
             if k < 0.8:
-                return f"(if {self.expr(env, 'bool', depth - 1)} {{ {self.expr(env, 'f64', depth - 1)} }} else {{ {self.expr(env, 'f64', depth - 1)} }})"
+                # an `if` of untyped literals alone would be f32 (the default): one branch is
+                # typed, the other one (literals too) takes its type (the choice draws no
+                # random number, so a seed gives the same programs as before)
+                c = self.expr(env, 'bool', depth - 1)
+                a, b = self.expr(env, 'f64', depth - 1), self.expr(env, 'f64', depth - 1)
+                if len(c) % 2 == 0:
+                    a = f"f64({a})"
+                else:
+                    b = f"f64({b})"
+                return f"(if {c} {{ {a} }} else {{ {b} }})"
             if k < 0.87:
                 return f"sqrt(fabs({self.expr(env, 'f64', depth - 1)}))"
             if k < 0.93:
@@ -231,7 +240,8 @@ class Gen:
             self.tmp += 1
             n = f"v_{self.tmp}"
             t = r.choice(INT_TYPES + ["f64", "bool"])
-            self.w(f"{n} := {self.expr(env, t, 3)}")
+            # (an f64 variable is declared with its type: from literals alone it would be f32)
+            self.w(f"{n}: f64 = {self.expr(env, t, 3)}" if t == "f64" else f"{n} := {self.expr(env, t, 3)}")
             env[n] = t
         else:
             if mutable:

@@ -24,5 +24,5 @@ fn main() {
     g := id(G)
     s := id(S8)
     u := id(U32)
-    print(f64(a), u64(id(1.5e19)), a / 2, a > 5, a >> 1, id(L) % 3, -g, ~g, s / id(i8(-1)), s >> id(9), u << id(33), u8(id(1.0e30)))
+    print(f64(a), u64(id(f64(1.5e19))), a / 2, a > 5, a >> 1, id(L) % 3, -g, ~g, s / id(i8(-1)), s >> id(9), u << id(33), u8(id(f64(1.0e30))))
 }

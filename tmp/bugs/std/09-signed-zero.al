@@ -3,5 +3,5 @@
 // expected: -0.0 -0.0 -0.0 -0.0   actual (before the fix): 0.0 0.0 0.0 0.0
 fn main() {
     y: f32 = -0.25
-    print(trunc(-0.5), round(-0.4), ceil(y), atan(-0.0))
+    print(trunc(f64(-0.5)), round(f64(-0.4)), ceil(y), atan(f64(-0.0)))
 }

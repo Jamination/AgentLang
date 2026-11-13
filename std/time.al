@@ -146,6 +146,11 @@ fn fixed_step(hz: f64) -> FixedStep {
     return FixedStep{step: 1.0 / hz, acc: 0.0, max_steps: 8, steps: 0}
 }
 
+// the same for an f32 rate (converted exactly; the step is computed in f64)
+fn fixed_step(hz: f32) -> FixedStep {
+    return fixed_step(f64(hz))
+}
+
 // adds the frame time `dt` (ignored if negative) and returns how many fixed updates to run
 // now (0..max_steps)
 fn advance(f: *FixedStep, dt: f64) -> i64 {
@@ -163,6 +168,11 @@ fn advance(f: *FixedStep, dt: f64) -> i64 {
     }
     f.steps += n
     return n
+}
+
+// the same for an f32 frame time (converted exactly; the accumulator stays f64)
+fn advance(f: *FixedStep, dt: f32) -> i64 {
+    return advance(f, f64(dt))
 }
 
 // how far the frame is between the last two simulation states, in [0, 1): draw
@@ -183,6 +193,12 @@ struct Timer { duration: f64, left: f64, repeat: bool, active: bool }
 fn timer(seconds: f64, repeat: bool) -> Timer {
     assert seconds > 0.0 || !repeat, "timer: a repeating timer needs a positive period"
     return Timer{duration: seconds, left: seconds, repeat: repeat, active: true}
+}
+
+// the same for an f32 period (converted exactly: timer(0.1, ..) is the f32 nearest to 0.1;
+// write timer(f64(0.1), ..) for the f64 one)
+fn timer(seconds: f32, repeat: bool) -> Timer {
+    return timer(f64(seconds), repeat)
 }
 
 // advances the timer by dt and returns how often it fired: 0 or 1 for a one-shot timer, the
@@ -216,6 +232,11 @@ fn tick(t: *Timer, dt: f64) -> i64 {
     }
     t.left = min(t.left, t.duration)
     return n
+}
+
+// the same for an f32 dt (converted exactly; the countdown stays f64)
+fn tick(t: *Timer, dt: f32) -> i64 {
+    return tick(t, f64(dt))
 }
 
 // true when a one-shot timer has fired

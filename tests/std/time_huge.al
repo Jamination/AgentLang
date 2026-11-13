@@ -15,7 +15,7 @@ fn main() -> i64 {
     }
     print(run([]str{"timeout", "-s", "KILL", "0.2", a[0], "child-ms"}), run([]str{"timeout", "-s", "KILL", "0.2", a[0], "child-until"}))
     sleep_until(0.0 / 0.0)
-    t := timer(1e-9, true)
-    print(t.tick(1e300) == 0x7FFF_FFFF_FFFF_FFFF, t.left == t.duration, t.tick(0.0 / 0.0), t.tick(2.5e-9))
+    t := timer(f64(1e-9), true)
+    print(t.tick(f64(1e300)) == 0x7FFF_FFFF_FFFF_FFFF, t.left == t.duration, t.tick(f64(0.0) / 0.0), t.tick(f64(2.5e-9)))
     0
 }

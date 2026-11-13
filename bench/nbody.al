@@ -30,7 +30,7 @@ fn advance(b: []Body, dt: f64) {
 
 fn energy(b: []Body) -> f64 {
     n := len(b)
-    e := 0.0
+    e: f64 = 0.0
     for i in 0..n {
         e += 0.5 * b[i].mass * (b[i].vx * b[i].vx + b[i].vy * b[i].vy + b[i].vz * b[i].vz)
         for j in i + 1..n {
@@ -44,9 +44,9 @@ fn energy(b: []Body) -> f64 {
 }
 
 fn offset_momentum(b: []Body) {
-    px := 0.0
-    py := 0.0
-    pz := 0.0
+    px: f64 = 0.0
+    py: f64 = 0.0
+    pz: f64 = 0.0
     for i in 0..len(b) {
         px += b[i].vx * b[i].mass
         py += b[i].vy * b[i].mass

@@ -25,7 +25,7 @@ fn main() {
     nan: f32 = NAN
     ok("floor inf", floor(inf) == inf && ceil(-inf) == -inf && round(inf) == inf && trunc(-inf) == -inf)
     ok("floor nan", floor(nan) != floor(nan) && round(nan) != round(nan))
-    ok("round f64", round(2.5) == 3.0 && round(-2.5) == -3.0 && round(0.49999999999999994) == 0.0 && trunc(-3.7) == -3.0 && floor(-3.2) == -4.0 && ceil(3.2) == 4.0)
+    ok("round f64", round(f64(2.5)) == 3.0 && round(f64(-2.5)) == -3.0 && round(f64(0.49999999999999994)) == 0.0 && trunc(f64(-3.7)) == -3.0 && floor(f64(-3.2)) == -4.0 && ceil(f64(3.2)) == 4.0)
     q: f32 = 2.75
     ok("fract", fract(q) == 0.75 && fract(-q) == 0.25 && fract(3.0 + 0.125) == 0.125)
     ok("sign", sign(q) == 1.0 && sign(-q) == -1.0 && sign(q - q) == 0.0 && sign(-4.5) == -1.0)
@@ -49,9 +49,10 @@ fn main() {
     ok("align_up", align_up(0, 16) == 0 && align_up(1, 16) == 16 && align_up(16, 16) == 16 && align_up(17, 8) == 24)
     s, c := sin_cos(q)
     ok("sin_cos f32", s == sin(q) && c == cos(q))
-    s2, c2 := sin_cos(1.25)
-    ok("sin_cos f64", s2 == sin(1.25) && c2 == cos(1.25) && approx_eq(s2 * s2 + c2 * c2, 1.0))
-    ok("constants", approx_eq(sin(PI / 6.0), 0.5) && approx_eq(exp(1.0), E) && approx_eq(log(E), 1.0) && approx_eq(TAU, 2.0 * PI) && approx_eq(DEG2RAD * RAD2DEG, 1.0))
+    s2, c2 := sin_cos(f64(1.25))
+    ok("sin_cos f64", s2 == sin(f64(1.25)) && c2 == cos(f64(1.25)) && approx_eq(s2 * s2 + c2 * c2, 1.0))
+    pi: f64 = PI
+    ok("constants", approx_eq(sin(pi / 6.0), 0.5) && approx_eq(exp(f64(1.0)), E) && approx_eq(log(f64(E)), 1.0) && approx_eq(f64(TAU), 2.0 * pi) && approx_eq(f64(DEG2RAD) * RAD2DEG, 1.0))
     h: f32 = HALF_PI
     ok("f32 constants", approx_eq(sin(h), 1.0) && fabs(cos(h)) < 0.000001 && approx_eq(atan2(q, q), PI / 4.0) && approx_eq(pow(q, 2.0), 7.5625) && approx_eq(log2(q * 4.0), 3.4594316))
     print("math_basic failures:", fails)

@@ -632,7 +632,7 @@ fn sin_cos(x: f64) -> (f64, f64) {
     }
     n := 0
     r := x
-    t := 0.0
+    t: f64 = 0.0
     if fabs(x) > __PIO4 {
         n, r, t = __rem_pio2(x)
     }
@@ -665,7 +665,7 @@ fn asin(x: f64) -> f64 {
     z := (1.0 - a) * 0.5
     s := sqrt(z)
     r := __asin_r(z)
-    t := 0.0
+    t: f64 = 0.0
     if a >= 0.975 {
         t = __PIO2_HI - (2.0 * (s + s * r) - __PIO2_LO)
     } else {
@@ -733,7 +733,7 @@ fn atan2(y: f64, x: f64) -> f64 {
     }
     ax := fabs(x)
     ay := fabs(y)
-    z := 0.0
+    z: f64 = 0.0
     if ay != 0.0 {
         z = if ax == INF && ay == INF { __PIO4 } else { atan(ay / ax) }
     }

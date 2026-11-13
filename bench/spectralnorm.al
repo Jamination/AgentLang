@@ -5,7 +5,7 @@ fn eval_a(i: i64, j: i64) -> f64 {
 fn eval_a_times_u(u: []f64, au: []f64) {
     n := len(u)
     for i in 0..n {
-        s := 0.0
+        s: f64 = 0.0
         for j in 0..n {
             s += eval_a(i, j) * u[j]
         }
@@ -16,7 +16,7 @@ fn eval_a_times_u(u: []f64, au: []f64) {
 fn eval_at_times_u(u: []f64, au: []f64) {
     n := len(u)
     for i in 0..n {
-        s := 0.0
+        s: f64 = 0.0
         for j in 0..n {
             s += eval_a(j, i) * u[j]
         }
@@ -41,8 +41,8 @@ fn main() {
         eval_ata_times_u(u, v, t)
         eval_ata_times_u(v, u, t)
     }
-    vbv := 0.0
-    vv := 0.0
+    vbv: f64 = 0.0
+    vv: f64 = 0.0
     for i in 0..n {
         vbv += u[i] * v[i]
         vv += v[i] * v[i]

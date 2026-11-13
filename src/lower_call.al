@@ -1784,13 +1784,14 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                     return Some(val_err())
                 }
             }
-            // an untyped literal takes the type of the other operand, else of the context
+            // an untyped literal (or sqrt(literal), ...) takes the type of the other operand,
+            // else of the context
             first := 0
-            if two && self.is_untyped(&args[0]) && !self.is_untyped(&args[1]) {
+            if two && (self.is_untyped(&args[0]) && !self.is_untyped(&args[1]) || self.untyped_math(&args[0]) && !self.is_untyped(&args[1]) && !self.untyped_math(&args[1])) {
                 first = 1
             }
             exp0: Opt[i64] = None
-            if self.is_untyped(&args[first]) {
+            if self.is_untyped(&args[first]) || self.untyped_math(&args[first]) {
                 exp0 = Some(self.float_expect(expect))
             }
             v := self.expr(&args[first], exp0)

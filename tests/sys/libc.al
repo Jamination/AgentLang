@@ -14,7 +14,7 @@ fn main() {
     print(a)
     buf: [64]u8
     n := snprintf(ptr(buf), 64, cast[*u8](ptr("%.3f|%ld\0")), 3.14159, 42)
-    print(buf[..i64(n)], cosf(0.0), pow(2.0, 10.0))
+    print(buf[..i64(n)], cosf(0.0), pow(f64(2.0), 10.0))
     p := malloc(100)
     print(p != nil)
     free(p)

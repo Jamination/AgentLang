@@ -2,6 +2,7 @@
 Space Game |   padded   | fallback | 0 | http://x/?a=b#frag
 1920 720 -1 -1 42
 0.75 0.25 1920.0 1.5
+0.75 0.25 1920.0 1.5 0.1
 true false true false
 #ff8800 | a # b ; c | http://x/?a=b#frag
 true false true 12 12
@@ -11,6 +12,7 @@ true true
 true JsonObject 11 0
 Scout 100 25.0 25 9007199254740993
 3 1.5 -2 0.0 true true
+25.0 1.5 0.0 -1.0 1.0000001 1.0
 true false true false false
 laser 7 0 -1
 5 no true true true 0 0

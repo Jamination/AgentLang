@@ -62,6 +62,35 @@ priv fn parse_usize(s: str) -> (i64, bool) {
     return (v, true)
 }
 
+// an untyped float constant (`0.5`, `-1.5`, `PI / 2.0`): its type comes from the context
+fn untyped_float(self: *Fx, e: *Expr) -> bool {
+    return self.is_untyped(e) && is_cv_float(self.cx.const_eval(e))
+}
+
+// the builtin `sqrt` / `fabs` / `fmin` / `fmax` of untyped arguments (`sqrt(2.0)`): like an
+// untyped float, its type comes from the context (it has no side effects to keep in order)
+fn untyped_math(self: *Fx, e: *Expr) -> bool {
+    match e.k {
+        Call(c, args) => {
+            match c.k {
+                Ident(n) if n == "sqrt" || n == "fabs" || n == "fmin" || n == "fmax" => {
+                    if args.len == 0 || is_some(self.lookup(n)) || self.cx.has_fn_name(n) {
+                        return false
+                    }
+                    for i in 0..args.len {
+                        if !self.is_untyped(&args[i]) && !self.untyped_math(&args[i]) {
+                            return false
+                        }
+                    }
+                    return true
+                }
+                _ => return false
+            }
+        }
+        _ => return false
+    }
+}
+
 fn is_untyped(self: *Fx, e: *Expr) -> bool {
     match e.k {
         Int(_, _), Float(_, _), Nil => { return true }
@@ -1075,7 +1104,8 @@ priv fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: 
     }
     l: Val
     r: Val
-    if self.is_untyped(a) && !self.is_untyped(b) {
+    // an untyped operand takes the type of the other one, which is lowered first
+    if self.is_untyped(a) && !self.is_untyped(b) || self.untyped_math(a) && !self.is_untyped(b) && !self.untyped_math(b) {
         r = self.expr(b, exp)
         l = self.expr(a, Some(r.ty))
     } else {

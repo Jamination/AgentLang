@@ -4,16 +4,16 @@ fn main() {
     bit_num := 0
     byte_acc: u8 = 0
     iter := 50
-    limit := 2.0
+    limit: f64 = 2.0
     put("P4\n", w, " ", h, "\n")
     for yi in 0..h {
         y := f64(yi)
         for xi in 0..w {
             x := f64(xi)
-            zr := 0.0
-            zi := 0.0
-            tr := 0.0
-            ti := 0.0
+            zr: f64 = 0.0
+            zi: f64 = 0.0
+            tr: f64 = 0.0
+            ti: f64 = 0.0
             cr := 2.0 * x / f64(w) - 1.5
             ci := 2.0 * y / f64(h) - 1.0
             i := 0

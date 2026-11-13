@@ -98,7 +98,7 @@ fn main() {
     x := 5
     x.incr()
     x.incr()
-    f := 3.0
+    f: f64 = 3.0
     f.halve()
     b := false
     b.toggle()
@@ -127,7 +127,7 @@ fn main() {
     vs.buf[0].incr()
     vs.len.incr()
     vs.len.add(-1)
-    t := (1, 2.0, Jmp)
+    t: (i64, f64, Op) = (1, 2.0, Jmp)
     t.0.incr()
     t.1.halve()
     t.2.next()

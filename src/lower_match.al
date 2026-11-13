@@ -1304,8 +1304,9 @@ priv struct ArmSt {
     pat_err: bool
 }
 
-// Is the value of the arm `b` a variant whose enum type must come from the context: a name
-// that several enums have, or a variant of a generic enum without type arguments?
+// Is the value of the arm `b` a variant whose enum type must come from the context (a name
+// that several enums have, or a variant of a generic enum without type arguments), or an
+// untyped float constant, which takes the type of the other arms?
 priv fn needs_type(s: *Fx, b: *Block, binds: *Vec[(str, i64, Pos)]) -> bool {
     if b.stmts.len == 0 {
         return false
@@ -1323,11 +1324,18 @@ priv fn needs_type(s: *Fx, b: *Block, binds: *Vec[(str, i64, Pos)]) -> bool {
                         return false
                     }
                     bv := s.bare_variant(n, None)
-                    return bv.2 == 2 || (bv.2 == 1 && s.cx.enum_decls[bv.0].tparams.len != 0)
+                    if bv.2 == 2 || (bv.2 == 1 && s.cx.enum_decls[bv.0].tparams.len != 0) {
+                        return true
+                    }
                 }
-                Field(_, _), Call(_, _) => return s.variant_ref(e) != ""
+                Field(_, _), Call(_, _) => {
+                    if s.variant_ref(e) != "" {
+                        return true
+                    }
+                }
                 _ => {}
             }
+            return s.untyped_float(e) || s.untyped_math(e)
         }
         _ => {}
     }
