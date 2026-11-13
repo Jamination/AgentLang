@@ -125,6 +125,132 @@ priv fn keep_args(f: *Func) {
     }
 }
 
+// ---------- dropping the orphans ----------
+// An instruction in no block (an orphan: replaced, deleted, its alloca promoted) is never read
+// again: the passes and the back end look at the instructions of the blocks only (and isel at
+// Func.has_vec, which stands for every instruction ever made). Most instructions are orphans
+// at the end (60 % at -O0). keep_func drops them and numbers the others in their old order, so
+// a later decision that compares instruction numbers comes out the same, and every table by
+// instruction later on is smaller. Not done when an instruction or terminator in a block uses
+// an orphan (the function is kept as it is then).
+
+// the new number of every instruction (-1: dropped) and how many stay, or (nil, 0); in the
+// scratch region
+priv fn orphan_map(f: *Func) -> ([]i64, i64) {
+    n := f.insts.len
+    scratch_on()
+    m := mkslice[i64](__alloc_raw(n * 8), n)
+    scratch_off()
+    memfill(ptr(m), 0xFF, n * 8)
+    for b in 0..f.blocks.len {
+        for v in f.blocks[b].insts {
+            m[v] = 0
+        }
+    }
+    for b in 0..f.blocks.len {
+        for v in f.blocks[b].insts {
+            for a in f.insts[v].args {
+                if m[a] < 0 {
+                    return (nil, 0)
+                }
+            }
+        }
+        match f.blocks[b].term {
+            Br(c, _, _) => {
+                if m[c] < 0 {
+                    return (nil, 0)
+                }
+            }
+            Ret(vs) => {
+                for x in vs {
+                    if m[x] < 0 {
+                        return (nil, 0)
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    c := 0
+    for v in 0..n {
+        if m[v] == 0 {
+            m[v] = c
+            c += 1
+        }
+    }
+    return (m, c)
+}
+
+// the instructions of the blocks, renumbered by m, in new memory of the main arena (also their
+// argument lists, the lists of the blocks and the values returned); the instruction list is
+// compacted in place when it is in the main arena
+priv fn drop_orphans(f: *Func, m: []i64, c: i64) {
+    n := f.insts.len
+    ins := f.insts
+    if !in_main(cast[i64](ptr(f.insts.buf))) {
+        ins = Vec[Inst]{buf: mkslice[Inst](__alloc_raw(c * sizeof[Inst]()), c), len: c}
+    }
+    total := 0
+    for b in 0..f.blocks.len {
+        total += f.blocks[b].insts.len
+        for v in f.blocks[b].insts {
+            i := &f.insts[v]
+            total += if i.op == Phi { 2 * i.args.len } else { i.args.len }
+        }
+    }
+    buf := mkslice[i64](__alloc_raw(total * 8), total)
+    at := 0
+    // (m[v] <= v: in place, an instruction moves down over one already moved or dropped)
+    for v in 0..n {
+        nv := m[v]
+        if nv < 0 {
+            continue
+        }
+        i := f.insts[v]
+        na := i.args.len
+        if na == 0 {
+            i.args = nil
+            i.cap = 0
+        } else {
+            for k in 0..na {
+                buf[at + k] = m[i.args[k]]
+            }
+            if i.op == Phi {
+                memcopy(ptr(buf[at + na..]), ptr(i.from()), na * 8)
+                i.args = buf[at..at + na]
+                i.cap = i32(na)
+                at += 2 * na
+            } else {
+                i.args = buf[at..at + na]
+                at += na
+            }
+        }
+        ins.buf[nv] = i
+    }
+    ins.len = c
+    f.insts = ins
+    for b in 0..f.blocks.len {
+        blk := &f.blocks[b]
+        nl := blk.insts.len
+        for k in 0..nl {
+            buf[at + k] = m[blk.insts[k]]
+        }
+        blk.insts = Vec[i64]{buf: buf[at..at + nl], len: nl}
+        at += nl
+        match blk.term {
+            Br(&x, _, _) => *x = m[*x]
+            Ret(vs) => {
+                nvs := vec_fill(vs.len, 0)
+                for k in 0..vs.len {
+                    nvs[k] = m[vs[k]]
+                }
+                blk.term = Ret(nvs)
+            }
+            _ => {}
+        }
+    }
+}
+
 priv fn keep_func(f: *Func) {
     if len(f.name) > 0 && !in_main(cast[i64](ptr(f.name))) {
         f.name = clone(f.name)
@@ -135,13 +261,20 @@ priv fn keep_func(f: *Func) {
     if len(f.rets.buf) > 0 && !in_main(cast[i64](ptr(f.rets.buf))) {
         f.rets = clone(f.rets)
     }
+    if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
+        f.blocks = vec_of(f.blocks.items())
+    }
+    m, c := orphan_map(f)
+    if len(m) > 0 {
+        drop_orphans(f, m, c)
+        scratch_reset()
+        return
+    }
+    scratch_reset()
     if len(f.insts.buf) > 0 && !in_main(cast[i64](ptr(f.insts.buf))) {
         f.insts = vec_of(f.insts.items())
     }
     keep_args(f)
-    if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
-        f.blocks = vec_of(f.blocks.items())
-    }
     for b in 0..f.blocks.len {
         blk := &f.blocks[b]
         keep_list(&blk.insts)

@@ -732,13 +732,8 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
             }
         }
     }
-    wide_xmm := false
-    for ii in 0..f.insts.len {
-        if f.insts[ii].ty.is_vec() {
-            wide_xmm = true
-            break
-        }
-    }
+    // (every instruction ever made in f, also those no longer in its list: see Func.has_vec)
+    wide_xmm := f.has_vec
     s := Sel{
         f: f,
         m: m,

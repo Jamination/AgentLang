@@ -239,6 +239,9 @@ struct Func {
     inl: i64 // inlining hint: 1 = always, -1 = never, 0 = auto
     noreturn: bool
     lowered: bool
+    // mk has made an instruction of a vector type (since insts was last emptied): isel sizes
+    // spill slots by it, also for instructions no longer in the list (see keep_func)
+    has_vec: bool
     // a C function in a shared library: index into Module.externs
     ext: Opt[i64]
 }
@@ -292,6 +295,7 @@ fn func_new(name: str) -> Func {
         inl: 0,
         noreturn: false,
         lowered: false,
+        has_vec: false,
         ext: None,
     }
 }
@@ -414,6 +418,9 @@ fn mk(self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
         work_pause()
         self.insts.reserve(self.insts.len + 1)
         work_resume()
+    }
+    if ty.is_vec() {
+        self.has_vec = true
     }
     self.insts.push(Inst{op: op, ty: ty, args: args.items(), k: k, aux: 0, cap: 0})
     return self.insts.len - 1

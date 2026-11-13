@@ -240,6 +240,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     }
     f.insts = inst_bufs[buf_depth]
     f.insts.len = 0
+    f.has_vec = false
     f.blocks = block_bufs[buf_depth]
     f.blocks.len = 0
     pend := pend_bufs[buf_depth]
