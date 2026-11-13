@@ -68,6 +68,54 @@ fn opt_trace(what: str, f: *Func) {
     }
 }
 
+// ---------- keeping a function after work_end() ----------
+// After work_end() the parts of the function made while working are in the discarded work
+// region; they get new memory in the main arena (as `clone(*f)` would). A list still in the
+// main arena (never moved while working) is kept: nothing else refers to it. A list made while
+// working that is empty but has room is replaced too (a later push would write into the
+// discarded region).
+priv fn in_main(p: i64) -> bool {
+    // the main arena is the one in use after work_end()
+    return p >= __heap_base && p < __heap_end
+}
+
+priv inline fn keep_list(l: *Vec[i64]) {
+    if len(l.buf) > 0 && !in_main(cast[i64](ptr(l.buf))) {
+        *l = vec_of(l.items())
+    }
+}
+
+priv fn keep_func(f: *Func) {
+    if len(f.name) > 0 && !in_main(cast[i64](ptr(f.name))) {
+        f.name = clone(f.name)
+    }
+    if len(f.params.buf) > 0 && !in_main(cast[i64](ptr(f.params.buf))) {
+        f.params = clone(f.params)
+    }
+    if len(f.rets.buf) > 0 && !in_main(cast[i64](ptr(f.rets.buf))) {
+        f.rets = clone(f.rets)
+    }
+    if len(f.insts.buf) > 0 && !in_main(cast[i64](ptr(f.insts.buf))) {
+        f.insts = vec_of(f.insts.items())
+    }
+    for v in 0..f.insts.len {
+        i := &f.insts[v]
+        keep_list(&i.args)
+        keep_list(&i.pb)
+    }
+    if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
+        f.blocks = vec_of(f.blocks.items())
+    }
+    for b in 0..f.blocks.len {
+        blk := &f.blocks[b]
+        keep_list(&blk.insts)
+        match blk.term {
+            Ret(&vs) => keep_list(vs)
+            _ => {}
+        }
+    }
+}
+
 // ---------- passes that cannot change anything are not run ----------
 // Every pass is a function of the IR of the function and tells whether it changed it (also for
 // what the passes it calls do; unroll_run and bce_run may add preheaders without saying so and
@@ -245,6 +293,8 @@ fn opt_optimize(m: *Module, level: i64) {
         if f.lowered {
             work_begin()
             ir_memo_begin(f)
+            // at -O0 only mem2reg adds instructions: keep the list in the main arena
+            ir_insts_main = level == 0
             sk_forget()
             opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
             opt_pass(PASS_MEM2REG, f, mem2reg_run)
@@ -262,7 +312,8 @@ fn opt_optimize(m: *Module, level: i64) {
             // keep the function, drop the passes' temporary data (see work_begin in base.al)
             ir_memo_end()
             work_end()
-            m.funcs[fid] = clone(*f)
+            ir_insts_main = false
+            keep_func(f)
         }
     }
     if level == 0 {
@@ -327,7 +378,7 @@ fn opt_optimize(m: *Module, level: i64) {
             }
             ir_memo_end()
             work_end()
-            m.funcs[fid] = clone(m.funcs[fid])
+            keep_func(&m.funcs[fid])
         }
         done[fid] = true
     }

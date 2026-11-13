@@ -225,6 +225,7 @@ struct BlockData {
     term: Term
 }
 
+// (keep_func in opt/mod.al knows every list in a Func, an Inst and a BlockData)
 struct Func {
     name: str
     params: Vec[T]
@@ -387,7 +388,16 @@ fn new_block(self: *Func) -> i64 {
     return self.blocks.len - 1
 }
 
+// set by the optimiser while the instruction list of the function it works on is to grow in the
+// main arena (see opt_optimize)
+ir_insts_main: bool
+
 fn mk(self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
+    if ir_insts_main && self.insts.len == len(self.insts.buf) {
+        work_pause()
+        self.insts.reserve(self.insts.len + 1)
+        work_resume()
+    }
     self.insts.push(Inst{op: op, ty: ty, args: args, k: k, aux: 0, pb: vec[i64]()})
     return self.insts.len - 1
 }
