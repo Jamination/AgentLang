@@ -1133,7 +1133,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 }
             }
             // the loop statement pushes its entry of `loops` at the current length
-            self.labels.push((label, self.loops.len, s.pos.line))
+            self.labels.push((label, self.loops.len, i64(s.pos.line)))
             self.stmt(inner)
             self.labels.pop()
         }
@@ -1496,7 +1496,7 @@ fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
 // ---------- runtime failure blocks ----------
 fn loc_str(self: *Fx, pos: Pos) -> Val {
     // the string global and length of "file:line", made once per line
-    gl, known := self.cx.locs.get((pos.file, pos.line))
+    gl, known := self.cx.locs.get((pos.file, i64(pos.line)))
     if !known {
         fname: str = ""
         if pos.file >= 0 && pos.file < self.cx.file_names.len {
@@ -1504,7 +1504,7 @@ fn loc_str(self: *Fx, pos: Pos) -> Val {
         }
         s := fmt(fname, ":", pos.line)
         gl = (self.cx.string_global(s), len(s))
-        self.cx.locs.set((pos.file, pos.line), gl)
+        self.cx.locs.set((pos.file, i64(pos.line)), gl)
     }
     return self.str_global_val(gl.0, gl.1)
 }
@@ -1540,7 +1540,7 @@ fn slice_parts(self: *Fx, s: Val) -> (i64, i64) {
 
 // kind: 0 = bounds, 1 = division by zero
 priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
-    known, found := self.traps.get((kind, pos.line))
+    known, found := self.traps.get((kind, i64(pos.line)))
     if found {
         return known
     }
@@ -1566,7 +1566,7 @@ priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     self.pend_base = save_base
     self.cur = save_cur
     self.dead = save_dead
-    self.traps.set((kind, pos.line), b)
+    self.traps.set((kind, i64(pos.line)), b)
     return b
 }
 

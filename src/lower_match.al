@@ -1571,7 +1571,7 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
                     }
                 }
                 if !guarded {
-                    prior.push((rp, arm.pos.line))
+                    prior.push((rp, i64(arm.pos.line)))
                 }
             }
             // what the arm covers (an arm with a guard covers nothing)

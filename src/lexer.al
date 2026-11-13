@@ -263,7 +263,7 @@ priv fn parse_u64(text: str) -> (u64, bool) {
 }
 
 priv fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
-    return Pos{file: file, line: line, col: at - line_start + 1}
+    return Pos{file: file, line: i32(line), col: i32(at - line_start + 1)}
 }
 
 // bytes that continue an identifier: [A-Za-z0-9_]; the class of a byte that starts a token
@@ -560,6 +560,8 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
     }
     s := src
     n := len(s)
+    // positions are 32-bit (Pos)
+    assert n < 0x7FFFFFFF, "lexer: a source file of 2 GB or more"
     i := 0
     line := 1
     line_start := 0

@@ -120,18 +120,18 @@ fn nested_hint(self: *Fx, n: str, pos: Pos) -> str {
                 match s.k {
                     Fn(d) => {
                         if d.name == n {
-                            line = s.pos.line
+                            line = i64(s.pos.line)
                             is_fn = true
                         }
                     }
                     Let(names, e) => {
                         if fx != self && contains(&names, n) {
-                            line = s.pos.line
+                            line = i64(s.pos.line)
                         }
                     }
                     Var(name, ty, init) => {
                         if fx != self && name == n {
-                            line = s.pos.line
+                            line = i64(s.pos.line)
                         }
                     }
                     _ => {}
