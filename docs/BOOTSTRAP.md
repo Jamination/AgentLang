@@ -119,6 +119,11 @@ reference; `src/base.al`):
   of the next round discards them; used in `src/opt/simplify.al`). Nothing reachable from
   the function may be allocated between `scratch_on()` and `scratch_off()`.
 
+Numbers of instructions, blocks and virtual registers are kept in 32 bits wherever they are
+stored in bulk (the instruction lists of the blocks, the passes' tables: `Vec[i32]`, where
+`NOV` reads as -1). The places that make new numbers (`mk`, `new_block`, `new_vreg`, and
+those of types, symbols, functions and frame slots) assert that they fit in 32 bits.
+
 Compiling the compiler (about 25,800 lines and the 2,700 of the prelude) takes about 3.4 s and 0.4 GB.
 `ALC_DEBUG=mem` prints memory and time after each phase.
 
