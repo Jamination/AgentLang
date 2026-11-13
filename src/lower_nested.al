@@ -34,12 +34,8 @@ fn lower_nested_outer(p: *Fx, name: str) -> Opt[(i64, i64)] {
     fx := p
     while fx != nil {
         match fx.local(id) {
-            Some(x) => {
-                if x.0 < 0 {
-                    return Some(x)
-                }
-                return Some((LOWER_NESTED_OUTER, 0))
-            }
+            Some(x) if x.0 < 0 => return Some(x)
+            Some(_) => return Some((LOWER_NESTED_OUTER, 0))
             None => {}
         }
         fx = fx.parent
@@ -57,7 +53,7 @@ fn nested_named(self: *Fx, n: str) -> i64 {
 
 // the nested function that a method call `x.name(..)` means, or -1
 fn nested_method(self: *Fx, name: str) -> i64 {
-    if self.cx.nested.len == 0 {
+    if self.cx.nested.is_empty() {
         return -1
     }
     idx := self.nested_named(name)
@@ -115,26 +111,11 @@ fn nested_hint(self: *Fx, n: str, pos: Pos) -> str {
             b := fx.blocks[bi]
             for i in 0..b.stmts.len {
                 s := &b.stmts[i]
-                line := 0
-                is_fn := false
-                match s.k {
-                    Fn(d) => {
-                        if d.name == n {
-                            line = i64(s.pos.line)
-                            is_fn = true
-                        }
-                    }
-                    Let(names, e) => {
-                        if fx != self && contains(&names, n) {
-                            line = i64(s.pos.line)
-                        }
-                    }
-                    Var(name, ty, init) => {
-                        if fx != self && name == n {
-                            line = i64(s.pos.line)
-                        }
-                    }
-                    _ => {}
+                line, is_fn := match s.k {
+                    Fn(d) if d.name == n => (i64(s.pos.line), true)
+                    Let(names, _) if fx != self && contains(&names, n) => (i64(s.pos.line), false)
+                    Var(name, _, _) if fx != self && name == n => (i64(s.pos.line), false)
+                    _ => (0, false)
                 }
                 if line == 0 {
                     continue
@@ -162,9 +143,9 @@ fn nested_hint(self: *Fx, n: str, pos: Pos) -> str {
 // function. A named one is entered into the innermost scope before its body is lowered, so
 // that it can call itself.
 fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
-    for i in 0..self.nested_done.len {
-        if self.nested_done[i].0 == d {
-            return self.nested_done[i].1
+    for nd in self.nested_done {
+        if nd.0 == d {
+            return nd.1
         }
     }
     cx := self.cx
@@ -172,8 +153,8 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
     idx := cx.nested.len
     self.nested_done.push((d, idx))
     shown := if anon { fmt(self.f.name, ".fn@", d.pos.line, ":", d.pos.col) } else { fmt(self.f.name, ".", ast_plain(d.name)) }
-    cx.nested.push(NestedFn{decl: d, shown: shown, fid: -1, ptys: vec[i64](), rty: T_ERR})
-    if d.tparams.len != 0 {
+    cx.nested.push(NestedFn{decl: d, shown: shown, fid: -1, rty: T_ERR})
+    if !d.tparams.is_empty() {
         self.err(d.pos, fmt("the nested function `", shown, "` cannot have type parameters of its own (`[", join(d.tparams.items(), ", "), "]`): it may use the type parameters of the enclosing function; a generic function is declared at the top level"))
         return idx
     }
