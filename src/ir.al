@@ -849,14 +849,24 @@ fn cfg_new(f: *Func) -> Cfg {
     return memo_cfg
 }
 
-priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
-    n := f.blocks.len
-    rpo_idx := vec_fill(n, 0xFFFFFFFF)
-    for i in 0..rpo.len {
-        rpo_idx[rpo[i]] = i
+// cfg_new(f).preds without the rest of the analysis
+fn cfg_preds(f: *Func) -> Vec[Vec[i64]] {
+    if !memo_valid(f) {
+        return rpo_preds_of(f, f.rpo_compute())
     }
-    // predecessors among the reachable blocks, in reverse postorder
-    cnt := zeros(n)
+    if memo_has_cfg {
+        return memo_cfg.preds
+    }
+    if !memo_has_rpo {
+        memo_rpo = f.rpo_compute()
+        memo_has_rpo = true
+    }
+    return rpo_preds_of(f, memo_rpo)
+}
+
+// the predecessors among the reachable blocks (those of rpo), in reverse postorder
+priv fn rpo_preds_of(f: *Func, rpo: Vec[i64]) -> Vec[Vec[i64]] {
+    cnt := zeros(f.blocks.len)
     for b in rpo {
         k, s0, s1 := f.succ_pair(b)
         if k > 0 {
@@ -876,6 +886,16 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
             add(&preds[s1], b)
         }
     }
+    return preds
+}
+
+priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
+    n := f.blocks.len
+    rpo_idx := vec_fill(n, 0xFFFFFFFF)
+    for i in 0..rpo.len {
+        rpo_idx[rpo[i]] = i
+    }
+    preds := rpo_preds_of(f, rpo)
     idom := vec_fill(n, 0xFFFFFFFF)
     idom[0] = 0
     changed := true

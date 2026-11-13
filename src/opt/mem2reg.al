@@ -2,7 +2,7 @@
 
 priv struct Ctx {
     f: *Func,
-    cfg: *Cfg,
+    preds: Vec[Vec[i64]], // among the reachable blocks, in reverse postorder (cfg_preds)
     var_ty: Vec[T],
     nb: i64, // block count: the key of (var, block) is var * nb + block
     last_store: IMap,
@@ -45,7 +45,7 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
     if v0 >= 0 {
         return v0
     }
-    preds := self.cfg.preds[b]
+    preds := self.preds[b]
     np := preds.len
     v := 0
     if np == 0 {
@@ -137,8 +137,8 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     // The users of the pointers into allocas (instruction users only, in reverse postorder).
     // `ptrs` is a superset of those pointers: the allocas of the entry block and constant
     // offsets from such pointers (an argument is defined before its user in reverse postorder,
-    // except for a phi: the uses by phis are all recorded). The recorded (value, user) pairs go
-    // to one buffer by value: the users of a are ulist[ustart[a]..ustart[a + 1]].
+    // except for a phi: the uses by phis are all recorded). The recorded (value, user) pairs are
+    // linked into one list per value (below).
     ptrs := alloc[bool](n)
     for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
@@ -181,21 +181,16 @@ priv fn run_once(f: *Func, first: bool) -> bool {
             _ => {}
         }
     }
+    // the recorded users of x, in the order recorded: pairs[2 * e + 1] for e = head[x],
+    // unext[e], .. until -1 (the lists are made from the end)
     total := pairs.len / 2
-    ustart := alloc[i64](n + 1)
-    for k in 0..total {
-        ustart[pairs[2 * k] + 1] += 1
-    }
-    for x in 0..n {
-        ustart[x + 1] += ustart[x]
-    }
-    ulist := mkslice[i64](__alloc_raw(total * 8), total)
-    ufill := mkslice[i64](__alloc_raw(n * 8), n)
-    memcopy(ptr(ufill), ptr(ustart), n * 8)
-    for k in 0..total {
+    head := mkslice[i64](__alloc_raw(n * 8), n)
+    memfill(ptr(head), 0xFF, n * 8)
+    unext := mkslice[i64](__alloc_raw(total * 8), total)
+    for k in total - 1..=0 by -1 {
         x := pairs[2 * k]
-        ulist[ufill[x]] = pairs[2 * k + 1]
-        ufill[x] += 1
+        unext[k] = head[x]
+        head[x] = k
     }
     // access[v] = var + 1 for a load or store of a promoted slot (0: none)
     access := alloc[i64](n)
@@ -222,8 +217,10 @@ priv fn run_once(f: *Func, first: bool) -> bool {
             if term_used[x] {
                 continue allocas
             }
-            for ui in ustart[x]..ustart[x + 1] {
-                u := ulist[ui]
+            e := head[x]
+            while e >= 0 {
+                u := pairs[2 * e + 1]
+                e = unext[e]
                 inst := &f.insts[u]
                 if inst.op == Add {
                     other := if inst.args[0] == x { inst.args[1] } else { inst.args[0] }
@@ -297,7 +294,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     if naccess == 0 {
         return false
     }
-    cfg := cfg_new(f)
+    preds := cfg_preds(f)
     nb := f.blocks.len
     // last store per (var, block); has_store[b]: block b stores to a var
     last_store := imap_new(naccess)
@@ -313,7 +310,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     }
     repl := vec_fill(n, NOV)
     nvar := var_ty.len
-    cx := Ctx{f: f, cfg: &cfg, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}}
+    cx := Ctx{f: f, preds: preds, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i64](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}}
     // the value of each var in the current block: cur_val[var] when cur_blk[var] == b
     cur_val := alloc[i64](nvar)
     cur_blk := vec_fill(nvar, NOV)

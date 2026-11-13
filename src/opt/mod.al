@@ -134,9 +134,9 @@ priv fn keep_args(f: *Func) {
 // instruction later on is smaller. Not done when an instruction or terminator in a block uses
 // an orphan (the function is kept as it is then).
 
-// the new number of every instruction (-1: dropped) and how many stay, or (nil, 0); in the
-// scratch region
-priv fn orphan_map(f: *Func) -> ([]i64, i64) {
+// the new number of every instruction (-1: dropped), how many stay and the words their lists
+// take (see drop_orphans), or (nil, 0, 0); in the scratch region
+priv fn orphan_map(f: *Func) -> ([]i64, i64, i64) {
     n := f.insts.len
     scratch_on()
     m := mkslice[i64](__alloc_raw(n * 8), n)
@@ -147,24 +147,28 @@ priv fn orphan_map(f: *Func) -> ([]i64, i64) {
             m[v] = 0
         }
     }
+    total := 0
     for b in 0..f.blocks.len {
+        total += f.blocks[b].insts.len
         for v in f.blocks[b].insts {
-            for a in f.insts[v].args {
+            i := &f.insts[v]
+            for a in i.args {
                 if m[a] < 0 {
-                    return (nil, 0)
+                    return (nil, 0, 0)
                 }
             }
+            total += if i.op == Phi { 2 * i.args.len } else { i.args.len }
         }
         match f.blocks[b].term {
             Br(c, _, _) => {
                 if m[c] < 0 {
-                    return (nil, 0)
+                    return (nil, 0, 0)
                 }
             }
             Ret(vs) => {
                 for x in vs {
                     if m[x] < 0 {
-                        return (nil, 0)
+                        return (nil, 0, 0)
                     }
                 }
             }
@@ -178,25 +182,17 @@ priv fn orphan_map(f: *Func) -> ([]i64, i64) {
             c += 1
         }
     }
-    return (m, c)
+    return (m, c, total)
 }
 
 // the instructions of the blocks, renumbered by m, in new memory of the main arena (also their
-// argument lists, the lists of the blocks and the values returned); the instruction list is
-// compacted in place when it is in the main arena
-priv fn drop_orphans(f: *Func, m: []i64, c: i64) {
+// argument lists, the lists of the blocks and the values returned: `total` words); the
+// instruction list is compacted in place when it is in the main arena
+priv fn drop_orphans(f: *Func, m: []i64, c: i64, total: i64) {
     n := f.insts.len
     ins := f.insts
     if !in_main(cast[i64](ptr(f.insts.buf))) {
         ins = Vec[Inst]{buf: mkslice[Inst](__alloc_raw(c * sizeof[Inst]()), c), len: c}
-    }
-    total := 0
-    for b in 0..f.blocks.len {
-        total += f.blocks[b].insts.len
-        for v in f.blocks[b].insts {
-            i := &f.insts[v]
-            total += if i.op == Phi { 2 * i.args.len } else { i.args.len }
-        }
     }
     buf := mkslice[i64](__alloc_raw(total * 8), total)
     at := 0
@@ -264,9 +260,9 @@ priv fn keep_func(f: *Func) {
     if len(f.blocks.buf) > 0 && !in_main(cast[i64](ptr(f.blocks.buf))) {
         f.blocks = vec_of(f.blocks.items())
     }
-    m, c := orphan_map(f)
+    m, c, total := orphan_map(f)
     if len(m) > 0 {
-        drop_orphans(f, m, c)
+        drop_orphans(f, m, c, total)
         scratch_reset()
         return
     }
