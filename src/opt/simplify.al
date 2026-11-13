@@ -246,7 +246,7 @@ priv fn simplify_small(k: i64) -> bool {
 }
 
 priv fn simplify_is_not(s: *Ctx, n: i64, x: i64) -> bool {
-    ni := s.f.insts[n]
+    ni := &s.f.insts[n]
     return ni.op == Xor && opt_is(s.c(ni.args[1]), -1) && ni.args[0] == x
 }
 
@@ -300,7 +300,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                     self.set_const(v, 0)
                     return None
                 } else if op == Xor && k == 1 && ty == I8 && self.op(a).is_cmp() {
-                    ai := self.f.insts[a]
+                    ai := &self.f.insts[a]
                     if ai.op.is_icmp() {
                         self.set(v, ai.op.negate_icmp(), clone(ai.args), 0)
                         return None
@@ -398,7 +398,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // (x op c1) op c2 for associative ops
             if hk {
                 k2 := k
-                ai := self.f.insts[a]
+                ai := &self.f.insts[a]
                 if ai.op == op && (op == Add || op == Mul || op == And || op == Or || op == Xor) {
                     k1, hk1 := unopt(self.c(ai.args[1]))
                     if hk1 {
@@ -430,7 +430,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // (x + c1) << c2  =>  (x << c2) + (c1 << c2) ; (x + c1) * c2  =>  x * c2 + c1 * c2
             if hk {
                 k2 := k
-                ai := self.f.insts[a]
+                ai := &self.f.insts[a]
                 if (op == Shl || op == Mul) && ai.op == Add {
                     k1, hk1 := unopt(self.c(ai.args[1]))
                     prod_small := false
@@ -452,8 +452,8 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 }
             }
             if op == Xor || op == Or {
-                ai := self.f.insts[a]
-                bi := self.f.insts[b]
+                ai := &self.f.insts[a]
+                bi := &self.f.insts[b]
                 ua := 2
                 if a < self.uses.len {
                     ua = self.uses[a]
@@ -519,7 +519,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             }
             // x + (0 - y) => x - y
             if op == Add {
-                bi := self.f.insts[b]
+                bi := &self.f.insts[b]
                 if bi.op == Sub && opt_is(self.c(bi.args[0]), 0) {
                     y := bi.args[1]
                     self.set(v, Sub, vec_of([]i64{a, y}), 0)
@@ -607,7 +607,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             // comparisons of booleans with constants
             k, hk := unopt(self.c(b))
             if hk {
-                ai := self.f.insts[a]
+                ai := &self.f.insts[a]
                 if (op == Eq || op == Ne) && at == I8 && ai.op.is_cmp() {
                     truth := (op == Ne) == (k == 0)
                     // (cmp != 0) or (cmp == 1) => cmp ; (cmp == 0) or (cmp != 1) => !cmp
@@ -642,8 +642,10 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 if (op == Eq || op == Ne) && ai.op == Add {
                     k1, hk1 := unopt(self.c(ai.args[1]))
                     if hk1 {
+                        // (ai is not valid after konst)
+                        x := ai.args[0]
                         nk := self.konst(at, k - k1)
-                        self.set(v, op, vec_of([]i64{ai.args[0], nk}), 0)
+                        self.set(v, op, vec_of([]i64{x, nk}), 0)
                         return None
                     }
                 }
@@ -689,7 +691,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 self.set_const(v, r)
                 return None
             }
-            ai := self.f.insts[a]
+            ai := &self.f.insts[a]
             if (op == SExt && ai.op == SExt) || (op == ZExt && ai.op == ZExt) {
                 self.set(v, op, vec_of([]i64{ai.args[0]}), 0)
             } else if op == SExt && ai.op == ZExt {
@@ -743,7 +745,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             return None
         }
         FToBits => {
-            i := self.f.insts[inst.args[0]]
+            i := &self.f.insts[inst.args[0]]
             if i.op == FConst {
                 k := i.k
                 self.set_const(v, k)
@@ -785,13 +787,13 @@ priv fn is_finite(x: f64) -> bool {
 }
 
 priv fn masked_by_is_len_m1(s: *Ctx, lenv: i64, m: i64) -> bool {
-    mi := s.f.insts[m]
+    mi := &s.f.insts[m]
     return mi.op == Add && mi.args[0] == lenv && opt_is(s.c(mi.args[1]), -1)
 }
 
 // is v always of the form (x & (len - 1)), directly or through phis?
 priv fn masked_by(self: *Ctx, v: i64, lenv: i64, depth: i64, root: i64) -> bool {
-    i := self.f.insts[v]
+    i := &self.f.insts[v]
     if i.op == And {
         return masked_by_is_len_m1(self, lenv, i.args[0]) || masked_by_is_len_m1(self, lenv, i.args[1])
     }
@@ -816,7 +818,7 @@ priv fn sat_sub(a: i64, b: i64) -> i64 {
 
 // upper bound on the number of significant bits of an unsigned value
 priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
-    i := self.f.insts[v]
+    i := &self.f.insts[v]
     tb := max(i64(i.ty.bits()), 1)
     if depth == 0 {
         return tb
@@ -854,7 +856,7 @@ priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
 }
 
 priv fn match_rotate_is_complement(s: *Ctx, bits: i64, m: i64, n: i64) -> bool {
-    mi := s.f.insts[m]
+    mi := &s.f.insts[m]
     if !(mi.op == Sub && mi.args[1] == n) {
         return false
     }
@@ -866,10 +868,10 @@ priv fn match_rotate_is_complement(s: *Ctx, bits: i64, m: i64, n: i64) -> bool {
 
 priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
     bits := i64(ty.bits())
-    ai := self.f.insts[a]
-    bi := self.f.insts[b]
-    shr: Inst
-    shl: Inst
+    ai := &self.f.insts[a]
+    bi := &self.f.insts[b]
+    shr := ai
+    shl := bi
     if ai.op == LShr && bi.op == Shl {
         shr = ai
         shl = bi
