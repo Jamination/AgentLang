@@ -596,7 +596,7 @@ fn term_uses(self: *Func, b: i64) -> Vec[i64] {
 }
 
 fn use_counts(self: *Func) -> Vec[i64] {
-    c := vec_fill(self.insts.len, 0)
+    c := Vec[i64]{buf: alloc[i64](self.insts.len), len: self.insts.len}
     for bi in 0..self.blocks.len {
         b := &self.blocks[bi]
         for v in b.insts {

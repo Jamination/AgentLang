@@ -16,12 +16,13 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
             changed = true
         }
     }
-    // p is a predecessor of b when its (now pruned) terminator goes to b
+    // p is a predecessor of b when its (now pruned) terminator goes to b; the phis of a block
+    // come first
     for b in rpo {
         for ii in 0..f.blocks[b].insts.len {
             v := f.blocks[b].insts[ii]
             if f.insts[v].op != Phi {
-                continue
+                break
             }
             inst := &f.insts[v]
             k := 0
@@ -124,33 +125,43 @@ priv fn trivial_phis_res(repl: *Vec[i64], v0: i64) -> i64 {
 
 // remove phis whose inputs are all the same value
 fn cleanup_trivial_phis(f: *Func) -> bool {
+    // the phis in block order (they come first in their blocks)
+    phis := vec[i64]()
+    for bi in 0..f.blocks.len {
+        for v in f.blocks[bi].insts {
+            if f.insts[v].op != Phi {
+                break
+            }
+            phis.push(v)
+        }
+    }
+    if phis.is_empty() {
+        return false
+    }
     repl := vec_fill(f.insts.len, NOV)
     any := false
     loop {
         changed := false
-        for bi in 0..f.blocks.len {
-            for ii in 0..f.blocks[bi].insts.len {
-                v := f.blocks[bi].insts[ii]
-                if f.insts[v].op != Phi || repl[v] != NOV {
+        for v in phis {
+            if repl[v] != NOV {
+                continue
+            }
+            same := NOV
+            trivial := true
+            for a0 in f.insts[v].args {
+                a := trivial_phis_res(&repl, a0)
+                if a == v || a == same {
                     continue
                 }
-                same := NOV
-                trivial := true
-                for a0 in f.insts[v].args {
-                    a := trivial_phis_res(&repl, a0)
-                    if a == v || a == same {
-                        continue
-                    }
-                    if same != NOV {
-                        trivial = false
-                        break
-                    }
-                    same = a
+                if same != NOV {
+                    trivial = false
+                    break
                 }
-                if trivial && same != NOV {
-                    repl[v] = same
-                    changed = true
-                }
+                same = a
+            }
+            if trivial && same != NOV {
+                repl[v] = same
+                changed = true
             }
         }
         if !changed {

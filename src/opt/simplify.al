@@ -212,13 +212,13 @@ priv fn ctx_fbits(ty: T, r: f64) -> i64 {
 
 priv fn konst(self: *Ctx, ty: T, k: i64) -> i64 {
     v := self.f.mk(Const, ty, vec[i64](), ir_canon(ty, k))
-    self.new_insts.push(v)
+    put(&self.new_insts, v)
     return v
 }
 
 priv fn mk(self: *Ctx, op: Op, ty: T, args: Vec[i64]) -> i64 {
     v := self.f.mk(op, ty, args, 0)
-    self.new_insts.push(v)
+    put(&self.new_insts, v)
     return v
 }
 
@@ -1055,9 +1055,20 @@ priv fn fold_insts_find(repl: *Vec[i64], v0: i64) -> i64 {
     return v
 }
 
+// push for a list that usually has room (push itself is not inlined)
+priv inline fn put(l: *Vec[i64], x: i64) {
+    if l.len < len(l.buf) {
+        l.buf[l.len] = x
+        l.len += 1
+    } else {
+        l.push(x)
+    }
+}
+
 priv fn fold_insts(f: *Func) -> bool {
     rpo := f.rpo()
-    repl := vec_fill(f.insts.len, NOV)
+    // made at the first replacement
+    repl := vec[i64]()
     nrepl := 0
     // the use counts are only read for an Xor or Or (simplify never makes one from another op)
     has_xor_or := false
@@ -1098,7 +1109,7 @@ priv fn fold_insts(f: *Func) -> bool {
                     nrepl += 1
                     cx.changed = true
                 }
-                None => { cx.new_insts.push(v) }
+                None => put(&cx.new_insts, v)
             }
         }
         k := cx.new_insts.len
