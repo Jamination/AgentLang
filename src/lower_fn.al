@@ -173,6 +173,12 @@ priv fn lower_fn(cx: *Cx, fid: i64, di: i64, targs: Vec[i64]) {
     lower_fn_lower_body(cx, fid, &d.params, &d.body, tenv, d.name, d.pos, nil)
 }
 
+// buffers for the instructions and blocks of the functions being lowered, one pair per level
+// of nesting (see lower_fn_lower_body)
+priv inst_bufs: Vec[Vec[Inst]]
+priv block_bufs: Vec[Vec[BlockData]]
+priv buf_depth: i64
+
 // Lowers the body of function `fid`, whose IR signature and entry in `fn_sigs` exist: a
 // top-level function (`parent` is nil), or a nested or anonymous function written in the
 // function that `parent` is lowering.
@@ -182,6 +188,17 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     rty := sig.1
     f := cx.module.funcs[fid]
     cx.module.funcs[fid] = func_new("")
+    // the instructions and blocks are built in buffers that are kept for the next function
+    // (one pair per level of nesting); the function gets copies of exact length
+    if buf_depth == inst_bufs.len {
+        inst_bufs.push(vec[Inst]())
+        block_bufs.push(vec[BlockData]())
+    }
+    f.insts = inst_bufs[buf_depth]
+    f.insts.len = 0
+    f.blocks = block_bufs[buf_depth]
+    f.blocks.len = 0
+    buf_depth += 1
     fx := Fx{
         cx: cx,
         f: f,
@@ -260,9 +277,12 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         }
     }
     // finalize: allocas at the top of the entry block
-    entry := clone(fx.allocas)
-    entry.extend(fx.f.blocks[0].insts.items())
-    fx.f.blocks[0].insts = entry
+    b0 := fx.f.blocks[0].insts
+    na := fx.allocas.len
+    entry := alloc[i64](na + b0.len)
+    copy(entry, fx.allocas.items())
+    copy(entry[na..], b0.items())
+    fx.f.blocks[0].insts = Vec[i64]{buf: entry, len: len(entry)}
     for bi in 0..fx.f.blocks.len {
         match fx.f.blocks[bi].term {
             Term.None => {
@@ -272,6 +292,11 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         }
     }
     lf := fx.f
+    buf_depth -= 1
+    inst_bufs[buf_depth] = lf.insts
+    block_bufs[buf_depth] = lf.blocks
+    lf.insts = vec_of(lf.insts.items())
+    lf.blocks = vec_of(lf.blocks.items())
     lf.lowered = true
     cx.flush_layout_errors(pos)
     cx.module.funcs[fid] = lf
