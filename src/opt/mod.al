@@ -178,6 +178,7 @@ fn opt_optimize(m: *Module, level: i64) {
         f := &m.funcs[fid]
         if f.lowered {
             work_begin()
+            ir_memo_begin(f)
             cleanup_prune_unreachable(f)
             mem2reg_run(f)
             cleanup_dce(f)
@@ -189,6 +190,7 @@ fn opt_optimize(m: *Module, level: i64) {
                 }
             }
             // keep the function, drop the passes' temporary data (see work_begin in base.al)
+            ir_memo_end()
             work_end()
             m.funcs[fid] = clone(*f)
         }
@@ -245,11 +247,13 @@ fn opt_optimize(m: *Module, level: i64) {
     for fid in order {
         if m.funcs[fid].lowered {
             work_begin()
+            ir_memo_begin(&m.funcs[fid])
             local_opt(&m.funcs[fid], level)
             if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol) {
                 opt_trace("after-inline", &m.funcs[fid])
                 local_opt(&m.funcs[fid], level)
             }
+            ir_memo_end()
             work_end()
             m.funcs[fid] = clone(m.funcs[fid])
         }

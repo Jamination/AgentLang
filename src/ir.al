@@ -433,8 +433,100 @@ fn succs(self: *Func, b: i64) -> Vec[i64] {
     }
 }
 
+// ---------- CFG analyses reused between passes ----------
+// rpo, preds, cfg_new and loops_new depend only on the successors of the blocks. Between
+// `ir_memo_begin(f)` and `ir_memo_end()` (the optimiser, one function at a time) they keep
+// their last results for f with the successors they were computed from (one word per block)
+// and return them again while those are unchanged. Callers never change a result; a new one
+// is always computed into new memory, so a result held across a change stays as it was.
+// Results live in the region in use when they are made: not to be asked for while the
+// scratch region is on.
+priv memo_f: *Func
+priv memo_sig: Vec[i64]
+priv memo_has_rpo: bool
+priv memo_rpo: Vec[i64]
+priv memo_has_preds: bool
+priv memo_preds: Vec[Vec[i64]]
+priv memo_has_cfg: bool
+priv memo_cfg: Cfg
+priv memo_has_loops: bool
+priv memo_loops: Loops
+
+fn ir_memo_begin(f: *Func) {
+    ir_memo_end()
+    memo_f = f
+}
+
+fn ir_memo_end() {
+    memo_f = nil
+    memo_sig = vec[i64]()
+    memo_has_rpo = false
+    memo_has_preds = false
+    memo_has_cfg = false
+    memo_has_loops = false
+}
+
+// are the memorised results (if any) those of f's current CFG? Forgets them if not.
+priv fn memo_valid(f: *Func) -> bool {
+    if f != memo_f {
+        return false
+    }
+    n := f.blocks.len
+    same := memo_sig.len == n
+    if !same {
+        memo_sig = vec_fill(n, 0)
+    }
+    for b in 0..n {
+        x := 0
+        match f.blocks[b].term {
+            Jmp(t) => x = (t + 1) << 32
+            Br(_, t, e) => {
+                x = (t + 1) << 32
+                if t != e {
+                    x |= e + 1
+                }
+            }
+            _ => {}
+        }
+        if memo_sig[b] != x {
+            memo_sig[b] = x
+            same = false
+        }
+    }
+    if !same {
+        memo_has_rpo = false
+        memo_has_preds = false
+        memo_has_cfg = false
+        memo_has_loops = false
+    }
+    return true
+}
+
 // the predecessors of every block, in increasing block order
 fn preds(self: *Func) -> Vec[Vec[i64]] {
+    if !memo_valid(self) {
+        return self.preds_compute()
+    }
+    if !memo_has_preds {
+        memo_preds = self.preds_compute()
+        memo_has_preds = true
+    }
+    return memo_preds
+}
+
+// reverse postorder of reachable blocks
+fn rpo(self: *Func) -> Vec[i64] {
+    if !memo_valid(self) {
+        return self.rpo_compute()
+    }
+    if !memo_has_rpo {
+        memo_rpo = self.rpo_compute()
+        memo_has_rpo = true
+    }
+    return memo_rpo
+}
+
+priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
     n := self.blocks.len
     cnt := vec_fill(n, 0)
     for b in 0..n {
@@ -459,8 +551,7 @@ fn preds(self: *Func) -> Vec[Vec[i64]] {
     return p
 }
 
-// reverse postorder of reachable blocks
-fn rpo(self: *Func) -> Vec[i64] {
+priv fn rpo_compute(self: *Func) -> Vec[i64] {
     n := self.blocks.len
     seen := alloc[bool](n)
     // every block is on the stack at most once; the postorder is written from the end, so
@@ -606,8 +697,22 @@ struct Cfg {
 }
 
 fn cfg_new(f: *Func) -> Cfg {
+    if !memo_valid(f) {
+        return cfg_compute(f, f.rpo_compute())
+    }
+    if !memo_has_cfg {
+        if !memo_has_rpo {
+            memo_rpo = f.rpo_compute()
+            memo_has_rpo = true
+        }
+        memo_cfg = cfg_compute(f, memo_rpo)
+        memo_has_cfg = true
+    }
+    return memo_cfg
+}
+
+priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
     n := f.blocks.len
-    rpo := f.rpo()
     rpo_idx := vec_fill(n, 0xFFFFFFFF)
     for i in 0..rpo.len {
         rpo_idx[rpo[i]] = i
@@ -726,6 +831,18 @@ struct Loops {
 }
 
 fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
+    // the memorised loops belong to the memorised cfg
+    if memo_valid(f) && memo_has_cfg && ptr(cfg.rpo_idx.buf) == ptr(memo_cfg.rpo_idx.buf) {
+        if !memo_has_loops {
+            memo_loops = loops_compute(f, cfg)
+            memo_has_loops = true
+        }
+        return memo_loops
+    }
+    return loops_compute(f, cfg)
+}
+
+priv fn loops_compute(f: *Func, cfg: *Cfg) -> Loops {
     n := f.blocks.len
     loops := vec[Loop]()
     none: Opt[i64] = None

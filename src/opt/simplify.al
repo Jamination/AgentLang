@@ -1359,12 +1359,13 @@ priv fn simplify_cfg(f: *Func) -> bool {
         }
         // per-round tables live on the scratch heap (see base.al)
         scratch_reset()
-        scratch_on()
+        // (the CFG analyses are kept for the next pass: not on the scratch heap)
         preds := f.preds()
+        rpo := f.rpo()
+        scratch_on()
         merged := false
         repl := vec_fill(f.insts.len, NOV)
         dead := vec_fill(f.blocks.len, false)
-        rpo := f.rpo()
         scratch_off()
         for b in rpo {
             if dead[b] {
@@ -1428,11 +1429,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        scratch_on()
         preds := f.preds()
         did := false
         rpo := f.rpo()
-        scratch_off()
         for e in rpo {
             if e == 0 || !f.blocks[e].insts.is_empty() {
                 continue
@@ -1505,15 +1504,15 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        scratch_on()
         preds := f.preds()
+        rpo := f.rpo()
+        scratch_on()
         uses := f.use_counts()
         // blocks whose edges or phis changed this round: their entries in preds / phi lists are
         // stale, so they wait for the next round (one threading per round made long chains of
         // `&&` / `||` quadratic in time and memory)
         touched := vec_fill(f.blocks.len, false)
         did := false
-        rpo := f.rpo()
         scratch_off()
         blocks: for b in rpo {
             c, t, e := match f.blocks[b].term {
@@ -1640,8 +1639,8 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        scratch_on()
         cfg := cfg_new(f)
+        scratch_on()
         def_block := f.block_of()
         scratch_off()
         did := false
@@ -1822,11 +1821,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         scratch_reset()
-        scratch_on()
         preds := f.preds()
         did := false
         rpo := f.rpo()
-        scratch_off()
         for b in rpo {
             c, t, e := match f.blocks[b].term {
                 Br(c1, t1, e1) if t1 != e1 => (c1, t1, e1)
