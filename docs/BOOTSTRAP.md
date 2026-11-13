@@ -219,8 +219,10 @@ before it prints them.
 `ALC_DEBUG=verify` (IR verifier between passes), `trace`, `mir`, `unroll`, `mem`;
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
 `partial`, `thread4`, `thread5`, `ifconv`); `ALC_STD_DIR=<dir>` reads bundled modules from
-`<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the run-time
-library from `<file>` instead of the copy inside the compiler; `ALC_ALIGN=1` aligns inner loops.
+`<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the prelude
+from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
+layer if there is none: the file is then the whole run-time library), so
+`ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops.
 
 ## Windows target
 
@@ -247,4 +249,8 @@ same, the differences are:
   `src/x86/emit.al`, kept in `Code.unwind`: pushes, the allocation, the xmm saves of its
   prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
   (exception dispatch, debuggers); functions without a frame are leaf functions.
+- **Run-time library.** `src/prelude_windows.al` replaces `src/prelude_linux.al` (kernel32.dll
+  only); bundled modules with Linux interfaces are refused (`LINUX_ONLY` in `src/main.al`).
+  `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
+  `tests/windows.skip`).
 - `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine.

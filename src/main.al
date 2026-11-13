@@ -613,7 +613,8 @@ priv fn real_main() -> i64 {
     src := Sources{names: vec[str](), decls: vec[Decl](), errs: vec[Diag](), seen: map[str, bool](), std_files: vec[i64]()}
     // the run-time library: the prelude and the OS layer of the target. ALC_PRELUDE=<file>
     // (development) reads the prelude from that file instead of the copy inside the compiler,
-    // and the layer from prelude_linux.al / prelude_windows.al next to it if that exists
+    // and the layer from prelude_linux.al / prelude_windows.al next to it; without one there
+    // the file is the whole library (ALC_PRELUDE=src/prelude.al tests the sources as they are)
     prelude := PRELUDE
     layer_name := if target_os == TargetWindows { "prelude_windows.al" } else { "prelude_linux.al" }
     layer := if target_os == TargetWindows { PRELUDE_WINDOWS } else { PRELUDE_LINUX }
@@ -629,10 +630,9 @@ priv fn real_main() -> i64 {
             Some(d) => path_join(d, layer_name)
             None => layer_name
         }
+        // (a file without a layer next to it is the whole run-time library)
         lt, lerr := read_to_string(lpath)
-        if len(lerr) == 0 {
-            layer = lt
-        }
+        layer = if len(lerr) == 0 { lt } else { "" }
     }
     src.add_text("<prelude>", prelude, None)
     src.add_text(fmt("<", layer_name[..len(layer_name) - 3], ">"), layer, None)

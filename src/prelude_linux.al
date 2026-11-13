@@ -32,7 +32,8 @@ fn __rt_init(sp: i64) {
     syscall(13, 8, ptr(sa), 0, 8)
 }
 
-fn __os_exit(code: i64) -> never {
+// (not `-> never`: so that it is inlined; its callers are `never` functions)
+inline fn __os_exit(code: i64) {
     syscall(231, code)
 }
 
@@ -65,7 +66,7 @@ fn __write_all(fd: i64, p: i64, n: i64) -> i64 {
 }
 
 // read(2), again after an interruption
-fn __os_read(fd: i64, p: i64, n: i64) -> i64 {
+inline fn __os_read(fd: i64, p: i64, n: i64) -> i64 {
     loop {
         r := syscall(0, fd, p, n)
         if r != -4 {
@@ -75,19 +76,19 @@ fn __os_read(fd: i64, p: i64, n: i64) -> i64 {
 }
 
 // O_RDONLY | O_CLOEXEC, or O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC with mode 0644
-fn __os_open(path: *u8, write: bool) -> i64 {
+inline fn __os_open(path: *u8, write: bool) -> i64 {
     if write {
         return syscall(2, path, 0x80241, 420)
     }
     return syscall(2, path, 0x80000, 0)
 }
 
-fn __os_close(fd: i64) -> i64 {
+inline fn __os_close(fd: i64) -> i64 {
     return syscall(3, fd)
 }
 
 // (size, true) for a regular file, (size, false) for anything else, (-1, false) on failure
-fn __os_fstat(fd: i64) -> (i64, bool) {
+inline fn __os_fstat(fd: i64) -> (i64, bool) {
     st: [18]i64
     if syscall(5, fd, ptr(st)) != 0 {
         return (-1, false)
@@ -119,23 +120,19 @@ noinline fn __heap_grow(n: i64) -> i64 {
     __die("panic: out of memory", "", "")
 }
 
-// n bytes of zeroed memory outside the arena, or 0
-fn __os_map(n: i64) -> i64 {
+// n bytes of zeroed memory outside the arena: the address, or -errno
+inline fn __os_map(n: i64) -> i64 {
     // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS
-    p := syscall(9, 0, n, 3, 0x22, -1, 0)
-    if p < 0 && p > -4096 {
-        return 0
-    }
-    return p
+    return syscall(9, 0, n, 3, 0x22, -1, 0)
 }
 
 // gives back memory of __os_map, of an arena or of a mapped file: 0 or -errno
-fn __os_unmap(p: i64, n: i64) -> i64 {
+inline fn __os_unmap(p: i64, n: i64) -> i64 {
     return syscall(11, p, n)
 }
 
 // runs a test block in a child process: 1 if it ended with status 0, else 0
-fn __os_test(f: fn()) -> i64 {
+inline fn __os_test(f: fn()) -> i64 {
     pid := syscall(57)
     if pid == 0 {
         f()
@@ -146,7 +143,7 @@ fn __os_test(f: fn()) -> i64 {
     return if status == 0 { 1 } else { 0 }
 }
 
-fn __os_error_text(e: i64) -> str {
+inline fn __os_error_text(e: i64) -> str {
     return fmt("os error ", e)
 }
 

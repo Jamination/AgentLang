@@ -10,7 +10,7 @@
 //   __os_open(path, write)         a descriptor or -errno (path: NUL-terminated)
 //   __os_close(fd), __os_fstat(fd) -> (size, is a regular file)
 //   __heap_grow(n)                 the slow path of the arena allocator (see below)
-//   __os_map(n), __os_unmap(p, n)  memory outside the arena
+//   __os_map(n), __os_unmap(p, n)  memory outside the arena (address or -errno; 0 or -errno)
 //   __os_test(f) -> 1 / 0 / -1     runs one `test` block in a process of its own: passed,
 //                                  failed, or not run by this process
 //   __os_error_text(e)             error_text for numbers it does not know
@@ -953,7 +953,7 @@ fn __cap_put(s: str) {
             cap = cap * 2
         }
         p := __os_map(cap)
-        if p == 0 {
+        if p < 0 && p > -4096 {
             __die("panic: out of memory", "", "")
         }
         memcopy(p, ptr(__cap_buf), __cap_len)

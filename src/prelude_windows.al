@@ -529,9 +529,10 @@ noinline fn __heap_grow(n: i64) -> i64 {
     return p
 }
 
-// n bytes of zeroed memory outside the arena, or 0
+// n bytes of zeroed memory outside the arena: the address, or -errno
 fn __os_map(n: i64) -> i64 {
-    return VirtualAlloc(0, n, 0x3000, 4)          // MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+    p := VirtualAlloc(0, n, 0x3000, 4)          // MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+    return if p == 0 { last_error() } else { p }
 }
 
 // gives back memory of __os_map, of an arena or a view of a mapped file: 0 or -errno
