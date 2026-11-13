@@ -98,8 +98,7 @@ test "areas" {
   through the branches of an `if` / `match` used as a value (`x: u8 = if c { 1 } else { 2 }`);
   without context an integer literal is `i64`, a float literal **`f32`**: `x := 0.1` is an
   `f32`; `x: f64 = 0.1`, `f64(0.1)` and `y * 0.1` (`y` an `f64`) use the f64 nearest to 0.1 (an f32
-  literal is the f32 nearest to the written value, rounded once, ties to even: `3.4028235e38`
-  is the largest f32, a value from halfway to the next power of two on is `inf`). An
+  literal is rounded once, ties to even; from halfway past `3.4028235e38` it is `inf`). An
   integer literal is accepted where a float is expected (`d: f64 = 5`). A decimal literal must
   fit its type (not `x: u8 = -1`); hex, binary, octal, character literals may be bit patterns (`x: i8 = 0xFF`).
 - **Conversions** are written like calls: `i64(x)`, `u8(x)`, `f64(n)`. Integer to a narrower
