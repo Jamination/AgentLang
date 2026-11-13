@@ -16,7 +16,7 @@ priv fn term_is_ret(t: Term) -> bool {
 }
 
 // can the back edge latch -> header stay unsplit? returns the aliases needed after the loop
-priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_block: *Vec[i64], nb: i64, latch: i64, header: i64, other: i64, c: i64) -> (Vec[ExitAlias], bool) {
+priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_block: *Vec[i64], der: *Vec[bool], inph: *Vec[bool], nb: i64, latch: i64, header: i64, other: i64, c: i64) -> (Vec[ExitAlias], bool) {
     none := vec[ExitAlias]()
     if !cfg.reachable(latch) || !cfg.dom(header, latch) {
         return (none, false)
@@ -106,68 +106,115 @@ priv fn split_critical_edges_analyze(f: *Func, cfg: *Cfg, loops: *Loops, def_blo
     // Instruction selection may evaluate address arithmetic and compares lazily at their
     // use. Anything computed from a header phi inside the loop that could be re-evaluated
     // after the loop would then read the already-updated phi register: keep the edge split.
+    // (der: the phis and what is derived from them lazily; inph: the phis; both are cleared
+    // again before returning)
     derived := clone(phis)
-    qi := 0
-    while qi < derived.len {
-        x := derived[qi]
-        qi += 1
+    for p in phis {
+        der[p] = true
+        inph[p] = true
+    }
+    changed := true
+    while changed {
+        changed = false
         for b in l.blocks {
             for u in f.blocks[b].insts {
+                if der[u] {
+                    continue
+                }
                 ui := &f.insts[u]
                 lazy := ui.op == Add || ui.op == Sub || ui.op == Shl || ui.op == Mul || ui.op == And || ui.op.is_cmp()
-                if lazy && contains(&ui.args, x) && !contains(&derived, u) {
-                    derived.push(u)
+                if !lazy {
+                    continue
+                }
+                for a in ui.args {
+                    if der[a] {
+                        der[u] = true
+                        derived.push(u)
+                        changed = true
+                        break
+                    }
                 }
             }
         }
     }
-    for b in 0..nb {
-        if !cfg.reachable(b) || loops.contains(li, b) {
-            continue
-        }
-        for v in f.blocks[b].insts {
-            for a in f.insts[v].args {
-                if contains(&derived, a) && !contains(&phis, a) {
-                    return (none, false)
-                }
-            }
-        }
-        tu := f.term_uses(b)
-        for a in tu {
-            if contains(&derived, a) && !contains(&phis, a) {
-                return (none, false)
+    out, ok := outside_uses(f, cfg, loops, der, inph, nb, li, latch, header, &phis, &trap_exits)
+    for x in derived {
+        der[x] = false
+    }
+    for p in phis {
+        inph[p] = false
+    }
+    return (out, ok)
+}
+
+// is a value of `der` that is not one of the phis (`inph`) used in block b?
+priv fn derived_used(f: *Func, b: i64, der: *Vec[bool], inph: *Vec[bool]) -> bool {
+    for v in f.blocks[b].insts {
+        for a in f.insts[v].args {
+            if der[a] && !inph[a] {
+                return true
             }
         }
     }
-    // phis used after the loop need a partner that receives them on the back edge
+    match f.blocks[b].term {
+        Br(c, _, _) => return der[c] && !inph[c]
+        Ret(vs) => {
+            for a in vs {
+                if der[a] && !inph[a] {
+                    return true
+                }
+            }
+        }
+        _ => {}
+    }
+    return false
+}
+
+// the uses after the loop: no derived value may be used there, and phis used there need a
+// partner that receives them on the back edge
+priv fn outside_uses(f: *Func, cfg: *Cfg, loops: *Loops, der: *Vec[bool], inph: *Vec[bool], nb: i64, li: i64, latch: i64, header: i64, phis: *Vec[i64], trap_exits: *Vec[i64]) -> (Vec[ExitAlias], bool) {
+    none := vec[ExitAlias]()
     out := vec[ExitAlias]()
+    used := vec[i64]()
     for b in 0..nb {
         if !cfg.reachable(b) || loops.contains(li, b) {
             continue
         }
-        used := vec[i64]()
+        if derived_used(f, b, der, inph) {
+            return (none, false)
+        }
+        used.clear()
         for v in f.blocks[b].insts {
             for a in f.insts[v].args {
-                if contains(&phis, a) {
+                if inph[a] {
                     used.push(a)
                 }
             }
         }
-        tu := f.term_uses(b)
-        for a in tu {
-            if contains(&phis, a) {
-                used.push(a)
+        match f.blocks[b].term {
+            Br(c, _, _) => {
+                if inph[c] {
+                    used.push(c)
+                }
             }
+            Ret(vs) => {
+                for a in vs {
+                    if inph[a] {
+                        used.push(a)
+                    }
+                }
+            }
+            _ => {}
         }
         if used.is_empty() {
             continue
         }
-        if contains(&trap_exits, b) {
+        if contains(trap_exits, b) {
             return (none, false)
         }
         for p in used {
             partner := -1
-            for q in phis {
+            for q in *phis {
                 qinst := &f.insts[q]
                 if q == p {
                     continue
@@ -203,6 +250,8 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
     preds := f.preds()
     nb := f.blocks.len
     def_block := f.block_of()
+    der := vec_fill(f.insts.len, false)
+    inph := vec_fill(f.insts.len, false)
     aliases := vec[ExitAlias]()
     // decide first (on the unmodified CFG), then split
     keep := vec[(i64, i64)]()
@@ -217,7 +266,7 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
                     s := if w == 0 { t } else { e }
                     other := if w == 0 { e } else { t }
                     if preds[s].len > 1 {
-                        al, ok := split_critical_edges_analyze(f, &cfg, &loops, &def_block, nb, b, s, other, c)
+                        al, ok := split_critical_edges_analyze(f, &cfg, &loops, &def_block, &der, &inph, nb, b, s, other, c)
                         if ok {
                             aliases.extend(al.items())
                             keep.push((b, s))
@@ -591,10 +640,9 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Map[i64, i64] {
     return slot_of
 }
 
-fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFunc {
+// (cfg and loops: of f as it is now)
+fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, aliases: []ExitAlias) -> MFunc {
     n := f.insts.len
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
     exit_alias := map[i64, (i64, i64)]()
     for a in aliases {
         for li in 0..loops.loops.len {
@@ -692,7 +740,7 @@ fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFu
         }
     }
     s.slot_of = alloca_slots(f, &s.mf)
-    rpo := f.rpo()
+    rpo := cfg.rpo
     for ri in rpo.len - 1..=0 by -1 {
         b := rpo[ri]
         s.cur_block = b

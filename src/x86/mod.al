@@ -70,7 +70,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
             depths.push(loops.depth(b))
         }
         opt_trace("isel", f)
-        mf := isel_select(f, m, depths.items(), aliases.items())
+        mf := isel_select(f, m, &cfg, loops, depths.items(), aliases.items())
         layout := block_layout(f)
         // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
         // benchmark suite the padding executed on every loop entry cost more than it gained.
