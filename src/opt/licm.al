@@ -108,12 +108,12 @@ fn licm_make_preheaders(f: *Func) -> bool {
                     pbs.push(x.0)
                 }
                 np := f.mk_phi_of(ity, vals.items(), pbs.items())
-                f.blocks[p].insts.push(np)
+                f.blocks[p].insts.push(i32(np))
                 incoming = np
             }
             keep_args.push(incoming)
             keep_pb.push(p)
-            f.im(v).phi_set(keep_args.items(), keep_pb.items())
+            f.im(i64(v)).phi_set(keep_args.items(), keep_pb.items())
         }
         changed = true
     }
@@ -166,7 +166,7 @@ fn licm_run(f: *Func) -> bool {
         // the blocks in reverse postorder (their positions in it are distinct)
         blocks := vec[i64]()
         for b in l.blocks {
-            blocks.push(cfg.rpo_idx[b])
+            blocks.push(i64(cfg.rpo_idx[b]))
         }
         sort(blocks.items())
         for k in 0..blocks.len {
@@ -180,7 +180,7 @@ fn licm_run(f: *Func) -> bool {
             for v in f.blocks[b].insts {
                 o := f.insts[v].op
                 if o == Store {
-                    stores.push(alias_memref(f, v))
+                    stores.push(alias_memref(f, i64(v)))
                 } else if o == Call || o == CallInd || o == Syscall || o == MemCpy || o == MemSet {
                     has_call = true
                 }
@@ -225,7 +225,7 @@ fn licm_run(f: *Func) -> bool {
                             }
                             ok = safe_const || run_guaranteed(&cfg, exiting.items(), l.latches.items(), b)
                         } else if i.op == Load {
-                            m := alias_memref(f, v)
+                            m := alias_memref(f, i64(v))
                             private := false
                             safe_addr := false
                             match m.addr.base {
@@ -252,7 +252,7 @@ fn licm_run(f: *Func) -> bool {
                     }
                     if ok {
                         f.blocks[pre].insts.push(v)
-                        def_block[v] = pre
+                        def_block[v] = i32(pre)
                         moved = true
                     } else {
                         insts[kept] = v

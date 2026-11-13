@@ -205,6 +205,8 @@ struct MFunc {
 }
 
 fn new_vreg(self: *MFunc, class: u8) -> i64 {
+    // registers are kept in i32 fields and tables (Mem, isel, regalloc)
+    assert self.vclass.len < 0x7FFFFFFF - VREG0, "isel: too many virtual registers in a function"
     self.vclass.push(class)
     return VREG0 + (self.vclass.len - 1)
 }
@@ -220,6 +222,8 @@ fn class(self: *MFunc, r: i64) -> u8 {
 }
 
 fn new_slot(self: *MFunc, size: i64, align: i64) -> i64 {
+    // slot numbers are kept in 32 bits (Mem.id)
+    assert self.slots.len < 0x7FFFFFFF, "isel: too many frame slots in a function"
     self.slots.push((size, align))
     return self.slots.len - 1
 }

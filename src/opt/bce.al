@@ -32,7 +32,7 @@ priv enum Kind {
 }
 
 // the closure `invariant` of find_iv, match_affine and hoist_in_loop
-priv fn invariant(v: i64, in_loop: []bool, def_block: []i64) -> bool {
+priv fn invariant(v: i64, in_loop: []bool, def_block: []i32) -> bool {
     return def_block[v] == 0xFFFFFFFF || !in_loop[def_block[v]]
 }
 
@@ -46,7 +46,7 @@ priv fn signum(x: i64) -> i64 {
     return 0
 }
 
-priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i64) -> Opt[Iv] {
+priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i32) -> Opt[Iv] {
     c, t, e := match f.blocks[latch].term {
         Br(c0, t0, e0) => (c0, t0, e0)
         _ => return None
@@ -73,7 +73,7 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     }
     phi := ni.args[0]
     pi := &f.insts[phi]
-    if pi.op != Phi || def_block[phi] != header || pi.args.len != 2 {
+    if pi.op != Phi || i64(def_block[phi]) != header || pi.args.len != 2 {
         return None
     }
     start := NOV
@@ -159,7 +159,7 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
 }
 
 // match idx as ext(inner) with inner = iv, inner + inv, inner - inv or inv - inner
-priv fn match_affine(f: *Func, idx: i64, iv: *Iv, in_loop: []bool, def_block: []i64) -> Opt[BceAffine] {
+priv fn match_affine(f: *Func, idx: i64, iv: *Iv, in_loop: []bool, def_block: []i32) -> Opt[BceAffine] {
     ext: Opt[Op] = None
     inner := idx
     {
@@ -234,11 +234,11 @@ priv fn match_affine(f: *Func, idx: i64, iv: *Iv, in_loop: []bool, def_block: []
 }
 
 // rebuild the index expression in block `pre` with the induction variable replaced by `at`
-priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bool, def_block: []i64) -> i64 {
+priv fn clone_at(f: *Func, pre: i64, v: i64, iv_phi: i64, at: i64, in_loop: []bool, def_block: []i32) -> i64 {
     if v == iv_phi {
         return at
     }
-    db := 0xFFFFFFFF
+    db := i32(NOV)
     if v < len(def_block) {
         db = def_block[v]
     }
@@ -281,7 +281,7 @@ priv fn zext_cannot_wrap(f: *Func, a: *BceAffine, iv: *Iv, ln: i64) -> bool {
 // `in_loop`: the blocks of loop `li` are marked (by the caller, in one buffer for all loops).
 // `def_block`: the block of every instruction, computed when the first loop needs it and shared
 // by the loops of one round (hoisting adds instructions but moves none)
-priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i64]) -> bool {
+priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i32]) -> bool {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -409,7 +409,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
     }
     // the index expression `a` for the value `at` of the induction variable; the
     // computations go into `pre` (it dominates the whole chain)
-    fn index_at(f: *Func, at: i64, pre: i64, a: *BceAffine, iv: *Iv, in_loop: []bool, def_block: []i64) -> i64 {
+    fn index_at(f: *Func, at: i64, pre: i64, a: *BceAffine, iv: *Iv, in_loop: []bool, def_block: []i32) -> i64 {
         inner := clone_at(f, pre, a.inner, iv.phi, at, in_loop, def_block)
         match a.ext {
             Some(op) => f.push(pre, op, I64, vec_of([]i64{inner}), 0)
@@ -543,7 +543,7 @@ priv fn entry_guard(f: *Func, cfg: *Cfg, pre: i64, iv: *Iv) -> bool {
 // removed. Unlike hoisting this puts no condition on the loop body (calls, other exits).
 // `in_loop`: the blocks of loop `li` are marked (by the caller, in one buffer for all loops).
 // `def_block`: the block of every instruction, computed when the first loop needs it.
-priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i64]) -> bool {
+priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i32]) -> bool {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -624,7 +624,7 @@ priv fn eliminate_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: 
 priv fn eliminate(f: *Func) -> bool {
     licm_make_preheaders(f)
     cfg, loops := cfg_loops(f)
-    def_block := vec[i64]()
+    def_block := vec[i32]()
     in_loop := vec_fill(f.blocks.len, false)
     did := false
     for li in 0..loops.loops.len {
@@ -658,7 +658,7 @@ fn bce_run(f: *Func) -> bool {
         // Hoisting one loop per round made functions with many loops quadratic in time and
         // memory (and left loops after the 200th unhoisted)
         touched := vec_fill(loops.loops.len, false)
-        def_block := vec[i64]()
+        def_block := vec[i32]()
         // sized before any hoisting: blocks added this round belong to no loop of the round
         in_loop := vec_fill(f.blocks.len, false)
         did := false

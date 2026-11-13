@@ -36,7 +36,7 @@ priv fn header_phis(f: *Func, h: i64) -> Vec[i64] {
         if f.insts[v].op != Phi {
             break
         }
-        hphis.push(v)
+        hphis.push(i64(v))
     }
     return hphis
 }
@@ -44,7 +44,7 @@ priv fn header_phis(f: *Func, h: i64) -> Vec[i64] {
 // `in_loop`: the blocks of loop `li` are marked (by the caller, one buffer for all loops);
 // `def_block_v`: the block of every instruction, computed when first needed and shared by the
 // loops of one round (analysis changes nothing)
-priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i64]) -> Opt[Plan] {
+priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i32]) -> Opt[Plan] {
     l := &loops.loops[li]
     h := l.header
     outside := licm_outside_preds(cfg, loops, li, h)
@@ -89,7 +89,7 @@ priv fn analyze(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
     }
     phi := ni.args[0]
     pi := &f.insts[phi]
-    if pi.op != Phi || pi.args.len != 2 || !contains(&f.blocks[h].insts, phi) {
+    if pi.op != Phi || pi.args.len != 2 || !contains(&f.blocks[h].insts, i32(phi)) {
         return None
     }
     start_opt: Opt[i64] = None
@@ -204,7 +204,7 @@ priv fn bmap_at(bmap: *Map[i64, i64], b: i64) -> i64 {
 }
 
 // `def_block_v`: as in analyze (still exact: analysis changed nothing)
-priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
+priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
     n0 := f.insts.len
     nb0 := f.blocks.len
     in_loop_v := vec_fill(nb0, false)
@@ -217,11 +217,11 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
     }
     def_block := def_block_v.items()
     // is v an original value (below n0) defined inside the loop?
-    fn loop_def(v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> bool {
+    fn loop_def(v: i64, n0: i64, def_block: []i32, in_loop: []bool) -> bool {
         v < n0 && def_block[v] != 0xFFFFFFFF && in_loop[def_block[v]]
     }
     // the copy of v in the iteration that `m` describes
-    fn look(m: *Vec[i64], v: i64, n0: i64, def_block: []i64, in_loop: []bool) -> i64 {
+    fn look(m: *Vec[i64], v: i64, n0: i64, def_block: []i32, in_loop: []bool) -> i64 {
         if loop_def(v, n0, def_block, in_loop) {
             return m[v]
         }
@@ -251,8 +251,8 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
     loop_vals := vec[i64]()
     for b in p.blocks {
         for v in f.blocks[b].insts {
-            if v < n0 {
-                loop_vals.push(v)
+            if i64(v) < n0 {
+                loop_vals.push(i64(v))
             }
         }
     }
@@ -280,7 +280,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
         // allocate ids
         for b in p.blocks {
             for ii in 0..f.blocks[b].insts.len {
-                v := f.blocks[b].insts[ii]
+                v := i64(f.blocks[b].insts[ii])
                 if v >= n0 || cur[v] != NOV {
                     continue
                 }
@@ -300,7 +300,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
             nb := bmap_at(&bmap, b)
             insts := clone(f.blocks[b].insts)
             for v in insts {
-                if v >= n0 {
+                if i64(v) >= n0 {
                     continue
                 }
                 if b == p.header && f.insts[v].op == Phi {
@@ -322,7 +322,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
                 } else {
                     f.im(nv).args = args
                 }
-                f.blocks[nb].insts.push(nv)
+                f.blocks[nb].insts.push(i32(nv))
             }
             src_term := if b == p.latch { clone(orig_latch_term) } else { clone(f.blocks[b].term) }
             f.blocks[nb].term = match src_term {
@@ -417,15 +417,15 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i64]) {
         return
     }
     // copy 0: header phis take their initial values
-    repl := vec_fill(f.insts.len, NOV)
+    repl := vec_fill(f.insts.len, i32(NOV))
     for ph in hphis {
-        repl[ph] = phi_in_at(&phi_in, ph).0
+        repl[ph] = i32(phi_in_at(&phi_in, ph).0)
     }
     hb := &f.blocks[p.header]
     n := 0
     for ii in 0..hb.insts.len {
         v := hb.insts[ii]
-        if !contains(&hphis, v) {
+        if !contains(&hphis, i64(v)) {
             hb.insts[n] = v
             n += 1
         }
@@ -445,7 +445,7 @@ fn unroll_run(f: *Func) -> bool {
         order := licm_loop_order(&loops)
         plan: Opt[Plan] = None
         in_loop := vec_fill(f.blocks.len, false)
-        def_block := vec[i64]()
+        def_block := vec[i32]()
         for li in order {
             for b in loops.loops[li].blocks {
                 in_loop[b] = true

@@ -58,7 +58,7 @@ fn cleanup_dce(f: *Func) -> bool {
     n := f.insts.len
     live := alloc[bool](n)
     // every value is pushed at most once (when it becomes live)
-    work := mkslice[i64](__alloc_raw(n * 8), n)
+    work := mkslice[i32](__alloc_raw(n * 4), n)
     sp := 0
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
@@ -72,14 +72,14 @@ fn cleanup_dce(f: *Func) -> bool {
         match b.term {
             Br(c, _, _) if !live[c] => {
                 live[c] = true
-                work[sp] = c
+                work[sp] = i32(c)
                 sp += 1
             }
             Ret(vs) => {
                 for v in vs {
                     if !live[v] {
                         live[v] = true
-                        work[sp] = v
+                        work[sp] = i32(v)
                         sp += 1
                     }
                 }
@@ -93,7 +93,7 @@ fn cleanup_dce(f: *Func) -> bool {
         for a in f.insts[v].args {
             if !live[a] {
                 live[a] = true
-                work[sp] = a
+                work[sp] = i32(a)
                 sp += 1
             }
         }
@@ -119,10 +119,10 @@ fn cleanup_dce(f: *Func) -> bool {
     return changed
 }
 
-priv fn trivial_phis_res(repl: *Vec[i64], v0: i64) -> i64 {
+priv fn trivial_phis_res(repl: *Vec[i32], v0: i64) -> i64 {
     v := v0
     while repl[v] != NOV {
-        v = repl[v]
+        v = i64(repl[v])
     }
     return v
 }
@@ -136,13 +136,13 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
             if f.insts[v].op != Phi {
                 break
             }
-            phis.push(v)
+            phis.push(i64(v))
         }
     }
     if phis.is_empty() {
         return false
     }
-    repl := vec_fill(f.insts.len, NOV)
+    repl := vec_fill(f.insts.len, i32(NOV))
     any := false
     loop {
         changed := false
@@ -164,7 +164,7 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
                 same = a
             }
             if trivial && same != NOV {
-                repl[v] = same
+                repl[v] = i32(same)
                 changed = true
             }
         }

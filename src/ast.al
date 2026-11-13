@@ -1,9 +1,11 @@
 // AST for AL.
 
+// line and column (1-based) are 32-bit: a source file is less than 2 GB (lexer_lex). The file
+// index stays 64-bit: the struct is 16 bytes either way and the file is compared with i64s
 struct Pos {
     file: i64
-    line: i64
-    col: i64
+    line: i32
+    col: i32
 }
 
 struct Diag {
@@ -542,6 +544,8 @@ fn ast_sym_hashed(s: str, h: u64) -> i64 {
         i = (i + 1) & mask
     }
     id := sym_texts.len
+    // a slot keeps id + 1 in its low 32 bits
+    assert id < 0x7FFFFFFF, "ast: too many symbols"
     n := len(s)
     if sym_chunk_used + n + 8 > len(sym_chunk) {
         sym_chunk = alloc[u8](max(SYM_CHUNK, n + 8))

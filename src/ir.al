@@ -225,7 +225,7 @@ enum Term {
 }
 
 struct BlockData {
-    insts: Vec[i64]
+    insts: Vec[i32]
     term: Term
 }
 
@@ -300,9 +300,9 @@ fn func_new(name: str) -> Func {
     }
 }
 
-// n zeros (filled by memfill, not one by one)
-priv fn zeros(n: i64) -> Vec[i64] {
-    return Vec[i64]{buf: alloc[i64](n), len: n}
+// n zero counts
+priv fn zeros(n: i64) -> Vec[i32] {
+    return Vec[i32]{buf: alloc[i32](n), len: n}
 }
 
 // n uninitialised words
@@ -310,12 +310,17 @@ priv fn raw(n: i64) -> []i64 {
     return mkslice[i64](__alloc_raw(n * 8), n)
 }
 
+// n uninitialised i32s (stacks of block numbers)
+priv fn raw32(n: i64) -> []i32 {
+    return mkslice[i32](__alloc_raw(n * 4), n)
+}
+
 // n lists in one buffer: list i has room for cnt[i] items (filled with `add`)
-priv fn lists_sized(cnt: *Vec[i64]) -> Vec[Vec[i64]] {
+priv fn lists_sized(cnt: *Vec[i32]) -> Vec[Vec[i64]] {
     n := cnt.len
     total := 0
     for i in 0..n {
-        total += cnt[i]
+        total += i64(cnt[i])
     }
     // every list is filled to its size before it is read: no zeroing
     flat := mkslice[i64](__alloc_raw(total * 8), total)
@@ -323,8 +328,9 @@ priv fn lists_sized(cnt: *Vec[i64]) -> Vec[Vec[i64]] {
     out.reserve(n)
     off := 0
     for i in 0..n {
-        out.buf[i] = Vec[i64]{buf: flat[off..off + cnt[i]], len: 0}
-        off += cnt[i]
+        c := i64(cnt[i])
+        out.buf[i] = Vec[i64]{buf: flat[off..off + c], len: 0}
+        off += c
     }
     out.len = n
     return out
@@ -336,11 +342,12 @@ priv inline fn add(l: *Vec[i64], x: i64) {
     l.len += 1
 }
 
-// A hash map from non-negative integers to integers for the passes (open addressing, linear
-// probing); `iget` gives -1 for a missing key. Faster than a `Map` for these keys.
+// A hash map from non-negative integers to instruction numbers for the passes (open
+// addressing, linear probing); `iget` gives -1 for a missing key. Faster than a `Map` for
+// these keys.
 struct IMap {
     keys: []i64 // -1: empty slot
-    vals: []i64
+    vals: []i32
     len: i64
 }
 
@@ -351,7 +358,7 @@ fn imap_new(n: i64) -> IMap {
     }
     keys := mkslice[i64](__alloc_raw(cap * 8), cap)
     memfill(ptr(keys), 0xFF, cap * 8)
-    return IMap{keys: keys, vals: mkslice[i64](__alloc_raw(cap * 8), cap), len: 0}
+    return IMap{keys: keys, vals: mkslice[i32](__alloc_raw(cap * 4), cap), len: 0}
 }
 
 priv inline fn islot(keys: []i64, k: i64) -> i64 {
@@ -368,7 +375,7 @@ fn iget(self: *IMap, k: i64) -> i64 {
     if self.keys[h] == -1 {
         return -1
     }
-    return self.vals[h]
+    return i64(self.vals[h])
 }
 
 fn iset(self: *IMap, k: i64, v: i64) {
@@ -379,7 +386,7 @@ fn iset(self: *IMap, k: i64, v: i64) {
             *self = imap_new(len(old.keys))
             for i in 0..len(old.keys) {
                 if old.keys[i] != -1 {
-                    self.iset(old.keys[i], old.vals[i])
+                    self.iset(old.keys[i], i64(old.vals[i]))
                 }
             }
             h = islot(self.keys, k)
@@ -387,7 +394,7 @@ fn iset(self: *IMap, k: i64, v: i64) {
         self.keys[h] = k
         self.len += 1
     }
-    self.vals[h] = v
+    self.vals[h] = i32(v)
 }
 
 // the successors of block b without allocating: (count, first, second)
@@ -405,7 +412,10 @@ fn succ_pair(self: *Func, b: i64) -> (i64, i64, i64) {
 }
 
 fn new_block(self: *Func) -> i64 {
-    self.blocks.push(BlockData{insts: vec[i64](), term: Term.None})
+    // block and instruction numbers are kept in i32 tables (NOV, as an i32, is -1); the
+    // dominator tree numbers (Cfg.pre, post) go up to twice the number of blocks
+    assert self.blocks.len < 0x3FFFFFFF, "ir: too many blocks in a function"
+    self.blocks.push(BlockData{insts: vec[i32](), term: Term.None})
     return self.blocks.len - 1
 }
 
@@ -422,6 +432,7 @@ fn mk(self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     if ty.is_vec() {
         self.has_vec = true
     }
+    assert self.insts.len < 0x7FFFFFFF, "ir: too many instructions in a function"
     self.insts.push(Inst{op: op, ty: ty, args: args.items(), k: k, aux: 0, cap: 0})
     return self.insts.len - 1
 }
@@ -493,7 +504,7 @@ fn phi_remove(self: *Inst, k: i64) {
 
 fn push(self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.mk(op, ty, args, k)
-    self.blocks[b].insts.push(v)
+    self.blocks[b].insts.push(i32(v))
     return v
 }
 
@@ -693,26 +704,26 @@ fn rpo_compute(self: *Func) -> Vec[i64] {
     // every block is on the stack at most once; the postorder is written from the end, so
     // order[k..n] is the reverse postorder
     order := raw(n)
-    sb := raw(n)
-    si := raw(n)
+    sb := raw32(n)
+    si := raw32(n)
     sb[0] = 0
     si[0] = 0
     sp := 1
     seen[0] = true
     k := n
     while sp > 0 {
-        b := sb[sp - 1]
-        i := si[sp - 1]
+        b := i64(sb[sp - 1])
+        i := i64(si[sp - 1])
         cnt, s0, s1 := self.succ_pair(b)
         if i < cnt {
             s := s0
             if i == 1 {
                 s = s1
             }
-            si[sp - 1] = i + 1
+            si[sp - 1] = i32(i + 1)
             if !seen[s] {
                 seen[s] = true
-                sb[sp] = s
+                sb[sp] = i32(s)
                 si[sp] = 0
                 sp += 1
             }
@@ -733,8 +744,8 @@ fn term_uses(self: *Func, b: i64) -> Vec[i64] {
     }
 }
 
-fn use_counts(self: *Func) -> Vec[i64] {
-    c := Vec[i64]{buf: alloc[i64](self.insts.len), len: self.insts.len}
+fn use_counts(self: *Func) -> Vec[i32] {
+    c := Vec[i32]{buf: alloc[i32](self.insts.len), len: self.insts.len}
     for bi in 0..self.blocks.len {
         b := &self.blocks[bi]
         for v in b.insts {
@@ -757,22 +768,22 @@ fn use_counts(self: *Func) -> Vec[i64] {
     return c
 }
 
-priv fn apply_repl_find(map: *Vec[i64], v: i64) -> i64 {
+priv fn apply_repl_find(map: *Vec[i32], v: i64) -> i64 {
     r := v
     while map[r] != NOV {
-        r = map[r]
+        r = i64(map[r])
     }
     c := v
     while map[c] != NOV {
-        n := map[c]
-        map[c] = r
+        n := i64(map[c])
+        map[c] = i32(r)
         c = n
     }
     return r
 }
 
 // apply a replacement map (map[v] = replacement or NOV) to all uses
-fn apply_repl(self: *Func, map: *Vec[i64]) {
+fn apply_repl(self: *Func, map: *Vec[i32]) {
     if map.len < self.insts.len {
         map.resize(self.insts.len, NOV)
     }
@@ -805,11 +816,12 @@ fn apply_repl(self: *Func, map: *Vec[i64]) {
     }
 }
 
-fn block_of(self: *Func) -> Vec[i64] {
-    bo := vec_fill(self.insts.len, 0xFFFFFFFF)
+// the block of every instruction in a block (NOV for the others)
+fn block_of(self: *Func) -> Vec[i32] {
+    bo := vec_fill(self.insts.len, i32(NOV))
     for bi in 0..self.blocks.len {
         for v in self.blocks[bi].insts {
-            bo[v] = bi
+            bo[v] = i32(bi)
         }
     }
     return bo
@@ -826,12 +838,12 @@ fn size(self: *Func) -> i64 {
 // ---------- CFG analysis ----------
 struct Cfg {
     rpo: Vec[i64]
-    rpo_idx: Vec[i64]
+    rpo_idx: Vec[i32] // NOV: unreachable
     preds: Vec[Vec[i64]]
-    idom: Vec[i64]
+    idom: Vec[i32]
     children: Vec[Vec[i64]]
-    pre: Vec[i64]
-    post: Vec[i64]
+    pre: Vec[i32]
+    post: Vec[i32]
 }
 
 fn cfg_new(f: *Func) -> Cfg {
@@ -891,37 +903,37 @@ priv fn rpo_preds_of(f: *Func, rpo: Vec[i64]) -> Vec[Vec[i64]] {
 
 priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
     n := f.blocks.len
-    rpo_idx := vec_fill(n, 0xFFFFFFFF)
+    rpo_idx := vec_fill(n, i32(NOV))
     for i in 0..rpo.len {
-        rpo_idx[rpo[i]] = i
+        rpo_idx[rpo[i]] = i32(i)
     }
     preds := rpo_preds_of(f, rpo)
-    idom := vec_fill(n, 0xFFFFFFFF)
+    idom := vec_fill(n, i32(NOV))
     idom[0] = 0
     changed := true
     while changed {
         changed = false
         for bi in 1..rpo.len {
             b := rpo[bi]
-            nw := 0xFFFFFFFF
+            nw := i32(NOV)
             for p in preds[b] {
-                if idom[p] == 0xFFFFFFFF {
+                if idom[p] == NOV {
                     continue
                 }
-                if nw == 0xFFFFFFFF {
-                    nw = p
+                if nw == NOV {
+                    nw = i32(p)
                 } else {
                     x := p
-                    y := nw
+                    y := i64(nw)
                     while x != y {
                         while rpo_idx[x] > rpo_idx[y] {
-                            x = idom[x]
+                            x = i64(idom[x])
                         }
                         while rpo_idx[y] > rpo_idx[x] {
-                            y = idom[y]
+                            y = i64(idom[y])
                         }
                     }
-                    nw = x
+                    nw = i32(x)
                 }
             }
             if idom[b] != nw {
@@ -939,29 +951,29 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
         b := rpo[bi]
         add(&children[idom[b]], b)
     }
-    pre := zeros(n)
-    post := zeros(n)
+    pre := Vec[i32]{buf: alloc[i32](n), len: n}
+    post := Vec[i32]{buf: alloc[i32](n), len: n}
     t := 0
     // every block is on the stack at most once
-    sb := raw(n)
-    si := raw(n)
+    sb := raw32(n)
+    si := raw32(n)
     sb[0] = 0
     si[0] = 0
     sp := 1
     while sp > 0 {
-        b := sb[sp - 1]
-        i := si[sp - 1]
+        b := i64(sb[sp - 1])
+        i := i64(si[sp - 1])
         if i < children[b].len {
             c := children[b][i]
-            si[sp - 1] = i + 1
+            si[sp - 1] = i32(i + 1)
             t += 1
-            pre[c] = t
-            sb[sp] = c
+            pre[c] = i32(t)
+            sb[sp] = i32(c)
             si[sp] = 0
             sp += 1
         } else {
             t += 1
-            post[b] = t
+            post[b] = i32(t)
             sp -= 1
         }
     }
@@ -969,7 +981,7 @@ priv fn cfg_compute(f: *Func, rpo: Vec[i64]) -> Cfg {
 }
 
 fn reachable(self: *Cfg, b: i64) -> bool {
-    return self.rpo_idx[b] != 0xFFFFFFFF
+    return self.rpo_idx[b] != NOV
 }
 
 // a dominates b (reflexive)
@@ -987,7 +999,7 @@ priv struct Loop {
 
 struct Loops {
     loops: Vec[Loop]
-    loop_of: Vec[Opt[i64]] // innermost loop per block
+    loop_of: Vec[i32] // innermost loop per block, or -1
 }
 
 // cfg_new and loops_new with one check of the memo
@@ -1026,19 +1038,17 @@ fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
 priv fn loops_compute(f: *Func, cfg: *Cfg) -> Loops {
     n := f.blocks.len
     loops := vec[Loop]()
-    none: Opt[i64] = None
-    by_header := vec_fill(n, none)
+    // the loop of each header, or -1
+    by_header := vec_fill(n, i32(-1))
     for b in cfg.rpo {
         ss := f.succs(b)
         for s in ss {
             if cfg.dom(s, b) {
-                li := match by_header[s] {
-                    Some(x) => x
-                    None => {
-                        loops.push(Loop{header: s, blocks: vec_of([]i64{s}), latches: vec[i64](), parent: None, depth: 0})
-                        by_header[s] = Some(loops.len - 1)
-                        loops.len - 1
-                    }
+                li := i64(by_header[s])
+                if li < 0 {
+                    loops.push(Loop{header: s, blocks: vec_of([]i64{s}), latches: vec[i64](), parent: None, depth: 0})
+                    li = loops.len - 1
+                    by_header[s] = i32(li)
                 }
                 loops[li].latches.push(b)
             }
@@ -1087,30 +1097,37 @@ priv fn loops_compute(f: *Func, cfg: *Cfg) -> Loops {
             j -= 1
         }
     }
-    loop_of := vec_fill(n, none)
+    loop_of := vec_fill(n, i32(-1))
     for li in order {
-        parent := loop_of[loops[li].header]
-        loops[li].parent = parent
-        loops[li].depth = match parent {
-            Some(p) => loops[p].depth + 1
-            None => 1
+        p := i64(loop_of[loops[li].header])
+        if p >= 0 {
+            loops[li].parent = Some(p)
+            loops[li].depth = loops[p].depth + 1
+        } else {
+            loops[li].parent = None
+            loops[li].depth = 1
         }
         for bi in 0..loops[li].blocks.len {
-            loop_of[loops[li].blocks[bi]] = Some(li)
+            loop_of[loops[li].blocks[bi]] = i32(li)
         }
     }
     return Loops{loops: loops, loop_of: loop_of}
 }
 
 fn depth(self: *Loops, b: i64) -> i64 {
-    match self.loop_of[b] {
-        Some(l) => self.loops[l].depth
-        None => 0
+    l := self.loop_of[b]
+    if l < 0 {
+        return 0
     }
+    return self.loops[l].depth
 }
 
 fn contains(self: *Loops, li: i64, b: i64) -> bool {
-    cur := self.loop_of[b]
+    l := i64(self.loop_of[b])
+    if l < 0 {
+        return false
+    }
+    cur: Opt[i64] = Some(l)
     loop {
         match cur {
             Some(c) if c == li => return true

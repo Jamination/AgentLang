@@ -82,7 +82,7 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
         }
         first, known := seen.get(name)
         if !known {
-            seen.set(name, (is_private, kind, pos.line))
+            seen.set(name, (is_private, kind, i64(pos.line)))
         } else if first.0 != is_private {
             if kind == 1 && first.1 == 1 {
                 errs.push(Diag{pos: pos, msg: fmt("function `", name, "` is defined both with and without `priv` in this file (the other definition is at line ", first.2, "): the definitions of one name in a file are all private or all public; write `priv` in front of every one, or of none")})

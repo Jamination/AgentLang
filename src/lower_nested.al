@@ -120,18 +120,18 @@ fn nested_hint(self: *Fx, n: str, pos: Pos) -> str {
                 match s.k {
                     Fn(d) => {
                         if d.name == n {
-                            line = s.pos.line
+                            line = i64(s.pos.line)
                             is_fn = true
                         }
                     }
                     Let(names, e) => {
                         if fx != self && contains(&names, n) {
-                            line = s.pos.line
+                            line = i64(s.pos.line)
                         }
                     }
                     Var(name, ty, init) => {
                         if fx != self && name == n {
-                            line = s.pos.line
+                            line = i64(s.pos.line)
                         }
                     }
                     _ => {}
@@ -197,6 +197,7 @@ fn nested_lower(self: *Fx, d: *FnDecl) -> i64 {
     f := func_new(shown)
     f.noreturn = rty == T_NEVER
     cx.fn_abi(&f, ptys.items(), rty)
+    assert cx.module.funcs.len < 0x7FFFFFFF, "lower: too many functions"
     cx.module.funcs.push(f)
     cx.fn_sigs.push((clone(ptys), rty))
     cx.nested[idx].fid = fid

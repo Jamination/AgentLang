@@ -142,7 +142,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
         return esc
     }
     // derived[v] = alloca this pointer value is derived from
-    derived := vec_fill(n, NOV)
+    derived := vec_fill(n, i32(NOV))
     for v in f.blocks[0].insts {
         if f.insts[v].op == Alloca {
             derived[v] = v
@@ -201,7 +201,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
 }
 
 // a terminator uses u: the alloca it is derived from escapes
-priv inline fn esc_use(esc: *Vec[bool], derived: *Vec[i64], u: i64, changed: *bool) {
+priv inline fn esc_use(esc: *Vec[bool], derived: *Vec[i32], u: i64, changed: *bool) {
     d := derived[u]
     if d != NOV && !esc[d] {
         esc[d] = true
@@ -211,14 +211,14 @@ priv inline fn esc_use(esc: *Vec[bool], derived: *Vec[i64], u: i64, changed: *bo
 
 struct MemRef {
     addr: Addr,
-    size: i64,
-    class: i64,
-    ptr: i64, // the address value itself
+    size: i32,
+    class: i32, // Inst.aux
+    ptr: i32, // the address value itself
 }
 
 fn alias_memref(f: *Func, v: i64) -> MemRef {
     i := &f.insts[v]
-    return MemRef{addr: decompose(f, i.args[0]), size: i.ty.size(), class: i64(i.aux), ptr: i.args[0]}
+    return MemRef{addr: decompose(f, i.args[0]), size: i32(i.ty.size()), class: i.aux, ptr: i32(i.args[0])}
 }
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
@@ -233,11 +233,11 @@ fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
     }
     if a.addr.base == b.addr.base {
         match (a.addr.off, b.addr.off) {
-            (Some(oa), Some(ob)) => return oa < ob + b.size && ob < oa + a.size
+            (Some(oa), Some(ob)) => return oa < ob + i64(b.size) && ob < oa + i64(a.size)
             _ => {}
         }
     }
-    return types_may_alias_class(a.class, b.class)
+    return types_may_alias_class(i64(a.class), i64(b.class))
 }
 
 fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
