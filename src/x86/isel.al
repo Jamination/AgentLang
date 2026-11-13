@@ -623,6 +623,7 @@ fn isel_select(f: *Func, m: *Module, depths: []i64, aliases: []ExitAlias) -> MFu
             fconsts: vec[Bits128](),
             has_calls: false,
             wide_xmm: wide_xmm,
+            xuses: vec[i64](),
         },
         vreg: vec_fill(n, NOREG),
         uses: f.use_counts(),
@@ -743,7 +744,7 @@ priv fn e(self: *Sel, op: MOp, sz: u8, a: Opnd, b: Opnd) {
 
 priv fn shufps(self: *Sel, d: i64, s: i64, imm: i64) {
     mi := minst_new(Shufps, 16, R(d), R(s))
-    mi.c = I(imm)
+    mi.tgt = i32(imm)
     self.out.push(mi)
 }
 
@@ -770,7 +771,7 @@ priv fn fconst(self: *Sel, bits: Bits128) -> Mem {
         ix = self.mf.fconsts.len - 1
         self.fconst_ix.set(bits, ix)
     }
-    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: FConst, id: ix}
+    return Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_FCONST, id: i32(ix)}
 }
 
 // the frame slot of the alloca v (`self.slot_of[&v]`)
@@ -907,14 +908,14 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
         m.disp += i32(i.k)
         return
     }
-    if i.op == GAddr && m.kind == Normal {
-        m.kind = Global
-        m.id = i.k
+    if i.op == GAddr && m.kind == MK_NORMAL {
+        m.kind = MK_GLOBAL
+        m.id = i32(i.k)
         return
     }
-    if i.op == Alloca && m.kind == Normal && m.base == NOREG {
-        m.kind = Slot
-        m.id = isel_slot_of(self, v)
+    if i.op == Alloca && m.kind == MK_NORMAL && m.base == NOREG {
+        m.kind = MK_SLOT
+        m.id = i32(isel_slot_of(self, v))
         return
     }
     if i.op == Add && depth < 8 && self.foldable_add(v) {
@@ -937,7 +938,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
                 }
                 if scale != 0 {
                     x := i.args[0]
-                    m.idx = self.reg(x)
+                    m.idx = i32(self.reg(x))
                     m.scale = scale
                     return
                 }
@@ -946,19 +947,19 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
         }
     }
     r := self.reg(v)
-    base_free := m.base == NOREG && m.kind != Slot
+    base_free := m.base == NOREG && m.kind != MK_SLOT
     if base_free {
-        m.base = r
+        m.base = i32(r)
     } else if m.idx == NOREG {
-        m.idx = r
+        m.idx = i32(r)
         m.scale = 1
     } else {
         // out of components: collapse what we have into a temporary
         t := new_vreg(&self.mf, 0)
         self.e(Lea, 8, R(t), M(*m))
         *m = mem_new()
-        m.base = t
-        m.idx = r
+        m.base = i32(t)
+        m.idx = i32(r)
         m.scale = 1
     }
 }
@@ -998,7 +999,7 @@ fn params(self: *Sel) {
             } else {
                 if want {
                     d := self.vr(pv)
-                    m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: InArg, id: nstack}
+                    m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: i32(nstack)}
                     self.e(MovSd, fsz(t), R(d), M(m))
                 }
                 nstack += if t.is_vec() { 2 } else { 1 }
@@ -1012,7 +1013,7 @@ fn params(self: *Sel) {
         } else {
             if want {
                 d := self.vr(pv)
-                m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: InArg, id: nstack}
+                m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: i32(nstack)}
                 self.e(Mov, 8, R(d), M(m))
             }
             nstack += 1
@@ -1111,7 +1112,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
             R(r) => {}
             Opnd.None => self.e(Zero, 8, R(d), Opnd.None)
             M(m) => {
-                if m.kind == Slot {
+                if m.kind == MK_SLOT {
                     self.e(Lea, 8, R(d), s2)
                 } else {
                     self.e(MovSd, 8, R(d), s2)
@@ -1217,13 +1218,13 @@ priv fn cmp_flags(self: *Sel, c: i64) -> (u8, u8) {
 priv fn jcc(self: *Sel, cc: u8, t: i64) {
     i := minst_new(Jcc, 0, Opnd.None, Opnd.None)
     i.cc = cc
-    i.tgt = t
+    i.tgt = i32(t)
     self.out.push(i)
 }
 
 priv fn jmp(self: *Sel, t: i64) {
     i := minst_new(Jmp, 0, Opnd.None, Opnd.None)
-    i.tgt = t
+    i.tgt = i32(t)
     self.out.push(i)
 }
 
@@ -1302,9 +1303,7 @@ priv fn term(self: *Sel, b: i64) {
                 self.e(if sv.2 { MovSd } else { Mov }, 8, R(sv.0), sv.1)
                 used.push(sv.0)
             }
-            i := minst_new(MOp.Ret, 0, Opnd.None, Opnd.None)
-            i.uses = used
-            self.out.push(i)
+            self.out.push(self.mf.mir_with_uses(MOp.Ret, 0, Opnd.None, used.items()))
         }
         Trap, Term.None => {
             self.e(Ud2, 0, Opnd.None, Opnd.None)
@@ -1414,18 +1413,18 @@ priv fn inst(self: *Sel, v: i64) {
                 self.addr_term(i.args[0], &m, 1)
                 self.addr_term(i.args[1], &m, 1)
                 d := self.vr(v)
-                simple := m.kind == Normal && m.idx == NOREG && m.base != NOREG
+                simple := m.kind == MK_NORMAL && m.idx == NOREG && m.base != NOREG
                 if simple && m.disp == 0 {
-                    self.e(Mov, 8, R(d), R(m.base))
-                } else if simple && self.uses_of_reg_single(i, m.base) {
-                    self.e(Mov, 8, R(d), R(m.base))
+                    self.e(Mov, 8, R(d), R(i64(m.base)))
+                } else if simple && self.uses_of_reg_single(i, i64(m.base)) {
+                    self.e(Mov, 8, R(d), R(i64(m.base)))
                     self.e(MOp.Add, 8, R(d), I(i64(m.disp)))
-                } else if m.kind == Normal && m.base != NOREG && m.idx != NOREG && m.scale == 1 && m.disp == 0 {
+                } else if m.kind == MK_NORMAL && m.base != NOREG && m.idx != NOREG && m.scale == 1 && m.disp == 0 {
                     // a + b: two-address add when one side dies here
                     a := i.args[0]
                     b := i.args[1]
-                    ra := m.base
-                    rb := m.idx
+                    ra := i64(m.base)
+                    rb := i64(m.idx)
                     direct := self.vreg[a] == ra && self.vreg[b] == rb
                     if direct && self.dies_here(a) {
                         self.e(Mov, 8, R(d), R(ra))
@@ -1436,8 +1435,8 @@ priv fn inst(self: *Sel, v: i64) {
                     } else {
                         self.e(Lea, 8, R(d), M(m))
                     }
-                } else if m.kind == Global && m.base == NOREG && m.idx == NOREG {
-                    self.e(Mov, 8, R(d), GAddr(m.id, i64(m.disp)))
+                } else if m.kind == MK_GLOBAL && m.base == NOREG && m.idx == NOREG {
+                    self.e(Mov, 8, R(d), GAddr(i64(m.id), i64(m.disp)))
                 } else {
                     self.e(Lea, 8, R(d), M(m))
                 }
@@ -1469,7 +1468,7 @@ priv fn inst(self: *Sel, v: i64) {
                 Some(k) if fits32(k) => {
                     ar := self.reg(a)
                     mi := minst_new(Imul3, osz(ty), R(d), R(ar))
-                    mi.c = I(k)
+                    mi.tgt = i32(k)
                     self.out.push(mi)
                 }
                 Some(_) => {
@@ -1778,9 +1777,7 @@ priv fn inst(self: *Sel, v: i64) {
                 self.e(Mov, 8, R(sr[k]), srcs[k])
                 used.push(sr[k])
             }
-            mi := minst_new(MOp.Syscall, 0, Opnd.None, Opnd.None)
-            mi.uses = used
-            self.out.push(mi)
+            self.out.push(self.mf.mir_with_uses(MOp.Syscall, 0, Opnd.None, used.items()))
             if self.needed[v] {
                 d := self.vr(v)
                 self.e(Mov, 8, R(d), R(RAX))
@@ -2020,7 +2017,7 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
     }
     self.mf.out_args = max(self.mf.out_args, nstack)
     for sm in stack_moves {
-        m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: OutArg, id: sm.0}
+        m := Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_OUTARG, id: i32(sm.0)}
         if sm.2 != 0 {
             self.e(MovSd, sm.2, M(m), sm.1)
         } else {
@@ -2032,23 +2029,21 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
         self.e(if rm.2 { MovSd } else { Mov }, 8, R(rm.0), rm.1)
         used.push(rm.0)
     }
-    c: MInst
-    match tr {
-        Some(r) => {
-            c = minst_new(MOp.CallInd, 8, R(r), Opnd.None)
-        }
-        None => {
-            c = minst_new(MOp.Call, 0, Opnd.None, Opnd.None)
-            c.tgt = i.k
-        }
-    }
     if i.op == CallInd && i.aux == 1 {
         // C calling convention: al = number of vector registers used (for variadic callees)
         self.e(Mov, 4, R(RAX), I(nf))
         used.push(RAX)
     }
-    c.uses = used
-    self.out.push(c)
+    match tr {
+        Some(r) => {
+            self.out.push(self.mf.mir_with_uses(MOp.CallInd, 8, R(r), used.items()))
+        }
+        None => {
+            c := self.mf.mir_with_uses(MOp.Call, 0, Opnd.None, used.items())
+            c.tgt = i32(i.k)
+            self.out.push(c)
+        }
+    }
     // results
     if i.ty != Void {
         if self.needed[v] {

@@ -55,25 +55,25 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
         r.idx = i8(m.idx)
     }
     match m.kind {
-        Normal => {}
-        Global => {
+        MK_GLOBAL => {
             r.reloc = Some(Abs32Global(i64(m.id)))
         }
-        FConst => {
+        MK_FCONST => {
             r.reloc = Some(Abs32FConst(self.fpool[i64(m.id)]))
         }
-        Slot => {
+        MK_SLOT => {
             r.base = i8(RSP)
             r.disp += self.frame.slot_off[i64(m.id)]
         }
-        OutArg => {
+        MK_OUTARG => {
             r.base = i8(RSP)
             r.disp += 8 * i32(m.id)
         }
-        InArg => {
+        MK_INARG => {
             r.base = i8(RSP)
             r.disp += self.frame.size + 8 * self.frame.npush + 8 + 8 * i32(m.id)
         }
+        _ => {}
     }
     return r
 }
@@ -376,10 +376,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
         Imul3 => {
             d := reg_of(i.a)
             rm := e.rm(i.b)
-            k := match i.c {
-                I(k0) => k0
-                _ => panic("encoder: imul3 without immediate")
-            }
+            k := i64(i.tgt)
             if k >= -128 && k <= 127 {
                 e.op(false, 0, w, []u8{0x6B}, u8(d & 15), &rm, false)
                 e.imm(k, 1)
@@ -491,10 +488,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             d := reg_of(i.a)
             rm := e.rm(i.b)
             e.op(false, 0, false, []u8{0x0F, 0xC6}, u8(d & 15), &rm, false)
-            k := match i.c {
-                I(k0) => k0
-                _ => panic("encoder: shufps without immediate")
-            }
+            k := i64(i.tgt)
             e.imm(k, 1)
         }
         Movlo => {
@@ -607,15 +601,15 @@ priv fn peephole_lea_add(i: *MInst) -> Opt[Opnd] {
     add: Opt[Opnd] = None
     if i.op == Lea {
         match (&i.a, &i.b) {
-            (R(d), M(m)) if m.kind == Normal => {
+            (R(d), M(m)) if m.kind == MK_NORMAL => {
                 base := i64(m.base)
                 idx := i64(m.idx)
                 if base == d && idx == NOREG && i32(m.disp) != 0 {
                     add = Some(I(i64(m.disp)))
                 } else if base == d && idx != NOREG && u8(m.scale) == 1 && i32(m.disp) == 0 && idx != d {
-                    add = Some(R(m.idx))
+                    add = Some(R(idx))
                 } else if idx == d && u8(m.scale) == 1 && i32(m.disp) == 0 && base != NOREG && base != d {
-                    add = Some(R(m.base))
+                    add = Some(R(base))
                 }
             }
             _ => {}
@@ -642,7 +636,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64]) {
         for x in 0..mf.blocks[b].insts.len {
             i := &mf.blocks[b].insts[x]
             if i.op == Jmp || i.op == Jcc {
-                i.tgt = peephole_resolve(i64(i.tgt), &fwd)
+                i.tgt = i32(peephole_resolve(i64(i.tgt), &fwd))
             }
         }
     }

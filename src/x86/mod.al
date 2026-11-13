@@ -48,6 +48,7 @@ priv fn reachable_funcs(m: *Module) -> Vec[i64] {
     return out
 }
 
+
 fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     fids := reachable_funcs(m)
     fpool := vec[Bits128]()
