@@ -1040,7 +1040,10 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
     return foldable_add_leafy(self, i.args[0]) || foldable_add_leafy(self, i.args[1])
 }
 
-priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
+// `mem`: the address is the operand of one memory access (every value on the way to v has one
+// use), not a value computed with `lea`, so an instruction emitted here for v is not repeated
+// by another user
+priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
     i := &self.f.insts[v]
     if i.op == Const && fits32(i.k) && fits32(i64(m.disp) + i.k) {
         m.disp += i32(i.k)
@@ -1059,8 +1062,8 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
     if i.op == Add && depth < 8 && self.foldable_add(v) {
         a := i.args[0]
         b := i.args[1]
-        self.addr_term(a, m, depth + 1)
-        self.addr_term(b, m, depth + 1)
+        self.addr_term(a, m, depth + 1, mem && self.uses[v] == 1)
+        self.addr_term(b, m, depth + 1, mem && self.uses[v] == 1)
         return
     }
     if (i.op == Shl || i.op == Mul) && m.idx == NOREG && i.ty == I64 {
@@ -1084,6 +1087,28 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
             None => {}
         }
     }
+    if i.op == Mul && m.idx == NOREG && i.ty == I64 && mem && self.uses[v] == 1 && self.blk_of[v] == self.cur_block {
+        // x * (c << s), c = 3, 5, 9: t = lea [x + x*(c-1)], then [.. + t*2^s] (shifting t
+        // by what the scale cannot take). Not for an address computed into a register: there
+        // `lea; shl; add` (the Mul selected on its own) beats a `lea` with a scaled index and
+        // a base, which takes 2 cycles on AMD Zen
+        c, s := match self.f.is_const(i.args[1]) {
+            Some(k) => lea_factor(k)
+            None => (0, 0)
+        }
+        if c != 0 {
+            t := new_vreg(&self.mf, 0)
+            self.lea_times(t, self.reg(i.args[0]), c, 8)
+            sc := s
+            if s > 3 {
+                self.e(MOp.Shl, 8, R(t), I(s - 3))
+                sc = 3
+            }
+            m.idx = i32(t)
+            m.scale = u8(1) << sc
+            return
+        }
+    }
     r := self.reg(v)
     base_free := m.base == NOREG && m.kind != MK_SLOT
     if base_free {
@@ -1104,8 +1129,31 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64) {
 
 priv fn addr(self: *Sel, v: i64) -> Mem {
     m := mem_new()
-    self.addr_term(v, &m, 0)
+    self.addr_term(v, &m, 0, true)
     return m
+}
+
+// k = c << s with c = 3, 5 or 9, the factors a `lea` with the same register as base and index
+// multiplies by: (c, s); otherwise (0, 0)
+priv fn lea_factor(k: i64) -> (i64, i64) {
+    if k <= 0 {
+        return (0, 0)
+    }
+    s := i64(ctz(u64(k)))
+    c := k >> s
+    if c == 3 || c == 5 || c == 9 {
+        return (c, s)
+    }
+    return (0, 0)
+}
+
+// d = x * c (c = 3, 5, 9) with a `lea` of operation size sz
+priv fn lea_times(self: *Sel, d: i64, x: i64, c: i64, sz: u8) {
+    m := mem_new()
+    m.base = i32(x)
+    m.idx = i32(x)
+    m.scale = u8(c - 1)
+    self.e(Lea, sz, R(d), M(m))
 }
 
 // ---------- parameters ----------
@@ -1539,8 +1587,8 @@ priv fn inst(self: *Sel, v: i64) {
         Add => {
             if ty == I64 {
                 m := mem_new()
-                self.addr_term(i.args[0], &m, 1)
-                self.addr_term(i.args[1], &m, 1)
+                self.addr_term(i.args[0], &m, 1, false)
+                self.addr_term(i.args[1], &m, 1, false)
                 d := self.vr(v)
                 simple := m.kind == MK_NORMAL && m.idx == NOREG && m.base != NOREG
                 if simple && m.disp == 0 {
@@ -1593,21 +1641,33 @@ priv fn inst(self: *Sel, v: i64) {
                 b = tmp
             }
             d := self.vr(v)
-            match self.f.is_const(b) {
-                Some(k) if fits32(k) => {
-                    ar := self.reg(a)
-                    mi := minst_new(Imul3, osz(ty), R(d), R(ar))
-                    mi.tgt = i32(k)
-                    self.out.push(mi)
+            c, s := match self.f.is_const(b) {
+                Some(k) => lea_factor(k)
+                None => (0, 0)
+            }
+            if c != 0 {
+                // a * (c << s), c = 3, 5, 9: lea and shl (latency 2) instead of imul (3)
+                self.lea_times(d, self.reg(a), c, osz(ty))
+                if s != 0 {
+                    self.e(MOp.Shl, osz(ty), R(d), I(s))
                 }
-                Some(_) => {
-                    // a constant too wide for an immediate: multiply two registers
-                    ar := self.reg(a)
-                    br := self.reg(b)
-                    self.e(Mov, 8, R(d), R(ar))
-                    self.e(Imul, osz(ty), R(d), R(br))
+            } else {
+                match self.f.is_const(b) {
+                    Some(k) if fits32(k) => {
+                        ar := self.reg(a)
+                        mi := minst_new(Imul3, osz(ty), R(d), R(ar))
+                        mi.tgt = i32(k)
+                        self.out.push(mi)
+                    }
+                    Some(_) => {
+                        // a constant too wide for an immediate: multiply two registers
+                        ar := self.reg(a)
+                        br := self.reg(b)
+                        self.e(Mov, 8, R(d), R(ar))
+                        self.e(Imul, osz(ty), R(d), R(br))
+                    }
+                    None => self.binop(v, Imul, true)
                 }
-                None => self.binop(v, Imul, true)
             }
         }
         And => {
