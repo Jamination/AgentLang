@@ -93,109 +93,6 @@ fn lexer_p_text(c: i64) -> str {
     return b
 }
 
-// ---------- f32 value of a float literal ----------
-// `f32(v)` of the f64 value `v` rounds twice: wrong when `v` is exactly half-way between two
-// f32 values but the literal is not. Then the literal is compared exactly with `v`.
-
-// big natural numbers: little-endian base 2^32 limbs
-priv fn big_mul_add(a: *Vec[u64], m: u64, add: u64) {
-    carry := add
-    for i in 0..a.len {
-        x := a[i] * m + carry
-        a[i] = x & 0xFFFFFFFF
-        carry = x >> 32
-    }
-    if carry != 0 {
-        a.push(carry)
-    }
-}
-
-priv fn big_cmp(a: *Vec[u64], b: *Vec[u64]) -> i64 {
-    while !a.is_empty() && a.last() == 0 {
-        a.pop()
-    }
-    while !b.is_empty() && b.last() == 0 {
-        b.pop()
-    }
-    if a.len != b.len {
-        return if a.len < b.len { -1 } else { 1 }
-    }
-    for i in a.len - 1..=0 by -1 {
-        if a[i] != b[i] {
-            return if a[i] < b[i] { -1 } else { 1 }
-        }
-    }
-    return 0
-}
-
-// compares the decimal literal `text` (digits, point, exponent) with the positive finite `v`
-priv fn dec_cmp_f64(text: str, v: f64) -> i64 {
-    a := vec[u64]()
-    k := 0
-    i := 0
-    frac := false
-    while i < len(text) && text[i] != 'e' && text[i] != 'E' {
-        if text[i] == '.' {
-            frac = true
-        } else {
-            big_mul_add(&a, 10, u64(text[i] - '0'))
-            if frac {
-                k -= 1
-            }
-        }
-        i += 1
-    }
-    if i < len(text) {
-        e, ok := parse_i64(text[i + 1..])
-        if !ok || e > 100000 || e < -100000 {
-            return 0
-        }
-        k += e
-    }
-    bits := cast[u64](v)
-    ex := i64(bits >> 52)
-    fr := bits & 0xFFFFFFFFFFFFF
-    m := if ex == 0 { fr } else { fr | (u64(1) << 52) }
-    q := if ex == 0 { -1074 } else { ex - 1075 }
-    b := vec_two(m & 0xFFFFFFFF, m >> 32)
-    // a * 10^k against b * 2^q
-    for _ in 0..max(k, 0) {
-        big_mul_add(&a, 10, 0)
-    }
-    for _ in 0..max(-k, 0) {
-        big_mul_add(&b, 10, 0)
-    }
-    for _ in 0..max(q, 0) {
-        big_mul_add(&b, 2, 0)
-    }
-    for _ in 0..max(-q, 0) {
-        big_mul_add(&a, 2, 0)
-    }
-    return big_cmp(&a, &b)
-}
-
-priv fn f32_of(text: str, v: f64) -> f32 {
-    r := f32(v)
-    if f64(r) == v || v != v || v > 3.4028234663852886e38 {
-        return r
-    }
-    // the f32 neighbour of r on the other side of v
-    rb := cast[u32](r)
-    other := cast[f32](if f64(r) < v { rb + 1 } else { rb - 1 })
-    if f64(r) + f64(other) != 2.0 * v {
-        return r
-    }
-    c := dec_cmp_f64(text, v)
-    if c == 0 {
-        return r
-    }
-    up := c > 0
-    if up == (f64(other) > f64(r)) {
-        return other
-    }
-    return r
-}
-
 // the value of the digit `c` in the given radix, if it is one
 priv fn to_digit(c: u8, radix: i64) -> Opt[i64] {
     d := -1
@@ -406,7 +303,8 @@ priv fn lex_number(s: str, i: i64, p: Pos, out: *Vec[Token], errs: *Vec[Diag]) -
     if is_float {
         v, ok := parse_f64(text)
         if ok {
-            out.push(Token{t: Float(v, f32_of(text, v)), pos: p})
+            f, _ := parse_f32(text)
+            out.push(Token{t: Float(v, f), pos: p})
         } else {
             errs.push(Diag{pos: p, msg: "invalid float literal"})
             out.push(Token{t: Float(0.0, 0.0), pos: p})
