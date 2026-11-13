@@ -46,11 +46,6 @@ when TARGET_OS == Windows {
     use "host_linux.al"
 }
 
-// the compiler runs on Windows (else on Linux)
-inline fn host_windows() -> bool {
-    return TARGET_OS == Windows
-}
-
 // run_program_env without changes to the environment
 fn run_program(path: str, argv: []str) -> i64 {
     return run_program_env(path, argv, nil, nil)
