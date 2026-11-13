@@ -22,8 +22,8 @@ are `priv` do not appear: a program may reuse their names).
 | `std.asset` | files, directories, paths, cached asset loading, hot-reload polling, config and JSON readers | nothing | [std/asset.md](std/asset.md) |
 | `std.os` | for tools and build scripts: run programs (status, captured output) or start them in the background (wait, kill), shared memory, process id, working directory; loads `std.asset` for files and directories | nothing | [std/os.md](std/os.md) |
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
-| `std.input` | per-frame key / mouse state, action maps | nothing | [std/input.md](std/input.md) |
-| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` | [std/window.md](std/window.md) |
+| `std.input` | per-frame key / mouse / gamepad state, action maps | nothing (Windows: `xinput1_4.dll` or `xinput9_1_0.dll`, loaded when a gamepad is opened) | [std/input.md](std/input.md) |
+| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6`; Windows: `user32.dll`, `gdi32.dll` | [std/window.md](std/window.md) |
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2` (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
@@ -37,8 +37,8 @@ dynamically linked executable that needs only the libraries of the functions it 
 For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
-`std.asset`, `std.os` and `std.image` work the same on Windows (through kernel32.dll; the
-differences are in their pages). `std.input`, `std.window`, `std.audio`, `std.wayland`,
+`std.asset`, `std.os`, `std.image`, `std.input` and `std.window` work the same on Windows
+(through system DLLs; the differences are in their pages). `std.audio`, `std.wayland`,
 `std.vk`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
 compile error that names the module and the target. `std.dx12` and `std.dx12_util` are the
 other way round: Windows only (a Linux build stops at their Windows DLLs).
