@@ -831,7 +831,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
         }
         TypeE(t) => {
             env := self.tenv
-            ty := self.cx.resolve(&t, &env)
+            ty := self.cx.resolve(t, &env)
             return self.conversion(ty, args, pos)
         }
         _ => {

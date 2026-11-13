@@ -129,7 +129,7 @@ priv fn priv_fn(r: *PrivCx, f: *FnDecl) -> bool {
         priv_type(r, &f.params[i].1)
     }
     f.ret = opt_type(r, f.ret)
-    return block(r, f.body)
+    return block(r, &f.body)
 }
 
 priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
@@ -167,7 +167,7 @@ priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
             Global(g)
         }
         Test(t) => {
-            block(r, t.body)
+            block(r, &t.body)
             Test(t)
         }
         Use(path, pos) => d
@@ -231,6 +231,13 @@ priv fn opt_expr(r: *PrivCx, o: Opt[Expr]) -> Opt[Expr] {
 priv fn opt_pexpr(r: *PrivCx, o: Opt[*Expr]) -> bool {
     match o {
         Some(e) => expr(r, e)
+        None => true
+    }
+}
+
+priv fn opt_ptype(r: *PrivCx, o: Opt[*TypeAst]) -> bool {
+    match o {
+        Some(t) => priv_type(r, t)
         None => true
     }
 }
@@ -310,7 +317,7 @@ priv fn expr(r: *PrivCx, e: *Expr) -> bool {
             }
             true
         }
-        TypeE(&t) => priv_type(r, t)
+        TypeE(t) => priv_type(r, t)
         If(c, a, b) => {
             expr(r, c)
             block(r, a)
@@ -331,7 +338,7 @@ priv fn expr(r: *PrivCx, e: *Expr) -> bool {
                     }
                     None => {}
                 }
-                block(r, arm.body)
+                block(r, &arm.body)
             }
             true
         }
@@ -383,8 +390,8 @@ priv fn pat(r: *PrivCx, p: *Pat) -> bool {
     }
 }
 
-// the statements are rewritten in place: a Block copy shares their storage
-priv fn block(r: *PrivCx, b: Block) -> bool {
+// the statements are rewritten in place
+priv fn block(r: *PrivCx, b: *Block) -> bool {
     for i in 0..b.stmts.len {
         stmt(r, &b.stmts[i])
     }
@@ -393,24 +400,25 @@ priv fn block(r: *PrivCx, b: Block) -> bool {
 
 priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
     return match s.k {
-        Expr(&e) => expr(r, e)
-        Let(&names, &e) => {
+        Expr(e) => expr(r, e)
+        Let(&names, e) => {
             priv_names(r, names)
             expr(r, e)
         }
-        MultiAssign(&lhs, &e) => {
+        MultiAssign(&lhs, e) => {
             exprs(r, lhs)
             expr(r, e)
         }
-        Var(name, ty, init) => {
-            s.k = Var(priv_name(r, name), opt_type(r, ty), opt_expr(r, init))
-            true
+        Var(&name, ty, init) => {
+            *name = priv_name(r, *name)
+            opt_ptype(r, ty)
+            opt_pexpr(r, init)
         }
-        Assign(&a, _, &b) => {
+        Assign(a, _, b) => {
             expr(r, a)
             expr(r, b)
         }
-        If(&c, then, els) => {
+        If(c, then, els) => {
             expr(r, c)
             block(r, then)
             match els {
@@ -421,35 +429,33 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
             }
             true
         }
-        While(&c, body) => {
+        While(c, body) => {
             expr(r, c)
             block(r, body)
         }
         Loop(body) => block(r, body)
-        For(v1, v2, lo, hi, incl, step, body) => {
-            v2n: Opt[str] = match v2 {
-                Some(n2) => Some(priv_name(r, n2))
-                None => None
+        For(f) => {
+            match f.var2 {
+                Some(&n2) => {
+                    *n2 = priv_name(r, *n2)
+                }
+                None => {}
             }
-            ll: Expr = lo
-            expr(r, &ll)
-            s.k = For(priv_name(r, v1), v2n, ll, opt_expr(r, hi), incl, opt_expr(r, step), body)
-            block(r, body)
+            expr(r, f.lo)
+            f.var1 = priv_name(r, f.var1)
+            opt_pexpr(r, f.hi)
+            opt_pexpr(r, f.step)
+            block(r, f.body)
         }
-        Return(v) => {
-            s.k = Return(opt_expr(r, v))
-            true
-        }
+        Return(v) => opt_pexpr(r, v)
         Break => true
         Labeled(label, st) => stmt(r, st)
         BreakTo(label) => true
         ContinueTo(label) => true
         Continue => true
         Assert(c, msg) => {
-            cc: Expr = c
-            expr(r, &cc)
-            s.k = Assert(cc, opt_expr(r, msg))
-            true
+            expr(r, c)
+            opt_pexpr(r, msg)
         }
         Block(b) => block(r, b)
         Defer(b) => block(r, b)

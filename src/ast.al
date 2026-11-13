@@ -49,6 +49,8 @@ enum BinOp {
     LOr,
 }
 
+// Nodes are kept small (big parts are behind pointers): the parser and lowering copy and
+// match them by value
 struct Expr {
     k: EK
     pos: Pos
@@ -68,8 +70,8 @@ enum EK {
     Slice(*Expr, Opt[*Expr], Opt[*Expr]),
     Field(*Expr, str),
     Lit(*Expr, Vec[(Opt[str], Expr)]),
-    TypeE(TypeAst),
-    If(*Expr, Block, Block),
+    TypeE(*TypeAst),
+    If(*Expr, *Block, *Block),
     Tuple(Vec[Expr]),
     Match(*Expr, Vec[MatchArm]),
     // anonymous function `fn(a: A, b: B) -> R { body }` (the declaration has an empty name)
@@ -111,22 +113,21 @@ struct Stmt {
 }
 
 enum SK {
-    Expr(Expr),
-    Let(Vec[str], Expr),
-    MultiAssign(Vec[Expr], Expr),
-    Var(str, Opt[TypeAst], Opt[Expr]),
-    Assign(Expr, Opt[BinOp], Expr),
-    If(Expr, Block, Opt[Block]),
-    While(Expr, Block),
-    Loop(Block),
-    // var, var2, lo, hi, incl, step, body
-    For(str, Opt[str], Expr, Opt[Expr], bool, Opt[Expr], Block),
-    Return(Opt[Expr]),
+    Expr(*Expr),
+    Let(Vec[str], *Expr),
+    MultiAssign(Vec[Expr], *Expr),
+    Var(str, Opt[*TypeAst], Opt[*Expr]),
+    Assign(*Expr, Opt[BinOp], *Expr),
+    If(*Expr, *Block, Opt[*Block]),
+    While(*Expr, *Block),
+    Loop(*Block),
+    For(*ForStmt),
+    Return(Opt[*Expr]),
     Break,
     Continue,
-    Assert(Expr, Opt[Expr]),
-    Block(Block),
-    Defer(Block),
+    Assert(*Expr, Opt[*Expr]),
+    Block(*Block),
+    Defer(*Block),
     // `name: for/while/loop ...`: the loop statement with its label
     Labeled(str, *Stmt),
     // `break name` / `continue name`
@@ -134,6 +135,17 @@ enum SK {
     ContinueTo(str),
     // `fn name(params) -> R { body }` inside a block: a nested function
     Fn(*FnDecl),
+}
+
+// `for var1, var2 in lo..hi by step { body }` (`..=`: incl)
+struct ForStmt {
+    var1: str
+    var2: Opt[str]
+    lo: *Expr
+    hi: Opt[*Expr]
+    incl: bool
+    step: Opt[*Expr]
+    body: *Block
 }
 
 struct FnDecl {
@@ -311,7 +323,7 @@ fn ast_expr_str(e: *Expr) -> str {
         Call(c, args) => fmt(operand_str(c, 10, false), "(", expr_list_str(&args), ")")
         Index(b, idx) => fmt(operand_str(b, 10, false), "[", expr_list_str(&idx), "]")
         Field(b, n) => fmt(operand_str(b, 10, false), ".", n)
-        TypeE(t) => ast_type_str(&t)
+        TypeE(t) => ast_type_str(t)
         Tuple(es) => fmt("(", expr_list_str(&es), ")")
         _ => "..."
     }

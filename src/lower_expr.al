@@ -314,7 +314,7 @@ fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
             self.err(e.pos, "a type cannot be used as a value here")
             return val_err()
         }
-        If(c, t, el) => { return self.if_value(c, &t, &el, true, expect) }
+        If(c, t, el) => { return self.if_value(c, t, el, true, expect) }
         Tuple(es) => {
             exp_tys: Opt[Vec[i64]] = None
             match expect {

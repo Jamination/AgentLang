@@ -609,10 +609,10 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
         }
         match s.k {
             Expr(e) => {
-                v = self.expr(&e, expect)
+                v = self.expr(e, expect)
             }
             If(c, t, Some(e)) => {
-                v = self.if_value(&c, &t, &e, true, expect)
+                v = self.if_value(c, t, e, true, expect)
             }
             _ => {
                 self.stmt(s)
@@ -694,10 +694,10 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                     self.match_expr(sc, arms.items(), false, None, e.pos)
                 }
                 _ => {
-                    self.expr(&e, None)
+                    self.expr(e, None)
                     no_effect := match e.k {
                         Int(_, _), Float(_, _), Str(_), Bool(_), Nil, Ident(_), Fn(_), TypeE(_) => true
-                        Un(_, _), Bin(_, _, _), Field(_, _), Index(_, _), Slice(_, _, _), Tuple(_), Lit(_, _) => !lower_call_has_call(&e)
+                        Un(_, _), Bin(_, _, _), Field(_, _), Index(_, _), Slice(_, _, _), Tuple(_), Lit(_, _) => !lower_call_has_call(e)
                         _ => false
                     }
                     if no_effect {
@@ -712,7 +712,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             }
         }
         Let(names, e) => {
-            v := self.expr(&e, None)
+            v := self.expr(e, None)
             if names.len == 1 {
                 if v.ty == T_UNIT || v.ty == T_NEVER {
                     self.err(s.pos, fmt("cannot bind `", names[0], "` to an expression without a value"))
@@ -745,7 +745,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             }
         }
         MultiAssign(lhs, e) => {
-            v := self.expr(&e, None)
+            v := self.expr(e, None)
             match self.cx.types.k(v.ty) {
                 Tuple(ts) if ts.len == lhs.len => {}
                 Err => return
@@ -775,12 +775,12 @@ priv fn stmt(self: *Fx, s: *Stmt) {
         }
         Var(name, ty, init) => {
             t: Opt[i64] = match ty {
-                Some(ta) => Some(self.cx.resolve(&ta, &self.tenv))
+                Some(ta) => Some(self.cx.resolve(ta, &self.tenv))
                 None => None
             }
             match init {
                 Some(e) => {
-                    v := self.expr(&e, t)
+                    v := self.expr(e, t)
                     match t {
                         Some(tt) => {
                             v = self.coerce(v, tt, e.pos)
@@ -812,21 +812,21 @@ priv fn stmt(self: *Fx, s: *Stmt) {
         Assign(lhs, op, rhs) => {
             match lhs.k {
                 Ident("_") => {
-                    self.expr(&rhs, None)
+                    self.expr(rhs, None)
                     return
                 }
                 _ => {}
             }
-            dst := match self.place(&lhs) {
+            dst := match self.place(lhs) {
                 Some(d) => d
                 None => {
-                    self.expr(&rhs, None)
+                    self.expr(rhs, None)
                     return
                 }
             }
             match op {
                 None => {
-                    v := self.expr(&rhs, Some(dst.ty))
+                    v := self.expr(rhs, Some(dst.ty))
                     v2 := self.coerce(v, dst.ty, rhs.pos)
                     self.store(dst, v2)
                 }
@@ -835,9 +835,9 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                     l := self.sval(dst.ty, cur)
                     r: Val
                     if bop == Shl || bop == Shr {
-                        r = self.expr(&rhs, None)
+                        r = self.expr(rhs, None)
                     } else {
-                        r = self.expr(&rhs, Some(dst.ty))
+                        r = self.expr(rhs, Some(dst.ty))
                     }
                     v := self.binary_vals(bop, l, r, s.pos)
                     v2 := self.coerce(v, dst.ty, rhs.pos)
@@ -848,14 +848,14 @@ priv fn stmt(self: *Fx, s: *Stmt) {
         If(c, t, eo) => {
             match eo {
                 Some(e) => {
-                    self.if_value(&c, &t, &e, false, None)
+                    self.if_value(c, t, e, false, None)
                 }
                 None => {
                     bt := self.new_block()
                     bj := self.new_block()
-                    self.cond_br(&c, bt, bj)
+                    self.cond_br(c, bt, bj)
                     self.switch_to(bt)
-                    self.block(&t)
+                    self.block(t)
                     self.jmp(bj)
                     self.switch_to(bj)
                 }
@@ -865,14 +865,14 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             bb := self.new_block()
             bc := self.new_block()
             bx := self.new_block()
-            self.cond_br(&c, bb, bx)
+            self.cond_br(c, bb, bx)
             self.switch_to(bb)
             self.loops.push(LoopCtx{brk: bx, cont: bc, scope_depth: self.scopes.len})
-            self.block(&body)
+            self.block(body)
             self.loops.pop()
             self.jmp(bc)
             self.switch_to(bc)
-            self.cond_br(&c, bb, bx)
+            self.cond_br(c, bb, bx)
             self.switch_to(bx)
         }
         Loop(body) => {
@@ -881,7 +881,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             self.jmp(bb)
             self.switch_to(bb)
             self.loops.push(LoopCtx{brk: bx, cont: bb, scope_depth: self.scopes.len})
-            self.block(&body)
+            self.block(body)
             self.loops.pop()
             self.jmp(bb)
             self.switch_to(bx)
@@ -903,24 +903,15 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             }
             self.dead = !reach
         }
-        For(var1, var2, lo, hi, incl, step_e, body) => {
-            // the optional bounds are passed by pointer (into this arm's copies)
-            hi_p: Opt[*Expr] = match hi {
-                Some(&h) => Some(h)
-                None => None
-            }
-            step_p: Opt[*Expr] = match step_e {
-                Some(&se) => Some(se)
-                None => None
-            }
-            self.for_stmt(var1, var2, &lo, hi_p, incl, step_p, &body, s.pos)
+        For(f) => {
+            self.for_stmt(f.var1, f.var2, f.lo, f.hi, f.incl, f.step, f.body, s.pos)
         }
         Return(eo) => {
             v: Opt[Val] = None
             match eo {
                 Some(e) => {
                     rt := self.ret_ty
-                    rv := self.expr(&e, Some(rt))
+                    rv := self.expr(e, Some(rt))
                     if rt == T_UNIT || rt == T_NEVER {
                         if rv.ty != T_UNIT && rv.ty != T_ERR && rv.ty != T_NEVER {
                             self.err(e.pos, "this function does not return a value")
@@ -949,12 +940,12 @@ priv fn stmt(self: *Fx, s: *Stmt) {
         Assert(c, msg) => {
             ok := self.new_block()
             fail := self.new_block()
-            self.cond_br(&c, ok, fail)
+            self.cond_br(c, ok, fail)
             self.switch_to(fail)
             loc := self.loc_str(s.pos)
             m := match msg {
                 Some(me) => {
-                    v := self.expr(&me, Some(T_STR))
+                    v := self.expr(me, Some(T_STR))
                     self.coerce(v, T_STR, me.pos)
                 }
                 None => self.str_val("assertion failed")
@@ -966,13 +957,11 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             self.switch_to(ok)
         }
         Block(b) => {
-            self.block(&b)
+            self.block(b)
         }
         Defer(b) => {
-            // the scope keeps a pointer: the block is copied to the heap
-            bp := new[Block]()
-            *bp = b
-            self.scopes[self.scopes.len - 1].defers.push(bp)
+            // the scope keeps a pointer to the block
+            self.scopes[self.scopes.len - 1].defers.push(b)
         }
         Labeled(label, inner) => {
             for i in 0..self.labels.len {

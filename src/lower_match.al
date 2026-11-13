@@ -1326,7 +1326,7 @@ priv fn needs_type(s: *Fx, b: *Block, binds: *Vec[(str, i64, Pos)]) -> bool {
                     bv := s.bare_variant(n, None)
                     return bv.2 == 2 || (bv.2 == 1 && s.cx.enum_decls[bv.0].tparams.len != 0)
                 }
-                Field(_, _), Call(_, _) => return s.variant_ref(&e) != ""
+                Field(_, _), Call(_, _) => return s.variant_ref(e) != ""
                 _ => {}
             }
         }

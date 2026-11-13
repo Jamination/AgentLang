@@ -111,8 +111,8 @@ priv fn expr(u: *Use, e: *Expr) -> bool {
         TypeE(t) => true
         If(c, a, b) => {
             expr(u, c)
-            block(u, &a)
-            block(u, &b)
+            block(u, a)
+            block(u, b)
         }
         Tuple(es) => exprs(u, &es)
         Fn(d) => true
@@ -129,20 +129,15 @@ priv fn expr(u: *Use, e: *Expr) -> bool {
 
 priv fn stmt(u: *Use, s: *Stmt) -> bool {
     return match s.k {
-        Expr(e) => expr(u, &e)
-        Let(names, e) => expr(u, &e)
+        Expr(e) => expr(u, e)
+        Let(names, e) => expr(u, e)
         MultiAssign(lhs, e) => {
             exprs(u, &lhs)
-            expr(u, &e)
+            expr(u, e)
         }
-        Var(name, ty, init) => {
-            match init {
-                Some(e) => expr(u, &e)
-                None => true
-            }
-        }
+        Var(name, ty, init) => opt(u, init)
         Assign(lhs, op, rhs) => {
-            expr(u, &rhs)
+            expr(u, rhs)
             direct := false
             match lhs.k {
                 Field(b, f) => {
@@ -165,55 +160,37 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
             if direct {
                 true
             } else {
-                expr(u, &lhs)
+                expr(u, lhs)
             }
         }
         If(c, t, eo) => {
-            expr(u, &c)
-            block(u, &t)
+            expr(u, c)
+            block(u, t)
             match eo {
-                Some(e) => block(u, &e)
+                Some(e) => block(u, e)
                 None => true
             }
         }
         While(c, body) => {
-            expr(u, &c)
-            block(u, &body)
+            expr(u, c)
+            block(u, body)
         }
-        Loop(body) => block(u, &body)
-        For(var1, var2, lo, hi, incl, step, body) => {
-            expr(u, &lo)
-            match hi {
-                Some(h) => {
-                    expr(u, &h)
-                }
-                None => {}
-            }
-            match step {
-                Some(st) => {
-                    expr(u, &st)
-                }
-                None => {}
-            }
-            block(u, &body)
+        Loop(body) => block(u, body)
+        For(f) => {
+            expr(u, f.lo)
+            opt(u, f.hi)
+            opt(u, f.step)
+            block(u, f.body)
         }
-        Return(e) => {
-            match e {
-                Some(x) => expr(u, &x)
-                None => true
-            }
-        }
+        Return(e) => opt(u, e)
         Break => true
         Continue => true
         Assert(c, m) => {
-            expr(u, &c)
-            match m {
-                Some(x) => expr(u, &x)
-                None => true
-            }
+            expr(u, c)
+            opt(u, m)
         }
-        Block(b) => block(u, &b)
-        Defer(b) => block(u, &b)
+        Block(b) => block(u, b)
+        Defer(b) => block(u, b)
         Labeled(label, st) => stmt(u, st)
         BreakTo(label) => true
         ContinueTo(label) => true
@@ -228,7 +205,7 @@ fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
     s := &b.stmts[i]
     match s.k {
         Let(names, e) => {
-            if names.len != 1 || names[0] == "_" || !is_place(&e) {
+            if names.len != 1 || names[0] == "_" || !is_place(e) {
                 return
             }
             name := names[0]
@@ -248,7 +225,7 @@ fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
                 }
             }
             if u.writes > 0 {
-                src := place_str(&e)
+                src := place_str(e)
                 plain := ast_plain(name)
                 self.err(u.first, fmt("`", plain, "` is a copy of `", src, "` (`:=` copies a struct), so this assignment changes only the copy, and the copy is never read afterwards. To change the original write `", src, ".", u.field, " = ...`, or take a pointer: `", plain, " := &", src, "`"))
             }

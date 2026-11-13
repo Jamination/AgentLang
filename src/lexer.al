@@ -5,8 +5,10 @@ enum Tk {
     Int(u64, bool), // value, written in decimal
     Float(f64, f32), // the value; the literal rounded once to f32
     Str(str),
-    Kw(str),
-    P(str),
+    // a keyword: its index in KEYWORDS (KW_FN ...)
+    Kw(i64),
+    // punctuation: its bytes, the first in the low byte (`'('`, or P_ARROW for `->`)
+    P(i64),
     Nl,
     Eof,
 }
@@ -22,10 +24,103 @@ priv KEYWORDS := [26]str{
     "inline", "noinline", "extern", "priv",
 }
 
-priv PUNCTS := [47]str{
-    "<<=", ">>=", "..=", ":=", "->", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "+=", "-=", "*=",
-    "/=", "%=", "&=", "|=", "^=", "..", "=>", "+", "-", "*", "/", "%", "&", "|", "^", "~", "!", "<",
-    ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "@",
+// the keywords by their index in KEYWORDS
+const KW_FN = 0
+const KW_STRUCT = 1
+const KW_ENUM = 2
+const KW_CONST = 3
+const KW_TEST = 4
+const KW_USE = 5
+const KW_IF = 6
+const KW_ELSE = 7
+const KW_WHILE = 8
+const KW_LOOP = 9
+const KW_FOR = 10
+const KW_IN = 11
+const KW_RETURN = 12
+const KW_BREAK = 13
+const KW_CONTINUE = 14
+const KW_ASSERT = 15
+const KW_TRUE = 16
+const KW_FALSE = 17
+const KW_NIL = 18
+const KW_MATCH = 19
+const KW_BY = 20
+const KW_DEFER = 21
+const KW_INLINE = 22
+const KW_NOINLINE = 23
+const KW_EXTERN = 24
+const KW_PRIV = 25
+
+// punctuation of more than one byte (one byte: the character itself, `P('(')`)
+const P_SHL_EQ = 0x3D3C3C // <<=
+const P_SHR_EQ = 0x3D3E3E // >>=
+const P_RANGE_EQ = 0x3D2E2E // ..=
+const P_DECL = 0x3D3A // :=
+const P_ARROW = 0x3E2D // ->
+const P_EQ = 0x3D3D // ==
+const P_NE = 0x3D21 // !=
+const P_LE = 0x3D3C // <=
+const P_GE = 0x3D3E // >=
+const P_LAND = 0x2626 // &&
+const P_LOR = 0x7C7C // ||
+const P_SHL = 0x3C3C // <<
+const P_SHR = 0x3E3E // >>
+const P_ADD_EQ = 0x3D2B // +=
+const P_SUB_EQ = 0x3D2D // -=
+const P_MUL_EQ = 0x3D2A // *=
+const P_DIV_EQ = 0x3D2F // /=
+const P_REM_EQ = 0x3D25 // %=
+const P_AND_EQ = 0x3D26 // &=
+const P_OR_EQ = 0x3D7C // |=
+const P_XOR_EQ = 0x3D5E // ^=
+const P_RANGE = 0x2E2E // ..
+const P_FAT_ARROW = 0x3E3D // =>
+
+// the text of a keyword
+fn lexer_kw_text(k: i64) -> str {
+    return KEYWORDS[k]
+}
+
+// the text of a punctuation token
+fn lexer_p_text(c: i64) -> str {
+    n := if c >> 16 != 0 { 3 } else if c >> 8 != 0 { 2 } else { 1 }
+    b := alloc[u8](n)
+    for j in 0..n {
+        b[j] = u8(c >> (8 * j))
+    }
+    return b
+}
+
+// the keyword index of an identifier-shaped word, or -1
+priv fn kw_index(w: str) -> i64 {
+    n := len(w)
+    if n < 2 || n > 8 {
+        return -1
+    }
+    k := match w[0] {
+        'a' => KW_ASSERT
+        'b' => if n == 2 { KW_BY } else { KW_BREAK }
+        'c' => if n == 5 { KW_CONST } else { KW_CONTINUE }
+        'd' => KW_DEFER
+        'e' => if w[1] == 'l' { KW_ELSE } else if w[1] == 'n' { KW_ENUM } else { KW_EXTERN }
+        'f' => if n == 2 { KW_FN } else if n == 3 { KW_FOR } else { KW_FALSE }
+        'i' => if n == 2 { if w[1] == 'f' { KW_IF } else { KW_IN } } else { KW_INLINE }
+        'l' => KW_LOOP
+        'm' => KW_MATCH
+        'n' => if n == 3 { KW_NIL } else { KW_NOINLINE }
+        'p' => KW_PRIV
+        'r' => KW_RETURN
+        's' => KW_STRUCT
+        't' => if n == 4 { if w[1] == 'e' { KW_TEST } else { KW_TRUE } } else { -1 }
+        'u' => KW_USE
+        'w' => KW_WHILE
+        _ => -1
+    }
+    if k >= 0 && w == KEYWORDS[k] {
+        return k
+    }
+    return -1
 }
 
 // ---------- f32 value of a float literal ----------
@@ -202,8 +297,50 @@ priv fn lexer_pos(file: i64, line: i64, at: i64, line_start: i64) -> Pos {
     return Pos{file: file, line: line, col: at - line_start + 1}
 }
 
+// bytes that continue an identifier: [A-Za-z0-9_] (filled on first use)
+priv ident_tab: [256]bool
+priv ident_tab_ready: bool
+
+priv fn ident_tab_init() {
+    for c in 0..256 {
+        b := u8(c)
+        ident_tab[c] = is_alnum(b) || b == '_'
+    }
+    ident_tab_ready = true
+}
+
+// a token after which a newline ends the statement
+priv fn ends_stmt(t: Tk) -> bool {
+    return match t {
+        Id(_), Int(_, _), Float(_, _), Str(_) => true
+        P(p) => p == ')' || p == ']' || p == '}'
+        Kw(k) => k == KW_RETURN || k == KW_BREAK || k == KW_CONTINUE || k == KW_TRUE || k == KW_FALSE || k == KW_NIL
+        _ => false
+    }
+}
+
+// the length of the punctuation token that starts with `c` (followed by `c1`, `c2`, or 0 at
+// the end), 0 if `c` starts none: the longest one that matches
+priv fn punct_len(c: u8, c1: u8, c2: u8) -> i64 {
+    return match c {
+        '<', '>' => if c1 == c { if c2 == '=' { 3 } else { 2 } } else if c1 == '=' { 2 } else { 1 }
+        '.' => if c1 == '.' { if c2 == '=' { 3 } else { 2 } } else { 1 }
+        ':' => if c1 == '=' { 2 } else { 1 }
+        '-' => if c1 == '>' || c1 == '=' { 2 } else { 1 }
+        '=' => if c1 == '=' || c1 == '>' { 2 } else { 1 }
+        '&', '|' => if c1 == c || c1 == '=' { 2 } else { 1 }
+        '!', '+', '*', '/', '%', '^' => if c1 == '=' { 2 } else { 1 }
+        '~', '(', ')', '[', ']', '{', '}', ',', ';', '@' => 1
+        _ => 0
+    }
+}
+
 fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
+    if !ident_tab_ready {
+        ident_tab_init()
+    }
     s := src
+    n := len(s)
     i := 0
     line := 1
     line_start := 0
@@ -213,25 +350,15 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         line_start = 3
     }
     out := vec[Token]()
+    out.reserve(n / 5 + 16)
     // bracket stack: '(' / '[' suppress newlines, '{' enables them
     stack := vec[u8]()
-    while i < len(s) {
+    while i < n {
         c := s[i]
         if c == '\n' {
             sig := stack.len == 0 || stack[stack.len - 1] == '{'
-            if sig {
-                term := false
-                if out.len > 0 {
-                    term = match out[out.len - 1].t {
-                        Id(_), Int(_, _), Float(_, _), Str(_) => true
-                        P(p) => p == ")" || p == "]" || p == "}"
-                        Kw(k) => k == "return" || k == "break" || k == "continue" || k == "true" || k == "false" || k == "nil"
-                        _ => false
-                    }
-                }
-                if term {
-                    out.push(Token{t: Nl, pos: lexer_pos(file, line, i, line_start)})
-                }
+            if sig && out.len > 0 && ends_stmt(out[out.len - 1].t) {
+                out.push(Token{t: Nl, pos: lexer_pos(file, line, i, line_start)})
             }
             i += 1
             line += 1
@@ -242,28 +369,24 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             i += 1
             continue
         }
-        if c == '/' && i + 1 < len(s) && s[i + 1] == '/' {
-            while i < len(s) && s[i] != '\n' {
+        if c == '/' && i + 1 < n && s[i + 1] == '/' {
+            while i < n && s[i] != '\n' {
                 i += 1
             }
             continue
         }
         p := lexer_pos(file, line, i, line_start)
-        if is_alpha(c) || c == '_' {
+        if ident_tab[c] && !is_digit(c) {
             st := i
-            while i < len(s) && (is_alnum(s[i]) || s[i] == '_') {
+            i += 1
+            while i < n && ident_tab[s[i]] {
                 i += 1
             }
             w := src[st..i]
-            is_kw := false
-            for k in KEYWORDS {
-                if k == w {
-                    out.push(Token{t: Kw(k), pos: p})
-                    is_kw = true
-                    break
-                }
-            }
-            if !is_kw {
+            k := kw_index(w)
+            if k >= 0 {
+                out.push(Token{t: Kw(k), pos: p})
+            } else {
                 out.push(Token{t: Id(w), pos: p})
             }
             continue
@@ -316,13 +439,7 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             }
             is_float := false
             // after a `.` a number is a tuple field: `t.0.1` is (t.0).1
-            field := false
-            if out.len > 0 {
-                field = match out[out.len - 1].t {
-                    P(q) => q == "."
-                    _ => false
-                }
-            }
+            field := out.len > 0 && out[out.len - 1].t == P('.')
             if !field && i + 1 < len(s) && s[i] == '.' && is_digit(s[i + 1]) {
                 is_float = true
                 i += 1
@@ -344,15 +461,18 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
                 }
             }
             // the literal without its underscores
-            tbuf := alloc[u8](i - st)
-            tn := 0
-            for k in st..i {
-                if s[k] != '_' {
-                    tbuf[tn] = s[k]
-                    tn += 1
+            text := s[st..i]
+            if contains(text, '_') {
+                tbuf := alloc[u8](i - st)
+                tn := 0
+                for k in st..i {
+                    if s[k] != '_' {
+                        tbuf[tn] = s[k]
+                        tn += 1
+                    }
                 }
+                text = tbuf[..tn]
             }
-            text := tbuf[..tn]
             if is_float {
                 v, ok := parse_f64(text)
                 if ok {
@@ -394,6 +514,28 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
         if c == '"' || c == '\'' {
             q := c
             i += 1
+            // without escapes the literal is the text between the quotes
+            j := i
+            while j < n && s[j] != q && s[j] != '\n' && s[j] != '\\' {
+                j += 1
+            }
+            if j < n && s[j] == q {
+                lit := s[i..j]
+                i = j + 1
+                if q == '"' {
+                    out.push(Token{t: Str(lit), pos: p})
+                } else {
+                    if len(lit) != 1 {
+                        errs.push(Diag{pos: p, msg: "char literal must be exactly one byte"})
+                    }
+                    first: u8 = 0
+                    if len(lit) > 0 {
+                        first = lit[0]
+                    }
+                    out.push(Token{t: Int(u64(first), false), pos: p})
+                }
+                continue
+            }
             buf := vec[u8]()
             closed := false
             while i < len(s) {
@@ -466,24 +608,28 @@ fn lexer_lex(src: str, file: i64, errs: *Vec[Diag]) -> Vec[Token] {
             }
             continue
         }
-        matched := false
-        for pp in PUNCTS {
-            if starts_with(s[i..], pp) {
-                if pp == "(" || pp == "[" || pp == "{" {
-                    stack.push(c)
-                } else if pp == ")" || pp == "]" || pp == "}" {
-                    // (an unmatched closing bracket is left to the parser)
-                    if stack.len > 0 {
-                        stack.pop()
-                    }
+        c1: u8 = if i + 1 < n { s[i + 1] } else { 0 }
+        c2: u8 = if i + 2 < n { s[i + 2] } else { 0 }
+        plen := punct_len(c, c1, c2)
+        if plen > 0 {
+            if c == '(' || c == '[' || c == '{' {
+                stack.push(c)
+            } else if c == ')' || c == ']' || c == '}' {
+                // (an unmatched closing bracket is left to the parser)
+                if stack.len > 0 {
+                    stack.pop()
                 }
-                out.push(Token{t: P(pp), pos: p})
-                i += len(pp)
-                matched = true
-                break
             }
-        }
-        if !matched {
+            code := i64(c)
+            if plen >= 2 {
+                code |= i64(c1) << 8
+            }
+            if plen == 3 {
+                code |= i64(c2) << 16
+            }
+            out.push(Token{t: P(code), pos: p})
+            i += plen
+        } else {
             shown, clen := char_at(s, i)
             if clen > 1 {
                 // the code point too: the character may be invisible (U+00A0, U+200B)

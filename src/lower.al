@@ -1123,7 +1123,7 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
             panic("unwrap of None")
         }
         TypeE(t) => {
-            return Some(self.resolve(&t, env))
+            return Some(self.resolve(t, env))
         }
         Un(Deref, inner) => {
             match self.expr_type(inner, env) {
