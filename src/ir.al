@@ -206,7 +206,7 @@ fn negate_icmp(self: Op) -> Op {
 // 48 bytes. `args` is a view of memory of its own, never shared with another instruction
 // (the passes write through it). A phi's buffer has room for `cap` inputs and holds the block
 // each input comes from `cap` words after the input (`from()`): its inputs are changed only
-// through the phi functions below.
+// through the phi functions below, and `clone` of a phi instruction loses the blocks.
 struct Inst {
     op: Op
     ty: T
