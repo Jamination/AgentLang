@@ -184,6 +184,7 @@ fn const_val(self: *Fx, ty: Opt[i64], cv: CV, dec: bool, expect: Opt[i64], pos: 
             self.sval(T_BOOL, v)
         }
         Str(s) => self.str_val(s)
+        Variant(t, vi) => self.sval(t, self.tag_const(vi))
     }
 }
 

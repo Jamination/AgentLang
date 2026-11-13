@@ -1,0 +1,5 @@
+when_define_type.al:2:1: error: -D LEVEL=300: 300 does not fit in u8
+when_define_type.al:3:1: error: -D DEMO=yes: `yes` is not a value of type bool (the type of `DEMO`)
+when_define_type.al:4:1: error: -D NAME: only a bool constant may be set without a value; write -D NAME=VALUE
+when_define_type.al:5:1: error: -D RATE=fast: `fast` is not a value of type f64 (the type of `RATE`)
+when_define_type.al:7:1: error: -D MODE=Medium: `Medium` is not a value of type Mode (the type of `MODE`)

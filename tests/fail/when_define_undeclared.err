@@ -1,0 +1,3 @@
+error: -D NOPE: the program declares no constant `NOPE`
+error: -D counter: the program declares no constant `counter`: `counter` is a global variable, not a `const`
+error: -D TARGET_OS: the program declares no constant `TARGET_OS`: `TARGET_OS` is a constant of the library, which -D does not change

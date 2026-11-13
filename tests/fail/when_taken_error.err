@@ -1,0 +1,2 @@
+when_taken_error.al:4:28: error: type mismatch: expected i64, found str
+when_taken_error.al:8:18: error: type mismatch: expected i64, found str

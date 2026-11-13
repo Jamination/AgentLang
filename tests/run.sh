@@ -19,6 +19,12 @@
 # tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
 # tests/driver/NAME.sh is run with bash, the compiler as $1 and an empty scratch directory as
 #                     $2; it tests the command line (files, paths, exit codes) and must exit 0
+# NAME.flags          (run/, std/, sys/, fail/, check/) options for the compiler, e.g. `-D DEMO`
+# all targets         (Linux runs) `alc check --all-targets` must pass for the programs of
+#                     examples/ (files with `fn main`), for tests/check/NAME.al without
+#                     NAME.target and for the tests of run/ and std/ that use `when`, unless
+#                     tests/one_target lists them with the reason: platform code of every
+#                     target stays type-checked
 # Programs run with the repository root as working directory.
 #
 # --target windows builds the programs for Windows and runs them under Wine (in the prefix
@@ -115,17 +121,19 @@ for src in $dir/*.al; do
   exp_out="$dir/$name.out"
   exp_code=0
   [[ -f "$dir/$name.code" ]] && exp_code=$(cat "$dir/$name.code")
+  flags=()
+  [[ -f "$dir/$name.flags" ]] && read -ra flags <"$dir/$name.flags"
   modes=("" "-O0" "--unchecked")
   [[ -f "$dir/$name.checked" ]] && modes=("" "-O0")
   for mode in "${modes[@]}"; do
     label="$name [${mode:-default}]"
-    if ! $ALC build "${TARGET[@]}" "$src" $mode -o "$BIN" 2>"$TMP/cerr"; then
+    if ! $ALC build "${TARGET[@]}" "${flags[@]}" "$src" $mode -o "$BIN" 2>"$TMP/cerr"; then
       echo "FAIL $label: compile error"; head -5 "$TMP/cerr"; fail=$((fail+1)); continue
     fi
     # (with --host-wine the default mode runs the program through `alc run`: arguments, input
     # and exit status pass through the compiler)
     cmd=("${RUN[@]}" "$BIN")
-    [[ -n $HOST_EXE && -z $mode ]] && cmd=("$ALC" run "${TARGET[@]}" "$src" -o "$BIN" --)
+    [[ -n $HOST_EXE && -z $mode ]] && cmd=("$ALC" run "${TARGET[@]}" "${flags[@]}" "$src" -o "$BIN" --)
     if [[ -f "$dir/$name.in" ]]; then
       timeout 60 "${cmd[@]}" <"$dir/$name.in" >"$TMP/out" 2>"$TMP/err"; code=$?
     else
@@ -160,7 +168,9 @@ for src in tests/check/*.al; do
   win_skip "check/$name" && continue
   ctarget=("${TARGET[@]}")
   [[ -f tests/check/$name.target ]] && ctarget=(--target "$(cat "tests/check/$name.target")")
-  if $ALC check "${ctarget[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
+  flags=()
+  [[ -f "tests/check/$name.flags" ]] && read -ra flags <"tests/check/$name.flags"
+  if $ALC check "${ctarget[@]}" "${flags[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
     pass=$((pass+1))
   else
     echo "FAIL check/$name: does not type-check"; head -5 "$TMP/cerr"; fail=$((fail+1))
@@ -171,7 +181,9 @@ for src in tests/fail/*.al; do
   name=$(basename "$src" .al)
   [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
   win_skip "fail/$name" && continue
-  if $ALC check "${TARGET[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
+  flags=()
+  [[ -f "tests/fail/$name.flags" ]] && read -ra flags <"tests/fail/$name.flags"
+  if $ALC check "${TARGET[@]}" "${flags[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
     echo "FAIL $name: expected a compile error"; fail=$((fail+1)); continue
   fi
   ok=1
@@ -194,6 +206,32 @@ for src in tests/unit/*.al; do
   if [[ "$code" != "$exp_code" ]]; then echo "FAIL unit/$name: exit code $code, expected $exp_code"; ok=0; fi
   if [[ $ok == 1 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done
+# every target: the programs whose code differs per target (`when`), see the top
+if [[ $WIN == 0 ]]; then
+  declare -A ONE
+  while read -r key why; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    ONE[$key]=$why
+  done <tests/one_target
+  for src in examples/*.al examples/*/*.al tests/check/*.al tests/run/*.al tests/std/*.al; do
+    [[ -e "$src" ]] || continue
+    name=$(basename "$src" .al)
+    [[ -n "$FILTER" && "$name" != *"$FILTER"* ]] && continue
+    [[ -n "${ONE[$src]+x}" ]] && continue
+    case $src in
+      examples/*) grep -q '^fn main' "$src" || continue ;;
+      tests/check/*) [[ -f ${src%.al}.target ]] && continue ;;
+      *) grep -qE '^\s*when ' "$src" || continue ;;
+    esac
+    flags=()
+    [[ -f "${src%.al}.flags" ]] && read -ra flags <"${src%.al}.flags"
+    if $ALC check --all-targets "${flags[@]}" "$src" 2>"$TMP/cerr" >/dev/null; then
+      pass=$((pass+1))
+    else
+      echo "FAIL all-targets $src: does not type-check for every target"; head -5 "$TMP/cerr"; fail=$((fail+1))
+    fi
+  done
+fi
 for src in tests/driver/*.sh; do
   [[ $WIN == 1 ]] && break
   [[ -e "$src" ]] || continue

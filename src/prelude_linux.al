@@ -708,3 +708,6 @@ fn __os_pipe() -> (i64, i64) {
     }
     return (fds[0] & 0xFFFFFFFF, fds[0] >> 32)
 }
+
+// the target of this layer (see `enum Os` in prelude.al)
+const TARGET_OS = Os.Linux

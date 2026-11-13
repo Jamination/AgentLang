@@ -40,7 +40,7 @@ priv fn variant_list(cx: *Cx, ei: i64) -> str {
 
 // The enum that the name `n` denotes as the qualifier of `n.Variant`, or -1. An enum of the
 // other layer is hidden by a declaration of this layer with the same name.
-priv fn qual_enum_name(self: *Cx, n: str) -> i64 {
+fn qual_enum_name(self: *Cx, n: str) -> i64 {
     ei := match self.find_enum(n) {
         Some(e) => e
         None => return -1

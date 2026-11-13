@@ -412,7 +412,7 @@ fn file(p: *Parser) -> Vec[Decl] {
         if ok {
             out.push(d)
         } else {
-            p.sync_decl(from)
+            p.sync_decl(from, false)
         }
     }
     return out
@@ -421,8 +421,8 @@ fn file(p: *Parser) -> Vec[Decl] {
 // after an error in the declaration that starts at token `from`: skip to the next
 // top-level declaration, a line that starts outside all braces with a declaration keyword
 // or a name (a keyword in column 1 also inside braces: the declaration in error may lack
-// a `}`)
-priv fn sync_decl(p: *Parser, from: i64) {
+// a `}`). `inner`: the declaration is in the branch of a `when`, whose `}` ends the search.
+priv fn sync_decl(p: *Parser, from: i64, inner: bool) {
     depth := 0
     for j in from..p.i {
         if tk_p(p.toks[j].t, '{') {
@@ -439,9 +439,14 @@ priv fn sync_decl(p: *Parser, from: i64) {
         match p.peek() {
             Eof => return
             P('{') => depth += 1
-            P('}') => depth -= 1
+            P('}') => {
+                if inner && depth <= 0 {
+                    return
+                }
+                depth -= 1
+            }
             Kw(k) => {
-                if starts && (depth <= 0 || p.pos().col == 1) && (k == KW_FN || k == KW_STRUCT || k == KW_ENUM || k == KW_CONST || k == KW_TEST || k == KW_USE || k == KW_INLINE || k == KW_NOINLINE || k == KW_EXTERN || k == KW_PRIV) {
+                if starts && (depth <= 0 || p.pos().col == 1) && (k == KW_FN || k == KW_STRUCT || k == KW_ENUM || k == KW_CONST || k == KW_TEST || k == KW_USE || k == KW_INLINE || k == KW_NOINLINE || k == KW_EXTERN || k == KW_PRIV || k == KW_WHEN) {
                     return
                 }
             }
@@ -483,8 +488,9 @@ priv fn priv_decl(p: *Parser) -> (Decl, bool) {
         p.errs.push(Diag{pos: ppos, msg: "a `test` block cannot be `priv` (nothing refers to a test by name): remove `priv`"})
         return p.decl()
     }
-    if p.is_kw(KW_USE) {
-        p.errs.push(Diag{pos: ppos, msg: "`use` cannot be `priv` (a file is included into the whole program): remove `priv`"})
+    if p.is_kw(KW_USE) || p.is_kw(KW_WHEN) {
+        what := if p.is_kw(KW_USE) { "`use` cannot be `priv` (a file is included into the whole program)" } else { "a `when` cannot be `priv` (write `priv` in front of the declarations inside it)" }
+        p.errs.push(Diag{pos: ppos, msg: fmt(what, ": remove `priv`")})
         return p.decl()
     }
     d, ok := p.decl()
@@ -533,6 +539,7 @@ priv fn set_priv(d: Decl, ppos: Pos, errs: *Vec[Diag]) -> Decl {
         }
         Test(t) => d
         Use(path, upos) => d
+        When(w) => d
     }
 }
 
@@ -912,10 +919,115 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
             }
         }
     }
+    if p.eat_kw(KW_WHEN) {
+        return p.when_decl(pos)
+    }
     if tk_id(p.peek()) {
         return p.var_decl(pos)
     }
-    return p.err[Decl]("expected a declaration: `fn`, `struct`, `enum`, `const`, a variable (`name: T`, `name := value`), `test`, `use`, `extern` or `priv`")
+    return p.err[Decl]("expected a declaration: `fn`, `struct`, `enum`, `const`, a variable (`name: T`, `name := value`), `test`, `use`, `when`, `extern` or `priv`")
+}
+
+// ---------- when ----------
+
+// after the `}` of a branch: `else` (also on the next line) is consumed
+priv fn else_follows(p: *Parser) -> bool {
+    j := p.i
+    while p.toks[j].t == Nl {
+        j += 1
+    }
+    if tk_kw(p.toks[j].t, KW_ELSE) {
+        p.i = j + 1
+        return true
+    }
+    return false
+}
+
+// The branches of a `when` after the keyword: `cond { ... } else when cond { ... } else { ... }`.
+// `top`: declarations (a top-level `when`), else statements.
+priv fn when_arms(p: *Parser, top: bool) -> (Vec[WhenArm], bool) {
+    arms := vec[WhenArm]()
+    if !p.nest(COST_STMT) {
+        return fail[Vec[WhenArm]]()
+    }
+    defer {
+        p.unnest(COST_STMT)
+    }
+    cond: Opt[*Expr] = None
+    loop {
+        c := p.header_expr()
+        if c == nil {
+            return fail[Vec[WhenArm]]()
+        }
+        cond = Some(c)
+        last := false
+        loop {
+            arm := WhenArm{cond: cond, decls: vec[Decl](), body: nil}
+            if top {
+                ds, ok := p.decl_block()
+                if !ok {
+                    return fail[Vec[WhenArm]]()
+                }
+                arm.decls = ds
+            } else {
+                b := p.block()
+                if b == nil {
+                    return fail[Vec[WhenArm]]()
+                }
+                arm.body = b
+            }
+            arms.push(arm)
+            if last || !p.else_follows() {
+                return (arms, true)
+            }
+            if p.eat_kw(KW_WHEN) {
+                break
+            }
+            if !p.is_p('{') {
+                return p.err[Vec[WhenArm]]("expected `when` or `{` after `else` (a chain of compile-time choices is written `when a { } else when b { } else { }`)")
+            }
+            cond = None
+            last = true
+        }
+    }
+    return (arms, true)
+}
+
+// `when cond { decls } ...` at top level
+priv fn when_decl(p: *Parser, pos: Pos) -> (Decl, bool) {
+    arms, ok := p.when_arms(true)
+    if !ok {
+        return fail[Decl]()
+    }
+    return (When(WhenDecl{arms: arms, pos: pos}), true)
+}
+
+// the declarations of a branch of a top-level `when`: `{ decl ... }`
+priv fn decl_block(p: *Parser) -> (Vec[Decl], bool) {
+    if !p.expect_p('{') {
+        return fail[Vec[Decl]]()
+    }
+    save := p.no_lit
+    p.no_lit = false
+    out := vec[Decl]()
+    loop {
+        p.skip_nl()
+        if p.is_p('}') || p.peek() == Eof {
+            break
+        }
+        from := p.i
+        d, ok := p.decl()
+        if ok {
+            out.push(d)
+        } else {
+            p.sync_decl(from, true)
+        }
+    }
+    p.no_lit = save
+    if !p.expect_p('}') {
+        return fail[Vec[Decl]]()
+    }
+    return (out, true)
 }
 
 // ---------- types ----------
@@ -1230,6 +1342,14 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             return fail[SK]()
         }
         return (If(c, t, e), true)
+    }
+    if p.eat_kw(KW_WHEN) {
+        wpos := p.toks[p.i - 1].pos
+        arms, ok := p.when_arms(false)
+        if !ok {
+            return fail[SK]()
+        }
+        return (When(parser_box(WhenDecl{arms: arms, pos: wpos})), true)
     }
     if p.eat_kw(KW_WHILE) {
         c := p.header_expr()

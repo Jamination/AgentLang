@@ -1,0 +1,1 @@
+when_order.al:3:1: error: this `when` was decided before all files were included, and a file included later changes a constant of its condition (a constant of the program that hides one of the library): give that constant another name

@@ -153,6 +153,33 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 A program that never opens a window or a device (a test run, a server, a tool) uses none of
 the system libraries and is a static executable.
 
+## Platform code and build flags
+
+Code that differs per system goes in `when` branches, and a demo or debug build is a constant
+set on the command line; neither costs anything in the other build:
+
+```
+const DEMO = false                      // alc build -D DEMO game.al: the demo build
+const DEBUG_DRAW = false
+
+when TARGET_OS == Windows {
+    fn save_dir() -> str { fmt(env_get("APPDATA").0, "/MyGame") }
+} else {
+    fn save_dir() -> str { fmt(env_get("HOME").0, "/.local/share/mygame") }
+}
+
+fn update(g: *Game, inp: *Input, dt: f32) {
+    if DEMO && g.level > 3 {            // decided at compile time: the full game has no trace of it
+        g.screen = BuyScreen
+        return
+    }
+    ...
+}
+```
+
+Only the taken branch of a `when` is type-checked, so `alc check --all-targets game.al`
+checks the game for Linux and Windows at once.
+
 ## Windows
 
 **Building and shipping.** `alc build --target windows --gui game.al -o game.exe` makes one

@@ -495,3 +495,10 @@ fn audio_open(rate: i64, channels: i64) -> (*AudioDevice, bool) {
     audio_open("default", rate, channels, 50)
 }
 
+
+// the OS layer of the target
+when TARGET_OS == Windows {
+    use std.audio_windows
+} else {
+    use std.audio_linux
+}

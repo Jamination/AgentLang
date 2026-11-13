@@ -2878,3 +2878,11 @@ fn or[T](o: Opt[T], default: T) -> T {
         None => default
     }
 }
+
+// ---------- target ----------
+// The system and processor the program is built for, constants for `when` and `if`:
+// `when TARGET_OS == Windows { ... }`. TARGET_OS is declared by the OS layer.
+enum Os { Linux, Windows }
+enum Arch { X86_64 }
+
+const TARGET_ARCH = Arch.X86_64

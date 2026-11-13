@@ -7,7 +7,8 @@ Vulkan surface (Linux) or a DXGI swapchain (Windows). The API and the events are
 both systems; the differences are listed in [Windows](#windows).
 
 The window system lives in the module's OS layer: `std/window_linux.al` (X11) or
-`std/window_windows.al` (Win32), loaded with `use std.window` for the target.
+`std/window_windows.al` (Win32), which `std/window.al` includes for the target with
+`when TARGET_OS == Windows { use std.window_windows } else { use std.window_linux }`.
 
 - **Linux:** a program that calls `window_open` is dynamically linked against `libX11.so.6`
   (and libc). On a Wayland session it runs through XWayland; a program that wants to talk to

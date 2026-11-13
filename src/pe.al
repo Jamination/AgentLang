@@ -114,6 +114,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
         is_iat[m.externs[x].got] = true
     }
     gaddr := vec_fill(m.globals.len, 0)
+    live := x86_live_data(m, out)
     func_addr := vec_fill(m.funcs.len, 0)
     func_off := vec_fill(m.funcs.len, 0)
     // ---- .text ----
@@ -137,7 +138,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     }
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if g.readonly {
+        if g.readonly && live[gi] {
             a := max(g.align, 1)
             while rodata.len % a != 0 {
                 rodata.push(0)
@@ -304,7 +305,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     }
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if g.relocs.is_empty() || is_iat[gi] {
+        if g.relocs.is_empty() || is_iat[gi] || !live[gi] {
             continue
         }
         if g.readonly {

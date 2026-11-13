@@ -196,6 +196,8 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
         ContinueTo(label) => true
         // (a nested function does not see the variable)
         Fn(d) => true
+        // (replaced by its taken branch before lowering: src/when.al)
+        When(w) => true
     }
 }
 

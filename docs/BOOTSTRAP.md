@@ -28,7 +28,10 @@ The seed is a static x86-64 Linux executable of about 2.8 MB. It only has to be 
 the seed does not know, or a run-time library function it does not have (stage 1 is linked
 with the seed's copy of the library, so a new `__os_*` function for the compiler is added
 first, then the seed is replaced, then the compiler calls it); add the feature, build,
-reseed, then use it. `ALC_SEED=/path/to/alc` selects another seed.
+reseed, then use it. `ALC_SEED=/path/to/alc` selects another seed. So the compiler sources
+(`src/*.al` except the run-time library) do not use `when` until the seed knows it; the
+run-time library (`src/prelude*.al`) and the bundled modules (`std/`) are compiled by the new
+compiler and may.
 
 Stage 1 is compiled by the seed and may therefore lay out types as an older compiler did (the
 seed before the change to 4-byte enum tags stored every tag in 8 bytes). The compiler never
@@ -55,7 +58,8 @@ executables before and after); the conventions below describe the result.
 
 | Path | Contents |
 |------|----------|
-| `src/main.al` | driver: arguments, source loading, bundled modules, diagnostics output; lists every other file |
+| `src/main.al` | driver: arguments, source loading (files and the `when`s that include them), bundled modules, diagnostics output; lists every other file |
+| `src/when.al` | `when` (deciding conditions, the branches of function bodies) and `-D NAME=VALUE` |
 | `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), processes, the working-memory regions |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
@@ -142,7 +146,8 @@ Compiling the compiler (about 34,000 lines including the prelude) takes about 0.
 
 ## Notes on language features
 
-- **`priv`** (`src/priv.al`). Right after a file is parsed, `priv_apply` renames each private
+- **`priv`** (`src/priv.al`). Once the files are loaded and their `when`s decided (`finish` in
+  `src/main.al`), `priv_apply` renames each private
   declaration to `name` + byte 1 + the file's index (a spelling that cannot occur in source),
   in the declaration and in every identifier of that spelling in the file, including local
   declarations; field names, field labels and variant names are left alone. The rest of the
@@ -154,6 +159,32 @@ Compiling the compiler (about 34,000 lines including the prelude) takes about 0.
   private one fits), and `priv_hint` (the "is declared `priv` in ..." hint). A new kind of
   declaration becomes private-capable with one case in `set_priv` (`src/parser.al`) and one
   in `priv_decl_info` / `rewrite` (`src/priv.al`).
+- **`when`** (`src/when.al`, driven by `src/main.al`). Each file's top-level declarations are
+  kept as a list of items (`Item` in main.al: a declaration, a file included here for the
+  first time, or a `when` still to decide). The library's files (prelude, OS layer, bundled
+  modules) decide their `when`s while they are read; the program's are decided in rounds
+  after loading (`settle`), and the files a taken branch includes are read then. `finish`
+  then replaces the `when` statements of function bodies by their taken branch
+  (`when_stmts`), gives the constants their `-D` values (the declared value becomes the
+  literal of the command line: `when_apply_defs`), runs `priv_apply` per file (so priv.al
+  only sees taken branches) and puts the declarations in order: each file where it is first
+  included, as before `when` existed. The conditions are evaluated on the AST with the
+  constants and enums declared outside `when` (`when_register`, only once a `when` or `-D`
+  needs them), not by the type checker, which never sees an untaken branch. `TARGET_OS` is
+  declared by the OS layers (`src/prelude_linux.al`, `src/prelude_windows.al`), `enum Os`,
+  `enum Arch` and `TARGET_ARCH` by `src/prelude.al`; a constant may be a variant of an enum
+  without data (`CV.Variant`). The bundled modules with an OS layer (std.window, std.input,
+  std.audio) include it with `when TARGET_OS == Windows { use std.window_windows } else { ... }`
+  at their end, which loads the files in the same order as the rule the driver had before.
+- **`if` on a constant** (`if_br` in `src/lower_fn.al`): a condition (or an operand of `&&`,
+  `||`, `!`) without local variables whose `const_eval` is a `bool` becomes a jump, and the
+  branch it rules out is unreachable: pruned by `opt_first` at every level, with the calls and
+  data in it. The linkers (ELF and PE) leave out every read-only global that the compiled
+  code does not refer to, directly or through the data of other kept globals
+  (`x86_live_data` in `src/x86/mod.al`). `ALC_DISABLE=constif,deaddata` turns both off, which
+  gives the executables of the compiler before them.
+- **`alc check --all-targets`** (`check_all` in main.al) loads and checks the program once per
+  target and merges the diagnostics by file name, line, column and message.
 - **Nested and anonymous functions** (`src/lower_nested.al`). `fn name(..) { }` inside a
   block is the statement `SK.Fn`, `fn(..) { }` the expression `EK.Fn` (a `FnDecl` with an empty
   name). Both become ordinary IR functions `outer.name` / `outer.fn@line:col`, lowered where
@@ -224,7 +255,8 @@ before it prints them.
 
 `ALC_DEBUG=verify` (IR verifier between passes), `trace`, `mir`, `unroll`, `mem`;
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
-`partial`, `thread4`, `thread5`, `ifconv`); `ALC_STD_DIR=<dir>` reads bundled modules from
+`partial`, `thread4`, `thread5`, `ifconv`; outside the optimiser `constif`: `if` on a constant
+is not decided while lowering, `deaddata`: all read-only data is linked); `ALC_STD_DIR=<dir>` reads bundled modules from
 `<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the prelude
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so
@@ -256,7 +288,8 @@ same, the differences are:
   prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
   (exception dispatch, debuggers); functions without a frame are leaf functions.
 - **Run-time library.** `src/prelude_windows.al` replaces `src/prelude_linux.al` (kernel32.dll
-  only); bundled modules with Linux interfaces are refused (`LINUX_ONLY` in `src/main.al`).
+  only); bundled modules with Linux interfaces are refused (`LINUX_ONLY` in `src/main.al`), and
+  the modules with an OS layer include the target's one with `when TARGET_OS == ...`.
   `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
   `tests/windows.skip`).
 - `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine.

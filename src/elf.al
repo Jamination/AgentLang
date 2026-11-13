@@ -133,9 +133,10 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         put64(&rodata, i64(bits.hi))
     }
     gaddr := vec_fill(m.globals.len, 0)
+    live := x86_live_data(m, out)
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if g.readonly {
+        if g.readonly && live[gi] {
             a := max(g.align, 1)
             while rodata.len % a != 0 {
                 rodata.push(0)
@@ -329,6 +330,9 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
             continue
         }
         if g.readonly {
+            if !live[gi] {
+                continue
+            }
             link_patch_data(&rodata, BASE + ro_off, g, gaddr[gi], &gaddr, &func_addr)
         } else if is_some(g.data) {
             link_patch_data(&data, BASE + data_off, g, gaddr[gi], &gaddr, &func_addr)

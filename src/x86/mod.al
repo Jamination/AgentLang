@@ -11,6 +11,53 @@ struct Output {
     err: str // the first function that cannot be compiled (stack frame too large), or ""
 }
 
+// The globals the linkers write (ELF and PE). A read-only global (a string literal, a
+// constant table, a "file:line" text) is kept only if the compiled code refers to it,
+// directly or through the data of another kept global: data that only removed code used
+// (a branch of `if` on a constant, a function nobody calls, a check the optimiser removed)
+// is not in the executable. Writable globals are all kept. ALC_DISABLE=deaddata keeps all.
+fn x86_live_data(m: *Module, out: *Output) -> Vec[bool] {
+    live := vec_fill(m.globals.len, !opt_enabled("deaddata"))
+    if !opt_enabled("deaddata") {
+        return live
+    }
+    work := vec[i64]()
+    for gi in 0..m.globals.len {
+        if !m.globals[gi].readonly {
+            live[gi] = true
+            work.push(gi)
+        }
+    }
+    for ci in 0..out.funcs.len {
+        for r in out.funcs[ci].code.relocs {
+            match r.kind {
+                Abs32Global(g) => {
+                    if !live[g] {
+                        live[g] = true
+                        work.push(g)
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    while work.len > 0 {
+        g := work.pop()
+        for rl in m.globals[g].relocs {
+            match rl.1 {
+                Global(t, _) => {
+                    if !live[t] {
+                        live[t] = true
+                        work.push(t)
+                    }
+                }
+                Func(_) => {}
+            }
+        }
+    }
+    return live
+}
+
 // The functions that each function calls or takes the address of, from its optimised IR: those
 // of function f are list[start[f]..start[f] + cnt[f]]; cnt[f] is -1 while they are not known.
 priv struct Refs {

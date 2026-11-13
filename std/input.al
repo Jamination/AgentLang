@@ -655,3 +655,10 @@ fn action_vec2(m: *ActionMap, i: *Input, left: i64, right: i64, up: i64, down: i
     }
     v
 }
+
+// the OS layer of the target
+when TARGET_OS == Windows {
+    use std.input_windows
+} else {
+    use std.input_linux
+}

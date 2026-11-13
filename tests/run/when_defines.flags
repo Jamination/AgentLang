@@ -1,0 +1,1 @@
+-D DEMO -D LEVEL=3 -D NAME=hello -D RATE=-2.5 -D MODE=Slow -D BIG=0xFF

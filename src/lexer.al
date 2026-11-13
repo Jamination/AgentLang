@@ -18,10 +18,10 @@ struct Token {
     pos: Pos
 }
 
-priv KEYWORDS := [26]str{
+priv KEYWORDS := [27]str{
     "fn", "struct", "enum", "const", "test", "use", "if", "else", "while", "loop", "for", "in",
     "return", "break", "continue", "assert", "true", "false", "nil", "match", "by", "defer",
-    "inline", "noinline", "extern", "priv",
+    "inline", "noinline", "extern", "priv", "when",
 }
 
 // the keywords by their index in KEYWORDS
@@ -51,6 +51,7 @@ const KW_INLINE = 22
 const KW_NOINLINE = 23
 const KW_EXTERN = 24
 const KW_PRIV = 25
+const KW_WHEN = 26
 
 // punctuation of more than one byte (one byte: the character itself, `P('(')`)
 const P_SHL_EQ = 0x3D3C3C // <<=

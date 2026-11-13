@@ -68,7 +68,7 @@ test "areas" {
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
   A line cannot *start* with a binary operator.
 - Keywords (not usable as names): `fn struct enum const test use priv extern inline noinline if
-  else while loop for in by return break continue assert match defer true false nil`.
+  else while loop for in by return break continue assert match defer true false nil when`.
 - Integer literals: `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17`. A character literal (`'a'`,
   `'\n'`, `'\''`, `'\x41'`) is an integer literal with the byte's value: `c: u8 = 'a'`,
   `s[i] == 'a'`; `c := 'a'` is an `i64`.
@@ -139,6 +139,7 @@ use "other.al"                             // include another file (path relativ
 use std.window                             // a module bundled with the compiler (see STDLIB.md)
 extern "libc.so.6" fn getpid() -> i32      // a C function (see C interop)
 priv fn helper(x: i64) -> i64 { ... }      // `priv`: visible only inside this file
+when TARGET_OS == Windows { ... } else { ... }   // compile-time choice: see `when` below
 ```
 
 - The program starts at `fn main()`; `fn main() -> i64` returns the exit status.
@@ -221,6 +222,17 @@ follow the same rules.
 - An aggregate constant can be read, indexed, iterated, sliced, compared, passed and copied
   (`t := TABLE` is an independent copy). No constant can be modified or have its address taken;
   to get a modifiable table, declare a global (`TABLE := [4]i64{...}`).
+
+### `when`: compile-time choices
+
+`when cond { ... } else when cond { ... } else { ... }` keeps only the first branch whose
+condition holds; the others are parsed but not type-checked and leave nothing in the
+executable. At top level the branches hold declarations (also `use`), in a function
+statements; neither form opens a scope. A condition is made of literals, `==`, `!=`, `&&`,
+`||`, `!` and constants declared outside `when`: `TARGET_OS` (`Linux`, `Windows`),
+`TARGET_ARCH` (`X86_64`) and the program's; anything else is an error. `alc build -D N=V`
+(also run, test, check; `-D N` alone: `true`) sets the program's constant `N`. An `if` on
+constants compiles only its taken branch (both are type-checked). [DETAILS.md](DETAILS.md#when-and--d)
 
 ### `priv`: file-private declarations
 
@@ -369,7 +381,6 @@ fn describe(o: Opt[Shape]) -> str {
         None => "nothing"
     }
 }
-
 fn both(a: Opt[i64], b: Opt[i64]) -> i64 {
     match (a, b) {
         (Some(x), Some(y)) => x + y
@@ -377,7 +388,6 @@ fn both(a: Opt[i64], b: Opt[i64]) -> i64 {
         (None, None) => 0
     }
 }
-
 fn sum(l: *List) -> i64 {
     match l {
         Cons(x, rest) => x + sum(rest)   // l is not nil and *l is a Cons
@@ -385,14 +395,12 @@ fn sum(l: *List) -> i64 {
         nil => 0                         // needed for the match to be exhaustive
     }
 }
-
 fn deposit(o: *Opt[Account], amount: i64) {
     match *o {
         Some(&acc) => { acc.balance += amount }          // acc is a *Account into *o
         None => {}
     }
 }
-
 fn main() {
     end := End
     b := Cons(2, &end)
@@ -719,19 +727,16 @@ putf(x: f64, digits: i64)    fmtf(x: f64, digits: i64) -> str   // fixed notatio
 fmtf(x: f64, digits: i64, width: i64) -> str   // the same, right-aligned in width characters: fmtf(3.14159, 2, 8) is "    3.14"; also for f32
 eprint(s: str)    eput(s: str)             // s to standard error, unbuffered, with / without a newline: eprint(fmt("bad: ", x))
 exit(code: i64) -> never                   // flush, end the program with this exit status
-
 // ---- numbers
 min(a: T, b: T) -> T    max(a: T, b: T) -> T    abs(x: T) -> T   // min / max: any numeric type or str (both arguments the same type), NaN if either is NaN; abs: any signed integer or float type
 swap(a: *T, b: *T)    floor ceil round trunc pow fmod sin cos tan atan2 exp log ...   // swap(&x, &y), swap(&v[i], &v[j]); the math functions exist for f32 and f64 (the argument type picks one): std/math.md
 clock_ns() -> i64                          // monotonic clock in nanoseconds; there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
-
 // ---- slices (for a Vec pass v[..])
 sort(a: []T)                               // ascending, in place; T is a number type or str (bytewise, like cmp)
 sort_by(a: []T, less: fn(T, T) -> bool)    // stable; descending: sort_by(xs, fn(a: i64, b: i64) -> bool { a > b })
 sort_by(a: []T, ctx: C, less: fn(C, T, T) -> bool)   // `ctx` is handed to every comparison (there are no closures)
 index_of(s: []T, x: T) -> i64    contains(s: []T, x: T) -> bool    reverse(s: []T)   // position of the first element == x, or -1; reverse works in place
 copy(dst: []T, src: []T) -> i64    fill(a: []T, x: T)   // copies min(len(dst), len(src)) elements (they may overlap), returns that number; every element = x
-
 // ---- Vec[T]: growable array.  struct Vec[T] { buf: []T, len: i64 }
 vec[T]() -> Vec[T]                         // the zero value is an empty, usable Vec too: a field `xs: Vec[T]` needs no vec[T]()
 vec_of(s: []T) -> Vec[T]    vec_fill(n: i64, x: T) -> Vec[T]   // a Vec of copies of the elements of s: vec_of([]i64{1, 2}); of n times x
@@ -748,7 +753,6 @@ v.insert(i: i64, x: T)                     // x becomes element i (0 <= i <= v.l
 v.remove(i: i64) -> T                      // removes and returns element i, the rest moves down (order kept)
 v.swap_remove(i: i64) -> T                 // removes and returns element i, the last element takes its place (fast)
 v.contains(x: T) -> bool    v.dedup()      // (position: index_of(v[..], x)); removes adjacent equal elements (sort first to remove all duplicates)
-
 // ---- Map[K, V]: hash map that keeps the order of insertion. K is any type with == (numbers, str, structs, tuples, enums); a NaN key equals nothing (each set adds an entry that cannot be found)
 map[K, V]() -> Map[K, V]                   // the zero value is an empty, usable Map too
 m.set(k: K, v: V)                          // inserts (as the last entry) or replaces the value (the entry keeps its place)
@@ -757,7 +761,6 @@ m.get_or(k: K, default: V) -> V    m.has(k: K) -> bool    m.del(k: K) -> bool   
 m.ptr(k: K) -> *V                          // pointer to the stored value (nil if missing) to change it in place; valid until a new key is set
 m.keys() -> []K    m.values() -> []V       // new slices of all keys / values in the order in which the keys were first set (a deleted key that is set again is the last)
 m.len    len(m)    m.clear()               // number of entries; remove every entry
-
 // ---- strings.  str = []u8: s[i] is a byte, s[a..b] a view (no copy), len(s) counts bytes, == compares content
 concat(a: str, b: str) -> str    repeat(s: str, n: i64) -> str   // new strings: a then b (more parts: fmt(a, b, c)); n copies of s ("" if n <= 0)
 find(s: str, sub: str) -> i64    rfind(s: str, sub: str) -> i64  // index of the first / last occurrence of sub, or -1 (empty sub: 0 / len(s))
@@ -784,10 +787,8 @@ parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits 
 parse_i64(s: str, base: i64) -> (i64, bool)   // the same in base 2..36 (letters of either case; no prefix): parse_i64("ff", 16). Base 0: 0x / 0b / 0o after the sign decide, else decimal ("-0x1F", "017" is 17); other bases: panic
 parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan. parse_f32: the same to f32, rounded once from the text
 is_digit(c: u8) -> bool   is_alpha  is_alnum  is_upper  is_lower  is_space: the same   // ASCII; '_' is none of them; is_space: the white space of trim
-
 // ---- Opt[T]: a value that may be absent.  enum Opt[T] { None, Some(T) }  (zero value: None)
 is_some(o: Opt[T]) -> bool   is_none(o: Opt[T]) -> bool   unwrap(o: Opt[T]) -> T   or(o: Opt[T], default: T) -> T   // unwrap / or: the value; if None: "panic: unwrap of None" / default
-
 // ---- files and process
 read_file(path: str) -> (str, bool)        // the whole file; ("", false) if it cannot be opened or read
 write_file(path: str, data: str) -> bool   // creates or replaces the file; false on failure
@@ -840,9 +841,9 @@ alc build file.al [-o out]     compile; the executable is the source path withou
 alc run file.al [-- args...]   compile (writing the executable as build does) and run; exit status of the program
 alc test file.al               compile and run all `test` blocks, each in its own process (`main` is not run and need not exist);
                                per test its output, then `ok   name` / `FAIL name`; status 1 if any failed; the test runner is written to `file.test`
-alc check file.al              type-check only
+alc check file.al              type-check only; `--all-targets`: once for every target (Linux, Windows)
 alc sigs file.al [-- std]      one line per declaration: `file:line: signature`; `-- std` adds the library's
-options: --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  --gui (with --target windows: no console window): DETAILS.md#windows
+options: -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  --gui (with --target windows: no console window): DETAILS.md#windows
 ```
 
 Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`

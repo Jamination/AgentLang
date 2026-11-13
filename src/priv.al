@@ -2,8 +2,9 @@
 // constant or global variable (`priv fn helper() { ... }`, `priv counter: i64`).
 //
 // All top-level names of a program share one namespace. A private declaration `name` of file
-// number `k` is taken out of it by renaming: right after the file is parsed, the declaration
-// and every identifier of that spelling in the same file get the internal name
+// number `k` is taken out of it by renaming: once the files are loaded and their `when`s
+// decided (main.al), the declaration and every identifier of that spelling in the same file
+// get the internal name
 // `name` + byte 1 + `k`, which cannot be written in source. The rest of the compiler needs no
 // notion of files: other files simply cannot spell the name. Local variables, parameters and
 // type parameters of the same spelling are renamed with it, so shadowing works as written.
@@ -52,6 +53,7 @@ fn priv_decl_info(d: *Decl) -> (str, i64, bool, Pos) {
         Global(g) => (g.name, 2, g.is_priv, g.pos)
         Test(t) => ("", 0, false, t.pos)
         Use(path, pos) => ("", 0, false, pos)
+        When(w) => ("", 0, false, w.pos)
     }
 }
 
@@ -193,7 +195,26 @@ priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
             Test(t)
         }
         Use(path, pos) => d
+        // (the driver replaces a `when` by its taken branch before this runs; see when.al)
+        When(w) => {
+            when_arms(r, &w)
+            When(w)
+        }
     }
+}
+
+priv fn when_arms(r: *PrivCx, w: *WhenDecl) -> bool {
+    for i in 0..w.arms.len {
+        arm := &w.arms[i]
+        opt_pexpr(r, arm.cond)
+        for j in 0..arm.decls.len {
+            arm.decls[j] = rewrite(r, arm.decls[j])
+        }
+        if arm.body != nil {
+            block(r, arm.body)
+        }
+    }
+    return true
 }
 
 priv fn types(r: *PrivCx, ts: *Vec[TypeAst]) -> bool {
@@ -484,5 +505,6 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
         Defer(b) => block(r, b)
         // a nested function is a local name: renamed like the variables of that spelling
         Fn(d) => priv_fn(r, d)
+        When(w) => when_arms(r, w)
     }
 }

@@ -1,0 +1,9 @@
+# Programs that `tests/run.sh` does not check with `alc check --all-targets` (see its top):
+# "path reason". They are built for their one target by the other tests.
+examples/vk_triangle.al std.vk binds libvulkan.so.1 (Linux)
+examples/wayland_window.al std.wayland is Linux only
+tests/check/wayland.al std.wayland is Linux only
+tests/check/wayland_window.al std.wayland is Linux only
+examples/dx12_triangle.al Direct3D 12 and the Win32 window handle (win32_hwnd) are Windows only
+examples/dx12_starter/game.al Direct3D 12 and the Win32 window handle (win32_hwnd) are Windows only
+examples/dx12_breakout/game.al Direct3D 12 and the Win32 window handle (win32_hwnd) are Windows only

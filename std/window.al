@@ -114,3 +114,10 @@ fn mouse_in_frame(w: *Window, pw: i64, ph: i64) -> vec2 {
     }
     (mouse_pos(&w.input) - vec2(f32(rx), f32(ry))) * vec2(f32(pw) / f32(rw), f32(ph) / f32(rh))
 }
+
+// the OS layer of the target
+when TARGET_OS == Windows {
+    use std.window_windows
+} else {
+    use std.window_linux
+}

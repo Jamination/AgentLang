@@ -1,0 +1,6 @@
+when_nonconst.al:7:6: error: `counter` is a global variable, not a constant: a `when` condition is decided at compile time and can use only constants (`const`), TARGET_OS, TARGET_ARCH and literals
+when_nonconst.al:8:8: error: `on()` cannot be used in a `when` condition: a condition is decided at compile time and is made of constants, literals, `==`, `!=`, `&&`, `||`, `!` and parentheses
+when_nonconst.al:9:12: error: the operator `>` cannot be used in a `when` condition (only `==`, `!=`, `&&`, `||` and `!`); a constant can hold the result: `const BIG = LIMIT > 2`
+when_nonconst.al:10:6: error: the condition of `when` must be a bool, not an integer
+when_nonconst.al:11:6: error: constant `BAD` (line 5) cannot be used in a `when` condition: its value `on()` is not made of literals, constants, variants and operators
+when_nonconst.al:15:10: error: unknown name `x` in a `when` condition (a condition can use only constants declared with `const` outside `when`, TARGET_OS, TARGET_ARCH and literals)

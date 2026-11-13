@@ -9,6 +9,8 @@ enum CV {
     Float(f64),
     Bool(bool),
     Str(str),
+    // a variant of an enum without data (`const TARGET_OS = Os.Linux`): enum type, variant index
+    Variant(i64, i64),
 }
 
 fn is_cv_float(o: Opt[CV]) -> bool {
@@ -1329,6 +1331,7 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
         Some(Float(_)) => ct.or(T_F32)
         Some(Bool(_)) => T_BOOL
         Some(Str(_)) => T_STR
+        Some(Variant(t, _)) => t
         None => T_ERR
     }
 }
@@ -1604,10 +1607,32 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
     }
     self.const_vals.set(d.name, Busy)
     ty: Opt[i64] = None
+    want := -1
     match d.ty {
         Some(t) => {
             env := map[str, i64]()
             ty = Some(self.resolve(&t, &env))
+            match self.types.k(ty.unwrap()) {
+                Enum(_) => {
+                    want = ty.unwrap()
+                }
+                _ => {}
+            }
+        }
+        None => {}
+    }
+    // a variant: `const TARGET_OS = Os.Linux`, `const MODE: Mode = Fast`
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    vr := self.const_variant(&d.val, want)
+    self.scope_prelude = save_scope
+    match vr {
+        Some((ety, vi)) => {
+            if is_some(ty) && ty != Some(ety) {
+                self.err(d.pos, fmt("constant `", name, "` value does not match its declared type"))
+            }
+            self.const_vals.set(d.name, Done(Some(ety), Variant(ety, vi)))
+            return Some((Some(ety), CV.Variant(ety, vi)))
         }
         None => {}
     }
@@ -1642,6 +1667,7 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                             true
                         }
                         (F64, Float(_)), (Bool, Bool(_)), (Slice(T_U8), Str(_)) => true
+                        (Enum(_), Variant(et, _)) => et == t
                         _ => false
                     }
                     if !ok {
@@ -1649,7 +1675,10 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
                     }
                 }
                 None => {
-                    ty = vt
+                    ty = match v0 {
+                        Variant(et, _) => Some(et)
+                        _ => vt
+                    }
                     if !is_some(vt) && dec_lit_over(&d.val, 64, true) {
                         self.err(d.val.pos, fmt("constant `", name, "`: the decimal literal does not fit in i64 (declare the type, as in `const ", name, ": u64 = ...`, or write it in hex)"))
                     }
@@ -1667,6 +1696,109 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
         }
     }
     return None
+}
+
+// A variant of a non-generic enum without data written as a value: `Os.Linux`, or a bare
+// `Linux` that the expected enum type `want` (-1: none) has or exactly one enum of this
+// layer (else of the other) has. (enum type, variant index)
+fn const_variant(self: *Cx, e: *Expr, want: i64) -> Opt[(i64, i64)] {
+    ei := -1
+    vi := -1
+    match e.k {
+        Ident(n) => {
+            if self.has_const(n) {
+                return None
+            }
+            if want >= 0 {
+                match self.types.k(want) {
+                    Enum(eid) => {
+                        ei = self.types.enums[eid].decl
+                        vi = self.variant_of(ei, n)
+                    }
+                    _ => {}
+                }
+            } else {
+                ul, uhas := self.user_variants(n)
+                pl, phas := self.lib_variants(n)
+                own, own_has, other, other_has := if self.scope_prelude { (pl, phas, ul, uhas) } else { (ul, uhas, pl, phas) }
+                bit := if self.scope_prelude { 1 } else { 2 }
+                if own_has && own.len == 1 {
+                    ei, vi = own[0]
+                } else if !own_has && other_has && other.len == 1 && self.decl_layer(n) & bit == 0 {
+                    ei, vi = other[0]
+                }
+            }
+        }
+        Field(b, n) => {
+            match b.k {
+                Ident(q) => {
+                    if self.has_const(q) || self.has_global(q) {
+                        return None
+                    }
+                    ei = self.qual_enum_name(q)
+                    if ei >= 0 {
+                        vi = self.variant_of(ei, n)
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    if ei < 0 || vi < 0 || self.enum_decls[ei].tparams.len != 0 {
+        return None
+    }
+    ety := self.inst_enum(ei, vec[i64](), e.pos)
+    match self.types.k(ety) {
+        Enum(eid) if self.types.enums[eid].simple => return Some((ety, vi))
+        _ => return None
+    }
+}
+
+// the (enum type, variant index) of an enum constant or a variant (see const_variant)
+priv fn const_variant_val(cx: *Cx, e: *Expr, want: i64) -> Opt[(i64, i64)] {
+    match e.k {
+        Ident(n) if cx.has_const(n) => {
+            match cx.const_named(n) {
+                Some((_, Variant(t, v))) => return Some((t, v))
+                _ => return None
+            }
+        }
+        _ => return cx.const_variant(e, want)
+    }
+}
+
+// `a == b` of an enum constant and a variant (or another one): whether they are equal; None
+// if the operands are not such (at least one must name a constant)
+priv fn const_variant_eq(cx: *Cx, a: *Expr, b: *Expr) -> Opt[bool] {
+    named := match (a.k, b.k) {
+        (Ident(n), _) if cx.has_const(n) => true
+        (_, Ident(n)) if cx.has_const(n) => true
+        _ => false
+    }
+    if !named {
+        return None
+    }
+    va := const_variant_val(cx, a, -1)
+    vb: Opt[(i64, i64)] = None
+    match va {
+        Some(x) => {
+            vb = const_variant_val(cx, b, x.0)
+        }
+        None => {
+            vb = const_variant_val(cx, b, -1)
+            match vb {
+                Some(y) => {
+                    va = const_variant_val(cx, a, y.0)
+                }
+                None => return None
+            }
+        }
+    }
+    match (va, vb) {
+        (Some(x), Some(y)) if x.0 == y.0 => return Some(x.1 == y.1)
+        _ => return None
+    }
 }
 
 // integer (op) integer
@@ -1773,6 +1905,12 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
             }
         }
         Bin(op, a, b) => {
+            if op == Eq || op == Ne {
+                match const_variant_eq(self, a, b) {
+                    Some(r) => return (Some(CV.Bool(if op == Eq { r } else { !r })), None)
+                    None => {}
+                }
+            }
             xv, ta := self.const_eval_t(a)
             x := match xv {
                 Some(v) => v
@@ -2221,6 +2359,7 @@ priv fn const_init(self: *Cx, e: *Expr, ty: i64, off: i64, data: *Vec[u8], reloc
         (Bool, Bool(b)) => {
             data[off] = if b { u8(1) } else { u8(0) }
         }
+        (Enum(_), Variant(t, vi)) if t == ty => put_le(data, off, u64(vi), 4)
         (Slice(T_U8), Str(s)) => {
             g := self.string_global(s)
             relocs.push((off, Global(g, 0)))

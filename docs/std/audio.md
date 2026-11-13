@@ -13,8 +13,8 @@ executable and its output is bit-for-bit reproducible, so game audio can be test
 checksumming the mix. Only the `audio_*` device functions use the system: on Linux ALSA
 (`libasound.so.2`, declared in `std.alsa`; using one of them makes the program dynamically
 linked), on Windows `ole32.dll` (COM) and the audio engine behind it. The device code is in the
-module's OS layers, `std/audio_linux.al` and `std/audio_windows.al`, which `use std.audio`
-loads for the target.
+module's OS layers, `std/audio_linux.al` and `std/audio_windows.al`, which `std/audio.al`
+includes for the target with `when TARGET_OS == ...`.
 
 ## Sound
 

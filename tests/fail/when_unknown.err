@@ -1,0 +1,3 @@
+when_unknown.al:3:6: error: unknown name `DEMOO` in a `when` condition (a condition can use only constants declared with `const` outside `when`, TARGET_OS, TARGET_ARCH and literals)
+when_unknown.al:4:19: error: unknown name `Windos` in a `when` condition (a condition can use only constants declared with `const` outside `when`, TARGET_OS, TARGET_ARCH and literals)
+when_unknown.al:6:6: error: `INNER` is declared inside a `when`: a condition can use only constants declared outside every `when`

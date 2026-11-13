@@ -1031,7 +1031,7 @@ priv fn stmt(self: *Fx, s: *Stmt) {
                 None => {
                     bt := self.new_block()
                     bj := self.new_block()
-                    self.cond_br(c, bt, bj)
+                    self.if_br(c, bt, bj)
                     self.switch_to(bt)
                     self.block(t)
                     self.jmp(bj)
@@ -1208,7 +1208,7 @@ fn if_value(self: *Fx, c: *Expr, t: *Block, e: *Block, want: bool, expect: Opt[i
     bt := self.new_block()
     be := self.new_block()
     bj := self.new_block()
-    self.cond_br(c, bt, be)
+    self.if_br(c, bt, be)
     // an untyped float as the value of the then-branch takes the type of the else-branch:
     // that one is lowered first
     swap := want && !is_some(expect) && block_tail_untyped_float(self, t) && !block_tail_untyped_float(self, e)
@@ -1482,33 +1482,90 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
 
 // ---------- conditions ----------
 fn cond_br(self: *Fx, e: *Expr, t: i64, f: i64) {
+    self.cond_jump(e, t, f, false)
+}
+
+// The condition of an `if`: as cond_br, but a condition (or an operand of its `&&`, `||`,
+// `!`) whose value is a constant (`if DEBUG`, `if TARGET_OS == Windows`) becomes a jump. The
+// branch it rules out is still type-checked, but unreachable: pruned at every optimisation
+// level, together with the functions and data only it uses (ALC_DISABLE=constif: not done).
+fn if_br(self: *Fx, e: *Expr, t: i64, f: i64) {
+    self.cond_jump(e, t, f, opt_enabled("constif"))
+}
+
+priv fn cond_jump(self: *Fx, e: *Expr, t: i64, f: i64, fold: bool) {
     match e.k {
         Bin(LAnd, a, b) => {
             mid := self.new_block()
-            self.cond_br(a, mid, f)
+            self.cond_jump(a, mid, f, fold)
             self.switch_to(mid)
-            self.cond_br(b, t, f)
+            self.cond_jump(b, t, f, fold)
             return
         }
         Bin(LOr, a, b) => {
             mid := self.new_block()
-            self.cond_br(a, t, mid)
+            self.cond_jump(a, t, mid, fold)
             self.switch_to(mid)
-            self.cond_br(b, t, f)
+            self.cond_jump(b, t, f, fold)
             return
         }
         Un(Not, a) => {
-            self.cond_br(a, f, t)
+            self.cond_jump(a, f, t, fold)
             return
         }
         _ => {}
     }
     v0 := self.expr(e, Some(T_BOOL))
     v := self.coerce(v0, T_BOOL, e.pos)
+    if fold && v.ty == T_BOOL {
+        match self.const_cond(e) {
+            Some(b) => {
+                self.jmp(if b { t } else { f })
+                return
+            }
+            None => {}
+        }
+    }
     c := self.scalar(v)
     d := self.dead
     self.br(c, t, f)
     self.dead = d
+}
+
+// the value of a condition made only of constants (no local variable), if it has one
+priv fn const_cond(self: *Fx, e: *Expr) -> Opt[bool] {
+    if !self.no_locals(e) {
+        return None
+    }
+    saved := self.cx.errs.len
+    r := self.cx.const_eval(e)
+    self.cx.errs.truncate(saved)
+    return match r {
+        Some(Bool(b)) => Some(b)
+        _ => None
+    }
+}
+
+// does `e` name no local variable or nested function (where constants could be hidden)?
+priv fn no_locals(self: *Fx, e: *Expr) -> bool {
+    return match e.k {
+        Ident(n) => !is_some(self.lookup(n))
+        Un(_, x), Field(x, _) => self.no_locals(x)
+        Bin(_, a, b) => self.no_locals(a) && self.no_locals(b)
+        Call(c, args), Index(c, args) => {
+            if !self.no_locals(c) {
+                return false
+            }
+            for i in 0..args.len {
+                if !self.no_locals(&args[i]) {
+                    return false
+                }
+            }
+            true
+        }
+        Int(_, _), Float(_, _), Str(_), Bool(_), Nil, TypeE(_) => true
+        _ => false
+    }
 }
 
 // ---------- runtime failure blocks ----------

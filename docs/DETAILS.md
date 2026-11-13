@@ -3,13 +3,13 @@
 Read on demand. [LANGUAGE.md](LANGUAGE.md) is the reference an agent reads in full; this file
 holds the fine print that only a minority of programs needs: the exact rules of name
 resolution (overloading, builtin names, enum variants, `priv`), details of constants, `match`,
-method calls and nested functions, bounds checks, region limits, `clone` cost, C interop,
-programs for Windows, and the grammar.
+method calls and nested functions, `when` and `-D`, bounds checks, region limits, `clone` cost,
+C interop, programs for Windows, and the grammar.
 
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
-[Method calls](#method-calls) · [Bounds checks](#bounds-checks) · [Regions](#regions) ·
+[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Regions](#regions) ·
 [clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Grammar](#grammar)
 
 ## Overloading and builtin names
@@ -92,8 +92,10 @@ fn main() {
   constant components; names of non-generic functions (for elements of function type, or the
   whole value: `const F = double`, called as `F(x)`; an overloaded name needs the annotated
   type `const F: fn(i64) -> i64 = inc`); `nil`; variants of enums without data (as elements or
-  fields of a typed literal); `embed("file")`; names of other constants. A constant cannot
-  depend on itself. The address of an `extern` function is not a constant.
+  fields of a typed literal, or the whole value when no variant of the enum has data:
+  `const MODE = Mode.Fast`, `const M: Mode = Fast`); `embed("file")`; names of other
+  constants. A constant cannot depend on itself. The address of an `extern` function is not a
+  constant.
 - An annotated type must match the value (`const UNIT: Point = Point{1, 1}`).
 - An aggregate (array, struct, tuple) or vector / matrix constant is stored once in read-only
   memory. Assigning to it or to a part of it, and `&` on it or on a part of it are compile
@@ -365,6 +367,94 @@ fn main() {
 }
 ```
 
+## when and -D
+
+`when cond { ... } else when cond { ... } else { ... }` chooses at compile time. The first
+branch whose condition holds is part of the program; the others are parsed (their syntax
+errors are reported) and then dropped: nothing else in them is checked, a file they `use` is
+not read, and they leave no code or data in the executable.
+
+- **Where.** At top level a branch holds declarations, also `use`, `test`, `priv` and generic
+  ones, which belong to the file as if written outside the `when`. In a function body it holds
+  statements, which take the place of the `when` in the enclosing block: like the top-level
+  form it opens no scope (`when W { sep := "\\" } else { sep := "/" }` declares `sep` for the
+  rest of the block, a `defer` in a branch belongs to that block, and a `when` that is the
+  last statement of a function gives its value). `when` is not an expression.
+- **Conditions** are made of literals, constants, `==`, `!=`, `&&`, `||`, `!` and parentheses;
+  the result is a `bool`. Anything else is an error at the condition: a variable (also a
+  local one), a function call, another operator (`<`, `+`: declare a constant for the
+  result, `const BIG = LEVEL > 2`), an operand of the wrong type, a name that is not declared.
+  A misspelt name is never false. Every condition of a chain is checked, also those after the
+  taken branch.
+- **Which constants.** The built-in `TARGET_OS` (`enum Os { Linux, Windows }`, declared by the
+  OS layer of the run-time library for `--target`) and `TARGET_ARCH` (`enum Arch { X86_64 }`),
+  and the constants of the program declared at top level outside every `when`, in any file. A
+  name of the condition's file means its private constant first, then a public one of the
+  program, then one of the library (the library's own `when`s see only the library's). Such a
+  constant may be computed from others with any operator (`const VERBOSE = LEVEL >= 2`) and may
+  be a variant (`const MODE = Mode.Fast`; a bare variant in a condition takes its enum from the
+  other operand: `MODE == Fast`), but not with a conversion, a call or an aggregate. A constant
+  declared inside a `when` is not available to conditions (it is to everything else).
+- **Order.** The files the program includes without `when` are loaded first; then the
+  conditions of their `when`s are decided, a taken branch may include more files, whose
+  `when`s are decided next, until nothing changes. Because conditions only see constants
+  declared outside `when`, the order does not change the result: a constant is known before
+  any condition can use it or not at all (then: "unknown name"). The one exception is checked:
+  a constant of the program that hides a library constant of the same name, declared in a file
+  that only a `when` includes, is reported if it would have changed a decision. The bundled
+  modules decide theirs as soon as they are read (TARGET_OS is always known by then).
+- `alc sigs` lists the declarations of the taken branches only.
+
+**`-D NAME=VALUE`** (`alc build`, `run`, `test`, `check`; also written `-DNAME=VALUE`) gives the
+program's constant `NAME` the value instead of the declared one, for `when` and for every other
+use. `-D NAME` alone is `-D NAME=true`, for a `bool` constant only.
+
+- `NAME` must be a constant of the program (in any file and branch that is part of it; every
+  declaration of that name, also private ones of several files, gets the value). A name that
+  is no constant of the program is an error that names it, also a constant of the library:
+  `TARGET_OS` and the bundled modules' constants cannot be set.
+- The value is read as a literal of the constant's type, the declared one or else the type of
+  its value: `true` / `false`; an integer literal (`42`, `-1`, `0xFF`, `1_000`) that fits the
+  type (an untyped integer constant: `i64`); a float or integer literal for a float; for `str`
+  the text as it is, without quotes or escapes (`-D NAME=hello world` in one shell word); for a
+  constant of an enum without data, a variant name (`-D MODE=Slow`). Anything else is an error
+  at the declaration. A constant whose type cannot be told from its value needs a declared type.
+
+**`if` on a constant.** An `if` whose condition (or an operand of its `&&`, `||`, `!`) is a
+constant expression without local variables (`if DEBUG`, `if TARGET_OS == Windows`,
+`if !DEMO && LEVEL == 2`) is decided while it is lowered, at every optimisation level (`-O0`
+too). Unlike `when`, both branches are type-checked; the other one is compiled to nothing, so
+the functions only it calls and the string literals and constant tables only it uses are not
+in the executable. (In general the linker leaves out every read-only data item that no code in
+the executable refers to.)
+
+**`alc check --all-targets f.al`** type-checks the program once for every target (Linux,
+Windows), each with its own branches of `when`. An error that not every target reports ends in
+the targets that do: `(--target windows)`. `tests/run.sh` runs it for the examples, the
+bundled modules (`tests/check/std_targets.al`) and the tests that use `when`.
+
+```
+const DEMO = false                          // alc build -D DEMO game.al
+const LEVELS: i32 = 12
+
+when TARGET_OS == Windows {
+    extern "kernel32.dll" fn GetTickCount64() -> u64
+    fn uptime_ms() -> i64 { i64(GetTickCount64()) }
+} else {
+    fn uptime_ms() -> i64 { clock_ns() / 1000000 }
+}
+
+fn main() {
+    when DEMO {
+        last := 3
+    } else {
+        last := LEVELS
+    }
+    if DEMO { print("demo: levels 1 to", last) }     // not in the full game's executable
+    print(uptime_ms() >= 0, last)                    // true 12
+}
+```
+
 ## Bounds checks
 
 - `v[i]` on a `Vec` is checked against the **length** `v.len`, and `v[a..b]` requires
@@ -573,7 +663,8 @@ both systems, except where this section says otherwise.
 - **Memory.** Arenas reserve the same address space (64 GiB, 16 GiB per region) and commit it
   in steps as it is used; committed memory counts against the system's commit limit.
 - **Not available** for `--target windows` (a compile error that names the module):
-  `std.x11`, `std.wayland`, `std.alsa`, `std.vk`, `std.libc`. In
+  `std.x11`, `std.wayland`, `std.alsa`, `std.vk`, `std.libc` (a program for both systems
+  includes them with `when TARGET_OS == Linux { use std.x11 }`). In
   std.os, signals do not exist (`kill` with any signal but 0 ends the process; see
   [std/os.md](std/os.md)).
 - **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless
@@ -617,6 +708,7 @@ decl      = ["priv"] ["inline" | "noinline"] "fn" IDENT [tparams] params ["->" t
           | ["priv"] IDENT (":" type ["=" expr] | ":=" expr)
           | "test" STRING block
           | "use" (STRING | IDENT {"." IDENT})
+          | "when" expr "{" { decl } "}" { "else" "when" expr "{" { decl } "}" } [ "else" "{" { decl } "}" ]
 tparams   = "[" IDENT {"," IDENT} "]"
 params    = "(" [IDENT ":" type {"," IDENT ":" type}] ")"
 type      = IDENT ["[" type {"," type} "]"] | "*" type | "[" "]" type | "[" expr "]" type
@@ -631,6 +723,7 @@ stmt      = IDENT ":" type ["=" expr]
           | "return" [expr] | "break" [IDENT] | "continue" [IDENT]
           | "assert" expr ["," expr] | "defer" block | block
           | "fn" IDENT params ["->" type] block
+          | "when" expr block { "else" "when" expr block } [ "else" block ]
 expr      = unary { binop unary }
 unary     = ("-" | "!" | "~" | "&" | "*") unary | postfix
 postfix   = primary { "(" [expr {"," expr}] ")" | "[" expr {"," expr} "]" | "[" [expr] ".." [expr] "]"

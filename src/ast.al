@@ -137,6 +137,9 @@ enum SK {
     ContinueTo(str),
     // `fn name(params) -> R { body }` inside a block: a nested function
     Fn(*FnDecl),
+    // `when cond { ... } else ...` in a function body (`WhenArm.body`); decided and replaced
+    // by the statements of the taken branch before type checking (src/when.al)
+    When(*WhenDecl),
 }
 
 // `for var1, var2 in lo..hi by step { body }` (`..=`: incl)
@@ -208,6 +211,21 @@ struct TestDecl {
     pos: Pos
 }
 
+// one branch of a `when`: its condition (none for the final `else`) and its contents, the
+// declarations of a top-level `when` or the statements of one in a function body
+struct WhenArm {
+    cond: Opt[*Expr]
+    decls: Vec[Decl]
+    body: *Block
+}
+
+// `when cond { ... } else when cond { ... } else { ... }`: a choice made at compile time
+// (src/when.al); only the taken branch becomes part of the program
+struct WhenDecl {
+    arms: Vec[WhenArm]
+    pos: Pos
+}
+
 enum Decl {
     Fn(FnDecl),
     Struct(StructDecl),
@@ -216,6 +234,7 @@ enum Decl {
     Global(GlobalDecl),
     Test(TestDecl),
     Use(str, Pos),
+    When(WhenDecl),
 }
 
 // the source forms of a list of types, separated by ", "

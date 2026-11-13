@@ -1542,3 +1542,6 @@ fn __os_pipe() -> (i64, i64) {
     }
     return (r, w)
 }
+
+// the target of this layer (see `enum Os` in prelude.al)
+const TARGET_OS = Os.Windows
