@@ -909,6 +909,31 @@ fn __at_fmtf(x: f64, prec: i64, width: i64, at: str) -> str {
     return pad_left(__at_fmtf(x, prec, at), width, ' ')
 }
 
+// the f32 versions: an f32 converts to f64 exactly, so the digits are those of the exact value
+fn putf(x: f32, prec: i64) {
+    __at_putf(f64(x), prec, "?")
+}
+
+fn __at_putf(x: f32, prec: i64, at: str) {
+    __at_putf(f64(x), prec, at)
+}
+
+fn fmtf(x: f32, prec: i64) -> str {
+    return __at_fmtf(f64(x), prec, "?")
+}
+
+fn __at_fmtf(x: f32, prec: i64, at: str) -> str {
+    return __at_fmtf(f64(x), prec, at)
+}
+
+fn fmtf(x: f32, prec: i64, width: i64) -> str {
+    return __at_fmtf(f64(x), prec, width, "?")
+}
+
+fn __at_fmtf(x: f32, prec: i64, width: i64, at: str) -> str {
+    return __at_fmtf(f64(x), prec, width, at)
+}
+
 fn __put_slice[T](s: []T) {
     putc('[')
     for i, x in s {
@@ -2371,6 +2396,45 @@ fn __dec_cmp_bin(num: []u32, n: i64, e10: i64, mm: u64, q: i64) -> i64 {
 // decimal text to the nearest f64 (ties to even), exactly as a C compiler reads a literal:
 // [+-] digits [. digits] [e [+-] digits]; (0, false) if s is not a number
 fn parse_f64(s: str) -> (f64, bool) {
+    num: [__BIG_LIMBS]u32
+    v, ok, _, _ := __parse_dec(s, num[..])
+    return (v, ok)
+}
+
+// decimal text to the nearest f32 (ties to even), rounded once from the text: the nearest f64
+// can only mislead when it lies exactly halfway between two f32s, and then the exact decimal
+// value decides
+fn parse_f32(s: str) -> (f32, bool) {
+    num: [__BIG_LIMBS]u32
+    v, ok, nn, exp10 := __parse_dec(s, num[..])
+    r := f32(v)
+    if !ok || nn == 0 || f64(r) == v || v != v {
+        return (r, ok)
+    }
+    // lo: the largest f32 below |v|, hi: the next one (2^128 above the largest finite f32)
+    av := fabs(v)
+    lb := cast[u32](f32(av))
+    if f64(cast[f32](lb)) > av {
+        lb -= 1
+    }
+    lo := f64(cast[f32](lb))
+    hi := if lb + 1 == 0x7F800000 { cast[f64](u64(0x47F0000000000000)) } else { f64(cast[f32](lb + 1)) }
+    if av != (lo + hi) * 0.5 {
+        return (r, true)
+    }
+    m, e, _ := __f64_parts(av)
+    c := __dec_cmp_bin(num[..], nn, exp10, m, e)
+    if c == 0 {
+        return (r, true)
+    }
+    x := cast[f32](if c > 0 { lb + 1 } else { lb })
+    return (if v < 0.0 { -x } else { x }, true)
+}
+
+// parse_f64 with the digits as a big integer: (value, ok, nn, exp10) where num[..nn] * 10^exp10
+// is the exact value (num already multiplied when exp10 > 0); nn is 0 for zero, overflow,
+// underflow and errors
+fn __parse_dec(s: str, num: []u32) -> (f64, bool, i64, i64) {
     n := len(s)
     i := 0
     neg := false
@@ -2379,7 +2443,6 @@ fn parse_f64(s: str) -> (f64, bool) {
         i = 1
     }
     // significant digits as a big integer (at most 800 are kept; more only set a sticky digit)
-    num: [__BIG_LIMBS]u32
     nn := 0
     mant: u64 = 0
     digits := 0
@@ -2429,7 +2492,7 @@ fn parse_f64(s: str) -> (f64, bool) {
         i += 1
     }
     if !seen {
-        return (0.0, false)
+        return (0.0, false, 0, 0)
     }
     if i < n && (s[i] == 'e' || s[i] == 'E') {
         i += 1
@@ -2439,7 +2502,7 @@ fn parse_f64(s: str) -> (f64, bool) {
             i += 1
         }
         if i == n {
-            return (0.0, false)
+            return (0.0, false, 0, 0)
         }
         e := 0
         while i < n && s[i] >= '0' && s[i] <= '9' {
@@ -2453,17 +2516,17 @@ fn parse_f64(s: str) -> (f64, bool) {
         mexp += if eneg { -e } else { e }
     }
     if i != n {
-        return (0.0, false)
+        return (0.0, false, 0, 0)
     }
     inf := cast[f64](u64(0x7FF0000000000000))
     if nn == 0 {
-        return (if neg { -0.0 } else { 0.0 }, true)
+        return (if neg { -0.0 } else { 0.0 }, true, 0, 0)
     }
     if digits + exp10 > 310 {
-        return (if neg { -inf } else { inf }, true)
+        return (if neg { -inf } else { inf }, true, 0, 0)
     }
     if digits + exp10 < -326 {
-        return (if neg { -0.0 } else { 0.0 }, true)
+        return (if neg { -0.0 } else { 0.0 }, true, 0, 0)
     }
     if sticky {
         // the dropped digits only matter as "a little more": one extra non-zero digit
@@ -2479,8 +2542,8 @@ fn parse_f64(s: str) -> (f64, bool) {
     e := if mexp < 0 { -mexp } else { mexp }
     while e > 0 {
         step := if e > 300 { 300 } else { e }
-        scale := 1.0
-        p := 10.0
+        scale: f64 = 1.0
+        p: f64 = 10.0
         k := step
         while k > 0 {
             if k & 1 == 1 {
@@ -2533,7 +2596,7 @@ fn parse_f64(s: str) -> (f64, bool) {
         break
     }
     r := cast[f64](bits)
-    return (if neg { -r } else { r }, true)
+    return (if neg { -r } else { r }, true, nn, exp10)
 }
 
 // ---------- files and arguments ----------

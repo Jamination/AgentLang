@@ -78,7 +78,14 @@ fn is_untyped(self: *Fx, e: *Expr) -> bool {
             }
             d, has := self.cx.const_decl(n)
             if has && !is_some(d.ty) {
-                return !self.cx.const_is_mem(n)
+                if self.cx.const_is_mem(n) {
+                    return false
+                }
+                // a constant whose value has a type (`const DT = f64(1) / 60.0`) is typed
+                match self.cx.const_named(n) {
+                    Some((Some(_), _)) => return false
+                    _ => return true
+                }
             }
             return false
         }

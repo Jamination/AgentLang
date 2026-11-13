@@ -170,7 +170,7 @@ priv fn literal_type(s: *Fx, a: *Expr) -> i64 {
     match s.cx.const_eval(a) {
         Some(Str(_)) => T_STR
         Some(Bool(_)) => T_BOOL
-        Some(Float(_)) => T_F64
+        Some(Float(_)) => T_F32
         _ => T_I64
     }
 }

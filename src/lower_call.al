@@ -865,8 +865,9 @@ priv fn conversion(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
     }
     floaty := conversion_has_float(&args[0]) || is_cv_float(self.cx.const_eval(&args[0]))
     exp: Opt[i64] = None
-    if self.is_untyped(&args[0]) && (self.cx.types.is_float(to) || (self.cx.types.is_int(to) && !floaty)) {
-        exp = Some(to)
+    if self.is_untyped(&args[0]) && (self.cx.types.is_float(to) || self.cx.types.is_int(to)) {
+        // an untyped float converted to an integer: from its f64 value, as in a constant
+        exp = Some(if self.cx.types.is_int(to) && floaty { T_F64 } else { to })
         // a constant that does not fit the target type is converted from i64 (`i8(200)` is
         // -56, `u64(-1)` is 0xFFFF_FFFF_FFFF_FFFF), a literal beyond i64 from u64
         match (self.cx.types.k(to), self.cx.const_eval(&args[0])) {
@@ -1086,7 +1087,7 @@ priv fn literal_fit(self: *Fx, d: *FnDecl, pi: i64, a: *Expr) -> Opt[i64] {
         _ => {}
     }
     if is_cv_float(self.cx.const_eval(a)) {
-        if t == T_F64 {
+        if t == T_F32 {
             return Some(0)
         } else if is_f {
             return Some(1)

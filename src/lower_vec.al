@@ -15,11 +15,12 @@ fn is_vecish(self: *Fx, t: i64) -> bool {
     return is_some(self.cx.types.vec_lanes(t)) || t == T_MAT4
 }
 
-// the float type an untyped literal takes in a context expecting `expect`
+// the float type an untyped literal takes in a context expecting `expect`: f64 only where
+// f64 is expected, else f32 (the default)
 fn float_expect(self: *Fx, expect: Opt[i64]) -> i64 {
     match expect {
-        Some(t) if t == T_F32 || self.is_vecish(t) => T_F32
-        _ => T_F64
+        Some(T_F64) => T_F64
+        _ => T_F32
     }
 }
 

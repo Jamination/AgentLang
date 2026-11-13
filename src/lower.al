@@ -758,7 +758,7 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
             }
             hint := match n {
                 "int", "long", "isize", "usize", "uint", "size_t" => " (integer types are i8 i16 i32 i64 u8 u16 u32 u64; the default is i64)"
-                "float", "double", "f32" => " (the floating-point type is f64)"
+                "float", "double" => " (the floating-point types are f32 and f64; the default is f32)"
                 "string", "String", "char", "byte" => " (text is `str`, a byte is `u8`)"
                 "boolean" => " (use `bool`)"
                 "void" => " (omit the result type instead)"
@@ -1237,7 +1237,7 @@ fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
 priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     match e.k {
         Int(_, _) => return T_I64
-        Float(_, _) => return T_F64
+        Float(_, _) => return T_F32
         Bool(_) => return T_BOOL
         Str(_) => return T_STR
         Lit(t, _) => {
@@ -1281,9 +1281,10 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
         }
         _ => {}
     }
-    match self.const_eval(e) {
+    cv, ct := self.const_eval_t(e)
+    match cv {
         Some(Int(_)) => T_I64
-        Some(Float(_)) => T_F64
+        Some(Float(_)) => ct.or(T_F32)
         Some(Bool(_)) => T_BOOL
         Some(Str(_)) => T_STR
         None => T_ERR
@@ -1672,16 +1673,17 @@ priv fn const_bin_int(cx: *Cx, op: BinOp, x: i64, y: i64, pos: Pos) -> Opt[CV] {
 }
 
 // The integer type of a constant scalar expression whose type is fixed: a typed constant, a
-// conversion `T(x)`, or an operation with such an operand. None: untyped (or not an integer).
+// conversion `T(x)`, or an operation with such an operand. None: untyped (or not a number).
 priv fn const_int_ty(cx: *Cx, e: *Expr) -> Opt[i64] {
     return cx.const_eval_t(e).1
 }
 
-priv fn const_only_int(cx: *Cx, t: Opt[i64]) -> Opt[i64] {
+// `t` if it is a number type
+priv fn const_only_num(cx: *Cx, t: Opt[i64]) -> Opt[i64] {
     match t {
         Some(ty) => {
             match cx.types.k(ty) {
-                Int(_, _) => return t
+                Int(_, _), F64, F32 => return t
                 _ => {}
             }
         }
@@ -1704,14 +1706,15 @@ priv fn const_wrap_t(cx: *Cx, t: Opt[i64], r: i64) -> i64 {
     return r
 }
 
-// The value of a constant operator expression together with its integer type (see
-// `const_int_ty`), in one walk over the expression
+// The value of a constant operator expression together with its number type (see
+// `const_int_ty`), in one walk over the expression. An operation on an f32 operand is
+// rounded to f32.
 fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
     match e.k {
         Ident(n) => {
             if self.has_const(n) {
                 match self.const_named(n) {
-                    Some(x) => return (Some(x.1), const_only_int(self, x.0))
+                    Some(x) => return (Some(x.1), const_only_num(self, x.0))
                     None => return (None, None)
                 }
             }
@@ -1722,7 +1725,7 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
             match (op, xv) {
                 (Neg, Some(Int(i))) => return (Some(CV.Int(const_wrap_t(self, t, -i))), t)
                 (BitNot, Some(Int(i))) => return (Some(CV.Int(const_wrap_t(self, t, ~i))), t)
-                (Neg, Some(Float(f))) => return (Some(CV.Float(-f)), None)
+                (Neg, Some(Float(f))) => return (Some(CV.Float(-f)), t)
                 (Not, Some(Bool(b))) => return (Some(CV.Bool(!b)), None)
                 _ => return (None, None)
             }
@@ -1759,7 +1762,21 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
                     }
                     return (const_bin_int(self, op, xi, yi, e.pos), rt)
                 }
-                (Int(_), Float(_)), (Float(_), Int(_)), (Float(_), Float(_)) => return (const_bin_float(op, x, y), None)
+                (Int(_), Float(_)), (Float(_), Int(_)), (Float(_), Float(_)) => {
+                    // the float type of a typed operand (an integer-typed one is an error later)
+                    ft := if ta == Some(T_F64) || ta == Some(T_F32) { ta } else { tb }
+                    if ft != Some(T_F64) && ft != Some(T_F32) {
+                        ft = None
+                    }
+                    r := const_bin_float(op, x, y)
+                    if !is_some(rt) {
+                        return (r, None)
+                    }
+                    match r {
+                        Some(Float(f)) if ft == Some(T_F32) => return (Some(CV.Float(f64(f32(f)))), ft)
+                        _ => return (r, ft)
+                    }
+                }
                 (Bool(xb), Bool(yb)) => {
                     match op {
                         LAnd => return (Some(CV.Bool(xb && yb)), None)
@@ -1781,7 +1798,7 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
             saved := self.errs.len
             t := self.expr_type(c, &env)
             self.errs.truncate(saved)
-            return (v, const_only_int(self, t))
+            return (v, const_only_num(self, t))
         }
         _ => return (self.const_eval(e), None)
     }
