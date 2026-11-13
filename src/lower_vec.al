@@ -34,7 +34,7 @@ fn fconst_ty(self: *Fx, ty: i64, f: f64) -> Val {
     }
 }
 
-priv fn fx_vec_ty(n: i64) -> i64 {
+priv fn vec_ty(n: i64) -> i64 {
     match n {
         2 => T_VEC2
         3 => T_VEC3
@@ -47,13 +47,9 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
     match b.k {
         Ident(n) => {
             match self.lookup(n) {
-                Some(x) => {
-                    if x.0 >= 0 {
-                        return self.mval(x.0, x.1)
-                    }
-                    // a nested function
-                    return self.expr(b, None)
-                }
+                Some(x) if x.0 >= 0 => return self.mval(x.0, x.1)
+                // a nested function
+                Some(_) => return self.expr(b, None)
                 None => {}
             }
             if !self.cx.has_const(n) {
@@ -65,16 +61,10 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
         }
         Field(bb, name) if name != "len" => {
             x := self.lvalue_base(bb)
-            match self.field_of(x, name, b.pos) {
-                Some(p) => return p
-                None => return val_err()
-            }
+            return self.field_of(x, name, b.pos).or(val_err())
         }
         Index(bb, idx) if idx.len == 1 => {
-            match self.index_place(bb, &idx[0], b.pos) {
-                Some(p) => return p
-                None => return val_err()
-            }
+            return self.index_place(bb, &idx[0], b.pos).or(val_err())
         }
         Un(Deref, p) => {
             pv := self.expr(p, None)
@@ -94,7 +84,6 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
 // `.x`, `.xyz`, ... on a vector; None when `bv` is not a vector
 fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
     bv := bv0
-    no_val: Opt[Val] = None
     match self.cx.types.k(bv.ty) {
         Ptr(t) if is_some(self.cx.types.vec_lanes(t)) => {
             a := self.scalar(bv)
@@ -107,34 +96,25 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
         None => return None
     }
     vt := self.irt(bv.ty)
+    // an unknown letter is lane 4, which no vector has
     lanes := vec[i64]()
-    good := true
     for c in name {
-        match lane_of(c) {
-            Some(k) => {
-                lanes.push(k)
-            }
-            None => {
-                good = false
-            }
-        }
+        lanes.push(lane_of(c).or(4))
     }
-    if good {
-        good = !lanes.is_empty() && lanes.len <= 4
-        for i in 0..lanes.len {
-            if lanes[i] >= n {
-                good = false
-            }
+    good := !lanes.is_empty() && lanes.len <= 4
+    for k in lanes {
+        if k >= n {
+            good = false
         }
     }
     if !good {
         tn := self.tyname(bv.ty)
         self.err(pos, fmt(tn, " has no component `", name, "` (components: ", "xyzw"[..n], "; swizzles like `.xy` or `.zyx` are allowed)"))
-        return Some(no_val)
+        return Some(None)
     }
     if lanes.len == 1 {
         if is_some(bv.lane) {
-            return Some(no_val)
+            return Some(None)
         }
         if bv.mem {
             return Some(Some(Val{ty: T_F32, v: bv.v, mem: true, alias: bv.alias, lane: Some((lanes[0], vt))}))
@@ -147,7 +127,7 @@ fn vec_field(self: *Fx, bv0: Val, name: str, pos: Pos) -> Opt[Opt[Val]] {
     for i in 0..lanes.len {
         imm |= lanes[i] << (2 * i)
     }
-    rt := fx_vec_ty(lanes.len)
+    rt := vec_ty(lanes.len)
     it := self.irt(rt)
     r := self.ins(VShuf, it, vec_two(x, x), imm)
     return Some(Some(self.sval(rt, r)))
@@ -192,14 +172,13 @@ fn vec_index(self: *Fx, bv: Val, idx: *Expr, pos: Pos) -> Opt[Val] {
         self.check(c, 0, pos)
     }
     // a run-time lane: go through memory
-    base: i64
-    if bv.mem && !is_some(bv.lane) {
-        base = bv.v
+    base := if bv.mem && !is_some(bv.lane) {
+        bv.v
     } else {
         t := self.temp(bv.ty)
         tv := self.mval(bv.ty, t)
         self.store(tv, bv)
-        base = t
+        t
     }
     four := self.iconst(I64, 4)
     off := self.ins(Mul, I64, vec_two(i, four), 0)
@@ -241,14 +220,15 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
     if !is_some(ln) && !is_some(rn) && l.ty != T_MAT4 && r.ty != T_MAT4 {
         return None
     }
+    match (op, l.ty, r.ty) {
+        (Mul, T_MAT4, T_MAT4) => return Some(self.call_rt("__mat4_mul", vec[i64](), vec_two[Val](l, r), pos))
+        (Mul, T_MAT4, T_VEC4) => return Some(self.call_rt("__mat4_mulv", vec[i64](), vec_two[Val](l, r), pos))
+        (Mul, T_QUAT, T_QUAT) => return Some(self.call_rt("__quat_mul", vec[i64](), vec_two[Val](l, r), pos))
+        (Mul, T_QUAT, T_VEC3) => return Some(self.call_rt("__quat_rotate", vec[i64](), vec_two[Val](l, r), pos))
+        _ => {}
+    }
     eq := op == Eq || op == Ne
     if l.ty == T_MAT4 || r.ty == T_MAT4 {
-        if op == Mul && l.ty == T_MAT4 && r.ty == T_MAT4 {
-            return Some(self.call_rt("__mat4_mul", vec[i64](), vec_two[Val](l, r), pos))
-        }
-        if op == Mul && l.ty == T_MAT4 && r.ty == T_VEC4 {
-            return Some(self.call_rt("__mat4_mulv", vec[i64](), vec_two[Val](l, r), pos))
-        }
         if l.ty == T_MAT4 && r.ty == T_MAT4 && eq {
             acc := NOV
             for c in 0..4 {
@@ -271,21 +251,11 @@ fn vec_binary(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Opt[Val] {
         }
         return vec_binary_bad(self, l, r, pos)
     }
-    if op == Mul && l.ty == T_QUAT && r.ty == T_QUAT {
-        return Some(self.call_rt("__quat_mul", vec[i64](), vec_two[Val](l, r), pos))
-    }
-    if op == Mul && l.ty == T_QUAT && r.ty == T_VEC3 {
-        return Some(self.call_rt("__quat_rotate", vec[i64](), vec_two[Val](l, r), pos))
-    }
     if eq {
         if l.ty != r.ty {
             return vec_binary_bad(self, l, r, pos)
         }
-        lanes := match ln {
-            Some(k) => k
-            None => panic("unwrap of None")
-        }
-        e := self.vec_eq(l, r, lanes)
+        e := self.vec_eq(l, r, ln.unwrap())
         if op == Ne {
             one := self.iconst(I8, 1)
             e = self.ins(Xor, I8, vec_two(e, one), 0)
@@ -370,10 +340,7 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
         }
         return self.mval(T_MAT4, t)
     }
-    n := match self.cx.types.vec_lanes(to) {
-        Some(vn) => vn
-        None => panic("unwrap of None")
-    }
+    n := self.cx.types.vec_lanes(to).unwrap()
     it := self.irt(to)
     if vals.len == 1 {
         v := vals[0].0
@@ -428,32 +395,29 @@ fn vec_construct(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
 // print a vector / matrix
 fn put_vec(self: *Fx, v: Val, pos: Pos) {
     if v.ty == T_MAT4 {
-        self.put_lit_pub("mat4(", pos)
+        self.put_lit("mat4(", pos)
         for c in 0..4 {
             if c > 0 {
-                self.put_lit_pub(", ", pos)
+                self.put_lit(", ", pos)
             }
             a := self.add_off(v.v, 16 * c)
             col := self.mval(T_VEC4, a)
             self.put_vec(col, pos)
         }
-        self.put_lit_pub(")", pos)
+        self.put_lit(")", pos)
         return
     }
-    n := match self.cx.types.vec_lanes(v.ty) {
-        Some(vn) => vn
-        None => panic("unwrap of None")
-    }
+    n := self.cx.types.vec_lanes(v.ty).unwrap()
     tn := self.tyname(v.ty)
     x := self.scalar(v)
-    self.put_lit_pub(fmt(tn, "("), pos)
+    self.put_lit(fmt(tn, "("), pos)
     for k in 0..n {
         if k > 0 {
-            self.put_lit_pub(", ", pos)
+            self.put_lit(", ", pos)
         }
         l := self.ins(VExt, F32, vec_one(x), k)
         lv := self.sval(T_F32, l)
         self.call_rt("__put_f32", vec[i64](), vec_one[Val](lv), pos)
     }
-    self.put_lit_pub(")", pos)
+    self.put_lit(")", pos)
 }
