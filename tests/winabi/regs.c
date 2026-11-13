@@ -74,3 +74,45 @@ EXPORT int32_t stack_aligned(void) {
 EXPORT int32_t call_back(int32_t (*cb)(void)) {
     return cb() + 1000;
 }
+
+// walk_from(cb) calls cb (AL), which calls walk() through some AL frames: walk unwinds the
+// stack with the unwind information of the executable (RtlLookupFunctionEntry,
+// RtlVirtualUnwind; a function without an entry is a leaf) until it is back in walk_from, and
+// returns the number of frames it passed (-1: it got lost). walk_from returns that number.
+#include <windows.h>
+
+static volatile DWORD64 saved_rsp;
+static volatile int walked;
+
+EXPORT int32_t walk(void) {
+    CONTEXT ctx;
+    RtlCaptureContext(&ctx);
+    for (int i = 0; i < 200; i++) {
+        DWORD64 base;
+        PRUNTIME_FUNCTION f = RtlLookupFunctionEntry(ctx.Rip, &base, NULL);
+        if (!f) {
+            ctx.Rip = *(DWORD64 *)ctx.Rsp;
+            ctx.Rsp += 8;
+        } else {
+            void *hd;
+            DWORD64 est;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, f, &ctx, &hd, &est, NULL);
+        }
+        if (ctx.Rsp == saved_rsp) {
+            walked = i + 1;
+            return walked;
+        }
+        if (ctx.Rip == 0 || ctx.Rsp > saved_rsp) break;
+    }
+    walked = -1;
+    return -1;
+}
+
+EXPORT int32_t walk_from(int64_t (*cb)(void)) {
+    DWORD64 sp;
+    walked = 0;
+    __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
+    saved_rsp = sp;
+    cb();
+    return walked;
+}

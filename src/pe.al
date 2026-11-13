@@ -150,11 +150,31 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
             rodata.push(0) // keep distinct addresses for empty strings
         }
     }
-    // ---- .idata: import directory, lookup tables, names, import address tables ----
-    id_rva := align_up(ro_rva + max(rodata.len, 1), SECT_ALIGN)
-    if rodata.is_empty() {
-        id_rva = ro_rva
+    // the unwind information of the functions with a frame (4-byte aligned)
+    unwind_rva := vec_fill(m.funcs.len, 0)
+    for c in out.funcs {
+        if c.code.unwind.len > 0 {
+            while rodata.len % 4 != 0 {
+                rodata.push(0)
+            }
+            unwind_rva[c.fid] = ro_rva + rodata.len
+            rodata.extend(c.code.unwind.items())
+        }
     }
+    // ---- .pdata: the exception table, a RUNTIME_FUNCTION (start, end, unwind information)
+    // per function with a frame, in the order of the addresses (functions without one are
+    // leaf functions: the return address is at [rsp]) ----
+    pd_rva := if rodata.is_empty() { ro_rva } else { align_up(ro_rva + rodata.len, SECT_ALIGN) }
+    pdata := vec[u8]()
+    for c in out.funcs {
+        if c.code.unwind.len > 0 {
+            put32(&pdata, func_addr[c.fid] - BASE)
+            put32(&pdata, func_addr[c.fid] - BASE + c.code.bytes.len)
+            put32(&pdata, unwind_rva[c.fid])
+        }
+    }
+    // ---- .idata: import directory, lookup tables, names, import address tables ----
+    id_rva := if pdata.is_empty() { pd_rva } else { align_up(pd_rva + pdata.len, SECT_ALIGN) }
     idata := vec[u8]()
     libs := vec[str]()
     for x in imports {
@@ -299,6 +319,9 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     if !rodata.is_empty() {
         secs.push(Section{name: ".rdata", rva: ro_rva, data: rodata, vsize: rodata.len, flags: 0x40000040})
     }
+    if !pdata.is_empty() {
+        secs.push(Section{name: ".pdata", rva: pd_rva, data: pdata, vsize: pdata.len, flags: 0x40000040})
+    }
     if !idata.is_empty() {
         secs.push(Section{name: ".idata", rva: id_rva, data: idata, vsize: idata.len, flags: 0xC0000040})
     }
@@ -362,11 +385,14 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     put64(&h, 4 << 10) // heap commit
     put32(&h, 0)
     put32(&h, 16)
-    // data directories: 1 = imports, 12 = import address table
+    // data directories: 1 = imports, 3 = exceptions (.pdata), 12 = import address table
     for d in 0..16 {
         if d == 1 && !libs.is_empty() {
             put32(&h, id_rva)
             put32(&h, 20 * (nl + 1))
+        } else if d == 3 && !pdata.is_empty() {
+            put32(&h, pd_rva)
+            put32(&h, pdata.len)
         } else if d == 12 && !libs.is_empty() {
             put32(&h, id_rva + iat_lo)
             put32(&h, iat_hi - iat_lo)

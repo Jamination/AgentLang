@@ -240,6 +240,10 @@ same, the differences are:
   page (`stack_probe` in `src/x86/emit.al`): the stack grows through a guard page.
 - **Linking** (`pe_link`): the image is loaded at 0x400000 without base relocations (the code
   uses 32-bit absolute addresses, as on Linux), sections `.text`, `.rdata`, `.idata` (import
-  descriptors, lookup tables, the IAT, which holds the import slots), `.data` (with the zero
+  descriptors, lookup tables, the IAT, which holds the import slots), `.pdata`, `.data` (with the zero
   data); the entry point is `__entry`, stack reserve 16 MiB. A reachable `syscall` is an error.
+- **Unwind information.** Every function with a frame gets an UNWIND_INFO (`unwind_info` in
+  `src/x86/emit.al`, kept in `Code.unwind`: pushes, the allocation, the xmm saves of its
+  prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
+  (exception dispatch, debuggers); functions without a frame are leaf functions.
 - `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine.

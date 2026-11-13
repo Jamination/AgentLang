@@ -3,6 +3,8 @@
 extern "regs.dll" fn check_saved(cb: fn()) -> i32
 extern "regs.dll" fn stack_aligned() -> i32
 extern "regs.dll" fn call_back(cb: fn() -> i32) -> i32
+extern "regs.dll" fn walk() -> i32
+extern "regs.dll" fn walk_from(cb: fn() -> i64) -> i32
 
 burn_out: f64
 burn_iout: i64
@@ -112,6 +114,42 @@ noinline fn deep(n: i64) -> i64 {
     return deep(n - 1) + n % 3
 }
 
+// the stack is walked (with the unwind information of the executable) from C called through
+// frames that push registers, save xmm registers and probe the stack
+noinline fn unwind_a(n: i64) -> i64 {
+    big: [5000]u8
+    big[n * 100] = u8(n)
+    r := if n == 0 { i64(walk()) } else { unwind_b(n - 1) }
+    return r + i64(big[n * 100])
+}
+
+noinline fn unwind_b(n: i64) -> i64 {
+    x0 := f64(n) + burn_out
+    x1 := x0 * 1.5
+    x2 := x1 + 0.25
+    x3 := x2 * 0.75
+    x4 := x3 + 2.0
+    x5 := x4 * 1.125
+    x6 := x5 - 0.5
+    x7 := x6 * 0.875
+    x8 := x7 + 3.0
+    x9 := x8 * 0.625
+    x10 := x9 + 1.75
+    x11 := x10 * 1.25
+    x12 := x11 - 1.0
+    x13 := x12 * 0.5
+    x14 := x13 + 4.0
+    x15 := x14 * 0.375
+    burn_out = x0 * x1 + x2 * x3 + x4 * x5 + x6 * x7 + x8 * x9 + x10 * x11 + x12 * x13 + x14 * x15 + x0 + x15
+    k := n * 3 + 1
+    r := unwind_a(n)
+    return r + k - n * 3 - 1 + i64(burn_out > 1e300)
+}
+
+noinline fn unwind_top() -> i64 {
+    return unwind_b(5)
+}
+
 fn main() -> i64 {
     bad := 0
     fn check(what: str, ok: bool, bad: *i64) {
@@ -141,5 +179,10 @@ fn main() -> i64 {
         d += n % 3
     }
     check("recursion 100000 deep", deep(100000) == d, &bad)
+    w := walk_from(unwind_top)
+    check("stack walk through AL frames (unwind information)", w > 12, &bad)
+    if w <= 12 {
+        print("  frames walked:", w)
+    }
     return bad
 }
