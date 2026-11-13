@@ -305,8 +305,8 @@ priv fn ident_tab_init() {
 priv fn ends_stmt(t: Tk) -> bool {
     return match t {
         Id(_), Int(_, _), Float(_, _), Str(_) => true
-        P(')'), P(']'), P('}') => true
-        Kw(KW_RETURN), Kw(KW_BREAK), Kw(KW_CONTINUE), Kw(KW_TRUE), Kw(KW_FALSE), Kw(KW_NIL) => true
+        P(p) => p == ')' || p == ']' || p == '}'
+        Kw(k) => k == KW_RETURN || k == KW_BREAK || k == KW_CONTINUE || k == KW_TRUE || k == KW_FALSE || k == KW_NIL
         _ => false
     }
 }
