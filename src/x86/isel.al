@@ -268,12 +268,20 @@ priv fn uses_index(cx: *SplitCx, f: *Func) {
 // when the loop is only left through its latch (or through traps): its copies are emitted in
 // the latch before the branch, and uses of header phis after the loop are redirected.
 fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
-    cfg := cfg_new(f)
-    loops := loops_new(f, &cfg)
     preds := f.preds()
     nb := f.blocks.len
-    def_block := f.block_of()
-    cx := SplitCx{der: vec_fill(f.insts.len, false), inl: vec_fill(nb, false), built: false, uoff: vec[i64](), uuser: vec[i64](), ublk: vec[i64](), uord: vec[i64]()}
+    // Only a back edge can stay unsplit, and a back edge goes back in the reverse postorder
+    // (or is a self loop): the dominators and loops are computed for the first such edge.
+    rpo := f.rpo()
+    ridx := vec_fill(nb, -1)
+    for i, b in rpo {
+        ridx[b] = i
+    }
+    ready := false
+    cfg: Cfg
+    loops: Loops
+    def_block: Vec[i64]
+    cx: SplitCx
     aliases := vec[ExitAlias]()
     // decide first (on the unmodified CFG), then split
     keep := vec[(i64, i64)]()
@@ -287,7 +295,14 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
                 for w in 0..2 {
                     s := if w == 0 { t } else { e }
                     other := if w == 0 { e } else { t }
-                    if preds[s].len > 1 {
+                    if preds[s].len > 1 && ridx[b] >= 0 && ridx[s] <= ridx[b] {
+                        if !ready {
+                            ready = true
+                            cfg = cfg_new(f)
+                            loops = loops_new(f, &cfg)
+                            def_block = f.block_of()
+                            cx = SplitCx{der: vec_fill(f.insts.len, false), inl: vec_fill(nb, false), built: false, uoff: vec[i64](), uuser: vec[i64](), ublk: vec[i64](), uord: vec[i64]()}
+                        }
                         al, ok := split_critical_edges_analyze(f, &cfg, &loops, &def_block, &cx, b, s, other, c)
                         if ok {
                             aliases.extend(al.items())
@@ -680,8 +695,8 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i64] {
     return slot_of
 }
 
-// (cfg and loops: of f as it is now)
-fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, aliases: []ExitAlias) -> MFunc {
+// (rpo and loops: of f as it is now; loops is empty for a function without a cycle)
+fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, aliases: []ExitAlias) -> MFunc {
     n := f.insts.len
     ea_q := vec_fill(n, -1)
     ea_loop := vec_fill(n, -1)
@@ -793,7 +808,6 @@ fn isel_select(f: *Func, m: *Module, cfg: *Cfg, loops: Loops, depths: []i64, ali
         }
     }
     s.slot_of = alloca_slots(f, &s.mf)
-    rpo := cfg.rpo
     // Each block is selected backwards: the terminator, then the instructions from the last
     // one, then (entry block) the parameters. Every piece appends its instructions to s.out
     // in order (a chunk); the block is the chunks in the reverse order.
