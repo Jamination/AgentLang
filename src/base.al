@@ -85,6 +85,68 @@ fn run_program(path: str, argv: []str) -> i64 {
     return 128 + (st & 0x7F)
 }
 
+// ---------- worker processes (the parallel back end) ----------
+// the number of CPUs this process may run on (sched_getaffinity), at least 1
+fn cpu_count() -> i64 {
+    mask: [16]u64
+    n := syscall(204, 0, 128, ptr(mask))
+    if n <= 0 {
+        return 1
+    }
+    c := 0
+    for i in 0..min(n / 8, 16) {
+        c += i64(popcnt(mask[i]))
+    }
+    return max(c, 1)
+}
+
+// a zeroed mapping of `bytes` that forked children share with this process (pages are only
+// allocated when touched): its address, or 0
+fn shared_map(bytes: i64) -> i64 {
+    // PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE
+    r := syscall(9, 0, bytes, 3, 0x4021, -1, 0)
+    if r < 0 && r > -4096 {
+        return 0
+    }
+    return r
+}
+
+fn shared_unmap(addr: i64, bytes: i64) {
+    syscall(11, addr, bytes)
+}
+
+// fork after flushing standard output: 0 in the child, the child's pid in the parent, < 0 if
+// it failed
+fn fork_worker() -> i64 {
+    flush()
+    return syscall(57)
+}
+
+// ends a forked worker at once (its copy of the buffered output is not written)
+fn worker_exit(code: i64) {
+    syscall(231, code)
+}
+
+// waits for a forked worker: its exit status, 128 + the signal that ended it, or -1
+fn wait_worker(pid: i64) -> i64 {
+    status: [1]i64
+    loop {
+        r := syscall(61, pid, ptr(status), 0, 0)
+        if r == -4 {
+            continue
+        }
+        if r < 0 {
+            return -1
+        }
+        break
+    }
+    st := status[0] & 0xFFFFFFFF
+    if st & 0x7F == 0 {
+        return (st >> 8) & 0xFF
+    }
+    return 128 + (st & 0x7F)
+}
+
 // Deep recursion needs a big stack: if the stack limit is below `bytes`, raise it and start
 // the program again (the limit only applies to a new process image). Call first in main.
 fn ensure_stack(bytes: i64) {

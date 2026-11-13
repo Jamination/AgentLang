@@ -940,6 +940,113 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     return Code{bytes: bytes, relocs: relocs, err: err}
 }
 
+// rewrites the float constant relocations of code from indices into the function's own list
+// to indices into the module pool (local[i])
+fn emit_pool_fconsts(code: *Code, local: []i64) {
+    for j in 0..code.relocs.len {
+        match code.relocs[j].kind {
+            Abs32FConst(k) => code.relocs[j].kind = Abs32FConst(local[k])
+            _ => {}
+        }
+    }
+}
+
+// ---------- code in a shared mapping (the parallel back end) ----------
+// At byte offset q (8-aligned) of the mapping at base: the counts of bytes, relocations, float
+// constants and error bytes, then the bytes (padded to 8), each relocation as 4 words
+// (offset, kind, payload, addend), each constant as 2 words, the error text (padded).
+
+priv fn pad8(n: i64) -> i64 {
+    return (n + 7) / 8 * 8
+}
+
+fn emit_code_size(code: *Code, fc: *Vec[Bits128]) -> i64 {
+    return 32 + pad8(code.bytes.len) + 32 * code.relocs.len + 16 * fc.len + pad8(len(code.err))
+}
+
+// writes code at q; returns the offset after it
+fn emit_put_code(code: *Code, fc: *Vec[Bits128], base: i64, q0: i64) -> i64 {
+    h := cast[*i64](base + q0)
+    h[0] = code.bytes.len
+    h[1] = code.relocs.len
+    h[2] = fc.len
+    h[3] = len(code.err)
+    q := q0 + 32
+    if code.bytes.len > 0 {
+        memcopy(cast[*u8](base + q), ptr(code.bytes.buf), code.bytes.len)
+    }
+    q += pad8(code.bytes.len)
+    for r in code.relocs {
+        w := cast[*i64](base + q)
+        w[0] = r.off
+        match r.kind {
+            Abs32Global(x) => {
+                w[1] = 0
+                w[2] = x
+            }
+            Abs32Func(x) => {
+                w[1] = 1
+                w[2] = x
+            }
+            Rel32Func(x) => {
+                w[1] = 2
+                w[2] = x
+            }
+            Abs32FConst(x) => {
+                w[1] = 3
+                w[2] = x
+            }
+        }
+        w[3] = i64(r.addend)
+        q += 32
+    }
+    for b in *fc {
+        w := cast[*i64](base + q)
+        w[0] = i64(b.lo)
+        w[1] = i64(b.hi)
+        q += 16
+    }
+    if len(code.err) > 0 {
+        memcopy(cast[*u8](base + q), ptr(code.err), len(code.err))
+    }
+    return q + pad8(len(code.err))
+}
+
+// reads the code at q (into the current arena): (code, float constants, offset after it)
+fn emit_get_code(base: i64, q0: i64) -> (Code, Vec[Bits128], i64) {
+    h := cast[*i64](base + q0)
+    nb := h[0]
+    nr := h[1]
+    nf := h[2]
+    ne := h[3]
+    q := q0 + 32
+    bytes := vec_of(mkslice[u8](cast[*u8](base + q), nb))
+    q += pad8(nb)
+    relocs := vec[Reloc]()
+    relocs.reserve(nr)
+    for k in 0..nr {
+        w := cast[*i64](base + q)
+        kind := match w[1] {
+            0 => Abs32Global(w[2])
+            1 => Abs32Func(w[2])
+            2 => Rel32Func(w[2])
+            _ => Abs32FConst(w[2])
+        }
+        relocs.push(Reloc{off: w[0], kind: kind, addend: i32(w[3])})
+        q += 32
+    }
+    fc := vec[Bits128]()
+    fc.reserve(nf)
+    for k in 0..nf {
+        w := cast[*i64](base + q)
+        fc.push(Bits128{lo: u64(w[0]), hi: u64(w[1])})
+        q += 16
+    }
+    err := clone(mkslice[u8](cast[*u8](base + q), ne))
+    q += pad8(ne)
+    return (Code{bytes: bytes, relocs: relocs, err: err}, fc, q)
+}
+
 // padding in front of an aligned block; long paddings are not worth executing
 priv fn align_pad(o: i64, a: i64) -> i64 {
     p := (a - o % a) % a
