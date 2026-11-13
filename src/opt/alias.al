@@ -19,6 +19,14 @@ priv fn off_add(off: Opt[i64], k: i64) -> Opt[i64] {
     }
 }
 
+// both offsets are known and equal (a tuple match: faster here than `is_some(a) && a == b`)
+priv fn off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
+    match (a, b) {
+        (Some(x), Some(y)) => x == y
+        _ => false
+    }
+}
+
 priv fn decompose(f: *Func, addr: i64) -> Addr {
     v := addr
     off: Opt[i64] = Some(0)
@@ -236,5 +244,5 @@ fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
     if a.size != b.size {
         return false
     }
-    return (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && is_some(a.addr.off) && a.addr.off == b.addr.off)
+    return (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && off_some_eq(a.addr.off, b.addr.off))
 }
