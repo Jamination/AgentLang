@@ -65,6 +65,11 @@ priv extern "kernel32.dll" fn SetWaitableTimer(h: i64, due: *i64, period: i32, r
 priv extern "kernel32.dll" fn CreateFileMappingW(h: i64, security: i64, protect: u32, size_hi: u32, size_lo: u32, name: i64) -> i64
 priv extern "kernel32.dll" fn MapViewOfFile(h: i64, access: u32, off_hi: u32, off_lo: u32, size: i64) -> i64
 priv extern "kernel32.dll" fn UnmapViewOfFile(p: i64) -> i32
+priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
+priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
+priv extern "kernel32.dll" fn CreateThread(security: i64, stack: i64, start: fn(i64) -> u32, arg: i64, flags: u32, id: i64) -> i64
+priv extern "kernel32.dll" fn GetCurrentThreadStackLimits(low: *i64, high: *i64)
+priv extern "kernel32.dll" fn GetActiveProcessorCount(group: u16) -> u32
 
 priv const INVALID_HANDLE = -1
 priv const INFINITE: u32 = 0xFFFFFFFF
@@ -580,9 +585,9 @@ fn __os_unmap(p: i64, n: i64) -> i64 {
 }
 
 // ---------- processes ----------
-// starts app with the command line cmd and the three standard handles: (process handle,
-// process id), or (0, -errno)
-priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64) -> (i64, i64) {
+// starts app with the command line cmd, the three standard handles and the environment block
+// env (0: this process's): (process handle, process id), or (0, -errno)
+priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env: i64) -> (i64, i64) {
     // the child gets inheritable copies of the three handles
     me := GetCurrentProcess()
     src: [3]i64
@@ -604,7 +609,8 @@ priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64) -> 
     si[12] = dup[2]
     // PROCESS_INFORMATION: process, thread, process id, thread id
     pi: [3]i64
-    ok := CreateProcessW(app, cmd, 0, 0, 1, 0, 0, 0, &si[0], &pi[0])
+    // CREATE_UNICODE_ENVIRONMENT for a block of UTF-16 text
+    ok := CreateProcessW(app, cmd, 0, 0, 1, if env != 0 { 0x400 } else { 0 }, env, 0, &si[0], &pi[0])
     e := GetLastError()
     for i in 0..3 {
         if dup[i] != 0 {
@@ -670,7 +676,7 @@ fn __os_test(f: fn()) -> i64 {
     line := GetCommandLineW()
     cmd := alloc[u16](wcslen(line) + 1)
     memcopy(ptr(cmd), line, 2 * wcslen(line))
-    h, _ := create_process(ptr(exe), ptr(cmd), handle(0), handle(1), handle(2))
+    h, _ := create_process(ptr(exe), ptr(cmd), handle(0), handle(1), handle(2), 0)
     SetEnvironmentVariableW(name, nil)
     if h == 0 {
         return 0
@@ -1071,6 +1077,24 @@ priv fn quote_arg(out: *Vec[u8], a: str) {
     out.push('"')
 }
 
+// the command line of program `name` with arguments args: the name has no escapes (quotes
+// around it if it has white space), each argument is quoted by quote_arg
+priv fn command_line(name: str, args: []str) -> str {
+    line := vec[u8]()
+    if find(name, " ") >= 0 || find(name, "\t") >= 0 {
+        line.push('"')
+        line.extend(name)
+        line.push('"')
+    } else {
+        line.extend(name)
+    }
+    for a in args {
+        line.push(' ')
+        quote_arg(&line, a)
+    }
+    return line.items()
+}
+
 // Starts argv; capture: 0 nothing, 1 standard output, 2 standard output and standard error go to
 // a pipe. Returns (process id, process handle, read end of the pipe or -1) once the program
 // runs, (-1, -1, -1) if it could not be started (io_error()).
@@ -1084,19 +1108,7 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
         __io_result(-e)
         return (-1, -1, -1)
     }
-    // the program name has no escapes: quotes around it if it has white space
-    line := vec[u8]()
-    if find(argv[0], " ") >= 0 || find(argv[0], "\t") >= 0 {
-        line.push('"')
-        line.extend(argv[0])
-        line.push('"')
-    } else {
-        line.extend(argv[0])
-    }
-    for a in argv[1..] {
-        line.push(' ')
-        quote_arg(&line, a)
-    }
+    line := command_line(argv[0], argv[1..])
     pipe_r := -1
     pipe_w := 0
     if capture != 0 {
@@ -1112,7 +1124,7 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
     flush()
     hout := if capture != 0 { pipe_w } else { handle(1) }
     herr := if capture == 2 { pipe_w } else { handle(2) }
-    h, pid := create_process(wide(file), wide(line.items()), handle(0), hout, herr)
+    h, pid := create_process(wide(file), wide(line), handle(0), hout, herr, 0)
     if capture != 0 {
         CloseHandle(pipe_w)
     }
@@ -1228,4 +1240,197 @@ fn __os_current_dir() -> str {
     }
     __io_result(0)
     return narrow(ptr(buf), k)
+}
+
+// ---------- the compiler's host ----------
+// What alc (src/base.al) needs of the system it runs on. Only the compiler uses these.
+
+// the system the program runs on: Windows (else Linux)
+inline fn __os_is_windows() -> bool {
+    return true
+}
+
+// the size of this thread's stack (its reservation) in bytes, -1 if it is not known
+fn __os_stack_size() -> i64 {
+    lo: i64
+    hi: i64
+    GetCurrentThreadStackLimits(&lo, &hi)
+    return if hi > lo { hi - lo } else { -1 }
+}
+
+priv big_stack_fn: fn() -> i64
+priv big_stack_result: i64
+
+priv fn big_stack_thread(arg: i64) -> u32 {
+    // the same room for the handler after a stack overflow as on the first thread
+    g: u32 = 0x10000
+    SetThreadStackGuarantee(&g)
+    f := big_stack_fn
+    big_stack_result = f()
+    return 0
+}
+
+// Calls f with a stack of at least `bytes` (deep recursion) and returns its result: f runs on
+// a new thread whose stack reserves `bytes` (committed as it is used), while this thread waits
+// for it without doing anything else (so only one thread ever runs AL code). If the thread
+// cannot be created, f runs here, with the stack there is.
+fn __os_big_stack(bytes: i64, f: fn() -> i64) -> i64 {
+    big_stack_fn = f
+    // STACK_SIZE_PARAM_IS_A_RESERVATION
+    h := CreateThread(0, bytes, big_stack_thread, 0, 0x10000, 0)
+    if h == 0 {
+        return f()
+    }
+    WaitForSingleObject(h, INFINITE)
+    CloseHandle(h)
+    return big_stack_result
+}
+
+// the environment block of this process (UTF-16) without the variables named in `drop`
+// (compared without regard to case) and with the `NAME=value` entries of `add`; 0 (this
+// process's environment) if there is nothing to change
+priv fn env_block(drop: []str, add: []str) -> i64 {
+    if len(drop) == 0 && len(add) == 0 {
+        return 0
+    }
+    out := vec[u16]()
+    blk := GetEnvironmentStringsW()
+    if blk != nil {
+        at := cast[i64](blk)
+        loop {
+            e := cast[*u16](at)
+            n := wcslen(e)
+            if n == 0 {
+                break
+            }
+            // the name ends at the first '=' after the first unit ("=C:=C:\x" names the
+            // working directory of drive C)
+            k := 1
+            while k < n && e[k] != 61 {
+                k += 1
+            }
+            keep := true
+            for d in drop {
+                if len(d) == k {
+                    same := true
+                    for i in 0..k {
+                        a := i64(e[i])
+                        b := i64(d[i])
+                        if a >= 97 && a <= 122 {
+                            a -= 32
+                        }
+                        if b >= 97 && b <= 122 {
+                            b -= 32
+                        }
+                        if a != b {
+                            same = false
+                            break
+                        }
+                    }
+                    if same {
+                        keep = false
+                    }
+                }
+            }
+            if keep {
+                for i in 0..n + 1 {
+                    out.push(e[i])
+                }
+            }
+            at += 2 * (n + 1)
+        }
+        FreeEnvironmentStringsW(blk)
+    }
+    for a in add {
+        w := wide(a)
+        for i in 0..wcslen(w) + 1 {
+            out.push(w[i])
+        }
+    }
+    // the block ends with an empty entry (an empty block: two NULs)
+    if out.len == 0 {
+        out.push(0)
+    }
+    out.push(0)
+    return cast[i64](ptr(out.items()))
+}
+
+// Runs the program at path with arguments argv and the environment of this process, without
+// the variables named in `drop` and with the `NAME=value` entries of `add`; waits for it.
+// Returns its status (as __os_wait), -1 if it could not be started.
+fn __os_run(path: str, argv: []str, drop: []str, add: []str) -> i64 {
+    flush()
+    m := mark()
+    defer { release(m) }
+    env := env_block(drop, add)
+    h, _ := create_process(wide(path), wide(command_line(path, argv)), handle(0), handle(1), handle(2), env)
+    if h == 0 {
+        return -1
+    }
+    WaitForSingleObject(h, INFINITE)
+    code: u32 = 1
+    ok := GetExitCodeProcess(h, &code)
+    CloseHandle(h)
+    if ok == 0 {
+        return -1
+    }
+    return status_of(code)
+}
+
+// nothing to do: whether a file can be executed does not depend on a mode
+fn __os_make_executable(path: *u8) -> bool {
+    return true
+}
+
+// (volume serial number, file index, true) of the file that path names (following links), or
+// (0, 0, false)
+fn __os_file_id(path: *u8) -> (i64, i64, bool) {
+    buf: [4096]u16
+    // no access needed; FILE_FLAG_BACKUP_SEMANTICS also opens directories
+    h := CreateFileW(wide_c(buf[..], path), 0, 7, 0, 3, 0x02000000, 0)
+    if h == INVALID_HANDLE {
+        return (0, 0, false)
+    }
+    // BY_HANDLE_FILE_INFORMATION: ..., volume serial number at 7, file index high, low at 11, 12
+    d: [13]u32
+    ok := GetFileInformationByHandle(h, &d[0])
+    CloseHandle(h)
+    if ok == 0 {
+        return (0, 0, false)
+    }
+    return (i64(d[7]), (i64(d[11]) << 32) | i64(d[12]), true)
+}
+
+// the number of processors of the system, at least 1
+fn __os_cpu_count() -> i64 {
+    // ALL_PROCESSOR_GROUPS
+    return max(i64(GetActiveProcessorCount(0xFFFF)), 1)
+}
+
+// The parallel back end (src/x86/mod.al) forks worker processes; Windows has no fork, so the
+// compiler does all the work itself (src/base.al: can_fork) and these only report that.
+
+// ENOSYS: no memory shared with forked processes
+fn __os_map_shared(bytes: i64) -> i64 {
+    return -38
+}
+
+// ENOSYS: no fork
+fn __os_fork(quiet: bool) -> i64 {
+    return -38
+}
+
+// no work queue for forked workers: -1
+fn __os_queue_new(items: []i64) -> i64 {
+    return -1
+}
+
+// an anonymous pipe (not inherited): (read end, write end), or (-1, -1)
+fn __os_pipe() -> (i64, i64) {
+    r: i64
+    w: i64
+    if CreatePipe(&r, &w, 0, 0) == 0 {
+        return (-1, -1)
+    }
+    return (r, w)
 }
