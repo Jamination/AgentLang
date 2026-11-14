@@ -156,9 +156,10 @@ fn os_error(errno: i64) -> str {
 // of its own; what it allocated stays valid after worker_join (that arena is never freed). A
 // panic in a worker thread ends the compiler, as in any thread.
 
-// the stack of a worker thread (reserved; committed as it is used): as big as the compiler's
-// thread (with_stack in main), see "Parallel back end" in docs/BOOTSTRAP.md
-priv const WORKER_STACK = 1 << 30
+// the stack of a worker thread (reserved; committed as it is used). Nothing that runs there
+// (opt_finish, compile_fn) recurses deeper with the size or nesting of a function: every
+// program measured needs about 12 KiB, see "Parallel back end" in docs/BOOTSTRAP.md
+priv const WORKER_STACK = 1 << 20
 
 // starts a thread that runs f(ctx); nil if it cannot be started
 fn worker_start[C](f: fn(C), ctx: C) -> *__ThreadCtl {

@@ -1137,7 +1137,7 @@ priv fn run_windows(exe: str, argv: []str) -> i64 {
 }
 
 fn main() -> i64 {
-    // deep recursion in the frontend and SSA construction: use a big stack
+    // deep recursion in the front end (it follows the nesting): use a big stack
     return with_stack(1 << 30, start)
 }
 

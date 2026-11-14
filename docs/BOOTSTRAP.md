@@ -350,20 +350,19 @@ How the run-time library and the compiler implement threads (the rules: DETAILS.
 
 ## Parallel back end
 
-`x86_compile` compiles functions independently of each other. With more than one CPU (Linux:
-the CPUs of `sched_getaffinity`, limited by a cgroup quota in `/sys/fs/cgroup/cpu.max`;
-Windows: `GetActiveProcessorCount`; at most 6) the compiler's thread and worker threads compile
-them together, on Linux and Windows alike (`compile_spread` in `src/x86/mod.al`; the threads are
-the run-time library's, started by `worker_start` in `src/base.al`). The functions are in one
-list, largest first, and every thread takes the next one with an `atomic_add` on the position
-in the list, so all threads finish at about the same time. A thread puts the result of a
-function (`Done`: machine code, relocations, float constants, frame shape, line table) into
-that function's element of a result array; it is allocated in the thread's own arena, which
-the join hands to the compiler's thread and which is never freed, so nothing is copied. After
-the join the compiler builds the float constant pool in the order of the functions and takes
-the back end's diagnostics (`Code.err`: a frame too large, a Linux system call in a Windows
-executable) in that order too, so output and messages are byte-identical to a sequential
-compile with any number of threads.
+`x86_compile` compiles functions independently of each other. With more than one CPU and
+enough functions (**Number of threads** below) the compiler's thread
+and worker threads compile them together, on Linux and Windows alike (`compile_spread` in
+`src/x86/mod.al`; the threads are the run-time library's, started by `worker_start` in
+`src/base.al`). The functions are in one list, largest first, and every thread takes the next
+one with an `atomic_add` on the position in the list, so all threads finish at about the same
+time. A thread puts the result of a function (`Done`: machine code, relocations, float
+constants, frame shape, line table) into that function's element of a result array; it is
+allocated in the thread's own arena, which the join hands to the compiler's thread and which
+is never freed, so nothing is copied. After the join the compiler builds the float constant
+pool in the order of the functions and takes the back end's diagnostics (`Code.err`: a frame
+too large, a Linux system call in a Windows executable) in that order too, so output and
+messages are byte-identical to a sequential compile with any number of threads.
 
 At `-O0` the optimiser is only `opt_first` per function (prune, mem2reg, DCE), which reads
 nothing of the module but the function: `opt_optimize` leaves it to the back end
@@ -375,6 +374,40 @@ addresses of the optimised IR in the function's entry of `Refs`, from which the 
 computes the reachable functions as a sequential compile does and keeps only their code.
 Optimised builds compute the reachable functions first and compile only those (at least 64) in
 the threads.
+
+**Number of threads** (`spread_threads` in `src/x86/mod.al`), the compiler's thread included:
+one per CPU (Linux: the CPUs of `sched_getaffinity`, limited by a cgroup quota in
+`/sys/fs/cgroup/cpu.max`; Windows: `GetActiveProcessorCount`), at most 32, and at most one per
+24 functions at `-O0` (where the threads also optimise them) or per 16 functions when
+optimising (fewer, bigger functions after inlining); below 64 functions the compile stays on
+the compiler's thread. A thread costs its start and memory: its arena and its work and
+scratch regions each begin with a 2 MiB page where the kernel backs memory with transparent
+huge pages, about 6 MB a thread for a small program, and up to 10 MB in the optimised
+self-compile (the work regions of the largest functions, whose register allocation needs a
+bit matrix of up to 16 MB). Measured on a 12-CPU machine (6 cores with 2 hardware threads
+each), wall time of `alc build`, best of 5 (large) or 15 (small) runs, interleaved:
+
+| program (functions compiled at `-O0` / optimised) | 1 | 2 | 4 | 6 | 8 | 12 threads |
+|---|---|---|---|---|---|---|
+| hello world (78, sequential), `-O0` | 10.3 ms | 9.4 | 9.3 | 10.0 | 10.6 | 10.4 |
+| `tests/run/clone.al` (163 / 83), `-O0` | 18.6 | 14.2 | 12.6 | 12.8 | 13.3 | 14.1 |
+| the same, optimised | 55.5 | 49.5 | 48.9 | 49.0 | 50.8 | 52.2 |
+| `tests/run/index_scale.al` (125), `-O0` | 26.8 | 19.7 | 16.9 | 16.4 | 17.0 | 18.2 |
+| `tools/gen_dx12.al` (347 / 135), `-O0` | 42.5 | 29.2 | 22.9 | 22.0 | 21.6 | 21.7 |
+| the same, optimised | 145.3 | 128.8 | 118.7 | 116.6 | 115.1 | 116.6 |
+| the compiler (1967 / 963), `-O0` | 341 | 214 | 166 | 136 | 132 | 125 |
+| the same, optimised | 1179 | 1045 | 972 | 935 | 933 | 931 |
+| back end of the compiler (`ALC_DEBUG=mem`), `-O0` | 255 | 130 | 80 | 51 | 46 | 42 |
+| peak RSS of the compiler, `-O0` | 184 MB | 186 | 190 | 204 | 218 | 236 |
+| peak RSS of the compiler, optimised | 258 MB | 258 | 286 | 306 | 330 | 368 |
+| peak RSS of `clone.al`, `-O0` | 40 MB | 40 | 40 | 50 | 62 | 78 |
+
+The rule gives hello world 3 threads, `clone.al` 6 at `-O0` and 5 optimised,
+`index_scale.al` 5, `gen_dx12.al` 12 and 8, the compiler 12: within 0.5 ms of the best count
+of every program measured (also generated ones with 100 to 3000 functions), never slower than
+the earlier fixed 6 by more than that, and 11 ms faster on the compiler at `-O0`. The cap of
+32 is not measured: there the largest functions start to bound the gain (the compiler's
+largest takes 6 ms of its 255 ms `-O0` back end) while every thread still costs 5-10 MB.
 
 **What the threads share**, and why that is safe:
 
@@ -409,14 +442,26 @@ process, so there is none. A worker that fails is a compiler bug either way: the
 on the same function as in a sequential compile, which fails the same way (`ALC_JOBS=1`
 reproduces it on one thread), and the fallback only hid the bug.
 
-**Stack.** A worker thread reserves a stack of 1 GiB, committed as it is used, like the
-compiler's thread. The back end alone needs at most 64 KiB on every program measured (the
-nesting tests of `tests/run`, 2000-level nests of blocks, `if`, loops, `match`, expressions,
-`else if`, the compiler itself); `opt_first` (at `-O0`) needs up to 512 KiB on the 2000-level
-nests, but mem2reg's search for a variable's definition recurses once per block on its way
-back (about 250 bytes per `if`/`else`: 5 MiB for 20,000 `if`s in a row, 20 MiB for 80,000),
-which the parser's nesting limit does not bound. With the compiler thread's size a parallel
-compile overflows exactly where a sequential one does.
+**Stack.** A worker thread reserves a stack of 1 MiB (`WORKER_STACK` in `src/base.al`),
+committed as it is used. Nothing a worker runs (`opt_finish`: prune, mem2reg, DCE; then
+`compile_fn`) recurses deeper with the size or the nesting of a function: mem2reg's search for
+the definition of a variable goes back through the predecessors with a work stack of its own
+(`read_in` in `src/opt/mem2reg.al`; it used to recurse once per block on its way back, 2.5 MiB
+for 20,000 `if`s in a row), and the other recursions are bounded by a constant (address
+folding in isel at 8 levels, `decompose_obj` in `alias.al`, the sort's depth limit). Measured
+with an instrumented compiler that runs all functions on one worker and counts the stack pages
+it touched (`mincore`): about 12 KiB on every program, at `-O0` and optimised, for the Linux
+and the Windows target: the tests of `tests/run`, the examples, the benchmarks, the compiler
+itself, generated programs with 5,000 to 80,000 `if`, `if`/`else`, `while`, `match`, `&&`/`||`
+conditions or statements in a row, and nests of 1,950 levels (the parser's limit is 2,000) of
+blocks, `if`, `if`/`else`, `while`, `for`, `loop`, `match`, `else if`, parentheses, unary
+minus, operators, calls, method calls and `if` expressions. Under Wine the Windows compiler
+compiles them (all but the 80,000-statement programs and the `for` nest, too slow there) with
+a worker stack of 128 KiB, half of which is the guarantee for the overflow handler
+(`SetThreadStackGuarantee`). 1 MiB leaves a margin of about 80 times; what remains is the depth
+of the passes' fixed call chains, which no input deepens. (The compiler's own thread needs
+more: up to 22 MB on the 2,000-level nests, in the parser and lowering, whose recursion follows
+the nesting.)
 
 `ALC_JOBS=n` sets the number of threads (`ALC_JOBS=1`: sequential, on the compiler's thread
 alone); `--emit-asm` and the per-function debug output (`ALC_DEBUG` other than `mem`) are always
@@ -481,8 +526,8 @@ the conformance suite with it).
   includes with `when TARGET_OS == ...`; files, paths and the environment go through the OS
   layers of the run-time library (the `__os_*` functions of `src/prelude_linux.al` and
   `src/prelude_windows.al`). The default `--target` is the host.
-- **Stack.** The compiler needs a big stack (deep recursion in the front end and SSA
-  construction): `with_stack(1 GB, ...)` at the start of `main`. Linux raises the stack limit
+- **Stack.** The compiler needs a big stack (deep recursion in the front end, which follows the
+  nesting): `with_stack(1 GB, ...)` at the start of `main`. Linux raises the stack limit
   and starts the compiler again (`ALC_STACK_SET` holds the original limit, which the programs
   of `alc run` get back); Windows runs the compiler on a thread whose stack reserves 1 GB
   (`CreateThread` with `STACK_SIZE_PARAM_IS_A_RESERVATION`, committed as it is used, with the
@@ -492,9 +537,9 @@ the conformance suite with it).
   a panic of the compiler there says `panic in thread 1:`. (Other programs keep the 16 MiB of
   the PE header.) The nesting limit of the parser is measured against this stack.
 - **Parallelism.** The same as on Linux ([parallel back end](#parallel-back-end)): that thread
-  starts the worker threads (`CreateThread` through the run-time library, 1 GiB reserved each);
-  the number of threads, the compiler's included, is `GetActiveProcessorCount`, at most 6, or
-  `ALC_JOBS`.
+  starts the worker threads (`CreateThread` through the run-time library, 1 MiB reserved each);
+  the number of threads follows the same rule, with `GetActiveProcessorCount` as the number of
+  CPUs, or `ALC_JOBS`.
 - **Processes.** `alc run` / `alc test` start the program with `CreateProcessW` (arguments
   quoted by the Microsoft rules) and wait for it; a Linux executable (`--target linux`) is
   built but not run. `ALC_WINE` only applies on Linux.

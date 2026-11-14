@@ -8,6 +8,17 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Changed
+- The compiler uses more threads for big programs and fewer for small ones: one per CPU, up to
+  32 (was at most 6), and at most one per 24 functions at `-O0` or per 16 when optimising
+  (`ALC_JOBS=n` still sets the number). On 12 CPUs the compiler compiles itself without
+  optimisation in 125 ms instead of 136 ms; small programs no longer start threads that cost
+  more than they save (memory included: about 6 MB a thread).
+- The worker threads reserve a stack of 1 MiB instead of 1 GiB: mem2reg no longer recurses once
+  per block (its search for a variable's definition uses a work stack of its own), and nothing
+  else in the back end recurses with the size or nesting of a function (about 12 KiB used on
+  every program measured, 2,000-level nests and 80,000 `if`s in a row included).
+
 ## [0.2.1] - 2026-11-14
 
 ### Changed
