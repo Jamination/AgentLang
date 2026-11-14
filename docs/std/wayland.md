@@ -3,19 +3,28 @@
 Linux only: with `--target windows`, `use std.wayland` is a compile error.
 
 `use std.wayland` gives a program what it needs to talk to a Wayland compositor itself:
-`libwayland-client`, the protocols `wayland` (core), `xdg-shell` and `xdg-decoration-unstable-v1`,
-and the parts of `libxkbcommon` (keyboard) and `libwayland-cursor` (pointer image) that a window
-needs. It is a binding of the C API, not a window abstraction: `std.window` is the portable
-window module (it uses X11, which works on Wayland sessions through XWayland).
+`libwayland-client`, the protocols `wayland` (core), `xdg-shell`, `xdg-decoration-unstable-v1`,
+`relative-pointer-unstable-v1` and `pointer-constraints-unstable-v1` (unaccelerated relative
+motion and a locked or confined pointer, for mouse-look), and the parts of `libxkbcommon`
+(keyboard) and `libwayland-cursor` (pointer image) that a window needs. It is a binding of the
+C API, not a window abstraction: `std.window` is the portable window module (it uses X11, which
+works on Wayland sessions through XWayland).
 
 A program that uses it links against `libwayland-client.so.0`, and against `libxkbcommon.so.0`
 and `libwayland-cursor.so.0` if it calls their functions.
 
-What is bound: 30 interfaces (23 of the core protocol, 5 of `xdg-shell`, 2 of
-`xdg-decoration`) with all their 113 requests, 72 events (in 19 listener structs, one per
-interface that has events; the two events of `wl_display` are handled inside libwayland) and
-305 enum values; 31 functions of libwayland-client, 15 of libxkbcommon, 5 of
-libwayland-cursor, and a few helpers.
+What is bound: 35 interfaces (23 of the core protocol, 5 of `xdg-shell`, 2 of
+`xdg-decoration`, 2 of `relative-pointer`, 3 of `pointer-constraints`) with all their 124
+requests, 77 events (in 22 listener structs, one per interface that has events; the two events
+of `wl_display` are handled inside libwayland) and 308 enum values; 31 functions of
+libwayland-client, 15 of libxkbcommon, 5 of libwayland-cursor, and a few helpers.
+
+Mouse-look on Wayland: bind `zwp_relative_pointer_manager_v1` and `zwp_pointer_constraints_v1`
+from the registry, get a `ZwpRelativePointerV1` for the seat's `WlPointer`
+(`zwp_relative_pointer_manager_v1_get_relative_pointer`) and read `relative_motion` (`dx`, `dy`
+as `wl_fixed_t`: `wl_fixed_to_double`; the `_unaccel` pair is without acceleration), and lock the
+pointer to the surface with `zwp_pointer_constraints_v1_lock_pointer(constraints, surface,
+pointer, nil, ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT)` while the camera is active.
 
 Complete example: [examples/wayland_window.al](../../examples/wayland_window.al) (a window with
 a test pattern, keyboard, pointer and cursor, resizing, fullscreen / maximize, server-side
@@ -141,4 +150,4 @@ files (the list `PROTOCOLS` at the top of the generator; add a protocol there to
 hand-written part (the library functions, xkbcommon, cursor) is `tools/wayland_helpers.al`;
 edit it there, not in `std/wayland.al`. With `-- --verify` it also builds a C program from
 `wayland-scanner`'s output and an AL program from the bindings, both printing every interface
-table, opcode and enum value, and compares them (`tables: no mismatches in 633 lines`).
+table, opcode and enum value, and compares them (`tables: no mismatches in 668 lines`).

@@ -1456,6 +1456,136 @@ fn use_zxdg_toplevel_decoration_v1() {
     total += i64(zxdg_toplevel_decoration_v1_add_listener(zero[*ZxdgToplevelDecorationV1](), l, nil))
 }
 
+fn use_zwp_relative_pointer_manager_v1() {
+    total += sizeof[ZwpRelativePointerManagerV1]()
+    {
+        r: *WlInterface = zwp_relative_pointer_manager_v1_interface()
+        keep(&r)
+    }
+    total += i64(ZWP_RELATIVE_POINTER_MANAGER_V1_DESTROY)
+    total += i64(ZWP_RELATIVE_POINTER_MANAGER_V1_GET_RELATIVE_POINTER)
+    zwp_relative_pointer_manager_v1_set_user_data(zero[*ZwpRelativePointerManagerV1](), zero[*u8]())
+    {
+        r: *u8 = zwp_relative_pointer_manager_v1_get_user_data(zero[*ZwpRelativePointerManagerV1]())
+        keep(&r)
+    }
+    {
+        r: u32 = zwp_relative_pointer_manager_v1_get_version(zero[*ZwpRelativePointerManagerV1]())
+        keep(&r)
+    }
+    zwp_relative_pointer_manager_v1_destroy(zero[*ZwpRelativePointerManagerV1]())
+    {
+        r: *ZwpRelativePointerV1 = zwp_relative_pointer_manager_v1_get_relative_pointer(zero[*ZwpRelativePointerManagerV1](), zero[*WlPointer]())
+        keep(&r)
+    }
+}
+
+fn use_zwp_relative_pointer_v1() {
+    total += sizeof[ZwpRelativePointerV1]()
+    {
+        r: *WlInterface = zwp_relative_pointer_v1_interface()
+        keep(&r)
+    }
+    total += i64(ZWP_RELATIVE_POINTER_V1_DESTROY)
+    zwp_relative_pointer_v1_set_user_data(zero[*ZwpRelativePointerV1](), zero[*u8]())
+    {
+        r: *u8 = zwp_relative_pointer_v1_get_user_data(zero[*ZwpRelativePointerV1]())
+        keep(&r)
+    }
+    {
+        r: u32 = zwp_relative_pointer_v1_get_version(zero[*ZwpRelativePointerV1]())
+        keep(&r)
+    }
+    zwp_relative_pointer_v1_destroy(zero[*ZwpRelativePointerV1]())
+    l := new[ZwpRelativePointerV1Listener]()
+    l.relative_motion = fn(data: *u8, object: *ZwpRelativePointerV1, a_utime_hi: u32, a_utime_lo: u32, a_dx: i32, a_dy: i32, a_dx_unaccel: i32, a_dy_unaccel: i32) {}
+    total += i64(zwp_relative_pointer_v1_add_listener(zero[*ZwpRelativePointerV1](), l, nil))
+}
+
+fn use_zwp_pointer_constraints_v1() {
+    total += sizeof[ZwpPointerConstraintsV1]()
+    {
+        r: *WlInterface = zwp_pointer_constraints_v1_interface()
+        keep(&r)
+    }
+    total += i64(ZWP_POINTER_CONSTRAINTS_V1_ERROR_ALREADY_CONSTRAINED)
+    total += i64(ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_ONESHOT)
+    total += i64(ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT)
+    total += i64(ZWP_POINTER_CONSTRAINTS_V1_DESTROY)
+    total += i64(ZWP_POINTER_CONSTRAINTS_V1_LOCK_POINTER)
+    total += i64(ZWP_POINTER_CONSTRAINTS_V1_CONFINE_POINTER)
+    zwp_pointer_constraints_v1_set_user_data(zero[*ZwpPointerConstraintsV1](), zero[*u8]())
+    {
+        r: *u8 = zwp_pointer_constraints_v1_get_user_data(zero[*ZwpPointerConstraintsV1]())
+        keep(&r)
+    }
+    {
+        r: u32 = zwp_pointer_constraints_v1_get_version(zero[*ZwpPointerConstraintsV1]())
+        keep(&r)
+    }
+    zwp_pointer_constraints_v1_destroy(zero[*ZwpPointerConstraintsV1]())
+    {
+        r: *ZwpLockedPointerV1 = zwp_pointer_constraints_v1_lock_pointer(zero[*ZwpPointerConstraintsV1](), zero[*WlSurface](), zero[*WlPointer](), zero[*WlRegion](), zero[u32]())
+        keep(&r)
+    }
+    {
+        r: *ZwpConfinedPointerV1 = zwp_pointer_constraints_v1_confine_pointer(zero[*ZwpPointerConstraintsV1](), zero[*WlSurface](), zero[*WlPointer](), zero[*WlRegion](), zero[u32]())
+        keep(&r)
+    }
+}
+
+fn use_zwp_locked_pointer_v1() {
+    total += sizeof[ZwpLockedPointerV1]()
+    {
+        r: *WlInterface = zwp_locked_pointer_v1_interface()
+        keep(&r)
+    }
+    total += i64(ZWP_LOCKED_POINTER_V1_DESTROY)
+    total += i64(ZWP_LOCKED_POINTER_V1_SET_CURSOR_POSITION_HINT)
+    total += i64(ZWP_LOCKED_POINTER_V1_SET_REGION)
+    zwp_locked_pointer_v1_set_user_data(zero[*ZwpLockedPointerV1](), zero[*u8]())
+    {
+        r: *u8 = zwp_locked_pointer_v1_get_user_data(zero[*ZwpLockedPointerV1]())
+        keep(&r)
+    }
+    {
+        r: u32 = zwp_locked_pointer_v1_get_version(zero[*ZwpLockedPointerV1]())
+        keep(&r)
+    }
+    zwp_locked_pointer_v1_destroy(zero[*ZwpLockedPointerV1]())
+    zwp_locked_pointer_v1_set_cursor_position_hint(zero[*ZwpLockedPointerV1](), zero[i32](), zero[i32]())
+    zwp_locked_pointer_v1_set_region(zero[*ZwpLockedPointerV1](), zero[*WlRegion]())
+    l := new[ZwpLockedPointerV1Listener]()
+    l.locked = fn(data: *u8, object: *ZwpLockedPointerV1) {}
+    l.unlocked = fn(data: *u8, object: *ZwpLockedPointerV1) {}
+    total += i64(zwp_locked_pointer_v1_add_listener(zero[*ZwpLockedPointerV1](), l, nil))
+}
+
+fn use_zwp_confined_pointer_v1() {
+    total += sizeof[ZwpConfinedPointerV1]()
+    {
+        r: *WlInterface = zwp_confined_pointer_v1_interface()
+        keep(&r)
+    }
+    total += i64(ZWP_CONFINED_POINTER_V1_DESTROY)
+    total += i64(ZWP_CONFINED_POINTER_V1_SET_REGION)
+    zwp_confined_pointer_v1_set_user_data(zero[*ZwpConfinedPointerV1](), zero[*u8]())
+    {
+        r: *u8 = zwp_confined_pointer_v1_get_user_data(zero[*ZwpConfinedPointerV1]())
+        keep(&r)
+    }
+    {
+        r: u32 = zwp_confined_pointer_v1_get_version(zero[*ZwpConfinedPointerV1]())
+        keep(&r)
+    }
+    zwp_confined_pointer_v1_destroy(zero[*ZwpConfinedPointerV1]())
+    zwp_confined_pointer_v1_set_region(zero[*ZwpConfinedPointerV1](), zero[*WlRegion]())
+    l := new[ZwpConfinedPointerV1Listener]()
+    l.confined = fn(data: *u8, object: *ZwpConfinedPointerV1) {}
+    l.unconfined = fn(data: *u8, object: *ZwpConfinedPointerV1) {}
+    total += i64(zwp_confined_pointer_v1_add_listener(zero[*ZwpConfinedPointerV1](), l, nil))
+}
+
 fn main() {
     helpers()
     use_wl_display()
@@ -1488,5 +1618,10 @@ fn main() {
     use_xdg_popup()
     use_zxdg_decoration_manager_v1()
     use_zxdg_toplevel_decoration_v1()
+    use_zwp_relative_pointer_manager_v1()
+    use_zwp_relative_pointer_v1()
+    use_zwp_pointer_constraints_v1()
+    use_zwp_locked_pointer_v1()
+    use_zwp_confined_pointer_v1()
     print(total)
 }

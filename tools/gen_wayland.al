@@ -22,6 +22,9 @@ priv const PROTOCOLS = [_]str{
     "/usr/share/wayland/wayland.xml",
     "/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml",
     "/usr/share/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml",
+    // mouse-look: relative motion and locking / confining the pointer
+    "/usr/share/wayland-protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml",
+    "/usr/share/wayland-protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml",
 }
 priv const LIB = "libwayland-client.so.0"
 // the protocol whose interface tables libwayland-client exports (wl_surface_interface, ...); the
