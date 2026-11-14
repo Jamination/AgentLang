@@ -904,6 +904,11 @@ priv fn stmt(self: *Fx, s: *Stmt) {
             tv := self.mval(v.ty, t)
             self.store(tv, v)
             for i in 0..lhs.len {
+                // `_` discards that part, as with `:=`
+                match lhs[i].k {
+                    Ident(n) if n == "_" => continue
+                    _ => {}
+                }
                 src := match self.field_of(tv, fmt(i), s.pos) {
                     Some(p) => p
                     None => return

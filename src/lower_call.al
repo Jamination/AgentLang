@@ -546,7 +546,17 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                                         tys.push(ty)
                                     }
                                     None => {
-                                        self.err(t.pos, "expected a type argument")
+                                        msg := "expected a type argument"
+                                        // a name that is nothing at all: say so, not that a type was expected
+                                        match t.k {
+                                            Ident(tn) => {
+                                                if !is_some(self.lookup(tn)) && !self.cx.has_const(tn) && !is_some(self.cx.find_fn(tn)) && !is_some(self.cx.find_struct(tn)) && !is_some(self.cx.find_enum(tn)) {
+                                                    msg = fmt("unknown type `", tn, "`")
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                        self.err(t.pos, msg)
                                         return val_err()
                                     }
                                 }
