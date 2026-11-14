@@ -296,6 +296,13 @@ fn main() {
   cannot reach a loop of the enclosing function, and `defer` blocks belong to the function
   they are written in.
 - A nested or anonymous function can be given to C as a callback.
+- **Cost.** Where the optimiser can see which function a function value is (a named, nested
+  or anonymous function passed straight to `retain`, `sort_by` or a generic of the program,
+  or kept in a local variable), it calls that function directly and inlines it when it is
+  small. A function too big to inline that calls such an argument gets a copy for it (at
+  most 8 per function and 64 per program; `--emit-ir` and the symbol table name it
+  `name~argument`, stack traces `name`). A function value chosen at run time is called
+  indirectly.
 - Diagnostics, `--emit-ir` and the symbol table name them `outer.name` and `outer.fn@line:col`.
 
 ## match
