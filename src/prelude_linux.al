@@ -160,12 +160,7 @@ fn clock_ns() -> i64 {
 fn args() -> []str {
     out := alloc[str](__argc)
     for i in 0..__argc {
-        p := cast[*i64](__argv)[i]
-        n := 0
-        while cast[*u8](p)[n] != 0 {
-            n += 1
-        }
-        out[i] = mkslice[u8](p, n)
+        out[i] = from_cstr(cast[*u8](cast[*i64](__argv)[i]))
     }
     return out
 }
@@ -251,7 +246,7 @@ fn __os_list_dir(path: *u8, names: *Vec[str]) -> i64 {
             reclen := i64(buf[off + 16]) | i64(buf[off + 17]) << 8
             name := from_cstr(cast[*u8](cast[i64](ptr(buf)) + off + 19))
             if name != "." && name != ".." {
-                names.push(concat(name, ""))
+                names.push(clone(name))
             }
             off += reclen
         }
@@ -286,7 +281,7 @@ priv fn locate(name: str) -> (str, i64) {
     if len(name) == 0 {
         return ("", 2)
     }
-    if find(name, "/") >= 0 {
+    if contains(name, '/') {
         return (name, 0)
     }
     path, has := env_get("PATH")
@@ -379,21 +374,11 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
         return (-1, -1, -1)
     }
     failed: [1]i64
-    loop {
-        r := syscall(0, note_r, ptr(failed), 8)
-        if r != -4 {
-            break
-        }
-    }
+    __os_read(note_r, cast[i64](ptr(failed)), 8)
     syscall(3, note_r)
     if failed[0] != 0 {
         // the child exits at once: wait for it
-        status: [1]i32
-        loop {
-            if syscall(61, pid, ptr(status), 0, 0) != -4 {
-                break
-            }
-        }
+        __os_wait(pid, pid, true)
         if pipe_r >= 0 {
             syscall(3, pipe_r)
         }
@@ -465,7 +450,7 @@ fn __os_current_dir() -> str {
     if n <= 0 {
         return ""
     }
-    return concat(from_cstr(ptr(buf)), "")
+    return clone(from_cstr(ptr(buf)))
 }
 
 // the target of this layer (see `enum Os` in prelude.al)
