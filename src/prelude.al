@@ -3793,6 +3793,39 @@ fn __thread_spawn(body: fn(*__ThreadCtl), arg: i64, stack: i64) -> *__ThreadCtl 
     return c
 }
 
+// what a new thread of __thread_start needs: the function and the copy of its context
+struct __ThreadArgs[C] {
+    f: fn(C)
+    ctx: C
+}
+
+// a thread that runs f(ctx) (ctx copied): its control block, or nil (io_error() says why)
+fn __thread_start[C](f: fn(C), ctx: C, stack: i64) -> *__ThreadCtl {
+    n := sizeof[__ThreadArgs[C]]()
+    p := __os_map(n)
+    if p < 0 && p > -4096 {
+        __io_result(p)
+        return nil
+    }
+    a := cast[*__ThreadArgs[C]](p)
+    a.f = f
+    a.ctx = ctx
+    c := __thread_spawn(__thread_body[C], p, stack)
+    if c == nil {
+        __os_unmap(p, n)
+    }
+    return c
+}
+
+// the body of a thread of __thread_start (in the new thread)
+fn __thread_body[C](c: *__ThreadCtl) {
+    a := cast[*__ThreadArgs[C]](c.arg)
+    f := a.f
+    ctx := a.ctx
+    __os_unmap(c.arg, sizeof[__ThreadArgs[C]]())
+    f(ctx)
+}
+
 priv fn thr_release(c: *__ThreadCtl) {
     __os_lock(&thr_lock)
     c.gen += 1

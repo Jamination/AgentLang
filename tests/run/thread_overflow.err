@@ -1,0 +1,2 @@
+panic in thread 1: memory fault (nil dereference, stack overflow or use of released memory)
+  at tests/run/thread_overflow.al:6 in deep

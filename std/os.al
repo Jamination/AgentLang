@@ -230,12 +230,6 @@ struct Thread {
     gen: i64
 }
 
-// what a new thread needs: the function and the copy of its context
-priv struct Start[C] {
-    f: fn(C)
-    ctx: C
-}
-
 // the stack of a thread of thread_spawn without a size: 8 MiB (reserved, used as it grows)
 priv const STACK = 8 << 20
 
@@ -249,30 +243,11 @@ fn thread_spawn[C](f: fn(C), ctx: C) -> (Thread, bool) {
 
 // the same with a stack of `stack` bytes (at least 64 KiB)
 fn thread_spawn[C](f: fn(C), ctx: C, stack: i64) -> (Thread, bool) {
-    n := sizeof[Start[C]]()
-    p := __os_map(n)
-    if p < 0 && p > -4096 {
-        __io_result(p)
-        return (Thread{}, false)
-    }
-    s := cast[*Start[C]](p)
-    s.f = f
-    s.ctx = ctx
-    c := __thread_spawn(body[C], p, stack)
+    c := __thread_start(f, ctx, stack)
     if c == nil {
-        __os_unmap(p, n)
         return (Thread{}, false)
     }
     return (Thread{id: c.id - 1, ctl: c, gen: c.gen}, true)
-}
-
-// the body of a thread of thread_spawn (in the new thread)
-priv fn body[C](c: *__ThreadCtl) {
-    s := cast[*Start[C]](c.arg)
-    f := s.f
-    ctx := s.ctx
-    __os_unmap(c.arg, sizeof[Start[C]]())
-    f(ctx)
 }
 
 // Waits until the thread has ended; its memory becomes t.region. Joining a thread twice (also

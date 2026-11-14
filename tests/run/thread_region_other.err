@@ -1,0 +1,2 @@
+panic in thread 1: enter: this region is entered by thread 0
+  at tests/run/thread_region_other.al:6 in work

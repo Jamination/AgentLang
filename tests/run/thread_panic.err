@@ -1,0 +1,3 @@
+panic in thread 1 at tests/run/thread_panic.al:5: bad value 3
+  at tests/run/thread_panic.al:5 in crash
+  at tests/run/thread_panic.al:11 in work

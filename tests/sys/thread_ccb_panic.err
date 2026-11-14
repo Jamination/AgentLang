@@ -1,0 +1,2 @@
+assertion failed in thread 1 at tests/sys/thread_ccb_panic.al:12: value 9
+  at tests/sys/thread_ccb_panic.al:12 in callback
