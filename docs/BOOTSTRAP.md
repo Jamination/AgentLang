@@ -35,9 +35,8 @@ are compiled by the new compiler.
 
 Stage 1 is compiled by the seed and may therefore lay out types as an older compiler did (the
 seed before the change to 4-byte enum tags stored every tag in 8 bytes). The compiler never
-depends on the layout of its own types: no `sizeof` or `cast` of an enum, and the records the
-parallel back end shares between processes (`emit_put_code`, the reachability records in
-`src/x86/mod.al`) are written and read field by field.
+depends on the layout of its own types: no `sizeof` or `cast` of an enum (the threads of the
+parallel back end hand their results over as AL values in memory: nothing is serialised).
 
 ## Versions and the changelog
 
@@ -156,20 +155,24 @@ Conventions:
 ## Memory
 
 AL programs allocate from an arena and never free. The compiler would need gigabytes that
-way, because every pass builds tables it throws away. Besides the main arena it therefore
-uses two prelude regions (`Region` with `enter` / `leave` / `reset`, see the language
-reference; `src/base.al`):
+way, because every pass builds tables it throws away. Besides the arena of the thread it
+therefore uses two prelude regions (`Region` with `enter` / `leave` / `reset`, see the language
+reference; `src/base.al`), which belong to a `Work`: every thread that optimises or compiles
+functions has its own (`work_main()` is the main thread's, see [parallel back
+end](#parallel-back-end)), and the functions below take it:
 
-- the **main arena** for what lives to the end (AST, types, the module, machine code);
-- the **work region** for one function being optimised or compiled: `work_begin()` enters it
-  and `work_end()` leaves and resets it, in `opt_optimize` and `x86_compile`. The function (or
-  its machine code) is deep-copied to the main arena with `clone` right after `work_end()`:
-  the discarded memory stays readable until the next `work_begin()`. `work_pause()` /
-  `work_resume()` switch to the main arena for a moment, for results that must stay;
+- the **arena** of the thread for what lives to the end (AST, types, the module, machine code);
+- the **work region** for one function being optimised or compiled: `work_begin(w)` enters it
+  and `work_end(w)` leaves and resets it, in `opt_first`, `opt_func` and `compile_fn`. The
+  function (or its machine code) is deep-copied to the arena with `clone` right after
+  `work_end(w)` (`keep_func` copies what lies in the regions of `w`, `work_holds`): the
+  discarded memory stays readable until the next `work_begin(w)`. `work_pause(w)` /
+  `work_resume(w)` switch to the arena for a moment, for results that must stay;
 - the **scratch region** for tables that a pass rebuilds on every round of a loop
-  (`scratch_on()` / `scratch_off()` bracket their construction, `scratch_reset()` at the top
-  of the next round discards them; used in `src/opt/simplify.al`). Nothing reachable from
-  the function may be allocated between `scratch_on()` and `scratch_off()`.
+  (`scratch_on(w)` / `scratch_off(w)` bracket their construction, `scratch_reset(w)` at the top
+  of the next round discards them; used in `src/opt/simplify.al` and the register allocator).
+  Nothing reachable from the function may be allocated between `scratch_on(w)` and
+  `scratch_off(w)`.
 
 Numbers of instructions, blocks and virtual registers are kept in 32 bits wherever they are
 stored in bulk (the instruction lists of the blocks, the passes' tables: `Vec[i32]`, where
@@ -266,7 +269,7 @@ Compiling the compiler (about 36,500 lines including the run-time library) takes
   new instructions at 0. Isel stamps the MIR of each IR instruction (`MInst.loc`, in a padding
   word: MInst stays 80 bytes), and `emit_emit` records `Code.lines` (offset, location) where the
   location changes, after branch relaxation, plus the frame shape (`alloc`, `npush`, the
-  prologue offsets); both cross the worker mapping with the code. *The table*: `bt_attach`
+  prologue offsets); both are part of the `Code` a worker thread hands over. *The table*: `bt_attach`
   (after `x86_compile`) encodes per function its start (relative to the first function, as
   `layout_text` places them), size, frame shape and line data (ULEB128: inlined locations, then
   offset/line pairs with lines as zigzag deltas), with names and files as strings; it becomes
@@ -341,40 +344,84 @@ How the run-time library and the compiler implement threads (the rules: DETAILS.
   on the new stack); Windows calls `CreateThread`. Locks: futexes (Linux), SRW locks and
   condition variables (Windows). The output buffers, the output lock and the panic lock: the
   comments of "output" and `__die` in `src/prelude.al`.
-- **The compiler's host.** Linux keeps forking workers (each a process with a copy of the thread
-  block); `alc build` unlinks and rewrites an executable that is busy (ETXTBSY: Linux keeps an
-  ended multi-threaded process's file mapped while it frees its memory).
+- **The compiler's host.** The compiler is a threaded program too (its parallel back end, below);
+  `alc build` unlinks and rewrites an executable that is busy (ETXTBSY: Linux keeps an ended
+  multi-threaded process's file mapped while it frees its memory).
 
 ## Parallel back end
 
-`x86_compile` compiles functions independently of each other. With more than one CPU (the
-CPUs of `sched_getaffinity`, limited by a cgroup quota in `/sys/fs/cgroup/cpu.max`, at most 6)
-it forks workers (`fork_worker` in `src/host_linux.al`; on Windows, which has no fork, the compile is
-always sequential: `can_fork`). The functions go into a queue, largest
-first: a pipe filled before the fork, from which every process (the compiler too) takes one
-function at a time (`queue_new`, `queue_take`), so all processes finish at about the same
-time. A worker writes each function's machine code, relocations and float constants into a
-mapping shared with the compiler (`emit_put_code`) and closes its end of a pipe when it is
-done; the compiler then builds the float constant pool in the order of the functions, so the
-output is byte-identical to a sequential compile.
+`x86_compile` compiles functions independently of each other. With more than one CPU (Linux:
+the CPUs of `sched_getaffinity`, limited by a cgroup quota in `/sys/fs/cgroup/cpu.max`;
+Windows: `GetActiveProcessorCount`; at most 6) the compiler's thread and worker threads compile
+them together, on Linux and Windows alike (`compile_spread` in `src/x86/mod.al`; the threads are
+the run-time library's, started by `worker_start` in `src/base.al`). The functions are in one
+list, largest first, and every thread takes the next one with an `atomic_add` on the position
+in the list, so all threads finish at about the same time. A thread puts the result of a
+function (`Done`: machine code, relocations, float constants, frame shape, line table) into
+that function's element of a result array; it is allocated in the thread's own arena, which
+the join hands to the compiler's thread and which is never freed, so nothing is copied. After
+the join the compiler builds the float constant pool in the order of the functions and takes
+the back end's diagnostics (`Code.err`: a frame too large, a Linux system call in a Windows
+executable) in that order too, so output and messages are byte-identical to a sequential
+compile with any number of threads.
 
 At `-O0` the optimiser is only `opt_first` per function (prune, mem2reg, DCE), which reads
 nothing of the module but the function: `opt_optimize` leaves it to the back end
-(`opt_finish`), and the workers optimise the functions they take before compiling them. As the
+(`opt_finish`), and the threads optimise the functions they take before compiling them. As the
 reachable functions are only known from the optimised IR (prune and DCE remove calls), at
 `-O0` every lowered function is optimised and compiled (with at least 64 functions in the
-module; nearly all are reachable at `-O0`); each worker also reports the calls and function
-addresses of the optimised IR, from which the compiler computes the reachable functions as a
-sequential compile does and keeps only their code. Optimised builds compute the reachable
-functions first and send only those (at least 64) to the queue.
+module; nearly all are reachable at `-O0`); each thread also records the calls and function
+addresses of the optimised IR in the function's entry of `Refs`, from which the compiler
+computes the reachable functions as a sequential compile does and keeps only their code.
+Optimised builds compute the reachable functions first and compile only those (at least 64) in
+the threads.
 
-A fork's changes to the IR are its own, so the compiler still has the unoptimised IR of the
-functions the workers took. Whatever a worker does not deliver (it crashed, failed, exited
-before it was done or ran out of room) the compiler optimises and compiles itself; workers
-are silent unless `ALC_DEBUG` is set. `ALC_JOBS=n` sets the number of processes
-(`ALC_JOBS=1`: sequential); `--emit-asm` and the per-function debug output (`ALC_DEBUG` other
-than `mem`) are always sequential, and `--emit-ir` optimises every function in the compiler
-before it prints them.
+**What the threads share**, and why that is safe:
+
+- Per thread: a `Work` (`src/base.al`) with the work and scratch regions and everything the
+  passes remember between calls (the CFG memo of `ir.al`, the change count and clean passes of
+  `opt_pass`, the escaping allocas of `alias.al`, licm's preheader count, mem2reg's `settled`,
+  `insts_main`), which were globals before; the allocation arena and region stack (run-time
+  library). While a thread works on a function, `Func.w` points to its Work, so the passes find
+  their state through the function they are given. The compiler's main thread uses
+  `work_main()`, a worker thread the Work compile_spread made for it.
+- Per function: a function is optimised and compiled by one thread, which alone writes its
+  `Func`, its elements of the optimiser's tables by function (`first_done`, `clean_at`,
+  `clean_end`), of `Refs` and of the result array (distinct elements, never resized while the
+  threads run).
+- Filled before the threads start, then only read: the rest of the module (globals, and the
+  signatures of other functions, which isel reads for calls: `keep_func` copies only lists in
+  the regions of its own Work, so a thread never rewrites `params` or `rets` that others read),
+  the optimiser's environment switches and `check_fail` (`opt_optimize`), `win_tls_index`
+  (`isel_init`), the register order (`regalloc_windows`), `deferred`. The front end's tables
+  (types and their layout caches, symbols, interned names) are not used by `opt_first` or the
+  back end at all.
+- Shared and written: only the position in the list (atomic). The threads take no lock.
+
+Thread-local globals (`__tls_*`) are a feature of library files only; making compiler globals
+thread-local would need a language change and a new seed, and every pass has the function,
+hence its Work, at hand.
+
+**Failure.** A panic or memory fault in a worker thread ends the compiler with that thread's
+message and stack trace, as in any AL program. The forked workers had a fallback (the compiler
+optimised and compiled itself what a crashed worker had not delivered); threads share the
+process, so there is none. A worker that fails is a compiler bug either way: the same code runs
+on the same function as in a sequential compile, which fails the same way (`ALC_JOBS=1`
+reproduces it on one thread), and the fallback only hid the bug.
+
+**Stack.** A worker thread reserves a stack of 1 GiB, committed as it is used, like the
+compiler's thread. The back end alone needs at most 64 KiB on every program measured (the
+nesting tests of `tests/run`, 2000-level nests of blocks, `if`, loops, `match`, expressions,
+`else if`, the compiler itself); `opt_first` (at `-O0`) needs up to 512 KiB on the 2000-level
+nests, but mem2reg's search for a variable's definition recurses once per block on its way
+back (about 250 bytes per `if`/`else`: 5 MiB for 20,000 `if`s in a row, 20 MiB for 80,000),
+which the parser's nesting limit does not bound. With the compiler thread's size a parallel
+compile overflows exactly where a sequential one does.
+
+`ALC_JOBS=n` sets the number of threads (`ALC_JOBS=1`: sequential, on the compiler's thread
+alone); `--emit-asm` and the per-function debug output (`ALC_DEBUG` other than `mem`) are always
+sequential, and `--emit-ir` optimises every function in the compiler before it prints them.
+`ALC_DEBUG=mem` counts the memory of the threads' arenas in the "compiled" line.
 
 ## Debugging switches
 

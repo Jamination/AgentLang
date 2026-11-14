@@ -297,6 +297,13 @@ priv struct Job {
     w: *Work // the thread's own
 }
 
+// the bytes the arenas of the joined worker threads hold (for ALC_DEBUG=mem)
+priv thread_bytes: i64
+
+fn x86_thread_mem() -> i64 {
+    return thread_bytes
+}
+
 // Compiles the functions cand in nw threads: this one and nw - 1 worker threads (fewer if they
 // cannot be started). They take the functions in turn from one list, largest first, so that
 // all finish at about the same time; each function is optimised (what opt_optimize left to the
@@ -315,6 +322,7 @@ priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> 
     no_done: Done
     done := vec_fill(n, no_done)
     s := Spread{m: m, o: o, order: order.items(), next: 0, done: done.items(), r: r}
+    // (works[t]: the Work of worker thread t)
     works := alloc[Work](nw)
     threads := vec[*__ThreadCtl]()
     for t in 1..nw {
@@ -326,7 +334,7 @@ priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> 
     }
     spread_worker(Job{s: &s, w: work_main()})
     for t in 0..threads.len {
-        worker_join(threads[t])
+        thread_bytes += worker_join(threads[t])
         work_free(&works[t + 1])
     }
     return done
