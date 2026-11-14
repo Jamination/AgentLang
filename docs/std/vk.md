@@ -148,6 +148,10 @@ create := cast[fn(*u8, *VkDebugUtilsMessengerCreateInfoEXT, *VkAllocationCallbac
     vkGetInstanceProcAddr(instance, ptr("vkCreateDebugUtilsMessengerEXT")))
 messenger: u64
 r := create(instance, &info, nil, &messenger)
+// at shutdown, before vkDestroyInstance:
+destroy := cast[fn(*u8, u64, *VkAllocationCallbacks)](
+    vkGetInstanceProcAddr(instance, ptr("vkDestroyDebugUtilsMessengerEXT")))
+destroy(instance, messenger, nil)
 ```
 
 - A `nil` result means the command is not available (extension not enabled); calling a
@@ -218,12 +222,22 @@ off by default. Switch it on from the program with the layer's `VK_EXT_layer_set
 
 ```
 on: u32 = VK_TRUE
-setting := VkLayerSettingEXT{cstr("VK_LAYER_KHRONOS_validation"), ptr("validate_sync"), VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, cast[*u8](&on)}
+layer := cstr("VK_LAYER_KHRONOS_validation")
+setting := [2]VkLayerSettingEXT{
+    VkLayerSettingEXT{layer, ptr("validate_sync"), VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, cast[*u8](&on)},
+    // without this, accesses that shaders make through descriptors (storage buffers and
+    // images) are not tracked, so compute/graphics hazards go unreported
+    VkLayerSettingEXT{layer, ptr("syncval_shader_accesses_heuristic"), VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, cast[*u8](&on)},
+}
 settings := vk_layer_settings_create_info_ext()
-settings.settingCount = 1
-settings.pSettings = &setting
+settings.settingCount = 2
+settings.pSettings = ptr(setting)
 instance_info.pNext = cast[*u8](&settings)
 ```
+
+To be sure it checks, build once with a barrier deliberately removed: the layer must report a
+hazard. (The shader-access heuristic is based on static analysis of the SPIR-V and can rarely
+give false positives; it is off by default in the layer.)
 
 or from the environment without changing the program: `VK_LAYER_VALIDATE_SYNC=true`,
 `VK_LAYER_VALIDATE_BEST_PRACTICES=true` (performance advice; `_NVIDIA`, `_AMD` variants).

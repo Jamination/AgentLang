@@ -170,10 +170,15 @@ fn gpu_create_instance(g: *Gpu, app_name: str, extensions: []str, validate: bool
     // (hazards between commands, missing barriers), which is off by default:
     // instance -> layer settings -> messenger
     on: u32 = VK_TRUE
-    setting := VkLayerSettingEXT{cstr(VALIDATION_LAYER), ptr("validate_sync"), VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, cast[*u8](&on)}
+    layer := cstr(VALIDATION_LAYER)
+    setting := [2]VkLayerSettingEXT{
+        VkLayerSettingEXT{layer, ptr("validate_sync"), VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, cast[*u8](&on)},
+        // also track accesses that shaders make through descriptors (off by default)
+        VkLayerSettingEXT{layer, ptr("syncval_shader_accesses_heuristic"), VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, cast[*u8](&on)},
+    }
     settings := vk_layer_settings_create_info_ext()
-    settings.settingCount = 1
-    settings.pSettings = &setting
+    settings.settingCount = 2
+    settings.pSettings = ptr(setting)
     if g.validation && has_instance_extension(VALIDATION_LAYER, VK_EXT_LAYER_SETTINGS_EXTENSION_NAME) {
         exts.push(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME)
         settings.pNext = cast[*u8](&during_create)

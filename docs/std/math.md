@@ -124,8 +124,8 @@ They are written with vector operators and compile to packed SSE code.
 | `transpose determinant inverse inverse_affine` | `inverse_affine` for matrices whose last row is 0 0 0 1 |
 | `look_at(eye, target, up)` | view space: +X right, +Y up, -Z forward |
 | `perspective(fovy, aspect, near, far)` | clip depth 0 at near, 1 at far (D3D / Metal / Vulkan range), +Y up |
-| `perspective_vk(...)` | the same with Y flipped: Vulkan's clip space has +Y down |
-| `ortho(left, right, bottom, top, near, far)` | depth 0..1 |
+| `perspective_vk(...)` | the same with Y flipped: Vulkan's clip space has +Y down. The flip keeps counter-clockwise models front-facing with `VK_FRONT_FACE_COUNTER_CLOCKWISE` |
+| `ortho(left, right, bottom, top, near, far)` | depth 0..1, +Y up (`bottom` maps to clip -1): for Vulkan's +Y down pass `top` as `bottom` and vice versa |
 | `transform_point(m, p)` `transform_dir(m, d)` | w = 1 / w = 0, no divide |
 | `project_point(m, p)` | with the perspective divide |
 

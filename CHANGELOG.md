@@ -13,6 +13,15 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   (compiler version, reading order, rules).
 - README: installing several releases side by side (`alc-0.1.0`, with `alc` as a link).
 
+### Fixed
+- `docs/std/vk.md`'s synchronization-validation snippet (and `examples/vk_renderer`) also turn on
+  `syncval_shader_accesses_heuristic`; without it, current validation layers do not track
+  accesses that shaders make through descriptors, so compute/graphics hazards went unreported.
+  The page now also shows destroying the debug messenger.
+- Docs: `ortho`'s Y direction and winding with `perspective_vk` (`std/math.md`); parameter types
+  of `memcopy` / `memfill` and how to offset a pointer by bytes; `str` constants, like literals,
+  are NUL-terminated.
+
 ## [0.1.0] - 2026-11-14
 
 The first release. An overview of what a project starting on 0.1.0 gets:
