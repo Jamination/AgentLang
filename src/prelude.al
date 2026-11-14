@@ -355,10 +355,19 @@ priv fn bt_str(w: *BtWalk, off: i64) -> str {
     return mkslice[u8](cast[*u8](p), n)
 }
 
+// the state of the walk and the line being written: globals, not locals, because after a stack
+// overflow the handler may have little stack (Windows: what SetThreadStackGuarantee leaves;
+// under Wine about 4 KiB)
+priv bt_start: BtWalk
+priv bt_cur: BtWalk
+priv bt_count: BtOut
+priv bt_out: BtOut
+priv bt_buf: [512]u8
+
 // writes line `id` of the trace (or "... N more" if `more` > 0) to standard error (no
 // allocation: the panic may be "out of memory")
 priv fn bt_write(w: *BtWalk, id: i64, more: i64) {
-    b: [512]u8
+    b := &bt_buf
     n := 0
     fn put(b: *[512]u8, n: *i64, s: str) {
         for c in s {
@@ -388,24 +397,24 @@ priv fn bt_write(w: *BtWalk, id: i64, more: i64) {
         }
     }
     if more > 0 {
-        put(&b, &n, "  ... ")
-        num(&b, &n, more)
-        put(&b, &n, if id >= BT_LIB_MORE { " more frames in the library" } else { " more" })
+        put(b, &n, "  ... ")
+        num(b, &n, more)
+        put(b, &n, if id >= BT_LIB_MORE { " more frames in the library" } else { " more" })
     } else {
         s, line := bt_scope(w, id)
-        put(&b, &n, "  at ")
+        put(b, &n, "  at ")
         if line == 0 {
-            put(&b, &n, "?")
+            put(b, &n, "?")
         } else {
-            put(&b, &n, bt_str(w, bt_scope_word(w, s, 0)))
-            put(&b, &n, ":")
-            num(&b, &n, line)
+            put(b, &n, bt_str(w, bt_scope_word(w, s, 0)))
+            put(b, &n, ":")
+            num(b, &n, line)
         }
-        put(&b, &n, " in ")
-        put(&b, &n, bt_str(w, bt_scope_word(w, s, 1)))
+        put(b, &n, " in ")
+        put(b, &n, bt_str(w, bt_scope_word(w, s, 1)))
     }
     b[n] = '\n'
-    __write_all(2, cast[i64](ptr(b)), n + 1)
+    __write_all(2, cast[i64](ptr(bt_buf)), n + 1)
 }
 
 // line number o.n of the trace: written if it is one of the first 20 or the last 5
@@ -457,20 +466,21 @@ priv fn bt_add(o: *BtOut, w: *BtWalk, id: i64) {
 }
 
 priv fn bt_walk(w0: *BtWalk, o: *BtOut) {
-    w := *w0
+    bt_cur = *w0
+    w := &bt_cur
     loop {
         // the frames inlined at the address, innermost first, then the function's own
-        v := bt_loc(&w)
+        v := bt_loc(w)
         depth := 0
         while v % 2 == 1 && depth < 1000 {
             k := v / 2
-            bt_add(o, &w, 1 + ((w.f << 32) | k))
-            s, line, at := bt_inlined(&w, w.f, k)
+            bt_add(o, w, 1 + ((w.f << 32) | k))
+            s, line, at := bt_inlined(w, w.f, k)
             v = if s < 0 { 0 } else { at }
             depth += 1
         }
-        bt_add(o, &w, -1 - ((w.f << 32) | (if v % 2 == 0 { (v / 2) & 0xFFFFFFFF } else { 0 })))
-        if !bt_step(&w) {
+        bt_add(o, w, -1 - ((w.f << 32) | (if v % 2 == 0 { (v / 2) & 0xFFFFFFFF } else { 0 })))
+        if !bt_step(w) {
             return
         }
     }
@@ -487,7 +497,7 @@ noinline fn __bt_print() {
     if __os_backtrace_off() {
         return
     }
-    w: BtWalk
+    w := &bt_start
     w.base = cast[*i64](t)[0]
     w.nfuncs = bt_u32(t + 8)
     w.nscopes = bt_u32(t + 12)
@@ -509,14 +519,14 @@ noinline fn __bt_print() {
         w.pc = cast[*i64](at)[0]
         w.sp = at + 8
     }
-    w.f = bt_find(&w, w.pc)
+    w.f = bt_find(w, w.pc)
     if w.f < 0 || w.sp < w.lo || w.sp >= w.hi || w.sp % 8 != 0 {
         return
     }
-    count := BtOut{}
-    bt_walk(&w, &count)
-    out := BtOut{print: true, total: count.n}
-    bt_walk(&w, &out)
+    bt_walk(w, &bt_count)
+    bt_out.print = true
+    bt_out.total = bt_count.n
+    bt_walk(w, &bt_out)
     __bt_busy = false
 }
 

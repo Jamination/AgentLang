@@ -1,5 +1,5 @@
 panic: memory fault (nil dereference, stack overflow or use of released memory)
-  at tests/run/backtrace_overflow_big.al:5 in descend
+  at tests/run/backtrace_overflow_big.al:6 in descend
   ... 
  more
-  at tests/run/backtrace_overflow_big.al:10 in main
+  at tests/run/backtrace_overflow_big.al:11 in main
