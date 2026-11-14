@@ -158,12 +158,16 @@ pipelines, buffers and the sprite, tile or mesh drawing are the game's own code,
 what the game needs.
 
 - **Vulkan**: [std/vk.md](std/vk.md) has the workflow: shaders compiled to SPIR-V with `glslc`
-  ahead of time and built into the executable with `embed("shader.vert.spv")`, a surface from
-  the window's native handles.
+  ahead of time and built into the executable with `embed("shader.vert.spv")` (or at run time
+  with `std.shaderc`, for hot reload), a surface from the window's native handles, validation
+  layers through the debug-utils messenger. Vsync is the present mode: FIFO by default, MAILBOX
+  for low latency where offered.
 - **Direct3D 12**: [std/dx12.md](std/dx12.md): HLSL compiled at run time with `D3DCompile`, a
   swap chain on `win32_hwnd(w)`.
 - **The examples are reference code, not a library**: read them, copy what helps, change it.
   `examples/vk_triangle.al` and `examples/dx12_triangle.al` are complete minimal programs;
+  `examples/vk_renderer/` uses most of what an engine needs from Vulkan (1.3 features, textures,
+  depth, compute, frames in flight, swapchain recreation, validation);
   `examples/gamekit/dx12_gpu.al` (device with WARP fallback, fences, shader compilation, a
   sprite batcher) and `screen.al` (frames in flight, a virtual resolution letterboxed into the
   window, resizing) are what the two DX12 games draw with.
@@ -178,6 +182,9 @@ what the game needs.
   on a Wayland session through XWayland) and Windows (Win32, XInput):
   `examples/starter/game.al` runs unchanged on both. `std.wayland` binds the Wayland client API
   for a program that wants to talk to the compositor itself.
+- In the loop: skip rendering while `w.minimized`, rebuild the swapchain on `EventResize`;
+  mouse-look with `set_cursor_locked(w, true)` and `mouse_delta`; gamepads plugged in later
+  appear through `gamepad_changed` (see [std/window.md](std/window.md), [std/input.md](std/input.md)).
 - `std.vk`, `std.dx12`: see [Rendering](#rendering).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
@@ -228,7 +235,7 @@ from Explorer or a shortcut is not its own folder. Build from Linux; test under 
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
 (events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
-(WASAPI). Windows only: std.dx12. Linux only: std.vk, std.x11, std.wayland, std.alsa.
+(WASAPI). Windows only: std.dx12. Linux only: std.vk, std.shaderc, std.x11, std.wayland, std.alsa.
 
 **Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
 

@@ -39,7 +39,7 @@ For example a game that uses `std.audio` only to mix into a buffer stays static.
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
 `std.asset`, `std.os`, `std.image`, `std.input`, `std.window` and `std.audio` (its device
 through WASAPI) work the same on Windows (the differences are in their pages). `std.wayland`,
-`std.vk`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
+`std.vk`, `std.shaderc`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
 compile error that names the module and the target. `std.dx12` is the other way round:
 Windows only (a Linux build stops at its Windows DLLs).
 

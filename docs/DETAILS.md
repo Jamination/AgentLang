@@ -655,6 +655,9 @@ fn main() {
   static, libc-free executable. Only the libraries of functions and variables that are
   actually reachable are needed.
 - The declared signature of an `extern` function and the type of an `extern` variable are trusted.
+- A plain `extern` binds a library's default symbol version as the loader resolves an
+  unversioned reference, which for some versioned C symbols is the OLDEST one (ALSA's pre-1.0
+  `snd_pcm_hw_params_get_*`): check the library's documentation when a function has versions.
 - Vectors are single values in SSE registers; `vec3` in memory is exactly 12 bytes, so `[]vec3`
   or a struct of vectors can be handed to a GPU API as is.
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
