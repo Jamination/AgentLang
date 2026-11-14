@@ -126,15 +126,18 @@ fn layout_bss(m: *Module, addr: i64, gaddr: *Vec[i64]) -> i64 {
 // The thread block: every thread's copy of the thread-local globals (zeroed), aligned to 16;
 // returns its size. gaddr of such a global is the displacement the code addresses it with:
 // Linux (TLS variant II, the block ends at the thread pointer fs:0) its offset minus the size,
-// Windows (the block the TLS directory makes the loader allocate) its offset.
+// Windows (the block the TLS directory makes the loader allocate) its offset. The arena
+// (__heap_*, the allocation fast path) comes first, in one cache line.
 fn layout_tls(m: *Module, gaddr: *Vec[i64], below_tp: bool) -> i64 {
     size := 0
-    for gi in 0..m.globals.len {
-        g := &m.globals[gi]
-        if g.tls {
-            size = align_up(size, min(max(g.align, 1), 16))
-            gaddr[gi] = size
-            size += max(g.size, 1)
+    for pass in 0..2 {
+        for gi in 0..m.globals.len {
+            g := &m.globals[gi]
+            if g.tls && starts_with(g.name, "__heap_") == (pass == 0) {
+                size = align_up(size, min(max(g.align, 1), 16))
+                gaddr[gi] = size
+                size += max(g.size, 1)
+            }
         }
     }
     size = align_up(max(size, 16), 16)
