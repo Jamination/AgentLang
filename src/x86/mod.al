@@ -126,6 +126,24 @@ priv struct Done {
     ok: bool
 }
 
+// The number of threads that compile functions together (see "Parallel back end" in
+// docs/BOOTSTRAP.md): one per CPU, at most MAX_THREADS, and with at least FUNCS_PER_THREAD_O0
+// functions per thread at -O0 (optimised and compiled), FUNCS_PER_THREAD when optimising (only
+// compiled, but bigger after inlining): a thread costs its start and some memory, which a few
+// small functions do not repay. ALC_JOBS=n sets the number exactly.
+priv const MAX_THREADS = 32
+priv const FUNCS_PER_THREAD_O0 = 24
+priv const FUNCS_PER_THREAD = 16
+
+// the threads for count functions with per functions per thread: nw unless exact (ALC_JOBS)
+// says it is fixed
+priv fn spread_threads(nw: i64, exact: bool, count: i64, per: i64) -> i64 {
+    if exact {
+        return nw
+    }
+    return max(1, min(nw, count / per))
+}
+
 priv struct Opts {
     dump_asm: bool
     align: bool // ALC_ALIGN
@@ -143,14 +161,16 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     }
     isel_init(m)
     // Functions are compiled independently of each other: with several CPUs, worker threads
-    // compile them together with this one (ALC_JOBS=n sets the number of threads). Debug output
-    // that is written per function (mir, trace, verify) keeps the plain order.
-    nw := min(cpu_count(), 6)
+    // compile them together with this one (spread_threads). Debug output that is written per
+    // function (mir, trace, verify) keeps the plain order.
+    nw := min(cpu_count(), MAX_THREADS)
+    exact := false
     jobs, jobs_set := env_get("ALC_JOBS")
     if jobs_set {
         j, jok := parse_i64(jobs)
         if jok && j >= 1 {
             nw = j
+            exact = true
         }
     }
     par := nw > 1 && !dump_asm && (!dbg_set || dbg == "mem")
@@ -171,7 +191,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
                 lowered.push(f)
             }
         }
-        made = compile_spread(m, lowered.items(), &o, nw, &r)
+        made = compile_spread(m, lowered.items(), &o, spread_threads(nw, exact, lowered.len, FUNCS_PER_THREAD_O0), &r)
     }
     w := work_main()
     for f in 0..n {
@@ -182,7 +202,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     }
     fids := reachable_funcs(m, &r)
     if par && !fused && fids.len >= 64 {
-        made = compile_spread(m, fids.items(), &o, nw, nil)
+        made = compile_spread(m, fids.items(), &o, spread_threads(nw, exact, fids.len, FUNCS_PER_THREAD), nil)
     }
     done := vec_fill(fids.len, no_done)
     for i in 0..fids.len {
