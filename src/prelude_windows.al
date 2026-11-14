@@ -34,6 +34,7 @@ priv extern "kernel32.dll" fn AddVectoredExceptionHandler(first: u32, handler: f
 priv extern "kernel32.dll" fn SetThreadStackGuarantee(size: *u32) -> i32
 priv extern "kernel32.dll" fn SetUnhandledExceptionFilter(filter: fn(i64) -> i32) -> i64
 priv extern "kernel32.dll" fn GetModuleHandleW(name: *u16) -> i64
+priv extern "kernel32.dll" fn GetCurrentThreadStackLimits(low: *i64, high: *i64)
 priv extern "kernel32.dll" fn VirtualAlloc(addr: i64, size: i64, kind: u32, protect: u32) -> i64
 priv extern "kernel32.dll" fn VirtualFree(addr: i64, size: i64, kind: u32) -> i32
 priv extern "kernel32.dll" fn VirtualQuery(addr: i64, info: *i64, size: i64) -> i64
