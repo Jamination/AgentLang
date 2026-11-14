@@ -35,6 +35,7 @@ priv extern "kernel32.dll" fn SetThreadStackGuarantee(size: *u32) -> i32
 priv extern "kernel32.dll" fn SetUnhandledExceptionFilter(filter: fn(i64) -> i32) -> i64
 priv extern "kernel32.dll" fn GetModuleHandleW(name: *u16) -> i64
 priv extern "kernel32.dll" fn GetCurrentThreadStackLimits(low: *i64, high: *i64)
+priv extern "kernel32.dll" fn CreateThread(security: i64, stack: i64, start: fn(i64) -> u32, arg: i64, flags: u32, id: i64) -> i64
 priv extern "kernel32.dll" fn VirtualAlloc(addr: i64, size: i64, kind: u32, protect: u32) -> i64
 priv extern "kernel32.dll" fn VirtualFree(addr: i64, size: i64, kind: u32) -> i32
 priv extern "kernel32.dll" fn VirtualQuery(addr: i64, info: *i64, size: i64) -> i64
@@ -162,9 +163,27 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
     __bt_fault_r11 = cast[*i64](ctx + 0xD0)[0]
     __bt_fault_sp = cast[*i64](ctx + 0x98)[0]
     __bt_fault_pc = cast[*i64](ctx + 0xF8)[0]
+    GetCurrentThreadStackLimits(&fault_lo, &fault_hi)
     if code == 0xC0000094 || code == 0xC0000095 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
+    if code == 0xC00000FD {
+        // after a stack overflow the handler has little stack left (under Wine less than 1 KiB,
+        // whatever SetThreadStackGuarantee asked for): the report is made by a thread of its own
+        h := CreateThread(0, 0, report_overflow, 0, 0, 0)
+        if h != 0 {
+            WaitForSingleObject(h, 0xFFFFFFFF)
+            ExitProcess(1)
+        }
+    }
+    __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
+}
+
+// the stack of the thread that faulted (the stack trace walks it, also from another thread)
+priv fault_lo: i64
+priv fault_hi: i64
+
+priv fn report_overflow(arg: i64) -> u32 {
     __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
 }
 
@@ -189,6 +208,13 @@ fn __rt_init(sp: i64) {
     SetThreadStackGuarantee(&g)
     AddVectoredExceptionHandler(1, on_exception)
     SetUnhandledExceptionFilter(on_unhandled)
+    // ALC_BACKTRACE=0: read now, a panic after a stack overflow may lack the stack for it (Wine)
+    name: [14]u16
+    for i, c in "ALC_BACKTRACE" {
+        name[i] = u16(c)
+    }
+    v: [4]u16
+    bt_off = GetEnvironmentVariableW(ptr(name), ptr(v), 4) == 1 && v[0] == u16('0')
     // Subsystem, 92 bytes after the PE signature: 2 = GUI (--gui), 3 = console
     if cast[*u16](pe + 92)[0] == 2 {
         gui = true
@@ -196,21 +222,21 @@ fn __rt_init(sp: i64) {
     }
 }
 
+// (after a fault: the stack of the thread that faulted, see report_overflow)
 fn __os_stack_range() -> (i64, i64) {
+    if fault_hi != 0 {
+        return (fault_lo, fault_hi)
+    }
     lo := 0
     hi := 0
     GetCurrentThreadStackLimits(&lo, &hi)
     return (lo, hi)
 }
 
-// (GetEnvironmentVariableW into a buffer of its own: no allocation)
+priv bt_off: bool
+
 fn __os_backtrace_off() -> bool {
-    name: [14]u16
-    for i, c in "ALC_BACKTRACE" {
-        name[i] = u16(c)
-    }
-    v: [4]u16
-    return GetEnvironmentVariableW(ptr(name), ptr(v), 4) == 1 && v[0] == u16('0')
+    return bt_off
 }
 
 // ---------- GUI programs ----------
