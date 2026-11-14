@@ -1,0 +1,1 @@
+weston (the test starts its own headless compositor with the GL renderer), a writable XDG_RUNTIME_DIR, libwayland-client.so.0, the Vulkan loader (libvulkan.so.1) or a Vulkan driver is missing

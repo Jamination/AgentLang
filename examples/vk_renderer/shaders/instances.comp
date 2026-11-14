@@ -1,6 +1,7 @@
 #version 450
 // Writes the instances of the frame: instance 0 is the near quad (it moves when `animate` is
-// set), instance 1 the far one, yellow on even frames and cyan on odd ones.
+// set), instance 1 the far one, yellow on even frames and cyan on odd ones (when animating:
+// every 64 frames, so that a window does not flicker).
 layout(local_size_x = 64) in;
 
 struct Instance {
@@ -25,6 +26,7 @@ void main() {
         inst[i].tint = vec4(1.0);
     } else {
         inst[i].offset_scale = vec4(0.3, 0.3, 0.6, 0.4);
-        inst[i].tint = (pc.frame & 1u) == 0u ? vec4(1.0, 1.0, 0.0, 1.0) : vec4(0.0, 1.0, 1.0, 1.0);
+        uint phase = pc.animate != 0u ? pc.frame >> 6 : pc.frame;
+        inst[i].tint = (phase & 1u) == 0u ? vec4(1.0, 1.0, 0.0, 1.0) : vec4(0.0, 1.0, 1.0, 1.0);
     }
 }

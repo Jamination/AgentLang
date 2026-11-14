@@ -1,0 +1,4 @@
+fifo ok | frames presented: at least 20 | swapchain 800 x 600, recreated once for fullscreen 640 x 480
+mailbox ok | frames presented: at least 20 | swapchain 800 x 600, recreated once for fullscreen 640 x 480
+immediate ok | frames presented: at least 20 | swapchain 800 x 600, recreated once for fullscreen 640 x 480
+validation errors: 0 warnings: 0

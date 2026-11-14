@@ -39,3 +39,4 @@ fail/extern on Windows extern functions may take and return structs (Microsoft x
 sys/shaderc std.shaderc binds libshaderc_shared.so.1 (Linux)
 std/vk_glue std.vk binds libvulkan.so.1 (Linux)
 sys/vk_renderer std.vk binds libvulkan.so.1 (Linux)
+sys/vk_present std.vk binds libvulkan.so.1; std.wayland is Linux only
