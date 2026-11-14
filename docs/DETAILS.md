@@ -489,12 +489,21 @@ panic: index out of bounds at main.al:12
   where the line is unknown. Names as written: `outer.name` and `outer.fn@line:col` for nested
   and anonymous functions, `name[T]` for generic instances, `priv` names plain, `test "name"`
   for a test block (`alc test` shows the trace of a failing test).
-- **Library frames.** Frames of the run-time library and the core modules (files `<prelude>`,
-  `<std/...>`) before the first frame of the program are left out: the first line is the
-  program's call, the line a caller-location message names (`pop`, `insert`, ...). So are the
-  library frames after the program's last one (start-up, test runner). Library frames between
-  frames of the program (`sort_by` calling a comparison) are shown; a run of more than 7 as its
-  first 4 and last 3 around `  ... N more frames in the library`.
+- **Library frames.** Frames of the always-loaded run-time library (files `<prelude>`, its OS
+  layer, the core modules `<std/math.al>`, `rand`, `time`, `mem`) before the first frame of the
+  program are left out: the first line is the program's call, the line a caller-location
+  message names (`pop`, `insert`, ...). So are the library frames after the program's last one
+  (start-up, test runner). Library frames between frames of the program (`sort_by` calling a
+  comparison) are shown; a run of more than 7 as its first 4 and last 3 around
+  `  ... N more frames in the library`. Modules loaded with `use std.name` count as the
+  program: `  at <std/image.al>:1095 in image_new` shows where a call failed inside one.
+- **C code.** The trace goes on through frames of C libraries (a callback called by `qsort`
+  that panics, a fault inside `strlen`), one line each: `  at LIBRARY SYMBOL`, the library's
+  file name and the function (Linux: its dynamic symbol; Windows: its export), or
+  `  at LIBRARY+0xOFFSET` where the function has no name (an address for `addr2line`). Linux
+  unwinds them by the libraries' DWARF call frame information (`.eh_frame`), Windows by their
+  unwind data (`RtlVirtualUnwind`); a frame without it ends the trace. C frames after the
+  program's last frame (process start-up) are left out.
 - **Inlining.** Optimised builds show the same frames as `-O0`: code inlined from a function of
   the program is reported as a frame of that function at its line, with the call it was inlined
   at as the next frame. A library function inlined into the program shows as the line of the
@@ -502,8 +511,8 @@ panic: index out of bounds at main.al:12
 - **Length.** More than 25 lines (deep recursion, stack overflow): the first 20, `  ... N more`,
   the last 5.
 - **Corrupted stacks.** Every step is checked (return address inside a function of the
-  program, frame inside the stack and above the previous one); the trace ends at the first step
-  that fails. Calls through C code end it too.
+  program or a C library, frame inside the stack and above the previous one, call frame data
+  inside the library); the trace ends at the first step that fails.
 - **`ALC_BACKTRACE=0`** in the environment turns the trace off (the message stays). Nothing
   of it runs unless the program panics; its table costs about 1-2 KB in a small program and 5%
   of the compiler's executable.

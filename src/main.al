@@ -810,6 +810,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     main_ret := false
     has_main := false
     has_c := false
+    has_bt_c := false
     decls := vec[Decl]()
     taken := src.decls
     src.decls = vec[Decl]()
@@ -836,6 +837,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
                     }
                 }
                 has_c = has_c || is_some(f.ext)
+                has_bt_c = has_bt_c || f.name == "__bt_c_init"
                 decls.push(Fn(f))
             }
             _ => {
@@ -845,8 +847,9 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     }
     entry := vec[str]()
     entry.push("fn __entry(sp: i64) -> never {\n __rt_init(sp)\n")
-    if has_c {
-        // (stack traces through C code: only a program that declares C functions has them)
+    if has_c && has_bt_c {
+        // (stack traces through C code: only a program that declares C functions has them; a
+        // run-time library of ALC_PRELUDE may lack them)
         entry.push(" __bt_c_init()\n")
     }
     if test_mode {
