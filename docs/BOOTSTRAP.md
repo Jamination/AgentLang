@@ -378,7 +378,7 @@ the threads.
 **Number of threads** (`spread_threads` in `src/x86/mod.al`), the compiler's thread included:
 one per CPU (Linux: the CPUs of `sched_getaffinity`, limited by a cgroup quota in
 `/sys/fs/cgroup/cpu.max`; Windows: `GetActiveProcessorCount`), at most 32, and at most one per
-24 functions at `-O0` (where the threads also optimise them) or per 16 functions when
+24 functions at `-O0` (where the threads also optimise them) or per 12 functions when
 optimising (fewer, bigger functions after inlining); below 64 functions the compile stays on
 the compiler's thread. A thread costs its start and memory: its arena and its work and
 scratch regions each begin with a 2 MiB page where the kernel backs memory with transparent
@@ -402,12 +402,14 @@ each), wall time of `alc build`, best of 5 (large) or 15 (small) runs, interleav
 | peak RSS of the compiler, optimised | 258 MB | 258 | 286 | 306 | 330 | 368 |
 | peak RSS of `clone.al`, `-O0` | 40 MB | 40 | 40 | 50 | 62 | 78 |
 
-The rule gives hello world 3 threads, `clone.al` 6 at `-O0` and 5 optimised,
-`index_scale.al` 5, `gen_dx12.al` 12 and 8, the compiler 12: within 0.5 ms of the best count
-of every program measured (also generated ones with 100 to 3000 functions), never slower than
-the earlier fixed 6 by more than that, and 11 ms faster on the compiler at `-O0`. The cap of
-32 is not measured: there the largest functions start to bound the gain (the compiler's
-largest takes 6 ms of its 255 ms `-O0` back end) while every thread still costs 5-10 MB.
+The rule gives hello world 3 threads, `clone.al` 6 at `-O0` and 6 optimised,
+`index_scale.al` 5, `gen_dx12.al` 12 and 11, the compiler 12. Against the earlier fixed 6
+(best of 5 to 9 runs, interleaved): hello world 10.3 → 9.2 ms, the compiler at `-O0` 133 →
+123 ms, optimised 918 → 912 ms, generated programs of 1000 and 3000 functions 81 → 71 and
+218 → 189 ms at `-O0`; the programs with 100 to 350 functions within 0.5 ms either way. The
+cap of 32 is not measured: there the largest functions start to bound the gain (the
+compiler's largest takes 6 ms of its 255 ms `-O0` back end) while every thread still costs
+5-10 MB.
 
 **What the threads share**, and why that is safe:
 

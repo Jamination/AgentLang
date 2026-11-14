@@ -133,7 +133,7 @@ priv struct Done {
 // small functions do not repay. ALC_JOBS=n sets the number exactly.
 priv const MAX_THREADS = 32
 priv const FUNCS_PER_THREAD_O0 = 24
-priv const FUNCS_PER_THREAD = 16
+priv const FUNCS_PER_THREAD = 12
 
 // the threads for count functions with per functions per thread: nw unless exact (ALC_JOBS)
 // says it is fixed
