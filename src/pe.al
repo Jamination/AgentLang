@@ -150,7 +150,32 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
         }
     }
     data.resize(align_up(data.len, 16), 0)
+    // the TLS directory (data directory 9): the loader gives every thread a zeroed thread block
+    // of tls_size bytes (see layout_tls; no template data, no callbacks: an empty list after
+    // the directory) and stores the block's index in __win_tls_index, which the code reads
+    tls_size := layout_tls(m, &gaddr, false)
+    tls_index := -1
+    for gi in 0..m.globals.len {
+        if m.globals[gi].name == "__win_tls_index" && !m.globals[gi].readonly {
+            tls_index = gi
+        }
+    }
+    tls_dir := data.len
+    if tls_index >= 0 {
+        empty := BASE + data_rva + tls_dir + 40
+        put64(&data, empty) // StartAddressOfRawData
+        put64(&data, empty) // EndAddressOfRawData
+        put64(&data, 0)     // AddressOfIndex (below)
+        put64(&data, empty) // AddressOfCallBacks
+        put32(&data, tls_size)
+        put32(&data, 0)
+        put64(&data, 0)     // the empty callback list
+    }
+    data.resize(align_up(data.len, 16), 0)
     bss_size := layout_bss(m, BASE + data_rva + data.len, &gaddr)
+    if tls_index >= 0 {
+        set64(&data, tls_dir + 16, gaddr[tls_index])
+    }
     image_end := data_rva + data.len + bss_size
     // the code addresses code and data with 32-bit absolute and relative displacements
     if BASE + image_end > 0x7FFF_FFFF {
@@ -243,7 +268,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     put64(&h, 4 << 10) // heap commit
     put32(&h, 0)
     put32(&h, 16)
-    // data directories: 1 = imports, 3 = exceptions (.pdata), 12 = import address table
+    // data directories: 1 = imports, 3 = exceptions (.pdata), 9 = TLS, 12 = import address table
     for d in 0..16 {
         match d {
             1 if !libs.is_empty() => {
@@ -253,6 +278,10 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
             3 if !pdata.is_empty() => {
                 put32(&h, pd_rva)
                 put32(&h, pdata.len)
+            }
+            9 if tls_index >= 0 => {
+                put32(&h, data_rva + tls_dir)
+                put32(&h, 40)
             }
             12 if !libs.is_empty() => {
                 put32(&h, id_rva + iat_lo)

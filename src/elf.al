@@ -32,7 +32,8 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
                 "`, which is not a Linux library; this compiler emits x86-64 Linux executables (bindings for other platforms can be type-checked with `alc check`)"))
         }
     }
-    nph := if dynamic { 6 } else { 3 }
+    // (PT_TLS: the thread block, see layout_tls; a static program's start sets it up itself)
+    nph := if dynamic { 7 } else { 4 }
     hdr_size := 64 + 56 * nph
     text_off := align_up(hdr_size, 16)
     // ---- text ----
@@ -156,6 +157,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     data.resize(align_up(data.len, 16), 0)
     bss_addr := BASE + data_off + data.len
     bss_size := layout_bss(m, bss_addr, &gaddr)
+    tls_size := layout_tls(m, &gaddr, true)
     // the code addresses code and data with 32-bit absolute and relative displacements
     if bss_addr + bss_size > 0x7FFF_FFFF {
         return ("", fmt("the program's code and global variables take ", bss_addr + bss_size - BASE,
@@ -276,6 +278,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     if dynamic {
         segment(&h, 2, 6, dyn_at - BASE, dyn_at, dyn_len, dyn_len, 8) // PT_DYNAMIC
     }
+    segment(&h, 7, 4, data_off + data.len, bss_addr, 0, tls_size, 16) // PT_TLS
     segment(&h, 0x6474e551, 6, 0, 0, 0, 0, 16)
     assert h.len <= file.len
     copy(file[..], h.items())

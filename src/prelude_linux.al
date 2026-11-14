@@ -41,10 +41,62 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
 }
 
+// the program headers (AT_PHDR, AT_PHNUM of the auxiliary vector, which follows the
+// environment on the initial stack): (address, count)
+priv fn phdrs() -> (i64, i64) {
+    p := __argv + 8 * (__argc + 1)
+    while cast[*i64](p)[0] != 0 {
+        p += 8
+    }
+    p += 8
+    phdr := 0
+    phnum := 0
+    while cast[*i64](p)[0] != 0 {
+        a := cast[*i64](p)
+        if a[0] == 3 {
+            phdr = a[1]
+        } else if a[0] == 5 {
+            phnum = a[1]
+        }
+        p += 16
+    }
+    return (phdr, min(phnum, 64))
+}
+
+// the size of the thread block (PT_TLS, a multiple of 16; see layout_tls in the compiler)
+priv tls_size: i64
+
+// a thread block with the TCB after it (x86-64 TLS variant II: the thread-local globals lie
+// below the thread pointer, whose first word points to itself) in the n bytes at p: the
+// thread pointer
+priv fn tls_place(p: i64) -> i64 {
+    tp := p + tls_size
+    cast[*i64](tp)[0] = tp
+    return tp
+}
+
 // sp: the initial stack pointer (argc, argv..., 0, envp..., 0)
 fn __rt_init(sp: i64) {
     __argc = cast[*i64](sp)[0]
     __argv = sp + 8
+    ph, n := phdrs()
+    for k in 0..n {
+        if cast[*u32](ph + 56 * k)[0] == 7 {
+            tls_size = (cast[*i64](ph + 56 * k + 40)[0] + 15) & ~15
+        }
+    }
+    // the main thread's thread block: the C library's loader made it in a dynamically linked
+    // program (FS is set); a static program starts with FS 0 and makes its own. Nothing
+    // before this point touches a thread-local global.
+    fs := 0
+    syscall(158, 0x1003, &fs)                // arch_prctl(ARCH_GET_FS)
+    if fs == 0 {
+        p := __os_map(tls_size + 64)
+        if p < 0 && p > -4096 {
+            __os_exit(127)
+        }
+        syscall(158, 0x1002, tls_place(p))   // arch_prctl(ARCH_SET_FS)
+    }
     stack_top = sp
     // report crashes as panics: handlers run on their own stack so that stack overflow works too
     ss: [3]i64
@@ -101,22 +153,7 @@ priv bl_dyn: i64
 // program headers named by the auxiliary vector (AT_PHDR, AT_PHNUM), which follows the
 // environment on the initial stack
 priv noinline fn bl_r_debug() -> i64 {
-    p := __argv + 8 * (__argc + 1)
-    while cast[*i64](p)[0] != 0 {
-        p += 8
-    }
-    p += 8
-    phdr := 0
-    phnum := 0
-    while cast[*i64](p)[0] != 0 {
-        a := cast[*i64](p)
-        if a[0] == 3 {
-            phdr = a[1]
-        } else if a[0] == 5 {
-            phnum = a[1]
-        }
-        p += 16
-    }
+    phdr, phnum := phdrs()
     bias := 0
     dyn := 0
     for k in 0..min(phnum, 64) {

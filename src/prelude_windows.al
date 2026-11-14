@@ -199,8 +199,17 @@ priv fn on_unhandled(info: i64) -> i32 {
     return fault(info, true)
 }
 
+// the index of the program's thread block among the blocks of the thread (TEB at gs:0x58):
+// the loader writes it (AddressOfIndex of the TLS directory); the code of every access to a
+// thread-local global reads it (src/x86/isel.al)
+__win_tls_index: u32
+
 // sp: what the loader passes (the PEB), not used
 fn __rt_init(sp: i64) {
+    // (the compiler finds __win_tls_index by name; this keeps it in every program)
+    if __win_tls_index > 0x7FFFFFFF {
+        __os_exit(127)
+    }
     // no error dialogs: SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
     SetErrorMode(0x8003)
     // the image: e_lfanew at 0x3C, SizeOfImage at 24 + 56 after the PE signature

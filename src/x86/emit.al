@@ -43,10 +43,11 @@ priv struct RM {
     scale: u8
     disp: i32
     reloc: Opt[RelocKind]
+    seg: u8 // segment override prefix (0x64 fs, 0x65 gs) or 0
 }
 
 priv fn rm_reg(r: i64) -> RM {
-    return RM{is_reg: true, reg: u8(r & 15), base: -1, idx: -1, scale: 1, disp: 0, reloc: None}
+    return RM{is_reg: true, reg: u8(r & 15), base: -1, idx: -1, scale: 1, disp: 0, reloc: None, seg: 0}
 }
 
 // The code of a function is encoded into one buffer without the jumps; the jumps (and the
@@ -74,7 +75,7 @@ priv inline fn b1(self: *Enc, x: u8) {
 }
 
 priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
-    r := RM{is_reg: false, reg: 0, base: -1, idx: -1, scale: u8(m.scale), disp: i32(m.disp), reloc: None}
+    r := RM{is_reg: false, reg: 0, base: -1, idx: -1, scale: u8(m.scale), disp: i32(m.disp), reloc: None, seg: 0}
     if i64(m.base) != NOREG {
         r.base = i8(m.base)
     }
@@ -84,6 +85,12 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
     match m.kind {
         MK_GLOBAL => {
             r.reloc = Some(Abs32Global(i64(m.id)))
+        }
+        MK_TLS => {
+            r.seg = if target_os == TargetWindows { 0x65 } else { 0x64 }
+            if m.id >= 0 {
+                r.reloc = Some(Abs32Global(i64(m.id)))
+            }
         }
         MK_FCONST => {
             r.reloc = Some(Abs32FConst(self.fpool[i64(m.id)]))
@@ -116,6 +123,9 @@ priv fn rm(self: *Enc, o: *Opnd) -> RM {
 // [prefix66] [mandatory prefix] [REX] opcode modrm [sib] [disp]
 // (opc: one opcode byte, or 0x0F and a second one as 0x0Fxx)
 priv fn op(self: *Enc, p66: bool, pfx: u8, w: bool, opc: i64, reg: u8, rm: *RM, force_rex: bool) {
+    if !rm.is_reg && rm.seg != 0 {
+        self.b1(rm.seg)
+    }
     if p66 {
         self.b1(0x66)
     }

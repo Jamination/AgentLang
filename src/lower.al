@@ -1382,8 +1382,15 @@ priv fn global_new(self: *Cx, d: *GlobalDecl) -> Opt[(i64, i64)] {
     size := self.types.size_of(ty)
     align := max(self.types.align_of(ty), 1)
     gid := self.module.globals.len
-    self.module.globals.push(Global{name: ast_plain(d.name), size: size, align: max(align, 8), data: None, readonly: false})
+    // (thread-local: library globals named __tls_*, __heap_* or __region_*, always zeroed)
+    plain := ast_plain(d.name)
+    tls := self.lib_file(d.pos.file) && (starts_with(plain, "__tls_") || starts_with(plain, "__heap_") || starts_with(plain, "__region_"))
+    self.module.globals.push(Global{name: plain, size: size, align: max(align, 8), data: None, readonly: false, tls: tls})
     self.globals.set(d.name, (ty, gid))
+    if tls && is_some(d.init) {
+        self.err(d.pos, fmt("the thread-local library global `", plain, "` cannot have an initializer"))
+        return Some((ty, gid))
+    }
     match d.init {
         Some(init) => {
             if ty != T_ERR {

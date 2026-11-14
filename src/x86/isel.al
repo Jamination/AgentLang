@@ -776,7 +776,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 s.out.push(minst_new(Mov, 8, R(d), I(f.insts[v].k)))
                 continue
             }
-            if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr || op == FAddr || op == Proj {
+            if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr && !s.win_tls(v) || op == FAddr || op == Proj {
                 continue
             }
             if cleanup_is_root(op) || s.needed[v] {
@@ -870,6 +870,18 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
             m := self.fconst(Bits128{lo: u64(i.k), hi: 0})
             self.e(MovSd, 8, R(r), M(m))
         }
+        return r
+    }
+    if i.op == GAddr && self.m.globals[i.k].tls {
+        if target_os == TargetWindows {
+            // (computed once where it is defined: see tls_block)
+            self.needed[v] = true
+            return self.vr(v)
+        }
+        // the thread pointer (fs:0 holds itself), then the global's offset from it
+        r := new_vreg(&self.mf, 0)
+        self.e(Mov, 8, R(r), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_TLS, id: -1}))
+        self.e(Lea, 8, R(r), M(Mem{base: i32(r), idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(i.k)}))
         return r
     }
     if i.op == GAddr {
@@ -984,9 +996,17 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
         return
     }
     if i.op == GAddr && m.kind == MK_NORMAL {
-        m.kind = MK_GLOBAL
-        m.id = i32(i.k)
-        return
+        if !self.m.globals[i.k].tls {
+            m.kind = MK_GLOBAL
+            m.id = i32(i.k)
+            return
+        }
+        if mem && target_os != TargetWindows {
+            // Linux: fs-relative, the base and index registers still fold (not for a `lea`)
+            m.kind = MK_TLS
+            m.id = i32(i.k)
+            return
+        }
     }
     if i.op == Alloca && m.kind == MK_NORMAL && m.base == NOREG {
         m.kind = MK_SLOT
@@ -1039,6 +1059,13 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
     } else if m.idx == NOREG {
         m.idx = i32(r)
         m.scale = 1
+    } else if m.kind == MK_TLS {
+        // out of components: the registers into a temporary, the global stays fs-relative
+        t := new_vreg(&self.mf, 0)
+        self.e(Lea, 8, R(t), M(Mem{base: m.base, idx: m.idx, scale: m.scale, disp: 0, kind: MK_NORMAL, id: 0}))
+        m.base = i32(t)
+        m.idx = i32(r)
+        m.scale = 1
     } else {
         // out of components: collapse what we have into a temporary
         t := new_vreg(&self.mf, 0)
@@ -1048,6 +1075,34 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
         m.idx = i32(r)
         m.scale = 1
     }
+}
+
+// a thread-local global's address on Windows: a value of its own (see tls_block)
+priv fn win_tls(self: *Sel, v: i64) -> bool {
+    i := &self.f.insts[v]
+    return target_os == TargetWindows && i.op == GAddr && self.m.globals[i.k].tls
+}
+
+// the global the Windows loader writes the index of the program's thread block to (found once)
+priv win_tls_index := -2
+
+// Windows: d = the address of the thread-local global g: the TEB's ThreadLocalStoragePointer
+// (gs:0x58) indexed by __win_tls_index is this thread's block (see layout_tls)
+priv fn tls_block(self: *Sel, d: i64, g: i64) {
+    if win_tls_index == -2 {
+        win_tls_index = -1
+        for gi in 0..self.m.globals.len {
+            if self.m.globals[gi].name == "__win_tls_index" && !self.m.globals[gi].readonly {
+                win_tls_index = gi
+            }
+        }
+    }
+    assert win_tls_index >= 0, "isel: the run-time library lacks __win_tls_index"
+    t := new_vreg(&self.mf, 0)
+    self.e(Mov, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0x58, kind: MK_TLS, id: -1}))
+    self.e(Mov, 4, R(t), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(win_tls_index)}))
+    self.e(Mov, 8, R(d), M(Mem{base: i32(d), idx: i32(t), scale: 8, disp: 0, kind: MK_NORMAL, id: 0}))
+    self.e(Lea, 8, R(d), M(Mem{base: i32(d), idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(g)}))
 }
 
 priv fn addr(self: *Sel, v: i64) -> Mem {
@@ -1182,7 +1237,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
         si := &self.f.insts[src]
         so := match si.op {
             Const => I(si.k)
-            GAddr => Opnd.GAddr(si.k, 0)
+            GAddr if !self.m.globals[si.k].tls => Opnd.GAddr(si.k, 0)
             FAddr => Opnd.FAddr(si.k)
             FConst if si.k == 0 => Opnd.None
             FConst => M(self.fconst(Bits128{lo: u64(si.k), hi: 0}))
@@ -1436,7 +1491,7 @@ priv fn mov_src(self: *Sel, v: i64) -> Opnd {
     i := &self.f.insts[v]
     match i.op {
         Const => I(i.k)
-        GAddr => Opnd.GAddr(i.k, 0)
+        GAddr if !self.m.globals[i.k].tls => Opnd.GAddr(i.k, 0)
         FAddr => Opnd.FAddr(i.k)
         _ => R(self.reg(v))
     }
@@ -1512,6 +1567,7 @@ priv fn inst(self: *Sel, v: i64) {
     i := &self.f.insts[v]
     ty := i.ty
     match i.op {
+        GAddr => self.tls_block(self.vr(v), i.k)
         Add => {
             if ty == I64 {
                 m := mem_new()

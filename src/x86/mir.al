@@ -56,6 +56,10 @@ const MK_SLOT: u8 = 2   // disp is relative to frame slot `id` (base is rsp)
 const MK_INARG: u8 = 3  // incoming stack argument `id` (base is rsp)
 const MK_OUTARG: u8 = 4 // outgoing stack argument `id` (base is rsp)
 const MK_FCONST: u8 = 5 // float constant pool entry `id`
+// thread-local: disp is relative to thread-local global `id` (its offset from the thread
+// pointer, see layout_tls), or (id -1) an offset from the segment base; encoded with the fs
+// prefix (Windows: gs, the TEB, only with id -1)
+const MK_TLS: u8 = 6
 
 // 20 bytes: an operand is 32, an instruction 80
 struct Mem {
@@ -549,6 +553,7 @@ priv fn opnd_str(o: Opnd, sz: u8) -> str {
                 MK_INARG => "inarg"
                 MK_OUTARG => "outarg"
                 MK_FCONST => "fconst"
+                MK_TLS => "tls"
                 _ => ""
             }
             if k != "" {

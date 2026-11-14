@@ -105,12 +105,12 @@ fn layout_rodata(m: *Module, out: *Output, live: []bool, addr: i64, gaddr: *Vec[
 }
 
 // Places the writable globals without data at address addr (their addresses go to gaddr);
-// returns the size of the bss.
+// returns the size of the bss. (Thread-local globals are not there: layout_tls.)
 fn layout_bss(m: *Module, addr: i64, gaddr: *Vec[i64]) -> i64 {
     size := 0
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
-        if !g.readonly && is_none(g.data) {
+        if !g.readonly && is_none(g.data) && !g.tls {
             a := min(max(g.align, 1), 64)
             if g.size >= 64 {
                 a = max(a, 64)
@@ -118,6 +118,31 @@ fn layout_bss(m: *Module, addr: i64, gaddr: *Vec[i64]) -> i64 {
             size = align_up(size, a)
             gaddr[gi] = addr + size
             size += max(g.size, 1)
+        }
+    }
+    size
+}
+
+// The thread block: every thread's copy of the thread-local globals (zeroed), aligned to 16;
+// returns its size. gaddr of such a global is the displacement the code addresses it with:
+// Linux (TLS variant II, the block ends at the thread pointer fs:0) its offset minus the size,
+// Windows (the block the TLS directory makes the loader allocate) its offset.
+fn layout_tls(m: *Module, gaddr: *Vec[i64], below_tp: bool) -> i64 {
+    size := 0
+    for gi in 0..m.globals.len {
+        g := &m.globals[gi]
+        if g.tls {
+            size = align_up(size, min(max(g.align, 1), 16))
+            gaddr[gi] = size
+            size += max(g.size, 1)
+        }
+    }
+    size = align_up(max(size, 16), 16)
+    if below_tp {
+        for gi in 0..m.globals.len {
+            if m.globals[gi].tls {
+                gaddr[gi] -= size
+            }
         }
     }
     size

@@ -286,6 +286,9 @@ struct Global {
     data: Opt[Vec[u8]]
     relocs: Vec[(i64, RelocTarget)]
     readonly: bool
+    // thread-local (a library global named __tls_*, __heap_* or __region_*): every thread has
+    // its own zeroed copy in its thread block (see layout_tls in objwrite.al)
+    tls: bool
 }
 
 struct Module {
