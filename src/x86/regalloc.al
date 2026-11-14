@@ -1009,26 +1009,12 @@ priv fn find_reg(st: *Vec[(i64, i64)], r: i64) -> i64 {
 
 // removes the entries held in register d
 priv fn retain_reg_ne(st: *Vec[(i64, i64)], d: i64) {
-    n := 0
-    for x in 0..st.len {
-        if st[x].1 != d {
-            st[n] = st[x]
-            n += 1
-        }
-    }
-    st.len = n
+    st.retain(d, fn(d: i64, e: (i64, i64)) -> bool { e.1 != d })
 }
 
 // removes the entries for slot s
 priv fn retain_slot_ne(st: *Vec[(i64, i64)], s: i64) {
-    n := 0
-    for x in 0..st.len {
-        if st[x].0 != s {
-            st[n] = st[x]
-            n += 1
-        }
-    }
-    st.len = n
+    st.retain(s, fn(s: i64, e: (i64, i64)) -> bool { e.0 != s })
 }
 
 // After allocation: reuse registers that still hold the value of a spill slot instead of

@@ -102,7 +102,8 @@ fn cleanup_dce(f: *Func) -> bool {
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
         before := b.insts.len
-        // keep the live instructions, in order
+        // keep the live instructions, in order (a loop, not retain: this runs over every
+        // instruction after each pass, and retain costs an indirect call per element)
         kept := 0
         for i in 0..before {
             v := b.insts[i]

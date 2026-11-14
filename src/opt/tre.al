@@ -162,16 +162,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
             Some((comb, _)) => vec_two(s.call, comb)
             None => vec_one(s.call)
         }
-        blk := &f.blocks[b]
-        n := 0
-        for ii in 0..blk.insts.len {
-            v := blk.insts[ii]
-            if !contains(&drop, i64(v)) {
-                blk.insts[n] = v
-                n += 1
-            }
-        }
-        blk.insts.len = n
+        f.blocks[b].insts.retain(drop, fn(drop: Vec[i64], v: i32) -> bool { !drop.contains(i64(v)) })
         match new_acc {
             Some(nv) if is_some(s.acc) => f.blocks[b].insts.push(i32(nv))
             _ => {}
