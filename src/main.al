@@ -39,6 +39,10 @@ use "priv.al"
 use "lower_mem.al"
 use "when.al"
 
+// the compiler's version, "MAJOR.MINOR.PATCH": `alc --version`. Changed only on a release,
+// to the version of the topmost released section of CHANGELOG.md (verify.sh checks it).
+priv const VERSION = "0.1.0"
+
 priv const PRELUDE = embed("prelude.al")
 // the OS layer of the run-time library, compiled right after the prelude (see the top of
 // prelude.al)
@@ -238,9 +242,9 @@ priv fn usage(why: str) -> never {
     if len(why) != 0 {
         eput(fmt(why, "\n"))
     }
-    eput(concat("usage: alc <command> <file.al> [options]\n",
-        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n")))
+    eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  version print the compiler's version and default target (also --version)\n",
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -280,12 +284,16 @@ priv fn parse_args() -> Args {
             json = true
         }
     }
-    if av.len < 2 {
-        usage("")
-    }
     // the default target is the system the compiler runs on
     if TARGET_OS == Windows {
         target_os = TargetWindows
+    }
+    if av.len >= 1 && (av[0] == "--version" || av[0] == "version") {
+        print(fmt("alc ", VERSION, "\ndefault target: ", if target_os == TargetWindows { "windows" } else { "linux" }, " x86-64"))
+        exit(0)
+    }
+    if av.len < 2 {
+        usage("")
     }
     a := Args{cmd: av[0], opt: 2}
     i := 1
