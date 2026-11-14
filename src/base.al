@@ -254,7 +254,7 @@ fn scratch_reset(w: *Work) {
 
 // is address p in memory of the work or the scratch region (discarded at work_end)? (not to be
 // asked while working: the fields of an entered region are not up to date)
-fn work_holds(w: *Work, p: i64) -> bool {
+inline fn work_holds(w: *Work, p: i64) -> bool {
     return (p >= w.work.base && p < w.work.end) || (p >= w.scratch.base && p < w.scratch.end)
 }
 
