@@ -690,15 +690,7 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
                 x -= 1
             }
         }
-        // keep the reachable blocks
-        n := 0
-        for x in 0..layout.len {
-            if reach[layout[x]] {
-                layout[n] = layout[x]
-                n += 1
-            }
-        }
-        layout.truncate(n)
+        layout.retain(reach, fn(reach: Vec[bool], b: i64) -> bool { reach[b] })
     }
     // 2. fallthrough and branch inversion (the prologue is never a `jcc`: with it, a block
     // ending in `jcc; jmp` has a single jcc exactly when it has one without it)

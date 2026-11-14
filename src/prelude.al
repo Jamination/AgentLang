@@ -641,12 +641,7 @@ fn __region_top() -> *Region {
 }
 
 fn __region_entered(r: *Region) -> bool {
-    for i in 0..__region_depth {
-        if __region_stack[i] == r {
-            return true
-        }
-    }
-    return false
+    return contains(__region_stack[..__region_depth], r)
 }
 
 // allocations now come from r, until the matching leave(); calls nest up to 64 deep
@@ -927,11 +922,7 @@ fn __f64_parts(x: f64) -> (u64, i64, i64) {
 }
 
 fn __copy_str(out: []u8, o: i64, s: str) -> i64 {
-    for c in s {
-        out[o] = c
-        o += 1
-    }
-    return o
+    return o + copy(out[o..], s)
 }
 
 // printf("%.*f") semantics: exact value, round half to even. Returns the length written to out.
@@ -999,10 +990,7 @@ fn __fmt_fixed(x: f64, prec: i64, out: []u8) -> i64 {
         out[o] = '0'
         o += 1
     } else {
-        for i in 0..pos {
-            out[o] = d[i]
-            o += 1
-        }
+        o += copy(out[o..], d[..pos])
     }
     if prec > 0 {
         out[o] = '.'
@@ -1087,9 +1075,7 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
     found := false
     for p in 1..19 {
         if p >= n {
-            for i in 0..n {
-                c[i] = d[i]
-            }
+            copy(c[..], d[..n])
             cn = n
             cp = pos
             break
@@ -1099,9 +1085,7 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
         nearer_up := d[p] > '5' || (d[p] == '5' && (n > p + 1 || ((d[p - 1] - '0') & 1) == 1))
         for t in 0..2 {
             up := if t == 0 { nearer_up } else { !nearer_up }
-            for i in 0..p {
-                c[i] = d[i]
-            }
+            copy(c[..], d[..p])
             cn = p
             cp = pos
             if up {
@@ -1140,10 +1124,7 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
         out[o] = '.'
         o += 1
         if cn > cp {
-            for i in cp..cn {
-                out[o] = c[i]
-                o += 1
-            }
+            o += copy(out[o..], c[cp..cn])
         } else {
             out[o] = '0'
             o += 1
@@ -1154,14 +1135,9 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
         out[o] = '0'
         out[o + 1] = '.'
         o += 2
-        for i in 0..-cp {
-            out[o] = '0'
-            o += 1
-        }
-        for i in 0..cn {
-            out[o] = c[i]
-            o += 1
-        }
+        fill(out[o..o - cp], '0')
+        o -= cp
+        o += copy(out[o..], c[..cn])
         return o
     }
     out[o] = c[0]
@@ -1169,10 +1145,7 @@ fn __fmt_short_parts(neg: bool, m: u64, e: i64, cls: i64, closer: bool, out: []u
     if cn > 1 {
         out[o] = '.'
         o += 1
-        for i in 1..cn {
-            out[o] = c[i]
-            o += 1
-        }
+        o += copy(out[o..], c[1..cn])
     }
     out[o] = 'e'
     o += 1
@@ -1275,12 +1248,8 @@ fn __at_fmtf(x: f64, prec: i64, at: str) -> str {
     b: [1420]u8
     n := __fmt_fixed(x, prec, b[..])
     s := alloc[u8](n + __fmt_extra(x, prec))
-    for i in 0..n {
-        s[i] = b[i]
-    }
-    for i in n..len(s) {
-        s[i] = '0'
-    }
+    copy(s, b[..n])
+    fill(s[n..], '0')
     return s
 }
 
@@ -1480,13 +1449,13 @@ fn abs[T](x: T) -> T {
     if x <= 0 { 0 - x } else { x }
 }
 
-fn swap[T](a: *T, b: *T) {
+inline fn swap[T](a: *T, b: *T) {
     t := *a
     *a = *b
     *b = t
 }
 
-fn copy[T](dst: []T, src: []T) -> i64 {
+inline fn copy[T](dst: []T, src: []T) -> i64 {
     n := min(len(dst), len(src))
     d := cast[i64](ptr(dst))
     s := cast[i64](ptr(src))
@@ -1503,7 +1472,7 @@ fn copy[T](dst: []T, src: []T) -> i64 {
     return n
 }
 
-fn fill[T](a: []T, x: T) {
+inline fn fill[T](a: []T, x: T) {
     for i in 0..len(a) {
         a[i] = x
     }
@@ -1547,9 +1516,7 @@ fn vec_of[T](s: []T) -> Vec[T] {
 // a Vec of n copies of x
 fn vec_fill[T](n: i64, x: T) -> Vec[T] {
     buf := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
-    for i in 0..n {
-        buf[i] = x
-    }
+    fill(buf, x)
     return Vec[T]{buf: buf, len: n}
 }
 
@@ -1655,11 +1622,7 @@ fn __at_insert[T](v: *Vec[T], i: i64, x: T, at: str) {
         __assert_fail(at, "Vec insert position out of range")
     }
     push(v, x)
-    k := v.len - 1
-    while k > i {
-        v.buf[k] = v.buf[k - 1]
-        k -= 1
-    }
+    copy(v.buf[i + 1..v.len], v.buf[i..v.len - 1])
     v.buf[i] = x
 }
 
@@ -1673,9 +1636,7 @@ fn __at_remove[T](v: *Vec[T], i: i64, at: str) -> T {
         __assert_fail(at, "Vec remove position out of range")
     }
     x := v.buf[i]
-    for k in i..v.len - 1 {
-        v.buf[k] = v.buf[k + 1]
-    }
+    copy(v.buf[i..v.len - 1], v.buf[i + 1..v.len])
     v.len -= 1
     return x
 }
@@ -1717,9 +1678,7 @@ fn reverse[T](s: []T) {
     i := 0
     j := len(s) - 1
     while i < j {
-        t := s[i]
-        s[i] = s[j]
-        s[j] = t
+        swap(&s[i], &s[j])
         i += 1
         j -= 1
     }
@@ -1734,6 +1693,32 @@ fn dedup[T](v: *Vec[T]) {
     for i in 1..v.len {
         if v.buf[i] != v.buf[n - 1] {
             v.buf[n] = v.buf[i]
+            n += 1
+        }
+    }
+    v.len = n
+}
+
+// keeps the elements x with keep(x), in their order: one pass in place, keep is called once
+// per element, first to last (the slots past the new length keep their old contents, as
+// with truncate)
+fn retain[T](v: *Vec[T], keep: fn(T) -> bool) {
+    n := 0
+    for x in v.buf[..v.len] {
+        if keep(x) {
+            v.buf[n] = x
+            n += 1
+        }
+    }
+    v.len = n
+}
+
+// the same with a context value that is handed to every call of keep
+fn retain[T, C](v: *Vec[T], ctx: C, keep: fn(C, T) -> bool) {
+    n := 0
+    for x in v.buf[..v.len] {
+        if keep(ctx, x) {
+            v.buf[n] = x
             n += 1
         }
     }
@@ -2075,9 +2060,7 @@ fn __sort_range[T](a: []T, lo: i64, hi: i64, depth: i64) {
                 j -= 1
             }
             if i <= j {
-                t := a[i]
-                a[i] = a[j]
-                a[j] = t
+                swap(&a[i], &a[j])
                 i += 1
                 j -= 1
             }
@@ -2110,9 +2093,7 @@ fn __heap_sort[T](a: []T, lo: i64, hi: i64) {
     }
     end := n - 1
     while end > 0 {
-        t := a[lo]
-        a[lo] = a[lo + end]
-        a[lo + end] = t
+        swap(&a[lo], &a[lo + end])
         __sift_down(a, lo, 0, end)
         end -= 1
     }
@@ -2130,9 +2111,7 @@ fn __sift_down[T](a: []T, lo: i64, root: i64, n: i64) {
         if !(a[lo + root] < a[lo + c]) {
             return
         }
-        t := a[lo + root]
-        a[lo + root] = a[lo + c]
-        a[lo + c] = t
+        swap(&a[lo + root], &a[lo + c])
         root = c
     }
 }
@@ -2198,9 +2177,7 @@ fn sort_by[T](a: []T, less: fn(T, T) -> bool) {
         width = width * 2
     }
     if ptr(src) != ptr(a) {
-        for i in 0..n {
-            a[i] = src[i]
-        }
+        copy(a, src)
     }
 }
 
@@ -2251,9 +2228,7 @@ fn sort_by[T, C](a: []T, ctx: C, less: fn(C, T, T) -> bool) {
         width = width * 2
     }
     if ptr(src) != ptr(a) {
-        for i in 0..n {
-            a[i] = src[i]
-        }
+        copy(a, src)
     }
 }
 
@@ -2575,7 +2550,7 @@ fn fields(s: str) -> []str {
 }
 
 fn lines(s: str) -> []str {
-    if len(s) > 0 && s[len(s) - 1] == '\n' {
+    if ends_with(s, "\n") {
         return split(s[..len(s) - 1], '\n')
     }
     return split(s, '\n')
@@ -2721,9 +2696,7 @@ fn __big_shl(a: []u32, n: i64, bits: i64) -> i64 {
         a[i + words] = (a[i] << sh) | lo
         i -= 1
     }
-    for j in 0..words {
-        a[j] = 0
-    }
+    fill(a[..words], 0)
     n += words
     if sh != 0 && a[n] != 0 {
         n += 1
@@ -2750,9 +2723,7 @@ fn __big_cmp(a: []u32, an: i64, b: []u32, bn: i64) -> i64 {
 fn __dec_cmp_bin(num: []u32, n: i64, e10: i64, mm: u64, q: i64) -> i64 {
     a: [__BIG_LIMBS]u32
     b: [__BIG_LIMBS]u32
-    for i in 0..n {
-        a[i] = num[i]
-    }
+    copy(a[..n], num[..n])
     an := n
     b[0] = u32(mm)
     b[1] = u32(mm >> 32)
@@ -3013,43 +2984,42 @@ fn io_error() -> i64 {
 // a short text for an OS error number, e.g. for `io_error()`
 fn error_text(e: i64) -> str {
     match e {
-        0 => return "no error"
-        1 => return "operation not permitted"
-        2 => return "no such file or directory"
-        3 => return "no such process"
-        4 => return "interrupted system call"
-        5 => return "input/output error"
-        6 => return "no such device or address"
-        7 => return "argument list too long"
-        8 => return "exec format error"
-        9 => return "bad file descriptor"
-        10 => return "no child processes"
-        11 => return "resource temporarily unavailable"
-        12 => return "out of memory"
-        13 => return "permission denied"
-        16 => return "device or resource busy"
-        17 => return "file exists"
-        18 => return "cross-device link"
-        19 => return "no such device"
-        20 => return "not a directory"
-        21 => return "is a directory"
-        22 => return "invalid argument"
-        23 => return "too many open files in system"
-        24 => return "too many open files"
-        26 => return "text file busy"
-        27 => return "file too large"
-        28 => return "no space left on device"
-        29 => return "illegal seek"
-        30 => return "read-only file system"
-        31 => return "too many links"
-        32 => return "broken pipe"
-        36 => return "file name too long"
-        39 => return "directory not empty"
-        40 => return "too many levels of symbolic links"
-        122 => return "disk quota exceeded"
-        _ => {}
+        0 => "no error"
+        1 => "operation not permitted"
+        2 => "no such file or directory"
+        3 => "no such process"
+        4 => "interrupted system call"
+        5 => "input/output error"
+        6 => "no such device or address"
+        7 => "argument list too long"
+        8 => "exec format error"
+        9 => "bad file descriptor"
+        10 => "no child processes"
+        11 => "resource temporarily unavailable"
+        12 => "out of memory"
+        13 => "permission denied"
+        16 => "device or resource busy"
+        17 => "file exists"
+        18 => "cross-device link"
+        19 => "no such device"
+        20 => "not a directory"
+        21 => "is a directory"
+        22 => "invalid argument"
+        23 => "too many open files in system"
+        24 => "too many open files"
+        26 => "text file busy"
+        27 => "file too large"
+        28 => "no space left on device"
+        29 => "illegal seek"
+        30 => "read-only file system"
+        31 => "too many links"
+        32 => "broken pipe"
+        36 => "file name too long"
+        39 => "directory not empty"
+        40 => "too many levels of symbolic links"
+        122 => "disk quota exceeded"
+        _ => __os_error_text(e)
     }
-    return __os_error_text(e)
 }
 
 // everything readable from a file descriptor (0 = standard input); what was read before an
@@ -3270,15 +3240,14 @@ fn is_lower(c: u8) -> bool {
 // like print, to standard error
 fn eprint(s: str) {
     flush()
-    __write_all(2, cast[i64](ptr(s)), len(s))
-    nl := "\n"
-    __write_all(2, cast[i64](ptr(nl)), 1)
+    __err(s)
+    __err("\n")
 }
 
 // like put (no newline), to standard error
 fn eput(s: str) {
     flush()
-    __write_all(2, cast[i64](ptr(s)), len(s))
+    __err(s)
 }
 
 
@@ -3304,10 +3273,9 @@ fn is_none[T](o: Opt[T]) -> bool {
 // the value of `o`; stops the program if there is none
 fn unwrap[T](o: Opt[T]) -> T {
     match o {
-        Some(x) => { return x }
-        None => {}
+        Some(x) => x
+        None => __die("panic: unwrap of None", "", "")
     }
-    __die("panic: unwrap of None", "", "")
 }
 
 // the value of `o`, or `default` if there is none
