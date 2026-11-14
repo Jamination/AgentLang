@@ -84,7 +84,9 @@ Build `examples\audio_tone.al` and `tests\winaudio\tone.al`.
     documented message and the program keeps running.
 
 ## 5. Direct3D 12
-Build `tests\sys\dx12_offscreen.al` and `examples\dx12_triangle.al`.
+Build `tests\sys\dx12_offscreen.al` and `examples\dx12_triangle.al` (both include the examples'
+Direct3D 12 set-up code, `examples\gamekit\dx12_gpu.al`, by relative path: keep the folders as
+they are in the repository).
 1. `dx12_offscreen.exe`: stdout equals `tests\sys\dx12_offscreen.out`, exit 0; stderr names the
    real GPU and then "Microsoft Basic Render Driver" (first test of real WARP).
 2. The same built with `-O0` and with `--unchecked`.

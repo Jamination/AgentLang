@@ -1,7 +1,7 @@
-// std.dx12_util: the set-up code every Direct3D 12 program repeats, on top of std.dx12 (Windows
-// only): a device with its queue and fence (hardware adapter, else WARP), fence waits, device
-// removal text, HLSL compilation with the compiler's messages, buffers, textures, barriers,
-// readback of a render target, and a sprite batcher for 2D games. See docs/std/dx12_util.md.
+// Direct3D 12 set-up code shared by the DX12 examples, on top of std.dx12 (Windows only): a
+// device with its queue and fence (hardware adapter, else WARP), fence waits, device removal
+// text, HLSL compilation with the compiler's messages, buffers, textures, barriers, and a sprite
+// batcher for 2D games. Example code to read, copy and change: not part of the standard library.
 use std.dx12
 
 // ---- device ----------------------------------------------------------------------------------
@@ -19,37 +19,12 @@ struct Gpu {
     adapter_name: str
 }
 
-// The name of a common HRESULT ("DXGI_ERROR_DEVICE_REMOVED"), or "".
-fn hresult_name(hr: i32) -> str {
-    match hr {
-        S_OK => "S_OK"
-        S_FALSE => "S_FALSE"
-        E_FAIL => "E_FAIL"
-        E_INVALIDARG => "E_INVALIDARG"
-        E_OUTOFMEMORY => "E_OUTOFMEMORY"
-        E_NOINTERFACE => "E_NOINTERFACE"
-        E_NOTIMPL => "E_NOTIMPL"
-        E_POINTER => "E_POINTER"
-        DXGI_ERROR_UNSUPPORTED => "DXGI_ERROR_UNSUPPORTED"
-        DXGI_ERROR_NOT_FOUND => "DXGI_ERROR_NOT_FOUND"
-        DXGI_ERROR_INVALID_CALL => "DXGI_ERROR_INVALID_CALL"
-        DXGI_ERROR_DEVICE_REMOVED => "DXGI_ERROR_DEVICE_REMOVED"
-        DXGI_ERROR_DEVICE_HUNG => "DXGI_ERROR_DEVICE_HUNG"
-        DXGI_ERROR_DEVICE_RESET => "DXGI_ERROR_DEVICE_RESET"
-        DXGI_ERROR_DRIVER_INTERNAL_ERROR => "DXGI_ERROR_DRIVER_INTERNAL_ERROR"
-        DXGI_ERROR_SDK_COMPONENT_MISSING => "DXGI_ERROR_SDK_COMPONENT_MISSING"
-        _ => ""
+// Stops the program with the HRESULT and its name if `hr` is a failure code.
+fn dx_check(hr: i32, what: str) {
+    if FAILED(hr) {
+        panic(hresult_text(what, hr))
     }
 }
-
-// "0x887a0004 (DXGI_ERROR_UNSUPPORTED)": the code in hexadecimal and its name if it is a common one.
-fn hresult_code(hr: i32) -> str {
-    name := hresult_name(hr)
-    fmt("0x", pad_left(hex(u64(u32(hr))), 8, '0'), if name == "" { "" } else { fmt(" (", name, ")") })
-}
-
-// "what failed: HRESULT 0x887a0004 (DXGI_ERROR_UNSUPPORTED)"
-fn hresult_text(what: str, hr: i32) -> str { fmt(what, " failed: HRESULT ", hresult_code(hr)) }
 
 // UTF-8 of a NUL-terminated UTF-16 array (adapter names); characters outside ASCII become '?'.
 priv fn ascii_of(w: []u16) -> str {
@@ -336,49 +311,6 @@ fn dx_barrier(list: *ID3D12GraphicsCommandList, resource: *ID3D12Resource, befor
     list.ResourceBarrier(1, &barrier)
 }
 
-// A copy of a 2D texture of 4-byte pixels on its way to the CPU.
-struct Readback {
-    buffer: *ID3D12Resource
-    width: i64
-    height: i64
-    row_pitch: i64        // bytes from one row to the next in the buffer (a multiple of 256)
-}
-
-// Records a copy of a 2D texture of 4-byte pixels (R8G8B8A8, B8G8R8A8) into a new readback
-// buffer; the texture is in `state` before and after. Read it with readback_pixels once the GPU
-// has executed the list.
-fn gpu_readback(g: *Gpu, list: *ID3D12GraphicsCommandList, texture: *ID3D12Resource, state: u32) -> Readback {
-    desc := texture.GetDesc()
-    footprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT
-    total: u64
-    g.device.GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nil, nil, &total)
-    r := Readback{gpu_buffer(g, D3D12_HEAP_TYPE_READBACK, i64(total), D3D12_RESOURCE_STATE_COPY_DEST), i64(desc.Width),
-        i64(desc.Height), i64(footprint.Footprint.RowPitch)}
-    dst := D3D12_TEXTURE_COPY_LOCATION{pResource: r.buffer, Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}
-    *dst.u_PlacedFootprint() = footprint
-    src := D3D12_TEXTURE_COPY_LOCATION{pResource: texture, Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}
-    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE) }
-    list.CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
-    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state) }
-    r
-}
-
-// The pixels of a finished readback, rows packed (width * 4 bytes each; allocates).
-fn readback_pixels(r: *Readback) -> []u8 {
-    out := alloc[u8](r.width * r.height * 4)
-    mapped: *u8
-    whole := D3D12_RANGE{0, u64(r.row_pitch * r.height)}
-    dx_check(r.buffer.Map(0, &whole, &mapped), "ID3D12Resource::Map (readback)")
-    for y in 0..r.height {
-        memcopy(&out[y * r.width * 4], cast[*u8](cast[i64](mapped) + y * r.row_pitch), r.width * 4)
-    }
-    none := D3D12_RANGE{0, 0}
-    r.buffer.Unmap(0, &none)
-    out
-}
-
-fn readback_free(r: *Readback) { com_release(&r.buffer) }
-
 // ---- sprites ---------------------------------------------------------------------------------
 
 // One corner of a sprite: position in pixels, texture coordinates, colour (RGBA8, red in the
@@ -531,7 +463,7 @@ fn sprites_begin(s: *Sprites, frame: i64, width: i64, height: i64) {
 
 // Adds a sprite: the atlas rectangle (sx, sy, sw, sh) in atlas pixels drawn at (x, y) with size
 // (w, h) in target pixels, tinted by `color` (0xffffffff: as it is). A negative sw or sh mirrors.
-// Sprites beyond the capacity are dropped (sprites_dropped counts them).
+// Sprites beyond the capacity are dropped.
 fn sprite(s: *Sprites, x: f32, y: f32, w: f32, h: f32, sx: f32, sy: f32, sw: f32, sh: f32, color: u32) {
     uv0 := vec2(sx, sy) / s.atlas_size
     uv1 := vec2(sx + sw, sy + sh) / s.atlas_size
@@ -543,12 +475,8 @@ fn sprite_rect(s: *Sprites, x: f32, y: f32, w: f32, h: f32, color: u32) {
     s.quad(x, y, w, h, vec2(-1.0), vec2(-1.0), color)
 }
 
-// Sprites added in this frame that did not fit.
-fn sprites_dropped(s: *Sprites) -> i64 { max(s.count - s.capacity, 0) }
-
 priv fn quad(s: *Sprites, x: f32, y: f32, w: f32, h: f32, uv0: vec2, uv1: vec2, color: u32) {
     if s.count >= s.capacity {
-        s.count += 1
         return
     }
     v := s.mapped

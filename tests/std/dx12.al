@@ -47,7 +47,7 @@ fn fake_size(self: *ID3DBlob) -> u64 { u64(len(cast[*FakeBlob](self).data)) }
 fn helpers() {
     print("S_OK", SUCCEEDED(S_OK), FAILED(S_OK), "S_FALSE", SUCCEEDED(S_FALSE), "E_FAIL", SUCCEEDED(E_FAIL), FAILED(E_FAIL))
     print("DXGI_ERROR_DEVICE_REMOVED", hex(u64(u32(DXGI_ERROR_DEVICE_REMOVED))), FAILED(DXGI_ERROR_DEVICE_REMOVED))
-    dx_check(S_OK, "nothing")
+    print(hresult_name(DXGI_ERROR_DEVICE_REMOVED), hresult_code(E_FAIL), hresult_code(0x7fff0001), hresult_text("Present", DXGI_ERROR_DEVICE_HUNG))
     w := mkslice[u16](utf16("A\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z"), 7)
     print("utf16", w)
     print("guid", hex(u64(IID_ID3D12Device.Data1)), IID_ID3D12Device.Data4, IID_ID3D12Device == IID_ID3D12Device, IID_ID3D12Device == IID_ID3D12Resource)

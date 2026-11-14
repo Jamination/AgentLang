@@ -9,12 +9,12 @@
 //
 // It shows the parts of a real-time program: a std.window window whose HWND (win32_hwnd) gets
 // a flip-model swap chain, two frames in flight (one command allocator and fence value per back
-// buffer), root constants, a sprite overlay from std.dx12_util, resizing the swap chain with the
-// window (ResizeBuffers; std.window keeps the loop running while the user drags the window's
-// edge), vsync, reporting a removed device, and a clean shutdown that waits for the GPU and
-// releases everything.
+// buffer), root constants, a sprite overlay from gamekit/dx12_gpu.al, resizing the swap chain
+// with the window (ResizeBuffers; std.window keeps the loop running while the user drags the
+// window's edge), vsync, reporting a removed device, and a clean shutdown that waits for the GPU
+// and releases everything.
 use std.window
-use std.dx12_util
+use "gamekit/dx12_gpu.al"
 
 const FRAMES = 2
 const FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM

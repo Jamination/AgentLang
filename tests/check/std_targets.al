@@ -8,7 +8,6 @@ use std.asset
 use std.os
 use std.image
 use std.dx12
-use std.dx12_util
 use std.metal
 
 fn main() {}

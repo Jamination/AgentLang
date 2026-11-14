@@ -39,6 +39,38 @@ depends on the layout of its own types: no `sizeof` or `cast` of an enum, and th
 parallel back end shares between processes (`emit_put_code`, the reachability records in
 `src/x86/mod.al`) are written and read field by field.
 
+## Versions and the changelog
+
+The compiler's version is one constant in `src/main.al`: `priv const VERSION = "X.Y.Z"`, three
+decimal numbers without a `v` or any suffix. `alc --version` (or `alc version`) prints
+`alc X.Y.Z` on its first line and the default target on the second. Between releases the
+constant keeps the last released version. `verify.sh` checks that the first line of
+`build/alc --version` names the topmost released section (`## [X.Y.Z] - date`) of
+`CHANGELOG.md`.
+
+Whoever changes the compiler, the run-time library or `std` adds one line per user-visible
+change under `## [Unreleased]` at the top of `CHANGELOG.md`, in the category it belongs to, in
+this order (a category heading only when it has entries):
+
+- `### Breaking`: a program that built and worked before must change: a removed or renamed
+  module, function or option, a changed signature, behaviour or language rule. Each entry
+  says what to write instead. Such a change is listed here only, not again below.
+- `### Added`: new language features, functions, modules, options, targets.
+- `### Changed`: different behaviour that breaks no program (messages, performance, sizes).
+- `### Fixed`: bugs fixed.
+- `### Removed`: removals that break no program (a deprecated alias nothing uses any more).
+
+Internal work (optimiser passes, refactoring, tests, the seed) gets no entry unless a user can
+notice it. A release:
+
+1. Choose the version: while the major version is 0, the minor version goes up (0.1.3 ->
+   0.2.0) when there is a Breaking or Added entry, otherwise the patch version (0.1.0 ->
+   0.1.1).
+2. In `CHANGELOG.md` rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a new empty
+   `## [Unreleased]` above it and update the two link lines at the end.
+3. Set `VERSION` in `src/main.al` to `"X.Y.Z"`; `./verify.sh` must pass.
+4. Commit, then tag that commit: `git tag -a vX.Y.Z -m "AL X.Y.Z"` and push the tag.
+
 ## History
 
 The compiler was first written in Rust (the last such state is tagged `rust-final` in git) and
@@ -58,7 +90,7 @@ executables before and after); the conventions below describe the result.
 
 | Path | Contents |
 |------|----------|
-| `src/main.al` | driver: arguments, source loading (files and the `when`s that include them), bundled modules, diagnostics output; lists every other file except the parts below that one or two files include themselves |
+| `src/main.al` | driver: arguments, the version (`VERSION`), source loading (files and the `when`s that include them), bundled modules, diagnostics output; lists every other file except the parts below that one or two files include themselves |
 | `src/when.al` | `when` (deciding conditions, the branches of function bodies) and `-D NAME=VALUE` |
 | `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), `align_up`, paths (`path_join`, `path_parent`), `file_name`, `os_error`, processes, the working-memory regions |
 | `src/host_linux.al`, `host_windows.al` | the compiler's host (the functions listed at the top of `base.al`: running programs, the big stack, worker processes): included by `base.al` with `when TARGET_OS == ...` |

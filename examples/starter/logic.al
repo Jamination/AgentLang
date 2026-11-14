@@ -24,7 +24,7 @@ struct Entity {
     radius: f32
     life: f32       // seconds left for shots and sparks; 0 = lives until destroyed
     hp: i32         // 3 for the player, 2 for a rock; removed at 0
-    color: u32      // 0xAABBGGRR: the byte order of an RGBA framebuffer and of std.dx12_util sprites
+    color: u32      // 0xAABBGGRR: the byte order of an RGBA framebuffer and of the DX12 sprites
 }
 
 struct Actions { left: i64, right: i64, up: i64, down: i64, fire: i64, quit: i64 }

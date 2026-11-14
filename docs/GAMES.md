@@ -1,9 +1,10 @@
 # Structuring a game in AL
 
 This is the shape the standard library is built to support. The complete example is
-[examples/starter](../examples/starter) (`logic.al`, the game, about 220 lines; `game.al`, its
-software front end: a playable shooter that also runs headless and prints a checksum, which is
-how it is tested).
+[examples/starter](../examples/starter) (`logic.al`, the game, about 220 lines; `game.al`, a
+minimal front end on the software framebuffer: a playable shooter that also runs headless and
+prints a checksum, which is how it is tested). [examples/dx12_starter](../examples/dx12_starter)
+is the same game drawn with the GPU.
 
 ## The frame
 
@@ -19,8 +20,7 @@ while !w.should_close() {
     for k in 0..steps.advance(clock.tick()) {
         update(&g, &w.input, f32(steps.step))  // every change to the game happens here
     }
-    render(&g, fb, steps.alpha())              // alpha: how far between two steps we are
-    w.present(as_bytes(fb), FB_W, FB_H)
+    render(&r, &g, steps.alpha())              // your renderer; alpha: how far between two steps we are
 }
 ```
 
@@ -149,16 +149,36 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
   into their own arrays (`pos: []vec3`, `vel: []vec3`); start with the fat struct and split only
   what a profile points at.
 
+## Rendering
+
+The standard library gives bindings, not a renderer: `std.vk` (Vulkan) and `std.dx12`
+(Direct3D 12, Windows), on top of the platform layer (`std.window` with the native handles a
+GPU surface needs, `std.input`, `std.audio`, `std.time`). Device set-up, swap chain,
+pipelines, buffers and the sprite, tile or mesh drawing are the game's own code, shaped by
+what the game needs.
+
+- **Vulkan**: [std/vk.md](std/vk.md) has the workflow: shaders compiled to SPIR-V with `glslc`
+  ahead of time and built into the executable with `embed("shader.vert.spv")`, a surface from
+  the window's native handles.
+- **Direct3D 12**: [std/dx12.md](std/dx12.md): HLSL compiled at run time with `D3DCompile`, a
+  swap chain on `win32_hwnd(w)`.
+- **The examples are reference code, not a library**: read them, copy what helps, change it.
+  `examples/vk_triangle.al` and `examples/dx12_triangle.al` are complete minimal programs;
+  `examples/gamekit/dx12_gpu.al` (device with WARP fallback, fences, shader compilation, a
+  sprite batcher) and `screen.al` (frames in flight, a virtual resolution letterboxed into the
+  window, resizing) are what the two DX12 games draw with.
+- `present` of std.window shows a CPU pixel buffer in the window (`blit_fit` scales one into
+  it): the way to display pixels computed on the CPU, for tools, debugging views and simple
+  programs such as `examples/starter/game.al`.
+
 ## Platform shell
 
-- `std.window` + `std.input`: window, events, software `present` for 2D or CPU rendering,
-  gamepads; the same API on Linux (X11; on a Wayland session through XWayland) and Windows
-  (Win32, XInput): `examples/starter/game.al` runs unchanged on both. `std.wayland` binds the
-  Wayland client API for a program that wants to talk to the compositor itself.
-- `std.vk` (Linux): Vulkan through `x11_display(w)` / `x11_window(w)` for a surface.
-- `std.dx12` (Windows): Direct3D 12 with `std.dx12_util` for the set-up and a sprite batcher
-  for 2D (`examples/dx12_triangle.al`: swap chain on a window, frames in flight, resizing); a
-  swap chain can use `win32_hwnd(w)` of a std.window window.
+- `std.window` + `std.input`: window, events, native handles for GPU surfaces
+  (`x11_display(w)` / `x11_window(w)`, `win32_hwnd(w)`), gamepads; the same API on Linux (X11;
+  on a Wayland session through XWayland) and Windows (Win32, XInput):
+  `examples/starter/game.al` runs unchanged on both. `std.wayland` binds the Wayland client API
+  for a program that wants to talk to the compositor itself.
+- `std.vk`, `std.dx12`: see [Rendering](#rendering).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
 - `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`. Saves
@@ -208,8 +228,7 @@ from Explorer or a shortcut is not its own folder. Build from Linux; test under 
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
 (events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
-(WASAPI). Windows only: std.dx12, std.dx12_util. Linux only: std.vk, std.x11, std.wayland,
-std.alsa.
+(WASAPI). Windows only: std.dx12. Linux only: std.vk, std.x11, std.wayland, std.alsa.
 
 **Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
 
@@ -222,11 +241,12 @@ game.al      window, GPU, sound device, drawing; `--headless` runs headless.al (
 
 The frame: `w.poll()`; `if !inp.focused { pause }`; menu and command edges read once
 (`handle_input`); `for k in 0..steps.advance(clock.tick()) { update(...) }`; play the events on
-the mixer; `audio_pump(dev, mixer)`; draw with the sprite batcher and `Present` (vsync paces
-the loop). [examples/gamekit](../examples/gamekit) has the shared parts: `screen.al` (a swap
-chain on the std.window window, two frames in flight, a fixed virtual resolution letterboxed
-into any window size or fullscreen, resizing while the window is dragged), `font.al` (a 5 x 7
-bitmap font baked into the atlas), `synth.al` (tones, noise, sweeps and music rendered through a
-mixer), `options.al`. A lost sound device (`dev.lost`) is shown and recovers by itself; a removed
+the mixer; `audio_pump(dev, mixer)`; draw and `Present` (vsync paces the loop).
+[examples/gamekit](../examples/gamekit) has the parts both games share, as example code:
+`dx12_gpu.al` (device, fences, shaders, a sprite batcher), `screen.al` (a swap chain on the
+std.window window, two frames in flight, a fixed virtual resolution letterboxed into any window
+size or fullscreen, resizing while the window is dragged), `font.al` (a 5 x 7 bitmap font baked
+into the atlas), `synth.al` (tones, noise, sweeps and music rendered through a mixer),
+`options.al`. A lost sound device (`dev.lost`) is shown and recovers by itself; a removed
 GPU ends the game with a panic that names the reason. The headless run is the regression test:
 `tests/std/dx12_*_sim` prints the same checksums on Linux as `tests/sys/dx12_*` on Windows.
