@@ -60,8 +60,13 @@ each one changes. A project pins the compiler it is written for:
 ```
 git clone https://github.com/Jamination/AgentLang && cd AgentLang
 git checkout v0.1.0 && ./build.sh
-cp build/alc build/alc.exe ~/game/tools/       # or install as alc-0.1 on the PATH
+cp build/alc build/alc.exe ~/game/tools/       # or install on the PATH, below
 ```
+
+On a machine shared by several projects, install each release beside the others and let
+`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.1.0 && ln -sfn alc-0.1.0
+~/.local/bin/alc`. Projects call the versioned name (`alc-0.1.0`), so a new release changes
+nothing until a project switches to it.
 
 The standard library ships inside the compiler, so one executable is the whole toolchain;
 `alc --version` names it. While the version is 0.x, a new minor version (0.2) may break
@@ -78,6 +83,7 @@ between the two versions, then rebuild and run the project's tests with the new 
   input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
 - [Testing on Windows](docs/WINDOWS_TEST.md): checks to run on a real Windows machine
+- [AGENTS.md template](docs/AGENTS_TEMPLATE.md): for a new game repository written by agents
 - [How the compiler is built and organised](docs/BOOTSTRAP.md)
 
 ## Examples

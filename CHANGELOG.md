@@ -8,6 +8,11 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Added
+- `docs/AGENTS_TEMPLATE.md`: an `AGENTS.md` template for game repositories written by agents
+  (compiler version, reading order, rules).
+- README: installing several releases side by side (`alc-0.1.0`, with `alc` as a link).
+
 ## [0.1.0] - 2026-11-14
 
 The first release. An overview of what a project starting on 0.1.0 gets:
