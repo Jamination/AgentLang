@@ -60,18 +60,15 @@ fn opt_trace(what: str, f: *Func) {
 }
 
 // ---------- keeping a function after work_end(w) ----------
-// After work_end(w) the parts of the function made while working are in the discarded work
-// region; they get new memory in the arena of the thread (as `clone(*f)` would). A list
-// elsewhere (never moved while working) is kept: nothing else refers to it. A list made while
-// working that is empty but has room is replaced too (a later push would write into the
-// discarded region). (Kept lists may be in the arena of another thread: those made when the
-// function was lowered, or by the thread that ran opt_first.)
-priv inline fn in_main(w: *Work, p: i64) -> bool {
-    return !work_holds(w, p)
-}
-
+// After work_end(w) the parts of the function made while working are in the discarded regions
+// of w (work_holds); they get new memory in the arena of the thread (as `clone(*f)` would). A
+// list elsewhere (never moved while working) is kept: nothing else refers to it. A list made
+// while working that is empty but has room is replaced too (a later push would write into the
+// discarded region). (A kept list may be in the arena of another thread: those made when the
+// function was lowered, or by the thread that ran opt_first. Lists of the function that the
+// passes do not change, like `rets`, which other threads read, are never written.)
 priv inline fn keep_list[T](w: *Work, l: *Vec[T]) {
-    if len(l.buf) > 0 && !in_main(w, cast[i64](ptr(l.buf))) {
+    if len(l.buf) > 0 && work_holds(w, cast[i64](ptr(l.buf))) {
         *l = vec_of(l.items())
     }
 }
@@ -87,7 +84,7 @@ priv fn keep_args(f: *Func) {
         if n == 0 {
             continue
         }
-        if !in_main(w, cast[i64](ptr(i.args))) {
+        if work_holds(w, cast[i64](ptr(i.args))) {
             total += if i.op == Phi { 2 * n } else { n }
         }
     }
@@ -103,7 +100,7 @@ priv fn keep_args(f: *Func) {
             }
             continue
         }
-        if in_main(w, cast[i64](ptr(i.args))) {
+        if !work_holds(w, cast[i64](ptr(i.args))) {
             continue
         }
         memcopy(ptr(buf[at..]), ptr(i.args), n * 8)
@@ -187,7 +184,7 @@ priv fn orphan_map(f: *Func) -> ([]i32, i64, i64, i64) {
 priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
     n := f.insts.len
     ins := f.insts
-    if !in_main(f.w, cast[i64](ptr(f.insts.buf))) {
+    if work_holds(f.w, cast[i64](ptr(f.insts.buf))) {
         ins = Vec[Inst]{buf: mkslice[Inst](__alloc_raw(c * sizeof[Inst]()), c), len: c}
     }
     buf := mkslice[i64](__alloc_raw(total * 8), total)
@@ -249,7 +246,7 @@ priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
 
 priv fn keep_func(f: *Func) {
     w := f.w
-    if len(f.name) > 0 && !in_main(w, cast[i64](ptr(f.name))) {
+    if len(f.name) > 0 && work_holds(w, cast[i64](ptr(f.name))) {
         f.name = clone(f.name)
     }
     keep_list(w, &f.params)
