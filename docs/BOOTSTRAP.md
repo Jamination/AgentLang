@@ -179,7 +179,7 @@ stored in bulk (the instruction lists of the blocks, the passes' tables: `Vec[i3
 `NOV` reads as -1). The places that make new numbers (`mk`, `new_block`, `new_vreg`, and
 those of types, symbols, functions and frame slots) assert that they fit in 32 bits.
 
-Compiling the compiler (about 36,500 lines including the run-time library) takes about 0.12 s at `-O0` and 0.84 s optimised, using about 0.12 GB (`bench/compile.sh`).
+Compiling the compiler (about 40,000 lines including the run-time library) takes about 0.13 s at `-O0` and 0.91 s optimised, using about 0.15 GB (`bench/compile.sh`).
 `ALC_DEBUG=mem` prints memory and time after each phase.
 
 ## Notes on language features

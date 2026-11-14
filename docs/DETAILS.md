@@ -816,9 +816,9 @@ both systems, except where this section says otherwise.
   `build/alc.exe` of `./build.sh`) is the compiler for Windows. It writes the same executables
   as the Linux compiler, for both targets; its default `--target` is `windows`. `alc run` /
   `alc test` run the program directly (a `--target linux` executable is only built); paths may
-  use `\` and drive or UNC roots, and appear in diagnostics as written. It compiles on one
-  thread with a 1 GiB stack, sequentially (no parallel back end); see
-  [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
+  use `\` and drive or UNC roots, and appear in diagnostics as written. It runs on a thread
+  with a 1 GiB stack and compiles functions in parallel worker threads as on Linux
+  (`ALC_JOBS=n` sets the number); see [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
 
 ## Grammar
 
