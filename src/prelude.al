@@ -2578,7 +2578,8 @@ fn cmp(a: str, b: str) -> i64 {
 }
 
 fn parse_i64(s: str) -> (i64, bool) {
-    return __parse_int(s, 10)
+    v, ok := __parse_int(s, 10, false)
+    return (i64(v), ok)
 }
 
 // an integer in another base (2..36; digits beyond 9 are letters of either case). Base 0: the
@@ -2592,15 +2593,37 @@ fn __at_parse_i64(s: str, base: i64, at: str) -> (i64, bool) {
     if base != 0 && (base < 2 || base > 36) {
         __panic(at, "parse_i64: the base must be 0 or 2..36")
     }
-    return __parse_int(s, base)
+    v, ok := __parse_int(s, base, false)
+    return (i64(v), ok)
 }
 
-fn __parse_int(s: str, base: i64) -> (i64, bool) {
+// the same conventions for the whole range of u64 (0 ..= 2^64 - 1): an optional '+', no '-'
+fn parse_u64(s: str) -> (u64, bool) {
+    return __parse_int(s, 10, true)
+}
+
+fn parse_u64(s: str, base: i64) -> (u64, bool) {
+    return __at_parse_u64(s, base, "?")
+}
+
+fn __at_parse_u64(s: str, base: i64, at: str) -> (u64, bool) {
+    if base != 0 && (base < 2 || base > 36) {
+        __panic(at, "parse_u64: the base must be 0 or 2..36")
+    }
+    return __parse_int(s, base, true)
+}
+
+// parse_i64 (the bits of the i64) or, if unsigned, parse_u64; (0, false) for bad text or a
+// value out of range
+fn __parse_int(s: str, base: i64, unsigned: bool) -> (u64, bool) {
     n := len(s)
     i := 0
     neg := false
     if n > 0 && (s[0] == '-' || s[0] == '+') {
         neg = s[0] == '-'
+        if neg && unsigned {
+            return (0, false)
+        }
         i = 1
     }
     if base == 0 {
@@ -2617,8 +2640,8 @@ fn __parse_int(s: str, base: i64) -> (i64, bool) {
         return (0, false)
     }
     v: u64 = 0
-    // the largest magnitude: 2^63 - 1, or 2^63 after a minus sign
-    limit: u64 = if neg { 0x8000_0000_0000_0000 } else { 0x7FFF_FFFF_FFFF_FFFF }
+    // the largest magnitude: 2^63 - 1, or 2^63 after a minus sign, or 2^64 - 1 unsigned
+    limit: u64 = if unsigned { 0xFFFF_FFFF_FFFF_FFFF } else if neg { 0x8000_0000_0000_0000 } else { 0x7FFF_FFFF_FFFF_FFFF }
     b := u64(base)
     q := limit / b
     r := limit % b
@@ -2637,9 +2660,9 @@ fn __parse_int(s: str, base: i64) -> (i64, bool) {
         i += 1
     }
     if neg {
-        return (i64(0 - v), true)
+        return (0 - v, true)
     }
-    return (i64(v), true)
+    return (v, true)
 }
 
 // ---- exact decimal to binary conversion: big integers as little-endian u32 limbs ----

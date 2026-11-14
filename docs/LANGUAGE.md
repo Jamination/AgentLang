@@ -785,7 +785,7 @@ fmti(x: T, width: i64, fill: u8) -> str    // an integer of any type right-align
 hex(x: u64) -> str    hex(x: u64, width: i64) -> str   // lower case, no prefix: hex(255) is "ff", hex(255, 4) "00ff" (zeros up to width); other types: hex(u64(n))
 to_base(x: u64, base: i64) -> str          // the digits in base 2..36 (0-9, a-z), no prefix: to_base(5, 2) is "101"; any other base: panic
 parse_i64(s: str) -> (i64, bool)           // the whole of s must be [+-]digits (no spaces, no 0x, no _) and fit in an i64; else (0, false)
-parse_i64(s: str, base: i64) -> (i64, bool)   // the same in base 2..36 (letters of either case; no prefix): parse_i64("ff", 16). Base 0: 0x / 0b / 0o after the sign decide, else decimal ("-0x1F", "017" is 17); other bases: panic
+parse_i64(s: str, base: i64) -> (i64, bool)   // the same in base 2..36 (letters of either case; no prefix): parse_i64("ff", 16). Base 0: 0x / 0b / 0o after the sign decide, else decimal ("-0x1F", "017" is 17); other bases: panic. parse_u64(s), parse_u64(s, base) -> (u64, bool): the same for 0 ..= 2^64 - 1 ("+" allowed, any "-" fails)
 parse_f64(s: str) -> (f64, bool)           // [+-]digits[.digits][e[+-]digits] (also ".5", "5.", "1e3"); no spaces, inf, nan. parse_f32: the same to f32, rounded once from the text
 is_digit(c: u8) -> bool   is_alpha  is_alnum  is_upper  is_lower  is_space: the same   // ASCII; '_' is none of them; is_space: the white space of trim
 // ---- Opt[T]: a value that may be absent.  enum Opt[T] { None, Some(T) }  (zero value: None)
