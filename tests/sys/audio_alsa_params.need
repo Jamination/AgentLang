@@ -1,0 +1,1 @@
+test -e /usr/lib/libasound.so.2 -o -e /usr/lib64/libasound.so.2 -o -e /usr/lib/x86_64-linux-gnu/libasound.so.2

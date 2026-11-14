@@ -1,0 +1,27 @@
+open: true minimized: false locked: false
+focus: true true
+resize
+ event: true 400 300 size: (400, 300)
+minimize (_NET_WM_STATE_HIDDEN)
+ minimized: true true size: (400, 300)
+ restored: true false
+minimize (unmapped)
+ minimized: true true
+ restored: true false
+ focus again: true
+fullscreen set by the window manager
+ fullscreen: true minimized: true true
+ fullscreen: false minimized: false
+locked pointer
+ locked: true pos: vec2(100.0, 80.0) delta: vec2(0.0, 0.0) grabbed: true centred: (200, 150)
+ move: vec2(30.0, 10.0) pos: vec2(130.0, 90.0) centred: (200, 150)
+ move: vec2(-50.0, -20.0) pos: vec2(80.0, 70.0) centred: (200, 150)
+ move: vec2(-200.0, -150.0) pos: vec2(-120.0, -80.0)
+ move: vec2(-200.0, -150.0) pos: vec2(-320.0, -230.0)
+focus lost while locked
+ unfocused: true grabbed: false locked: true
+ focus: true
+ grabbed again: true
+unlocked
+ pos: vec2(100.0, 80.0) delta: vec2(0.0, 0.0) grabbed: false pointer: (100, 80)
+closed: true false

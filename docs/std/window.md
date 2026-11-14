@@ -52,6 +52,7 @@ the arena.
 | `size(w) -> (i64, i64)` | current width and height of the drawable area |
 | `set_title(w, title: str)` | change the title |
 | `set_cursor_visible(w, visible: bool)` | hide / show the mouse pointer over the window |
+| `set_cursor_locked(w, locked: bool)` | lock / free the pointer for mouse-look: hidden, kept in the window, `mouse_delta` reports unbounded relative motion (see [Mouse-look](#mouse-look)) |
 | `set_fullscreen(w, on: bool)` | switch between fullscreen and windowed |
 | `present(w, pixels: []u8, pw, ph) -> bool` | show an RGBA8 framebuffer of `pw` x `ph` pixels |
 | `mouse_in_frame(w, pw, ph) -> vec2` | mouse position in pixels of a framebuffer shown with `present` |
@@ -61,7 +62,8 @@ the arena.
 | `win32_hwnd(w) -> *u8` | Windows: the `HWND` (nil after `close`) |
 
 Public fields of `Window`: `input` (an `Input`, see [input.md](input.md)), `events` (the
-`EventQueue`), `width`, `height`, `closing`, `fullscreen`, `cursor_hidden`. The field `os`
+`EventQueue`), `width`, `height`, `closing`, `fullscreen`, `minimized` (between an
+`EventMinimize` and the next `EventRestore`), `cursor_hidden`, `cursor_locked`. The field `os`
 (a `WindowOs`, different per system) holds the backend's handles. The native-handle accessors
 exist only on their system, like the backend's helpers below.
 
@@ -74,7 +76,8 @@ exist only on their system, like the backend's helpers below.
    `w.input` and appends it to `w.events` (the events of the previous `poll` are discarded;
    if more than `EVENT_QUEUE_CAP` arrive in one frame the rest only update `w.input` and are
    counted in `w.events.dropped`),
-3. updates `w.width` / `w.height` and sets `w.closing` when the user closes the window.
+3. updates `w.width` / `w.height`, `w.minimized` and `w.fullscreen` (also when the window
+   manager or the user changed them) and sets `w.closing` when the user closes the window.
 
 Most games only query `w.input` (or an `ActionMap`) after `poll`; the event queue is for
 things that need the individual events in order (text fields, key-binding menus, reacting to
@@ -93,6 +96,16 @@ loop {
 }
 ```
 
+**Size and visibility.** `EventResize` (`x`, `y`: the new drawable size) arrives whenever the
+size changes: the user resizing, `set_fullscreen`, the window manager maximizing. A minimized
+window keeps its size: minimizing sends `EventMinimize` (and sets `w.minimized`), showing it
+again `EventRestore`; nothing becomes 0 x 0. A renderer pauses (skips drawing and presenting)
+while `w.minimized`. On X11 a window counts as minimized while the window manager reports
+`_NET_WM_STATE_HIDDEN` (EWMH) or keeps it unmapped (ICCCM iconic state); on Windows while it is
+iconic (`WM_SIZE` with `SIZE_MINIMIZED`). The fullscreen state follows `_NET_WM_STATE_FULLSCREEN`
+on X11: when the user leaves fullscreen with a window-manager shortcut, `w.fullscreen` becomes
+false. Without a window manager `set_fullscreen` changes only `w.fullscreen`.
+
 Closing is a request: `should_close(w)` becomes true and the window stays open until the
 program calls `close(w)`, so the game can save or ask first. To quit from game code set
 `w.closing = true`. After `close`, the `Window` remains a valid closed window: `should_close`
@@ -105,6 +118,37 @@ method (layout, shift, dead keys, compose sequences / IME) and delivered as Unic
 control characters are filtered out. `mods` of key and mouse events are the modifiers held
 before the event (pressing Shift reports no Shift, releasing it does). Mouse wheel motion is
 `EventWheel`, not a button.
+
+### Mouse-look
+
+`set_cursor_locked(w, true)` turns the mouse into a relative device, as first-person cameras
+need: the pointer is hidden and kept inside the window, and `mouse_delta(&w.input)` is the
+motion of the frame in pixels, also when the pointer would have hit the edge of the screen.
+`mouse_pos` and the `x`, `y` of mouse events are then a virtual position that starts at the
+real one and moves without bounds; button events work as usual. `set_cursor_locked(w, false)`
+shows the pointer again where it was when locked and `mouse_pos` continues from there without
+a jump in `mouse_delta`.
+
+```
+w.set_cursor_locked(true)
+loop {
+    w.poll()
+    d := w.input.mouse_delta()
+    yaw -= d.x * 0.002
+    pitch = fmin(fmax(pitch - d.y * 0.002, -1.5), 1.5)
+    if w.input.key_pressed(KEY_ESCAPE) { w.set_cursor_locked(false) }    // open the menu
+    ...
+}
+```
+
+The lock holds only while the window has the keyboard focus: on `EventUnfocus` the pointer is
+freed (the user can use other windows), on `EventFocus` the window takes it again;
+`w.cursor_locked` stays true throughout. How: on X11 the window grabs the pointer
+(`XGrabPointer`, confined to the window, invisible cursor) and warps it back to the centre
+(`XWarpPointer`) in every `poll` after it moved, skipping the motion the warp itself causes; on
+Windows `ClipCursor` confines it and `SetCursorPos` centres it. The motion is the pointer's,
+with the desktop's acceleration (no raw device input). Under XWayland, Xwayland turns this
+pattern (grab, hidden cursor, warping) into a Wayland pointer lock.
 
 ### Software presentation
 
@@ -130,8 +174,17 @@ aspect-preserving rectangle) and `blit_fit(dst: []u32, dw, dh, src: []u8, sw, sh
 ### Vulkan
 
 For `VK_KHR_xlib_surface`, pass `x11_display(w)` as `dpy` and `x11_window(w)` as `window` of
-`VkXlibSurfaceCreateInfoKHR`. Recreate the swapchain on `EventResize`. Do not mix `present`
+`VkXlibSurfaceCreateInfoKHR` (the types match: `dpy` is a `*u8`, `window` a `u64`; enable
+`VK_KHR_surface` and `VK_KHR_xlib_surface` on the instance). Recreate the swapchain on `EventResize`; while
+`w.minimized`, skip rendering (or present nothing) until `EventRestore`. Do not mix `present`
 with a GPU swapchain on the same window.
+
+**Vertical sync** is not a window setting: choose it with the swapchain's present mode in
+Vulkan ([std.vk](vk.md#windows-and-swapchains): `VK_PRESENT_MODE_FIFO_KHR` waits for the
+vertical blank and is always available, `MAILBOX_KHR` replaces queued frames without tearing,
+`IMMEDIATE_KHR` does not wait and may tear), or with the sync interval of
+`IDXGISwapChain::Present` in Direct3D 12 (`Present(1, 0)` waits for one vertical blank,
+`Present(0, 0)` does not: [std.dx12](dx12.md)).
 
 ### Direct3D 12 (Windows)
 
@@ -150,11 +203,14 @@ both modules.
 | `event_from_x11_button(button, pressed, x, y, mods) -> Event` | mouse / wheel event for an X11 button number |
 
 `std.x11` (included by this module) declares the raw Xlib functions with their C names
-(`XOpenDisplay`, `XCreateSimpleWindow`, `XNextEvent`, `XPutImage`, `XInternAtom`, ...), the
-structs `XEvent` (an opaque 192-byte block read with `x_event_type`, `x_event_x`,
-`x_event_detail`, ... ), `XSizeHints`, `XColor`, and constants with an `X_` prefix
-(`X_KEY_PRESS`, `X_STRUCTURE_NOTIFY_MASK`, ...). Use it for anything this module does not
-cover; the display and window id of a `Window` are valid arguments for all of it.
+(`XOpenDisplay`, `XCreateSimpleWindow`, `XNextEvent`, `XPutImage`, `XInternAtom`,
+`XGetWindowProperty`, `XGrabPointer`, `XWarpPointer`, `XQueryPointer`, `XSetInputFocus`,
+`XIconifyWindow`, ...), the structs `XEvent` (an opaque 192-byte block read with
+`x_event_type`, `x_event_x`, `x_event_detail`, `x_event_property_atom`, ... ), `XSizeHints`,
+`XColor`, and constants with an `X_` prefix (`X_KEY_PRESS`, `X_STRUCTURE_NOTIFY_MASK`,
+`X_PROPERTY_NOTIFY`, `X_GRAB_SUCCESS`, ...). Use it for anything this module does not cover;
+the display and window id of a `Window` are valid arguments for all of it (`XIconifyWindow`
+minimizes the window, for example).
 
 ### Win32 helpers (Windows)
 
@@ -190,7 +246,8 @@ The same program runs on Windows with the same events; what differs:
   touchpads accumulates into steps; `y > 0` away from the user, `x > 0` to the right.
 - **System keys.** Alt and F10 do not enter the window-menu mode (which would stop the game);
   Alt+F4 is an `EventClose`, Alt+Space still opens the window menu.
-- **Minimizing** keeps the size (no `EventResize` to 0 x 0).
+- **Minimizing** keeps the size (no `EventResize` to 0 x 0), as on X11: `EventMinimize`,
+  then `EventRestore`.
 - **Moving and resizing.** While the user drags or resizes the window (or a window menu is
   open), Windows runs a loop of its own inside the message dispatch. `poll` pumps messages on a
   fiber of its own and leaves that loop on a timer, so it returns every 10-16 ms during the drag
@@ -373,14 +430,17 @@ that many frames, which is handy for automated smoke tests.
 
 Window logic that does not need a display is covered by `tests/std/window_fit` (scaling and
 conversion, both systems) and `tests/std/window_logic` (X11 key mapping and event translation).
-`tests/sys/window_x11` exercises a real X11 window, but only on the display named by the
-environment variable `AL_TEST_DISPLAY` (for example an `Xvfb` instance:
-`Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./build/alc window`); without it the
-test is skipped, so the test suite never opens a window on the desktop it runs on.
+`tests/sys/window_x11` exercises a real X11 window and `tests/sys/window_x11_events` resize,
+minimize / restore, window-manager fullscreen changes and the locked pointer (a second client
+connection plays the user and the window manager), but only on the display named by the
+environment variable `AL_TEST_DISPLAY`, which must have no window manager (for example an
+`Xvfb` instance: `Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./build/alc window`, or a rootful
+`Xwayland :99` inside a headless `weston`); without it the tests are skipped, so the test suite
+never opens a window on the desktop it runs on.
 
 On Windows (`tests/run.sh --target windows`, under Wine with its null display driver: windows
 exist and get messages, nothing is shown), `tests/sys/window_win32` opens a real Win32 window
 and checks the key table, posted and `SendInput` keyboard messages, text, mouse buttons and
-wheel, focus loss, `present` (pixels read back with `GetPixel`), the pointer, fullscreen, close
-requests and leaving a modal move loop; `tests/sys/window_dx12` uses std.window together with
-std.dx12. Both are skipped on Linux.
+wheel, focus loss, `present` (pixels read back with `GetPixel`), the pointer (also locked),
+fullscreen, minimizing, close requests and leaving a modal move loop; `tests/sys/window_dx12`
+uses std.window together with std.dx12. Both are skipped on Linux.

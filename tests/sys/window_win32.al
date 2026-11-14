@@ -1,8 +1,8 @@
 // std.window on Windows without a display (Wine's null driver, as tests/run.sh --target windows
 // sets it up): a real Win32 window receives posted and synthesized (SendInput) messages, and
-// the test checks the events, the input state, sizes, fullscreen, the pointer, the pixels drawn
-// by `present` (read back with GetPixel), close requests and a modal move loop that `poll`
-// must leave while it runs.
+// the test checks the events, the input state, sizes, fullscreen, minimizing, the pointer (also
+// locked for mouse-look), the pixels drawn by `present` (read back with GetPixel), close
+// requests and a modal move loop that `poll` must leave while it runs.
 use std.window
 
 extern "user32.dll" fn PostMessageW(hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i32
@@ -19,6 +19,13 @@ extern "user32.dll" fn GetThreadDpiAwarenessContext() -> *u8
 extern "user32.dll" fn GetAwarenessFromDpiAwarenessContext(ctx: *u8) -> i32
 extern "gdi32.dll" fn GetPixel(dc: *u8, x: i32, y: i32) -> u32
 extern "user32.dll" fn MapVirtualKeyW(code: u32, map_type: u32) -> u32
+extern "user32.dll" fn ShowWindow(hwnd: *u8, cmd: i32) -> i32
+extern "user32.dll" fn GetCursorPos(p: *[2]i32) -> i32
+extern "user32.dll" fn ScreenToClient(hwnd: *u8, p: *[2]i32) -> i32
+extern "user32.dll" fn GetClipCursor(rect: *[4]i32) -> i32
+extern "user32.dll" fn GetWindowRect(hwnd: *u8, rect: *[4]i32) -> i32
+extern "user32.dll" fn ClientToScreen(hwnd: *u8, p: *[2]i32) -> i32
+extern "user32.dll" fn SetCursorPos(x: i32, y: i32) -> i32
 
 // INPUT with a KEYBDINPUT (40 bytes: the union starts at offset 8)
 struct KeyInput {
@@ -215,6 +222,53 @@ fn main() {
     SendMessageW(h, 0x20, u64(cast[i64](h)), 0x02000001)
     print("hidden:", hidden, "shown:", GetCursor() != nil, w.cursor_hidden)
 
+    print("locked pointer")
+    print_moves = false
+    before: [2]i32
+    GetCursorPos(&before)
+    w.set_cursor_locked(true)
+    show(w)
+    cur: [2]i32
+    GetCursorPos(&cur)
+    ScreenToClient(h, &cur)
+    clip: [4]i32
+    GetClipCursor(&clip)
+    wr: [4]i32
+    GetWindowRect(h, &wr)
+    SendMessageW(h, 0x20, u64(cast[i64](h)), 0x02000001)
+    print("locked:", w.cursor_locked, "centred:", cur, "clipped to the window:", clip[0] >= wr[0] && clip[2] <= wr[2] && clip[2] - clip[0] == 320, "hidden:", GetCursor() == nil)
+    // the user moves the mouse: the pointer goes to the client position (x, y)
+    fn user_move(h: *u8, x: i32, y: i32) {
+        p := [2]i32{x, y}
+        ClientToScreen(h, &p)
+        SetCursorPos(p[0], p[1])
+    }
+    start := w.input.mouse_pos()
+    user_move(h, 190, 110)                            // centre + (30, 10)
+    show(w)
+    print("delta:", w.input.mouse_delta(), "moved:", w.input.mouse_pos() - start)
+    show(w)                                           // the pointer goes back to the centre: no motion
+    GetCursorPos(&cur)
+    ScreenToClient(h, &cur)
+    print("delta:", w.input.mouse_delta(), "centred:", cur)
+    user_move(h, 110, 80)                             // centre - (50, 20)
+    post(w, 0x201, 1, 0x0050006E)                     // left button there
+    post(w, 0x202, 0, 0x0050006E)
+    w.poll()                                          // (positions depend on where the pointer started)
+    print("delta:", w.input.mouse_delta(), "moved:", w.input.mouse_pos() - start, "clicked:", w.input.mouse_pressed(MOUSE_LEFT))
+    user_move(h, 0, 0)                                // the corner, twice: no bound
+    show(w)
+    show(w)
+    user_move(h, 0, 0)
+    show(w)
+    print("moved:", w.input.mouse_pos() - start)
+    print_moves = true
+    w.set_cursor_locked(false)
+    GetCursorPos(&cur)
+    GetClipCursor(&clip)
+    SendMessageW(h, 0x20, u64(cast[i64](h)), 0x02000001)
+    print("unlocked:", w.cursor_locked, "back:", cur == before, "clip released:", clip[2] - clip[0] > 320, "shown:", GetCursor() != nil)
+
     print("fullscreen")
     print_moves = false
     w.set_fullscreen(true)
@@ -229,6 +283,14 @@ fn main() {
     w.set_title("renamed")
     n = GetWindowTextW(h, ptr(title), 32)
     print("title:", title[..n])
+
+    print("minimize")
+    ShowWindow(h, 6)                                  // SW_MINIMIZE
+    show(w)
+    print("minimized:", w.minimized, "size:", w.size())
+    ShowWindow(h, 9)                                  // SW_RESTORE
+    show(w)
+    print("minimized:", w.minimized, "size:", w.size())
 
     print_moves = true
     print("menu key and move loop")

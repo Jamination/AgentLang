@@ -39,6 +39,9 @@ priv extern "user32.dll" fn LoadCursorW(instance: *u8, name: *u16) -> *u8
 priv extern "user32.dll" fn SetCursor(cursor: *u8) -> *u8
 priv extern "user32.dll" fn GetCursorPos(p: *W32Point) -> i32
 priv extern "user32.dll" fn ScreenToClient(hwnd: *u8, p: *W32Point) -> i32
+priv extern "user32.dll" fn ClientToScreen(hwnd: *u8, p: *W32Point) -> i32
+priv extern "user32.dll" fn SetCursorPos(x: i32, y: i32) -> i32
+priv extern "user32.dll" fn ClipCursor(rect: *W32Rect) -> i32
 priv extern "user32.dll" fn WindowFromPoint(p: W32Point) -> *u8
 priv extern "user32.dll" fn AdjustWindowRectEx(rect: *W32Rect, style: u32, menu: i32, ex_style: u32) -> i32
 priv extern "user32.dll" fn GetClientRect(hwnd: *u8, rect: *W32Rect) -> i32
@@ -201,6 +204,14 @@ struct WindowOs {
     pending: [PENDING_CAP]Event  // events recorded by the window procedure, applied by poll
     pending_head: i64
     pending_len: i64
+    iconic: bool                 // minimized (WM_SIZE with SIZE_MINIMIZED seen)
+    clipped: bool                // ClipCursor confines the pointer (locked cursor, focused)
+    last_x: i64                  // locked cursor: last real position (client pixels)
+    last_y: i64
+    virt_x: i64                  // locked cursor: the virtual position reported in events
+    virt_y: i64
+    unlock_x: i64                // locked cursor: where it was when locked
+    unlock_y: i64
 }
 
 priv class_atom: u16
@@ -403,6 +414,8 @@ priv fn w32_deliver(w: *Window) {
                 w.width = e.x
                 w.height = e.y
             }
+            EventMinimize => w.minimized = true
+            EventRestore => w.minimized = false
             EventClose => w.closing = true
             _ => {}
         }
@@ -581,11 +594,20 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             }
         }
         WM_MOUSEMOVE => {
-            w32_record(w, Event{kind: EventMouseMove, x: x, y: y})
+            if w.cursor_locked {
+                w32_locked_motion(w, x, y)
+            } else {
+                w32_record(w, Event{kind: EventMouseMove, x: x, y: y})
+            }
             return 0
         }
         WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP, WM_XBUTTONUP => {
             e := event_from_win32_button(msg, wp, x, y, w32_mods(w, -1, false))
+            if w.cursor_locked {
+                w32_locked_motion(w, x, y)
+                e.x = o.virt_x
+                e.y = o.virt_y
+            }
             // while a button is held the window gets the mouse even outside (as X11 grabs it)
             if e.kind == EventMouseDown {
                 SetCapture(hwnd)
@@ -605,13 +627,23 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
         }
         WM_SETCURSOR => {
             if lp & 0xFFFF == HTCLIENT {
-                SetCursor(if w.cursor_hidden { nil } else { arrow_cursor })
+                SetCursor(if w.cursor_hidden || w.cursor_locked { nil } else { arrow_cursor })
                 return 1
             }
         }
         WM_SIZE => {
-            // (minimizing keeps the size, as on X11)
-            if wp != 1 {
+            // minimizing keeps the size (as on X11): EventMinimize, then EventRestore when the
+            // window is shown again (SIZE_RESTORED or SIZE_MAXIMIZED)
+            if wp == 1 {
+                if !o.iconic {
+                    o.iconic = true
+                    w32_record(w, Event{kind: EventMinimize})
+                }
+            } else {
+                if o.iconic && (wp == 0 || wp == 2) {
+                    o.iconic = false
+                    w32_record(w, Event{kind: EventRestore})
+                }
                 cw := lp & 0xFFFF
                 ch := lp >> 16 & 0xFFFF
                 if cw != o.client_w || ch != o.client_h {
@@ -627,6 +659,7 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             return 0
         }
         WM_KILLFOCUS => {
+            w32_unclip(w)
             o.fake_ctrl = false
             o.print_down = false
             o.shift_held = [2]bool{false, false}
@@ -813,22 +846,123 @@ fn poll(w: *Window) {
     }
     w32_pump()
     w32_deliver(w)
+    if w.cursor_locked {
+        w32_keep_locked(w)
+    }
 }
 
-// Shows or hides the mouse pointer while it is over the window.
-fn set_cursor_visible(w: *Window, visible: bool) {
+// Gives the pointer the window's shape now if it is over the client area (else it takes it
+// when it gets there, through WM_SETCURSOR).
+priv fn w32_update_cursor(w: *Window) {
     hwnd := w.os.hwnd
-    if hwnd == nil || visible != w.cursor_hidden {
-        return
-    }
-    w.cursor_hidden = !visible
-    // the pointer takes the new shape now if it is over the client area, else when it gets there
     p: W32Point
     r: W32Rect
     if GetCursorPos(&p) != 0 && WindowFromPoint(p) == hwnd && ScreenToClient(hwnd, &p) != 0 && GetClientRect(hwnd, &r) != 0 &&
         p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom {
-        SetCursor(if visible { arrow_cursor } else { nil })
+        SetCursor(if w.cursor_hidden || w.cursor_locked { nil } else { arrow_cursor })
     }
+}
+
+// Shows or hides the mouse pointer while it is over the window.
+fn set_cursor_visible(w: *Window, visible: bool) {
+    if w.os.hwnd == nil || visible != w.cursor_hidden {
+        return
+    }
+    w.cursor_hidden = !visible
+    w32_update_cursor(w)
+}
+
+// Pointer motion to (x, y) while the cursor is locked: the motion since the last real position
+// moves the virtual position; the motion caused by the warp back to the centre is skipped.
+priv fn w32_locked_motion(w: *Window, x: i64, y: i64) {
+    o := &w.os
+    if x == o.last_x && y == o.last_y {
+        return
+    }
+    o.virt_x += x - o.last_x
+    o.virt_y += y - o.last_y
+    o.last_x = x
+    o.last_y = y
+    w32_record(w, Event{kind: EventMouseMove, x: o.virt_x, y: o.virt_y})
+}
+
+priv fn w32_unclip(w: *Window) {
+    if w.os.clipped {
+        ClipCursor(nil)
+        w.os.clipped = false
+    }
+}
+
+// Keeps a locked cursor confined to the client area (while the window has the focus and is
+// not minimized) and in its centre.
+priv fn w32_keep_locked(w: *Window) {
+    o := &w.os
+    hwnd := o.hwnd
+    if !w.input.focused || w.minimized {
+        w32_unclip(w)
+        return
+    }
+    // (every frame: the window may have moved)
+    r: W32Rect
+    GetClientRect(hwnd, &r)
+    a := W32Point{r.left, r.top}
+    b := W32Point{r.right, r.bottom}
+    ClientToScreen(hwnd, &a)
+    ClientToScreen(hwnd, &b)
+    clip := W32Rect{a.x, a.y, b.x, b.y}
+    ClipCursor(&clip)
+    o.clipped = true
+    cx := w.width / 2
+    cy := w.height / 2
+    if o.last_x != cx || o.last_y != cy {
+        c := W32Point{i32(cx), i32(cy)}
+        ClientToScreen(hwnd, &c)
+        SetCursorPos(c.x, c.y)
+        o.last_x = cx
+        o.last_y = cy
+    }
+}
+
+// Locks the pointer for mouse-look: hidden, kept inside the window (ClipCursor, moved back to
+// the centre) while the window has the focus, and every motion moves a virtual position
+// without bounds, so `mouse_delta(&w.input)` is the relative motion of the frame (positions
+// in mouse events are that virtual position). Unlocking puts the pointer back where it was.
+fn set_cursor_locked(w: *Window, locked: bool) {
+    o := &w.os
+    hwnd := o.hwnd
+    if hwnd == nil || locked == w.cursor_locked {
+        return
+    }
+    w.cursor_locked = locked
+    if locked {
+        p: W32Point
+        GetCursorPos(&p)
+        ScreenToClient(hwnd, &p)
+        o.last_x = i64(p.x)
+        o.last_y = i64(p.y)
+        o.unlock_x = o.last_x
+        o.unlock_y = o.last_y
+        // the virtual position starts at the real one (also the first motion counts in mouse_delta)
+        o.virt_x = o.last_x
+        o.virt_y = o.last_y
+        w.input.mouse_x = f32(o.virt_x)
+        w.input.mouse_y = f32(o.virt_y)
+        w.input.mouse_seen = true
+        w32_keep_locked(w)
+    } else {
+        if o.clipped {
+            w32_unclip(w)
+            p := W32Point{i32(o.unlock_x), i32(o.unlock_y)}
+            ClientToScreen(hwnd, &p)
+            SetCursorPos(p.x, p.y)
+            o.last_x = o.unlock_x
+            o.last_y = o.unlock_y
+        }
+        // continue from the real position without a jump in mouse_delta
+        w.input.mouse_x = f32(o.last_x)
+        w.input.mouse_y = f32(o.last_y)
+    }
+    w32_update_cursor(w)
 }
 
 // Makes the window fullscreen (borderless, covering its monitor) or windowed again; the new
@@ -898,6 +1032,7 @@ fn present(w: *Window, pixels: []u8, pw: i64, ph: i64) -> bool {
 fn close(w: *Window) {
     w.closing = true
     o := &w.os
+    w32_unclip(w)
     w32_free_dib(w)
     o.pending_len = 0
     hwnd := o.hwnd

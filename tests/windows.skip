@@ -26,6 +26,7 @@ sys/window_nodisplay an X11 display name (WindowDesc.display) means nothing on W
 sys/window_x11 needs an X server (AL_TEST_DISPLAY)
 sys/window_x11_events needs an X server (AL_TEST_DISPLAY) and calls Xlib itself
 sys/wayland std.wayland is Linux only
+sys/audio_alsa_params std.alsa binds libasound.so.2 (Linux)
 check/wayland std.wayland is Linux only
 check/wayland_window std.wayland is Linux only
 sys/vk_triangle std.vk binds libvulkan.so.1 (Linux)

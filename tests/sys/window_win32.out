@@ -90,6 +90,13 @@ presented: true
 000000 0000ff 00ff00 ff0000 ffffff 000000 
 pointer
 hidden: true shown: true false
+locked pointer
+locked: true centred: [160, 100] clipped to the window: true hidden: true
+delta: vec2(30.0, 10.0) moved: vec2(30.0, 10.0)
+delta: vec2(0.0, 0.0) centred: [160, 100]
+delta: vec2(-50.0, -20.0) moved: vec2(-20.0, -10.0) clicked: true
+moved: vec2(-340.0, -210.0)
+unlocked: false back: true clip released: true shown: true
 fullscreen
 before poll: (320, 200)
   EventResize 1024 768
@@ -97,6 +104,13 @@ covers the monitor: true popup: true
   EventResize 320 200
 windowed: (320, 200) popup: false
 title: [114, 101, 110, 97, 109, 101, 100]
+minimize
+  EventUnfocus 0 0
+  EventMinimize 0 0
+minimized: true size: (320, 200)
+  EventRestore 0 0
+  EventFocus 0 0
+minimized: false size: (320, 200)
 menu key and move loop
 poll returned inside the loop: true
 quick: true

@@ -17,9 +17,20 @@ struct WindowOs {
     wm_delete: u64
     net_wm_state: u64
     net_wm_state_fullscreen: u64
+    net_wm_state_hidden: u64
     net_wm_name: u64
     utf8_string: u64
     blank_cursor: u64
+    unmapped: bool               // unmapped after it was mapped (iconified by an ICCCM window manager)
+    wm_hidden: bool              // _NET_WM_STATE holds _NET_WM_STATE_HIDDEN (minimized, EWMH)
+    wm_fullscreen: bool          // _NET_WM_STATE holds _NET_WM_STATE_FULLSCREEN
+    grabbed: bool                // the pointer is grabbed for set_cursor_locked
+    last_x: i64                  // locked pointer: last real position (window pixels)
+    last_y: i64
+    virt_x: i64                  // locked pointer: the virtual position reported in events
+    virt_y: i64
+    unlock_x: i64                // locked pointer: where it was when locked
+    unlock_y: i64
     image: *u8
     image_data: *u8
     image_w: i64
@@ -199,12 +210,13 @@ fn window_open(d: WindowDesc) -> (*Window, bool) {
     o.wm_delete = XInternAtom(dpy, ptr("WM_DELETE_WINDOW"), 0)
     o.net_wm_state = XInternAtom(dpy, ptr("_NET_WM_STATE"), 0)
     o.net_wm_state_fullscreen = XInternAtom(dpy, ptr("_NET_WM_STATE_FULLSCREEN"), 0)
+    o.net_wm_state_hidden = XInternAtom(dpy, ptr("_NET_WM_STATE_HIDDEN"), 0)
     o.net_wm_name = XInternAtom(dpy, ptr("_NET_WM_NAME"), 0)
     o.utf8_string = XInternAtom(dpy, ptr("UTF8_STRING"), 0)
     XSetWMProtocols(dpy, o.win, &o.wm_delete, 1)
     XSelectInput(dpy, o.win, X_KEY_PRESS_MASK | X_KEY_RELEASE_MASK | X_BUTTON_PRESS_MASK |
         X_BUTTON_RELEASE_MASK | X_POINTER_MOTION_MASK | X_STRUCTURE_NOTIFY_MASK |
-        X_FOCUS_CHANGE_MASK | X_EXPOSURE_MASK)
+        X_FOCUS_CHANGE_MASK | X_EXPOSURE_MASK | X_PROPERTY_CHANGE_MASK)
     XkbSetDetectableAutoRepeat(dpy, 1, nil)
     if !d.resizable {
         hints: XSizeHints
@@ -219,6 +231,7 @@ fn window_open(d: WindowDesc) -> (*Window, bool) {
         XChangeProperty(dpy, o.win, o.net_wm_state, X_ATOM_ATOM, 32, X_PROP_MODE_REPLACE,
             cast[*u8](&o.net_wm_state_fullscreen), 1)
         w.fullscreen = true
+        o.wm_fullscreen = true
     }
     o.im = XOpenIM(dpy, nil, nil, nil)
     if o.im != nil {
@@ -285,6 +298,92 @@ priv fn window_key_event(w: *Window, ev: *XEvent, pressed: bool) {
     }
 }
 
+// The minimized state from what the window manager reported; EventMinimize / EventRestore
+// when it changed.
+priv fn window_update_minimized(w: *Window) {
+    m := w.os.wm_hidden || w.os.unmapped
+    if m != w.minimized {
+        w.minimized = m
+        window_emit(w, Event{kind: if m { EventMinimize } else { EventRestore }})
+    }
+}
+
+// Reads _NET_WM_STATE after the window manager changed it: hidden (minimized) and fullscreen.
+priv fn window_read_wm_state(w: *Window) {
+    o := &w.os
+    kind: u64
+    format: i32
+    n: u64
+    after: u64
+    data: *u8 = nil
+    hidden := false
+    fs := false
+    if XGetWindowProperty(o.dpy, o.win, o.net_wm_state, 0, 64, 0, X_ATOM_ATOM, &kind, &format, &n, &after, &data) == X_SUCCESS && data != nil {
+        if kind == X_ATOM_ATOM && format == 32 {
+            for a in mkslice[u64](data, i64(n)) {
+                if a == o.net_wm_state_hidden {
+                    hidden = true
+                } else if a == o.net_wm_state_fullscreen {
+                    fs = true
+                }
+            }
+        }
+        XFree(data)
+    }
+    o.wm_hidden = hidden
+    // (only a change of the window manager's state overrides what set_fullscreen asked for)
+    if fs != o.wm_fullscreen {
+        o.wm_fullscreen = fs
+        w.fullscreen = fs
+    }
+    window_update_minimized(w)
+}
+
+// Pointer motion to (x, y) while the cursor is locked: the motion since the last real position
+// moves the virtual position; the motion caused by the warp back to the centre is skipped.
+priv fn window_locked_motion(w: *Window, x: i64, y: i64) {
+    o := &w.os
+    if x == o.last_x && y == o.last_y {
+        return
+    }
+    o.virt_x += x - o.last_x
+    o.virt_y += y - o.last_y
+    o.last_x = x
+    o.last_y = y
+    window_emit(w, Event{kind: EventMouseMove, x: o.virt_x, y: o.virt_y})
+}
+
+// Keeps a locked pointer grabbed (while the window has the focus) and in the window's centre.
+priv fn window_keep_locked(w: *Window) {
+    o := &w.os
+    if !o.grabbed {
+        if !w.input.focused {
+            return
+        }
+        // ButtonPress | ButtonRelease | PointerMotion; confined to the window, blank cursor
+        if XGrabPointer(o.dpy, o.win, 1, 0x4C, X_GRAB_MODE_ASYNC, X_GRAB_MODE_ASYNC, o.win, window_blank_cursor(w), X_CURRENT_TIME) != X_GRAB_SUCCESS {
+            return
+        }
+        o.grabbed = true
+    }
+    cx := w.width / 2
+    cy := w.height / 2
+    if o.last_x != cx || o.last_y != cy {
+        XWarpPointer(o.dpy, 0, o.win, 0, 0, 0, 0, i32(cx), i32(cy))
+        o.last_x = cx
+        o.last_y = cy
+    }
+    XFlush(o.dpy)
+}
+
+priv fn window_ungrab(w: *Window) {
+    o := &w.os
+    if o.grabbed {
+        XUngrabPointer(o.dpy, X_CURRENT_TIME)
+        o.grabbed = false
+    }
+}
+
 // Starts a new input frame and processes every pending window event: updates `w.input`,
 // refills the event queue (events of the previous poll are discarded) and the size / close
 // state. Never blocks. Call it once at the top of every frame.
@@ -305,13 +404,26 @@ fn poll(w: *Window) {
             X_KEY_PRESS => window_key_event(w, &ev, true)
             X_KEY_RELEASE => window_key_event(w, &ev, false)
             X_BUTTON_PRESS, X_BUTTON_RELEASE => {
+                x := x_event_x(&ev)
+                y := x_event_y(&ev)
+                if w.cursor_locked {
+                    window_locked_motion(w, x, y)
+                    x = o.virt_x
+                    y = o.virt_y
+                }
                 e := event_from_x11_button(x_event_detail(&ev), x_event_type(&ev) == X_BUTTON_PRESS,
-                    x_event_x(&ev), x_event_y(&ev), mods_from_x11(x_event_state(&ev)))
+                    x, y, mods_from_x11(x_event_state(&ev)))
                 if e.kind != EventNone {
                     window_emit(w, e)
                 }
             }
-            X_MOTION_NOTIFY => window_emit(w, Event{kind: EventMouseMove, x: x_event_x(&ev), y: x_event_y(&ev)})
+            X_MOTION_NOTIFY => {
+                if w.cursor_locked {
+                    window_locked_motion(w, x_event_x(&ev), x_event_y(&ev))
+                } else {
+                    window_emit(w, Event{kind: EventMouseMove, x: x_event_x(&ev), y: x_event_y(&ev)})
+                }
+            }
             X_CONFIGURE_NOTIFY => {
                 cw := x_event_configure_width(&ev)
                 ch := x_event_configure_height(&ev)
@@ -319,6 +431,19 @@ fn poll(w: *Window) {
                     w.width = cw
                     w.height = ch
                     window_emit(w, Event{kind: EventResize, x: cw, y: ch})
+                }
+            }
+            X_MAP_NOTIFY => {
+                o.unmapped = false
+                window_update_minimized(w)
+            }
+            X_UNMAP_NOTIFY => {
+                o.unmapped = true
+                window_update_minimized(w)
+            }
+            X_PROPERTY_NOTIFY => {
+                if x_event_property_atom(&ev) == o.net_wm_state {
+                    window_read_wm_state(w)
                 }
             }
             X_FOCUS_IN => {
@@ -331,6 +456,8 @@ fn poll(w: *Window) {
                 if o.ic != nil {
                     XUnsetICFocus(o.ic)
                 }
+                // a locked pointer is free while another window has the focus
+                window_ungrab(w)
                 window_emit(w, Event{kind: EventUnfocus})
             }
             X_CLIENT_MESSAGE => {
@@ -344,6 +471,22 @@ fn poll(w: *Window) {
             _ => {}
         }
     }
+    if w.cursor_locked {
+        window_keep_locked(w)
+    }
+}
+
+// The invisible cursor (created on first use).
+priv fn window_blank_cursor(w: *Window) -> u64 {
+    o := &w.os
+    if o.blank_cursor == 0 {
+        zero: u64
+        color: XColor
+        pixmap := XCreateBitmapFromData(o.dpy, o.win, cast[*u8](&zero), 1, 1)
+        o.blank_cursor = XCreatePixmapCursor(o.dpy, pixmap, pixmap, &color, &color, 0, 0)
+        XFreePixmap(o.dpy, pixmap)
+    }
+    o.blank_cursor
 }
 
 // Shows or hides the mouse pointer while it is over the window.
@@ -355,17 +498,54 @@ fn set_cursor_visible(w: *Window, visible: bool) {
     if visible {
         XUndefineCursor(o.dpy, o.win)
     } else {
-        if o.blank_cursor == 0 {
-            zero: u64
-            color: XColor
-            pixmap := XCreateBitmapFromData(o.dpy, o.win, cast[*u8](&zero), 1, 1)
-            o.blank_cursor = XCreatePixmapCursor(o.dpy, pixmap, pixmap, &color, &color, 0, 0)
-            XFreePixmap(o.dpy, pixmap)
-        }
-        XDefineCursor(o.dpy, o.win, o.blank_cursor)
+        XDefineCursor(o.dpy, o.win, window_blank_cursor(w))
     }
     w.cursor_hidden = !visible
     XFlush(o.dpy)
+}
+
+// Locks the pointer for mouse-look: hidden, kept inside the window (grabbed and warped back to
+// the centre) while the window has the focus, and every motion moves a virtual position
+// without bounds, so `mouse_delta(&w.input)` is the relative motion of the frame (positions
+// in mouse events are that virtual position). Unlocking puts the pointer back where it was.
+fn set_cursor_locked(w: *Window, locked: bool) {
+    o := &w.os
+    if o.dpy == nil || locked == w.cursor_locked {
+        return
+    }
+    w.cursor_locked = locked
+    if locked {
+        root: u64
+        child: u64
+        rx: i32
+        ry: i32
+        wx: i32
+        wy: i32
+        mask: u32
+        XQueryPointer(o.dpy, o.win, &root, &child, &rx, &ry, &wx, &wy, &mask)
+        o.last_x = i64(wx)
+        o.last_y = i64(wy)
+        o.unlock_x = o.last_x
+        o.unlock_y = o.last_y
+        // the virtual position starts at the real one (also the first motion counts in mouse_delta)
+        o.virt_x = o.last_x
+        o.virt_y = o.last_y
+        w.input.mouse_x = f32(o.virt_x)
+        w.input.mouse_y = f32(o.virt_y)
+        w.input.mouse_seen = true
+        window_keep_locked(w)
+    } else {
+        if o.grabbed {
+            window_ungrab(w)
+            XWarpPointer(o.dpy, 0, o.win, 0, 0, 0, 0, i32(o.unlock_x), i32(o.unlock_y))
+            o.last_x = o.unlock_x
+            o.last_y = o.unlock_y
+        }
+        // continue from the real position without a jump in mouse_delta
+        w.input.mouse_x = f32(o.last_x)
+        w.input.mouse_y = f32(o.last_y)
+        XFlush(o.dpy)
+    }
 }
 
 // Asks the window manager to make the window fullscreen (borderless, covering the screen) or

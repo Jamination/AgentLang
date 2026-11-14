@@ -186,6 +186,15 @@ while !w.should_close() {
   `latency_ms` 2 to 3 times the worst expected frame time: 50 ms suits 60 Hz games, use
   100 ms or more if frames can take 40 ms. Lower values (20 to 30 ms) work when the frame rate
   is stable.
+- **Choosing and querying.** `latency_ms` sets the buffer; the device reports what it granted
+  in `d.buffer_frames` and `d.period_frames`. The period is the device's choice (ALSA's
+  `snd_pcm_set_params` usually takes a quarter of the buffer; WASAPI its engine period). On
+  Linux `d.os.pcm` is the ALSA handle of the open device, for queries such as `snd_pcm_delay`
+  (frames queued ahead of the speaker). An engine that needs a particular period size, a
+  sample format of its own or a descriptor to `poll` configures a PCM itself with
+  [std.alsa](#stdalsa) (`snd_pcm_hw_params_set_period_size_near`, `..._set_periods_near`,
+  `snd_pcm_sw_params_set_avail_min`, `snd_pcm_poll_descriptors`; `tests/sys/audio_alsa_params`
+  shows the sequence).
 - `audio_pump` advances the mixer only by what the device consumed, so audio stays in real
   time independently of the frame rate; do not call `mix` yourself on a mixer that feeds a
   device.
@@ -267,8 +276,14 @@ usual rest of the playback API with their C names and signatures: `snd_pcm_open`
 `snd_pcm_avail`, `snd_pcm_avail_update`, `snd_pcm_delay`, `snd_pcm_recover`, `snd_pcm_wait`,
 `snd_pcm_prepare`, `snd_pcm_start`, `snd_pcm_drop`, `snd_pcm_drain`, `snd_pcm_pause`,
 `snd_pcm_resume`, `snd_pcm_state`, `snd_pcm_nonblock`, `snd_pcm_close`, the
-`snd_pcm_hw_params_*` / `snd_pcm_sw_params_*` functions for explicit configuration,
+`snd_pcm_hw_params_*` / `snd_pcm_sw_params_*` functions for explicit configuration (access,
+format, channels, rate with `set_rate_resample`, period size / time, periods, buffer size /
+time, `get_*` of what was granted, `snd_pcm_hw_params_current`), the poll descriptors
+(`snd_pcm_poll_descriptors_count`, `snd_pcm_poll_descriptors`),
 `snd_strerror`, and the device name hints (`snd_device_name_hint`,
 `snd_device_name_get_hint`, `snd_device_name_free_hint`); constants `SND_PCM_STREAM_*`, `SND_PCM_NONBLOCK`, `SND_PCM_FORMAT_*`,
 `SND_PCM_ACCESS_RW_INTERLEAVED`, `SND_PCM_STATE_*`. Handles are `*u8`, frame counts `i64` /
-`u64`, results are negative `errno` values on failure.
+`u64`, results are negative `errno` values on failure. The `snd_pcm_hw_params_set_*_near` and
+`snd_pcm_hw_params_get_*` functions that libasound exports in two symbol versions are bound to
+the current API (pointer arguments, error code result), not to the pre-1.0 one that an
+unversioned reference would reach.

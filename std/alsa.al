@@ -54,12 +54,32 @@ extern "libasound.so.2" fn snd_pcm_hw_params_any(pcm: *u8, params: *u8) -> i32
 extern "libasound.so.2" fn snd_pcm_hw_params_set_access(pcm: *u8, params: *u8, access: i32) -> i32
 extern "libasound.so.2" fn snd_pcm_hw_params_set_format(pcm: *u8, params: *u8, format: i32) -> i32
 extern "libasound.so.2" fn snd_pcm_hw_params_set_channels(pcm: *u8, params: *u8, channels: u32) -> i32
-extern "libasound.so.2" fn snd_pcm_hw_params_set_rate_near(pcm: *u8, params: *u8, rate: *u32, dir: *i32) -> i32
-extern "libasound.so.2" fn snd_pcm_hw_params_set_period_size_near(pcm: *u8, params: *u8, frames: *u64, dir: *i32) -> i32
-extern "libasound.so.2" fn snd_pcm_hw_params_set_buffer_size_near(pcm: *u8, params: *u8, frames: *u64) -> i32
-extern "libasound.so.2" fn snd_pcm_hw_params_get_rate(params: *u8, rate: *u32, dir: *i32) -> i32
-extern "libasound.so.2" fn snd_pcm_hw_params_get_period_size(params: *u8, frames: *u64, dir: *i32) -> i32
-extern "libasound.so.2" fn snd_pcm_hw_params_get_buffer_size(params: *u8, frames: *u64) -> i32
+// The functions below exist twice in libasound.so.2: the current API (symbol version
+// ALSA_0.9.0rc4, pointer arguments, returns an error code) and the pre-1.0 API (ALSA_0.9: values
+// in, values out). A reference without a version binds to the oldest one, so these call the
+// current implementation through its unversioned alias `__snd_pcm_hw_params_*`.
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_set_rate_near(pcm: *u8, params: *u8, rate: *u32, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_set_period_size_near(pcm: *u8, params: *u8, frames: *u64, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_set_buffer_size_near(pcm: *u8, params: *u8, frames: *u64) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_set_periods_near(pcm: *u8, params: *u8, periods: *u32, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_set_period_time_near(pcm: *u8, params: *u8, us: *u32, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_set_buffer_time_near(pcm: *u8, params: *u8, us: *u32, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_get_rate(params: *u8, rate: *u32, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_get_period_size(params: *u8, frames: *u64, dir: *i32) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_get_buffer_size(params: *u8, frames: *u64) -> i32
+priv extern "libasound.so.2" fn __snd_pcm_hw_params_get_periods(params: *u8, periods: *u32, dir: *i32) -> i32
+fn snd_pcm_hw_params_set_rate_near(pcm: *u8, params: *u8, rate: *u32, dir: *i32) -> i32 { __snd_pcm_hw_params_set_rate_near(pcm, params, rate, dir) }
+fn snd_pcm_hw_params_set_period_size_near(pcm: *u8, params: *u8, frames: *u64, dir: *i32) -> i32 { __snd_pcm_hw_params_set_period_size_near(pcm, params, frames, dir) }
+fn snd_pcm_hw_params_set_buffer_size_near(pcm: *u8, params: *u8, frames: *u64) -> i32 { __snd_pcm_hw_params_set_buffer_size_near(pcm, params, frames) }
+fn snd_pcm_hw_params_set_periods_near(pcm: *u8, params: *u8, periods: *u32, dir: *i32) -> i32 { __snd_pcm_hw_params_set_periods_near(pcm, params, periods, dir) }
+fn snd_pcm_hw_params_set_period_time_near(pcm: *u8, params: *u8, us: *u32, dir: *i32) -> i32 { __snd_pcm_hw_params_set_period_time_near(pcm, params, us, dir) }
+fn snd_pcm_hw_params_set_buffer_time_near(pcm: *u8, params: *u8, us: *u32, dir: *i32) -> i32 { __snd_pcm_hw_params_set_buffer_time_near(pcm, params, us, dir) }
+fn snd_pcm_hw_params_get_rate(params: *u8, rate: *u32, dir: *i32) -> i32 { __snd_pcm_hw_params_get_rate(params, rate, dir) }
+fn snd_pcm_hw_params_get_period_size(params: *u8, frames: *u64, dir: *i32) -> i32 { __snd_pcm_hw_params_get_period_size(params, frames, dir) }
+fn snd_pcm_hw_params_get_buffer_size(params: *u8, frames: *u64) -> i32 { __snd_pcm_hw_params_get_buffer_size(params, frames) }
+fn snd_pcm_hw_params_get_periods(params: *u8, periods: *u32, dir: *i32) -> i32 { __snd_pcm_hw_params_get_periods(params, periods, dir) }
+extern "libasound.so.2" fn snd_pcm_hw_params_set_rate_resample(pcm: *u8, params: *u8, enable: u32) -> i32
+extern "libasound.so.2" fn snd_pcm_hw_params_current(pcm: *u8, params: *u8) -> i32
 extern "libasound.so.2" fn snd_pcm_hw_params(pcm: *u8, params: *u8) -> i32
 extern "libasound.so.2" fn snd_pcm_sw_params_malloc(params: **u8) -> i32
 extern "libasound.so.2" fn snd_pcm_sw_params_free(params: *u8)
@@ -67,6 +87,10 @@ extern "libasound.so.2" fn snd_pcm_sw_params_current(pcm: *u8, params: *u8) -> i
 extern "libasound.so.2" fn snd_pcm_sw_params_set_start_threshold(pcm: *u8, params: *u8, frames: u64) -> i32
 extern "libasound.so.2" fn snd_pcm_sw_params_set_avail_min(pcm: *u8, params: *u8, frames: u64) -> i32
 extern "libasound.so.2" fn snd_pcm_sw_params(pcm: *u8, params: *u8) -> i32
+// struct pollfd array (8 bytes each: fd i32, events i16, revents i16) for waiting on the device
+// in an event loop
+extern "libasound.so.2" fn snd_pcm_poll_descriptors_count(pcm: *u8) -> i32
+extern "libasound.so.2" fn snd_pcm_poll_descriptors(pcm: *u8, pfds: *u8, space: u32) -> i32
 extern "libasound.so.2" fn snd_strerror(errnum: i32) -> *u8
 // device name hints: snd_device_name_hint(-1, "pcm", &hints) lists every PCM as a nil-terminated
 // array; snd_device_name_get_hint(hint, "NAME" | "DESC" | "IOID") returns a malloc'ed string

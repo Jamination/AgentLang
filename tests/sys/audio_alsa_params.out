@@ -1,0 +1,5 @@
+rate 48000 period 256 periods 3 buffer 768
+poll descriptors: true
+written: 256 state running: true
+audio_open: true buffer ms: 20 period <= buffer: true
+snd_pcm_delay: true true

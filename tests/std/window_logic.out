@@ -16,6 +16,7 @@ unmapped key codes: 0
 10 EventNone 0 0 0 0 EventNone
 192 80 16
 true 4660 77 5 9
+property atom: 77
 33 52 18 77 32 5 9
 300 -2 5 38
 640 480

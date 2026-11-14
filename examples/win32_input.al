@@ -62,6 +62,8 @@ fn describe(e: Event) -> str {
         EventFocus => "focus"
         EventUnfocus => "unfocus"
         EventClose => "close requested"
+        EventMinimize => "minimized"
+        EventRestore => "restored"
         EventNone => "none"
     }
 }

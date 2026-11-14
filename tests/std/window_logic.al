@@ -39,6 +39,8 @@ fn main() {
     x_client_message(&ev, 0x1234, 77, 5, 6, 7, 8, 9)
     print(sizeof[XEvent](), sizeof[XSizeHints](), sizeof[XColor]())
     print(x_event_type(&ev) == X_CLIENT_MESSAGE, x_event_window(&ev), x_event_message_type(&ev), x_event_message_data(&ev, 0), x_event_message_data(&ev, 4))
+    // XPropertyEvent.atom is at offset 40, where XClientMessageEvent.message_type is
+    print("property atom:", x_event_property_atom(&ev))
     raw := mkslice[u8](cast[*u8](&ev), 192)
     print(raw[0], raw[32], raw[33], raw[40], raw[48], raw[56], raw[88])
     raw[64] = 0x2C

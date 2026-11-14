@@ -9,7 +9,8 @@
   Windows.
 
 Everything except the gamepad device is pure AL and the same on Linux and Windows; the device
-functions (`gamepad_open`, `gamepad_poll`, `gamepad_close`) are in the module's OS layer
+functions (`gamepad_open`, `gamepad_poll`, `gamepad_close`, `gamepad_changed`,
+`gamepad_watch_close`) are in the module's OS layer
 (`std/input_linux.al`: plain system calls, so programs stay static executables;
 `std/input_windows.al`: XInput). Everything except opening a gamepad device is testable by
 feeding events by hand. `std.window` includes this module, owns an `Input` and an
@@ -57,7 +58,8 @@ letters and digits are consecutive: `KEY_A + 3 == KEY_D`, `KEY_0 + 7 == KEY_7`.
 
 ```
 enum EventKind { EventNone, EventClose, EventResize, EventFocus, EventUnfocus, EventKeyDown,
-                 EventKeyUp, EventText, EventMouseMove, EventMouseDown, EventMouseUp, EventWheel }
+                 EventKeyUp, EventText, EventMouseMove, EventMouseDown, EventMouseUp, EventWheel,
+                 EventMinimize, EventRestore }
 struct Event { kind: EventKind, key: i64, x: i64, y: i64, codepoint: u32, mods: u8, repeat: bool }
 ```
 
@@ -68,9 +70,10 @@ struct Event { kind: EventKind, key: i64, x: i64, y: i64, codepoint: u32, mods: 
 | `EventFocus`, `EventUnfocus` | keyboard focus gained / lost |
 | `EventKeyDown`, `EventKeyUp` | `key`: `KEY_*`; `repeat`: auto-repeat of a held key; `mods` |
 | `EventText` | `codepoint`: one Unicode character typed (layout, shift, dead keys applied) |
-| `EventMouseMove` | `x`, `y`: pointer position in window pixels |
+| `EventMouseMove` | `x`, `y`: pointer position in window pixels (a virtual, unbounded position while the window's cursor is locked: see [window.md](window.md#mouse-look)) |
 | `EventMouseDown`, `EventMouseUp` | `key`: `MOUSE_*`; `x`, `y`; `mods` |
 | `EventWheel` | `x`, `y`: scroll steps (`y > 0`: away from the user) |
+| `EventMinimize`, `EventRestore` | the window was minimized (iconified) / is shown again; the size does not change |
 
 | Function | |
 |----------|---|
@@ -99,7 +102,7 @@ per key / mouse button), `mouse_x/y`, `mouse_dx/dy`, `wheel_x/y`, `focused`, `te
 | `shift_down(i)`, `ctrl_down(i)`, `alt_down(i)` | either of the two modifier keys is held |
 | `mouse_down(i, button)`, `mouse_pressed(i, button)`, `mouse_released(i, button)` | the same for `MOUSE_*` buttons |
 | `mouse_pos(i) -> vec2` | pointer position in window pixels |
-| `mouse_delta(i) -> vec2` | pointer movement during this frame |
+| `mouse_delta(i) -> vec2` | pointer movement during this frame (the relative motion for mouse-look while the window's cursor is locked) |
 | `wheel(i) -> vec2` | wheel steps during this frame |
 | `text(i) -> []u32` | code points typed this frame (view, valid until `begin_frame`) |
 | `text_utf8(i, buf: []u8) -> str` | the same as UTF-8 written into `buf`; returns the used part |
@@ -143,6 +146,8 @@ them. Triggers are axes from -1 (released) to 1.
 | `gamepad_open(g: *Gamepad, index: i64) -> bool` | Linux: open `/dev/input/js<index>` non-blocking; Windows: XInput controller `index` (0..3); false if absent |
 | `gamepad_poll(g) -> bool` | read all pending events; false once unplugged. Call after `begin_frame` / `poll(window)` each frame |
 | `gamepad_close(g)` | close and clear |
+| `gamepad_changed(w: *GamepadWatch) -> bool` | true on the first call and when a gamepad may have been plugged in or removed since the last call (see hot-plugging below); never blocks |
+| `gamepad_watch_close(w: *GamepadWatch)` | stop the watch (Linux: close its inotify descriptor) and reset it |
 | `gamepad_xinput(g, buttons: u16, left_trigger: u8, right_trigger: u8, lx, ly, rx, ry: i16)` | Windows: apply one XInput state (the fields of `XINPUT_GAMEPAD`) as `gamepad_poll` does (tests, replays) |
 | `gamepad_event(g, kind: u8, number: u8, value: i16)` | apply one raw joystick event, as `gamepad_poll` does per event; useful for tests and replays. `kind` 1 = button (`value` non-zero = down), 2 = axis (`value` -32767..32767, mapped to -1..1); `kind \| 0x80` marks the initial state reported when a pad is opened. `number` is the button or axis index (`PAD_*` constants) |
 | `pad_down(g, button)`, `pad_pressed(g, button)`, `pad_released(g, button)` | button state |
@@ -151,8 +156,33 @@ them. Triggers are axes from -1 (released) to 1.
 
 `begin_frame` clears the pressed / released edges of `Input.pad` together with the keyboard's,
 so the pad embedded in the window's `Input` needs only `gamepad_open(&w.input.pad, 0)` once and
-`gamepad_poll(&w.input.pad)` per frame. Hot-plugging is not detected automatically: when
-`gamepad_poll` returns false, try `gamepad_open` again from time to time.
+`gamepad_poll(&w.input.pad)` per frame.
+
+**Hot-plugging.** A pad that is unplugged makes `gamepad_poll` return false (and `connected` false). To notice
+new pads, keep a `GamepadWatch` (zero value: not started) and ask `gamepad_changed` once per
+frame; it is true on its first call and afterwards only when something may have changed, so
+the device is opened at start and again after plugging:
+
+```
+watch: GamepadWatch
+loop {
+    w.poll()
+    if gamepad_changed(&watch) && !w.input.pad.connected {
+        gamepad_open(&w.input.pad, 0)
+    }
+    gamepad_poll(&w.input.pad)
+    ...
+}
+gamepad_watch_close(&watch)
+```
+
+- **Linux:** the first call starts an inotify watch on `/dev/input` (one file descriptor,
+  non-blocking, plain system calls); later calls read its queue and are true when a `js*`
+  node was created, deleted or changed permissions (udev grants access just after creating the
+  node) or the queue overflowed. Other input devices (mice, keyboards, `event*` nodes) do not
+  count. Without inotify or `/dev/input` it is true once a second.
+- **Windows:** XInput reports no plugging, and querying an absent controller is slow, so it is
+  true on the first call and then at most once a second.
 
 **Windows (XInput).** The controller is read with `XInputGetState` of `xinput1_4.dll`
 (Windows 8 and later), else `xinput9_1_0.dll`, loaded when the first gamepad is opened (a

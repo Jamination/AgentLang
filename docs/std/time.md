@@ -16,7 +16,7 @@ the numbers they are given. Keep it that way in a game: read the clock once per 
 | Declaration | Description |
 |-------------|-------------|
 | `time_now() -> f64` | Monotonic time in seconds. The origin is arbitrary (system start): only differences mean something. Never goes backwards. |
-| `time_ns() -> i64` | The same clock in nanoseconds (the prelude's `clock_ns()`). |
+| `time_ns() -> i64` | The same clock in nanoseconds (the prelude's `clock_ns()`): the high-resolution clock for frame timing and profiling. Linux: `CLOCK_MONOTONIC` (nanosecond resolution; not counting while the machine is suspended; one system call per reading, well under a microsecond). Windows: `QueryPerformanceCounter`, converted exactly (usually 100 ns ticks). |
 | `wall_time() -> i64` | Calendar time: seconds since 1970-01-01 UTC. For time stamps and save files, not for measuring (it can jump). |
 | `sleep_ms(ms: i64)` | Suspends the program for `ms` milliseconds. Times beyond `i64` nanoseconds (about 292 years) are limited to that. |
 | `sleep_ns(ns: i64)` | Suspends the program for `ns` nanoseconds. Zero or negative: returns at once. |

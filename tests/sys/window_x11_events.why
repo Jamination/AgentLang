@@ -1,0 +1,1 @@
+no private X display for tests (set AL_TEST_DISPLAY to e.g. an Xvfb display)

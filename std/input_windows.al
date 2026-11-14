@@ -128,3 +128,21 @@ fn gamepad_poll(g: *Gamepad) -> bool {
 fn gamepad_close(g: *Gamepad) {
     *g = Gamepad{}
 }
+
+// True on the first call and then at most once a second (XInput reports no plugging, and
+// asking for absent controllers is slow): then try gamepad_open for the controllers that are
+// not connected. Never blocks.
+fn gamepad_changed(w: *GamepadWatch) -> bool {
+    now := clock_ns()
+    if w.started && now < w.next_ns {
+        return false
+    }
+    w.started = true
+    w.next_ns = now + 1_000_000_000
+    true
+}
+
+// Resets the watch of gamepad_changed (nothing to release on Windows).
+fn gamepad_watch_close(w: *GamepadWatch) {
+    *w = GamepadWatch{}
+}

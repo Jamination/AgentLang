@@ -1,8 +1,8 @@
 // std.input: platform-independent input state. A window (std.window) or a test feeds `Event`s
 // into an `Input`; the game reads per-frame key / mouse / text state from it and maps keys to
 // game actions with an `ActionMap`. Nothing here allocates per frame. The gamepad device
-// (gamepad_open / gamepad_poll / gamepad_close) is in the OS layer: std/input_linux.al
-// (joystick devices) or std/input_windows.al (XInput).
+// (gamepad_open / gamepad_poll / gamepad_close, gamepad_changed) is in the OS layer:
+// std/input_linux.al (joystick devices, inotify) or std/input_windows.al (XInput).
 
 // ---- key codes (dense, independent of the platform's key symbols) ----
 const KEY_UNKNOWN = 0
@@ -164,10 +164,11 @@ const EVENT_QUEUE_CAP = 256
 
 // What happened. `Event` fields used: EventResize x, y = new size; EventKeyDown / EventKeyUp
 // key, repeat, mods; EventText codepoint; EventMouseMove x, y; EventMouseDown / EventMouseUp
-// key = MOUSE_* button, x, y, mods; EventWheel x, y = scroll steps (y > 0: away from the user).
+// key = MOUSE_* button, x, y, mods; EventWheel x, y = scroll steps (y > 0: away from the user);
+// EventMinimize / EventRestore: the window was minimized (iconified) / is shown again.
 enum EventKind {
     EventNone, EventClose, EventResize, EventFocus, EventUnfocus, EventKeyDown, EventKeyUp,
-    EventText, EventMouseMove, EventMouseDown, EventMouseUp, EventWheel
+    EventText, EventMouseMove, EventMouseDown, EventMouseUp, EventWheel, EventMinimize, EventRestore
 }
 
 // One window or input event (plain data).
@@ -226,6 +227,14 @@ struct Gamepad {
     connected: bool
     buttons: [PAD_BUTTON_COUNT]u8
     axes: [PAD_AXIS_COUNT]f32
+}
+
+// Notices gamepads being plugged in or removed (gamepad_changed). Zero value = not started;
+// release it with gamepad_watch_close.
+struct GamepadWatch {
+    fd: i64
+    started: bool
+    next_ns: i64
 }
 
 // ---- input state ----

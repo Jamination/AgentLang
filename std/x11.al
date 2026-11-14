@@ -20,6 +20,7 @@ const X_DESTROY_NOTIFY = 17
 const X_UNMAP_NOTIFY = 18
 const X_MAP_NOTIFY = 19
 const X_CONFIGURE_NOTIFY = 22
+const X_PROPERTY_NOTIFY = 28
 const X_CLIENT_MESSAGE = 33
 const X_MAPPING_NOTIFY = 34
 
@@ -36,6 +37,7 @@ const X_STRUCTURE_NOTIFY_MASK = 0x20000
 const X_SUBSTRUCTURE_NOTIFY_MASK = 0x80000
 const X_SUBSTRUCTURE_REDIRECT_MASK = 0x100000
 const X_FOCUS_CHANGE_MASK = 0x200000
+const X_PROPERTY_CHANGE_MASK = 0x400000
 
 // modifier bits (key / button event state)
 const X_SHIFT_MASK: u32 = 0x1
@@ -56,6 +58,15 @@ const X_ATOM_STRING: u64 = 31
 const X_PROP_MODE_REPLACE = 0
 const X_Z_PIXMAP = 2
 const X_TRUE_COLOR = 4
+
+// XGetWindowProperty / XGrabPointer arguments and results
+const X_SUCCESS = 0
+const X_ANY_PROPERTY_TYPE: u64 = 0
+const X_CURRENT_TIME: u64 = 0
+const X_GRAB_MODE_ASYNC = 1
+const X_GRAB_SUCCESS = 0
+const X_ALREADY_GRABBED = 1
+const X_REVERT_TO_PARENT = 2
 
 // input method styles and Xutf8LookupString status values
 const X_IM_PREEDIT_NOTHING = 0x8
@@ -139,6 +150,9 @@ fn x_event_message_type(e: *XEvent) -> u64 { e.data[5] }
 // XClientMessageEvent.data.l[index] (index 0..4).
 fn x_event_message_data(e: *XEvent, index: i64) -> u64 { e.data[7 + index] }
 
+// XPropertyEvent.atom: the property that changed.
+fn x_event_property_atom(e: *XEvent) -> u64 { e.data[5] }
+
 // Fills `e` as a format-32 ClientMessage for `window` with five data longs.
 fn x_client_message(e: *XEvent, window: u64, message_type: u64, d0: u64, d1: u64, d2: u64, d3: u64, d4: u64) {
     *e = XEvent{}
@@ -182,6 +196,8 @@ extern "libX11.so.6" fn XInternAtom(dpy: *u8, name: *u8, only_if_exists: i32) ->
 extern "libX11.so.6" fn XSetWMProtocols(dpy: *u8, win: u64, protocols: *u64, count: i32) -> i32
 extern "libX11.so.6" fn XSetWMNormalHints(dpy: *u8, win: u64, hints: *XSizeHints)
 extern "libX11.so.6" fn XChangeProperty(dpy: *u8, win: u64, property: u64, kind: u64, format: i32, mode: i32, data: *u8, nelements: i32) -> i32
+// The data of a format-32 property is an array of C `long` (8 bytes each); free it with XFree.
+extern "libX11.so.6" fn XGetWindowProperty(dpy: *u8, win: u64, property: u64, long_offset: i64, long_length: i64, delete: i32, req_type: u64, actual_type: *u64, actual_format: *i32, nitems: *u64, bytes_after: *u64, prop: **u8) -> i32
 extern "libX11.so.6" fn XSendEvent(dpy: *u8, win: u64, propagate: i32, mask: i64, event: *XEvent) -> i32
 extern "libX11.so.6" fn XPending(dpy: *u8) -> i32
 extern "libX11.so.6" fn XNextEvent(dpy: *u8, event: *XEvent) -> i32
@@ -204,6 +220,11 @@ extern "libX11.so.6" fn XDefineCursor(dpy: *u8, win: u64, cursor: u64) -> i32
 extern "libX11.so.6" fn XUndefineCursor(dpy: *u8, win: u64) -> i32
 extern "libX11.so.6" fn XFreeCursor(dpy: *u8, cursor: u64) -> i32
 extern "libX11.so.6" fn XWarpPointer(dpy: *u8, src: u64, dst: u64, src_x: i32, src_y: i32, src_w: u32, src_h: u32, dst_x: i32, dst_y: i32) -> i32
+extern "libX11.so.6" fn XGrabPointer(dpy: *u8, win: u64, owner_events: i32, event_mask: u32, pointer_mode: i32, keyboard_mode: i32, confine_to: u64, cursor: u64, time: u64) -> i32
+extern "libX11.so.6" fn XUngrabPointer(dpy: *u8, time: u64) -> i32
+extern "libX11.so.6" fn XQueryPointer(dpy: *u8, win: u64, root: *u64, child: *u64, root_x: *i32, root_y: *i32, win_x: *i32, win_y: *i32, mask: *u32) -> i32
+extern "libX11.so.6" fn XIconifyWindow(dpy: *u8, win: u64, screen: i32) -> i32
+extern "libX11.so.6" fn XSetInputFocus(dpy: *u8, focus: u64, revert_to: i32, time: u64) -> i32
 extern "libX11.so.6" fn XSetLocaleModifiers(modifiers: *u8) -> *u8
 extern "libX11.so.6" fn XOpenIM(dpy: *u8, db: *u8, res_name: *u8, res_class: *u8) -> *u8
 extern "libX11.so.6" fn XCloseIM(im: *u8) -> i32
