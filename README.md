@@ -59,13 +59,13 @@ each one changes. A project pins the compiler it is written for:
 
 ```
 git clone https://github.com/Jamination/AgentLang && cd AgentLang
-git checkout v0.1.0 && ./build.sh
+git checkout v0.2.0 && ./build.sh
 cp build/alc build/alc.exe ~/game/tools/       # or install on the PATH, below
 ```
 
 On a machine shared by several projects, install each release beside the others and let
-`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.1.0 && ln -sfn alc-0.1.0
-~/.local/bin/alc`. Projects call the versioned name (`alc-0.1.0`), so a new release changes
+`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.2.0 && ln -sfn alc-0.2.0
+~/.local/bin/alc`. Projects call the versioned name (`alc-0.2.0`), so a new release changes
 nothing until a project switches to it.
 
 The standard library ships inside the compiler, so one executable is the whole toolchain;

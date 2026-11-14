@@ -8,6 +8,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-14
+
 ### Added
 - Threads (`std.os`): `thread_spawn(f, ctx)` (also with a stack size), `thread_join(&t)` (the
   thread's memory becomes the region `t.region`), `thread_id()`, `cpu_count()`, `Mutex`
@@ -132,5 +134,6 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   C boundary; the compiler compiles sequentially there (no parallel back end).
 - No package manager: code outside `std` is included by path.
 
-[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Jamination/AgentLang/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Jamination/AgentLang/releases/tag/v0.1.0

@@ -117,3 +117,18 @@ Build each with `--target windows --gui` (on Windows `--target windows` is the d
    to the file.
 10. A `--gui` program that panics, started from Explorer, shows a message box naming the panic.
 11. Closing with the window's X exits cleanly.
+
+## 7. Threads (`std.os`, atomics)
+Build and run each `tests\run\thread_*.al` (output must equal the matching `.out`; tests with a
+`.code` file exit with that status and print the `.err` lines).
+1. `thread_sum`, `thread_cas`, `thread_spin`, `thread_map`, `thread_cond`, `thread_alloc`,
+   `thread_region`, `thread_nested`, `thread_print`: correct output; run each about 20 times
+   (races show up rarely).
+2. `thread_cond` uses `wait` with a timeout (SRWLOCK + CONDITION_VARIABLE): it finishes and
+   prints the expected lines.
+3. The failure tests `thread_panic`, `thread_overflow`, `thread_nil`, `thread_join_twice`,
+   `thread_unlock`, `thread_region_other`: the message names the thread (`panic in thread N: ...`), shows its stack
+   trace, and the exit status is 1. The stack overflow in a thread is reported, not a silent
+   crash (this checks `SetThreadStackGuarantee` on new threads).
+4. Executables carry a TLS directory with an empty template: they load and per-thread data works
+   (every thread test exercises it).

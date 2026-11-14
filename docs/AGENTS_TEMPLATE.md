@@ -12,11 +12,11 @@ A game written from scratch in AL (https://github.com/Jamination/AgentLang), for
 
 ## Compiler
 
-- Version: **0.1.0**. Use `alc-0.1.0` (or `alc`, if `alc --version` prints `alc 0.1.0`).
-- Build: `alc-0.1.0 build src/main.al -o build/<game>`
-- Run: `alc-0.1.0 run src/main.al -- <args>`
-- Tests: `alc-0.1.0 test src/main.al` (every `test` block), plus `alc-0.1.0 run src/main.al -- --headless`
-- Check without building: `alc-0.1.0 check src/main.al` (`--all-targets` if the game has `when` branches)
+- Version: **0.2.0**. Use `alc-0.2.0` (or `alc`, if `alc --version` prints `alc 0.2.0`).
+- Build: `alc-0.2.0 build src/main.al -o build/<game>`
+- Run: `alc-0.2.0 run src/main.al -- <args>`
+- Tests: `alc-0.2.0 test src/main.al` (every `test` block), plus `alc-0.2.0 run src/main.al -- --headless`
+- Check without building: `alc-0.2.0 check src/main.al` (`--all-targets` if the game has `when` branches)
 - A newer compiler may break code: read the `Breaking` sections of the AL `CHANGELOG.md` before
   switching, then change the version above.
 

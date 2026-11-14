@@ -41,7 +41,7 @@ use "when.al"
 
 // the compiler's version, "MAJOR.MINOR.PATCH": `alc --version`. Changed only on a release,
 // to the version of the topmost released section of CHANGELOG.md (verify.sh checks it).
-priv const VERSION = "0.1.0"
+priv const VERSION = "0.2.0"
 
 priv const PRELUDE = embed("prelude.al")
 // the OS layer of the run-time library, compiled right after the prelude (see the top of
