@@ -166,8 +166,8 @@ Linux, `lost` stays false: a device that fails ends playback (`audio_pump` retur
 
 ### Pumping from the game loop
 
-There is no audio thread: AL code must not run (and allocate) on a thread created by a C
-library, and a single-threaded loop keeps the game deterministic. Instead the game tops up
+There is no audio thread: a single-threaded loop keeps the game deterministic (AL code could
+run on a thread of a C library, see DETAILS.md "Threads", but std.audio has none). Instead the game tops up
 the device buffer once per frame:
 
 ```

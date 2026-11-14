@@ -121,6 +121,16 @@ things.
 Do not allocate per entity or per frame outside these patterns; `mem_used()` at the end of
 each frame should be constant once a level is running.
 
+**Jobs on threads.** For work that splits into independent pieces (path finding for many
+agents, culling, procedural generation), start `cpu_count() - 1` workers with `thread_spawn`
+(std.os) once, at start-up. They share a job queue: a `Mutex`, a `Cond` the workers `wait` on,
+and an `atomic_add` counter of unfinished jobs the frame spins or waits on. Each job writes only
+its own slot of a result array (no lock needed); a worker brackets each job with
+`m := mark()` ... `release(m)` (or a region it resets), so its arena stays bounded, and results
+that must outlive the job go into memory the main thread owns. Keep the simulation's order
+deterministic: merge results in job order, not in finishing order. A panic in a job ends the
+game like one in the main loop.
+
 ## Systems are functions
 
 A system is a function over the state, called from `update` in a fixed order:

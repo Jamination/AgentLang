@@ -5,10 +5,8 @@ AL is a small, statically typed, compiled language designed to be written by AI 
 x86-64 Linux executable. The compiler reports all syntax errors at once, then (if there are none)
 all other errors, also in functions never called (generic ones: see [Generics](#generics)).
 
-- Integers wrap; division by zero and out-of-bounds indexing stop the program with a `file:line`
-  message. There are no implicit conversions, no constructors or destructors, no exceptions.
-- Memory is bump-allocated from arenas and reclaimed in bulk (`mark` / `release`, regions);
-  there is no `free` and no garbage collector.
+- Integers wrap; division by zero and out-of-bounds indexing stop the program with a `file:line` message. There are no implicit conversions, no constructors or destructors, no exceptions.
+- Memory is bump-allocated from arenas and reclaimed in bulk (`mark` / `release`, regions); there is no `free` and no garbage collector.
 - **AL does not have**: closures (a nested function sees no local of its surroundings), methods
   or `impl` blocks (`x.f(a)` calls the ordinary function `f(x, a)`), interfaces or constraints on
   type parameters, `<` on strings (use `cmp`), error propagation syntax (see [Errors](#errors)).
@@ -293,14 +291,12 @@ match value { ... }                        // see below
   scope** is an error; inner scopes may shadow outer names.
 - The last expression of a function body is its result (`fn sq(x: i64) -> i64 { x * x }`); the
   same holds for the branches of `if` / `match` used as values (`if` then needs an `else`).
-- `defer` blocks run in reverse order when their scope ends, also on `break`, `continue` and
-  `return` (the returned value is computed first).
+- `defer` blocks run in reverse order when their scope ends, also on `break`, `continue` and `return` (the returned value is computed first).
 - In `for i in a..b` the bounds are evaluated once. `for x in v` over a `Vec` reads its length
   and buffer once, when the loop starts: elements pushed during the loop are not visited. To
   change elements in place use the index: `for i in 0..v.len { v[i].hp -= 1 }`.
 - **Labels.** `name:` stands directly before `for`, `while` or `loop`. `break name` leaves that
-  loop, `continue name` starts its next iteration; the `defer` blocks of all scopes that are
-  left run. The label must be on the same line as `break` / `continue`.
+  loop, `continue name` starts its next iteration; the `defer` blocks of all scopes that are left run. The label must be on the same line as `break` / `continue`.
   Example: `rows: for y in 0..h { for x in 0..w { if bad(x, y) { continue rows } } }`.
 
 ### Nested functions
@@ -656,20 +652,25 @@ fn main() {
 }
 ```
 
-- `enter` / `leave` nest like brackets (up to 64 deep; a region cannot be entered twice):
-  `defer { leave() }` right after `enter` leaves on every path, also on an early `return`.
+- `enter` / `leave` nest like brackets (up to 64 deep; a region cannot be entered twice): `defer { leave() }` right after `enter` leaves on every path, also on an early `return`.
 - `mark()` / `release(m)` act on the arena in use; a mark belongs to the arena it was taken in.
 - Leaving does not reset: data in a region stays valid after `leave()` until `reset`.
-- Use a `Region` through a pointer and never copy one that has memory: keep it in a global, or
-  a local of the function that brackets the work. More (frame memory, pools): [std/mem.md](std/mem.md).
+- Use a `Region` through a pointer and never copy one that has memory: keep it in a global, or a local of the function that brackets the work. More (frame memory, pools): [std/mem.md](std/mem.md).
 - **A `Vec` or `Map` that grows while a region is in use moves its storage into that region,
   even if it was created elsewhere, and is invalid after the reset.** Containers that must
   survive are grown outside the region, or cloned out.
 
+### Threads
+
+`use std.os` starts threads: `t, ok := thread_spawn(f, ctx)` runs `f(ctx)` (`ctx` copied), `thread_join(&t)` waits; `Mutex`, `Cond`, the rules in full: [std/os.md](std/os.md#threads).
+- Threads share all memory. Each has its own arena, region stack, output buffer and `io_error()`; after `thread_join(&t)` what the thread allocated is the region `t.region` (`region_free(&t.region)` gives it back); a thread that is never joined keeps its memory until the program ends.
+- **A data race is undefined behaviour**, as in C: memory one thread writes while another reads or writes it must be guarded by a `Mutex` or accessed only with the atomic builtins. Nothing checks this.
+- A region is entered by one thread at a time: `enter`, `reset` or `region_free` of a region another thread has entered panics.
+- A panic in any thread ends the program (status 1) and names the thread: `panic in thread 3: ...`. When `main` returns the program ends, threads still running included. Lines printed by different threads never mix.
+
 ## Run-time errors
 
-These stop the program with exit status 1, a message on standard error (buffered output is written
-first) and the call stack, innermost first, as `  at file:line in function` ([DETAILS.md](DETAILS.md#stack-traces)):
+These stop the program with exit status 1, a message on standard error (buffered output is written first) and the call stack, innermost first, as `  at file:line in function` ([DETAILS.md](DETAILS.md#stack-traces)):
 
 | Situation | Message |
 |-----------|---------|
@@ -682,8 +683,7 @@ first) and the call stack, innermost first, as `  at file:line in function` ([DE
 | `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` / `resize` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
 | non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave`; a library function called wrongly (empty `sub` in `count`, base 1) | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, `panic at file:line: count: empty substring` (the line of the call), ... |
 
-Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes index and
-division checks (out-of-range behaviour is then undefined); `assert` and `panic` are kept.
+Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes index and division checks (out-of-range behaviour is then undefined); `assert` and `panic` are kept.
 
 ## Builtin functions
 
@@ -703,6 +703,7 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 | `syscall(nr, a, b, ...) -> i64` | raw Linux system call (up to 6 arguments) |
 | `cast[T](x)` | reinterpret: pointer↔pointer, pointer↔`i64`/`u64`, `f64`↔`i64`/`u64` and `f32`↔`i32`/`u32` bits, slice↔slice |
 | `ptr(s) -> *T`, `mkslice[T](p, n) -> []T`, `memcopy(dst, src: any pointers, nbytes)`, `memfill(dst, byte: u8, nbytes)` | pointer to the first element; slice from pointer and length; raw copy / fill. There is no pointer arithmetic: wrap a C pointer once as a slice, then `ptr(mem[n..])`, `cast[[]f32](mem[a..b])` |
+| `atomic_load(p)`, `atomic_store(p, v)`, `atomic_swap(p, v)`, `atomic_add` `atomic_sub` `atomic_and` `atomic_or` `atomic_xor(p, v)`, `atomic_cas(p, expected, new) -> (old, bool)`, `atomic_fence()` | atomic operations on `*T`, `T` an integer (load, store, swap, cas: also `bool` or a pointer); all but store return the old value. **Sequentially consistent**: all atomic operations of all threads happen in one total order, which agrees with each thread's program order |
 
 **How values print** (`print`, `put`, `fmt`): integers in decimal (a `u8` too: `put(s[0])` writes
 `104`; a character is written with `putc(c)` or as the slice `s[i..i + 1]`); floats as the shortest
@@ -854,8 +855,7 @@ counts bytes from 1). With `--json` they are printed to standard output as `[{"f
 ## Unsafe corners
 
 Everything else is checked. These are not:
-- Using memory after `release()`, `reset()` or `region_free()` gave it back (slices, pointers,
-  `Vec`s, `Map`s into it), or a slice or pointer into a local of a function that has returned.
+- Using memory after `release()`, `reset()` or `region_free()` gave it back (slices, pointers, `Vec`s, `Map`s into it), or a slice or pointer into a local of a function that has returned; a data race between threads.
 - A slice or pointer into a `Vec` (or `m.ptr(k)`) used after the container grew; a `Vec` / `Map`
   that grew inside a region and is used after its reset (see [Memory](#memory)).
 - Copying a `Region` that holds memory; unbalanced `enter` / `leave`.
@@ -892,7 +892,5 @@ home := from_cstr(getenv(ptr("HOME")))     // literals and str constants are NUL
 p := cstr(path)                            // NUL-terminated copy of any str
 ```
 
-Parameters and results are integers, `bool`, floats, pointers or function values (C `int` is
-`i32`, `long` is `i64`, `char*` is `*u8`; structs go by pointer). A program that reaches an
-`extern` function is dynamically linked; every other program is static. More:
-[DETAILS.md](DETAILS.md#c-interop).
+Parameters and results are integers, `bool`, floats, pointers or function values (C `int` is `i32`, `long` is `i64`, `char*` is `*u8`; structs go by pointer). A program that reaches an
+`extern` function is dynamically linked; every other program is static. More: [DETAILS.md](DETAILS.md#c-interop).

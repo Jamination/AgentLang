@@ -9,9 +9,29 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 ## [Unreleased]
 
 ### Added
+- Threads (`std.os`): `thread_spawn(f, ctx)` (also with a stack size), `thread_join(&t)` (the
+  thread's memory becomes the region `t.region`), `thread_id()`, `cpu_count()`, `Mutex`
+  (`lock`, `unlock`, `try_lock`) and `Cond` (`wait`, `wait` with a timeout, `signal`,
+  `broadcast`); zero values usable. The run-time library is thread-safe: every thread has its
+  own arena, region stack, output buffer and `io_error()`; lines of different threads never
+  mix; a panic in any thread ends the program and names the thread (`panic in thread 3: ...`).
+  Run-time checks: regions entered/reset/freed by another thread, double or self `thread_join`,
+  `unlock` by a thread that does not hold the mutex.
+- Atomic builtins, sequentially consistent: `atomic_load`, `atomic_store`, `atomic_swap`,
+  `atomic_add`, `atomic_sub`, `atomic_and`, `atomic_or`, `atomic_xor`, `atomic_cas`,
+  `atomic_fence()`.
+- AL code may run on threads that C libraries create (callbacks): it gets an arena, an id and an
+  output buffer of its own on first use.
 - `docs/AGENTS_TEMPLATE.md`: an `AGENTS.md` template for game repositories written by agents
   (compiler version, reading order, rules).
 - README: installing several releases side by side (`alc-0.1.0`, with `alc` as a link).
+
+### Changed
+- Executables have a `PT_TLS` program header (Linux) or a TLS directory (Windows); the arena
+  globals are thread-local, accessed `fs`-relative on Linux (the same speed).
+- `alc build` replaces an executable that cannot be written because a process that just ended
+  still maps it (Linux, after programs with threads) instead of failing with "Text file busy".
+- `Region` has one more internal field (the thread that entered it).
 
 ### Fixed
 - `docs/std/vk.md`'s synchronization-validation snippet (and `examples/vk_renderer`) also turn on

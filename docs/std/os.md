@@ -2,7 +2,7 @@
 
 `use std.os`. Source: `std/os.al`. For tools and build scripts: start other programs and read
 what they print, or let them run alongside; shared memory; find out about the process itself,
-and work with files and directories. Raw
+and work with files and directories; threads with mutexes and condition variables. Raw
 Linux system calls, no libc: a program using this module stays a static executable. Built with
 `--target windows` it calls kernel32.dll; the differences are listed under [Windows](#windows).
 
@@ -151,6 +151,66 @@ through their result and `io_error()`, none panics.
 Not there: changing the working directory or the environment of this process, feeding the
 standard input of a program from a string, time limits (use `timeout`, or `try_wait` and
 `kill`).
+
+## Threads
+
+| Declaration | Description |
+|-------------|-------------|
+| `thread_spawn[C](f: fn(C), ctx: C) -> (Thread, bool)` | Starts a thread that runs `f(ctx)`; `ctx` is copied (as `sort_by`'s context; what its slices and pointers refer to is shared). `f` may be a top-level, nested or anonymous function. `(Thread{}, false)` if it cannot be started, with `io_error()` (12: no memory; 38: a dynamically linked program whose libraries lack the C library's `pthread_create`). Stack: 8 MiB, reserved and committed as used, with a guard page. |
+| `thread_spawn[C](f: fn(C), ctx: C, stack: i64) -> (Thread, bool)` | The same with a stack of `stack` bytes (at least 64 KiB). |
+| `thread_join(t: *Thread)` | Waits until the thread has ended. Then `t.region` holds everything the thread allocated: an ordinary `Region` of the caller, valid until `region_free(&t.region)`. Joining twice (also through a copy of the `Thread`), joining `Thread{}` or the calling thread panics. |
+| `thread_id() -> i64` | The calling thread's id: 0 in the main thread, then 1, 2, ... in the order threads were started (`t.id` of a `Thread`). |
+| `cpu_count() -> i64` | The CPUs this process may use (Linux: its affinity mask), at least 1: how many workers to start. |
+| `struct Mutex` | A lock; the zero value is unlocked (a field of a struct needs no setup). Not recursive; must not be copied while in use. |
+| `lock(m: *Mutex)`, `unlock(m: *Mutex)`, `try_lock(m: *Mutex) -> bool` | Lock (waits), unlock, lock if free. `unlock` by a thread that does not hold it and `lock` by the thread that holds it panic; `try_lock` returns `false` then. |
+| `struct Cond` | A condition variable; the zero value is usable. |
+| `wait(c: *Cond, m: *Mutex)`, `wait(c: *Cond, m: *Mutex, timeout_ns: i64) -> bool` | Unlocks `m` (held by the caller), waits until `c` is signalled, locks `m` again; the second form gives up after `timeout_ns` (`false`). It may return without a signal: wait in a loop that checks the condition. |
+| `signal(c: *Cond)`, `broadcast(c: *Cond)` | Wakes one / every thread waiting on `c`. |
+
+- **Rules** (language reference, [DETAILS.md](../DETAILS.md#threads)): threads share all memory;
+  memory written by one thread while another uses it must be guarded by a `Mutex` or accessed
+  with the atomic builtins (`atomic_add`, `atomic_cas`, ...), else the behaviour is undefined;
+  each thread allocates from its own arena; a region is entered by one thread at a time; a panic
+  in any thread ends the program, naming the thread; when `main` returns, the program ends.
+- **Memory.** A worker that runs for long bounds its memory with `mark` / `release` or regions.
+  A thread that is never joined keeps its memory until the program ends.
+- **Output** of threads is written line by line: lines never mix. A partial line of a thread
+  still running when the program ends is lost.
+- Linux: in a dynamically linked program threads are made by the C library's `pthread_create`
+  (C code called from them works as in a C program); a static program stays static (`clone`).
+  Windows: `CreateThread`, SRW locks and condition variables of kernel32.dll.
+- No semaphore or once-flag: a `Mutex` with a `Cond`, or `atomic_cas` on a flag, does it.
+
+```
+use std.os
+
+struct Job { lo: i64, hi: i64, total: *i64, mu: *Mutex, names: *Vec[str] }
+
+fn work(j: Job) {
+    s := 0
+    for i in j.lo..j.hi { s += i }
+    atomic_add(j.total, s)
+    name := fmt("part ", j.lo / 1000)      // in this thread's arena
+    lock(j.mu)
+    j.names.push(name)
+    unlock(j.mu)
+}
+
+fn main() {
+    total: i64 = 0
+    mu: Mutex
+    names := vec[str]()
+    ts := vec[Thread]()
+    for k in 0..4 {
+        t, _ := thread_spawn(work, Job{k * 1000, (k + 1) * 1000, &total, &mu, &names})
+        ts.push(t)
+    }
+    for i in 0..ts.len { thread_join(&ts[i]) }
+    sort(names[..])
+    print(total, names[..])                 // 7998000 [part 0, part 1, part 2, part 3]
+    for i in 0..ts.len { region_free(&ts[i].region) }   // the names were in these regions
+}
+```
 
 ## Windows
 

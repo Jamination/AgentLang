@@ -640,8 +640,8 @@ fn main() {
   of a C string (not copied; `""` for `nil`). String literals are NUL-terminated already:
   `ptr("literal")` can be passed directly.
 - A plain AL function (also a nested or anonymous one) can be passed where C expects a callback
-  (`fn(*u8, *u8) -> i32`), as long as its parameters are scalars. Code running on a foreign
-  thread must not allocate.
+  (`fn(*u8, *u8) -> i32`), as long as its parameters are scalars. It may also be called on a
+  thread that the C library created: see [Threads](#threads).
 - `extern "lib" name: T` declares a global variable (or constant) `name` of the C library,
   with the C type written as `T` (a C struct as an AL struct of the same layout: `extern
   "libwayland-client.so.0" wl_surface_interface: WlInterface`). It is read, assigned and
@@ -685,6 +685,74 @@ fn main() {
   passed as a pointer to a copy the caller makes and returned through a hidden pointer. Vector
   types (`vec2` ... `quat`) cannot cross the C boundary.
 - C functions with a variable number of arguments (`printf`) cannot be declared.
+
+## Threads
+
+The API (`thread_spawn`, `thread_join`, `thread_id`, `cpu_count`, `Mutex`, `Cond`) is in
+[std/os.md](std/os.md#threads); the atomic builtins are in the language reference.
+
+- **What is shared.** One address space: globals and everything any thread allocated can be
+  read and written by every thread. Per thread are the arena in use and the thread's base
+  arena, the region stack (`enter` / `leave`, marks), `frame_begin` / `frame_end`, the output
+  buffer, `io_error()`, the stack and its signal stack. `args()` and the environment are shared
+  (read-only). The default generator of std.rand (`rand_*`) is one shared value: using it from
+  several threads at once is a data race; give each thread its own `Rng`.
+- **Data races.** Two accesses to the same memory from different threads, at least one a write
+  and not both atomic, without an order between them (a `Mutex` held around both, a
+  `thread_join`, an atomic store seen by an atomic load, `thread_spawn` before the start of
+  the thread) are undefined behaviour, as in C: the optimiser treats plain memory as
+  single-threaded code. There is no race detector (nothing like ThreadSanitizer).
+- **Memory model.** Every atomic operation is sequentially consistent (C11 `seq_cst`): there is
+  one total order of all atomic operations that agrees with the program order of each thread,
+  and a load sees the last store before it in that order. An atomic operation is a barrier for
+  the optimiser: plain loads and stores are not moved across it, a loop around `atomic_load`
+  keeps loading. x86-64: loads `mov`, stores and swaps `xchg`, add / sub `lock xadd`, cas
+  `lock cmpxchg`, and / or / xor a `lock cmpxchg` loop, fence `mfence`.
+- **Memory of a thread.** A thread allocates from a base arena of its own (16 GiB of address
+  space, committed as used). `thread_join(&t)` moves it into `t.region`, an ordinary region of
+  the joiner: what the thread allocated stays valid and can be used without a copy until
+  `region_free(&t.region)` (or `reset`); `enter(&t.region)` allocates more there. A long-running
+  thread bounds its memory with `mark` / `release`, regions or `frame_begin` / `frame_end`. The
+  memory of a thread that is never joined stays until the process ends. A region the thread
+  still has entered when it ends is left (no longer entered by anyone).
+- **Regions** are entered by one thread at a time (`Region` records the thread). Run-time errors:
+  `panic: enter: this region is entered by thread N`, the same for `reset` and `region_free`
+  (the message names the thread that panicked too: `panic in thread M: ...`).
+- **Output.** Each thread buffers its output. While the program has one thread the main thread
+  writes its buffer when it is full, at `flush()` and at the end, as always. From the first
+  `thread_spawn` on, a thread's complete lines go to a shared buffer under a lock whenever it
+  writes a newline (also lines built from several `put` calls): lines of different threads
+  never mix, and a line of up to 64 KiB is never split. `flush()` writes the shared buffer and
+  the calling thread's partial line; `exit` and the end of `main` write the shared buffer and
+  the main thread's output. A thread's partial line (a `put` without a newline) is written
+  when it ends, flushes or writes the newline; it is lost if the process ends first. `eprint`,
+  `eput` and panic messages take the same lock.
+- **Panics** in any thread end the process with status 1 (the C `abort` / Rust panic-abort
+  behaviour) after the message and the stack trace of the thread that panicked. The main
+  thread's messages are unchanged; another thread's name it: `panic in thread 3: index out of
+  bounds at f.al:7`, `panic in thread 3 at f.al:9: msg`, `assertion failed in thread 3 at
+  ...`. Memory faults (nil dereference, stack overflow on the thread's guard page) are reported
+  the same way. Only the first thread that panics reports; others that panic meanwhile wait
+  for the end.
+- **The end.** When `main` returns (or `exit` is called) the process ends, threads still
+  running included, as in C.
+- **Run-time checks** (always on, each a load and a compare): a region entered, reset or freed
+  by another thread than the one that entered it; `thread_join` of a thread joined before (also
+  through a copy of the `Thread`), of `Thread{}` or of the calling thread; `unlock` or `wait`
+  with a mutex the thread does not hold; `lock` of a mutex the thread holds already. Not checked:
+  data races, memory of a region used by another thread after its reset, a `Mutex`, `Cond` or
+  `Region` copied while in use.
+- **Threads that C libraries create** (a callback from a driver or audio thread) run AL code too:
+  on first use the thread gets an id (the next number), a base arena (never freed), an output
+  buffer (line by line); panics and stack traces work. Output of the main thread that is still
+  in its buffer when such a thread first prints may come after that thread's lines (`flush()`
+  first if the order matters). Its last partial line is lost unless it calls `flush()`.
+- **How threads are made.** Linux: in a dynamically linked program with the C library's
+  `pthread_create` (looked up at run time, so the C library's per-thread state is set up and a
+  program never depends on it just because it could start threads); if the program's libraries
+  lack it, `thread_spawn` fails with `io_error()` 38 (`function not implemented`). A static
+  program uses `clone` directly. Windows: `CreateThread`. Each thread has a guard page below its
+  stack (8 MiB unless given).
 
 ## Windows
 

@@ -305,6 +305,46 @@ Compiling the compiler (about 36,500 lines including the run-time library) takes
   two passes (count, then write the first 20 and last 5 lines) cost about 10 ms for a million
   frames.
 
+## Threads
+
+How the run-time library and the compiler implement threads (the rules: DETAILS.md).
+
+- **Thread-local globals.** A global of a library file whose name starts with `__tls_`,
+  `__heap_` or `__region_` is thread-local (`Global.tls`, set in `global_new`, `src/lower.al`;
+  zero-initialised only). Front end and optimiser treat it as any global (a `GAddr`, a distinct
+  object for alias analysis, pure); the back end lays the TLS globals out in one thread block
+  (`layout_tls` in `src/objwrite.al`), and `gaddr` of a TLS global is its displacement, so the
+  ordinary `Abs32Global` relocations fill it in. Linux (x86-64 TLS variant II, local-exec):
+  `PT_TLS` (memsz the block, no file data); the block ends at the thread pointer, a load is
+  `mov rax, fs:[off - size]` (memory kind `MK_TLS`: the global's operand plus the `fs` prefix;
+  base and index registers still fold), an address `mov r, fs:[0]` + `lea r, [r + off - size]`.
+  A dynamically linked program gets the block from glibc's loader in every thread (also those
+  of C libraries); a static one starts with FS 0, and `__rt_init` (`src/prelude_linux.al`) maps
+  the block and a TCB whose first word points to itself and sets FS (`arch_prctl`) before
+  anything touches a TLS global. Windows: a TLS directory (zero fill, `AddressOfIndex` =
+  `__win_tls_index`); the address of a TLS global is a value computed where its `GAddr` is
+  (`tls_block` in `src/x86/isel.al`: `gs:[0x58]`, the index, the block, `lea`), once per
+  function after GVN / LICM. Programs without threads differ from before only in that: the
+  arena, region stack, output state and `io_error` accesses carry the `fs` prefix, the extra
+  program header moves the code by 48 bytes, and the library itself changed.
+- **Atomics** are `Op.Atomic` (k = `ATOMIC_*`), not pure and `clobbers()`: every pass that keeps
+  memory facts drops them there like at a call (loadelim, licm, cleanup keeps it as a root,
+  gvn does not number it, bce / checkmerge / `opt_is_check_trap` do not move checks across it,
+  an alloca it uses escapes). `and` / `or` / `xor` are lowered to a CAS loop in the IR
+  (`atomic` in `src/lower_call.al`). Back end: `Xchg`, `Xadd`, `Cmpxchg` (fixed rax), `Mfence`.
+- **Threads.** `__thread_spawn` / `__thread_main` / `__thread_join` (`src/prelude.al`) with a
+  pooled control block (`__ThreadCtl`, a generation number makes stale handles detectable); the
+  OS layers create threads: Linux looks up `pthread_create` and friends in the loader's link
+  map (`DT_GNU_HASH`, default version: `c_symbol`) or, in a static program, uses the
+  library-only builtin `__clone(flags, stack, ptid, ctid, tls)`: `Op.Syscall` with k = 1, whose
+  encoding continues in the child with `pop rdi; pop rax; call rax` (argument and entry pushed
+  on the new stack); Windows calls `CreateThread`. Locks: futexes (Linux), SRW locks and
+  condition variables (Windows). The output buffers, the output lock and the panic lock: the
+  comments of "output" and `__die` in `src/prelude.al`.
+- **The compiler's host.** Linux keeps forking workers (each a process with a copy of the thread
+  block); `alc build` unlinks and rewrites an executable that is busy (ETXTBSY: Linux keeps an
+  ended multi-threaded process's file mapped while it frees its memory).
+
 ## Parallel back end
 
 `x86_compile` compiles functions independently of each other. With more than one CPU (the
@@ -399,9 +439,11 @@ the conformance suite with it).
   and starts the compiler again (`ALC_STACK_SET` holds the original limit, which the programs
   of `alc run` get back); Windows runs the compiler on a thread whose stack reserves 1 GB
   (`CreateThread` with `STACK_SIZE_PARAM_IS_A_RESERVATION`, committed as it is used, with the
-  64 KiB stack guarantee for the overflow handler) while the first thread only waits for it:
-  only one thread ever runs AL code, so the arenas need no locking. (Other programs keep the
-  16 MiB of the PE header.) The nesting limit of the parser is measured against this stack.
+  64 KiB stack guarantee for the overflow handler) while the first thread only waits for it.
+  The run-time library treats that thread like one a C library created: it gets its own arena,
+  id and line-buffered output on first use (`big_stack_thread` flushes before it returns), so
+  a panic of the compiler there says `panic in thread 1:`. (Other programs keep the 16 MiB of
+  the PE header.) The nesting limit of the parser is measured against this stack.
 - **Parallelism.** None: there is no fork, so the back end takes its sequential path.
 - **Processes.** `alc run` / `alc test` start the program with `CreateProcessW` (arguments
   quoted by the Microsoft rules) and wait for it; a Linux executable (`--target linux`) is
