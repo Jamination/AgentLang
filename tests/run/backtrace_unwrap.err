@@ -1,0 +1,3 @@
+panic: unwrap of None
+  at tests/run/backtrace_unwrap.al:10 in index_of_name
+  at tests/run/backtrace_unwrap.al:16 in main

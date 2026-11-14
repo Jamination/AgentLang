@@ -479,10 +479,14 @@ priv fn bt_walk(w0: *BtWalk, o: *BtOut) {
 // writes the call stack of the panic being reported (see above)
 noinline fn __bt_print() {
     t := __bt_table
-    if t == 0 || __bt_busy || __os_backtrace_off() {
+    if t == 0 || __bt_busy {
         return
     }
+    // (from here on a fault ends the program: the environment and the stack may be corrupted)
     __bt_busy = true
+    if __os_backtrace_off() {
+        return
+    }
     w: BtWalk
     w.base = cast[*i64](t)[0]
     w.nfuncs = bt_u32(t + 8)

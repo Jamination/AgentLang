@@ -8,14 +8,19 @@ __sigstack: [32768]u8
 
 // the initial stack pointer: the top of the stack, above every frame
 priv stack_top: i64
+priv in_fault: bool
 
 // uc: the interrupted state (ucontext_t: the general registers from byte 40, r11 the 4th, rsp
-// the 16th, rip the 17th), where the stack trace starts
+// the 16th, rip the 17th), where the stack trace starts. A fault while one is reported (the
+// stack trace of a corrupted stack, ...) ends the program at once.
 noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
-    if __bt_busy {
-        __err("  ... (the stack trace stopped at a fault)\n")
+    if in_fault || __bt_busy {
+        if __bt_busy {
+            __err("  ... (the stack trace stopped at a fault)\n")
+        }
         __os_exit(1)
     }
+    in_fault = true
     g := cast[*i64](uc + 40)
     __bt_fault_r11 = g[3]
     __bt_fault_sp = g[15]

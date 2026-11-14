@@ -1,0 +1,4 @@
+assertion failed at tests/run/backtrace_assert.al:5: account 7 is overdrawn
+  at tests/run/backtrace_assert.al:5 in check
+  at tests/run/backtrace_assert.al:10 in withdraw
+  at tests/run/backtrace_assert.al:17 in main

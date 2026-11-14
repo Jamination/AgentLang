@@ -1,0 +1,4 @@
+panic: index out of bounds at tests/run/backtrace_bounds.al:3
+  at tests/run/backtrace_bounds.al:3 in load_level
+  at tests/run/backtrace_bounds.al:8 in start
+  at tests/run/backtrace_bounds.al:13 in main

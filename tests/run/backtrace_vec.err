@@ -1,0 +1,3 @@
+panic: pop from an empty Vec at tests/run/backtrace_vec.al:4
+  at tests/run/backtrace_vec.al:4 in last_score
+  at tests/run/backtrace_vec.al:11 in main

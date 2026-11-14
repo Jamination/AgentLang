@@ -1,0 +1,6 @@
+panic: memory fault (nil dereference, stack overflow or use of released memory)
+  at tests/run/backtrace_nil.al:6 in second
+  at tests/run/backtrace_nil.al:11 in walk
+  at tests/run/backtrace_nil.al:13 in walk
+  at tests/run/backtrace_nil.al:13 in walk
+  at tests/run/backtrace_nil.al:19 in main

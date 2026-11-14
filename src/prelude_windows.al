@@ -153,7 +153,7 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
         0xC00000FD => {}                     // stack overflow
         _ => return 0
     }
-    if in_fault {
+    if in_fault || __bt_busy {
         if __bt_busy {
             __err("  ... (the stack trace stopped at a fault)\n")
         }

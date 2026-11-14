@@ -1,0 +1,4 @@
+panic: index out of bounds at tests/run/backtrace_inline.al:4
+  at tests/run/backtrace_inline.al:4 in cell
+  at tests/run/backtrace_inline.al:8 in neighbours
+  at tests/run/backtrace_inline.al:15 in main

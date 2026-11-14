@@ -1,0 +1,4 @@
+assertion failed at tests/run/backtrace_library.al:9: equal elements
+  at tests/run/backtrace_library.al:9 in by_size
+ in sort_by[i64]
+  at tests/run/backtrace_library.al:22 in main

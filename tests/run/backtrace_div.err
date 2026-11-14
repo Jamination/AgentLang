@@ -1,0 +1,3 @@
+  at tests/run/backtrace_div.al:4 in ratio
+  at tests/run/backtrace_div.al:11 in average
+  at tests/run/backtrace_div.al:16 in main

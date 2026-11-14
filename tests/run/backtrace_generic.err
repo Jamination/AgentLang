@@ -1,0 +1,4 @@
+panic at tests/run/backtrace_generic.al:6: no item 3
+  at tests/run/backtrace_generic.al:6 in pick[str]
+  at tests/run/backtrace_generic.al:12 in first_word
+  at tests/run/backtrace_generic.al:18 in main

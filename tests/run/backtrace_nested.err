@@ -1,0 +1,5 @@
+assertion failed at tests/run/backtrace_nested.al:4: too big
+  at tests/run/backtrace_nested.al:4 in process.scale
+  at tests/run/backtrace_nested.al:9 in process.fn@7:14
+  at tests/run/backtrace_nested.al:12 in process
+  at tests/run/backtrace_nested.al:17 in main
