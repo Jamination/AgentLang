@@ -8,6 +8,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Changed
+- The compiler compiles functions in parallel on Windows too: worker threads instead of forked
+  worker processes, the same on Linux and Windows (`ALC_JOBS=n` still sets the number). A
+  crash in a worker now ends the compiler with its message; the forked workers' fallback (the
+  compiler redid what a crashed worker had not delivered) is gone.
+
 ## [0.2.0] - 2026-11-14
 
 ### Added

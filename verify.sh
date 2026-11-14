@@ -37,8 +37,9 @@ if grep -nE '^(priv )?extern ' src/*.al src/*/*.al | grep -vE '^src/(prelude(_li
 [[ $(head -c 2 build/alc.exe 2>/dev/null) == MZ ]] || { echo "FAIL: build/alc.exe (the compiler for Windows) was not built"; fail=1; }
 # processes are only started through src/host_linux.al (the compiler's host on Linux, used by
 # src/base.al) and the OS layers of the run-time library: run_program (for `alc run` /
-# `alc test`, which start the program that was just built), with_stack (the compiler restarting
-# itself on Linux) and the parallel back end's workers
+# `alc test`, which start the program that was just built) and with_stack (the compiler
+# restarting itself on Linux); the parallel back end's worker threads are the run-time
+# library's (clone in src/prelude_linux.al)
 spawns=$(grep -nE 'syscall\((57|58|59|56|322),' src/*.al src/*/*.al | grep -v '^src/host_linux.al' | grep -vE '^src/prelude(_linux|_windows)?\.al')
 if [[ -n "$spawns" ]]; then echo "FAIL: compiler sources start processes:"; echo "$spawns"; fail=1; fi
 if [[ $(grep -c 'run_program(' src/main.al) != 1 ]]; then echo "FAIL: expected exactly one run_program call in src/main.al"; fail=1; fi

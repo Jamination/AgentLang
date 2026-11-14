@@ -91,8 +91,8 @@ executables before and after); the conventions below describe the result.
 |------|----------|
 | `src/main.al` | driver: arguments, the version (`VERSION`), source loading (files and the `when`s that include them), bundled modules, diagnostics output; lists every other file except the parts below that one or two files include themselves |
 | `src/when.al` | `when` (deciding conditions, the branches of function bodies) and `-D NAME=VALUE` |
-| `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), `align_up`, paths (`path_join`, `path_parent`), `file_name`, `os_error`, processes, the working-memory regions |
-| `src/host_linux.al`, `host_windows.al` | the compiler's host (the functions listed at the top of `base.al`: running programs, the big stack, worker processes): included by `base.al` with `when TARGET_OS == ...` |
+| `src/base.al` | helpers for compiler code: Vec constructors (`vec_one`, `vec_two`; `vec_of` and `vec_fill` are library functions), `align_up`, paths (`path_join`, `path_parent`), `file_name`, `os_error`, processes, worker threads, the working memory (`Work`: regions and per-thread pass state) |
+| `src/host_linux.al`, `host_windows.al` | the compiler's host (the functions listed at the top of `base.al`: running programs, the big stack, the CPU count): included by `base.al` with `when TARGET_OS == ...` |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
@@ -491,7 +491,10 @@ the conformance suite with it).
   id and line-buffered output on first use (`big_stack_thread` flushes before it returns), so
   a panic of the compiler there says `panic in thread 1:`. (Other programs keep the 16 MiB of
   the PE header.) The nesting limit of the parser is measured against this stack.
-- **Parallelism.** None: there is no fork, so the back end takes its sequential path.
+- **Parallelism.** The same as on Linux ([parallel back end](#parallel-back-end)): that thread
+  starts the worker threads (`CreateThread` through the run-time library, 1 GiB reserved each);
+  the number of threads, the compiler's included, is `GetActiveProcessorCount`, at most 6, or
+  `ALC_JOBS`.
 - **Processes.** `alc run` / `alc test` start the program with `CreateProcessW` (arguments
   quoted by the Microsoft rules) and wait for it; a Linux executable (`--target linux`) is
   built but not run. `ALC_WINE` only applies on Linux.
