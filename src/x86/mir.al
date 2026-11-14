@@ -179,6 +179,7 @@ struct MInst {
     sz2: u8
     cc: u8
     tgt: i32 // jump target block, called function, or the immediate third operand (imul3, shufps)
+    loc: i32 // the source location (Inst.loc) of the IR instruction it was selected for, 0: none
     a: Opnd
     b: Opnd
 }

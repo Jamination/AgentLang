@@ -18,6 +18,15 @@ struct Code {
     relocs: Vec[Reloc]
     err: str // a frame too large for 32-bit displacements: the message (the code is unusable)
     unwind: Vec[u8] // Windows: the UNWIND_INFO of a function with a frame (empty: none)
+    // for stack traces (src/backtrace.al): pairs (code offset, source location) where the
+    // location changes, the first at offset 0; and the shape of the frame: the bytes allocated
+    // below the pushes, the number of pushes, the prologue offsets after the pushes and after
+    // the allocation (Windows probe included)
+    lines: Vec[i32]
+    alloc: i32
+    npush: i32
+    push_end: i32
+    alloc_end: i32
 }
 
 priv struct Frame {
@@ -867,6 +876,10 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     bpos := vec_fill(mf.blocks.len, 0)  // where each block starts in enc.out
     bitem := vec_fill(mf.blocks.len, 0) // the items before it
     unwind := vec[u8]()
+    lines := vec[i32]()
+    last_loc: i32 = 0
+    push_end := 0
+    alloc_end := 0
     // the save slot of the k-th preserved xmm register
     fn xmm_slot(xmm_off: i64, k: i64) -> Opnd {
         m := mem_new()
@@ -893,12 +906,14 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                     unwind_code(&slots, &groups, enc.out.len, 0, r) // UWOP_PUSH_NONVOL
                 }
             }
+            push_end = enc.out.len
             if size >= 4096 && target_os == TargetWindows {
                 stack_probe(&enc, size)
             } else if size > 0 {
                 si := minst_new(Sub, 8, R(RSP), I(i64(size)))
                 enc_inst(&enc, &si)
             }
+            alloc_end = enc.out.len
             if win && size > 0 {
                 if size <= 128 {
                     unwind_code(&slots, &groups, enc.out.len, 2, i64(size) / 8 - 1) // UWOP_ALLOC_SMALL
@@ -931,6 +946,12 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         insts := &mf.blocks[b].insts
         for x in 0..insts.len {
             i := &insts[x]
+            if i.loc != 0 && i.loc != last_loc && i.op != Jmp && i.op != Jcc {
+                // (the first location covers the prologue as well)
+                lines.push(if lines.len == 0 { 0 } else { i32(enc.out.len) })
+                lines.push(i.loc)
+                last_loc = i.loc
+            }
             if i.op == Jmp || i.op == Jcc {
                 items.push(Item{pos: enc.out.len, tgt: i64(i.tgt), cc: if i.op == Jcc { i64(i.cc) } else { -1 }, long: false})
                 continue
@@ -1024,7 +1045,17 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             bytes.push(u8(i8(d)))
         }
     }
-    return Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind}
+    // the line offsets: shifted by the items at or before them
+    ki := 0
+    for li in 1..lines.len / 2 {
+        o := i64(lines[2 * li])
+        while ki < ni && items[ki].pos <= o {
+            ki += 1
+        }
+        lines[2 * li] = i32(o + pre[ki])
+    }
+    return Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind, lines: lines, alloc: size, npush: npush,
+        push_end: i32(push_end), alloc_end: i32(alloc_end)}
 }
 
 // rewrites the float constant relocations of code from indices into the function's own list
@@ -1040,12 +1071,13 @@ fn emit_pool_fconsts(code: *Code, local: []i64) {
 
 // ---------- code in a shared mapping (the parallel back end) ----------
 // At byte offset q (8-aligned) of the mapping at base: the counts of bytes, relocations, float
-// constants, error bytes and unwind bytes, then the bytes (padded to 8), each relocation as 4
-// words (offset, kind, payload, addend), each constant as 2 words, the error text (padded),
-// the unwind information (padded).
+// constants, error bytes, unwind bytes and line entries (i32s), the frame shape (4 words), then
+// the bytes (padded to 8), each relocation as 4 words (offset, kind, payload, addend), each
+// constant as 2 words, the error text (padded), the unwind information (padded), the line
+// entries (padded).
 
 fn emit_code_size(code: *Code, fc: *Vec[Bits128]) -> i64 {
-    return 40 + align_up(code.bytes.len, 8) + 32 * code.relocs.len + 16 * fc.len + align_up(len(code.err), 8) + align_up(code.unwind.len, 8)
+    return 80 + align_up(code.bytes.len, 8) + 32 * code.relocs.len + 16 * fc.len + align_up(len(code.err), 8) + align_up(code.unwind.len, 8) + align_up(4 * code.lines.len, 8)
 }
 
 // writes code at q; returns the offset after it
@@ -1056,7 +1088,12 @@ fn emit_put_code(code: *Code, fc: *Vec[Bits128], base: i64, q0: i64) -> i64 {
     h[2] = fc.len
     h[3] = len(code.err)
     h[4] = code.unwind.len
-    q := q0 + 40
+    h[5] = code.lines.len
+    h[6] = i64(code.alloc)
+    h[7] = i64(code.npush)
+    h[8] = i64(code.push_end)
+    h[9] = i64(code.alloc_end)
+    q := q0 + 80
     if code.bytes.len > 0 {
         memcopy(cast[*u8](base + q), ptr(code.bytes.buf), code.bytes.len)
     }
@@ -1086,7 +1123,11 @@ fn emit_put_code(code: *Code, fc: *Vec[Bits128], base: i64, q0: i64) -> i64 {
     if code.unwind.len > 0 {
         memcopy(cast[*u8](base + q), ptr(code.unwind.buf), code.unwind.len)
     }
-    return q + align_up(code.unwind.len, 8)
+    q += align_up(code.unwind.len, 8)
+    if code.lines.len > 0 {
+        memcopy(cast[*u8](base + q), cast[*u8](ptr(code.lines.buf)), 4 * code.lines.len)
+    }
+    return q + align_up(4 * code.lines.len, 8)
 }
 
 // reads the code at q (into the current arena): (code, float constants, offset after it)
@@ -1097,7 +1138,8 @@ fn emit_get_code(base: i64, q0: i64) -> (Code, Vec[Bits128], i64) {
     nf := h[2]
     ne := h[3]
     nu := h[4]
-    q := q0 + 40
+    nl := h[5]
+    q := q0 + 80
     bytes := vec_of(mkslice[u8](cast[*u8](base + q), nb))
     q += align_up(nb, 8)
     relocs := vec[Reloc]()
@@ -1124,7 +1166,10 @@ fn emit_get_code(base: i64, q0: i64) -> (Code, Vec[Bits128], i64) {
     q += align_up(ne, 8)
     unwind := vec_of(mkslice[u8](cast[*u8](base + q), nu))
     q += align_up(nu, 8)
-    return (Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind}, fc, q)
+    lines := vec_of(mkslice[i32](cast[*i32](base + q), nl))
+    q += align_up(4 * nl, 8)
+    return (Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind, lines: lines, alloc: i32(h[6]), npush: i32(h[7]),
+        push_end: i32(h[8]), alloc_end: i32(h[9])}, fc, q)
 }
 
 // padding in front of an aligned block; long paddings are not worth executing

@@ -30,8 +30,9 @@ priv fn bmap_at(bmap: *Vec[i64], b: i64) -> i64 {
 
 // inline one call site: `call` (in block `cb`) to callee `g`. The uses of the call's results
 // are not rewritten here: `repl` gets their replacements (applied once by inline_run; a value
-// taken from the caller is looked up in it). Returns by how much cost(f) grew.
-priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], returns: *bool) -> i64 {
+// taken from the caller is looked up in it). The copies keep the callee's source locations,
+// rebased onto the call's (`locs`). Returns by how much cost(f) grew.
+priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], returns: *bool, locs: *SrcLocs) -> i64 {
     pos := index_of(f.blocks[cb].insts.items(), i32(call))
     assert pos >= 0
     call_inst := clone(f.insts[call])
@@ -56,6 +57,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         bmap[gb] = f.new_block()
     }
     vmap := vec_fill(g.insts.len, NOV)
+    lmemo := map[i32, i32]()
     for gb in grpo {
         for gv in g.blocks[gb].insts {
             gi := &g.insts[gv]
@@ -65,6 +67,13 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
             }
             nv := f.mk(gi.op, gi.ty, vec[i64](), gi.k)
             f.im(nv).aux = gi.aux
+            if g.lib {
+                // (library code: its frames are not shown, the call's line stands for it)
+                f.im(nv).loc = call_inst.loc
+            } else if gi.loc != 0 {
+                l := locs.src_loc_inlined(gi.loc, call_inst.loc, &lmemo)
+                f.im(nv).loc = l
+            }
             vmap[gv] = nv
         }
     }
@@ -317,7 +326,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                 // g is not f and inline_call only changes f
                 returns := false
                 nb0 := m.funcs[fid].blocks.len
-                caller_size += inline_call(&m.funcs[fid], b, call, &m.funcs[g], &repl, &returns)
+                caller_size += inline_call(&m.funcs[fid], b, call, &m.funcs[g], &repl, &returns, &m.locs)
                 if !returns {
                     // the blocks after the call became unreachable through it: they may now
                     // be reached later, before the call's block

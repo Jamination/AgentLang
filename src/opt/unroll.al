@@ -260,6 +260,7 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
                 src := f.insts[v]
                 nv := f.mk(src.op, src.ty, vec[i64](), src.k)
                 f.im(nv).aux = src.aux
+                f.im(nv).loc = src.loc
                 cur[v] = nv
             }
         }

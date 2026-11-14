@@ -1511,6 +1511,11 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 }
             }
         }
+        "__ra_addr" if self.cx.scope_prelude && nargs == 0 => {
+            // (library only: the start of a stack trace, see __bt_print in the prelude; the
+            // function that uses it must not be inlined)
+            return Some(self.sval(T_I64, self.ins(RaAddr, I64, vec[i64](), 0)))
+        }
         "syscall" => {
             if nargs == 0 || nargs > 7 {
                 self.err(pos, "`syscall` takes a number and up to 6 arguments")

@@ -16,6 +16,8 @@
 //   __os_test(f) -> 1 / 0 / -1     runs one `test` block in a process of its own: passed,
 //                                  failed, or not run by this process
 //   __os_error_text(e)             error_text for numbers it does not know
+//   __os_stack_range() -> (lo, hi) the stack of the running thread, for stack traces
+//   __os_backtrace_off() -> bool   ALC_BACKTRACE=0 is set (without allocating)
 //   clock_ns, args, env_get        the public functions of that name
 // plus the __os_* functions used by std.asset, std.time and std.os. Error numbers are
 // Linux errno values on every target (the Windows layer maps its error codes to them).
@@ -57,6 +59,7 @@ fn __die(kind: str, loc: str, msg: str) -> never {
         __err(msg)
     }
     __err("\n")
+    __bt_print()
     __os_panic(kind, loc, msg)
     __os_exit(1)
 }
@@ -79,6 +82,438 @@ noinline fn __assert_fail(loc: str, msg: str) -> never {
 
 noinline fn __panic(loc: str, msg: str) -> never {
     __die("panic at ", loc, msg)
+}
+
+// ---------- stack traces ----------
+// After the message of a panic __bt_print writes the call stack, innermost frame first, one
+// line per function: "  at FILE:LINE in NAME" ("  at ? in NAME" where the line is unknown).
+// Code inlined into a function shows as the frames it came from. The frames of the library
+// before the first frame of the program and after its last one (the start of the program, the
+// test runner) are left out; a run of more than 7 library frames between frames of the program
+// shows its first 4 and last 3 around "  ... N more frames in the library"; a trace of more than
+// 25 lines its first 20 and last 5 around "  ... N more". ALC_BACKTRACE=0 in the environment
+// turns it off.
+//
+// The compiler adds a table to every executable (its layout: src/backtrace.al) and stores its
+// address in __bt_table. A frame is found from the return address its callee pushed: the table
+// gives the function that contains the address, the size of its frame (the code keeps the stack
+// pointer fixed after the prologue) and the source location of the call. Every step is checked
+// (the address must be in a function, the frame inside the stack and above the previous one),
+// so a corrupted stack ends the trace early instead of crashing or looping.
+__bt_table: i64
+// set by the fault handlers of the OS layers before they call __die: the faulting instruction,
+// the stack pointer and r11 there (r11 counts the pages of a Windows stack probe); pc 0: no fault
+__bt_fault_pc: i64
+__bt_fault_sp: i64
+__bt_fault_r11: i64
+// a trace is being written (a fault now is a fault of the walk itself)
+__bt_busy: bool
+
+priv struct BtWalk {
+    base: i64 // the address of the first function
+    nfuncs: i64
+    funcs: i64 // addresses of the parts of the table
+    nscopes: i64
+    scopes: i64
+    data: i64
+    data_end: i64
+    strs: i64
+    lo: i64 // the stack: [lo, hi)
+    hi: i64
+    // the frame: its function, an address in it, the stack pointer there
+    f: i64
+    pc: i64
+    sp: i64
+    fault: bool // pc is the faulting instruction (else a return address)
+    r11: i64
+    // the last location found (for deep recursion: the same address again and again)
+    memo_pc: i64
+    memo_loc: i64
+}
+
+// the lines of the trace (two passes: counting, then writing): library frames held back, the
+// number of lines so far
+priv struct BtOut {
+    print: bool
+    total: i64
+    n: i64
+    started: bool
+    // a run of library lines after a line of the program: the first 4, the last 3, how many
+    head: [4]i64
+    tail: [3]i64
+    run: i64
+}
+
+// a line of the trace: inlined location k of function f as 1 + f * 2^32 + k; a line of
+// function f itself as -1 - (f * 2^32 + line) (line 0: unknown); BT_LIB_MORE + N: "N more
+// frames in the library"
+priv const BT_LIB_MORE = 1 << 62
+// the size of a function's entry in the table
+priv const BT_FN = 24
+
+priv fn bt_u32(a: i64) -> i64 {
+    return i64(cast[*u32](a)[0])
+}
+
+priv fn bt_u8(a: i64) -> i64 {
+    return i64(cast[*u8](a)[0])
+}
+
+priv fn bt_uleb(p0: i64) -> (i64, i64) {
+    p := p0
+    x := 0
+    s := 0
+    loop {
+        b := bt_u8(p)
+        p += 1
+        x |= (b & 0x7F) << s
+        s += 7
+        if b < 0x80 || s > 56 {
+            return (x, p)
+        }
+    }
+}
+
+// the function that contains address pc, or -1
+priv fn bt_find(w: *BtWalk, pc: i64) -> i64 {
+    if w.nfuncs == 0 {
+        return -1
+    }
+    lo := 0
+    hi := w.nfuncs
+    while hi - lo > 1 {
+        mid := (lo + hi) / 2
+        if w.base + bt_u32(w.funcs + BT_FN * mid) <= pc {
+            lo = mid
+        } else {
+            hi = mid
+        }
+    }
+    start := w.base + bt_u32(w.funcs + BT_FN * lo)
+    if pc < start || pc >= start + bt_u32(w.funcs + BT_FN * lo + 4) {
+        return -1
+    }
+    return lo
+}
+
+// the bytes between the stack pointer of the frame and its return address, -1 if unknown. The
+// prologue pushes registers (1 or 2 bytes each), then allocates (Windows: a probe for a page or
+// more, see stack_probe in src/x86/emit.al); only a faulting instruction can be inside it.
+priv fn bt_frame_bytes(w: *BtWalk) -> i64 {
+    rec := w.funcs + BT_FN * w.f
+    start := w.base + bt_u32(rec)
+    alloc := bt_u32(rec + 12)
+    npush := bt_u8(rec + 16)
+    push_end := bt_u8(rec + 17)
+    alloc_end := bt_u8(rec + 18)
+    if !w.fault {
+        return 8 * npush + alloc
+    }
+    off := w.pc - start
+    if off < push_end {
+        n := 0
+        i := 0
+        while i < off {
+            i += if bt_u8(start + i) == 0x41 { 2 } else { 1 }
+            n += 1
+        }
+        return 8 * n
+    }
+    if off < alloc_end {
+        pages := alloc / 4096
+        if off == push_end + 13 && w.r11 >= 1 && w.r11 <= pages {
+            // `test [rsp], rsp` in the loop: r11 pages were left before this one
+            return 8 * npush + (pages - w.r11 + 1) * 4096
+        }
+        if off == alloc_end - 4 {
+            return 8 * npush + alloc
+        }
+        return -1
+    }
+    return 8 * npush + alloc
+}
+
+// to the caller's frame; false at the end of the stack or where a step cannot be trusted
+priv fn bt_step(w: *BtWalk) -> bool {
+    d := bt_frame_bytes(w)
+    if d < 0 {
+        return false
+    }
+    at := w.sp + d
+    if at < w.sp || at % 8 != 0 || at + 8 > w.hi {
+        return false
+    }
+    ra := cast[*i64](at)[0]
+    f := bt_find(w, ra)
+    if f < 0 {
+        return false
+    }
+    w.f = f
+    w.pc = ra
+    w.sp = at + 8
+    w.fault = false
+    return true
+}
+
+// the line data of function f: (where its inlined locations start, how many, the end)
+priv fn bt_data(w: *BtWalk, f: i64) -> (i64, i64, i64) {
+    rec := w.funcs + BT_FN * f
+    p := w.data + bt_u32(rec + 20)
+    end := if f + 1 < w.nfuncs { w.data + bt_u32(rec + BT_FN + 20) } else { w.data_end }
+    n, q := bt_uleb(p)
+    return (q, n, end)
+}
+
+// inlined location k of function f: (scope, line, location of its call); (-1, 0, 0) if none
+priv fn bt_inlined(w: *BtWalk, f: i64, k: i64) -> (i64, i64, i64) {
+    p, n, _ := bt_data(w, f)
+    if k < 0 || k >= n {
+        return (-1, 0, 0)
+    }
+    s := 0
+    line := 0
+    at := 0
+    for i in 0..=k {
+        s, p = bt_uleb(p)
+        line, p = bt_uleb(p)
+        at, p = bt_uleb(p)
+    }
+    return (s, line, at)
+}
+
+// the location (see src/backtrace.al) of the frame's address; a line of the function itself
+// as 2 * line (0: unknown)
+priv fn bt_loc(w: *BtWalk) -> i64 {
+    if w.pc == w.memo_pc {
+        return w.memo_loc
+    }
+    // a return address is right after the call
+    q := w.pc - (w.base + bt_u32(w.funcs + BT_FN * w.f)) - (if w.fault { 0 } else { 1 })
+    p, n, end := bt_data(w, w.f)
+    x := 0
+    for i in 0..3 * n {
+        x, p = bt_uleb(p)
+    }
+    off := 0
+    line := 0
+    loc := 0
+    while p < end {
+        d := 0
+        v := 0
+        d, p = bt_uleb(p)
+        v, p = bt_uleb(p)
+        off += d
+        if off > q {
+            break
+        }
+        if v % 2 == 0 {
+            z := v / 2
+            line += (z >> 1) ^ -(z & 1)
+            loc = 2 * line
+        } else {
+            loc = v
+        }
+    }
+    if loc < 0 || loc % 2 == 1 && loc / 2 >= n {
+        loc = 0
+    }
+    w.memo_pc = w.pc
+    w.memo_loc = loc
+    return loc
+}
+
+// the scope of line `id` and its line number
+priv fn bt_scope(w: *BtWalk, id: i64) -> (i64, i64) {
+    if id > 0 {
+        x := id - 1
+        s, line, _ := bt_inlined(w, x >> 32, x & 0xFFFFFFFF)
+        return (s, line)
+    }
+    x := -1 - id
+    return (bt_u32(w.funcs + BT_FN * (x >> 32) + 8), x & 0xFFFFFFFF)
+}
+
+// word k (0: file, 1: name) of scope s, -1 if there is no such scope
+priv fn bt_scope_word(w: *BtWalk, s: i64, k: i64) -> i64 {
+    if s < 0 || s >= w.nscopes {
+        return -1
+    }
+    return bt_u32(w.scopes + 8 * s + 4 * k)
+}
+
+priv fn bt_is_lib(w: *BtWalk, id: i64) -> bool {
+    s, _ := bt_scope(w, id)
+    return bt_scope_word(w, s, 1) >= (1 << 31)
+}
+
+// string number `off` of the table ("?" for -1)
+priv fn bt_str(w: *BtWalk, off: i64) -> str {
+    if off < 0 {
+        return "?"
+    }
+    n, p := bt_uleb(w.strs + (off & 0x7FFFFFFF))
+    return mkslice[u8](cast[*u8](p), n)
+}
+
+// writes line `id` of the trace (or "... N more" if `more` > 0) to standard error (no
+// allocation: the panic may be "out of memory")
+priv fn bt_write(w: *BtWalk, id: i64, more: i64) {
+    b: [512]u8
+    n := 0
+    fn put(b: *[512]u8, n: *i64, s: str) {
+        for c in s {
+            if *n < 511 {
+                b[*n] = c
+                *n += 1
+            }
+        }
+    }
+    fn num(b: *[512]u8, n: *i64, x0: i64) {
+        d: [20]u8
+        k := 0
+        x := x0
+        loop {
+            d[k] = u8('0' + x % 10)
+            k += 1
+            x /= 10
+            if x == 0 {
+                break
+            }
+        }
+        for i in k - 1..=0 by -1 {
+            if *n < 511 {
+                b[*n] = d[i]
+                *n += 1
+            }
+        }
+    }
+    if more > 0 {
+        put(&b, &n, "  ... ")
+        num(&b, &n, more)
+        put(&b, &n, if id >= BT_LIB_MORE { " more frames in the library" } else { " more" })
+    } else {
+        s, line := bt_scope(w, id)
+        put(&b, &n, "  at ")
+        if line == 0 {
+            put(&b, &n, "?")
+        } else {
+            put(&b, &n, bt_str(w, bt_scope_word(w, s, 0)))
+            put(&b, &n, ":")
+            num(&b, &n, line)
+        }
+        put(&b, &n, " in ")
+        put(&b, &n, bt_str(w, bt_scope_word(w, s, 1)))
+    }
+    b[n] = '\n'
+    __write_all(2, cast[i64](ptr(b)), n + 1)
+}
+
+// line number o.n of the trace: written if it is one of the first 20 or the last 5
+priv fn bt_line(o: *BtOut, w: *BtWalk, id: i64) {
+    k := o.n
+    o.n += 1
+    if !o.print {
+        return
+    }
+    if k < 20 || k >= o.total - 5 {
+        bt_write(w, id, if id >= BT_LIB_MORE { id - BT_LIB_MORE } else { 0 })
+    } else if k == 20 {
+        bt_write(w, 0, o.total - 25)
+    }
+}
+
+// the next line of the walk, before library frames are left out
+priv fn bt_add(o: *BtOut, w: *BtWalk, id: i64) {
+    lib := bt_is_lib(w, id)
+    if !o.started {
+        if lib {
+            return
+        }
+        o.started = true
+    }
+    if lib {
+        if o.run < 4 {
+            o.head[o.run] = id
+        } else {
+            o.tail[(o.run - 4) % 3] = id
+        }
+        o.run += 1
+        return
+    }
+    if o.run > 0 {
+        for i in 0..min(o.run, 4) {
+            bt_line(o, w, o.head[i])
+        }
+        if o.run > 7 {
+            bt_line(o, w, BT_LIB_MORE + o.run - 7)
+        }
+        rest := max(min(o.run - 4, 3), 0)
+        for i in 0..rest {
+            bt_line(o, w, o.tail[(o.run - 4 - rest + i) % 3])
+        }
+        o.run = 0
+    }
+    bt_line(o, w, id)
+}
+
+priv fn bt_walk(w0: *BtWalk, o: *BtOut) {
+    w := *w0
+    loop {
+        // the frames inlined at the address, innermost first, then the function's own
+        v := bt_loc(&w)
+        depth := 0
+        while v % 2 == 1 && depth < 1000 {
+            k := v / 2
+            bt_add(o, &w, 1 + ((w.f << 32) | k))
+            s, line, at := bt_inlined(&w, w.f, k)
+            v = if s < 0 { 0 } else { at }
+            depth += 1
+        }
+        bt_add(o, &w, -1 - ((w.f << 32) | (if v % 2 == 0 { (v / 2) & 0xFFFFFFFF } else { 0 })))
+        if !bt_step(&w) {
+            return
+        }
+    }
+}
+
+// writes the call stack of the panic being reported (see above)
+noinline fn __bt_print() {
+    t := __bt_table
+    if t == 0 || __bt_busy || __os_backtrace_off() {
+        return
+    }
+    __bt_busy = true
+    w: BtWalk
+    w.base = cast[*i64](t)[0]
+    w.nfuncs = bt_u32(t + 8)
+    w.nscopes = bt_u32(t + 12)
+    w.funcs = t + bt_u32(t + 16)
+    w.scopes = t + bt_u32(t + 20)
+    w.data = t + bt_u32(t + 24)
+    w.strs = t + bt_u32(t + 28)
+    w.data_end = w.data + bt_u32(t + 32)
+    w.memo_pc = -1
+    w.lo, w.hi = __os_stack_range()
+    if __bt_fault_pc != 0 {
+        w.pc = __bt_fault_pc
+        w.sp = __bt_fault_sp
+        w.r11 = __bt_fault_r11
+        w.fault = true
+    } else {
+        // from the frame of the caller (__die)
+        at := __ra_addr()
+        w.pc = cast[*i64](at)[0]
+        w.sp = at + 8
+    }
+    w.f = bt_find(&w, w.pc)
+    if w.f < 0 || w.sp < w.lo || w.sp >= w.hi || w.sp % 8 != 0 {
+        return
+    }
+    count := BtOut{}
+    bt_walk(&w, &count)
+    out := BtOut{print: true, total: count.n}
+    bt_walk(&w, &out)
+    __bt_busy = false
 }
 
 // ---------- memory ----------

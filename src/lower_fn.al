@@ -88,6 +88,10 @@ struct Fx {
     // names entered into scope 0 after inner scopes were pushed (a variable of an enclosing
     // function, reported once): (symbol, type, address); found after the bindings
     late: Vec[(i64, i64, i64)]
+    // the function being lowered (its index in the module) and the source location that `ins`
+    // gives to the instructions (set per statement and expression: `at`)
+    fid: i64
+    loc: i32
 }
 
 fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
@@ -227,6 +231,8 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     f.insts = inst_bufs[buf_depth]
     f.insts.clear()
     f.has_vec = false
+    fname := file_name(&cx.file_names, pos.file)
+    f.lib = len(fname) > 0 && fname[0] == '<'
     f.blocks = block_bufs[buf_depth]
     f.blocks.clear()
     pend := pend_bufs[buf_depth]
@@ -249,7 +255,9 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         labels: vec[(str, i64, i64)](),
         parent: parent,
         lvl: buf_depth,
+        fid: fid,
     }
+    fx.at(pos)
     fx.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
     fx.cur = fx.f.new_block()
     pi := 0
@@ -341,8 +349,27 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
 // (`flush_pend`): a block's list is allocated once, at its final length.
 fn ins(self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.f.mk(op, ty, args, k)
+    self.f.insts[v].loc = self.loc
     self.pend.push(i32(v))
     return v
+}
+
+// the instructions made from now on belong to source position `pos` (a line of this function);
+// returns the location in effect before, for the caller to restore
+fn at(self: *Fx, pos: Pos) -> i32 {
+    old := self.loc
+    if pos.line <= 0 {
+        return old
+    }
+    locs := &self.cx.module.locs
+    if old != 0 {
+        l := &locs.list[old]
+        if l.line == pos.line && i64(l.file) == pos.file {
+            return old
+        }
+    }
+    self.loc = locs.src_loc(SrcLoc{file: i32(pos.file), line: pos.line, func: i32(self.fid), parent: 0})
+    return old
 }
 
 // moves the pending instructions (from `pend_base` on) to the list of block `cur`
@@ -831,6 +858,12 @@ priv fn break_continue_to(fx: *Fx, pos: Pos, is_break: bool, label: str) {
 }
 
 priv fn stmt(self: *Fx, s: *Stmt) {
+    old := self.at(s.pos)
+    self.stmt_k(s)
+    self.loc = old
+}
+
+priv fn stmt_k(self: *Fx, s: *Stmt) {
     match s.k {
         Expr(e) => {
             match e.k {
@@ -1570,6 +1603,7 @@ priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     b := self.new_block()
     self.cur = b
     self.dead = false
+    save_loc := self.at(pos)
     loc := self.loc_str(pos)
     name := match kind {
         0 => "__bounds_fail"
@@ -1584,6 +1618,7 @@ priv fn trap_block(self: *Fx, kind: i64, pos: Pos) -> i64 {
     self.pend_base = save_base
     self.cur = save_cur
     self.dead = save_dead
+    self.loc = save_loc
     self.traps.set((kind, i64(pos.line)), b)
     return b
 }

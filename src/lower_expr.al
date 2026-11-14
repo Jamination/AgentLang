@@ -177,6 +177,13 @@ fn const_val(self: *Fx, ty: Opt[i64], cv: CV, dec: bool, expect: Opt[i64], pos: 
 }
 
 fn expr(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
+    old := self.at(e.pos)
+    v := self.expr_k(e, expect)
+    self.loc = old
+    return v
+}
+
+priv fn expr_k(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
     for i in 0..self.memo.len {
         if self.memo[i].0 == e {
             return self.memo[i].1

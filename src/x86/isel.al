@@ -754,9 +754,18 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         s.cur_clob = bclob[b]
         s.out.clear()
         starts.clear()
-        // terminator (with phi copies for the unique successor)
+        // terminator (with phi copies for the unique successor); its instructions belong to the
+        // last statement of the block
         starts.push(0)
         s.term(b)
+        tloc: i32 = 0
+        for vi in f.blocks[b].insts.len - 1..=0 by -1 {
+            tloc = f.insts[f.blocks[b].insts[vi]].loc
+            if tloc != 0 {
+                break
+            }
+        }
+        s.stamp(0, tloc)
         for vi in f.blocks[b].insts.len - 1..=0 by -1 {
             v := i64(f.blocks[b].insts[vi])
             op := f.insts[v].op
@@ -774,6 +783,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 starts.push(s.out.len)
                 s.cur_clob = s.clob[v]
                 s.inst(v)
+                s.stamp(starts.last(), f.insts[v].loc)
             }
         }
         if b == 0 {
@@ -794,6 +804,13 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
 
 priv fn e(self: *Sel, op: MOp, sz: u8, a: Opnd, b: Opnd) {
     self.out.push(minst_new(op, sz, a, b))
+}
+
+// the instructions selected from out[from] on come from source location loc (see emit_emit)
+priv fn stamp(self: *Sel, from: i64, loc: i32) {
+    for k in from..self.out.len {
+        self.out[k].loc = loc
+    }
 }
 
 priv fn shufps(self: *Sel, d: i64, s: i64, imm: i64) {
@@ -1973,6 +1990,11 @@ priv fn inst(self: *Sel, v: i64) {
                 b := self.reg(i.args[1])
                 self.shufps(d, b, i.k)
             }
+        }
+        RaAddr => {
+            // the incoming stack argument before the first one: the return address
+            d := self.vr(v)
+            self.e(Lea, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: -1}))
         }
         Bswap, Popcnt, Ctz, Clz => {
             d := self.vr(v)

@@ -137,6 +137,7 @@ enum Op {
     Popcnt,
     Ctz,
     Clz,
+    RaAddr, // the address of the slot that holds the function's return address (`__ra_addr()`)
 }
 
 fn is_cmp(self: Op) -> bool {
@@ -222,6 +223,7 @@ struct Inst {
     k: i64
     aux: i32
     cap: i32 // phis: room for inputs in the buffer of args
+    loc: i32 // source location (Module.locs), 0: none (see Locs)
 }
 
 enum Term {
@@ -252,6 +254,10 @@ struct Func {
     has_vec: bool
     // a C function in a shared library: index into Module.externs
     ext: Opt[i64]
+    // written in the library (a file whose name starts with `<`): its frames are left out of
+    // stack traces where they are not between frames of the program, and its code inlined
+    // elsewhere takes the location of the call (see src_loc_inlined)
+    lib: bool
 }
 
 enum RelocTarget {
@@ -273,6 +279,60 @@ struct Module {
     globals: Vec[Global]
     entry: i64
     externs: Vec[ExternFn]
+    locs: SrcLocs
+}
+
+// Source locations of instructions, for the stack traces of panics (src/backtrace.al): a line
+// of a function, and for code inlined from another function the location of the call it was
+// inlined at (`parent`, 0 for none). Locations are numbered from 1 (0: unknown); the lowering
+// gives every instruction the location of the expression or statement it belongs to, the
+// inliner rebases the callee's ones onto the call (`src_loc_inlined`).
+struct SrcLoc {
+    file: i32
+    line: i32
+    func: i32 // the function (index in Module.funcs) whose source the line belongs to
+    parent: i32
+}
+
+struct SrcLocs {
+    list: Vec[SrcLoc] // list[0] is a placeholder for "unknown"
+    ix: Map[SrcLoc, i32]
+}
+
+// the number of a location (made on first use)
+fn src_loc(self: *SrcLocs, l: SrcLoc) -> i32 {
+    if self.list.len == 0 {
+        self.list.push(SrcLoc{})
+    }
+    k, found := self.ix.get(l)
+    if found {
+        return k
+    }
+    assert self.list.len < 0x7FFFFFFF, "ir: too many source locations"
+    self.list.push(l)
+    k = i32(self.list.len - 1)
+    self.ix.set(l, k)
+    return k
+}
+
+// location `l` of the callee, inlined at a call with location `at`: the same line with the
+// call as its outermost parent. Called while working (work_begin, the inliner): the table
+// grows in the main arena, `memo` (the answers so far for this call) in the work region.
+fn src_loc_inlined(self: *SrcLocs, l: i32, at: i32, memo: *Map[i32, i32]) -> i32 {
+    if l == 0 {
+        return 0
+    }
+    k, found := memo.get(l)
+    if found {
+        return k
+    }
+    s := self.list[l]
+    s.parent = if s.parent == 0 { at } else { self.src_loc_inlined(s.parent, at, memo) }
+    work_pause()
+    k = self.src_loc(s)
+    work_resume()
+    memo.set(l, k)
+    return k
 }
 
 // An imported C symbol: calls of a C function load its address from the 8-byte global `got`,

@@ -6,7 +6,20 @@ __argc: i64
 __argv: i64
 __sigstack: [32768]u8
 
-noinline fn __on_fault(sig: i64) -> never {
+// the initial stack pointer: the top of the stack, above every frame
+priv stack_top: i64
+
+// uc: the interrupted state (ucontext_t: the general registers from byte 40, r11 the 4th, rsp
+// the 16th, rip the 17th), where the stack trace starts
+noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
+    if __bt_busy {
+        __err("  ... (the stack trace stopped at a fault)\n")
+        __os_exit(1)
+    }
+    g := cast[*i64](uc + 40)
+    __bt_fault_r11 = g[3]
+    __bt_fault_sp = g[15]
+    __bt_fault_pc = g[16]
     if sig == 8 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
@@ -17,6 +30,7 @@ noinline fn __on_fault(sig: i64) -> never {
 fn __rt_init(sp: i64) {
     __argc = cast[*i64](sp)[0]
     __argv = sp + 8
+    stack_top = sp
     // report crashes as panics: handlers run on their own stack so that stack overflow works too
     ss: [3]i64
     ss[0] = cast[i64](ptr(__sigstack))
@@ -24,12 +38,23 @@ fn __rt_init(sp: i64) {
     syscall(131, ptr(ss), 0)
     sa: [4]i64
     sa[0] = cast[i64](__on_fault)
-    // SA_ONSTACK | SA_RESTORER | SA_NODEFER
-    sa[1] = 0x08000000 | 0x04000000 | 0x40000000
+    // SA_ONSTACK | SA_RESTORER | SA_NODEFER | SA_SIGINFO
+    sa[1] = 0x08000000 | 0x04000000 | 0x40000000 | 4
     sa[2] = cast[i64](__on_fault)
     syscall(13, 11, ptr(sa), 0, 8)
     syscall(13, 7, ptr(sa), 0, 8)
     syscall(13, 8, ptr(sa), 0, 8)
+}
+
+// the frames lie below the initial stack pointer (the lower end only bounds a stack pointer that
+// is nonsense)
+fn __os_stack_range() -> (i64, i64) {
+    return (stack_top - (1 << 36), stack_top)
+}
+
+fn __os_backtrace_off() -> bool {
+    v, set := env_get("ALC_BACKTRACE")
+    return set && v == "0"
 }
 
 // (not `-> never`: so that it is inlined; its callers are `never` functions)

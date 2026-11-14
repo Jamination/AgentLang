@@ -154,9 +154,18 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
         _ => return 0
     }
     if in_fault {
+        if __bt_busy {
+            __err("  ... (the stack trace stopped at a fault)\n")
+        }
         ExitProcess(1)
     }
     in_fault = true
+    // where the stack trace starts: CONTEXT (the second pointer of EXCEPTION_POINTERS) holds
+    // r11 at 0xD0, rsp at 0x98, rip at 0xF8
+    ctx := cast[*i64](info)[1]
+    __bt_fault_r11 = cast[*i64](ctx + 0xD0)[0]
+    __bt_fault_sp = cast[*i64](ctx + 0x98)[0]
+    __bt_fault_pc = cast[*i64](ctx + 0xF8)[0]
     if code == 0xC0000094 || code == 0xC0000095 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
@@ -189,6 +198,23 @@ fn __rt_init(sp: i64) {
         gui = true
         gui_console()
     }
+}
+
+fn __os_stack_range() -> (i64, i64) {
+    lo := 0
+    hi := 0
+    GetCurrentThreadStackLimits(&lo, &hi)
+    return (lo, hi)
+}
+
+// (GetEnvironmentVariableW into a buffer of its own: no allocation)
+fn __os_backtrace_off() -> bool {
+    name: [14]u16
+    for i, c in "ALC_BACKTRACE" {
+        name[i] = u16(c)
+    }
+    v: [4]u16
+    return GetEnvironmentVariableW(ptr(name), ptr(v), 4) == 1 && v[0] == u16('0')
 }
 
 // ---------- GUI programs ----------

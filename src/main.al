@@ -33,6 +33,7 @@ use "x86/emit.al"
 use "x86/mod.al"
 use "elf.al"
 use "pe.al"
+use "backtrace.al"
 use "priv.al"
 use "lower_mem.al"
 use "when.al"
@@ -383,6 +384,8 @@ priv struct Sources {
     // the `when`s of the program decided while files were still being loaded: (the `when`,
     // file, branch), checked again at the end
     decided: Vec[(WhenDecl, i64, i64)]
+    // the names of the `test` blocks: the function `__test_k` is test k (see program)
+    tests: Vec[str]
 }
 
 // file `file` gets the declarations in `decls` (a file, or the taken branch of one of its
@@ -872,6 +875,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     p := parser_new(toks, &src.errs)
     more := p.file()
     decls.extend(more.items())
+    src.tests = tests
     return decls
 }
 
@@ -998,6 +1002,9 @@ priv fn real_main() -> i64 {
         }
     }
     out := x86_compile(&module, ar.emit_asm)
+    if opt_enabled("backtrace") {
+        bt_attach(&module, &out, cx.file_names.items(), src.tests.items())
+    }
     mem("compiled")
     bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     if len(link_err) != 0 {
