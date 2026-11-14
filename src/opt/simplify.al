@@ -251,7 +251,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
     // ops without a rule below (most instructions): nothing to copy or match
     match self.f.insts[v].op {
         Const, FConst, Param, GAddr, FAddr, Alloca, Load, Store, Call, CallInd, Syscall, Proj, Phi,
-        MemCpy, MemSet => return None
+        MemCpy, MemSet, Atomic => return None
         _ => {}
     }
     inst := self.f.insts[v]

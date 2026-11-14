@@ -1353,6 +1353,108 @@ priv fn builtin_okp(k: TyK) -> bool {
     }
 }
 
+// the atomic builtins (sequentially consistent): `atomic_fence()`, `atomic_load(p)`,
+// `atomic_store(p, v)`, `atomic_swap / add / sub / and / or / xor(p, v)` (the old value),
+// `atomic_cas(p, expected, new) -> (old, bool)`; p is a *T, T an integer type (also bool and
+// pointers for load, store, swap, cas)
+priv fn atomic(self: *Fx, name: str, args: []Expr, pos: Pos) -> Val {
+    nargs := len(args)
+    want := match name {
+        "atomic_fence" => 0
+        "atomic_load" => 1
+        "atomic_cas" => 3
+        _ => 2
+    }
+    if self.bad_arity(name, nargs, want, pos) {
+        return val_err()
+    }
+    if want == 0 {
+        self.ins(Atomic, Void, vec[i64](), ATOMIC_FENCE)
+        return val_unit()
+    }
+    p := self.expr(&args[0], None)
+    if p.ty == T_ERR {
+        return val_err()
+    }
+    et := match self.cx.types.k(p.ty) {
+        Ptr(e) => e
+        _ => {
+            tn := self.tyname(p.ty)
+            self.err(args[0].pos, fmt("`", name, "` needs a pointer to an integer, found ", tn))
+            return val_err()
+        }
+    }
+    arith := name != "atomic_load" && name != "atomic_store" && name != "atomic_swap" && name != "atomic_cas"
+    ok := self.cx.types.is_int(et) || !arith && match self.cx.types.k(et) {
+        Bool, Ptr(_) => true
+        _ => false
+    }
+    if !ok {
+        tn := self.tyname(et)
+        what := if arith { "an integer" } else { "an integer, bool or pointer" }
+        self.err(args[0].pos, fmt("`", name, "` needs a pointer to ", what, ", found a pointer to ", tn))
+        return val_err()
+    }
+    pv := self.scalar(p)
+    ty := self.irt(et)
+    vals := vec[i64]()
+    for i in 1..nargs {
+        v := self.expr(&args[i], Some(et))
+        v = self.coerce(v, et, args[i].pos)
+        if v.ty == T_ERR {
+            return val_err()
+        }
+        vals.push(self.scalar(v))
+    }
+    match name {
+        "atomic_load" => return self.sval(et, self.ins(Atomic, ty, vec_one(pv), ATOMIC_LOAD))
+        "atomic_store" => {
+            self.ins(Atomic, ty, vec_two(pv, vals[0]), ATOMIC_STORE)
+            return val_unit()
+        }
+        "atomic_swap" => return self.sval(et, self.ins(Atomic, ty, vec_two(pv, vals[0]), ATOMIC_SWAP))
+        "atomic_add" => return self.sval(et, self.ins(Atomic, ty, vec_two(pv, vals[0]), ATOMIC_ADD))
+        "atomic_sub" => {
+            z := self.iconst(ty, 0)
+            neg := self.ins(Sub, ty, vec_two(z, vals[0]), 0)
+            return self.sval(et, self.ins(Atomic, ty, vec_two(pv, neg), ATOMIC_ADD))
+        }
+        "atomic_cas" => {
+            prev := self.ins(Atomic, ty, vec_of([]i64{pv, vals[0], vals[1]}), ATOMIC_CAS)
+            same := self.ins(Eq, I8, vec_two(prev, vals[0]), 0)
+            tys := []i64{et, T_BOOL}
+            tty := self.cx.types.intern(TyK.Tuple(vec_of(tys)))
+            offs := self.cx.types.tuple_offsets(tys)
+            t := self.temp(tty)
+            self.store_raw(self.add_off(t, offs[0]), prev, ty, self.cx.types.scalar_ir(et).1)
+            self.store_raw(self.add_off(t, offs[1]), same, I8, AK_ANY)
+            return self.mval(tty, t)
+        }
+        _ => {}
+    }
+    // and / or / xor: a loop of compare-and-swap (x86 has no fetch-and-op for them)
+    op := match name {
+        "atomic_and" => Op.And
+        "atomic_or" => Op.Or
+        _ => Op.Xor
+    }
+    alias := self.cx.types.scalar_ir(et).1
+    tmp := self.temp(et)
+    self.store_raw(tmp, self.ins(Atomic, ty, vec_one(pv), ATOMIC_LOAD), ty, alias)
+    head := self.new_block()
+    done := self.new_block()
+    self.jmp(head)
+    self.switch_to(head)
+    old := self.load_raw(tmp, ty, alias)
+    nv := self.ins(op, ty, vec_two(old, vals[0]), 0)
+    prev := self.ins(Atomic, ty, vec_of([]i64{pv, old, nv}), ATOMIC_CAS)
+    self.store_raw(tmp, prev, ty, alias)
+    same := self.ins(Eq, I8, vec_two(prev, old), 0)
+    self.br(same, done, head)
+    self.switch_to(done)
+    return self.sval(et, old)
+}
+
 // reports a call of builtin `name` with `nargs` arguments where it takes `want`; true if so
 priv fn bad_arity(self: *Fx, name: str, nargs: i64, want: i64, pos: Pos) -> bool {
     if nargs == want {
@@ -1530,6 +1632,23 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             // (library only: the start of a stack trace, see __bt_print in the prelude; the
             // function that uses it must not be inlined)
             return Some(self.sval(T_I64, self.ins(RaAddr, I64, vec[i64](), 0)))
+        }
+        "__clone" if self.cx.scope_prelude && nargs == 5 => {
+            // (library only: clone(flags, stack, ptid, ctid, tls) of a thread whose new stack
+            // holds its argument and its function, which the child calls: see emit.al)
+            vs := vec_one(self.iconst(I64, 56))
+            for i in 0..nargs {
+                v := self.expr(&args[i], Some(T_I64))
+                v = self.coerce(v, T_I64, args[i].pos)
+                if v.ty == T_ERR {
+                    return Some(val_err())
+                }
+                vs.push(self.scalar(v))
+            }
+            return Some(self.sval(T_I64, self.ins(Syscall, I64, vs, 1)))
+        }
+        "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence" => {
+            return Some(self.atomic(name, args, pos))
         }
         "syscall" => {
             if nargs == 0 || nargs > 7 {

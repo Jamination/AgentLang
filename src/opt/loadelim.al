@@ -106,8 +106,9 @@ fn loadelim_run(f: *Func) -> bool {
                 }
                 // these take raw pointers that may point into any alloca passed to them
                 MemCpy, MemSet => st.clear()
-                Call, CallInd, Syscall => {
-                    // may read or write anything reachable: only non-escaped stack slots survive
+                Call, CallInd, Syscall, Atomic => {
+                    // may read or write anything reachable (an atomic: what other threads
+                    // wrote): only non-escaped stack slots survive
                     n := 0
                     for k in 0..st.len {
                         match st[k].m.addr.base {

@@ -1105,6 +1105,61 @@ priv fn tls_block(self: *Sel, d: i64, g: i64) {
     self.e(Lea, 8, R(d), M(Mem{base: i32(d), idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(g)}))
 }
 
+// an atomic operation (Op.Atomic): load `mov`, store and swap `xchg`, add `lock xadd`, cas
+// `lock cmpxchg`, fence `mfence`; results narrower than 32 bits are zero-extended, as loads are
+priv fn atomic(self: *Sel, v: i64) {
+    i := &self.f.insts[v]
+    k := i.k
+    if k == ATOMIC_FENCE {
+        self.e(Mfence, 0, Opnd.None, Opnd.None)
+        return
+    }
+    ty := i.ty
+    sz := sz_of(ty)
+    m := self.addr(i.args[0])
+    d := 0
+    match k {
+        ATOMIC_LOAD => {
+            d = self.vr(v)
+            if sz < 4 {
+                mi := minst_new(Movzx, sz, R(d), M(m))
+                mi.sz2 = 4
+                self.out.push(mi)
+            } else {
+                self.e(Mov, sz, R(d), M(m))
+            }
+            return
+        }
+        ATOMIC_STORE => {
+            t := new_vreg(&self.mf, 0)
+            self.e(Mov, 8, R(t), self.mov_src(i.args[1]))
+            self.e(Xchg, sz, M(m), R(t))
+            return
+        }
+        ATOMIC_SWAP, ATOMIC_ADD => {
+            d = self.vr(v)
+            self.e(Mov, 8, R(d), self.mov_src(i.args[1]))
+            self.e(if k == ATOMIC_ADD { Xadd } else { Xchg }, sz, M(m), R(d))
+        }
+        _ => {
+            // cas
+            t := new_vreg(&self.mf, 0)
+            self.e(Mov, 8, R(t), self.mov_src(i.args[2]))
+            self.e(Mov, 8, R(RAX), self.mov_src(i.args[1]))
+            self.e(Cmpxchg, sz, M(m), R(t))
+            d = self.vr(v)
+            self.e(Mov, 8, R(d), R(RAX))
+        }
+    }
+    if sz < 4 {
+        mi := minst_new(Movzx, sz, R(d), R(d))
+        mi.sz2 = 4
+        self.out.push(mi)
+    } else if sz == 4 {
+        self.e(Mov, 4, R(d), R(d))
+    }
+}
+
 priv fn addr(self: *Sel, v: i64) -> Mem {
     m := mem_new()
     self.addr_term(v, &m, 0, true)
@@ -1937,12 +1992,16 @@ priv fn inst(self: *Sel, v: i64) {
                 self.e(Mov, 8, R(sr[k]), srcs[k])
                 used.push(sr[k])
             }
-            self.out.push(self.mf.mir_with_uses(MOp.Syscall, 0, Opnd.None, used.items()))
+            sc := self.mf.mir_with_uses(MOp.Syscall, 0, Opnd.None, used.items())
+            // k 1: clone of a thread, whose child runs the code after the instruction (emit)
+            sc.tgt = i32(i.k)
+            self.out.push(sc)
             if self.needed[v] {
                 d := self.vr(v)
                 self.e(Mov, 8, R(d), R(RAX))
             }
         }
+        Atomic => self.atomic(v)
         MemCpy, MemSet => {
             d := self.mov_src(i.args[0])
             s := self.mov_src(i.args[1])

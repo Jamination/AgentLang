@@ -160,6 +160,11 @@ enum MOp {
     Push,
     Pop,
     Zero, // xor r32, r32 (clobbers flags)
+    // atomics: a = memory, b = a register, read and written (the old value)
+    Xchg,    // xchg (locked by itself)
+    Xadd,    // lock xadd
+    Cmpxchg, // lock cmpxchg: compares with rax, which receives the old value
+    Mfence,
 }
 
 const CC_B: u8 = 2
@@ -435,9 +440,33 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
                 _ => {}
             }
         }
+        Xchg, Xadd => {
+            r := reg_of_opnd(&i.b)
+            du[q] = r
+            du[q + 1] = r
+            q += 2
+            nd = 1
+            q = du_opnd(&i.a, du, q)
+        }
+        Cmpxchg => {
+            du[q] = RAX
+            du[q + 1] = RAX
+            q += 2
+            nd = 1
+            q = du_opnd(&i.b, du, q)
+            q = du_opnd(&i.a, du, q)
+        }
+        Mfence => {}
     }
     du[p] = nd | ((q - p - 1 - nd) << 8) | (flags << 16)
     return q
+}
+
+priv fn reg_of_opnd(o: *Opnd) -> i64 {
+    match o {
+        R(r) => return r
+        _ => panic("mir: a register operand was expected")
+    }
 }
 
 // Renaming registers: the callers either apply a lookup table or substitute one register;

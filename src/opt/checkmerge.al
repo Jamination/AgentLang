@@ -47,7 +47,7 @@ fn checkmerge_run(f: *Func) -> bool {
             }
             for v in f.blocks[cur].insts {
                 o := f.insts[v].op
-                if o == Call || o == CallInd || o == Syscall || o == Phi {
+                if o == Call || o == CallInd || o == Syscall || o == Atomic || o == Phi {
                     break walk
                 }
             }

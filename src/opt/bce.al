@@ -260,7 +260,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
     for b in l.blocks {
         for v in f.blocks[b].insts {
             o := f.insts[v].op
-            if o == Call || o == CallInd || o == Syscall {
+            if o == Call || o == CallInd || o == Syscall || o == Atomic {
                 return false
             }
         }

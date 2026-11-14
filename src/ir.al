@@ -138,7 +138,19 @@ enum Op {
     Ctz,
     Clz,
     RaAddr, // the address of the slot that holds the function's return address (`__ra_addr()`)
+    // a sequentially consistent atomic operation, k = ATOMIC_*: load [addr], store / swap /
+    // add [addr, val], cas [addr, expected, new] (all but store yield the old value; ty: the
+    // value's type), fence []. Not pure, clobbers memory: a barrier for every memory
+    // optimisation (BOOTSTRAP.md, "Threads")
+    Atomic,
 }
+
+const ATOMIC_LOAD = 0
+const ATOMIC_STORE = 1
+const ATOMIC_SWAP = 2
+const ATOMIC_ADD = 3
+const ATOMIC_CAS = 4
+const ATOMIC_FENCE = 5
 
 fn is_cmp(self: Op) -> bool {
     match self {
@@ -164,7 +176,7 @@ fn is_commutative(self: Op) -> bool {
 // no side effects, no memory dependence, cannot trap
 fn is_pure(self: Op) -> bool {
     match self {
-        Param, Alloca, SDiv, UDiv, SRem, URem, Load, Store, Call, CallInd, Syscall, Proj, Phi, MemCpy, MemSet => false
+        Param, Alloca, SDiv, UDiv, SRem, URem, Load, Store, Call, CallInd, Syscall, Proj, Phi, MemCpy, MemSet, Atomic => false
         _ => true
     }
 }
@@ -172,7 +184,7 @@ fn is_pure(self: Op) -> bool {
 // may read or write any memory the function can reach (calls, bulk memory operations)
 fn clobbers(self: Op) -> bool {
     match self {
-        Call, CallInd, Syscall, MemCpy, MemSet => true
+        Call, CallInd, Syscall, MemCpy, MemSet, Atomic => true
         _ => false
     }
 }

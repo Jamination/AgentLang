@@ -9,6 +9,7 @@ fn lower_mem_is_builtin(name: str) -> bool {
         "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
         "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed", "panic" => true
         "fmt", "hash", "put", "print", "clone", "mulhi" => true
+        "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence" => true
         _ => false
     }
 }

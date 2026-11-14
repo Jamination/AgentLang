@@ -473,6 +473,14 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
         Syscall => {
             e.b1(0x0F)
             e.b1(0x05)
+            if i.tgt == 1 {
+                // clone of a thread (`__clone`): the child (rax 0) runs on the new stack, which
+                // holds the argument and the function: test eax, eax; jnz +6; pop rdi; pop rax;
+                // call rax; ud2 (the function ends the thread, it never returns)
+                for x in []u8{0x85, 0xC0, 0x75, 0x06, 0x5F, 0x58, 0xFF, 0xD0, 0x0F, 0x0B} {
+                    e.b1(x)
+                }
+            }
         }
         Ud2 => {
             e.b1(0x0F)
@@ -608,6 +616,22 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                 e.op(false, 0, false, 0x31, u8(r & 15), &rm, false)
             }
         }
+        Xchg, Xadd, Cmpxchg => {
+            s := reg_of(&i.b)
+            rm := e.rm(&i.a)
+            b8 := sz == 1
+            opc: i64 = match i.op {
+                Xchg => if b8 { 0x86 } else { 0x87 }
+                Xadd => if b8 { 0x0FC0 } else { 0x0FC1 }
+                _ => if b8 { 0x0FB0 } else { 0x0FB1 }
+            }
+            e.op(p66, if i.op == Xchg { u8(0) } else { u8(0xF0) }, w, opc, u8(s & 15), &rm, b8 && byte_reg_needs_rex(&i.b))
+        }
+        Mfence => {
+            e.b1(0x0F)
+            e.b1(0xAE)
+            e.b1(0xF0)
+        }
         Jmp, Jcc => panic("unreachable")
     }
 }
@@ -615,7 +639,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
 priv fn sets_flags(op: MOp) -> bool {
     match op {
         Add, Sub, And, Or, Xor, Cmp, Test, Imul, Imul3, Neg, Shl, Shr, Sar, Rol, Ror, Idiv, Div,
-            Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap => true
+            Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap, Xadd, Cmpxchg => true
         _ => false
     }
 }

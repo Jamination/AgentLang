@@ -34,7 +34,7 @@ fn opt_is_check_trap(f: *Func, b: i64) -> bool {
     }
     for v in f.blocks[b].insts {
         i := &f.insts[v]
-        if i.op == CallInd || i.op == Syscall {
+        if i.op == CallInd || i.op == Syscall || i.op == Atomic {
             return false
         }
         if i.op == Call && !(i.k >= 0 && i.k < check_fail.len && check_fail[i.k]) {
