@@ -71,7 +71,7 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
                 // (library code: its frames are not shown, the call's line stands for it)
                 f.im(nv).set_srcloc(call_inst.srcloc())
             } else if gi.srcloc() != 0 {
-                l := locs.src_loc_inlined(gi.srcloc(), call_inst.srcloc(), &lmemo)
+                l := locs.src_loc_inlined(gi.srcloc(), call_inst.srcloc(), &lmemo, f.w)
                 f.im(nv).set_srcloc(l)
             }
             vmap[gv] = nv

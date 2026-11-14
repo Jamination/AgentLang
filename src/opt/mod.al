@@ -59,19 +59,19 @@ fn opt_trace(what: str, f: *Func) {
     }
 }
 
-// ---------- keeping a function after work_end() ----------
-// After work_end() the parts of the function made while working are in the discarded work
-// region; they get new memory in the main arena (as `clone(*f)` would). A list still in the
-// main arena (never moved while working) is kept: nothing else refers to it. A list made while
+// ---------- keeping a function after work_end(w) ----------
+// After work_end(w) the parts of the function made while working are in the discarded work
+// region; they get new memory in the arena of the thread (as `clone(*f)` would). A list
+// elsewhere (never moved while working) is kept: nothing else refers to it. A list made while
 // working that is empty but has room is replaced too (a later push would write into the
-// discarded region).
-priv fn in_main(p: i64) -> bool {
-    // the main arena is the one in use after work_end()
-    return p >= __heap_base && p < __heap_end
+// discarded region). (Kept lists may be in the arena of another thread: those made when the
+// function was lowered, or by the thread that ran opt_first.)
+priv inline fn in_main(w: *Work, p: i64) -> bool {
+    return !work_holds(w, p)
 }
 
-priv inline fn keep_list[T](l: *Vec[T]) {
-    if len(l.buf) > 0 && !in_main(cast[i64](ptr(l.buf))) {
+priv inline fn keep_list[T](w: *Work, l: *Vec[T]) {
+    if len(l.buf) > 0 && !in_main(w, cast[i64](ptr(l.buf))) {
         *l = vec_of(l.items())
     }
 }
@@ -79,6 +79,7 @@ priv inline fn keep_list[T](l: *Vec[T]) {
 // the argument lists made while working move to one new buffer (a phi's with the blocks of
 // its inputs, without spare room); an empty one no longer points anywhere
 priv fn keep_args(f: *Func) {
+    w := f.w
     total := 0
     for v in 0..f.insts.len {
         i := &f.insts[v]
@@ -86,7 +87,7 @@ priv fn keep_args(f: *Func) {
         if n == 0 {
             continue
         }
-        if !in_main(cast[i64](ptr(i.args))) {
+        if !in_main(w, cast[i64](ptr(i.args))) {
             total += if i.op == Phi { 2 * n } else { n }
         }
     }
@@ -102,7 +103,7 @@ priv fn keep_args(f: *Func) {
             }
             continue
         }
-        if in_main(cast[i64](ptr(i.args))) {
+        if in_main(w, cast[i64](ptr(i.args))) {
             continue
         }
         memcopy(ptr(buf[at..]), ptr(i.args), n * 8)
@@ -132,9 +133,9 @@ priv fn keep_args(f: *Func) {
 // scratch region
 priv fn orphan_map(f: *Func) -> ([]i32, i64, i64, i64) {
     n := f.insts.len
-    scratch_on()
+    scratch_on(f.w)
     m := alloc_neg1(n)
-    scratch_off()
+    scratch_off(f.w)
     for b in 0..f.blocks.len {
         for v in f.blocks[b].insts {
             m[v] = 0
@@ -179,13 +180,14 @@ priv fn orphan_map(f: *Func) -> ([]i32, i64, i64, i64) {
     return (m, c, total, lists)
 }
 
-// the instructions of the blocks, renumbered by m, in new memory of the main arena (also their
-// argument lists and the values returned: `total` words, and the lists of the blocks: `lists`
-// numbers); the instruction list is compacted in place when it is in the main arena
+// the instructions of the blocks, renumbered by m, in new memory of the thread's arena (also
+// their argument lists and the values returned: `total` words, and the lists of the blocks:
+// `lists` numbers); the instruction list is compacted in place when it is not in the work
+// region
 priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
     n := f.insts.len
     ins := f.insts
-    if !in_main(cast[i64](ptr(f.insts.buf))) {
+    if !in_main(f.w, cast[i64](ptr(f.insts.buf))) {
         ins = Vec[Inst]{buf: mkslice[Inst](__alloc_raw(c * sizeof[Inst]()), c), len: c}
     }
     buf := mkslice[i64](__alloc_raw(total * 8), total)
@@ -246,26 +248,27 @@ priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
 }
 
 priv fn keep_func(f: *Func) {
-    if len(f.name) > 0 && !in_main(cast[i64](ptr(f.name))) {
+    w := f.w
+    if len(f.name) > 0 && !in_main(w, cast[i64](ptr(f.name))) {
         f.name = clone(f.name)
     }
-    keep_list(&f.params)
-    keep_list(&f.rets)
-    keep_list(&f.blocks)
+    keep_list(w, &f.params)
+    keep_list(w, &f.rets)
+    keep_list(w, &f.blocks)
     m, c, total, lists := orphan_map(f)
     if len(m) > 0 {
         drop_orphans(f, m, c, total, lists)
-        scratch_reset()
+        scratch_reset(w)
         return
     }
-    scratch_reset()
-    keep_list(&f.insts)
+    scratch_reset(w)
+    keep_list(w, &f.insts)
     keep_args(f)
     for b in 0..f.blocks.len {
         blk := &f.blocks[b]
-        keep_list(&blk.insts)
+        keep_list(w, &blk.insts)
         match blk.term {
-            Ret(&vs) => keep_list(vs)
+            Ret(&vs) => keep_list(w, vs)
             _ => {}
         }
     }
@@ -274,11 +277,10 @@ priv fn keep_func(f: *Func) {
 // ---------- passes that cannot change anything are not run ----------
 // Every pass is a function of the IR of the function and tells whether it changed it (also for
 // what the passes it calls do; unroll_run and bce_run may add preheaders without saying so:
-// a preheader made counts as a change). `sk_gen` counts the changes; a pass that reported no
+// a preheader made counts as a change). `Work.gen` counts the changes; a pass that reported no
 // change when it was last run at the current count would report no change again: it is
-// skipped. Some passes are also known to be clean after a change (see opt_pass).
-priv sk_gen: i64
-priv sk_clean: [16]i64 // sk_gen + 1 when pass k is known to change nothing
+// skipped. Some passes are also known to be clean after a change (see opt_pass). `Work.clean[k]`
+// is gen + 1 when pass k is known to change nothing. (The Work of the thread: f.w.)
 
 // keys of the passes (simplify_run's parts use 7..9)
 const PASS_PRUNE = 0
@@ -292,68 +294,71 @@ const PASS_CFG = 8
 const PASS_PHIS = 9
 
 fn opt_pass(k: i64, f: *Func, p: fn(*Func) -> bool) -> bool {
-    if sk_clean[k] == sk_gen + 1 {
+    w := f.w
+    if w.clean[k] == w.gen + 1 {
         return false
     }
-    prune_clean := sk_clean[PASS_PRUNE] == sk_gen + 1
+    prune_clean := w.clean[PASS_PRUNE] == w.gen + 1
     // every pass but simplify_cfg (which folds branches first) asks for its first CFG analysis
     // before it changes anything
-    ir_memo_pass(sk_gen, k != PASS_CFG)
+    ir_memo_pass(w, w.gen, k != PASS_CFG)
     if p(f) {
-        sk_gen += 1
-        now := sk_gen + 1
+        w.gen += 1
+        now := w.gen + 1
         // passes that leave nothing for a second run of themselves
         if k == PASS_PRUNE || k == PASS_DCE || k == PASS_PHIS {
-            sk_clean[k] = now
+            w.clean[k] = now
         }
-        if k == PASS_MEM2REG && mem2reg_settled() {
+        if k == PASS_MEM2REG && mem2reg_settled(f) {
             // its last change ended with trivial phis and DCE (DCE removes no input of a live
             // phi), then a round found nothing; it keeps the CFG and the phi blocks of the
             // phis there are, and gives its phis the predecessors: a pruned function stays so
-            sk_clean[PASS_MEM2REG] = now
-            sk_clean[PASS_PHIS] = now
-            sk_clean[PASS_DCE] = now
+            w.clean[PASS_MEM2REG] = now
+            w.clean[PASS_PHIS] = now
+            w.clean[PASS_DCE] = now
             if prune_clean {
-                sk_clean[PASS_PRUNE] = now
+                w.clean[PASS_PRUNE] = now
             }
         }
         return true
     }
-    sk_clean[k] = sk_gen + 1
+    w.clean[k] = w.gen + 1
     if k == PASS_CFG {
         // simplify_cfg begins with prune: it found nothing either
-        sk_clean[PASS_PRUNE] = sk_gen + 1
+        w.clean[PASS_PRUNE] = w.gen + 1
     }
     return false
 }
 
 // the number of reported changes so far: equal numbers at the starts of two passes mean the
 // same IR (every work session starts with a new number)
-fn opt_gen() -> i64 {
-    return sk_gen
+fn opt_gen(f: *Func) -> i64 {
+    return f.w.gen
 }
 
 // the IR may have changed in any way
-priv fn sk_forget() {
-    sk_gen += 1
+priv fn sk_forget(f: *Func) {
+    f.w.gen += 1
 }
 
 // the passes that are clean now, as a bit set
-priv fn sk_save() -> i64 {
+priv fn sk_save(f: *Func) -> i64 {
+    w := f.w
     bits := 0
     for k in 0..16 {
-        if sk_clean[k] == sk_gen + 1 {
+        if w.clean[k] == w.gen + 1 {
             bits |= 1 << k
         }
     }
     return bits
 }
 
-priv fn sk_restore(bits: i64) {
-    sk_forget()
+priv fn sk_restore(f: *Func, bits: i64) {
+    sk_forget(f)
+    w := f.w
     for k in 0..16 {
         if bits & (1 << k) != 0 {
-            sk_clean[k] = sk_gen + 1
+            w.clean[k] = w.gen + 1
         }
     }
 }
@@ -409,11 +414,11 @@ priv fn local_opt(f: *Func, level: i64) {
         if !opt_enabled("unroll") {
             break
         }
-        made := licm_preheaders_made()
+        made := licm_preheaders_made(f)
         unrolled := unroll_run(f)
         // (preheaders change the function without being reported)
-        if unrolled || licm_preheaders_made() != made {
-            sk_forget()
+        if unrolled || licm_preheaders_made(f) != made {
+            sk_forget(f)
         }
         if !unrolled {
             break
@@ -433,10 +438,10 @@ priv fn local_opt(f: *Func, level: i64) {
         if !opt_enabled("bce") {
             break
         }
-        made := licm_preheaders_made()
+        made := licm_preheaders_made(f)
         hoisted := bce_run(f)
-        if hoisted || licm_preheaders_made() != made {
-            sk_forget()
+        if hoisted || licm_preheaders_made(f) != made {
+            sk_forget(f)
         }
         if !hoisted {
             break
@@ -457,17 +462,19 @@ priv fn local_opt(f: *Func, level: i64) {
 
 // first_done[fid]: opt_first has run for the function; clean_at[fid]: the passes that are clean
 // (see opt_pass) at its end (the function does not change until its local_opt)
+// clean_end[fid]: the passes that are clean when the optimisation of the function is over (it
+// does not change until the back end compiles it; one module per run of the compiler). Sized
+// by opt_optimize for the functions of the module; an element is written by the thread that
+// works on the function (the back end's threads run opt_first at -O0).
 priv first_done: Vec[bool]
 priv clean_at: Vec[i64]
-// clean_end[fid]: the passes that are clean when the optimisation of the function is over (it
-// does not change until the back end compiles it; one module per run of the compiler)
 priv clean_end: Vec[i64]
 
 // The cleanups the back end runs first (prune, trivial phis, DCE), each skipped where the
-// optimiser left the function clean for it.
+// optimiser left the function clean for it (f.w is set).
 fn opt_backend_cleanup(f: *Func, fid: i64) {
     bits := if fid < clean_end.len { clean_end[fid] } else { 0 }
-    sk_restore(bits)
+    sk_restore(f, bits)
     opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
     opt_pass(PASS_PHIS, f, cleanup_trivial_phis)
     opt_pass(PASS_DCE, f, cleanup_dce)
@@ -475,55 +482,53 @@ fn opt_backend_cleanup(f: *Func, fid: i64) {
 
 // The first part of the optimisation of one function, also callable right after the function
 // is lowered (opt_optimize then skips it): prune, mem2reg, dce and, when optimising, simplify
-// and tail recursion. It reads nothing of the module but the function (not the alias classes
-// of loads and stores either) and makes no loads or stores.
-fn opt_first(m: *Module, fid: i64, level: i64) {
-    // (grown in the main arena, before work_begin)
-    if first_done.len < m.funcs.len {
-        first_done.resize(m.funcs.len, false)
-        clean_at.resize(m.funcs.len, 0)
-        clean_end.resize(m.funcs.len, 0)
-    }
+// and tail recursion, by the thread whose Work w is. It reads nothing of the module but the
+// function (not the alias classes of loads and stores either) and makes no loads or stores.
+fn opt_first(m: *Module, fid: i64, level: i64, w: *Work) {
+    assert fid < first_done.len, "opt_first before opt_optimize"
     f := &m.funcs[fid]
     if !f.lowered || first_done[fid] {
         return
     }
     first_done[fid] = true
-    work_begin()
+    f.w = w
+    work_begin(w)
     ir_memo_begin(f)
-    // at -O0 only mem2reg adds instructions: keep the list in the main arena
-    ir_insts_main = level == 0
-    sk_forget()
+    // at -O0 only mem2reg adds instructions: keep the list outside the work region
+    w.insts_main = level == 0
+    sk_forget(f)
     opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
     opt_pass(PASS_MEM2REG, f, mem2reg_run)
     opt_pass(PASS_DCE, f, cleanup_dce)
     if level > 0 {
         simplify_run(f)
         if opt_enabled("tre") && tre_run(f, fid) {
-            sk_forget()
+            sk_forget(f)
             opt_trace("after-tre", f)
             simplify_run(f)
         }
-        clean_at[fid] = sk_save()
+        clean_at[fid] = sk_save(f)
     } else {
-        clean_end[fid] = sk_save()
+        clean_end[fid] = sk_save(f)
     }
     // keep the function, drop the passes' temporary data (see work_begin in base.al)
-    ir_memo_end()
-    work_end()
-    ir_insts_main = false
+    ir_memo_end(w)
+    work_end(w)
+    w.insts_main = false
     keep_func(f)
+    f.w = nil
 }
 
 // At -O0 the optimisation is opt_first alone, which reads nothing of the module but the
 // function: opt_optimize leaves it to the back end, which runs it per function (opt_finish), in
-// its worker processes when it has some (see x86_compile).
+// its worker threads when it has some (see x86_compile).
 priv deferred: bool
 
-// the optimisation of function fid that opt_optimize left to the back end (nothing if done)
-fn opt_finish(m: *Module, fid: i64) {
+// the optimisation of function fid that opt_optimize left to the back end (nothing if done),
+// by the thread whose Work w is
+fn opt_finish(m: *Module, fid: i64, w: *Work) {
     if deferred {
-        opt_first(m, fid, 0)
+        opt_first(m, fid, 0, w)
     }
 }
 
@@ -532,19 +537,27 @@ fn opt_deferred() -> bool {
     return deferred
 }
 
+// Optimises the module on the compiler's main thread (work_main()); at -O0 only prepares what
+// opt_finish needs. Everything the back end's threads read of the optimiser's state (the
+// tables by function, the environment switches) is filled here, before they start.
 fn opt_optimize(m: *Module, level: i64) {
+    read_env()
     n := m.funcs.len
     check_fail = vec_fill(n, false)
     for fid in 0..n {
         nm := m.funcs[fid].name
         check_fail[fid] = nm == "__bounds_fail" || nm == "__div_fail" || nm == "__step_fail"
     }
+    first_done = vec_fill(n, false)
+    clean_at = vec_fill(n, 0)
+    clean_end = vec_fill(n, 0)
     if level == 0 {
         deferred = true
         return
     }
+    w := work_main()
     for fid in 0..n {
-        opt_first(m, fid, level)
+        opt_first(m, fid, level, w)
     }
     // call graph facts
     call_counts := vec_fill(n, 0)
@@ -615,6 +628,7 @@ fn opt_optimize(m: *Module, level: i64) {
         call_counts: call_counts,
         addr_taken: addr_taken,
         spec: spec_new(n, devirt && opt_enabled("spec")),
+        w: w,
     }
     for fid in order {
         opt_func(m, fid, &st)
@@ -632,32 +646,37 @@ struct OptState {
     call_counts: Vec[i64]
     addr_taken: Vec[bool]
     spec: Spec
+    w: *Work // the Work of the thread (the main thread's)
 }
 
 // the local passes and inlining for function fid, which becomes final
 fn opt_func(m: *Module, fid: i64, st: *OptState) {
     if m.funcs[fid].lowered {
-        work_begin()
-        ir_memo_begin(&m.funcs[fid])
-        sk_restore(clean_at[fid])
-        local_opt(&m.funcs[fid], st.level)
+        w := st.w
+        f := &m.funcs[fid]
+        f.w = w
+        work_begin(w)
+        ir_memo_begin(f)
+        sk_restore(f, clean_at[fid])
+        local_opt(f, st.level)
         inlined, direct := inline_run(m, fid, st.done.items(), st.call_counts.items(), st.addr_taken.items(), &st.pol, st.costs.items())
         if inlined {
-            sk_forget()
-            opt_trace("after-inline", &m.funcs[fid])
-            local_opt(&m.funcs[fid], st.level)
+            sk_forget(f)
+            opt_trace("after-inline", f)
+            local_opt(f, st.level)
         }
         // the indirect calls of known targets the passes after inlining exposed (or the
         // inliner did not reach) become direct; the addresses of the functions such calls
         // took may be dead
         if st.pol.devirt && inline_devirt_all(m, fid) || direct && !inlined {
-            sk_forget()
-            opt_pass(PASS_DCE, &m.funcs[fid], cleanup_dce)
+            sk_forget(f)
+            opt_pass(PASS_DCE, f, cleanup_dce)
         }
-        ir_memo_end()
-        work_end()
-        clean_end[fid] = sk_save()
-        keep_func(&m.funcs[fid])
+        ir_memo_end(w)
+        work_end(w)
+        clean_end[fid] = sk_save(f)
+        keep_func(f)
+        f.w = nil
     }
     st.done[fid] = true
 }

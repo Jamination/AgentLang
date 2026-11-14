@@ -9,7 +9,7 @@ priv struct Avail {
 
 fn loadelim_run(f: *Func) -> bool {
     cfg := cfg_new(f)
-    esc := alias_escaped_cached(f, opt_gen())
+    esc := alias_escaped_cached(f, opt_gen(f))
     repl := vec_fill(f.insts.len, i32(NOV))
     dead := alloc[bool](f.insts.len)
     changed := false

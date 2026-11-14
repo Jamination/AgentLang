@@ -5,7 +5,6 @@
 priv extern "kernel32.dll" fn CloseHandle(h: i64) -> i32
 priv extern "kernel32.dll" fn CreateFileW(name: *u16, access: u32, share: u32, security: i64, disposition: u32, flags: u32, template: i64) -> i64
 priv extern "kernel32.dll" fn GetFileInformationByHandle(h: i64, info: *u32) -> i32
-priv extern "kernel32.dll" fn CreatePipe(r: *i64, w: *i64, security: i64, size: u32) -> i32
 priv extern "kernel32.dll" fn WaitForSingleObject(h: i64, ms: u32) -> u32
 priv extern "kernel32.dll" fn CreateThread(security: i64, stack: i64, start: fn(i64) -> u32, arg: i64, flags: u32, id: i64) -> i64
 priv extern "kernel32.dll" fn SetThreadStackGuarantee(size: *u32) -> i32
@@ -163,29 +162,4 @@ fn file_id(path: str) -> (str, bool) {
 fn cpu_count() -> i64 {
     // ALL_PROCESSOR_GROUPS
     return max(i64(GetActiveProcessorCount(0xFFFF)), 1)
-}
-
-// The parallel back end (src/x86/mod.al) forks worker processes; Windows has no fork, so the
-// compiler does all the work itself (can_fork) and these only report that.
-
-fn shared_map(bytes: i64) -> i64 {
-    return 0
-}
-
-fn fork_worker(quiet: bool) -> i64 {
-    return -38
-}
-
-fn queue_new(items: []i64) -> i64 {
-    return -1
-}
-
-// an anonymous pipe (not inherited)
-fn pipe_open() -> (i64, i64) {
-    r: i64
-    w: i64
-    if CreatePipe(&r, &w, 0, 0) == 0 {
-        return (-1, -1)
-    }
-    return (r, w)
 }

@@ -1083,20 +1083,22 @@ priv fn win_tls(self: *Sel, v: i64) -> bool {
     return target_os == TargetWindows && i.op == GAddr && self.m.globals[i.k].tls
 }
 
-// the global the Windows loader writes the index of the program's thread block to (found once)
-priv win_tls_index := -2
+// the global the Windows loader writes the index of the program's thread block to, or -1 (found
+// by isel_init before any function is selected: the back end's threads only read it)
+priv win_tls_index := -1
+
+fn isel_init(m: *Module) {
+    win_tls_index = -1
+    for gi in 0..m.globals.len {
+        if m.globals[gi].name == "__win_tls_index" && !m.globals[gi].readonly {
+            win_tls_index = gi
+        }
+    }
+}
 
 // Windows: d = the address of the thread-local global g: the TEB's ThreadLocalStoragePointer
 // (gs:0x58) indexed by __win_tls_index is this thread's block (see layout_tls)
 priv fn tls_block(self: *Sel, d: i64, g: i64) {
-    if win_tls_index == -2 {
-        win_tls_index = -1
-        for gi in 0..self.m.globals.len {
-            if self.m.globals[gi].name == "__win_tls_index" && !self.m.globals[gi].readonly {
-                win_tls_index = gi
-            }
-        }
-    }
     assert win_tls_index >= 0, "isel: the run-time library lacks __win_tls_index"
     t := new_vreg(&self.mf, 0)
     self.e(Mov, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0x58, kind: MK_TLS, id: -1}))

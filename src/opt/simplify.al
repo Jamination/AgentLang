@@ -1275,15 +1275,15 @@ priv fn simplify_cfg(f: *Func) -> bool {
             break
         }
         // per-round tables live on the scratch heap (see base.al)
-        scratch_reset()
+        scratch_reset(f.w)
         // (the CFG analyses are kept for the next pass: not on the scratch heap)
         rpo, preds := f.rpo_preds()
-        scratch_on()
+        scratch_on(f.w)
         merged := false
         repl := vec_fill(f.insts.len, i32(NOV))
         nrepl := 0
         dead := vec_fill(f.blocks.len, false)
-        scratch_off()
+        scratch_off(f.w)
         for b in rpo {
             if dead[b] {
                 continue
@@ -1342,7 +1342,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         } else if !may_forward(f) {
             break
         }
-        scratch_reset()
+        scratch_reset(f.w)
         rpo, preds := f.rpo_preds()
         did := false
         for e in rpo {
@@ -1415,16 +1415,16 @@ priv fn simplify_cfg(f: *Func) -> bool {
         } else if !may_thread4(f) {
             break
         }
-        scratch_reset()
+        scratch_reset(f.w)
         rpo, preds := f.rpo_preds()
-        scratch_on()
+        scratch_on(f.w)
         uses := f.use_counts()
         // blocks whose edges or phis changed this round: their entries in preds / phi lists are
         // stale, so they wait for the next round (one threading per round made long chains of
         // `&&` / `||` quadratic in time and memory)
         touched := vec_fill(f.blocks.len, false)
         did := false
-        scratch_off()
+        scratch_off(f.w)
         blocks: for b in rpo {
             c, t, e := phi_branch(f, b)
             if c == NOV || touched[b] {
@@ -1551,11 +1551,11 @@ priv fn simplify_cfg(f: *Func) -> bool {
         } else if !may_thread5(f) {
             break
         }
-        scratch_reset()
+        scratch_reset(f.w)
         cfg := cfg_new(f)
-        scratch_on()
+        scratch_on(f.w)
         def_block := f.block_of()
-        scratch_off()
+        scratch_off(f.w)
         did := false
         blocks2: for b in cfg.rpo {
             c, t, e := phi_branch(f, b)
@@ -1725,7 +1725,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
         } else if !may_ifconv(f) {
             break
         }
-        scratch_reset()
+        scratch_reset(f.w)
         rpo, preds := f.rpo_preds()
         did := false
         for b in rpo {

@@ -1017,7 +1017,7 @@ priv fn real_main() -> i64 {
     mem("optimized")
     if ar.emit_ir {
         for fi in 0..module.funcs.len {
-            opt_finish(&module, fi)
+            opt_finish(&module, fi, work_main())
         }
         for fi in 0..module.funcs.len {
             if module.funcs[fi].lowered {
@@ -1153,6 +1153,6 @@ priv t0: i64
 priv fn mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
-        eput(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak() >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
+        eput(fmt("[mem] ", phase, ": ", mem_used() >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
     }
 }

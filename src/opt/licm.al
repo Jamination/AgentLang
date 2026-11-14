@@ -21,12 +21,10 @@ fn licm_loop_order(loops: *Loops) -> Vec[i64] {
     return order
 }
 
-// how many preheaders licm_make_preheaders has made so far (callers that do not report them
-// as a change: unroll_run, bce_run)
-priv preheaders_made: i64
-
-fn licm_preheaders_made() -> i64 {
-    return preheaders_made
+// how many preheaders licm_make_preheaders has made so far in the thread (callers that do not
+// report them as a change: unroll_run, bce_run; counted in f.w)
+fn licm_preheaders_made(f: *Func) -> i64 {
+    return f.w.preheaders
 }
 
 fn licm_make_preheaders(f: *Func) -> bool {
@@ -42,7 +40,7 @@ fn licm_make_preheaders(f: *Func) -> bool {
             continue
         }
         p := f.new_block()
-        preheaders_made += 1
+        f.w.preheaders += 1
         f.blocks[p].term = Jmp(h)
         for o in outside {
             f.retarget(o, h, p)
@@ -114,7 +112,7 @@ fn licm_run(f: *Func) -> bool {
         return changed
     }
     // (unchanged since this pass began unless preheaders were made)
-    esc := alias_escaped_cached(f, if changed { -1 } else { opt_gen() })
+    esc := alias_escaped_cached(f, if changed { -1 } else { opt_gen(f) })
     def_block := f.block_of()
     order := licm_loop_order(&loops)
     // one membership buffer for all loops (cleared after each): a fresh one per loop made

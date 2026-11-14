@@ -1151,7 +1151,8 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
     }
 }
 
-fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
+// (w: the Work of the thread, whose scratch region holds the graphs of a round)
+fn regalloc_allocate(mf: *MFunc, order: []i64, w: *Work) -> Alloc {
     first_spill := mf.slots.len
     unspillable := vec_fill(mf.vclass.len, false)
     round := 0
@@ -1160,8 +1161,8 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
         n := 32 + mf.vclass.len
         unspillable.resize(mf.vclass.len, false)
         // the graphs of a round are thrown away at the start of the next one
-        scratch_reset()
-        scratch_on()
+        scratch_reset(w)
+        scratch_on(w)
         dec := decode(mf, order, n)
         vcls := vec_fill(n, u8(0))
         fill(vcls[16..32], u8(1))
@@ -1228,7 +1229,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             g.run()
             select(&g, c, vcls.items(), &spilled, &colors)
         }
-        scratch_off()
+        scratch_off(w)
         spilled = clone(spilled)
         colors = clone(colors)
         if spilled.is_empty() {

@@ -62,20 +62,19 @@ priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
     return v
 }
 
-// the last mem2reg_run ended with a round that changed nothing (not at its round limit)
-priv settled: bool
-
-fn mem2reg_settled() -> bool {
-    return settled
+// the last mem2reg_run on f's thread ended with a round that changed nothing (not at its round
+// limit; kept in f.w)
+fn mem2reg_settled(f: *Func) -> bool {
+    return f.w.settled
 }
 
 fn mem2reg_run(f: *Func) -> bool {
     any := false
-    settled = false
+    f.w.settled = false
     for it in 0..8 {
         // (only the first round sees the IR the pass began with)
         if !run_once(f, it == 0) {
-            settled = true
+            f.w.settled = true
             break
         }
         any = true
@@ -99,7 +98,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     // as a stored value, by anything but an Add, Load or Store, by an Add with a second
     // pointer). If that analysis of this very IR is at hand and every alloca escapes, nothing
     // can be done.
-    esc, known := alias_escaped_known(f, opt_gen())
+    esc, known := alias_escaped_known(f, opt_gen(f))
     if first && known {
         all := true
         for v in f.blocks[0].insts {

@@ -284,6 +284,9 @@ struct Func {
     // a specialised copy (opt/spec.al): the function it copies, whose frame it is in stack
     // traces; -1 for any other function
     copy_of: i64
+    // the Work of the thread that is optimising or compiling the function, nil while none is
+    // (see Work in base.al)
+    w: *Work
 }
 
 enum RelocTarget {
@@ -345,9 +348,10 @@ fn src_loc(self: *SrcLocs, l: SrcLoc) -> i32 {
 }
 
 // location `l` of the callee, inlined at a call with location `at`: the same line with the
-// call as its outermost parent. Called while working (work_begin, the inliner): the table
-// grows in the main arena, `memo` (the answers so far for this call) in the work region.
-fn src_loc_inlined(self: *SrcLocs, l: i32, at: i32, memo: *Map[i32, i32]) -> i32 {
+// call as its outermost parent. Called while working (work_begin(w), the inliner): the table
+// grows in the arena below the work region, `memo` (the answers so far for this call) in the
+// work region.
+fn src_loc_inlined(self: *SrcLocs, l: i32, at: i32, memo: *Map[i32, i32], w: *Work) -> i32 {
     if l <= 0 || i64(l) >= self.list.len {
         return 0
     }
@@ -356,10 +360,10 @@ fn src_loc_inlined(self: *SrcLocs, l: i32, at: i32, memo: *Map[i32, i32]) -> i32
         return k
     }
     s := self.list[l]
-    s.parent = if s.parent == 0 { at } else { self.src_loc_inlined(s.parent, at, memo) }
-    work_pause()
+    s.parent = if s.parent == 0 { at } else { self.src_loc_inlined(s.parent, at, memo, w) }
+    work_pause(w)
     k = self.src_loc(s)
-    work_resume()
+    work_resume(w)
     memo.set(l, k)
     return k
 }
@@ -533,15 +537,13 @@ fn new_block(self: *Func) -> i64 {
     return self.blocks.len - 1
 }
 
-// set by the optimiser while the instruction list of the function it works on is to grow in the
-// main arena (see opt_optimize)
-ir_insts_main: bool
-
 fn mk(self: *Func, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
-    if ir_insts_main && self.insts.len == len(self.insts.buf) {
-        work_pause()
+    // (insts_main: the optimiser wants the list of the function it works on to grow outside
+    // the work region; see opt_first)
+    if self.insts.len == len(self.insts.buf) && self.w != nil && self.w.insts_main {
+        work_pause(self.w)
         self.insts.reserve(self.insts.len + 1)
-        work_resume()
+        work_resume(self.w)
     }
     if ty.is_vec() {
         self.has_vec = true
@@ -696,66 +698,71 @@ fn succs(self: *Func, b: i64) -> Vec[i64] {
 
 // ---------- CFG analyses reused between passes ----------
 // rpo, preds, cfg_new and loops_new depend only on the successors of the blocks. Between
-// `ir_memo_begin(f)` and `ir_memo_end()` (the optimiser, one function at a time) they keep
+// `ir_memo_begin(f)` and `ir_memo_end(w)` (the optimiser, one function at a time) they keep
 // their last results for f with the successors they were computed from (one word per block)
 // and return them again while those are unchanged. Callers never change a result; a new one
 // is always computed into new memory, so a result held across a change stays as it was.
 // Results live in the region in use when they are made: not to be asked for while the
-// scratch region is on.
-priv memo_f: *Func
-priv memo_sig: Vec[i64]
-priv memo_has_rpo: bool
-priv memo_rpo: Vec[i64]
-priv memo_has_preds: bool
-priv memo_preds: Vec[Vec[i64]]
-priv memo_has_cfg: bool
-priv memo_cfg: Cfg
-priv memo_has_loops: bool
-priv memo_loops: Loops
-
-// Skipping the check: the optimiser counts the changes of the function (no pass changes it
-// without saying so) and tells at the start of each pass the current count and whether the
-// pass asks for an analysis before it changes anything. When the memo was last checked at the
-// same count, the first such request needs no check.
-priv memo_cur: i64 // the change count while the current pass runs
-priv memo_at: i64 // the change count when the memo was last checked (-1: never)
-priv memo_trust: bool
-
-fn ir_memo_pass(gen: i64, asks_first: bool) {
-    memo_cur = gen
-    memo_trust = asks_first && memo_at == gen
+// scratch region is on. The memo is the `memo` of the Work of the thread (f.w).
+struct Memo {
+    f: *Func
+    sig: Vec[i64]
+    has_rpo: bool
+    rpo: Vec[i64]
+    has_preds: bool
+    preds: Vec[Vec[i64]]
+    has_cfg: bool
+    cfg: Cfg
+    has_loops: bool
+    loops: Loops
+    // Skipping the check: the optimiser counts the changes of the function (no pass changes it
+    // without saying so) and tells at the start of each pass the current count and whether the
+    // pass asks for an analysis before it changes anything. When the memo was last checked at
+    // the same count, the first such request needs no check.
+    cur: i64 // the change count while the current pass runs
+    at: i64 // the change count when the memo was last checked (-1: never)
+    trust: bool
 }
 
+fn ir_memo_pass(w: *Work, gen: i64, asks_first: bool) {
+    w.memo.cur = gen
+    w.memo.trust = asks_first && w.memo.at == gen
+}
+
+// (f.w is set)
 fn ir_memo_begin(f: *Func) {
-    ir_memo_end()
-    memo_f = f
+    ir_memo_end(f.w)
+    f.w.memo.f = f
 }
 
-fn ir_memo_end() {
-    memo_f = nil
-    memo_at = -1
-    memo_trust = false
-    memo_sig = vec[i64]()
-    memo_has_rpo = false
-    memo_has_preds = false
-    memo_has_cfg = false
-    memo_has_loops = false
+fn ir_memo_end(w: *Work) {
+    m := &w.memo
+    m.f = nil
+    m.at = -1
+    m.trust = false
+    m.sig = vec[i64]()
+    m.has_rpo = false
+    m.has_preds = false
+    m.has_cfg = false
+    m.has_loops = false
 }
 
-// are the memorised results (if any) those of f's current CFG? Forgets them if not.
-priv fn memo_valid(f: *Func) -> bool {
-    if f != memo_f {
-        return false
+// f's memo if it has one; forgets the memorised results (if any) if they are not those of
+// f's current CFG
+priv fn memo_valid(f: *Func) -> *Memo {
+    if f.w == nil || f.w.memo.f != f {
+        return nil
     }
-    if memo_trust {
-        memo_trust = false
-        return true
+    m := &f.w.memo
+    if m.trust {
+        m.trust = false
+        return m
     }
-    memo_at = memo_cur
+    m.at = m.cur
     n := f.blocks.len
-    same := memo_sig.len == n
+    same := m.sig.len == n
     if !same {
-        memo_sig = vec_fill(n, 0)
+        m.sig = vec_fill(n, 0)
     }
     for b in 0..n {
         x := 0
@@ -769,69 +776,72 @@ priv fn memo_valid(f: *Func) -> bool {
             }
             _ => {}
         }
-        if memo_sig[b] != x {
-            memo_sig[b] = x
+        if m.sig[b] != x {
+            m.sig[b] = x
             same = false
         }
     }
     if !same {
-        memo_has_rpo = false
-        memo_has_preds = false
-        memo_has_cfg = false
-        memo_has_loops = false
+        m.has_rpo = false
+        m.has_preds = false
+        m.has_cfg = false
+        m.has_loops = false
     }
-    return true
+    return m
 }
 
 // the predecessors of every block, in increasing block order
 fn preds(self: *Func) -> Vec[Vec[i64]] {
-    if !memo_valid(self) {
+    m := memo_valid(self)
+    if m == nil {
         return self.preds_compute()
     }
-    if !memo_has_preds {
-        memo_preds = self.preds_compute()
-        memo_has_preds = true
+    if !m.has_preds {
+        m.preds = self.preds_compute()
+        m.has_preds = true
     }
-    return memo_preds
+    return m.preds
 }
 
 // rpo and preds with one check of the memo
 fn rpo_preds(self: *Func) -> (Vec[i64], Vec[Vec[i64]]) {
-    if !memo_valid(self) {
+    m := memo_valid(self)
+    if m == nil {
         return (self.rpo_compute(), self.preds_compute())
     }
-    rpo := memo_rpo_of(self)
-    if !memo_has_preds {
-        memo_preds = self.preds_compute()
-        memo_has_preds = true
+    rpo := memo_rpo_of(m, self)
+    if !m.has_preds {
+        m.preds = self.preds_compute()
+        m.has_preds = true
     }
-    return (rpo, memo_preds)
+    return (rpo, m.preds)
 }
 
 // reverse postorder of reachable blocks
 fn rpo(self: *Func) -> Vec[i64] {
-    if !memo_valid(self) {
+    m := memo_valid(self)
+    if m == nil {
         return self.rpo_compute()
     }
-    return memo_rpo_of(self)
+    return memo_rpo_of(m, self)
 }
 
-// the memorised rpo of f (memo_valid(f) holds), computed on first use; the same for the
-// cfg and the loops below
-priv fn memo_rpo_of(f: *Func) -> Vec[i64] {
-    if !memo_has_rpo {
-        memo_rpo = f.rpo_compute()
-        memo_has_rpo = true
+// the memorised rpo of f (m = memo_valid(f)), computed on first use; the same for the cfg and
+// the loops below
+priv fn memo_rpo_of(m: *Memo, f: *Func) -> Vec[i64] {
+    if !m.has_rpo {
+        m.rpo = f.rpo_compute()
+        m.has_rpo = true
     }
-    return memo_rpo
+    return m.rpo
 }
 
-priv fn memo_cfg_of(f: *Func) -> *Cfg {
-    if !memo_has_cfg {
-        memo_cfg = cfg_compute(f, memo_rpo_of(f))
-        memo_has_cfg = true
+priv fn memo_cfg_of(m: *Memo, f: *Func) -> *Cfg {
+    if !m.has_cfg {
+        m.cfg = cfg_compute(f, memo_rpo_of(m, f))
+        m.has_cfg = true
     }
-    return &memo_cfg
+    return &m.cfg
 }
 
 priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
@@ -1017,21 +1027,23 @@ struct Cfg {
 }
 
 fn cfg_new(f: *Func) -> Cfg {
-    if !memo_valid(f) {
+    m := memo_valid(f)
+    if m == nil {
         return cfg_compute(f, f.rpo_compute())
     }
-    return *memo_cfg_of(f)
+    return *memo_cfg_of(m, f)
 }
 
 // cfg_new(f).preds without the rest of the analysis
 fn cfg_preds(f: *Func) -> Vec[Vec[i64]] {
-    if !memo_valid(f) {
+    m := memo_valid(f)
+    if m == nil {
         return rpo_preds_of(f, f.rpo_compute())
     }
-    if memo_has_cfg {
-        return memo_cfg.preds
+    if m.has_cfg {
+        return m.cfg.preds
     }
-    return rpo_preds_of(f, memo_rpo_of(f))
+    return rpo_preds_of(f, memo_rpo_of(m, f))
 }
 
 // the predecessors among the reachable blocks (those of rpo), in reverse postorder
@@ -1162,27 +1174,29 @@ struct Loops {
 
 // cfg_new and loops_new with one check of the memo
 fn cfg_loops(f: *Func) -> (Cfg, Loops) {
-    if !memo_valid(f) {
+    m := memo_valid(f)
+    if m == nil {
         cfg := cfg_compute(f, f.rpo_compute())
         return (cfg, loops_compute(f, &cfg))
     }
-    cfg := memo_cfg_of(f)
-    return (*cfg, memo_loops_of(f, cfg))
+    cfg := memo_cfg_of(m, f)
+    return (*cfg, memo_loops_of(m, f, cfg))
 }
 
 // (the memorised loops belong to the memorised cfg)
-priv fn memo_loops_of(f: *Func, cfg: *Cfg) -> Loops {
-    if !memo_has_loops {
-        memo_loops = loops_compute(f, cfg)
-        memo_has_loops = true
+priv fn memo_loops_of(m: *Memo, f: *Func, cfg: *Cfg) -> Loops {
+    if !m.has_loops {
+        m.loops = loops_compute(f, cfg)
+        m.has_loops = true
     }
-    return memo_loops
+    return m.loops
 }
 
 fn loops_new(f: *Func, cfg: *Cfg) -> Loops {
     // the memorised loops belong to the memorised cfg
-    if memo_valid(f) && memo_has_cfg && ptr(cfg.rpo_idx.buf) == ptr(memo_cfg.rpo_idx.buf) {
-        return memo_loops_of(f, cfg)
+    m := memo_valid(f)
+    if m != nil && m.has_cfg && ptr(cfg.rpo_idx.buf) == ptr(m.cfg.rpo_idx.buf) {
+        return memo_loops_of(m, f, cfg)
     }
     return loops_compute(f, cfg)
 }

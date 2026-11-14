@@ -1,4 +1,5 @@
-// Helpers shared by the compiler sources: Vec conveniences, processes, working memory.
+// Helpers shared by the compiler sources: Vec conveniences, processes, worker threads, working
+// memory.
 
 // ---------- Vec ----------
 // Vecs of one and two elements without an intermediate slice (`succs` in ir.al is hot:
@@ -45,7 +46,6 @@ fn align_up(x: i64, a: i64) -> i64 {
 //   file_id(path) -> (str, bool)   the identity of an existing file (device and inode, or
 //                                  volume and file index), or false
 //   cpu_count() -> i64             the number of CPUs this process may use, at least 1
-//   shared_map, fork_worker, queue_new, pipe_open: worker processes (below)
 // The rest goes through the OS layer of the run-time library (the `__os_*` functions of
 // src/prelude_linux.al / prelude_windows.al).
 when TARGET_OS == Windows {
@@ -150,127 +150,120 @@ fn os_error(errno: i64) -> str {
     return fmt(text, " (os error ", errno, ")")
 }
 
-// ---------- worker processes (the parallel back end) ----------
-// The host files also define:
-//   shared_map(bytes) -> i64       a zeroed mapping of `bytes` that forked children share with
-//                                  this process (pages are only allocated when touched): its
-//                                  address, or 0
-//   fork_worker(quiet) -> i64      fork after flushing standard output: 0 in the child, the
-//                                  child's pid in the parent, < 0 if it failed. A quiet child
-//                                  writes its standard error to /dev/null (the parent redoes
-//                                  the work of a child that fails, so its messages would only
-//                                  confuse).
-//   queue_new(items) -> i64        a work queue that forked workers share: a pipe filled with
-//                                  the items (each below 2^32) and closed for writing before
-//                                  the workers are forked. A read of a pipe is atomic, so every
-//                                  item is taken (queue_take) by one process only, in the order
-//                                  of the items. Items that do not fit into the pipe are left
-//                                  out. Returns the read end, or -1.
-//   pipe_open() -> (i64, i64)      a pipe through which forked workers report that they are
-//                                  done: (read end, write end), or (-1, -1). Every worker
-//                                  closes its copy of the write end when it is done (a process
-//                                  that ends closes it too); once this process has closed its
-//                                  own, pipe_wait_closed returns when all are.
+// ---------- worker threads (the parallel back end) ----------
+// The run-time library's threads, as std.os's thread_spawn / thread_join make them (the
+// compiler does not load std.os: its cpu_count is the host's). A thread allocates from an arena
+// of its own; what it allocated stays valid after worker_join (that arena is never freed). A
+// panic in a worker thread ends the compiler, as in any thread.
 
-// whether workers can be forked (not on Windows: the back end is sequential there)
-inline fn can_fork() -> bool {
-    return TARGET_OS != Windows
+// the stack of a worker thread (reserved; committed as it is used): see "Parallel back end" in
+// docs/BOOTSTRAP.md
+priv const WORKER_STACK = 256 << 20
+
+// starts a thread that runs f(ctx); nil if it cannot be started
+fn worker_start[C](f: fn(C), ctx: C) -> *__ThreadCtl {
+    return __thread_start(f, ctx, WORKER_STACK)
 }
 
-fn shared_unmap(addr: i64, bytes: i64) {
-    __os_unmap(addr, bytes)
-}
-
-// ends a forked worker at once (its copy of the buffered output is not written)
-fn worker_exit(code: i64) {
-    __os_exit(code)
-}
-
-// waits for a forked worker: its exit status, 128 + the signal that ended it, or -1
-fn wait_worker(pid: i64) -> i64 {
-    return __os_wait(pid, pid, true)
-}
-
-// the next item of the queue at fd, or -1 if it is empty
-fn queue_take(fd: i64) -> i64 {
-    x: [1]u32
-    if __os_read(fd, cast[i64](ptr(x)), 4) != 4 {
-        return -1
-    }
-    return i64(x[0])
-}
-
-fn fd_close(fd: i64) {
-    if fd >= 0 {
-        __os_close(fd)
-    }
-}
-
-// waits until every copy of the write end of the pipe whose read end is fd is closed
-fn pipe_wait_closed(fd: i64) {
-    buf: [8]u8
-    while __os_read(fd, cast[i64](ptr(buf)), 8) > 0 {
-    }
+// waits until the thread of worker_start has ended
+fn worker_join(c: *__ThreadCtl) {
+    __thread_join(c)
 }
 
 // ---------- working memory ----------
 // The compiler never frees: everything lives in an arena. Passes over one function create a
-// lot of short-lived data, so besides the main arena the compiler uses two regions:
-//   work     one function being optimised or compiled. work_begin() makes every allocation
-//            come from it, work_end() goes back and empties it. Whatever must survive is
-//            copied (deep `clone`) right after work_end(): the discarded memory stays readable
-//            until the next work_begin().
+// lot of short-lived data, so besides the arena of the thread the compiler uses two regions:
+//   work     one function being optimised or compiled. work_begin(w) makes every allocation
+//            come from it, work_end(w) goes back and empties it. Whatever must survive is
+//            copied (deep `clone`) right after work_end(w): the discarded memory stays readable
+//            until the next work_begin(w).
 //   scratch  tables that a pass rebuilds on every round of a loop (predecessors, orderings,
-//            use counts). scratch_on() / scratch_off() bracket their construction and
-//            scratch_reset() at the top of the next round discards them. Nothing reachable
-//            from the function may be allocated between scratch_on() and scratch_off().
-priv work: Region
-priv scratch: Region
-priv working: bool
-priv scratching: bool
-
-fn work_begin() {
-    assert !working, "work_begin: already working"
-    working = true
-    enter(&work)
+//            use counts). scratch_on(w) / scratch_off(w) bracket their construction and
+//            scratch_reset(w) at the top of the next round discards them. Nothing reachable
+//            from the function may be allocated between scratch_on(w) and scratch_off(w).
+// Every thread that optimises or compiles functions has a Work of its own (the compiler's
+// main thread the one of work_main(), each worker thread of the back end one): the two regions
+// and what the passes keep between calls. While a thread works on a function, `Func.w` is its
+// Work: the passes reach it through the function they are given, so no thread touches the
+// Work of another.
+struct Work {
+    work: Region
+    scratch: Region
+    working: bool
+    scratching: bool
+    memo: Memo          // the CFG analyses of the function (ir.al)
+    insts_main: bool    // mk grows the instruction list outside the work region (ir.al)
+    gen: i64            // the optimiser's count of changes (opt_pass in opt/mod.al)
+    clean: [16]i64      // the passes known to change nothing (opt_pass in opt/mod.al)
+    esc_f: *Func        // the escaping allocas last remembered (opt/alias.al)
+    esc_gen: i64
+    esc_last: Vec[bool]
+    preheaders: i64     // preheaders made so far (opt/licm.al)
+    settled: bool       // see mem2reg_settled (opt/mem2reg.al)
 }
 
-fn work_end() {
-    assert working && !scratching, "work_end without work_begin"
-    working = false
+priv main_work: Work
+
+// the Work of the compiler's main thread (no other thread may use it)
+fn work_main() -> *Work {
+    return &main_work
+}
+
+fn work_begin(w: *Work) {
+    assert !w.working, "work_begin: already working"
+    w.working = true
+    enter(&w.work)
+}
+
+fn work_end(w: *Work) {
+    assert w.working && !w.scratching, "work_end without work_begin"
+    w.working = false
     leave()
-    reset(&work)
-    reset(&scratch)
+    reset(&w.work)
+    reset(&w.scratch)
 }
 
-// allocate from the main arena for a moment while working (for results that must stay)
-fn work_pause() {
-    assert working && !scratching, "work_pause without work_begin"
+// allocate from the arena below the work region for a moment while working (for results that
+// must stay)
+fn work_pause(w: *Work) {
+    assert w.working && !w.scratching, "work_pause without work_begin"
     leave()
 }
 
-fn work_resume() {
-    enter(&work)
+fn work_resume(w: *Work) {
+    enter(&w.work)
 }
 
-fn scratch_on() {
-    assert !scratching, "scratch_on: already on"
-    scratching = true
-    enter(&scratch)
+fn scratch_on(w: *Work) {
+    assert !w.scratching, "scratch_on: already on"
+    w.scratching = true
+    enter(&w.scratch)
 }
 
-fn scratch_off() {
-    assert scratching, "scratch_off without scratch_on"
-    scratching = false
+fn scratch_off(w: *Work) {
+    assert w.scratching, "scratch_off without scratch_on"
+    w.scratching = false
     leave()
 }
 
-fn scratch_reset() {
-    assert !scratching, "scratch_reset while the scratch region is in use"
-    reset(&scratch)
+fn scratch_reset(w: *Work) {
+    assert !w.scratching, "scratch_reset while the scratch region is in use"
+    reset(&w.scratch)
+}
+
+// is address p in memory of the work or the scratch region (discarded at work_end)? (not to be
+// asked while working: the fields of an entered region are not up to date)
+fn work_holds(w: *Work, p: i64) -> bool {
+    return (p >= w.work.base && p < w.work.end) || (p >= w.scratch.base && p < w.scratch.end)
 }
 
 // the largest size the work region has had, in bytes (not to be called while working)
-fn work_peak() -> i64 {
-    return max(work.hwm, work.cur) - work.base
+fn work_peak(w: *Work) -> i64 {
+    return max(w.work.hwm, w.work.cur) - w.work.base
+}
+
+// the memory the regions of w hold, given back (w is not in use)
+fn work_free(w: *Work) {
+    region_free(&w.work)
+    region_free(&w.scratch)
 }

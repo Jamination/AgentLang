@@ -94,30 +94,28 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     return None
 }
 
-// alias_escaped_allocas, remembered for the IR of a change count `gen` (opt_gen(), for IR not
-// changed since the current pass began; -1: not to be remembered). The result is not to be
-// changed.
-priv esc_f: *Func
-priv esc_gen: i64
-priv esc_last: Vec[bool]
-
+// alias_escaped_allocas, remembered for the IR of a change count `gen` (opt_gen(f), for IR not
+// changed since the current pass began; -1: not to be remembered), in the Work of the thread
+// (f.w: esc_f, esc_gen, esc_last). The result is not to be changed.
 fn alias_escaped_cached(f: *Func, gen: i64) -> Vec[bool] {
-    if gen >= 0 && f == esc_f && gen == esc_gen {
-        return esc_last
+    w := f.w
+    if gen >= 0 && f == w.esc_f && gen == w.esc_gen {
+        return w.esc_last
     }
     esc := alias_escaped_allocas(f)
     if gen >= 0 {
-        esc_f = f
-        esc_gen = gen
-        esc_last = esc
+        w.esc_f = f
+        w.esc_gen = gen
+        w.esc_last = esc
     }
     return esc
 }
 
 // the remembered result for change count `gen`, if there is one
 fn alias_escaped_known(f: *Func, gen: i64) -> (Vec[bool], bool) {
-    if gen >= 0 && f == esc_f && gen == esc_gen {
-        return (esc_last, true)
+    w := f.w
+    if gen >= 0 && f == w.esc_f && gen == w.esc_gen {
+        return (w.esc_last, true)
     }
     return (vec[bool](), false)
 }
