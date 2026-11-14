@@ -176,7 +176,7 @@ const DEMO = false                      // alc build -D DEMO game.al: the demo b
 const DEBUG_DRAW = false
 
 when TARGET_OS == Windows {
-    fn save_dir() -> str { fmt(env_get("APPDATA").0, "/MyGame") }
+    fn save_dir() -> str { fmt(env_get("APPDATA").0, "/MyGame") }    // `/` works on Windows too
 } else {
     fn save_dir() -> str { fmt(env_get("HOME").0, "/.local/share/mygame") }
 }

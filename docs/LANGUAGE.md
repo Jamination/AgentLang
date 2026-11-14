@@ -2,8 +2,8 @@
 
 AL is a small, statically typed, compiled language designed to be written by AI agents.
 `alc` compiles a whole program (`alc build main.al`, no build system) directly to a static
-x86-64 Linux executable. The compiler reports all errors of a program at once (also in functions
-that are never called; generic ones: see [Generics](#generics)) as `file:line:col: error: ...`.
+x86-64 Linux executable. The compiler reports all syntax errors at once, then (if there are none)
+all other errors, also in functions never called (generic ones: see [Generics](#generics)).
 
 - Integers wrap; division by zero and out-of-bounds indexing stop the program with a `file:line`
   message. There are no implicit conversions, no constructors or destructors, no exceptions.
@@ -103,9 +103,9 @@ test "areas" {
   fit its type (not `x: u8 = -1`); hex, binary, octal, character literals may be bit patterns (`x: i8 = 0xFF`).
 - **Conversions** are written like calls: `i64(x)`, `u8(x)`, `f64(n)`. Integer to a narrower
   type keeps the low bits; to a wider type the *source* type decides: a signed source is
-  sign-extended, an unsigned one zero-extended (`i64(u8(200))` is 200, `u64(i8(-1))` is
-  0xFFFFFFFFFFFFFFFF, `i8(200)` is -56). Float to integer truncates toward zero; NaN and values
-  beyond `i64` give 0x8000000000000000 (`u64` is exact below 2^64). `i64(true)` is 1.
+  sign-extended, an unsigned one zero-extended (`i64(u8(200))` is 200, `u64(i8(-1))` is all ones,
+  `i8(200)` is -56). Float to integer truncates toward zero; NaN and values beyond `i64` give
+  0x8000000000000000 (`u64` is exact below 2^64). `i64(true)` is 1; `i64(e)`: `e`'s variant number.
 - **Values and references.** Structs, tuples, arrays and enums are values: assignment, argument
   passing and returning copy them. Slices and pointers refer to shared storage, so a copy of a
   struct shares what its slices (and every `str`, `Vec` and `Map` inside) refer to. See
@@ -151,8 +151,8 @@ when TARGET_OS == Windows { ... } else { ... }   // compile-time choice: see `wh
   file they are in (except `priv` ones). `use` only adds a file to the program: a file included
   several times is included once, and a file need not `use` the file whose names it refers to
   as long as some file of the program includes it.
-- A user declaration may reuse a library name (your own `push`, `Vec`, `find`); the library
-  keeps using its own definitions internally.
+- A user declaration may reuse a library name, also one of a `use`d module (your own `push`,
+  `Vec`, `Sound`): your code sees yours, the library keeps its own (types, functions, constants).
 - **Overloading**: a function name may be defined several times with different parameter types
   (`fn area(c: Circle)` and `fn area(r: Rect)`; a generic `fn push[T](s: *Stack[T], x: T)` next
   to the library's `push` for `Vec`). A call picks the definition whose parameters match the
@@ -213,7 +213,7 @@ resolved in this order:
 ### Constants
 
 A `const` is a compile-time constant. Its initialiser is built from literals, other constants,
-constant expressions, `T{...}` literals and tuples, names of non-generic functions, variants
+arithmetic on them (`const DT = 1.0 / 60.0`), `T{...}` literals and tuples, names of non-generic functions, variants
 without data, `nil`, and `embed("file")` (the content of a file as a `str`, read at compile
 time, path relative to the source file). Function calls are not constant. Global initialisers
 follow the same rules.
@@ -232,8 +232,8 @@ executable. At top level the branches hold declarations (also `use`), in a funct
 statements; neither form opens a scope. A condition is made of literals, `==`, `!=`, `&&`,
 `||`, `!` and constants declared outside `when`: `TARGET_OS` (`Linux`, `Windows`),
 `TARGET_ARCH` (`X86_64`) and the program's; anything else is an error. `alc build -D N=V`
-(also run, test, check; `-D N` alone: `true`) sets the program's constant `N`. An `if` on
-constants compiles only its taken branch (both are type-checked). [DETAILS.md](DETAILS.md#when-and--d)
+(also run, test, check; `-D N` alone: `true`) sets the program's constant `N`. An `if` on constants
+compiles only its taken branch (both type-checked), as uncalled functions are left out. [DETAILS.md](DETAILS.md#when-and--d)
 
 ### `priv`: file-private declarations
 
@@ -693,7 +693,7 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 | `put(a, b, ...)` | same without separators and newline |
 | `fmt(a, b, ...) -> str` | like `put`, but returns the text: the way to build a string from values |
 | `len(x) -> i64` | length of a slice, array, string or `Vec`; number of entries of a `Map` |
-| `hash(x) -> u64` | hash of any value that supports `==` |
+| `hash(x) -> u64` | hash of any value that supports `==`; the same on every run and target |
 | `clone(x) -> T` | independent deep copy (see [`clone`](#clonex)) |
 | `sizeof[T]() -> i64` | size of `T` in bytes |
 | `sqrt(x)`, `fabs(x)`, `fmin(a, b)`, `fmax(a, b)` | on `f64`, `f32` and vectors |
@@ -701,7 +701,7 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 | `panic(msg: str) -> never` | stop with a message |
 | `embed("file") -> str` | content of a file, read at compile time (a constant) |
 | `syscall(nr, a, b, ...) -> i64` | raw Linux system call (up to 6 arguments) |
-| `cast[T](x)` | reinterpret: pointer↔pointer, pointer↔`i64`/`u64`, `f64`↔`i64`/`u64` bits, slice↔slice |
+| `cast[T](x)` | reinterpret: pointer↔pointer, pointer↔`i64`/`u64`, `f64`↔`i64`/`u64` and `f32`↔`i32`/`u32` bits, slice↔slice |
 | `ptr(s) -> *T`, `mkslice[T](p, n) -> []T`, `memcopy(dst, src, nbytes)`, `memfill(dst, byte, nbytes)` | pointer to the first element of a slice or array; slice from a pointer and a length; raw copy / fill |
 
 **How values print** (`print`, `put`, `fmt`): integers in decimal (a `u8` too: `put(s[0])` writes

@@ -40,7 +40,9 @@ struct Image { w: i64, h: i64, channels: i64, pix: []u8 }
 
 Rows from top to bottom, pixels left to right, `channels` bytes per pixel: 1 = grey,
 2 = grey + alpha, 3 = RGB, 4 = RGBA. `pix` can be handed to a GPU upload or to
-`window.present` as is.
+`window.present` as is. The other way round, a framebuffer of 4-byte pixels can be wrapped
+without copying: `Image{w: W, h: H, channels: 4, pix: fb}` (`fb` a `[]u8` of `W * H * 4` bytes), then
+`png_save("frame.png", img)` writes a screenshot.
 
 | Function | |
 |----------|---|

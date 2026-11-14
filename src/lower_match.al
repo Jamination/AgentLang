@@ -7,7 +7,7 @@
 
 // index of the variant `n` of enum declaration `ei`, or -1
 fn variant_of(self: *Cx, ei: i64, n: str) -> i64 {
-    l, _ := if self.enum_decls[ei].pos.file < self.n_prelude { self.lib_variants(n) } else { self.user_variants(n) }
+    l, _ := if self.lib_file(self.enum_decls[ei].pos.file) { self.lib_variants(n) } else { self.user_variants(n) }
     for p in l {
         if p.0 == ei {
             return p.1
@@ -37,7 +37,7 @@ fn qual_enum_name(self: *Cx, n: str) -> i64 {
         Some(e) => e
         None => return -1
     }
-    own := (self.enum_decls[ei].pos.file < self.n_prelude) == self.scope_prelude
+    own := self.lib_file(self.enum_decls[ei].pos.file) == self.scope_prelude
     if !own {
         bit := if self.scope_prelude { 1 } else { 2 }
         if self.decl_layer(n) & bit != 0 {
@@ -64,7 +64,7 @@ fn bare_variant(self: *Fx, n: str, expect: Opt[i64]) -> (i64, i64, i64) {
         Enum(eid) => {
             // the expected enum, if this name is one of its variants (and not hidden)
             ed := cx.types.enums[eid].decl
-            l := if (cx.enum_decls[ed].pos.file < cx.n_prelude) == cx.scope_prelude { own } else if hidden { Vec[(i64, i64)]{} } else { other }
+            l := if cx.lib_file(cx.enum_decls[ed].pos.file) == cx.scope_prelude { own } else if hidden { Vec[(i64, i64)]{} } else { other }
             for p in l {
                 if p.0 == ed {
                     return (ed, p.1, 1)
@@ -1603,7 +1603,7 @@ fn same_name_hint(self: *Fx, ta: i64, tb: i64) -> str {
     match (pa, pb) {
         (Some(x), Some(y)) if x != y => {
             where := fn(cx: *Cx, p: Pos) -> str {
-                if p.file < cx.n_prelude {
+                if cx.lib_file(p.file) {
                     return "in the standard library"
                 }
                 return concat("at ", cx.pos_str(p))

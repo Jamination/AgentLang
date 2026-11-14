@@ -881,7 +881,12 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
 
 // type checking and lowering to IR
 priv fn typecheck(ar: *Args, src: *Sources, decls: *Vec[Decl], n_prelude: i64) -> Cx {
-    cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, n_prelude)
+    // the files of the library: the core library (`load`) and the bundled modules
+    lib_files := vec[u8]()
+    for i in 0..src.files.len {
+        lib_files.push(if i < n_prelude { LIB_CORE } else if src.files[i].lib { LIB_MODULE } else { u8(0) })
+    }
+    cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, lib_files)
     if ar.cmd != "check" {
         // bundled modules are only compiled as far as the program reaches into them
         for f in src.std_files {
@@ -964,7 +969,7 @@ priv fn real_main() -> i64 {
             for x in 0..src.decls.len {
                 // private declarations of the library cannot be used from outside
                 _, _, is_private, pos := priv_decl_info(&src.decls[x])
-                lib_private := is_private && (pos.file < n_prelude || contains(&src.std_files, pos.file))
+                lib_private := is_private && src.files[pos.file].lib
                 if sigs_visible(&src.decls[x]) && !lib_private {
                     sdecls.push(src.decls[x])
                 }

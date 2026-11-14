@@ -1,0 +1,3 @@
+duplicate_followon.al:4:1: error: `Voice` is already declared at tests/fail/duplicate_followon.al:3:1
+duplicate_followon.al:6:1: error: `STEPS` is already declared at tests/fail/duplicate_followon.al:5:1
+2 error(s)

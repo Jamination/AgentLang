@@ -144,7 +144,7 @@ them. Triggers are axes from -1 (released) to 1.
 | `gamepad_poll(g) -> bool` | read all pending events; false once unplugged. Call after `begin_frame` / `poll(window)` each frame |
 | `gamepad_close(g)` | close and clear |
 | `gamepad_xinput(g, buttons: u16, left_trigger: u8, right_trigger: u8, lx, ly, rx, ry: i16)` | Windows: apply one XInput state (the fields of `XINPUT_GAMEPAD`) as `gamepad_poll` does (tests, replays) |
-| `gamepad_event(g, kind: u8, number: u8, value: i16)` | apply one raw joystick event (what `gamepad_poll` does per event; useful for tests and replays) |
+| `gamepad_event(g, kind: u8, number: u8, value: i16)` | apply one raw joystick event, as `gamepad_poll` does per event; useful for tests and replays. `kind` 1 = button (`value` non-zero = down), 2 = axis (`value` -32767..32767, mapped to -1..1); `kind \| 0x80` marks the initial state reported when a pad is opened. `number` is the button or axis index (`PAD_*` constants) |
 | `pad_down(g, button)`, `pad_pressed(g, button)`, `pad_released(g, button)` | button state |
 | `pad_axis(g, axis) -> f32` | axis in -1..1 (sticks: right / down positive) |
 | `pad_stick(g, axis_x, axis_y, deadzone: f32) -> vec2` | two axes with a radial dead zone, rescaled to length 0..1 |

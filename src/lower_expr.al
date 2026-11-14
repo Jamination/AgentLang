@@ -391,6 +391,10 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
         }
         None => {}
     }
+    if self.cx.is_dup(n) {
+        // (declared twice: reported at the declaration)
+        return val_err()
+    }
     // a variant of the expected enum, of an enum of this layer, or of the other layer if
     // no other declaration of this layer has the name
     bv := self.bare_variant(n, expect)

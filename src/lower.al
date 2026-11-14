@@ -76,19 +76,30 @@ struct Cx {
     locs: Map[(i64, i64), (i64, i64)]
     exposed: Map[i64, bool]
     inst_depth: i64
-    // names declared by the prelude: prelude code always sees these, user code may shadow them
+    // names declared by the library (see `lib_file`): library code always sees these, user
+    // code may shadow them
     p_fn_names: Map[str, i64]
     // every definition of a function name (overloads), per layer, in declaration order
     fn_over: Map[str, Vec[i64]]
     p_fn_over: Map[str, Vec[i64]]
     p_struct_names: Map[str, i64]
     p_enum_names: Map[str, i64]
-    // true while resolving names on behalf of prelude code
+    // the library's constants and globals; one that the program shadows is also in
+    // `const_decls` / `global_decls` under an internal name (see cx_new)
+    p_const_decls: Map[str, *ConstDecl]
+    p_global_decls: Map[str, *GlobalDecl]
+    // true while resolving names on behalf of library code
     scope_prelude: bool
     entry_file: i64
     // files whose declarations are only checked when something uses them
     lazy_files: Map[i64, bool]
-    n_prelude: i64
+    // by file: 0 = a file of the program, LIB_CORE / LIB_MODULE = of the library (see
+    // `lib_file`); files beyond its end are the program's
+    lib_files: Vec[u8]
+    // names declared twice in a layer (1 = library, 2 = user; the second declaration was
+    // rejected): in that layer the name stands for the error type, which silences what
+    // follows from the rejected declaration
+    dup_layers: Map[str, i64]
     // written name -> position of a `priv` declaration of it in some file (for the hint of
     // "unknown name" diagnostics)
     priv_decls: Map[str, Pos]
@@ -99,9 +110,9 @@ struct Cx {
     const_mems: Map[str, (i64, i64)]
     // files read by `embed`, by path
     embeds: Map[str, str]
-    // the same for the enums of the prelude (see lower_match.al for the lookup rules)
+    // the same for the enums of the library (see lower_match.al for the lookup rules)
     p_variants: Map[str, Vec[(i64, i64)]]
-    // which layers declare a function, type, constant or global of a name: 1 = prelude, 2 = user
+    // which layers declare a function, type, constant or global of a name: 1 = library, 2 = user
     decl_layers: Map[str, i64]
     // library functions that have a twin `__at_f` with the caller's "file:line" as an extra
     // last parameter: declaration -> twin
@@ -186,20 +197,25 @@ fn lower_new_sig(g: *FnDecl) -> str {
     return join(parts.items(), ",")
 }
 
-// files with an index below `n_prelude` form the always-present core library
-fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx {
-    np := n_prelude
+// `lib_files` (by file index) tells the files of the library: the run-time library and the
+// bundled modules (see `lib_file`)
+fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, lib_files: Vec[u8]) -> Cx {
     cx := Cx{
-        n_prelude: n_prelude,
+        lib_files: lib_files,
         types: types_new(),
         opts: opts,
         file_names: file_names,
         entry_file: 0xFFFF,
     }
-    names := map[str, Pos]()
-    // is the visible declaration of a name a function?
-    names_fn := map[str, bool]()
-    // the layers (1 = prelude, 2 = user) in which a name is a struct
+    // the latest accepted declaration of a name and the kind of its first one: in the
+    // program, and in the library per namespace (a bundled module may declare a value with
+    // the name of a type of the core library or the other way round, as a program may)
+    user_names := map[str, (Pos, i64)]()
+    lib_types := map[str, (Pos, i64)]()
+    lib_vals := map[str, (Pos, i64)]()
+    // library constants and globals that the program shadows
+    shadowed := vec[str]()
+    // the layers (1 = library, 2 = user) in which a name is a struct
     struct_layers := map[str, i64]()
     decls: for i in 0..len(decls) {
         name: str
@@ -260,53 +276,77 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
         if ast_is_private(name) && !cx.priv_decls.has(ast_plain(name)) {
             cx.priv_decls.set(ast_plain(name), pos)
         }
-        prev, has_prev := names.get(name)
+        lib := cx.lib_file(pos.file)
+        layer := if lib { 1 } else { 2 }
+        is_type := kind == 2 || kind == 3
+        own := if !lib { &user_names } else if is_type { &lib_types } else { &lib_vals }
+        prev, has_prev := own.get(name)
+        if !has_prev && lib {
+            o, has_o := (if is_type { &lib_vals } else { &lib_types }).get(name)
+            if has_o && cx.core_file(o.0.file) == cx.core_file(pos.file) {
+                prev, has_prev = (o, true)
+            }
+        }
         if has_prev {
-            was_fn, was_known := names_fn.get(name)
-            if kind == 1 && was_known && was_fn {
+            if kind == 1 && prev.1 == 1 {
                 // another definition of a function name: an overload, chosen by argument type
                 sig := lower_new_sig(fp)
-                for k in (if pos.file < np { &cx.p_fn_over } else { &cx.fn_over }).get_or(name, Vec[i64]{}) {
+                for k in (if lib { &cx.p_fn_over } else { &cx.fn_over }).get_or(name, Vec[i64]{}) {
                     if lower_new_sig(cx.fn_decls[k]) == sig {
                         at := cx.pos_str(cx.fn_decls[k].pos)
                         cx.err(pos, fmt("`", name, "` is already declared with these parameter types at ", at))
                         continue decls
                     }
                 }
-            } else if prev.file < np && pos.file >= np {
-                // a user declaration shadows a prelude declaration of the same name; types
-                // and values are looked up separately, so a function does not hide a type
-                if kind == 2 || kind == 3 {
-                    cx.struct_names.del(name)
-                    cx.enum_names.del(name)
-                } else {
-                    cx.fn_names.del(name)
-                    cx.const_decls.del(name)
-                    cx.global_decls.del(name)
-                }
             } else {
-                at := cx.pos_str(prev)
+                at := cx.pos_str(prev.0)
                 cx.err(pos, fmt("`", name, "` is already declared at ", at))
+                // what the rejected declaration would have declared stands for the error type
+                cx.dup_layers.set(name, cx.dup_layers.get_or(name, 0) | layer)
+                if kind == 3 {
+                    for v in ep.variants {
+                        cx.dup_layers.set(v.0, cx.dup_layers.get_or(v.0, 0) | layer)
+                    }
+                }
                 continue
             }
         }
-        names.set(name, pos)
-        names_fn.set(name, kind == 1)
-        cx.decl_layers.set(name, cx.decl_layers.get_or(name, 0) | (if pos.file < np { 1 } else { 2 }))
+        // a user declaration shadows a library declaration of the same name, whichever
+        // comes first; types and values are looked up separately, so a function does not hide
+        // a type, and functions of both layers are overloads
+        visible := true
+        other, in_other := (if lib { &user_names } else if is_type { &lib_types } else { &lib_vals }).get(name)
+        if in_other && is_type == (other.1 == 2 || other.1 == 3) && !(kind == 1 && other.1 == 1) {
+            if lib {
+                visible = false
+            } else if is_type {
+                cx.struct_names.del(name)
+                cx.enum_names.del(name)
+            } else {
+                cx.fn_names.del(name)
+                cx.const_decls.del(name)
+                cx.global_decls.del(name)
+            }
+            if other.1 == 4 || other.1 == 5 || kind == 4 || kind == 5 {
+                shadowed.push(name)
+            }
+        }
+        own.set(name, (pos, if has_prev { prev.1 } else { kind }))
+        cx.decl_layers.set(name, cx.decl_layers.get_or(name, 0) | layer)
         if kind == 2 {
-            struct_layers.set(name, struct_layers.get_or(name, 0) | (if pos.file < np { 1 } else { 2 }))
+            struct_layers.set(name, struct_layers.get_or(name, 0) | layer)
         }
         match kind {
             1 => {
                 di := cx.fn_decls.len
-                if pos.file < np {
+                if lib {
                     if !cx.p_fn_names.has(name) {
                         cx.p_fn_names.set(name, di)
                     }
                     l, _ := cx.p_fn_over.get(name)
                     l.push(di)
                     cx.p_fn_over.set(name, l)
-                    if !cx.fn_names.has(name) {
+                    if visible && !cx.fn_names.has(name) {
                         cx.fn_names.set(name, di)
                     }
                 } else {
@@ -321,27 +361,62 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
                 cx.fn_decls.push(fp)
             }
             2 => {
-                if pos.file < np {
+                if lib {
                     cx.p_struct_names.set(name, cx.struct_decls.len)
                 }
-                cx.struct_names.set(name, cx.struct_decls.len)
+                if visible {
+                    cx.struct_names.set(name, cx.struct_decls.len)
+                }
                 cx.struct_decls.push(sp)
             }
             3 => {
-                if pos.file < np {
+                if lib {
                     cx.p_enum_names.set(name, cx.enum_decls.len)
                 }
-                cx.enum_names.set(name, cx.enum_decls.len)
+                if visible {
+                    cx.enum_names.set(name, cx.enum_decls.len)
+                }
                 cx.enum_decls.push(ep)
             }
-            4 => cx.const_decls.set(name, cp)
-            _ => cx.global_decls.set(name, gp)
+            4 => {
+                if lib {
+                    cx.p_const_decls.set(name, cp)
+                }
+                if visible {
+                    cx.const_decls.set(name, cp)
+                }
+            }
+            _ => {
+                if lib {
+                    cx.p_global_decls.set(name, gp)
+                }
+                if visible {
+                    cx.global_decls.set(name, gp)
+                }
+            }
+        }
+    }
+    // a library constant or global that the program shadows gets an internal name (as a
+    // private declaration does, see priv.al) under which its value and storage are kept
+    // apart from the program's declaration
+    for name in shadowed {
+        cd, has_c := cx.p_const_decls.get(name)
+        if has_c && cd.name == name {
+            cd.name = ast_intern(fmt(name, "\x01", cd.pos.file))
+            ast_sym(cd.name)
+            cx.const_decls.set(cd.name, cd)
+        }
+        gd, has_g := cx.p_global_decls.get(name)
+        if has_g && gd.name == name {
+            gd.name = ast_intern(fmt(name, "\x01", gd.pos.file))
+            ast_sym(gd.name)
+            cx.global_decls.set(gd.name, gd)
         }
     }
     // library functions with a twin that takes the place of the call (see `call_fn`)
     for di in 0..cx.fn_decls.len {
         d := cx.fn_decls[di]
-        if d.pos.file >= np || !starts_with(d.name, "__at_") {
+        if !cx.lib_file(d.pos.file) || !starts_with(d.name, "__at_") {
             continue
         }
         l, has := cx.p_fn_over.get(d.name[5..])
@@ -355,16 +430,17 @@ fn cx_new(decls: []Decl, file_names: Vec[str], opts: Opts, n_prelude: i64) -> Cx
     }
     // enum variants: two enums may use the same variant name, and a variant may have the
     // name of a struct (a struct name is a type; `Name{...}` is always the struct literal).
-    // Within a layer (prelude / user) it must not have the name of a function, constant,
+    // Within a layer (library / user) it must not have the name of a function, constant,
     // global or enum
     for ei in 0..cx.enum_decls.len {
         e := cx.enum_decls[ei]
-        layer := if e.pos.file < np { 1 } else { 2 }
+        layer := if cx.lib_file(e.pos.file) { 1 } else { 2 }
         variants: for vi in 0..e.variants.len {
             vn := e.variants[vi].0
             if cx.decl_layers.get_or(vn, 0) & layer != 0 && struct_layers.get_or(vn, 0) & layer == 0 {
-                what := if cx.const_decls.has(vn) { "constant" } else if cx.global_decls.has(vn) { "global variable" } else if names_fn.get_or(vn, false) { "function" } else { "enum" }
-                cx.err(e.pos, fmt("variant `", vn, "` of enum `", e.name, "` has the name of the ", what, " `", vn, "` declared at ", cx.pos_str(names.get_or(vn, e.pos)), "; a variant can share its name with variants of other enums and with a struct, not with a function, constant, global variable or enum"))
+                d := if layer == 2 { user_names.get_or(vn, (e.pos, 3)) } else { lib_vals.get_or(vn, lib_types.get_or(vn, (e.pos, 3))) }
+                what := match d.1 { 4 => "constant"; 5 => "global variable"; 1 => "function"; _ => "enum" }
+                cx.err(e.pos, fmt("variant `", vn, "` of enum `", e.name, "` has the name of the ", what, " `", vn, "` declared at ", cx.pos_str(d.0), "; a variant can share its name with variants of other enums and with a struct, not with a function, constant, global variable or enum"))
                 continue
             }
             for vj in 0..vi {
@@ -398,8 +474,13 @@ struct SymNames {
     variants: i64
     p_variants: i64
     layers: i64
+    // the layers in which the name is declared twice (see `Cx.dup_layers`)
+    dup: i64
+    // the visible constant / global, and the library's own
     const_decl: *ConstDecl
     global_decl: *GlobalDecl
+    p_const_decl: *ConstDecl
+    p_global_decl: *GlobalDecl
 }
 
 // fills `names` from the tables of declared names, which are complete after cx_new
@@ -412,6 +493,9 @@ priv fn index_names(self: *Cx) {
         ast_sym(n)
     }
     for n in self.p_variants.keys() {
+        ast_sym(n)
+    }
+    for n in self.dup_layers.keys() {
         ast_sym(n)
     }
     self.names.resize(ast_sym_count(), SymNames{fn_name: -1, p_fn_name: -1, struct_name: -1, p_struct_name: -1, enum_name: -1, p_enum_name: -1, fn_over: -1, p_fn_over: -1, variants: -1, p_variants: -1})
@@ -456,6 +540,9 @@ priv fn index_names(self: *Cx) {
     for n in self.decl_layers.keys() {
         self.names[ast_sym(n)].layers = self.decl_layers.get_or(n, 0)
     }
+    for n in self.dup_layers.keys() {
+        self.names[ast_sym(n)].dup = self.dup_layers.get_or(n, 0)
+    }
     for n in self.const_decls.keys() {
         d, _ := self.const_decls.get(n)
         self.names[ast_sym(n)].const_decl = d
@@ -464,6 +551,20 @@ priv fn index_names(self: *Cx) {
         d, _ := self.global_decls.get(n)
         self.names[ast_sym(n)].global_decl = d
     }
+    for n in self.p_const_decls.keys() {
+        d, _ := self.p_const_decls.get(n)
+        self.names[ast_sym(n)].p_const_decl = d
+    }
+    for n in self.p_global_decls.keys() {
+        d, _ := self.p_global_decls.get(n)
+        self.names[ast_sym(n)].p_global_decl = d
+    }
+}
+
+// while resolving for library code: does the library declare `e`'s name as a function,
+// constant or global (which hides a value of the program with that name)?
+priv fn lib_value(self: *Cx, e: *SymNames) -> bool {
+    return self.scope_prelude && (e.p_fn_name >= 0 || e.p_const_decl != nil || e.p_global_decl != nil)
 }
 
 // the entry of `names` for the name `n`, or nil if no declaration has that name
@@ -526,7 +627,7 @@ fn lib_variants(self: *Cx, n: str) -> (Vec[(i64, i64)], bool) {
     return (self.vlists[e.p_variants], true)
 }
 
-// which layers declare a function, type, constant or global of the name: 1 = prelude, 2 = user
+// which layers declare a function, type, constant or global of the name: 1 = library, 2 = user
 fn decl_layer(self: *Cx, n: str) -> i64 {
     e := self.named(n)
     if e == nil {
@@ -535,30 +636,67 @@ fn decl_layer(self: *Cx, n: str) -> i64 {
     return e.layers
 }
 
-fn has_const(self: *Cx, n: str) -> bool {
+// is `n` declared twice in the layer being compiled (it stands for the error type there)?
+fn is_dup(self: *Cx, n: str) -> bool {
+    if self.dup_layers.len == 0 {
+        return false
+    }
     e := self.named(n)
-    return e != nil && e.const_decl != nil
+    return e != nil && e.dup & (if self.scope_prelude { 1 } else { 2 }) != 0
+}
+
+// the constant / global `n` as the layer being compiled sees it, or nil
+priv fn const_of(self: *Cx, n: str) -> *ConstDecl {
+    e := self.named(n)
+    if e == nil {
+        return nil
+    }
+    if self.scope_prelude && e.p_const_decl != nil {
+        return e.p_const_decl
+    }
+    if self.lib_value(e) {
+        return nil
+    }
+    return e.const_decl
+}
+
+priv fn global_of(self: *Cx, n: str) -> *GlobalDecl {
+    e := self.named(n)
+    if e == nil {
+        return nil
+    }
+    if self.scope_prelude && e.p_global_decl != nil {
+        return e.p_global_decl
+    }
+    if self.lib_value(e) {
+        return nil
+    }
+    return e.global_decl
+}
+
+fn has_const(self: *Cx, n: str) -> bool {
+    return self.const_of(n) != nil
 }
 
 fn const_decl(self: *Cx, n: str) -> (*ConstDecl, bool) {
-    e := self.named(n)
-    if e == nil || e.const_decl == nil {
-        return (nil, false)
-    }
-    return (e.const_decl, true)
+    d := self.const_of(n)
+    return (d, d != nil)
+}
+
+// the name under which the constant `n` (as seen from here) is evaluated and stored: its
+// declaration's (internal for a library constant the program shadows)
+priv fn const_key(self: *Cx, n: str) -> str {
+    d := self.const_of(n)
+    return if d == nil { n } else { d.name }
 }
 
 fn has_global(self: *Cx, n: str) -> bool {
-    e := self.named(n)
-    return e != nil && e.global_decl != nil
+    return self.global_of(n) != nil
 }
 
 fn global_decl(self: *Cx, n: str) -> (*GlobalDecl, bool) {
-    e := self.named(n)
-    if e == nil || e.global_decl == nil {
-        return (nil, false)
-    }
-    return (e.global_decl, true)
+    d := self.global_of(n)
+    return (d, d != nil)
 }
 
 fn find_fn(self: *Cx, n: str) -> Opt[i64] {
@@ -569,13 +707,16 @@ fn find_fn(self: *Cx, n: str) -> Opt[i64] {
     if self.scope_prelude && e.p_fn_name >= 0 {
         return Some(e.p_fn_name)
     }
+    if self.lib_value(e) {
+        return None
+    }
     if e.fn_name >= 0 {
         return Some(e.fn_name)
     }
     return None
 }
 
-// all definitions a call to `n` may resolve to: user definitions first, then the prelude's
+// all definitions a call to `n` may resolve to: user definitions first, then the library's
 fn fn_candidates(self: *Cx, n: str) -> Vec[i64] {
     v := self.fn_candidates_of(n)
     // a private function (see priv.al): the public definitions of the written name follow
@@ -593,11 +734,11 @@ priv fn fn_candidates_of(self: *Cx, n: str) -> Vec[i64] {
         return v
     }
     if self.scope_prelude {
-        // prelude code sees its own definitions; the synthesized entry also reaches user code
+        // library code sees its own definitions; the synthesized entry also reaches user code
         if e.p_fn_over >= 0 {
             return clone(self.lists[e.p_fn_over])
         }
-        if e.fn_over >= 0 {
+        if e.fn_over >= 0 && !self.lib_value(e) {
             return clone(self.lists[e.fn_over])
         }
         return v
@@ -619,8 +760,8 @@ fn find_struct(self: *Cx, n: str) -> Opt[i64] {
     if e == nil {
         return None
     }
-    if self.scope_prelude && e.p_struct_name >= 0 {
-        return Some(e.p_struct_name)
+    if self.scope_prelude && (e.p_struct_name >= 0 || e.p_enum_name >= 0) {
+        return if e.p_struct_name >= 0 { Some(e.p_struct_name) } else { None }
     }
     if e.struct_name >= 0 {
         return Some(e.struct_name)
@@ -633,8 +774,8 @@ fn find_enum(self: *Cx, n: str) -> Opt[i64] {
     if e == nil {
         return None
     }
-    if self.scope_prelude && e.p_enum_name >= 0 {
-        return Some(e.p_enum_name)
+    if self.scope_prelude && (e.p_enum_name >= 0 || e.p_struct_name >= 0) {
+        return if e.p_enum_name >= 0 { Some(e.p_enum_name) } else { None }
     }
     if e.enum_name >= 0 {
         return Some(e.enum_name)
@@ -642,8 +783,24 @@ fn find_enum(self: *Cx, n: str) -> Opt[i64] {
     return None
 }
 
+// the kinds of library files (`Cx.lib_files`): the core library (`src/prelude*.al` and the
+// modules that are always loaded), a bundled module included with `use std.name`
+const LIB_CORE: u8 = 1
+const LIB_MODULE: u8 = 2
+
+// a file of the library: of the core library or a bundled module. Library code resolves
+// names to the library's declarations; the program's declarations of the same names only
+// shadow them for the program's code.
+fn lib_file(self: *Cx, file: i64) -> bool {
+    return file >= 0 && file < self.lib_files.len && self.lib_files[file] != 0
+}
+
+fn core_file(self: *Cx, file: i64) -> bool {
+    return file >= 0 && file < self.lib_files.len && self.lib_files[file] == LIB_CORE
+}
+
 fn internal_file(self: *Cx, file: i64) -> bool {
-    return file < self.n_prelude || file == self.entry_file
+    return self.lib_file(file) || file == self.entry_file
 }
 
 fn pos_str(self: *Cx, p: Pos) -> str {
@@ -732,7 +889,7 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
             for i in 0..args.len {
                 targs.push(self.resolve(&args[i], env))
             }
-            if contains(&targs, T_ERR) {
+            if contains(&targs, T_ERR) || self.is_dup(n) {
                 return T_ERR
             }
             match self.find_struct(n) {
@@ -1171,15 +1328,25 @@ fn string_global(self: *Cx, s: str) -> i64 {
     return gid
 }
 
+// the (type, global) of the global variable `name` as seen from here
 fn global(self: *Cx, name: str) -> Opt[(i64, i64)] {
-    known, found := self.globals.get(name)
-    if found {
-        return Some(known)
-    }
     d, has_decl := self.global_decl(name)
     if !has_decl {
         return None
     }
+    known, found := self.globals.get(d.name)
+    if found {
+        return Some(known)
+    }
+    // (its type and initializer name what its own file sees)
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    r := self.global_new(d)
+    self.scope_prelude = save_scope
+    return r
+}
+
+priv fn global_new(self: *Cx, d: *GlobalDecl) -> Opt[(i64, i64)] {
     env := map[str, i64]()
     ty := T_ERR
     match d.ty {
@@ -1317,6 +1484,9 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
                 Some(bt) => return Some(bt)
                 None => {}
             }
+            if self.is_dup(n) {
+                return Some(T_ERR)
+            }
             match self.find_struct(n) {
                 Some(si) => {
                     if self.struct_decls[si].tparams.is_empty() {
@@ -1392,6 +1562,7 @@ fn expr_type(self: *Cx, e: *Expr, env: *Map[str, i64]) -> Opt[i64] {
 // scalar value? Decided by the form of its initializer: a `T{...}` literal, a tuple, a
 // vector constructor, or the name of another such constant.
 fn const_is_mem(self: *Cx, name: str) -> bool {
+    name = self.const_key(name)
     k, known := self.const_kind.get(name)
     if known {
         return k == 2
@@ -1401,6 +1572,8 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
         return false
     }
     self.const_kind.set(name, 0)
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
     mem := false
     match d.val.k {
         Lit(_, _), Tuple(_) => {
@@ -1433,12 +1606,14 @@ fn const_is_mem(self: *Cx, name: str) -> bool {
         }
         _ => {}
     }
+    self.scope_prelude = save_scope
     self.const_kind.set(name, if mem { 2 } else { 1 })
     return mem
 }
 
 // the (type, global) of a constant that lives in read-only memory (see `const_is_mem`)
 fn const_global(self: *Cx, name: str) -> Opt[(i64, i64)] {
+    name = self.const_key(name)
     d, has_decl := self.const_decl(name)
     if !has_decl {
         return None
@@ -1533,6 +1708,7 @@ fn embed_bytes(self: *Cx, args: []Expr, pos: Pos) -> Opt[str] {
 }
 
 fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
+    name = self.const_key(name)
     if self.const_is_mem(name) {
         // not a scalar value; evaluated here so that its errors are reported
         self.const_global(name)
@@ -1555,6 +1731,15 @@ fn const_named(self: *Cx, name: str) -> Opt[(Opt[i64], CV)] {
         return None
     }
     self.const_vals.set(d.name, Busy)
+    // (its value names what its own file sees)
+    save_scope := self.scope_prelude
+    self.scope_prelude = self.internal_file(d.pos.file)
+    r := self.const_value(d, name)
+    self.scope_prelude = save_scope
+    return r
+}
+
+priv fn const_value(self: *Cx, d: *ConstDecl, name: str) -> Opt[(Opt[i64], CV)] {
     ty: Opt[i64] = None
     want := -1
     match d.ty {

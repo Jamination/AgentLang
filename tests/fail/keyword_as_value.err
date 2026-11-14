@@ -1,0 +1,3 @@
+keyword_as_value.al:4:5: error: expected expression, found keyword `by` (`by` is a keyword and cannot be used as a name)
+keyword_as_value.al:6:17: error: expected expression, found keyword `by` (`by` is a keyword and cannot be used as a name)
+keyword_as_value.al:8:8: error: expected expression, found keyword `by` (`by` is a keyword and cannot be used as a name)

@@ -10,4 +10,3 @@ extern "libc.so.6" fn dlopen(path: *u8, flags: i32) -> *u8
 extern "libc.so.6" fn dlsym(handle: *u8, name: *u8) -> *u8
 extern "libc.so.6" fn dlerror() -> *u8
 extern "libm.so.6" fn cosf(x: f32) -> f32
-extern "libm.so.6" fn pow(x: f64, y: f64) -> f64

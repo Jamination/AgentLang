@@ -322,6 +322,13 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
             // a keyword where a name was meant: `by := 0`, `f(in, out)`, `x.type`,
             // `fn f(in: i64)`, `for match in ..`
             named := starts_with(msg, "expected identifier") || starts_with(msg, "expected field name")
+            // where a value was expected (`x + by`), the keywords that are often meant as names
+            if starts_with(msg, "expected expression") {
+                match lexer_kw_text(k) {
+                    "by", "in", "test", "use", "defer", "priv", "inline", "noinline", "extern" => { named = true }
+                    _ => {}
+                }
+            }
             match p.peek_at(1) {
                 P(P_DECL), P('='), P(':'), P(','), P(')'), P('.'), P(P_ADD_EQ), P(P_SUB_EQ) => { named = true }
                 _ => {}
@@ -1145,7 +1152,8 @@ priv fn block(p: *Parser) -> *Block {
         } else {
             p.sync_stmt()
         }
-        if after_name && p.errs.len > nerr {
+        // (not when the error already has a hint of its own)
+        if after_name && p.errs.len > nerr && !ends_with(p.errs[nerr].msg, ")") {
             p.errs[nerr].msg = fmt(p.errs[nerr].msg, " (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)")
         }
         after_name = false
