@@ -161,7 +161,8 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
   swap chain can use `win32_hwnd(w)` of a std.window window.
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
-- `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`.
+- `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`. Saves
+  and settings go in `data_dir(app)` / `config_dir(app)` (per user, per system).
 
 A program that never opens a window or a device (a test run, a server, a tool) uses none of
 the system libraries and is a static executable.
@@ -175,10 +176,10 @@ set on the command line; neither costs anything in the other build:
 const DEMO = false                      // alc build -D DEMO game.al: the demo build
 const DEBUG_DRAW = false
 
-when TARGET_OS == Windows {
-    fn save_dir() -> str { fmt(env_get("APPDATA").0, "/MyGame") }    // `/` works on Windows too
+when TARGET_OS == Windows {                // (std.os: run; saves go in std.asset's data_dir)
+    fn open_url(url: str) { run([]str{"cmd", "/c", "start", "", url}) }
 } else {
-    fn save_dir() -> str { fmt(env_get("HOME").0, "/.local/share/mygame") }
+    fn open_url(url: str) { run([]str{"xdg-open", url}) }
 }
 
 fn update(g: *Game, inp: *Input, dt: f32) {
