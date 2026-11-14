@@ -731,7 +731,7 @@ exit(code: i64) -> never                   // flush, end the program with this e
 // ---- numbers
 min(a: T, b: T) -> T    max(a: T, b: T) -> T    abs(x: T) -> T   // min / max: any numeric type or str (both arguments the same type), NaN if either is NaN; abs: any signed integer or float type
 swap(a: *T, b: *T)    floor ceil round trunc pow fmod sin cos tan atan2 exp log ...   // swap(&x, &y), swap(&v[i], &v[j]); the math functions exist for f32 and f64 (the argument type picks one): std/math.md
-clock_ns() -> i64                          // monotonic clock in nanoseconds; there are no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
+clock_ns() -> i64    sat_add(a: T, b: T) -> T    sat_sub(a: T, b: T) -> T   // monotonic clock in ns; sat_*: any integer type, limited to its range instead of wrapping (sat_add(u8(250), 10) is 255); no integer limit constants: the largest i64 is 0x7FFF_FFFF_FFFF_FFFF
 // ---- slices (for a Vec pass v[..])
 sort(a: []T)                               // ascending, in place; T is a number type or str (bytewise, like cmp)
 sort_by(a: []T, less: fn(T, T) -> bool)    // stable; descending: sort_by(xs, fn(a: i64, b: i64) -> bool { a > b })

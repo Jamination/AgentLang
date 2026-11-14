@@ -1459,6 +1459,40 @@ fn abs[T](x: T) -> T {
     if x <= 0 { 0 - x } else { x }
 }
 
+// a + b and a - b of any integer type, limited to the type's range instead of wrapping
+fn sat_add[T](a: T, b: T) -> T {
+    s := a + b
+    zero: T
+    if ~zero < zero {
+        // signed: overflow when both operands have one sign and the sum the other
+        if (a < 0) == (b < 0) && (s < 0) != (a < 0) {
+            return __sat_limit(a, a < 0)
+        }
+        return s
+    }
+    if s < a { ~zero } else { s }
+}
+
+fn sat_sub[T](a: T, b: T) -> T {
+    d := a - b
+    zero: T
+    if ~zero < zero {
+        // signed: overflow when the operands have different signs and the difference has b's
+        if (a < 0) != (b < 0) && (d < 0) != (a < 0) {
+            return __sat_limit(a, a < 0)
+        }
+        return d
+    }
+    if b > a { zero } else { d }
+}
+
+// the smallest (low) or largest value of the signed integer type of x
+fn __sat_limit[T](x: T, low: bool) -> T {
+    m: T = 1
+    m = m << (sizeof[T]() * 8 - 1)
+    if low { m } else { ~m }
+}
+
 inline fn swap[T](a: *T, b: *T) {
     t := *a
     *a = *b
