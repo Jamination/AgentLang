@@ -204,8 +204,8 @@ Compiling the compiler (about 36,500 lines including the run-time library) takes
   function is lowered (it needs the type of the initialiser) and counts, in the rest of the
   block, direct field assignments to the new name against every other occurrence of it.
 - **Failures that name the caller** (`pop`, `last`, `insert`, `remove`, `swap_remove`,
-  `truncate`; `count`, `replace`, `split`, `find` from a position, `find_any`, `parse_i64`
-  with a base, `to_base`). A prelude function `f` may have a twin `__at_f` with the same parameters plus
+  `truncate`; `count`, `replace`, `split`, `find` from a position, `find_any`, `parse_i64` and
+  `parse_u64` with a base, `to_base`). A prelude function `f` may have a twin `__at_f` with the same parameters plus
   a last `at: str`. `cx_new` records the pairs (`Cx.located`, matched by parameter types) and
   `call_fn` compiles every call of `f` as a call of `__at_f` with the "file:line" of the call
   (`loc_str`, as `assert` and bounds checks get theirs). Overload resolution, method calls
