@@ -108,57 +108,63 @@ fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
             break
         }
         checked_all = true
-        // type-check every non-generic user function, even if unreachable
+        // type-check every non-generic user function, even if unreachable (and those of the
+        // bundled modules when they are not lazy: `alc check`)
         for di in 0..cx.fn_decls.len {
             d := cx.fn_decls[di]
             eager := d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file)
             if d.tparams.is_empty() && eager {
                 l, has_l := cx.fn_over_of(d.name)
-                if has_l && contains(&l, di) && cx.has_fn_name(d.name) {
+                if cx.lib_file(d.pos.file) || (has_l && contains(&l, di) && cx.has_fn_name(d.name)) {
                     cx.inst_fn(di, vec[i64]())
                 }
             }
         }
         // two definitions of a name whose parameter types are the same once type aliases
-        // are resolved (the texts differ, so the declaration pass did not see it)
-        for n in cx.fn_over.keys() {
-            l, _ := cx.fn_over_of(n)
-            if l.len < 2 || !cx.has_fn_name(n) {
-                continue
-            }
-            for a in 1..l.len {
-                da := cx.fn_decls[l[a]]
-                if da.tparams.len != 0 || da.pos.file < check_from_file || cx.lazy_files.has(da.pos.file) {
+        // are resolved (the texts differ, so the declaration pass did not see it), per layer
+        for layer in 0..2 {
+            for n in (if layer == 0 { &cx.fn_over } else { &cx.p_fn_over }).keys() {
+                l, _ := (if layer == 0 { &cx.fn_over } else { &cx.p_fn_over }).get(n)
+                if l.len < 2 || (layer == 0 && !cx.has_fn_name(n)) {
                     continue
                 }
-                fa, has_a := cx.fn_insts.get((l[a], vec[i64]().items()))
-                if !has_a || contains(&cx.fn_sigs[fa].0, T_ERR) {
-                    continue
-                }
-                for b in 0..a {
-                    db := cx.fn_decls[l[b]]
-                    if db.tparams.len != 0 {
+                for a in 1..l.len {
+                    da := cx.fn_decls[l[a]]
+                    if da.tparams.len != 0 || da.pos.file < check_from_file || cx.lazy_files.has(da.pos.file) {
                         continue
                     }
-                    fb, has_b := cx.fn_insts.get((l[b], vec[i64]().items()))
-                    if has_b && cx.fn_sigs[fa].0.items() == cx.fn_sigs[fb].0.items() {
-                        at := cx.pos_str(db.pos)
-                        cx.err(da.pos, fmt("`", n, "` is already declared with these parameter types at ", at, " (", lower_new_sig(da), " and ", lower_new_sig(db), " are the same types)"))
-                        break
+                    fa, has_a := cx.fn_insts.get((l[a], vec[i64]().items()))
+                    if !has_a || contains(&cx.fn_sigs[fa].0, T_ERR) {
+                        continue
+                    }
+                    for b in 0..a {
+                        db := cx.fn_decls[l[b]]
+                        if db.tparams.len != 0 {
+                            continue
+                        }
+                        fb, has_b := cx.fn_insts.get((l[b], vec[i64]().items()))
+                        if has_b && cx.fn_sigs[fa].0.items() == cx.fn_sigs[fb].0.items() {
+                            at := cx.pos_str(db.pos)
+                            cx.err(da.pos, fmt("`", n, "` is already declared with these parameter types at ", at, " (", lower_new_sig(da), " and ", lower_new_sig(db), " are the same types)"))
+                            break
+                        }
                     }
                 }
             }
         }
         // and force evaluation of user constants / globals
-        // (the names are visited in the order of their declarations)
+        // (the names are visited in the order of their declarations; the tables hold the
+        // declarations visible to the program, and a shadowed library one under its internal
+        // name)
+        cx.scope_prelude = false
         for n in cx.const_decls.keys() {
-            d, _ := cx.const_decl(n)
+            d, _ := cx.const_decls.get(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
                 cx.const_named(n)
             }
         }
         for n in cx.global_decls.keys() {
-            d, _ := cx.global_decl(n)
+            d, _ := cx.global_decls.get(n)
             if d.pos.file >= check_from_file && !cx.lazy_files.has(d.pos.file) {
                 cx.global(n)
             }

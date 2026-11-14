@@ -238,7 +238,7 @@ struct VoiceId {
 }
 
 // One slot of the voice pool. `pos` and `step` are source frames in 32.32 fixed point.
-struct Voice {
+priv struct Voice {
     sound: Sound
     pos: i64
     step: i64

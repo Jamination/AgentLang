@@ -470,6 +470,11 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 }
                 None => {}
             }
+            if self.cx.is_dup(n) {
+                // (declared twice: reported at the declaration)
+                lower_call_eval_all(self, args)
+                return val_err()
+            }
             // a variant; in a call, a builtin function or type of the same name wins
             // (`len(x)`, `i64(x)`): such a variant is constructed as `Enum.Variant(..)`
             bv := self.bare_variant(n, expect)
@@ -1110,7 +1115,7 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
     // a library function `f` with a twin `__at_f` that takes the place of the call as a last
     // `str` parameter: the twin is called, so that its failure names the caller's line
     nloc := 0
-    if nest < 0 && d.pos.file < self.cx.n_prelude {
+    if nest < 0 && self.cx.lib_file(d.pos.file) {
         twin, has := self.cx.located.get(di)
         if has && d.params.len == len(args) + nrecv {
             d = self.cx.fn_decls[twin]
