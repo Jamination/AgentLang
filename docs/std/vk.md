@@ -76,7 +76,9 @@ current names needs it). Struct names that C defines as a second name of another
 - **pNext chains**: `pNext` is `*u8`; link structs with `cast[*u8](&next)`, see
   [pNext chains](#pnext-chains).
 - **Mapped memory**: `p: *u8; vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &p)`, then
-  `memcopy(p, ptr(data), nbytes)` or `mkslice[u8](p, nbytes)`. The layouts of AL's
+  view it as a slice once, `mem := mkslice[u8](p, size)`, and work with bounds-checked slices:
+  `memcopy(ptr(mem[off..]), ptr(data), nbytes)` to upload at an offset, `cast[[]vec4](mem[a..b])`
+  for a typed view (reading back, writing uniforms). The layouts of AL's
   `vec2`/`vec4`/`mat4` (column-major, 16-byte `vec4`) match GLSL's `std140`/`std430` for
   `vec4` and `mat4` members; a `vec3` is 12 bytes in AL and 16-byte aligned in `std140`.
 - **Callbacks** (`pfnUserCallback`, allocation callbacks): an AL function with scalar/pointer

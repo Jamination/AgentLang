@@ -655,6 +655,11 @@ fn main() {
   static, libc-free executable. Only the libraries of functions and variables that are
   actually reachable are needed.
 - The declared signature of an `extern` function and the type of an `extern` variable are trusted.
+- Raw memory from C (a mapped buffer, a returned array): wrap it once with
+  `mem := mkslice[u8](p, nbytes)` and work with slices, which are bounds-checked: a typed view at
+  a byte offset is `cast[[]T](mem[a..b])` (its length is `(b - a) / sizeof(T)`; leftover bytes
+  are dropped), a pointer at an offset for C is `ptr(mem[a..])`. Alignment is not checked: keep
+  views of `T` at offsets that are multiples of `T`'s alignment.
 - A plain `extern` binds a library's default symbol version as the loader resolves an
   unversioned reference, which for some versioned C symbols is the OLDEST one (ALSA's pre-1.0
   `snd_pcm_hw_params_get_*`): check the library's documentation when a function has versions.

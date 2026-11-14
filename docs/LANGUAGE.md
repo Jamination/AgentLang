@@ -702,7 +702,7 @@ division checks (out-of-range behaviour is then undefined); `assert` and `panic`
 | `embed("file") -> str` | content of a file, read at compile time (a constant) |
 | `syscall(nr, a, b, ...) -> i64` | raw Linux system call (up to 6 arguments) |
 | `cast[T](x)` | reinterpret: pointer↔pointer, pointer↔`i64`/`u64`, `f64`↔`i64`/`u64` and `f32`↔`i32`/`u32` bits, slice↔slice |
-| `ptr(s) -> *T`, `mkslice[T](p, n) -> []T`, `memcopy(dst, src: any pointers, nbytes)`, `memfill(dst, byte: u8, nbytes)` | pointer to the first element; slice from pointer and length; raw copy / fill. No pointer arithmetic: offset by bytes as `cast[*T](cast[u64](p) + n)` |
+| `ptr(s) -> *T`, `mkslice[T](p, n) -> []T`, `memcopy(dst, src: any pointers, nbytes)`, `memfill(dst, byte: u8, nbytes)` | pointer to the first element; slice from pointer and length; raw copy / fill. There is no pointer arithmetic: wrap a C pointer once as a slice, then `ptr(mem[n..])`, `cast[[]f32](mem[a..b])` |
 
 **How values print** (`print`, `put`, `fmt`): integers in decimal (a `u8` too: `put(s[0])` writes
 `104`; a character is written with `putc(c)` or as the slice `s[i..i + 1]`); floats as the shortest

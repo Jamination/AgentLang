@@ -19,8 +19,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   accesses that shaders make through descriptors, so compute/graphics hazards went unreported.
   The page now also shows destroying the debug messenger.
 - Docs: `ortho`'s Y direction and winding with `perspective_vk` (`std/math.md`); parameter types
-  of `memcopy` / `memfill` and how to offset a pointer by bytes; `str` constants, like literals,
-  are NUL-terminated.
+  of `memcopy` / `memfill`; `str` constants, like literals, are NUL-terminated.
+- Docs: raw memory from C (mapped Vulkan buffers) is handled through slices (`mkslice` once,
+  then sub-slices, `cast[[]T](...)` views and `ptr(mem[a..])`), which are bounds-checked;
+  replaces an integer-cast pointer workaround the docs suggested briefly.
 
 ## [0.1.0] - 2026-11-14
 
