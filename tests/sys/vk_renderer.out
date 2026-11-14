@@ -1,0 +1,15 @@
+ok   clear colour, corner
+ok   near quad, red quadrant
+ok   near quad, green quadrant
+ok   near quad, blue quadrant
+ok   near quad, white quadrant
+ok   far quad hidden by the near one (depth test)
+ok   far quad, green quadrant
+ok   far quad, blue quadrant
+ok   far quad, white quadrant, cyan (frame 7 from the compute shader)
+ok   camera translation (uniform buffer): left of the near quad
+ok   camera translation (uniform buffer): right edge of the near quad
+frames rendered: 8 with 2 in flight
+timestamps read: 8
+debug messenger received the test message: true
+validation errors: 0 warnings: 0

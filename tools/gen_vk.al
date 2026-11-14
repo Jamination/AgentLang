@@ -22,6 +22,9 @@ priv const EXTENSIONS = [_]str{
     "VK_KHR_xcb_surface",
     "VK_KHR_wayland_surface",
     "VK_EXT_debug_utils",
+    "VK_EXT_layer_settings",
+    "VK_EXT_memory_budget",
+    "VK_EXT_memory_priority",
 }
 priv const REGISTRY = "/usr/share/vulkan/registry/vk.xml"
 priv const LOADER = "/usr/lib/libvulkan.so.1"

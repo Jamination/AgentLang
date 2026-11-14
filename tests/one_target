@@ -7,3 +7,5 @@ tests/check/wayland_window.al std.wayland is Linux only
 examples/dx12_triangle.al Direct3D 12 and the Win32 window handle (win32_hwnd) are Windows only
 examples/dx12_starter/game.al Direct3D 12 and the Win32 window handle (win32_hwnd) are Windows only
 examples/dx12_breakout/game.al Direct3D 12 and the Win32 window handle (win32_hwnd) are Windows only
+examples/vk_renderer/offscreen.al std.vk binds libvulkan.so.1 (Linux)
+examples/vk_renderer/windowed.al std.vk binds libvulkan.so.1; X11 and Wayland surfaces (Linux)
