@@ -164,7 +164,7 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
     // the registers from 0x78 in x86 order (rax, rcx, ..., r15), rip at 0xF8
     ctx := cast[*i64](info)[1]
     for k in 0..16 {
-        __bt_fault_regs[k] = cast[*i64](ctx + 0x78 + 8 * k)[0]
+        __bt_fault_regs.r[k] = cast[*i64](ctx + 0x78 + 8 * k)[0]
     }
     __bt_fault_pc = cast[*i64](ctx + 0xF8)[0]
     GetCurrentThreadStackLimits(&fault_lo, &fault_hi)
@@ -258,7 +258,7 @@ priv bt_wname: [260]u16
 priv bt_name: [260]u8
 
 // is pc in the code of a DLL? (it becomes the DLL of the lookups)
-fn __os_bt_foreign(pc: i64) -> bool {
+noinline fn __os_bt_foreign(pc: i64) -> bool {
     h := 0
     // GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT
     if GetModuleHandleExW(6, pc, &h) == 0 || h == 0 || h == image_lo {
@@ -271,7 +271,7 @@ fn __os_bt_foreign(pc: i64) -> bool {
 // the caller of the frame of DLL code at pc (a return address, or the faulting instruction if
 // `fault`) with registers g: its return address (0: unknown), g becomes its registers (r[4]: its
 // stack pointer). The stack is read only in [g.r[4], hi).
-fn __os_bt_unwind(pc: i64, fault: bool, g: *__BtRegs, hi: i64) -> i64 {
+noinline fn __os_bt_unwind(pc: i64, fault: bool, g: *__BtRegs, hi: i64) -> i64 {
     sp := g.r[4]
     base := 0
     fe := if __os_bt_foreign(pc) { RtlLookupFunctionEntry(pc, &base, 0) } else { 0 }
@@ -342,7 +342,7 @@ priv fn bt_export(h: i64, rva: i64) -> str {
 
 // the frame of DLL code at address q: (the file name of its DLL, the name of its function or "",
 // q's offset in the DLL); ("", "", q) outside every DLL
-fn __os_bt_where(q: i64) -> (str, str, i64) {
+noinline fn __os_bt_where(q: i64) -> (str, str, i64) {
     if !__os_bt_foreign(q) {
         return ("", "", q)
     }

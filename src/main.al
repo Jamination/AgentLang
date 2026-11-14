@@ -809,6 +809,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     tests := vec[str]()
     main_ret := false
     has_main := false
+    has_c := false
     decls := vec[Decl]()
     taken := src.decls
     src.decls = vec[Decl]()
@@ -834,6 +835,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
                         src.errs.push(Diag{pos: f.pos, msg: fmt("`main` is declared `fn main()` or `fn main() -> i64` (the exit status), not `", ast_sig_str(&f), "`", note)})
                     }
                 }
+                has_c = has_c || is_some(f.ext)
                 decls.push(Fn(f))
             }
             _ => {
@@ -843,6 +845,10 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     }
     entry := vec[str]()
     entry.push("fn __entry(sp: i64) -> never {\n __rt_init(sp)\n")
+    if has_c {
+        // (stack traces through C code: only a program that declares C functions has them)
+        entry.push(" __bt_c_init()\n")
+    }
     if test_mode {
         for i, name in tests {
             // as a string literal of the entry source: every byte that cannot stand there as it is

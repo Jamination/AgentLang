@@ -19,7 +19,7 @@
 //   __os_stack_range() -> (lo, hi) the stack of the running thread, for stack traces
 //   __os_backtrace_off() -> bool   ALC_BACKTRACE=0 is set (without allocating)
 //   __os_bt_foreign, __os_bt_unwind, __os_bt_where, __BT_SAVED
-//                                  stack traces through C libraries (see "stack traces")
+//                                  stack traces through C libraries (see __bt_c_init)
 //   clock_ns, args, env_get        the public functions of that name
 // plus the __os_* functions used by std.asset, std.time and std.os. Error numbers are
 // Linux errno values on every target (the Windows layer maps its error codes to them).
@@ -106,13 +106,15 @@ noinline fn __panic(loc: str, msg: str) -> never {
 // a C library is a frame the OS layer unwinds (__os_bt_unwind: DWARF call frame information on
 // Linux, RtlVirtualUnwind on Windows); C code may keep its frames through any callee-saved
 // register, so the walk follows them too: the values a frame of the program pushed in its
-// prologue are its caller's.
+// prologue are its caller's. That part of the walk is reached through function values that
+// __bt_c_init sets, which the entry point calls only in a program that declares C functions:
+// other programs, where no C code can run, do not contain it.
 __bt_table: i64
 // set by the fault handlers of the OS layers before they call __die: the faulting instruction
 // and the registers there (see __BtRegs; r11 counts the pages of a Windows stack probe); pc 0:
 // no fault
 __bt_fault_pc: i64
-__bt_fault_regs: [16]i64
+__bt_fault_regs: __BtRegs
 // a trace is being written (a fault now is a fault of the walk itself)
 __bt_busy: bool
 
@@ -121,6 +123,22 @@ __bt_busy: bool
 struct __BtRegs {
     r: [16]i64
     known: i64
+}
+
+// the OS layer's functions for frames of C code (nil: no C code can run)
+priv bt_c_foreign: fn(i64) -> bool
+priv bt_c_unwind: fn(i64, bool, *__BtRegs, i64) -> i64
+priv bt_c_where: fn(i64) -> (str, str, i64)
+
+fn __bt_c_init() {
+    bt_c_foreign = __os_bt_foreign
+    bt_c_unwind = __os_bt_unwind
+    bt_c_where = __os_bt_where
+}
+
+// is pc in the code of a C library?
+priv fn bt_foreign(pc: i64) -> bool {
+    return cast[i64](bt_c_foreign) != 0 && bt_c_foreign(pc)
 }
 
 priv struct BtWalk {
@@ -259,7 +277,7 @@ priv fn bt_frame_bytes(w: *BtWalk) -> (i64, i64) {
 
 // the registers that the first n pushes of function f's prologue saved below its return address
 // at `at`: the values of its caller
-priv fn bt_saved(w: *BtWalk, f: i64, at: i64, n: i64) {
+priv noinline fn bt_saved(w: *BtWalk, f: i64, at: i64, n: i64) {
     p := w.base + bt_u32(w.funcs + BT_FN * f)
     for k in 0..n {
         r := 0
@@ -297,14 +315,14 @@ priv fn bt_step(w: *BtWalk) -> bool {
     } else {
         w.g.r[4] = w.sp
         w.g.known |= 16
-        ra = __os_bt_unwind(w.pc, w.fault, &w.g, w.hi)
+        ra = bt_c_unwind(w.pc, w.fault, &w.g, w.hi)
         sp = w.g.r[4]
         if ra == 0 || sp <= w.sp || sp % 8 != 0 || sp > w.hi {
             return false
         }
     }
     f := bt_find(w, ra)
-    if f < 0 && !__os_bt_foreign(ra) {
+    if f < 0 && !bt_foreign(ra) {
         return false
     }
     w.f = f
@@ -422,84 +440,88 @@ priv bt_cur: BtWalk
 priv bt_count: BtOut
 priv bt_out: BtOut
 priv bt_buf: [512]u8
+priv bt_len: i64
+
+// the line being written in bt_buf: s, a number, a number in hexadecimal ("0x...") added
+priv noinline fn bt_put(s: str) {
+    for c in s {
+        if bt_len < 511 {
+            bt_buf[bt_len] = c
+            bt_len += 1
+        }
+    }
+}
+
+priv noinline fn bt_num(x0: i64) {
+    d: [20]u8
+    k := 0
+    x := x0
+    loop {
+        d[k] = u8('0' + x % 10)
+        k += 1
+        x /= 10
+        if x == 0 {
+            break
+        }
+    }
+    for i in k - 1..=0 by -1 {
+        if bt_len < 511 {
+            bt_buf[bt_len] = d[i]
+            bt_len += 1
+        }
+    }
+}
+
+priv noinline fn bt_hex(x: i64) {
+    bt_put("0x")
+    for i in 15..=0 by -1 {
+        // (from the first digit that is not 0)
+        if (x >> (4 * i) != 0 || i == 0) && bt_len < 511 {
+            bt_buf[bt_len] = "0123456789abcdef"[(x >> (4 * i)) & 15]
+            bt_len += 1
+        }
+    }
+}
 
 // writes line `id` of the trace (or "... N more" if `more` > 0) to standard error (no
 // allocation: the panic may be "out of memory")
 priv fn bt_write(w: *BtWalk, id: i64, more: i64) {
-    b := &bt_buf
-    n := 0
-    fn put(b: *[512]u8, n: *i64, s: str) {
-        for c in s {
-            if *n < 511 {
-                b[*n] = c
-                *n += 1
-            }
-        }
-    }
-    fn num(b: *[512]u8, n: *i64, x0: i64) {
-        d: [20]u8
-        k := 0
-        x := x0
-        loop {
-            d[k] = u8('0' + x % 10)
-            k += 1
-            x /= 10
-            if x == 0 {
-                break
-            }
-        }
-        for i in k - 1..=0 by -1 {
-            if *n < 511 {
-                b[*n] = d[i]
-                *n += 1
-            }
-        }
-    }
-    fn hex(b: *[512]u8, n: *i64, x: i64) {
-        for i in 17..=0 by -1 {
-            // "0x", then the digits from the first that is not 0
-            c := if i == 17 { u8('0') } else if i == 16 { u8('x') } else { "0123456789abcdef"[(x >> (4 * i)) & 15] }
-            if (i >= 16 || x >> (4 * i) != 0 || i == 0) && *n < 511 {
-                b[*n] = c
-                *n += 1
-            }
-        }
-    }
+    bt_len = 0
     if more > 0 {
-        put(b, &n, "  ... ")
-        num(b, &n, more)
-        put(b, &n, if id >= BT_LIB_MORE { " more frames in the library" } else { " more" })
+        bt_put("  ... ")
+        bt_num(more)
+        bt_put(if id >= BT_LIB_MORE { " more frames in the library" } else { " more" })
     } else if id >= BT_C {
         // C code: its library and function (Linux: of the dynamic symbols), else its offset
-        lib, sym, off := __os_bt_where(id - BT_C)
-        put(b, &n, "  at ")
+        lib, sym, off := bt_c_where(id - BT_C)
+        bt_put("  at ")
         if len(lib) == 0 {
-            hex(b, &n, id - BT_C)
+            bt_hex(id - BT_C)
         } else {
-            put(b, &n, lib)
+            bt_put(lib)
             if len(sym) != 0 {
-                put(b, &n, " ")
-                put(b, &n, sym)
+                bt_put(" ")
+                bt_put(sym)
             } else {
-                put(b, &n, "+")
-                hex(b, &n, off)
+                bt_put("+")
+                bt_hex(off)
             }
         }
     } else {
         s, line := bt_scope(w, id)
-        put(b, &n, "  at ")
+        bt_put("  at ")
         if line == 0 {
-            put(b, &n, "?")
+            bt_put("?")
         } else {
-            put(b, &n, bt_str(w, bt_scope_word(w, s, 0)))
-            put(b, &n, ":")
-            num(b, &n, line)
+            bt_put(bt_str(w, bt_scope_word(w, s, 0)))
+            bt_put(":")
+            bt_num(line)
         }
-        put(b, &n, " in ")
-        put(b, &n, bt_str(w, bt_scope_word(w, s, 1)))
+        bt_put(" in ")
+        bt_put(bt_str(w, bt_scope_word(w, s, 1)))
     }
-    b[n] = '\n'
-    __write_all(2, cast[i64](ptr(bt_buf)), n + 1)
+    bt_buf[bt_len] = '\n'
+    __write_all(2, cast[i64](ptr(bt_buf)), bt_len + 1)
 }
 
 // line number o.n of the trace: written if it is one of the first 20 or the last 5
@@ -610,9 +632,7 @@ noinline fn __bt_print() {
     w.lo, w.hi = __os_stack_range()
     if __bt_fault_pc != 0 {
         w.pc = __bt_fault_pc
-        for k in 0..16 {
-            w.g.r[k] = __bt_fault_regs[k]
-        }
+        w.g = __bt_fault_regs
         w.g.known = 0xFFFF
         w.sp = w.g.r[4]
         w.fault = true
@@ -628,7 +648,7 @@ noinline fn __bt_print() {
         }
     }
     w.f = bt_find(w, w.pc)
-    if w.f < 0 && !(w.fault && __os_bt_foreign(w.pc)) || w.sp < w.lo || w.sp >= w.hi || w.sp % 8 != 0 {
+    if w.f < 0 && !(w.fault && bt_foreign(w.pc)) || w.sp < w.lo || w.sp >= w.hi || w.sp % 8 != 0 {
         return
     }
     bt_count.last = 1 << 62
