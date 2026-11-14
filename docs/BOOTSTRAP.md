@@ -287,7 +287,8 @@ before it prints them.
 
 `ALC_DEBUG=verify` (IR verifier between passes), `trace`, `mir`, `unroll`, `mem`;
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
-`partial`, `thread4`, `thread5`, `ifconv`; outside the optimiser `constif`: `if` on a constant
+`partial`, `thread4`, `thread5`, `ifconv`, `devirt`: calls through known function values stay
+indirect, `spec`: no specialised copies; outside the optimiser `constif`: `if` on a constant
 is not decided while lowering, `deaddata`: all read-only data is linked, `backtrace`: no stack-trace table); `ALC_STD_DIR=<dir>` reads bundled modules from
 `<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the prelude
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no

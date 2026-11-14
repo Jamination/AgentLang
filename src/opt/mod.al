@@ -550,18 +550,35 @@ fn opt_optimize(m: *Module, level: i64) {
     call_counts := vec_fill(n, 0)
     addr_taken := vec_fill(n, false)
     callees := vec_fill(n, vec[i64]())
+    // the functions whose address a function passes to a call or calls (an indirect call of a
+    // known function): ordered before it as well, so that they are final when inline_run can
+    // make such a call direct and inline it (after the callees: the order of a function that
+    // passes none stays as it is)
+    passed := vec[i64]()
+    devirt := opt_enabled("devirt")
     for fi in 0..n {
         f := &m.funcs[fi]
+        passed.clear()
         for bi in 0..f.blocks.len {
             for v in f.blocks[bi].insts {
                 i := &f.insts[v]
                 if i.op == Call {
                     call_counts[i.k] += 1
                     callees[fi].push(i.k)
+                    for a in i.args {
+                        if f.insts[a].op == FAddr {
+                            passed.push(f.insts[a].k)
+                        }
+                    }
                 } else if i.op == FAddr {
                     addr_taken[i.k] = true
+                } else if i.op == CallInd && i.aux == 0 && f.insts[i.args[0]].op == FAddr {
+                    passed.push(f.insts[i.args[0]].k)
                 }
             }
+        }
+        if devirt {
+            callees[fi].extend(passed.items())
         }
     }
     addr_taken[m.entry] = true
@@ -590,25 +607,76 @@ fn opt_optimize(m: *Module, level: i64) {
             }
         }
     }
-    pol := Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000}
-    done := vec_fill(n, false)
-    costs := vec_fill(n, -1)
-    for fid in order {
-        if m.funcs[fid].lowered {
-            work_begin()
-            ir_memo_begin(&m.funcs[fid])
-            sk_restore(clean_at[fid])
-            local_opt(&m.funcs[fid], level)
-            if inline_run(m, fid, done.items(), call_counts.items(), addr_taken.items(), &pol, costs.items()) {
-                sk_forget()
-                opt_trace("after-inline", &m.funcs[fid])
-                local_opt(&m.funcs[fid], level)
-            }
-            ir_memo_end()
-            work_end()
-            clean_end[fid] = sk_save()
-            keep_func(&m.funcs[fid])
-        }
-        done[fid] = true
+    st := OptState{
+        level: level,
+        pol: Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000, devirt: devirt},
+        done: vec_fill(n, false),
+        costs: vec_fill(n, -1),
+        call_counts: call_counts,
+        addr_taken: addr_taken,
+        spec: spec_new(n, devirt && opt_enabled("spec")),
     }
+    for fid in order {
+        opt_func(m, fid, &st)
+        spec_calls(m, fid, &st)
+    }
+}
+
+// the bottom-up optimisation of the module (opt_optimize) by function: tables by function id,
+// grown for a function the specialiser adds (opt_add_func)
+struct OptState {
+    level: i64
+    pol: Policy
+    done: Vec[bool] // the function is final
+    costs: Vec[i64] // see inline_run
+    call_counts: Vec[i64]
+    addr_taken: Vec[bool]
+    spec: Spec
+}
+
+// the local passes and inlining for function fid, which becomes final
+fn opt_func(m: *Module, fid: i64, st: *OptState) {
+    if m.funcs[fid].lowered {
+        work_begin()
+        ir_memo_begin(&m.funcs[fid])
+        sk_restore(clean_at[fid])
+        local_opt(&m.funcs[fid], st.level)
+        inlined, direct := inline_run(m, fid, st.done.items(), st.call_counts.items(), st.addr_taken.items(), &st.pol, st.costs.items())
+        if inlined {
+            sk_forget()
+            opt_trace("after-inline", &m.funcs[fid])
+            local_opt(&m.funcs[fid], st.level)
+        }
+        // the indirect calls of known targets the passes after inlining exposed (or the
+        // inliner did not reach) become direct; the addresses of the functions such calls
+        // took may be dead
+        if st.pol.devirt && inline_devirt_all(m, fid) || direct && !inlined {
+            sk_forget()
+            opt_pass(PASS_DCE, &m.funcs[fid], cleanup_dce)
+        }
+        ir_memo_end()
+        work_end()
+        clean_end[fid] = sk_save()
+        keep_func(&m.funcs[fid])
+    }
+    st.done[fid] = true
+}
+
+// adds function f (lowered, past opt_first, with nothing known to be clean) to the module and
+// returns its id
+fn opt_add_func(m: *Module, st: *OptState, f: Func) -> i64 {
+    fid := m.funcs.len
+    m.funcs.push(f)
+    n := fid + 1
+    first_done.resize(n, true)
+    first_done[fid] = true
+    clean_at.resize(n, 0)
+    clean_end.resize(n, 0)
+    check_fail.resize(n, false)
+    st.done.push(false)
+    st.costs.push(-1)
+    st.call_counts.push(0)
+    st.addr_taken.push(false)
+    spec_grow(&st.spec)
+    return fid
 }

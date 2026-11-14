@@ -269,6 +269,9 @@ struct Func {
     // stack traces where they are not between frames of the program, and its code inlined
     // elsewhere takes the location of the call (see src_loc_inlined)
     lib: bool
+    // a specialised copy (opt/spec.al): the function it copies, whose frame it is in stack
+    // traces; -1 for any other function
+    copy_of: i64
 }
 
 enum RelocTarget {
@@ -376,6 +379,7 @@ fn func_new(name: str) -> Func {
         lowered: false,
         has_vec: false,
         ext: None,
+        copy_of: -1,
     }
 }
 
