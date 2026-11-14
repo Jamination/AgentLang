@@ -53,8 +53,12 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   presentation, native handles; X11 on Linux, Win32 on Windows), `std.audio` (WAV, mixer,
   ALSA / WASAPI device).
 - Bindings: `std.vk` (Vulkan 1.0-1.3 with surface, swapchain and debug-utils extensions, Linux),
-  `std.wayland` (Linux), `std.dx12` and `std.dx12_util` (Direct3D 12 / DXGI, Windows),
-  `std.metal` (type-check only), and raw `std.libc`, `std.x11`, `std.alsa`.
+  `std.wayland` (Linux), `std.dx12` (Direct3D 12 / DXGI, Windows; with `hresult_name`,
+  `hresult_code`, `hresult_text`), `std.metal` (type-check only), and raw `std.libc`, `std.x11`,
+  `std.alsa`.
+- Graphics are bindings only: `std` has no renderer, sprite batcher or device set-up code. The
+  examples' Direct3D 12 set-up and sprite batcher (`examples/gamekit/dx12_gpu.al`, formerly
+  `std.dx12_util`) are reference code to copy, not a library.
 
 ### Tools
 
