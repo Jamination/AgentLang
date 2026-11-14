@@ -404,12 +404,12 @@ each), wall time of `alc build`, best of 5 (large) or 15 (small) runs, interleav
 
 The rule gives hello world 3 threads, `clone.al` 6 at `-O0` and 6 optimised,
 `index_scale.al` 5, `gen_dx12.al` 12 and 11, the compiler 12. Against the earlier fixed 6
-(best of 5 to 9 runs, interleaved): hello world 10.3 → 9.2 ms, the compiler at `-O0` 133 →
-123 ms, optimised 918 → 912 ms, generated programs of 1000 and 3000 functions 81 → 71 and
-218 → 189 ms at `-O0`; the programs with 100 to 350 functions within 0.5 ms either way. The
-cap of 32 is not measured: there the largest functions start to bound the gain (the
-compiler's largest takes 6 ms of its 255 ms `-O0` back end) while every thread still costs
-5-10 MB.
+(best of 5 to 9 runs, interleaved): hello world 10.3 → 9.4 ms at `-O0`, the compiler 132 →
+122 ms at `-O0` and 922 → 905 ms optimised, generated programs of 1000 and 3000 functions 79
+→ 70 and 217 → 188 ms at `-O0`; the programs with 80 to 350 functions within about 1 ms either
+way, the run-to-run spread of the same thread count. The cap of 32 is not measured: there the
+largest functions start to bound the gain (the compiler's largest takes 6 ms of its 255 ms
+`-O0` back end) while every thread still costs 5-10 MB.
 
 **What the threads share**, and why that is safe:
 
