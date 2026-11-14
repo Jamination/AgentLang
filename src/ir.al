@@ -212,18 +212,29 @@ fn negate_icmp(self: Op) -> Op {
     }
 }
 
-// 48 bytes. `args` is a view of memory of its own, never shared with another instruction
+// 40 bytes. `args` is a view of memory of its own, never shared with another instruction
 // (the passes write through it). A phi's buffer has room for `cap` inputs and holds the block
 // each input comes from `cap` words after the input (`from()`): its inputs are changed only
-// through the phi functions below, and `clone` of a phi instruction loses the blocks.
+// through the phi functions below, and `clone` of a phi instruction loses the blocks. Every
+// other instruction keeps its source location in `cap` (see SrcLocs: `srcloc`, `set_srcloc`).
 struct Inst {
     op: Op
     ty: T
     args: []i64
     k: i64
     aux: i32
-    cap: i32 // phis: room for inputs in the buffer of args
-    loc: i32 // source location (Module.locs), 0: none (see Locs)
+    cap: i32 // phis: room for inputs in the buffer of args; others: the source location
+}
+
+// the source location of an instruction (Module.locs), 0: none (phis have none)
+fn srcloc(self: *Inst) -> i32 {
+    return if self.op == Phi { 0 } else { self.cap }
+}
+
+fn set_srcloc(self: *Inst, l: i32) {
+    if self.op != Phi {
+        self.cap = l
+    }
 }
 
 enum Term {
@@ -319,7 +330,7 @@ fn src_loc(self: *SrcLocs, l: SrcLoc) -> i32 {
 // call as its outermost parent. Called while working (work_begin, the inliner): the table
 // grows in the main arena, `memo` (the answers so far for this call) in the work region.
 fn src_loc_inlined(self: *SrcLocs, l: i32, at: i32, memo: *Map[i32, i32]) -> i32 {
-    if l == 0 {
+    if l <= 0 || i64(l) >= self.list.len {
         return 0
     }
     k, found := memo.get(l)

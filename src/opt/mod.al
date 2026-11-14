@@ -97,7 +97,9 @@ priv fn keep_args(f: *Func) {
         n := len(i.args)
         if n == 0 {
             i.args = nil
-            i.cap = 0
+            if i.op == Phi {
+                i.cap = 0 // (other instructions keep their source location there)
+            }
             continue
         }
         if in_main(cast[i64](ptr(i.args))) {
@@ -198,7 +200,9 @@ priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
         na := i.args.len
         if na == 0 {
             i.args = nil
-            i.cap = 0
+            if i.op == Phi {
+                i.cap = 0
+            }
         } else {
             for k in 0..na {
                 buf[at + k] = i64(m[i.args[k]])

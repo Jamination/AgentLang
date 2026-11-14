@@ -760,7 +760,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         s.term(b)
         tloc: i32 = 0
         for vi in f.blocks[b].insts.len - 1..=0 by -1 {
-            tloc = f.insts[f.blocks[b].insts[vi]].loc
+            tloc = f.insts[f.blocks[b].insts[vi]].srcloc()
             if tloc != 0 {
                 break
             }
@@ -783,7 +783,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 starts.push(s.out.len)
                 s.cur_clob = s.clob[v]
                 s.inst(v)
-                s.stamp(starts.last(), f.insts[v].loc)
+                s.stamp(starts.last(), f.insts[v].srcloc())
             }
         }
         if b == 0 {

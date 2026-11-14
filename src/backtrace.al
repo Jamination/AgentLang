@@ -166,6 +166,9 @@ fn bt_attach(m: *Module, out: *Output, files: []str, tests: []str) {
         for k in 0..code.lines.len / 2 {
             o := i64(code.lines[2 * k])
             l := i64(code.lines[2 * k + 1])
+            if l <= 0 || l >= m.locs.list.len {
+                continue
+            }
             uleb(&pairs, o - prev)
             prev = o
             if own(&b, l, fid) {

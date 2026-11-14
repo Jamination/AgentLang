@@ -194,10 +194,12 @@ priv fn mk(self: *Ctx, op: Op, ty: T, args: Vec[i64]) -> i64 {
 // rewrite v in place
 priv fn set(self: *Ctx, v: i64, op: Op, args: Vec[i64], k: i64) {
     i := self.f.im(v)
+    if i.op == Phi {
+        i.cap = 0 // (a phi's room; other instructions keep their source location)
+    }
     i.op = op
     i.args = args.items()
     i.k = k
-    i.cap = 0
     self.changed = true
 }
 
