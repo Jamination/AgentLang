@@ -82,16 +82,39 @@ fn open_gpu() -> (Gpu, str) {
     (g, "")
 }
 
-// Allocates device memory that satisfies `req` and has the property `flags`.
+// Stops the program unless `result` is VK_SUCCESS: for calls that cannot fail in a correct program.
+fn check(result: i32, what: str) {
+    if result != VK_SUCCESS { panic(fmt(what, ": ", vk_result_name(result))) }
+}
+
+// Allocates device memory that satisfies `req` and has the property `flags`: the first memory
+// type that `req.memoryTypeBits` allows and that has all the flags.
 fn allocate(g: *Gpu, req: *VkMemoryRequirements, flags: u32) -> u64 {
-    index, ok := vk_find_memory_type(&g.memory, req.memoryTypeBits, flags)
-    assert ok, "no suitable memory type"
+    index := -1
+    for i in 0..i64(g.memory.memoryTypeCount) {
+        if index < 0 && req.memoryTypeBits >> u32(i) & 1 == 1 && g.memory.memoryTypes[i].propertyFlags & flags == flags {
+            index = i
+        }
+    }
+    assert index >= 0, "no suitable memory type"
     info := vk_memory_allocate_info()
     info.allocationSize = req.size
-    info.memoryTypeIndex = index
+    info.memoryTypeIndex = u32(index)
     memory: u64
-    vk_check(vkAllocateMemory(g.device, &info, nil, &memory), "vkAllocateMemory")
+    check(vkAllocateMemory(g.device, &info, nil, &memory), "vkAllocateMemory")
     memory
+}
+
+// A shader module from SPIR-V bytes. The words are copied: an embedded file need not be 4-byte aligned.
+fn shader_module(g: *Gpu, spirv: []u8) -> u64 {
+    words := alloc[u32](spirv.len / 4)
+    memcopy(ptr(words), ptr(spirv), words.len * 4)
+    info := vk_shader_module_create_info()
+    info.codeSize = u64(words.len * 4)
+    info.pCode = ptr(words)
+    module: u64
+    check(vkCreateShaderModule(g.device, &info, nil, &module), "vkCreateShaderModule")
+    module
 }
 
 // Creates a buffer backed by host-visible memory; returns (buffer, memory).
@@ -101,11 +124,11 @@ fn create_buffer(g: *Gpu, size: u64, usage: u32) -> (u64, u64) {
     info.usage = usage
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE
     buffer: u64
-    vk_check(vkCreateBuffer(g.device, &info, nil, &buffer), "vkCreateBuffer")
+    check(vkCreateBuffer(g.device, &info, nil, &buffer), "vkCreateBuffer")
     req: VkMemoryRequirements
     vkGetBufferMemoryRequirements(g.device, buffer, &req)
     memory := allocate(g, &req, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-    vk_check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory")
+    check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory")
     (buffer, memory)
 }
 
@@ -123,18 +146,18 @@ fn create_target(g: *Gpu) -> Target {
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL
     image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    vk_check(vkCreateImage(g.device, &image_info, nil, &t.image), "vkCreateImage")
+    check(vkCreateImage(g.device, &image_info, nil, &t.image), "vkCreateImage")
     req: VkMemoryRequirements
     vkGetImageMemoryRequirements(g.device, t.image, &req)
     t.memory = allocate(g, &req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-    vk_check(vkBindImageMemory(g.device, t.image, t.memory, 0), "vkBindImageMemory")
+    check(vkBindImageMemory(g.device, t.image, t.memory, 0), "vkBindImageMemory")
 
     view_info := vk_image_view_create_info()
     view_info.image = t.image
     view_info.viewType = VK_IMAGE_VIEW_TYPE_2D
     view_info.format = FORMAT
     view_info.subresourceRange = VkImageSubresourceRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    vk_check(vkCreateImageView(g.device, &view_info, nil, &t.view), "vkCreateImageView")
+    check(vkCreateImageView(g.device, &view_info, nil, &t.view), "vkCreateImageView")
 
     attachment := VkAttachmentDescription{
         format: FORMAT,
@@ -168,7 +191,7 @@ fn create_target(g: *Gpu) -> Target {
     pass_info.pSubpasses = &subpass
     pass_info.dependencyCount = 1
     pass_info.pDependencies = &dependency
-    vk_check(vkCreateRenderPass(g.device, &pass_info, nil, &t.render_pass), "vkCreateRenderPass")
+    check(vkCreateRenderPass(g.device, &pass_info, nil, &t.render_pass), "vkCreateRenderPass")
 
     fb_info := vk_framebuffer_create_info()
     fb_info.renderPass = t.render_pass
@@ -177,16 +200,15 @@ fn create_target(g: *Gpu) -> Target {
     fb_info.width = SIZE
     fb_info.height = SIZE
     fb_info.layers = 1
-    vk_check(vkCreateFramebuffer(g.device, &fb_info, nil, &t.framebuffer), "vkCreateFramebuffer")
+    check(vkCreateFramebuffer(g.device, &fb_info, nil, &t.framebuffer), "vkCreateFramebuffer")
     t
 }
 
 // Creates the graphics pipeline: two shader stages, vertices of (vec2 position, vec3 colour),
 // a fixed viewport covering the image, no culling, no blending. Returns (pipeline, layout).
 fn create_pipeline(g: *Gpu, render_pass: u64) -> (u64, u64) {
-    vert, vert_ok := vk_create_shader_module(g.device, embed("../tests/sys/data/tri.vert.spv"))
-    frag, frag_ok := vk_create_shader_module(g.device, embed("../tests/sys/data/tri.frag.spv"))
-    assert vert_ok && frag_ok, "shader module creation failed"
+    vert := shader_module(g, embed("../tests/sys/data/tri.vert.spv"))
+    frag := shader_module(g, embed("../tests/sys/data/tri.frag.spv"))
 
     stages: [2]VkPipelineShaderStageCreateInfo
     stages[0] = vk_pipeline_shader_stage_create_info()
@@ -238,7 +260,7 @@ fn create_pipeline(g: *Gpu, render_pass: u64) -> (u64, u64) {
 
     layout_info := vk_pipeline_layout_create_info()
     layout: u64
-    vk_check(vkCreatePipelineLayout(g.device, &layout_info, nil, &layout), "vkCreatePipelineLayout")
+    check(vkCreatePipelineLayout(g.device, &layout_info, nil, &layout), "vkCreatePipelineLayout")
 
     info := vk_graphics_pipeline_create_info()
     info.stageCount = 2
@@ -252,7 +274,7 @@ fn create_pipeline(g: *Gpu, render_pass: u64) -> (u64, u64) {
     info.layout = layout
     info.renderPass = render_pass
     pipeline: u64
-    vk_check(vkCreateGraphicsPipelines(g.device, 0, 1, &info, nil, &pipeline), "vkCreateGraphicsPipelines")
+    check(vkCreateGraphicsPipelines(g.device, 0, 1, &info, nil, &pipeline), "vkCreateGraphicsPipelines")
     vkDestroyShaderModule(g.device, vert, nil)
     vkDestroyShaderModule(g.device, frag, nil)
     (pipeline, layout)
@@ -300,7 +322,7 @@ fn main() -> i64 {
     vertex_bytes := u64(sizeof[[15]f32]())
     vertex_buffer, vertex_memory := create_buffer(&g, vertex_bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
     mapped: *u8
-    vk_check(vkMapMemory(g.device, vertex_memory, 0, VK_WHOLE_SIZE, 0, &mapped), "vkMapMemory")
+    check(vkMapMemory(g.device, vertex_memory, 0, VK_WHOLE_SIZE, 0, &mapped), "vkMapMemory")
     memcopy(mapped, ptr(vertices), i64(vertex_bytes))
     vkUnmapMemory(g.device, vertex_memory)
 
@@ -310,19 +332,19 @@ fn main() -> i64 {
     pool_info := vk_command_pool_create_info()
     pool_info.queueFamilyIndex = g.family
     pool: u64
-    vk_check(vkCreateCommandPool(g.device, &pool_info, nil, &pool), "vkCreateCommandPool")
+    check(vkCreateCommandPool(g.device, &pool_info, nil, &pool), "vkCreateCommandPool")
     alloc_info := vk_command_buffer_allocate_info()
     alloc_info.commandPool = pool
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
     alloc_info.commandBufferCount = 1
     cmd: *u8
-    vk_check(vkAllocateCommandBuffers(g.device, &alloc_info, &cmd), "vkAllocateCommandBuffers")
+    check(vkAllocateCommandBuffers(g.device, &alloc_info, &cmd), "vkAllocateCommandBuffers")
 
     // record: clear, draw the triangle, copy the image into the read-back buffer
     begin_info := vk_command_buffer_begin_info()
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    vk_check(vkBeginCommandBuffer(cmd, &begin_info), "vkBeginCommandBuffer")
-    clear := vk_clear_color(0.2, 0.2, 0.4, 1.0)
+    check(vkBeginCommandBuffer(cmd, &begin_info), "vkBeginCommandBuffer")
+    clear := vk_clear_value_color(vk_clear_color_value_float32([4]f32{0.2, 0.2, 0.4, 1.0}))
     pass_begin := vk_render_pass_begin_info()
     pass_begin.renderPass = target.render_pass
     pass_begin.framebuffer = target.framebuffer
@@ -340,15 +362,15 @@ fn main() -> i64 {
         imageExtent: VkExtent3D{SIZE, SIZE, 1},
     }
     vkCmdCopyImageToBuffer(cmd, target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, 1, &region)
-    vk_check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer")
+    check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer")
 
     submit := vk_submit_info()
     submit.commandBufferCount = 1
     submit.pCommandBuffers = &cmd
-    vk_check(vkQueueSubmit(g.queue, 1, &submit, 0), "vkQueueSubmit")
-    vk_check(vkQueueWaitIdle(g.queue), "vkQueueWaitIdle")
+    check(vkQueueSubmit(g.queue, 1, &submit, 0), "vkQueueSubmit")
+    check(vkQueueWaitIdle(g.queue), "vkQueueWaitIdle")
 
-    vk_check(vkMapMemory(g.device, readback_memory, 0, VK_WHOLE_SIZE, 0, &mapped), "vkMapMemory")
+    check(vkMapMemory(g.device, readback_memory, 0, VK_WHOLE_SIZE, 0, &mapped), "vkMapMemory")
     saved := write_bmp("triangle.bmp", mkslice[u8](mapped, pixel_bytes), i64(SIZE), i64(SIZE))
     vkUnmapMemory(g.device, readback_memory)
 
