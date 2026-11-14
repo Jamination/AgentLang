@@ -75,6 +75,9 @@ priv extern "kernel32.dll" fn AttachConsole(pid: u32) -> i32
 priv extern "kernel32.dll" fn SetStdHandle(which: u32, h: i64) -> i32
 priv extern "kernel32.dll" fn LoadLibraryW(name: *u16) -> i64
 priv extern "kernel32.dll" fn GetProcAddress(module: i64, name: *u8) -> i64
+priv extern "kernel32.dll" fn GetModuleHandleExW(flags: u32, name: i64, module: *i64) -> i32
+priv extern "kernel32.dll" fn RtlLookupFunctionEntry(pc: i64, base: *i64, history: i64) -> i64
+priv extern "kernel32.dll" fn RtlVirtualUnwind(kind: u32, base: i64, pc: i64, entry: i64, ctx: i64, data: *i64, frame: *i64, pointers: i64) -> i64
 
 priv const INVALID_HANDLE = -1
 priv const INFINITE: u32 = 0xFFFFFFFF
@@ -158,10 +161,11 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
     }
     in_fault = true
     // where the stack trace starts: CONTEXT (the second pointer of EXCEPTION_POINTERS) holds
-    // r11 at 0xD0, rsp at 0x98, rip at 0xF8
+    // the registers from 0x78 in x86 order (rax, rcx, ..., r15), rip at 0xF8
     ctx := cast[*i64](info)[1]
-    __bt_fault_r11 = cast[*i64](ctx + 0xD0)[0]
-    __bt_fault_sp = cast[*i64](ctx + 0x98)[0]
+    for k in 0..16 {
+        __bt_fault_regs.r[k] = cast[*i64](ctx + 0x78 + 8 * k)[0]
+    }
     __bt_fault_pc = cast[*i64](ctx + 0xF8)[0]
     GetCurrentThreadStackLimits(&fault_lo, &fault_hi)
     if code == 0xC0000094 || code == 0xC0000095 {
@@ -237,6 +241,128 @@ priv bt_off: bool
 
 fn __os_backtrace_off() -> bool {
     return bt_off
+}
+
+// ---------- stack traces through DLLs ----------
+// A stack trace that reaches code of a DLL (a callback called by it, a fault inside it) goes on
+// through its frames by their unwind information (RtlLookupFunctionEntry, RtlVirtualUnwind):
+// system DLLs and those of MinGW have it for every function. Frames are named by the DLL's
+// exports (one that starts where the frame's function starts).
+const __BT_SAVED = 0xF0E8 // rbx, rbp, rsi, rdi, r12-r15: the registers a call preserves
+
+priv bt_mod: i64 // the DLL of the last lookup
+// a CONTEXT (1232 bytes, aligned to 16 inside), the KNONVOLATILE_CONTEXT_POINTERS of an unwind
+priv bt_ctx: [160]i64
+priv bt_ptrs: [32]i64
+priv bt_wname: [260]u16
+priv bt_name: [260]u8
+
+// is pc in the code of a DLL? (it becomes the DLL of the lookups)
+noinline fn __os_bt_foreign(pc: i64) -> bool {
+    h := 0
+    // GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT
+    if GetModuleHandleExW(6, pc, &h) == 0 || h == 0 || h == image_lo {
+        return false
+    }
+    bt_mod = h
+    return true
+}
+
+// the caller of the frame of DLL code at pc (a return address, or the faulting instruction if
+// `fault`) with registers g: its return address (0: unknown), g becomes its registers (r[4]: its
+// stack pointer). The stack is read only in [g.r[4], hi).
+noinline fn __os_bt_unwind(pc: i64, fault: bool, g: *__BtRegs, hi: i64) -> i64 {
+    sp := g.r[4]
+    base := 0
+    fe := if __os_bt_foreign(pc) { RtlLookupFunctionEntry(pc, &base, 0) } else { 0 }
+    if fe == 0 {
+        // a leaf function, which has no unwind information: its return address is at rsp
+        if !fault || sp + 8 > hi {
+            return 0
+        }
+        g.r[4] = sp + 8
+        return cast[*i64](sp)[0]
+    }
+    // a frame register (UNWIND_INFO: the low 4 bits of byte 3) must point into the stack
+    fr := i64(cast[*u8](base + i64(cast[*u32](fe + 8)[0]) + 3)[0]) & 15
+    if fr != 0 && (g.known & (1 << fr) == 0 || g.r[fr] < sp || g.r[fr] >= hi) {
+        return 0
+    }
+    c := (cast[i64](ptr(bt_ctx)) + 15) & ~15
+    x := cast[*i64](c)
+    cast[*u32](c + 0x30)[0] = 0x10000B // ContextFlags: CONTEXT_FULL
+    for k in 0..16 {
+        x[15 + k] = if g.known & (1 << k) != 0 { g.r[k] } else { 0 }
+    }
+    x[31] = pc
+    for k in 0..32 {
+        bt_ptrs[k] = 0
+    }
+    data := 0
+    frame := 0
+    RtlVirtualUnwind(0, base, pc, fe, c, &data, &frame, cast[i64](ptr(bt_ptrs)))
+    // the registers it restored from the stack (IntegerContext of the pointers) and those that
+    // the frame kept
+    known := 0
+    for k in 0..16 {
+        if bt_ptrs[16 + k] != 0 || g.known & (1 << k) != 0 {
+            g.r[k] = x[15 + k]
+            known |= 1 << k
+        }
+    }
+    g.known = (known & __BT_SAVED) | 16
+    g.r[4] = x[19]
+    return x[31]
+}
+
+// the name of the export of DLL h at address h + rva, "" if none
+priv fn bt_export(h: i64, rva: i64) -> str {
+    // the export directory: data directory 0 of the PE32+ optional header
+    pe := h + i64(cast[*u32](h + 0x3C)[0])
+    dir := i64(cast[*u32](pe + 24 + 112)[0])
+    if cast[*u16](pe + 24)[0] != 0x20B || dir == 0 {
+        return ""
+    }
+    e := h + dir
+    funcs := h + i64(cast[*u32](e + 28)[0])
+    names := h + i64(cast[*u32](e + 32)[0])
+    ords := h + i64(cast[*u32](e + 36)[0])
+    for i in 0..i64(cast[*u32](e + 24)[0]) {
+        if i64(cast[*u32](funcs + 4 * i64(cast[*u16](ords + 2 * i)[0]))[0]) == rva {
+            p := h + i64(cast[*u32](names + 4 * i)[0])
+            n := 0
+            while n < 4096 && cast[*u8](p + n)[0] != 0 {
+                n += 1
+            }
+            return mkslice[u8](cast[*u8](p), n)
+        }
+    }
+    return ""
+}
+
+// the frame of DLL code at address q: (the file name of its DLL, the name of its function or "",
+// q's offset in the DLL); ("", "", q) outside every DLL
+noinline fn __os_bt_where(q: i64) -> (str, str, i64) {
+    if !__os_bt_foreign(q) {
+        return ("", "", q)
+    }
+    h := bt_mod
+    // (non-ASCII characters of the name as '?')
+    n := i64(GetModuleFileNameW(h, ptr(bt_wname), 260))
+    k := 0
+    for i in 0..min(n, 260) {
+        c := bt_wname[i]
+        if c == u16('\\') || c == u16('/') {
+            k = 0
+        } else {
+            bt_name[k] = if c < 128 { u8(c) } else { u8('?') }
+            k += 1
+        }
+    }
+    base := 0
+    fe := RtlLookupFunctionEntry(q, &base, 0)
+    sym := if fe != 0 && base == h { bt_export(h, i64(cast[*u32](fe)[0])) } else { "" }
+    return (mkslice[u8](ptr(bt_name), k), sym, q - h)
 }
 
 // ---------- GUI programs ----------

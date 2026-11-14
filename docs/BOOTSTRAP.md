@@ -239,18 +239,39 @@ Compiling the compiler (about 36,500 lines including the run-time library) takes
   `layout_text` places them), size, frame shape and line data (ULEB128: inlined locations, then
   offset/line pairs with lines as zigzag deltas), with names and files as strings; it becomes
   the read-only global `__bt_data`, and the library's `__bt_table` points at it through a data
-  relocation. *The walk*: `__bt_print` (called by `__die`) starts at its caller through the
-  builtin `__ra_addr()` (library only; `Op.RaAddr`, `lea` of `MK_INARG` -1, so the function
-  using it must be `noinline`), or at the faulting instruction recorded by the OS layer's fault
-  handler (Linux: the ucontext of the SIGSEGV/SIGFPE handler on its alternate stack; Windows:
-  the CONTEXT of the vectored handler; a stack overflow there is reported by a new thread,
-  because Wine leaves the handler less than 1 KiB). A faulting instruction may sit in a
+  relocation; frames of the program are those of files that are not `Cx.core_file` (bundled
+  modules count as the program; `Func.lib` is the same notion). *The walk*: `__bt_print`
+  (called by `__die`) starts at its caller through the builtin `__ra_addr()` (library only;
+  `Op.RaAddr`, `lea` of `MK_INARG` -1, so the function using it must be `noinline`; such a
+  function also pushes every callee-saved register, `MFunc.save_all`, so the walk knows the
+  caller's registers), or at the faulting instruction and registers recorded by the OS layer's
+  fault handler (Linux: the ucontext of the SIGSEGV/SIGFPE handler on its alternate stack;
+  Windows: the CONTEXT of the vectored handler; a stack overflow there is reported by a new
+  thread, because Wine leaves the handler less than 1 KiB). A faulting instruction may sit in a
   prologue: the pushes before it are decoded from the code, a probe loop is undone with r11.
   Each step is checked (the return address inside a function, the frame inside the thread's
   stack, `__os_stack_range`, and above the last); a fault during the walk ends the program.
-  The walk keeps its state in globals and allocates nothing. Sizes: hello world 1.5 KB of
-  table, the compiler about 190 KB (5%). The walk's two passes (count, then write the first 20
-  and last 5 lines) cost about 10 ms for a million frames.
+  The walk keeps its state in globals and allocates nothing. *C frames*: a return address in no
+  function of the table but in a C library continues the walk through the OS layer
+  (`__os_bt_foreign` / `__os_bt_unwind` / `__os_bt_where`, reached through function values that
+  `__bt_c_init` sets: the generated entry point calls it only when the program declares
+  `extern` functions, so other programs do not contain that code). The walk tracks the
+  callee-saved registers (C code may keep a frame through rbp): a frame of the program gives
+  its caller's values from its prologue's pushes (decoded from the code). Linux: the libraries
+  come from the loader's `r_debug` (DT_DEBUG of the program's dynamic section, found through
+  AT_PHDR), each one's program headers in memory give its segments, `.eh_frame_hdr` (binary
+  search for the FDE) and `.dynamic` (`.dynsym` names: the nearest function symbol whose size
+  reaches the address); a small CFI interpreter (the instructions GCC and Clang emit: CFA
+  rules, offsets, registers, remember/restore, advance) computes the caller's CFA, return
+  address and saved registers; every read of call frame data is checked against the library's
+  readable segments and every read of the stack against the frame, so bad data ends the trace.
+  Windows: `RtlLookupFunctionEntry` / `RtlVirtualUnwind` on a CONTEXT built from the tracked
+  registers (a frame register must point into the stack first); names from the DLL's export
+  directory (the export at the function's start). Sizes: hello world 1.5 KB of table, the
+  compiler about 190 KB (5%); the walker's code 6 KB, 12 KB with the Linux C-frame part (only
+  in programs with C functions); on Windows the DLL part adds 3 KB to every program. The walk's
+  two passes (count, then write the first 20 and last 5 lines) cost about 10 ms for a million
+  frames.
 
 ## Parallel back end
 

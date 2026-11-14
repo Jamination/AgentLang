@@ -10,9 +10,9 @@ __sigstack: [32768]u8
 priv stack_top: i64
 priv in_fault: bool
 
-// uc: the interrupted state (ucontext_t: the general registers from byte 40, r11 the 4th, rsp
-// the 16th, rip the 17th), where the stack trace starts. A fault while one is reported (the
-// stack trace of a corrupted stack, ...) ends the program at once.
+// uc: the interrupted state (ucontext_t: the general registers from byte 40: r8-r15, rdi, rsi,
+// rbp, rbx, rdx, rax, rcx, rsp, rip), where the stack trace starts. A fault while one is
+// reported (the stack trace of a corrupted stack, ...) ends the program at once.
 noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     if in_fault || __bt_busy {
         if __bt_busy {
@@ -22,8 +22,18 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     }
     in_fault = true
     g := cast[*i64](uc + 40)
-    __bt_fault_r11 = g[3]
-    __bt_fault_sp = g[15]
+    r := &__bt_fault_regs.r
+    for k in 0..8 {
+        r[8 + k] = g[k]
+    }
+    r[7] = g[8]
+    r[6] = g[9]
+    r[5] = g[10]
+    r[3] = g[11]
+    r[2] = g[12]
+    r[0] = g[13]
+    r[1] = g[14]
+    r[4] = g[15]
     __bt_fault_pc = g[16]
     if sig == 8 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
@@ -60,6 +70,636 @@ fn __os_stack_range() -> (i64, i64) {
 fn __os_backtrace_off() -> bool {
     v, set := env_get("ALC_BACKTRACE")
     return set && v == "0"
+}
+
+// ---------- stack traces through C libraries ----------
+// A stack trace that reaches code of a C library (a callback called by qsort, a fault inside
+// strlen) goes on through its frames by the library's DWARF call frame information (.eh_frame,
+// found through .eh_frame_hdr): C code keeps no frame shape the walk could rely on. The
+// libraries are those of the dynamic loader's list (r_debug, whose address the loader puts into
+// DT_DEBUG of the program's dynamic section; static programs have none); the program headers of
+// a library, in memory at its load address, give its segments, .eh_frame_hdr and dynamic
+// symbols (the names of the frames). Every address read is checked against the library's
+// segments or the stack: bad data ends the trace, it does not fault. The interpreter knows the
+// instructions GCC and Clang emit for x86-64 (a register saved by an expression becomes
+// unknown; a CFA computed by one ends the trace).
+const __BT_SAVED = 0xF028 // rbx, rbp, r12-r15: the registers a call preserves
+
+// the library of the last lookup: load address, name (a C string), the code segment holding the
+// address looked up, the segments that can be read (start, end), .eh_frame_hdr, the dynamic
+// section (0: none)
+priv bl_base: i64
+priv bl_name: i64
+priv bl_xlo: i64
+priv bl_xhi: i64
+priv bl_seg: [16]i64
+priv bl_nseg: i64
+priv bl_ehdr: i64
+priv bl_dyn: i64
+
+// the loader's r_debug (0: none): DT_DEBUG of the program's dynamic section, found through the
+// program headers named by the auxiliary vector (AT_PHDR, AT_PHNUM), which follows the
+// environment on the initial stack
+priv noinline fn bl_r_debug() -> i64 {
+    p := __argv + 8 * (__argc + 1)
+    while cast[*i64](p)[0] != 0 {
+        p += 8
+    }
+    p += 8
+    phdr := 0
+    phnum := 0
+    while cast[*i64](p)[0] != 0 {
+        a := cast[*i64](p)
+        if a[0] == 3 {
+            phdr = a[1]
+        } else if a[0] == 5 {
+            phnum = a[1]
+        }
+        p += 16
+    }
+    bias := 0
+    dyn := 0
+    for k in 0..min(phnum, 64) {
+        h := phdr + 56 * k
+        t := cast[*u32](h)[0]
+        if t == 6 {
+            bias = phdr - cast[*i64](h + 16)[0]  // PT_PHDR: where the headers were meant to be
+        } else if t == 2 {
+            dyn = cast[*i64](h + 16)[0]          // PT_DYNAMIC
+        }
+    }
+    if dyn == 0 {
+        return 0
+    }
+    d := cast[*i64](dyn + bias)
+    i := 0
+    while d[i] != 0 && i < 2000 {
+        if d[i] == 21 {
+            return d[i + 1]
+        }
+        i += 2
+    }
+    return 0
+}
+
+// makes the library at load address `base` (its ELF header there) the library of the lookups if
+// pc is in its code
+priv noinline fn bl_load(base: i64, name: i64, pc: i64) -> bool {
+    if cast[*u32](base)[0] != 0x464C457F {
+        return false
+    }
+    ph := base + cast[*i64](base + 32)[0]
+    n := min(i64(cast[*u16](base + 56)[0]), 64)
+    xlo := 0
+    xhi := 0
+    for k in 0..n {
+        h := ph + 56 * k
+        va := base + cast[*i64](h + 16)[0]
+        end := va + cast[*i64](h + 40)[0]
+        // PT_LOAD, executable
+        if cast[*u32](h)[0] == 1 && cast[*u32](h + 4)[0] & 1 != 0 && pc >= va && pc < end {
+            xlo = va
+            xhi = end
+        }
+    }
+    if xhi == 0 {
+        return false
+    }
+    bl_base = base
+    bl_name = name
+    bl_xlo = xlo
+    bl_xhi = xhi
+    bl_nseg = 0
+    bl_ehdr = 0
+    bl_dyn = 0
+    for k in 0..n {
+        h := ph + 56 * k
+        t := cast[*u32](h)[0]
+        va := base + cast[*i64](h + 16)[0]
+        if t == 1 && cast[*u32](h + 4)[0] & 4 != 0 && bl_nseg < 8 {
+            bl_seg[2 * bl_nseg] = va
+            bl_seg[2 * bl_nseg + 1] = va + cast[*i64](h + 40)[0]
+            bl_nseg += 1
+        } else if t == 0x6474E550 {
+            bl_ehdr = va                             // PT_GNU_EH_FRAME
+        } else if t == 2 {
+            bl_dyn = va
+        }
+    }
+    return true
+}
+
+// is pc in the code of a library the loader mapped? (it becomes the library of the lookups)
+noinline fn __os_bt_foreign(pc: i64) -> bool {
+    if pc >= bl_xlo && pc < bl_xhi {
+        return true
+    }
+    rd := bl_r_debug()
+    if rd == 0 {
+        return false
+    }
+    // r_debug.r_map: the list of link_map { l_addr, l_name, l_ld, l_next, ... } (the program
+    // itself, at l_addr 0, is not a library)
+    m := cast[*i64](rd)[1]
+    n := 0
+    while m != 0 && n < 10000 {
+        l := cast[*i64](m)
+        if l[0] != 0 && bl_load(l[0], l[1], pc) {
+            return true
+        }
+        m = l[3]
+        n += 1
+    }
+    return false
+}
+
+// the end of the library's segment that holds address a, 0 if none
+priv noinline fn bl_end(a: i64) -> i64 {
+    for k in 0..bl_nseg {
+        if a >= bl_seg[2 * k] && a < bl_seg[2 * k + 1] {
+            return bl_seg[2 * k + 1]
+        }
+    }
+    return 0
+}
+
+// can the n bytes at a be read (inside one segment of the library)?
+priv noinline fn bl_ok(a: i64, n: i64) -> bool {
+    return n >= 0 && a + n <= bl_end(a)
+}
+
+// reading call frame information: from cf_p up to cf_end, which ends it (cf_bad) when crossed
+priv cf_p: i64
+priv cf_end: i64
+priv cf_bad: bool
+
+priv noinline fn cf_u8() -> i64 {
+    if cf_p >= cf_end {
+        cf_bad = true
+        return 0
+    }
+    cf_p += 1
+    return i64(cast[*u8](cf_p - 1)[0])
+}
+
+// n bytes, little endian
+priv noinline fn cf_un(n: i64) -> i64 {
+    x := 0
+    for k in 0..n {
+        x |= cf_u8() << (8 * k)
+    }
+    return x
+}
+
+priv noinline fn cf_leb(signed: bool) -> i64 {
+    x := 0
+    s := 0
+    loop {
+        b := cf_u8()
+        if s < 64 {
+            x |= (b & 0x7F) << s
+        }
+        s += 7
+        if b < 0x80 || cf_bad {
+            if signed && s < 64 && b & 0x40 != 0 {
+                x |= -1 << s
+            }
+            return x
+        }
+    }
+}
+
+// a pointer in encoding `enc` (DW_EH_PE_*: its size, relative to its own address (pcrel) or to
+// `data` (datarel)); an encoding the walk does not know ends the reading
+priv noinline fn cf_ptr(enc: i64, data: i64) -> i64 {
+    at := cf_p
+    x := match enc & 0x0F {
+        0, 4, 12 => cf_un(8)
+        1 => cf_leb(false)
+        2 => cf_un(2)
+        3 => cf_un(4)
+        9 => cf_leb(true)
+        10 => i64(i16(cf_un(2)))
+        11 => i64(i32(cf_un(4)))
+        _ => {
+            cf_bad = true
+            0
+        }
+    }
+    h := (enc >> 4) & 7
+    if h == 1 {
+        x += at
+    } else if h == 3 {
+        x += data
+    } else if h != 0 {
+        cf_bad = true
+    }
+    return x
+}
+
+// a row of the table the instructions describe: the CFA (the stack pointer before the call) is
+// register cfa_reg (DWARF number, -1: unknown) + cfa_off; per register (DWARF 0-16, 16: the
+// return address) how its value in the caller is found: 0 unchanged, 1 saved at CFA + val, 2 in
+// register val, 3 unknown
+priv struct CfRow {
+    cfa_reg: i64
+    cfa_off: i64
+    how: [17]u8
+    val: [17]i64
+}
+
+priv cf_row: CfRow
+priv cf_first: CfRow // after the CIE's instructions (what DW_CFA_restore goes back to)
+priv cf_stack: [4]CfRow // DW_CFA_remember_state
+priv cf_depth: i64
+// of the CIE: code and data alignment, the encoding of the FDE's addresses, whether FDEs have
+// augmentation data, its instructions [cf_init, cf_init_end)
+priv cf_caf: i64
+priv cf_daf: i64
+priv cf_fenc: i64
+priv cf_aug: bool
+priv cf_init: i64
+priv cf_init_end: i64
+
+priv noinline fn cf_set(reg: i64, how: i64, val: i64) {
+    if reg >= 0 && reg < 17 {
+        cf_row.how[reg] = u8(how)
+        cf_row.val[reg] = val
+    }
+}
+
+priv noinline fn cf_restore(reg: i64) {
+    if reg >= 0 && reg < 17 {
+        cf_row.how[reg] = cf_first.how[reg]
+        cf_row.val[reg] = cf_first.val[reg]
+    }
+}
+
+// runs the instructions [cf_p, cf_end) from code address loc while the row applies to address q;
+// false on an instruction the walk does not know or bad data
+priv noinline fn cf_run(loc0: i64, q: i64) -> bool {
+    loc := loc0
+    while cf_p < cf_end && !cf_bad {
+        op := cf_u8()
+        lo := op & 0x3F
+        if op >> 6 == 1 {
+            loc += lo * cf_caf                          // DW_CFA_advance_loc
+            if loc > q {
+                return true
+            }
+        } else if op >> 6 == 2 {
+            cf_set(lo, 1, cf_leb(false) * cf_daf)       // DW_CFA_offset
+        } else if op >> 6 == 3 {
+            cf_restore(lo)                              // DW_CFA_restore
+        } else {
+            match lo {
+                0 => {}                                 // nop
+                1, 2, 3, 4 => {
+                    // set_loc, advance_loc1, 2, 4
+                    if lo == 1 {
+                        loc = cf_ptr(cf_fenc, 0)
+                    } else {
+                        loc += cf_un(if lo == 4 { 4 } else { lo - 1 }) * cf_caf
+                    }
+                    if loc > q {
+                        return true
+                    }
+                }
+                5, 17, 0x2F => {
+                    // offset_extended, offset_extended_sf, GNU_negative_offset_extended
+                    reg := cf_leb(false)
+                    off := if lo == 17 { cf_leb(true) } else { cf_leb(false) }
+                    cf_set(reg, 1, (if lo == 0x2F { -off } else { off }) * cf_daf)
+                }
+                6 => cf_restore(cf_leb(false))           // restore_extended
+                7 => cf_set(cf_leb(false), 3, 0)         // undefined
+                8 => cf_set(cf_leb(false), 0, 0)         // same_value
+                9 => {
+                    reg := cf_leb(false)                 // register
+                    cf_set(reg, 2, cf_leb(false))
+                }
+                10 => {
+                    if cf_depth == 4 {                   // remember_state
+                        return false
+                    }
+                    cf_stack[cf_depth] = cf_row
+                    cf_depth += 1
+                }
+                11 => {
+                    if cf_depth == 0 {                   // restore_state
+                        return false
+                    }
+                    cf_depth -= 1
+                    cf_row = cf_stack[cf_depth]
+                }
+                12, 18 => {
+                    cf_row.cfa_reg = cf_leb(false)       // def_cfa, def_cfa_sf
+                    cf_row.cfa_off = if lo == 18 { cf_leb(true) * cf_daf } else { cf_leb(false) }
+                }
+                13 => {
+                    cf_row.cfa_reg = cf_leb(false)       // def_cfa_register
+                }
+                14 => {
+                    cf_row.cfa_off = cf_leb(false)       // def_cfa_offset
+                }
+                19 => {
+                    cf_row.cfa_off = cf_leb(true) * cf_daf // def_cfa_offset_sf
+                }
+                15 => {
+                    cf_row.cfa_reg = -1                  // def_cfa_expression
+                    cf_p += cf_leb(false)
+                }
+                16, 20, 21, 22 => {
+                    // expression, val_offset, val_offset_sf, val_expression
+                    cf_set(cf_leb(false), 3, 0)
+                    n := cf_leb(lo == 21)
+                    if lo == 16 || lo == 22 {
+                        cf_p += n
+                    }
+                }
+                0x2E => {
+                    cf_leb(false)                        // GNU_args_size
+                }
+                _ => return false
+            }
+        }
+    }
+    return !cf_bad
+}
+
+// reads the CIE at c (cf_caf, cf_daf, cf_fenc, cf_aug, cf_init...); false if it is not one the
+// walk can use
+priv noinline fn cf_cie(c: i64) -> bool {
+    if !bl_ok(c, 9) {
+        return false
+    }
+    n := i64(cast[*u32](c)[0])
+    if n >= 0xFFFFFFF0 || !bl_ok(c, 4 + n) || cast[*u32](c + 4)[0] != 0 {
+        return false
+    }
+    cf_p = c + 8
+    cf_end = c + 4 + n
+    ver := cf_u8()
+    aug := cast[*u8](cf_p)
+    while cf_u8() != 0 && !cf_bad {}
+    cf_caf = cf_leb(false)
+    cf_daf = cf_leb(true)
+    ra := if ver == 1 { cf_u8() } else { cf_leb(false) }
+    cf_fenc = 0
+    cf_aug = aug[0] == 'z'
+    if cf_bad || ra != 16 {
+        return false
+    }
+    if cf_aug {
+        end := cf_leb(false)
+        end += cf_p
+        k := 1
+        while aug[k] != 0 {
+            a := aug[k]
+            if a == 'R' {
+                cf_fenc = cf_u8()
+            } else if a == 'L' {
+                cf_u8()
+            } else if a == 'P' {
+                cf_ptr(cf_u8() & 0x7F, 0)
+            } else if a != 'S' {
+                return false
+            }
+            k += 1
+        }
+        cf_p = end
+    } else if aug[0] != 0 {
+        return false
+    }
+    cf_init = cf_p
+    cf_init_end = cf_end
+    return !cf_bad && cf_p <= cf_end
+}
+
+// the row of the library's code at address q in cf_row; false if there is none or it cannot be
+// read
+priv noinline fn cf_find(q: i64) -> bool {
+    h := bl_ehdr
+    if h == 0 || !bl_ok(h, 4) {
+        return false
+    }
+    // .eh_frame_hdr: version 1, the encodings of the pointer to .eh_frame, of the count and of
+    // the table (only the usual one: pairs of 4-byte offsets from the header, sorted by address)
+    b := cast[*u8](h)
+    if b[0] != 1 || b[3] != 0x3B {
+        return false
+    }
+    cf_p = h + 4
+    cf_end = bl_end(h)
+    cf_bad = false
+    cf_ptr(i64(b[1]), h)
+    n := cf_ptr(i64(b[2]), h)
+    t := cf_p
+    if cf_bad || n <= 0 || !bl_ok(t, 8 * n) || h + i64(cast[*i32](t)[0]) > q {
+        return false
+    }
+    lo := 0
+    hi := n
+    while hi - lo > 1 {
+        mid := (lo + hi) / 2
+        if h + i64(cast[*i32](t + 8 * mid)[0]) <= q {
+            lo = mid
+        } else {
+            hi = mid
+        }
+    }
+    // the FDE: its length, the distance back to its CIE, its code (start, size), augmentation
+    // data, instructions
+    fde := h + i64(cast[*i32](t + 8 * lo + 4)[0])
+    if !bl_ok(fde, 8) {
+        return false
+    }
+    len := i64(cast[*u32](fde)[0])
+    if len < 8 || len >= 0xFFFFFFF0 || !bl_ok(fde, 4 + len) || !cf_cie(fde + 4 - i64(cast[*u32](fde + 4)[0])) {
+        return false
+    }
+    cf_p = fde + 8
+    cf_end = fde + 4 + len
+    start := cf_ptr(cf_fenc, 0)
+    size := cf_ptr(cf_fenc & 0x0F, 0)
+    if cf_aug {
+        cf_p += cf_leb(false)
+    }
+    if cf_bad || q < start || q - start >= size {
+        return false
+    }
+    p := cf_p
+    end := cf_end
+    cf_row.cfa_reg = -1
+    for r in 0..17 {
+        cf_row.how[r] = 0
+    }
+    cf_depth = 0
+    cf_p = cf_init
+    cf_end = cf_init_end
+    if !cf_run(start, q) {
+        return false
+    }
+    cf_first = cf_row
+    cf_p = p
+    cf_end = end
+    return cf_run(start, q)
+}
+
+// x86 register numbers of the DWARF ones (rax, rdx, rcx, rbx, rsi, rdi, rbp, rsp, r8-r15), as bytes
+priv const DW_X86 = "\x00\x02\x01\x03\x06\x07\x05\x04\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
+
+// the caller of the frame of C code at pc (a return address, or the faulting instruction if
+// `fault`) with registers g: its return address (0: unknown, or the end of the stack), g becomes
+// its registers (r[4]: its stack pointer). The stack is read only in [g.r[4], hi).
+noinline fn __os_bt_unwind(pc: i64, fault: bool, g: *__BtRegs, hi: i64) -> i64 {
+    q := if fault { pc } else { pc - 1 }
+    if !__os_bt_foreign(q) || !cf_find(q) {
+        return 0
+    }
+    c := cf_row.cfa_reg
+    if c < 0 || c > 15 || g.known & (1 << i64(DW_X86[c])) == 0 {
+        return 0
+    }
+    sp := g.r[4]
+    cfa := g.r[i64(DW_X86[c])] + cf_row.cfa_off
+    if cfa <= sp || cfa > hi {
+        return 0
+    }
+    old := *g
+    ra := 0
+    for d in 0..17 {
+        how := cf_row.how[d]
+        v := 0
+        ok := false
+        if how == 1 {
+            a := cfa + cf_row.val[d]
+            if a < sp || a + 8 > hi {
+                return 0
+            }
+            v = cast[*i64](a)[0]
+            ok = true
+        } else if how == 2 && cf_row.val[d] >= 0 && cf_row.val[d] < 16 {
+            s := i64(DW_X86[cf_row.val[d]])
+            v = old.r[s]
+            ok = old.known & (1 << s) != 0
+        }
+        if d == 16 {
+            if !ok {
+                return 0
+            }
+            ra = v
+        } else if d != 7 && how != 0 {
+            x := i64(DW_X86[d])
+            g.r[x] = v
+            g.known = if ok { g.known | (1 << x) } else { g.known & ~(1 << x) }
+        }
+    }
+    g.r[4] = cfa
+    g.known = (g.known & __BT_SAVED) | 16
+    return ra
+}
+
+// a C string of at most n bytes at p
+priv noinline fn bl_str(p: i64, n: i64) -> str {
+    k := 0
+    while k < n && cast[*u8](p + k)[0] != 0 {
+        k += 1
+    }
+    return mkslice[u8](cast[*u8](p), k)
+}
+
+// the name of the library's dynamic symbol for the function that holds address `base + off`:
+// the nearest before it, if its size reaches it; "" if none
+priv noinline fn bl_symbol(off: i64) -> str {
+    syms := 0
+    strs := 0
+    strsz := 0
+    hash := 0
+    gnu := 0
+    d := bl_dyn
+    while d != 0 && bl_ok(d, 16) && cast[*i64](d)[0] != 0 {
+        t := cast[*i64](d)[0]
+        v := cast[*i64](d)[1]
+        // (glibc's loader has relocated the addresses in place, others have not)
+        a := if v < bl_base { v + bl_base } else { v }
+        if t == 4 {
+            hash = a
+        } else if t == 5 {
+            strs = a
+        } else if t == 6 {
+            syms = a
+        } else if t == 10 {
+            strsz = v
+        } else if t == 0x6FFFFEF5 {
+            gnu = a
+        }
+        d += 16
+    }
+    // the number of symbols: of DT_HASH, or after the last chain of DT_GNU_HASH
+    n := 0
+    if hash != 0 && bl_ok(hash, 8) {
+        n = i64(cast[*u32](hash + 4)[0])
+    } else if gnu != 0 && bl_ok(gnu, 16) {
+        g := cast[*u32](gnu)
+        nb := i64(g[0])
+        first := i64(g[1])
+        buckets := gnu + 16 + 8 * i64(g[2])
+        if !bl_ok(buckets, 4 * nb) {
+            return ""
+        }
+        for k in 0..nb {
+            n = max(n, i64(cast[*u32](buckets + 4 * k)[0]))
+        }
+        if n < first {
+            n = first
+        } else {
+            chain := buckets + 4 * nb - 4 * first
+            while bl_ok(chain + 4 * n, 4) && cast[*u32](chain + 4 * n)[0] & 1 == 0 {
+                n += 1
+            }
+            n += 1
+        }
+    }
+    if syms == 0 || strs == 0 || !bl_ok(syms, 24 * n) || !bl_ok(strs, strsz) {
+        return ""
+    }
+    // the nearest function (STT_FUNC, STT_GNU_IFUNC) defined at or before the address
+    best := -1
+    at := 0
+    for i in 1..n {
+        e := syms + 24 * i
+        t := cast[*u8](e + 4)[0] & 15
+        v := cast[*i64](e + 8)[0]
+        if (t == 2 || t == 10) && cast[*u16](e + 6)[0] != 0 && v <= off && (best < 0 || v > at) {
+            best = i
+            at = v
+        }
+    }
+    // (a function of the library without a dynamic symbol may follow it)
+    size := if best < 0 { 0 } else { cast[*i64](syms + 24 * best + 16)[0] }
+    if best < 0 || size != 0 && off - at >= size {
+        return ""
+    }
+    o := i64(cast[*u32](syms + 24 * best)[0])
+    if o >= strsz {
+        return ""
+    }
+    return bl_str(strs + o, strsz - o)
+}
+
+// the frame of C code at address q: (the file name of its library, the name of its function or
+// "", q's offset in the library); ("", "", q) outside every library
+noinline fn __os_bt_where(q: i64) -> (str, str, i64) {
+    if !__os_bt_foreign(q) {
+        return ("", "", q)
+    }
+    name := bl_str(bl_name, 4096)
+    k := len(name)
+    while k > 0 && name[k - 1] != '/' {
+        k -= 1
+    }
+    return (name[k..], bl_symbol(q - bl_base), q - bl_base)
 }
 
 // (not `-> never`: so that it is inlined; its callers are `never` functions)

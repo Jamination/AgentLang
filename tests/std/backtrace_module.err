@@ -1,0 +1,4 @@
+assertion failed at <std/image.al>:1095: image_new: bad size or channel count
+  at <std/image.al>:1095 in image_new
+  at tests/std/backtrace_module.al:6 in thumbnail
+  at tests/std/backtrace_module.al:11 in main

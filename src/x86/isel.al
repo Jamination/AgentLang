@@ -1995,6 +1995,7 @@ priv fn inst(self: *Sel, v: i64) {
             // the incoming stack argument before the first one: the return address
             d := self.vr(v)
             self.e(Lea, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: -1}))
+            self.mf.save_all = true
         }
         Bswap, Popcnt, Ctz, Clz => {
             d := self.vr(v)

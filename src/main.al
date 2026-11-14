@@ -810,6 +810,8 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     tests := vec[str]()
     main_ret := false
     has_main := false
+    has_c := false
+    has_bt_c := false
     decls := vec[Decl]()
     taken := src.decls
     src.decls = vec[Decl]()
@@ -835,6 +837,8 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
                         src.errs.push(Diag{pos: f.pos, msg: fmt("`main` is declared `fn main()` or `fn main() -> i64` (the exit status), not `", ast_sig_str(&f), "`", note)})
                     }
                 }
+                has_c = has_c || is_some(f.ext)
+                has_bt_c = has_bt_c || f.name == "__bt_c_init"
                 decls.push(Fn(f))
             }
             _ => {
@@ -844,6 +848,11 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
     }
     entry := vec[str]()
     entry.push("fn __entry(sp: i64) -> never {\n __rt_init(sp)\n")
+    if has_c && has_bt_c {
+        // (stack traces through C code: only a program that declares C functions has them; a
+        // run-time library of ALC_PRELUDE may lack them)
+        entry.push(" __bt_c_init()\n")
+    }
     if test_mode {
         for i, name in tests {
             // as a string literal of the entry source: every byte that cannot stand there as it is
@@ -1009,7 +1018,7 @@ priv fn real_main() -> i64 {
     }
     out := x86_compile(&module, ar.emit_asm)
     if opt_enabled("backtrace") {
-        bt_attach(&module, &out, cx.file_names.items(), src.tests.items())
+        bt_attach(&module, &out, &cx, src.tests.items())
     }
     mem("compiled")
     bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }

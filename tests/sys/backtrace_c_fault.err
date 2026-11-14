@@ -1,0 +1,8 @@
+panic: memory fault (nil dereference, stack overflow or use of released memory)
+  at libbacktrace_c_fault.so poke
+  at libbacktrace_c_fault.so poke_twice
+  at tests/sys/backtrace_c_fault.al:14 in item
+  at libbacktrace_c_fault.so each
+  at libbacktrace_c_fault.so run_each
+  at tests/sys/backtrace_c_fault.al:20 in walk
+  at tests/sys/backtrace_c_fault.al:25 in main

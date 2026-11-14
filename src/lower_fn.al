@@ -237,8 +237,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     f.insts = inst_bufs[buf_depth]
     f.insts.clear()
     f.has_vec = false
-    fname := file_name(&cx.file_names, pos.file)
-    f.lib = len(fname) > 0 && fname[0] == '<'
+    f.lib = cx.core_file(pos.file) || pos.file == cx.entry_file
     f.blocks = block_bufs[buf_depth]
     f.blocks.clear()
     pend := pend_bufs[buf_depth]

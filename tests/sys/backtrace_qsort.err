@@ -1,0 +1,6 @@
+assertion failed at tests/sys/backtrace_qsort.al:6: comparing 3
+  at tests/sys/backtrace_qsort.al:6 in check
+  at tests/sys/backtrace_qsort.al:11 in by_value
+  at libc.so.6 
+  at tests/sys/backtrace_qsort.al:16 in sort
+  at tests/sys/backtrace_qsort.al:25 in main
