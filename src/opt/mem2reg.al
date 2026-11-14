@@ -11,6 +11,7 @@ priv struct Ctx {
     new_phis: Vec[(i64, i64)],
     entry_consts: Vec[i32],
     zero: [10]i64, // by T; NOV: none yet
+    walk: Vec[(i64, i64, i64)], // read_in's blocks on the way back (block, phi or NOV, next pred)
 }
 
 priv fn zero_of(self: *Ctx, t: T) -> i64 {
@@ -24,42 +25,86 @@ priv fn zero_of(self: *Ctx, t: T) -> i64 {
     return z
 }
 
-priv fn read_out(self: *Ctx, var_: i64, b: i64) -> i64 {
+// the value var_ has at the end of block b if b stores it there, else -1
+priv fn stored_out(self: *Ctx, var_: i64, b: i64) -> i64 {
     if self.has_store[b] {
-        v := self.last_store.iget(var_ * self.nb + b)
-        if v >= 0 {
-            return v
-        }
+        return self.last_store.iget(var_ * self.nb + b)
     }
-    return self.read_in(var_, b)
+    return -1
 }
 
-priv fn read_in(self: *Ctx, var_: i64, b: i64) -> i64 {
-    key := var_ * self.nb + b
-    v0 := self.def_in.iget(key)
-    if v0 >= 0 {
-        return v0
-    }
-    preds := self.preds[b]
-    np := preds.len
+// The value var_ has at the start of block b: def_in if known, else (and remembered in def_in)
+// zero without a predecessor, the value at the end of a single predecessor, or a new phi of
+// the values at the end of all predecessors (made before them: a loop back to b finds it).
+// The search goes back through the predecessors with a stack of its own (self.walk), not by
+// recursion: a chain of blocks can be as long as the function.
+priv fn read_in(self: *Ctx, var_: i64, b0: i64) -> i64 {
+    walk := &self.walk
+    walk.clear()
+    // b >= 0: the value at the start of b is wanted; b < 0: it is v, for the top of walk
+    b := b0
     v := 0
-    // (a single predecessor that is b itself: a self-loop of a single block)
-    if np == 0 || np == 1 && preds[0] == b {
-        v = self.zero_of(self.var_ty[var_])
-    } else if np == 1 {
-        v = self.read_out(var_, preds[0])
-    } else {
-        phi := self.f.mk_phi(self.var_ty[var_], np)
-        self.def_in.iset(key, phi)
-        self.new_phis.push((b, phi))
-        for p in preds {
-            a := self.read_out(var_, p)
-            self.f.im(phi).phi_add(a, p)
+    loop {
+        if b >= 0 {
+            key := var_ * self.nb + b
+            v0 := self.def_in.iget(key)
+            if v0 >= 0 {
+                v = v0
+                b = -1
+                continue
+            }
+            preds := self.preds[b]
+            np := preds.len
+            // (a single predecessor that is b itself: a self-loop of a single block)
+            if np == 0 || np == 1 && preds[0] == b {
+                v = self.zero_of(self.var_ty[var_])
+                self.def_in.iset(key, v)
+                b = -1
+                continue
+            }
+            phi := NOV
+            if np > 1 {
+                phi = self.f.mk_phi(self.var_ty[var_], np)
+                self.def_in.iset(key, phi)
+                self.new_phis.push((b, phi))
+            }
+            walk.push((b, phi, 0))
+            s := self.stored_out(var_, preds[0])
+            if s >= 0 {
+                v = s
+                b = -1
+            } else {
+                b = preds[0]
+            }
+            continue
         }
-        v = phi
+        // v: the result if walk is empty, else the value at the end of predecessor i of the
+        // block on top of walk
+        if walk.is_empty() {
+            return v
+        }
+        top := walk.len - 1
+        wb, phi, i := walk[top]
+        if phi == NOV {
+            self.def_in.iset(var_ * self.nb + wb, v)
+            walk.pop()
+            continue
+        }
+        preds := self.preds[wb]
+        self.f.im(phi).phi_add(v, preds[i])
+        if i + 1 == preds.len {
+            v = phi
+            walk.pop()
+            continue
+        }
+        walk[top].2 = i + 1
+        s := self.stored_out(var_, preds[i + 1])
+        if s >= 0 {
+            v = s
+        } else {
+            b = preds[i + 1]
+        }
     }
-    self.def_in.iset(key, v)
-    return v
 }
 
 // the last mem2reg_run on f's thread ended with a round that changed nothing (not at its round
@@ -288,7 +333,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     }
     repl := vec_fill(n, i32(NOV))
     nvar := var_ty.len
-    cx := Ctx{f: f, preds: preds, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i32](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}}
+    cx := Ctx{f: f, preds: preds, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i32](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}, walk: vec[(i64, i64, i64)]()}
     // the value of each var in the current block: cur_val[var] when cur_blk[var] == b
     cur_val := alloc[i64](nvar)
     cur_blk := vec_fill(nvar, NOV)
