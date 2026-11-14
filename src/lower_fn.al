@@ -355,7 +355,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
 // (`flush_pend`): a block's list is allocated once, at its final length.
 fn ins(self: *Fx, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
     v := self.f.mk(op, ty, args, k)
-    self.f.insts[v].loc = self.loc
+    self.f.insts[v].set_srcloc(self.loc)
     self.pend.push(i32(v))
     return v
 }
