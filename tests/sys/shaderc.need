@@ -1,0 +1,1 @@
+for d in /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu; do test -e $d/libshaderc_shared.so.1 && exit 0; done; exit 1

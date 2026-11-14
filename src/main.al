@@ -52,6 +52,7 @@ priv const LINUX_ONLY = [_](str, str){
     ("wayland", ""),
     ("alsa", ""),
     ("vk", ""),
+    ("shaderc", ""),
 }
 
 // the operating system the executable is built for (`--target linux|windows`); the default
@@ -89,6 +90,7 @@ priv const STD_MODULES = [_](str, str){
     ("audio_linux", embed("../std/audio_linux.al")),
     ("audio_windows", embed("../std/audio_windows.al")),
     ("vk", embed("../std/vk.al")),
+    ("shaderc", embed("../std/shaderc.al")),
     ("dx12", embed("../std/dx12.al")),
     ("dx12_util", embed("../std/dx12_util.al")),
     ("metal", embed("../std/metal.al")),

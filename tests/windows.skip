@@ -34,3 +34,5 @@ sys/extern_data C libraries with Linux names (libc.so.6)
 sys/backtrace_qsort C libraries with Linux names (libc.so.6)
 sys/backtrace_strlen C libraries with Linux names (libc.so.6)
 fail/extern on Windows extern functions may take and return structs (Microsoft x64): other diagnostics
+sys/shaderc std.shaderc binds libshaderc_shared.so.1 (Linux)
+std/vk_glue std.vk binds libvulkan.so.1 (Linux)
