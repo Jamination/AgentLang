@@ -50,6 +50,25 @@ runs on Linux and Windows (`build/alc.exe`), and builds for both (`--target linu
 | `alc test file.al` | run the file's `test` blocks |
 | `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
 | `alc sigs file.al` | list declarations (`-- std` adds the standard library) |
+| `alc --version` | the compiler's version and default target |
+
+## Versions
+
+Releases are tagged `vX.Y.Z` (the first is `v0.1.0`); [CHANGELOG.md](CHANGELOG.md) lists what
+each one changes. A project pins the compiler it is written for:
+
+```
+git clone https://github.com/Jamination/AgentLang && cd AgentLang
+git checkout v0.1.0 && ./build.sh
+cp build/alc build/alc.exe ~/game/tools/       # or install as alc-0.1 on the PATH
+```
+
+The standard library ships inside the compiler, so one executable is the whole toolchain;
+`alc --version` names it. While the version is 0.x, a new minor version (0.2) may break
+programs: the language, the run-time library and `std` can all change, and every such change
+is listed under **Breaking** in the changelog with what to write instead. A patch version
+(0.1.1) only fixes bugs and never breaks a program. To update, read the Breaking entries
+between the two versions, then rebuild and run the project's tests with the new compiler.
 
 ## Documentation
 
@@ -102,6 +121,7 @@ The compiler compiles its own 34,000 lines in about 0.12 s without optimisation 
 | `examples/`, `bench/` | sample programs; the benchmarks in AL and C |
 | `tests/` | conformance suite (`tests/run.sh`) and fuzzers (`tests/gen/`) |
 | `verify.sh` | everything: self-compilation to a fixed point, tests, benchmarks |
+| `CHANGELOG.md` | changes per release; [Versions](#versions) |
 
 ## License
 

@@ -19,6 +19,11 @@ echo "== build: the compiler compiles itself =="
 ./build.sh || { echo "FAIL: compiler did not build"; exit 1; }
 [[ -x $ALC ]] || { echo "FAIL: compiler did not build"; exit 1; }
 
+echo "== version: alc --version names the topmost release in CHANGELOG.md =="
+rel=$(sed -nE 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\] - [0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$/\1/p' CHANGELOG.md | head -1)
+ver=$($ALC --version | head -1)
+if [[ -n $rel && $ver == "alc $rel" ]]; then echo "ok   $ver"; else echo "FAIL: alc --version says '$ver', the topmost release in CHANGELOG.md is '${rel:-none}'"; fail=1; fi
+
 echo "== the compiler is AL only; no external tools in the compile path =="
 others=$(find src -type f ! -name '*.al')
 if [[ -n "$others" ]]; then echo "FAIL: non-AL files in src/:"; echo "$others"; fail=1; fi
