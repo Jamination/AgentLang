@@ -13,6 +13,7 @@ priv extern "kernel32.dll" fn GetCurrentThreadStackLimits(low: *i64, high: *i64)
 priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
 priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
 priv extern "kernel32.dll" fn GetActiveProcessorCount(group: u16) -> u32
+priv extern "kernel32.dll" fn DeleteFileW(name: *u16) -> i32
 
 priv const INVALID_HANDLE = -1
 priv const INFINITE: u32 = 0xFFFFFFFF
@@ -28,18 +29,21 @@ fn stack_size() -> i64 {
 priv big_stack_fn: fn() -> i64
 priv big_stack_result: i64
 
+// (the run-time library gives this thread, which it did not start, a context of its own on
+// first use: arena, id, line-buffered output; its last partial line is written here)
 priv fn big_stack_thread(arg: i64) -> u32 {
     // the same room for the handler after a stack overflow as on the first thread
     g: u32 = 0x10000
     SetThreadStackGuarantee(&g)
     f := big_stack_fn
     big_stack_result = f()
+    flush()
     return 0
 }
 
 // f runs on a new thread whose stack reserves `bytes` (committed as it is used), while this
-// thread waits for it without doing anything else (so only one thread ever runs AL code). If
-// the thread cannot be created, f runs here, with the stack there is.
+// thread waits for it without doing anything else. If the thread cannot be created, f runs
+// here, with the stack there is.
 fn with_stack(bytes: i64, f: fn() -> i64) -> i64 {
     big_stack_fn = f
     // STACK_SIZE_PARAM_IS_A_RESERVATION
@@ -132,6 +136,10 @@ fn run_program_env(path: str, argv: []str, drop: []str, add: []str) -> i64 {
 // nothing to do: whether a file can be executed does not depend on a mode
 fn make_executable(path: str) -> bool {
     return true
+}
+
+fn unlink_file(path: str) -> bool {
+    return DeleteFileW(__win_wide(path)) != 0
 }
 
 // "volume serial number:file index" of the file that path names (following links)

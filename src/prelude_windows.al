@@ -133,7 +133,8 @@ fn __os_error_text(e: i64) -> str {
 // in a DLL is left to the DLL's own exception handlers, and reaches the unhandled exception
 // filter (which walks the stack through AL frames by their unwind information) only if none
 // of them takes it.
-priv in_fault: bool
+// a fault is being reported by this thread
+__tls_in_fault: bool
 // the program's image: [image_lo, image_hi)
 priv image_lo: i64
 priv image_hi: i64
@@ -153,13 +154,15 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
         0xC00000FD => {}                     // stack overflow
         _ => return 0
     }
-    if in_fault || __bt_busy {
+    // (a fault in another thread while one is reported waits: the panic lock)
+    __panic_enter()
+    if __tls_in_fault || __bt_busy {
         if __bt_busy {
             __err("  ... (the stack trace stopped at a fault)\n")
         }
         ExitProcess(1)
     }
-    in_fault = true
+    __tls_in_fault = true
     // where the stack trace starts: CONTEXT (the second pointer of EXCEPTION_POINTERS) holds
     // the registers from 0x78 in x86 order (rax, rcx, ..., r15), rip at 0xF8
     ctx := cast[*i64](info)[1]
@@ -173,7 +176,9 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
     }
     if code == 0xC00000FD {
         // after a stack overflow the handler has little stack left (under Wine less than 1 KiB,
-        // whatever SetThreadStackGuarantee asked for): the report is made by a thread of its own
+        // whatever SetThreadStackGuarantee asked for): the report is made by a thread of its
+        // own, which takes over the identity and the output buffer of this one
+        overflow_of = [4]i64{__tls_id, __tls_obuf, __tls_olen, __tls_ocap}
         h := CreateThread(0, 0, report_overflow, 0, 0, 0)
         if h != 0 {
             WaitForSingleObject(h, 0xFFFFFFFF)
@@ -186,8 +191,14 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
 // the stack of the thread that faulted (the stack trace walks it, also from another thread)
 priv fault_lo: i64
 priv fault_hi: i64
+// the thread that overflowed its stack: id + 1, output buffer, length, room
+priv overflow_of: [4]i64
 
 priv fn report_overflow(arg: i64) -> u32 {
+    __tls_id = overflow_of[0]
+    __tls_obuf = overflow_of[1]
+    __tls_olen = overflow_of[2]
+    __tls_ocap = overflow_of[3]
     __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
 }
 
@@ -210,6 +221,7 @@ fn __rt_init(sp: i64) {
     if __win_tls_index > 0x7FFFFFFF {
         __os_exit(127)
     }
+    __thread_init_main()
     // no error dialogs: SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
     SetErrorMode(0x8003)
     // the image: e_lfanew at 0x3C, SizeOfImage at 24 + 56 after the PE signature
@@ -812,7 +824,8 @@ noinline fn __heap_grow(n: i64) -> i64 {
         __die("panic: out of memory", "", "")
     }
     if __heap_base == 0 {
-        size := if __region_depth == 0 { 1 << 36 } else { 1 << 34 }
+        // (64 GiB for the main thread's base arena; every other thread's becomes a region)
+        size := if __region_depth == 0 && __tls_id == 1 { 1 << 36 } else { 1 << 34 }
         while size >= (1 << 24) {
             p := VirtualAlloc(0, size, 0x2000, 1)          // MEM_RESERVE, PAGE_NOACCESS
             if p != 0 {
@@ -1258,23 +1271,23 @@ fn __os_wall_time() -> i64 {
     return (ft - EPOCH_FT) / 10000000
 }
 
-// a waitable timer for sleeping (high resolution where the system has it); -1: none
-priv sleep_timer: i64
+// this thread's waitable timer for sleeping (high resolution where the system has it); -1: none
+__tls_sleep_timer: i64
 
 fn __os_sleep_ns(ns: i64) {
-    if sleep_timer == 0 {
+    if __tls_sleep_timer == 0 {
         // CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS
         t := CreateWaitableTimerExW(0, 0, 2, 0x1F0003)
         if t == 0 {
             t = CreateWaitableTimerExW(0, 0, 0, 0x1F0003)
         }
-        sleep_timer = if t == 0 { -1 } else { t }
+        __tls_sleep_timer = if t == 0 { -1 } else { t }
     }
-    if sleep_timer > 0 {
+    if __tls_sleep_timer > 0 {
         // relative time: negative, in 100 ns units
         due := -(ns / 100 + if ns % 100 != 0 { 1 } else { 0 })
-        if SetWaitableTimer(sleep_timer, &due, 0, 0, 0, 0) != 0 {
-            WaitForSingleObject(sleep_timer, INFINITE)
+        if SetWaitableTimer(__tls_sleep_timer, &due, 0, 0, 0, 0) != 0 {
+            WaitForSingleObject(__tls_sleep_timer, INFINITE)
             return
         }
     }
@@ -1549,3 +1562,90 @@ inline fn __win_wcslen(w: *u16) -> i64 {
 
 // the target of this layer (see `enum Os` in prelude.al)
 const TARGET_OS = Os.Windows
+
+// ---------- threads ----------
+// Locks are SRW locks, condition variables CONDITION_VARIABLEs (both a pointer that is zero
+// when unused); threads are made by CreateThread (the loader gives each a thread block).
+priv extern "kernel32.dll" fn AcquireSRWLockExclusive(l: *i64)
+priv extern "kernel32.dll" fn ReleaseSRWLockExclusive(l: *i64)
+priv extern "kernel32.dll" fn TryAcquireSRWLockExclusive(l: *i64) -> u8
+priv extern "kernel32.dll" fn SleepConditionVariableSRW(c: *i64, l: *i64, ms: u32, flags: u32) -> i32
+priv extern "kernel32.dll" fn WakeConditionVariable(c: *i64)
+priv extern "kernel32.dll" fn WakeAllConditionVariable(c: *i64)
+priv extern "kernel32.dll" fn GetActiveProcessorCount(group: u16) -> u32
+
+fn __os_lock(p: *i64) {
+    AcquireSRWLockExclusive(p)
+}
+
+fn __os_unlock(p: *i64) {
+    ReleaseSRWLockExclusive(p)
+}
+
+fn __os_try_lock(p: *i64) -> bool {
+    return TryAcquireSRWLockExclusive(p) != 0
+}
+
+fn __os_cond_wait(c: *i64, m: *i64, ns: i64) -> bool {
+    ms := INFINITE
+    if ns >= 0 {
+        ms = u32(min(ns / 1000000 + if ns % 1000000 != 0 { 1 } else { 0 }, 0xFFFFFFFE))
+    }
+    if SleepConditionVariableSRW(c, m, ms, 0) != 0 {
+        return true
+    }
+    return GetLastError() != 1460                    // ERROR_TIMEOUT
+}
+
+fn __os_cond_wake(c: *i64, all: bool) {
+    if all {
+        WakeAllConditionVariable(c)
+    } else {
+        WakeConditionVariable(c)
+    }
+}
+
+fn __os_park() -> never {
+    loop {
+        Sleep(INFINITE)
+    }
+}
+
+fn __os_cpu_count() -> i64 {
+    // ALL_PROCESSOR_GROUPS
+    return max(i64(GetActiveProcessorCount(0xFFFF)), 1)
+}
+
+priv fn thread_entry(c: i64) -> u32 {
+    __thread_main(cast[*__ThreadCtl](c))
+    return 0
+}
+
+// c.os[0]: the thread's handle
+fn __os_thread_create(c: *__ThreadCtl) -> i64 {
+    // STACK_SIZE_PARAM_IS_A_RESERVATION: committed as it is used
+    h := CreateThread(0, c.stack, thread_entry, cast[i64](c), 0x10000, 0)
+    if h == 0 {
+        return last_error()
+    }
+    c.os[0] = h
+    return 0
+}
+
+fn __os_thread_join(c: *__ThreadCtl) {
+    WaitForSingleObject(c.os[0], INFINITE)
+    CloseHandle(c.os[0])
+}
+
+fn __os_thread_setup(c: *__ThreadCtl) {
+    // room for the handler after a stack overflow, as on the main thread
+    g: u32 = 0x10000
+    SetThreadStackGuarantee(&g)
+}
+
+fn __os_thread_cleanup() {
+    if __tls_sleep_timer > 0 {
+        CloseHandle(__tls_sleep_timer)
+    }
+    __tls_sleep_timer = 0
+}

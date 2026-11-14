@@ -4,23 +4,29 @@
 
 __argc: i64
 __argv: i64
+// the main thread's signal stack (every other thread maps its own: __os_thread_setup)
 __sigstack: [32768]u8
 
-// the initial stack pointer: the top of the stack, above every frame
-priv stack_top: i64
-priv in_fault: bool
+// the stack of this thread, for stack traces (the main thread: below the initial stack
+// pointer; 0: a thread a C library created, see __os_stack_range)
+__tls_stack_lo: i64
+__tls_stack_hi: i64
+// a fault is being reported by this thread
+__tls_in_fault: bool
 
 // uc: the interrupted state (ucontext_t: the general registers from byte 40: r8-r15, rdi, rsi,
 // rbp, rbx, rdx, rax, rcx, rsp, rip), where the stack trace starts. A fault while one is
-// reported (the stack trace of a corrupted stack, ...) ends the program at once.
+// reported (the stack trace of a corrupted stack, ...) ends the program at once; a fault in
+// another thread waits (the panic lock).
 noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
-    if in_fault || __bt_busy {
+    __panic_enter()
+    if __tls_in_fault || __bt_busy {
         if __bt_busy {
             __err("  ... (the stack trace stopped at a fault)\n")
         }
         __os_exit(1)
     }
-    in_fault = true
+    __tls_in_fault = true
     g := cast[*i64](uc + 40)
     r := &__bt_fault_regs.r
     for k in 0..8 {
@@ -97,7 +103,9 @@ fn __rt_init(sp: i64) {
         }
         syscall(158, 0x1002, tls_place(p))   // arch_prctl(ARCH_SET_FS)
     }
-    stack_top = sp
+    __thread_init_main()
+    __tls_stack_lo = sp - (1 << 36)
+    __tls_stack_hi = sp
     // report crashes as panics: handlers run on their own stack so that stack overflow works too
     ss: [3]i64
     ss[0] = cast[i64](ptr(__sigstack))
@@ -113,10 +121,16 @@ fn __rt_init(sp: i64) {
     syscall(13, 8, ptr(sa), 0, 8)
 }
 
-// the frames lie below the initial stack pointer (the lower end only bounds a stack pointer that
-// is nonsense)
+// the frames of this thread lie in its stack (the lower end only bounds a stack pointer that
+// is nonsense); a thread a C library created: around the current stack pointer (the walk's
+// other checks end the trace)
 fn __os_stack_range() -> (i64, i64) {
-    return (stack_top - (1 << 36), stack_top)
+    if __tls_stack_hi == 0 {
+        here := 0
+        a := cast[i64](&here)
+        return (a - (1 << 36), a + (1 << 36))
+    }
+    return (__tls_stack_lo, __tls_stack_hi)
 }
 
 fn __os_backtrace_off() -> bool {
@@ -809,7 +823,8 @@ inline fn __os_fstat(fd: i64) -> (i64, bool) {
 // the address space of an arena is reserved once; the kernel commits memory as it is touched
 noinline fn __heap_grow(n: i64) -> i64 {
     if __heap_base == 0 {
-        size := if __region_depth == 0 { 1 << 36 } else { 1 << 34 }
+        // (64 GiB for the main thread's base arena; every other thread's becomes a region)
+        size := if __region_depth == 0 && __tls_id == 1 { 1 << 36 } else { 1 << 34 }
         while size >= (1 << 24) {
             // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE
             p := syscall(9, 0, size, 3, 0x4022, -1, 0)
@@ -1162,3 +1177,299 @@ fn __os_current_dir() -> str {
 
 // the target of this layer (see `enum Os` in prelude.al)
 const TARGET_OS = Os.Linux
+
+// ---------- threads ----------
+// Locks and condition variables are futexes (system calls: with or without the C library).
+// A lock word (the low 4 bytes of the 8 at p) is 0 unlocked, 1 locked, 2 locked with waiters;
+// a condition variable's word counts its signals.
+fn __os_lock(p: *i64) {
+    w := cast[*u32](p)
+    _, ok := atomic_cas(w, 0, 1)
+    if ok {
+        return
+    }
+    while atomic_swap(w, 2) != 0 {
+        syscall(202, w, 128, 2, 0)                    // FUTEX_WAIT_PRIVATE
+    }
+}
+
+fn __os_unlock(p: *i64) {
+    w := cast[*u32](p)
+    if atomic_swap(w, 0) == 2 {
+        syscall(202, w, 129, 1)                       // FUTEX_WAKE_PRIVATE
+    }
+}
+
+fn __os_try_lock(p: *i64) -> bool {
+    _, ok := atomic_cas(cast[*u32](p), 0, 1)
+    return ok
+}
+
+fn __os_cond_wait(c: *i64, m: *i64, ns: i64) -> bool {
+    s := cast[*u32](c)
+    seq := atomic_load(s)
+    __os_unlock(m)
+    r := 0
+    if ns < 0 {
+        r = syscall(202, s, 128, seq, 0)
+    } else {
+        ts := [2]i64{ns / 1000000000, ns % 1000000000}
+        r = syscall(202, s, 128, seq, ptr(ts))        // (a relative time)
+    }
+    __os_lock(m)
+    return r != -110                                  // ETIMEDOUT
+}
+
+fn __os_cond_wake(c: *i64, all: bool) {
+    s := cast[*u32](c)
+    atomic_add(s, 1)
+    syscall(202, s, 129, if all { 0x7FFFFFFF } else { 1 })
+}
+
+fn __os_park() -> never {
+    loop {
+        syscall(34)                                   // pause
+    }
+}
+
+// the CPUs of the affinity mask
+fn __os_cpu_count() -> i64 {
+    mask: [16]u64
+    r := syscall(204, 0, 128, ptr(mask))              // sched_getaffinity
+    n := 0
+    for k in 0..min(max(r, 0) / 8, 16) {
+        n += i64(popcnt(mask[k]))
+    }
+    return max(n, 1)
+}
+
+// Threads of a dynamically linked program are made by the C library (its thread functions
+// set up the library's state of the thread, which the C code it may call needs): pthread_create
+// and friends are looked up when the first thread starts, in the libraries the loader mapped,
+// so that no program depends on them just because it could start threads. A static program
+// makes its threads with clone: one mapping holds a guard page, the stack and the thread block
+// (see tls_place), and the kernel clears `tid` when the thread has ended (the join waits for
+// that).
+priv pt_lock: i64
+priv pt_state: i64 // 0: not looked up, 1: found, -1: not found
+priv pt_create: i64
+priv pt_join: i64
+priv pt_attr_init: i64
+priv pt_attr_stack: i64
+priv pt_attr_destroy: i64
+
+// the address of the C function `name` in the libraries the loader mapped (the default version
+// of a versioned one), 0 if none
+priv fn c_symbol(name: str) -> i64 {
+    rd := bl_r_debug()
+    if rd == 0 {
+        return 0
+    }
+    m := cast[*i64](rd)[1]
+    n := 0
+    while m != 0 && n < 10000 {
+        l := cast[*i64](m)
+        if l[0] != 0 {
+            a := lib_symbol(l[0], l[2], name)
+            if a != 0 {
+                return a
+            }
+        }
+        m = l[3]
+        n += 1
+    }
+    return 0
+}
+
+// `name` in the library at load address base with the dynamic section dyn (DT_GNU_HASH)
+priv fn lib_symbol(base: i64, dyn: i64, name: str) -> i64 {
+    strtab := 0
+    symtab := 0
+    gnuhash := 0
+    versym := 0
+    d := cast[*i64](dyn)
+    i := 0
+    while d[i] != 0 && i < 1000 {
+        v := d[i + 1]
+        // (the loader may have relocated these addresses or not)
+        if v != 0 && v < base {
+            v += base
+        }
+        match d[i] {
+            5 => strtab = v
+            6 => symtab = v
+            0x6ffffef5 => gnuhash = v
+            0x6ffffff0 => versym = v
+            _ => {}
+        }
+        i += 2
+    }
+    if strtab == 0 || symtab == 0 || gnuhash == 0 {
+        return 0
+    }
+    h := cast[*u32](gnuhash)
+    nb := i64(h[0])
+    symoff := i64(h[1])
+    buckets := gnuhash + 16 + 8 * i64(h[2])
+    chain := buckets + 4 * nb
+    hv: u32 = 5381
+    for c in name {
+        hv = hv * 33 + u32(c)
+    }
+    if nb == 0 {
+        return 0
+    }
+    k := i64(cast[*u32](buckets)[i64(hv % u32(nb))])
+    if k < symoff {
+        return 0
+    }
+    found := 0
+    loop {
+        ch := cast[*u32](chain)[k - symoff]
+        if ch | 1 == hv | 1 {
+            sym := symtab + 24 * k
+            nm := cast[*u8](strtab + i64(cast[*u32](sym)[0]))
+            same := nm[len(name)] == 0
+            for j in 0..len(name) {
+                if nm[j] != name[j] {
+                    same = false
+                    break
+                }
+            }
+            if same && cast[*u16](sym + 6)[0] != 0 {
+                a := base + cast[*i64](sym + 8)[0]
+                if versym == 0 || cast[*u16](versym)[k] & 0x8000 == 0 {
+                    return a
+                }
+                if found == 0 {
+                    found = a
+                }
+            }
+        }
+        if ch & 1 != 0 {
+            break
+        }
+        k += 1
+    }
+    return found
+}
+
+// are the C library's thread functions there? (looked up once)
+priv fn pthreads() -> bool {
+    __os_lock(&pt_lock)
+    if pt_state == 0 {
+        pt_state = -1
+        if bl_r_debug() != 0 {
+            pt_create = c_symbol("pthread_create")
+            pt_join = c_symbol("pthread_join")
+            pt_attr_init = c_symbol("pthread_attr_init")
+            pt_attr_stack = c_symbol("pthread_attr_setstacksize")
+            pt_attr_destroy = c_symbol("pthread_attr_destroy")
+            if pt_create != 0 && pt_join != 0 && pt_attr_init != 0 && pt_attr_stack != 0 && pt_attr_destroy != 0 {
+                pt_state = 1
+            }
+        }
+    }
+    __os_unlock(&pt_lock)
+    return pt_state == 1
+}
+
+// the start of a thread of the C library (pthread_create)
+priv fn thread_entry_c(c: i64) -> i64 {
+    __thread_main(cast[*__ThreadCtl](c))
+    return 0
+}
+
+// the start of a thread made by clone: ends the thread (not the process) when it is done
+priv fn thread_entry_raw(c: i64) {
+    __thread_main(cast[*__ThreadCtl](c))
+    syscall(60, 0)
+}
+
+// c.os: [0] the pthread_t or the mapping, [1] the mapping's size, [3] 1: C library, 2: clone
+fn __os_thread_create(c: *__ThreadCtl) -> i64 {
+    if pthreads() {
+        attr: [16]i64
+        cast[fn(*i64) -> i32](pt_attr_init)(&attr[0])
+        cast[fn(*i64, i64) -> i32](pt_attr_stack)(&attr[0], c.stack)
+        r := cast[fn(*i64, *i64, fn(i64) -> i64, i64) -> i32](pt_create)(&c.os[0], &attr[0], thread_entry_c, cast[i64](c))
+        cast[fn(*i64) -> i32](pt_attr_destroy)(&attr[0])
+        c.os[3] = 1
+        return -i64(r)
+    }
+    if bl_r_debug() != 0 {
+        // a dynamically linked program whose libraries do not include the C library's threads:
+        // clone would leave them without the C library's state of the thread
+        return -38                                    // ENOSYS
+    }
+    total := 4096 + c.stack + tls_size + 64
+    // PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_STACK
+    p := syscall(9, 0, total, 3, 0x22 | 0x4000 | 0x20000, -1, 0)
+    if p < 0 && p > -4096 {
+        return p
+    }
+    syscall(10, p, 4096, 0)                           // the guard page: PROT_NONE
+    top := p + 4096 + c.stack
+    tp := tls_place(top)
+    // the child pops its argument and its function from the new stack (see __clone)
+    sp := top - 16
+    cast[*i64](sp)[0] = cast[i64](c)
+    f := thread_entry_raw
+    memcopy(sp + 8, &f, 8)
+    c.os[0] = p
+    c.os[1] = total
+    c.os[3] = 2
+    // CLONE_VM | FS | FILES | SIGHAND | THREAD | SYSVSEM | SETTLS | PARENT_SETTID | CHILD_CLEARTID
+    flags := 0x100 | 0x200 | 0x400 | 0x800 | 0x10000 | 0x40000 | 0x80000 | 0x100000 | 0x200000
+    tid := cast[i64](&c.tid)
+    r := __clone(flags, sp, tid, tid, tp)
+    if r < 0 {
+        syscall(11, p, total)
+        return r
+    }
+    return 0
+}
+
+fn __os_thread_join(c: *__ThreadCtl) {
+    if c.os[3] == 1 {
+        cast[fn(i64, i64) -> i32](pt_join)(c.os[0], 0)
+        return
+    }
+    loop {
+        t := atomic_load(&c.tid)
+        if t == 0 {
+            break
+        }
+        syscall(202, &c.tid, 0, t, 0)                 // FUTEX_WAIT (the kernel's wake is shared)
+    }
+    syscall(11, c.os[0], c.os[1])
+}
+
+// this thread's signal stack (sigaltstack is per thread)
+__tls_sigstack: i64
+
+fn __os_thread_setup(c: *__ThreadCtl) {
+    if c.os[3] == 2 {
+        __tls_stack_hi = c.os[0] + 4096 + c.stack
+    } else {
+        // (the C library's stack: its top is a little above this frame)
+        here := 0
+        __tls_stack_hi = cast[i64](&here) + (1 << 20)
+    }
+    __tls_stack_lo = __tls_stack_hi - c.stack - (1 << 21)
+    p := __os_map(32768)
+    if p > 0 || p < -4096 {
+        ss := [3]i64{p, 0, 32768}
+        syscall(131, ptr(ss), 0)
+        __tls_sigstack = p
+    }
+}
+
+fn __os_thread_cleanup() {
+    if __tls_sigstack != 0 {
+        ss := [3]i64{0, 2, 0}                          // SS_DISABLE
+        syscall(131, ptr(ss), 0)
+        __os_unmap(__tls_sigstack, 32768)
+        __tls_sigstack = 0
+    }
+}

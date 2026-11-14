@@ -1063,7 +1063,10 @@ priv fn real_main() -> i64 {
             return 1
         }
     }
-    if !write_file(out_path, bytes) {
+    // (a busy executable cannot be written but can be replaced: Linux keeps the file of a
+    // process that has ended mapped while it tears down its memory, which takes a moment after
+    // a program with threads)
+    if !write_file(out_path, bytes) && !(io_error() == 26 && unlink_file(out_path) && write_file(out_path, bytes)) {
         // (io_error(): why it failed)
         errno := io_error()
         if errno == 0 {

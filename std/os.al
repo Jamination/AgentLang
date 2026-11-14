@@ -1,5 +1,5 @@
-// std.os: running other programs (to their end or in the background), shared memory, and what a
-// process knows about itself. `use std.os`.
+// std.os: running other programs (to their end or in the background), shared memory, what a
+// process knows about itself, and threads with mutexes and condition variables. `use std.os`.
 // For tools and build scripts. The system calls are those of the OS layer of the prelude (no
 // libc): a program using this module stays a static executable on Linux and imports only
 // kernel32.dll on Windows. The file and directory functions (file_exists, is_dir, make_dir,
@@ -214,4 +214,186 @@ fn process_id() -> i64 {
 // the absolute path of the working directory ("" if it cannot be told: see io_error())
 fn current_dir() -> str {
     return __os_current_dir()
+}
+
+// ---------- threads ----------
+// Threads run AL code at the same time in this process; docs/std/os.md has the rules. A
+// thread allocates from an arena of its own; when it has been joined, that arena is the
+// joiner's region `t.region` (results stay valid without a copy; region_free(&t.region) gives
+// the memory back). A panic in any thread ends the process.
+
+// A started thread. Copies of a Thread are the same thread; only one of them is joined.
+struct Thread {
+    id: i64                 // its thread_id(); 0 for a Thread that was not started
+    region: Region          // after thread_join: the memory the thread allocated (the caller's)
+    ctl: *__ThreadCtl
+    gen: i64
+}
+
+// what a new thread needs: the function and the copy of its context
+priv struct Start[C] {
+    f: fn(C)
+    ctx: C
+}
+
+// the stack of a thread of thread_spawn without a size: 8 MiB (reserved, used as it grows)
+priv const STACK = 8 << 20
+
+// Starts a thread that runs f(ctx); ctx is copied (what its slices and pointers refer to is
+// shared). (the thread, true), or (Thread{}, false) if it could not be started: io_error()
+// says why (12: not enough memory; 38: a dynamically linked program whose libraries lack the
+// C library's threads).
+fn thread_spawn[C](f: fn(C), ctx: C) -> (Thread, bool) {
+    return thread_spawn(f, ctx, STACK)
+}
+
+// the same with a stack of `stack` bytes (at least 64 KiB)
+fn thread_spawn[C](f: fn(C), ctx: C, stack: i64) -> (Thread, bool) {
+    n := sizeof[Start[C]]()
+    p := __os_map(n)
+    if p < 0 && p > -4096 {
+        __io_result(p)
+        return (Thread{}, false)
+    }
+    s := cast[*Start[C]](p)
+    s.f = f
+    s.ctx = ctx
+    c := __thread_spawn(body[C], p, stack)
+    if c == nil {
+        __os_unmap(p, n)
+        return (Thread{}, false)
+    }
+    return (Thread{id: c.id - 1, ctl: c, gen: c.gen}, true)
+}
+
+// the body of a thread of thread_spawn (in the new thread)
+priv fn body[C](c: *__ThreadCtl) {
+    s := cast[*Start[C]](c.arg)
+    f := s.f
+    ctx := s.ctx
+    __os_unmap(c.arg, sizeof[Start[C]]())
+    f(ctx)
+}
+
+// Waits until the thread has ended; its memory becomes t.region. Joining a thread twice (also
+// through a copy), joining Thread{} or the calling thread itself stops the program.
+fn thread_join(t: *Thread) {
+    __at_thread_join(t, "?")
+}
+
+fn __at_thread_join(t: *Thread, at: str) {
+    c := t.ctl
+    if c == nil || c.gen != t.gen {
+        __panic(at, "thread_join: the thread was joined already (or never started)")
+    }
+    if c.id == __thread_key() {
+        __panic(at, "thread_join: a thread cannot join itself")
+    }
+    _, ok := atomic_cas(&c.joining, 0, 1)
+    if !ok {
+        __panic(at, "thread_join: the thread was joined already (or never started)")
+    }
+    t.region = __thread_join(c)
+    t.ctl = nil
+}
+
+// the calling thread's id: 0 in the main thread, 1, 2, ... for the threads in the order they
+// were started (a thread a C library created gets the next one when it first needs one)
+fn thread_id() -> i64 {
+    return __thread_id()
+}
+
+// the number of CPUs this process may run on (Linux: its affinity mask)
+fn cpu_count() -> i64 {
+    return __os_cpu_count()
+}
+
+// A mutual exclusion lock; the zero value is unlocked. Locked by at most one thread at a
+// time; only that thread may unlock it. Not recursive. Must not be copied while in use.
+struct Mutex {
+    state: i64              // the OS layer's lock
+    owner: i64              // the id + 1 of the thread that holds it, 0 if none
+}
+
+// waits until m is free and locks it (locking it again in the thread that holds it panics)
+fn lock(m: *Mutex) {
+    __at_lock(m, "?")
+}
+
+fn __at_lock(m: *Mutex, at: str) {
+    me := __thread_key()
+    if atomic_load(&m.owner) == me {
+        __panic(at, "lock: this thread holds the mutex already")
+    }
+    __os_lock(&m.state)
+    atomic_store(&m.owner, me)
+}
+
+// locks m if it is free; false if another thread holds it (or this one)
+fn try_lock(m: *Mutex) -> bool {
+    me := __thread_key()
+    if atomic_load(&m.owner) == me || !__os_try_lock(&m.state) {
+        return false
+    }
+    atomic_store(&m.owner, me)
+    return true
+}
+
+// unlocks m, which this thread must hold
+fn unlock(m: *Mutex) {
+    __at_unlock(m, "?")
+}
+
+fn __at_unlock(m: *Mutex, at: str) {
+    if atomic_load(&m.owner) != __thread_key() {
+        __panic(at, "unlock: this thread does not hold the mutex")
+    }
+    atomic_store(&m.owner, 0)
+    __os_unlock(&m.state)
+}
+
+// A condition variable: threads wait on it (with a Mutex) until another one signals it. The
+// zero value is usable. Must not be copied while in use.
+struct Cond {
+    state: i64              // the OS layer's condition variable
+}
+
+// Unlocks m (which this thread must hold), waits until c is signalled, locks m again. It may
+// also return without a signal: wait in a loop that checks the condition.
+fn wait(c: *Cond, m: *Mutex) {
+    __at_wait(c, m, "?")
+}
+
+fn __at_wait(c: *Cond, m: *Mutex, at: str) {
+    cond_wait(c, m, -1, at)
+}
+
+// the same, waiting at most timeout_ns nanoseconds: false if the time ran out
+fn wait(c: *Cond, m: *Mutex, timeout_ns: i64) -> bool {
+    return __at_wait(c, m, timeout_ns, "?")
+}
+
+fn __at_wait(c: *Cond, m: *Mutex, timeout_ns: i64, at: str) -> bool {
+    return cond_wait(c, m, max(timeout_ns, 0), at)
+}
+
+priv fn cond_wait(c: *Cond, m: *Mutex, ns: i64, at: str) -> bool {
+    me := __thread_key()
+    if atomic_load(&m.owner) != me {
+        __panic(at, "wait: this thread does not hold the mutex")
+    }
+    atomic_store(&m.owner, 0)
+    r := __os_cond_wait(&c.state, &m.state, ns)
+    atomic_store(&m.owner, me)
+    return r
+}
+
+// wakes one thread that waits on c (none if none waits)
+fn signal(c: *Cond) {
+    __os_cond_wake(&c.state, false)
+}
+
+// wakes every thread that waits on c
+fn broadcast(c: *Cond) {
+    __os_cond_wake(&c.state, true)
 }

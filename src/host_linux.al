@@ -103,6 +103,10 @@ fn make_executable(path: str) -> bool {
     return syscall(90, cstr(path), 0o755) == 0
 }
 
+fn unlink_file(path: str) -> bool {
+    return syscall(87, cstr(path)) == 0
+}
+
 // "device:inode" of the file that path names (following links)
 fn file_id(path: str) -> (str, bool) {
     st: [18]i64

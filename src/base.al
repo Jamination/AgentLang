@@ -27,6 +27,8 @@ fn align_up(x: i64, a: i64) -> i64 {
 // for. src/host_linux.al and src/host_windows.al define for it:
 //   make_executable(path) -> bool  marks a file as executable (mode 0755; nothing to do on
 //                                  Windows)
+//   unlink_file(path) -> bool      removes a file (Linux: also an executable that is still
+//                                  mapped by a process being torn down, which cannot be written)
 //   run_program_env(path, argv, drop, add) -> i64
 //                                  runs a program with arguments and the current environment
 //                                  without the variables named in `drop` and with the

@@ -20,17 +20,39 @@
 //   __os_backtrace_off() -> bool   ALC_BACKTRACE=0 is set (without allocating)
 //   __os_bt_foreign, __os_bt_unwind, __os_bt_where, __BT_SAVED
 //                                  stack traces through C libraries (see __bt_c_init)
+//   __os_thread_create(c) -> errno starts a thread that calls __thread_main(c); 0 or -errno
+//   __os_thread_join(c)            waits until it has ended and frees what the layer made
+//   __os_thread_setup(), __os_thread_cleanup()
+//                                  in a new thread first (stack bounds, signal stack) / last
+//   __os_lock(p), __os_unlock(p), __os_try_lock(p) -> bool
+//                                  a lock in the 8 bytes at p (zero: unlocked)
+//   __os_cond_wait(c, m, ns) -> bool, __os_cond_wake(c, all)
+//                                  a condition variable in the 8 bytes at c (zero: usable);
+//                                  ns < 0: no time limit; false: timed out
+//   __os_park() -> never           waits forever (a thread while another one panics)
+//   __os_cpu_count()               the CPUs the process may use
 //   clock_ns, args, env_get        the public functions of that name
 // plus the __os_* functions used by std.asset, std.time and std.os. Error numbers are
 // Linux errno values on every target (the Windows layer maps its error codes to them).
+//
+// Threads: every thread has its own copy of the globals named __tls_*, __heap_* and
+// __region_* (thread-local, always zero at the start of a thread; the compiler puts them in
+// the thread block of each thread: see layout_tls in src/objwrite.al), so each thread
+// allocates from its own arena and has its own region stack, output buffer, io_error and
+// stack bounds. A thread that a C library created starts with all of them zero: it gets an
+// id, an arena and an output buffer when it first needs them. The other globals are shared:
+// read-only after the start, or protected by the output lock or the panic lock (see below).
 
 __heap_cur: i64
 __heap_end: i64
 __heap_base: i64
 __heap_hwm: i64
-__obuf: [65536]u8
-__olen: i64
 __tests_failed: i64
+
+// this thread's id + 1 (0: not known yet, a thread a C library created; see __thread_key)
+__tls_id: i64
+// the next id + 1 to hand out (the main thread has id 0)
+__thread_next: i64
 
 // ---------- process ----------
 fn exit(code: i64) -> never {
@@ -43,7 +65,8 @@ fn exit(code: i64) -> never {
 noinline fn __out_write(p: i64, n: i64) {
     e := __write_all(1, p, n)
     if e != 0 {
-        __olen = 0
+        __tls_olen = 0
+        __out_len = 0
         __die("panic: cannot write to standard output: ", error_text(e), "")
     }
 }
@@ -52,9 +75,35 @@ fn __err(s: str) {
     __write_all(2, cast[i64](ptr(s)), len(s))
 }
 
+// A panic ends the process (exit status 1) after its message and the stack trace of the
+// thread that panicked. Only one thread reports: the first to take the panic lock; another
+// thread that panics (or faults) meanwhile waits for the end. In the main thread the message
+// is as it always was, in another one it names the thread: "panic in thread 3: ...",
+// "assertion failed in thread 3 at ...".
 fn __die(kind: str, loc: str, msg: str) -> never {
-    flush()
-    __err(kind)
+    __panic_enter()
+    __out_panic()
+    id := __thread_id()
+    if id == 0 {
+        __err(kind)
+    } else {
+        k := if starts_with(kind, "assertion failed") { 16 } else if starts_with(kind, "panic") { 5 } else { 0 }
+        __err(kind[..k])
+        __err(" in thread ")
+        b: [24]u8
+        i := 24
+        x := id
+        loop {
+            i -= 1
+            b[i] = u8(x % 10) + '0'
+            x = x / 10
+            if x == 0 {
+                break
+            }
+        }
+        __err(b[i..24])
+        __err(kind[k..])
+    }
     __err(loc)
     if len(msg) > 0 {
         __err(": ")
@@ -64,6 +113,19 @@ fn __die(kind: str, loc: str, msg: str) -> never {
     __bt_print()
     __os_panic(kind, loc, msg)
     __os_exit(1)
+}
+
+// the thread that holds the panic lock: its id + 1, 0 if none
+__panic_owner: i64
+
+// takes the panic lock, or waits forever if another thread holds it (the process is ending);
+// returns at once in the thread that holds it (a panic while a panic is reported)
+fn __panic_enter() {
+    me := __thread_key()
+    prev, ok := atomic_cas(&__panic_owner, 0, me)
+    if !ok && prev != me {
+        __os_park()
+    }
 }
 
 noinline fn __bounds_fail(loc: str) -> never {
@@ -663,10 +725,12 @@ noinline fn __bt_print() {
 
 // ---------- memory ----------
 // The arena that allocations come from is described by __heap_cur / __heap_end / __heap_base /
-// __heap_hwm. A program starts in the main arena; enter(&r) makes a Region the arena in use.
-// The state of an arena that is not in use is kept in its Region struct (the main arena's in
-// __heap_main), so the allocation paths below never look at regions.
-struct Region { cur: i64, end: i64, base: i64, hwm: i64 }
+// __heap_hwm. A thread starts in its base arena; enter(&r) makes a Region the arena in use.
+// The state of an arena that is not in use is kept in its Region struct (the base arena's in
+// __heap_main), so the allocation paths below never look at regions. All of these are
+// per thread: threads allocate independently, without locks. `owner` of an entered region is
+// the id + 1 of the thread that entered it (one thread at a time: see enter).
+struct Region { cur: i64, end: i64, base: i64, hwm: i64, owner: i64 }
 
 __heap_main: Region
 __region_stack: [64]*Region
@@ -773,7 +837,7 @@ fn __region_load(r: *Region) {
     __heap_hwm = r.hwm
 }
 
-// the arena in use: the innermost entered region, or the main arena
+// the arena in use: the innermost entered region, or the base arena
 fn __region_top() -> *Region {
     if __region_depth == 0 {
         return &__heap_main
@@ -781,17 +845,24 @@ fn __region_top() -> *Region {
     return __region_stack[__region_depth - 1]
 }
 
-fn __region_entered(r: *Region) -> bool {
-    return contains(__region_stack[..__region_depth], r)
+// a region another thread has entered was entered, reset or freed (`what`)
+noinline fn __region_other(what: str, owner: i64) -> never {
+    __die(fmt("panic: ", what, ": this region is entered by thread ", owner - 1), "", "")
 }
 
-// allocations now come from r, until the matching leave(); calls nest up to 64 deep
+// allocations now come from r, until the matching leave(); calls nest up to 64 deep. A region
+// is entered by one thread at a time.
 fn enter(r: *Region) {
     if __region_depth == 64 {
         __die("panic: enter: more than 64 regions are entered (is a leave() missing?)", "", "")
     }
-    if __region_entered(r) {
-        __die("panic: enter: this region is already entered", "", "")
+    me := __thread_key()
+    prev, ok := atomic_cas(&r.owner, 0, me)
+    if !ok {
+        if prev == me {
+            __die("panic: enter: this region is already entered", "", "")
+        }
+        __region_other("enter", prev)
     }
     __region_save(__region_top())
     __region_load(r)
@@ -804,7 +875,9 @@ fn leave() {
     if __region_depth == 0 {
         __die("panic: leave without enter", "", "")
     }
-    __region_save(__region_stack[__region_depth - 1])
+    r := __region_stack[__region_depth - 1]
+    __region_save(r)
+    atomic_store(&r.owner, 0)
     __region_depth -= 1
     __region_load(__region_top())
 }
@@ -818,6 +891,10 @@ fn reset(r: *Region) {
         }
         __heap_cur = __heap_base
         return
+    }
+    o := atomic_load(&r.owner)
+    if o != 0 && o != __thread_key() {
+        __region_other("reset", o)
     }
     if r.cur > r.hwm {
         r.hwm = r.cur
@@ -836,8 +913,12 @@ fn used(r: *Region) -> i64 {
 // gives the memory of r back to the operating system; r is empty afterwards and can be used
 // again. The region must not be entered.
 fn region_free(r: *Region) {
-    if __region_entered(r) {
-        __die("panic: region_free: this region is entered (leave() first)", "", "")
+    o := atomic_load(&r.owner)
+    if o != 0 {
+        if o == __thread_key() {
+            __die("panic: region_free: this region is entered (leave() first)", "", "")
+        }
+        __region_other("region_free", o)
     }
     if r.base != 0 {
         __os_unmap(r.base, r.end - r.base)
@@ -846,43 +927,199 @@ fn region_free(r: *Region) {
 }
 
 // ---------- output ----------
+// Standard output is buffered per thread (__tls_obuf; the main thread's is __obuf). While the
+// program has one thread, the main thread writes its buffer to the file when it is full, at
+// flush() and at exit: the fast path of __put_str and putc. Once a thread was spawned (or a
+// thread a C library created printed: __threaded), output goes line by line: whenever a
+// thread writes a newline, its complete lines move to the shared buffer __out_buf under the
+// output lock (a line longer than the 64 KiB buffer in parts), so lines of different threads
+// never mix; flush() moves all of the calling thread's output and writes the shared buffer;
+// exit() flushes. A thread's last line without a newline is written when it ends, flushes or
+// writes the newline, and is lost if the process ends before. eprint, eput and panic messages
+// take the output lock too. (__tls_ocap is the room of the fast path: 0 in line mode.)
+priv const OBUF = 65536
+__obuf: [65536]u8
+__tls_obuf: i64
+__tls_olen: i64
+__tls_ocap: i64
+__threaded: bool
+__out_buf: i64
+__out_len: i64
+__out_lock: i64
+__out_owner: i64
+
 fn flush() {
-    if __olen > 0 {
-        n := __olen
-        __olen = 0
-        __out_write(cast[i64](ptr(__obuf)), n)
+    if __tls_ocap != 0 && !__threaded {
+        if __tls_olen > 0 {
+            n := __tls_olen
+            __tls_olen = 0
+            __out_write(__tls_obuf, n)
+        }
+        return
     }
+    __out_acquire()
+    __out_commit(true)
+    __out_drain()
+    __out_release()
 }
 
 noinline fn __put_str(s: str) {
-    if __cap_on != 0 {
+    if __tls_cap_on != 0 {
         __cap_put(s)
         return
     }
     n := len(s)
-    if n > 65536 - __olen {
-        flush()
-        if n >= 65536 {
-            __out_write(cast[i64](ptr(s)), n)
-            return
-        }
+    if n > __tls_ocap - __tls_olen {
+        __put_slow(s)
+        return
     }
-    memcopy(cast[i64](ptr(__obuf)) + __olen, ptr(s), n)
-    __olen += n
+    memcopy(__tls_obuf + __tls_olen, ptr(s), n)
+    __tls_olen += n
 }
 
 fn putc(c: u8) {
-    if __cap_on != 0 {
+    if __tls_cap_on != 0 || __tls_olen >= __tls_ocap {
         one: [1]u8
         one[0] = c
-        __cap_put(one[..])
+        __put_slow(one[..])
         return
     }
-    if __olen == 65536 {
-        flush()
+    cast[*u8](__tls_obuf + __tls_olen)[0] = c
+    __tls_olen += 1
+}
+
+noinline fn __put_slow(s: str) {
+    if __tls_cap_on != 0 {
+        __cap_put(s)
+        return
     }
-    __obuf[__olen] = c
-    __olen += 1
+    if __tls_obuf == 0 {
+        // a thread that has not printed yet: its buffer (line mode)
+        p := __os_map(OBUF)
+        if p < 0 && p > -4096 {
+            __die("panic: out of memory", "", "")
+        }
+        __tls_obuf = p
+        __tls_ocap = 0
+        atomic_store(&__threaded, true)
+    }
+    n := len(s)
+    if __tls_ocap != 0 {
+        if !__threaded {
+            // the only thread, its buffer is full
+            flush()
+            if n >= OBUF {
+                __out_write(cast[i64](ptr(s)), n)
+                return
+            }
+            memcopy(__tls_obuf + __tls_olen, ptr(s), n)
+            __tls_olen += n
+            return
+        }
+        __tls_ocap = 0
+    }
+    i := 0
+    while i < n {
+        if __tls_olen == OBUF {
+            __out_acquire()
+            __out_commit(false)
+            __out_release()
+        }
+        k := min(n - i, OBUF - __tls_olen)
+        memcopy(__tls_obuf + __tls_olen, cast[i64](ptr(s)) + i, k)
+        __tls_olen += k
+        i += k
+    }
+    j := n - 1
+    while j >= 0 && s[j] != '\n' {
+        j -= 1
+    }
+    if j >= 0 {
+        __out_acquire()
+        __out_commit(false)
+        __out_release()
+    }
+}
+
+fn __out_acquire() {
+    __os_lock(&__out_lock)
+    __out_owner = __thread_key()
+}
+
+fn __out_release() {
+    __out_owner = 0
+    __os_unlock(&__out_lock)
+}
+
+// (holding the output lock) moves this thread's complete lines (all: everything) to the shared
+// buffer; a full buffer without a newline goes as it is
+fn __out_commit(all: bool) {
+    n := __tls_olen
+    if n == 0 {
+        return
+    }
+    p := __tls_obuf
+    cut := n
+    if !all {
+        cut = n
+        while cut > 0 && cast[*u8](p + cut - 1)[0] != '\n' {
+            cut -= 1
+        }
+        if cut == 0 {
+            if n < OBUF {
+                return
+            }
+            cut = n
+        }
+    }
+    if __out_buf == 0 {
+        b := __os_map(OBUF)
+        if b < 0 && b > -4096 {
+            // no shared buffer: written at once
+            __tls_olen = 0
+            __out_write(p, n)
+            return
+        }
+        __out_buf = b
+    }
+    if cut > OBUF - __out_len {
+        __out_drain()
+    }
+    memcopy(__out_buf + __out_len, p, cut)
+    __out_len += cut
+    // (an overlapping copy to a lower address is a forward copy)
+    memcopy(p, p + cut, n - cut)
+    __tls_olen = n - cut
+}
+
+// (holding the output lock) writes the shared buffer
+fn __out_drain() {
+    if __out_len > 0 {
+        n := __out_len
+        __out_len = 0
+        __out_write(__out_buf, n)
+    }
+}
+
+// the output before a panic message (holding the panic lock): everything buffered is written
+// and the output lock is kept to the end. The lock is waited for at most about a second: the
+// thread that holds it may have faulted.
+fn __out_panic() {
+    if __tls_ocap != 0 && !__threaded {
+        flush()
+        return
+    }
+    if __out_owner != __thread_key() {
+        for k in 0..1000 {
+            if __os_try_lock(&__out_lock) {
+                break
+            }
+            __os_sleep_ns(1000000)
+        }
+        __out_owner = __thread_key()
+    }
+    __out_commit(true)
+    __out_drain()
 }
 
 fn __put_u64(x: u64) {
@@ -1478,52 +1715,52 @@ fn __tests_done() -> i64 {
 }
 
 // ---------- capture output into a string: fmt(...) ----------
-// The capture buffer lives outside the arena (release() must not take it away): a static block
-// first, then mappings of its own.
-__cap_on: i64
-__cap_static: [1024]u8
-__cap_buf: []u8
-__cap_len: i64
+// The capture buffer (per thread) lives outside the arena (release() must not take it away): a
+// block of the thread block first, then mappings of its own.
+__tls_cap_on: i64
+__tls_cap_static: [1024]u8
+__tls_cap_buf: []u8
+__tls_cap_len: i64
 
 // captures nest: each fmt() takes the text appended after its starting position
 fn __cap_begin() -> i64 {
-    if len(__cap_buf) == 0 {
-        __cap_buf = __cap_static[..]
+    if len(__tls_cap_buf) == 0 {
+        __tls_cap_buf = __tls_cap_static[..]
     }
-    __cap_on += 1
-    return __cap_len
+    __tls_cap_on += 1
+    return __tls_cap_len
 }
 
 fn __cap_put(s: str) {
     n := len(s)
-    if __cap_len + n > len(__cap_buf) {
-        if n > (1 << 46) - __cap_len {
+    if __tls_cap_len + n > len(__tls_cap_buf) {
+        if n > (1 << 46) - __tls_cap_len {
             __die("panic: out of memory", "", "")
         }
-        cap := len(__cap_buf) * 2
-        while cap < __cap_len + n {
+        cap := len(__tls_cap_buf) * 2
+        while cap < __tls_cap_len + n {
             cap = cap * 2
         }
         p := __os_map(cap)
         if p < 0 && p > -4096 {
             __die("panic: out of memory", "", "")
         }
-        memcopy(p, ptr(__cap_buf), __cap_len)
-        if len(__cap_buf) > 1024 {
-            __os_unmap(cast[i64](ptr(__cap_buf)), len(__cap_buf))
+        memcopy(p, ptr(__tls_cap_buf), __tls_cap_len)
+        if len(__tls_cap_buf) > 1024 {
+            __os_unmap(cast[i64](ptr(__tls_cap_buf)), len(__tls_cap_buf))
         }
-        __cap_buf = mkslice[u8](p, cap)
+        __tls_cap_buf = mkslice[u8](p, cap)
     }
-    memcopy(cast[i64](ptr(__cap_buf)) + __cap_len, ptr(s), n)
-    __cap_len += n
+    memcopy(cast[i64](ptr(__tls_cap_buf)) + __tls_cap_len, ptr(s), n)
+    __tls_cap_len += n
 }
 
 fn __cap_end(start: i64) -> str {
-    n := __cap_len - start
+    n := __tls_cap_len - start
     out := alloc[u8](n)
-    memcopy(ptr(out), cast[i64](ptr(__cap_buf)) + start, n)
-    __cap_len = start
-    __cap_on -= 1
+    memcopy(ptr(out), cast[i64](ptr(__tls_cap_buf)) + start, n)
+    __tls_cap_len = start
+    __tls_cap_on -= 1
     return out
 }
 
@@ -3159,24 +3396,24 @@ fn __open(path: str, write: bool) -> i64 {
     return __io_result(__os_open(cast[*u8](__cstr(path)), write))
 }
 
-// the error number of the most recent failed file operation (0 after a success)
-__io_errno: i64
+// the error number of the most recent failed file operation of this thread (0 after a success)
+__tls_io_errno: i64
 
 // records the outcome of a system call: a negative result is `-errno`; returns `r`
 fn __io_result(r: i64) -> i64 {
     if r < 0 {
-        __io_errno = -r
+        __tls_io_errno = -r
     } else {
-        __io_errno = 0
+        __tls_io_errno = 0
     }
     return r
 }
 
 // The OS error number (Linux errno) of the most recent failed file operation of the library
-// (`read_file`, `write_file`, `read_all`, and the file functions of std.asset); 0 if the
-// most recent one succeeded. Read it right after the call that returned `false`.
+// (`read_file`, `write_file`, `read_all`, and the file functions of std.asset) in this thread;
+// 0 if the most recent one succeeded. Read it right after the call that returned `false`.
 fn io_error() -> i64 {
-    return __io_errno
+    return __tls_io_errno
 }
 
 // a short text for an OS error number, e.g. for `io_error()`
@@ -3256,7 +3493,7 @@ fn read_file(path: str) -> (str, bool) {
     }
     data := read_all(fd)
     __os_close(fd)
-    if __io_errno != 0 {
+    if __tls_io_errno != 0 {
         return ("", false)
     }
     return (data, true)
@@ -3270,7 +3507,7 @@ fn write_file(path: str, data: str) -> bool {
     }
     e := __write_all(fd, cast[i64](ptr(data)), len(data))
     if e != 0 {
-        __io_errno = e
+        __tls_io_errno = e
     }
     __os_close(fd)
     return e == 0
@@ -3437,17 +3674,165 @@ fn is_lower(c: u8) -> bool {
 
 // like print, to standard error
 fn eprint(s: str) {
-    flush()
-    __err(s)
-    __err("\n")
+    eput2(s, true)
 }
 
 // like put (no newline), to standard error
 fn eput(s: str) {
-    flush()
-    __err(s)
+    eput2(s, false)
 }
 
+// (with threads, under the output lock: lines of standard error do not mix either)
+priv fn eput2(s: str, nl: bool) {
+    threads := __threaded || __tls_ocap == 0
+    if threads {
+        __out_acquire()
+        __out_commit(true)
+        __out_drain()
+    } else {
+        flush()
+    }
+    __err(s)
+    if nl {
+        __err("\n")
+    }
+    if threads {
+        __out_release()
+    }
+}
+
+// ---------- threads ----------
+// The run-time library's side of std.os threads. A thread is started with a control block
+// (__ThreadCtl), which the OS layer hands to the new thread (__os_thread_create); there
+// __thread_main gives it its id and stack bounds, runs `body`, and at the end commits its
+// output and leaves its base arena in the control block, where __thread_join takes it for
+// the joiner. Control blocks are kept in a free list, never unmapped: a stale copy of a
+// handle finds another generation (`gen`) instead of unmapped memory.
+struct __ThreadCtl {
+    body: fn(*__ThreadCtl)
+    arg: i64        // for body
+    id: i64         // the thread's id + 1
+    gen: i64        // counts the uses of the block
+    joining: i64    // 1 once a thread_join started
+    stack: i64      // bytes of stack
+    os: [4]i64      // the OS layer's (handle, mapping, ...)
+    tid: i32        // the OS layer's (Linux: the kernel's thread id, 0 once it has ended)
+    region: Region  // after the end: the thread's base arena
+    next: *__ThreadCtl
+}
+
+priv thr_lock: i64
+priv thr_free: *__ThreadCtl
+
+// this thread's id + 1, given now to a thread a C library created
+fn __thread_key() -> i64 {
+    k := __tls_id
+    if k == 0 {
+        k = atomic_add(&__thread_next, 1) + 1
+        __tls_id = k
+    }
+    return k
+}
+
+// this thread's id: 0 for the main thread, then 1, 2, ... in the order of thread_spawn (and of
+// the first use of the library by threads that C libraries created)
+fn __thread_id() -> i64 {
+    return __thread_key() - 1
+}
+
+// the main thread (called first by the OS layer's __rt_init)
+fn __thread_init_main() {
+    __tls_id = 1
+    __thread_next = 1
+    __tls_obuf = cast[i64](ptr(__obuf))
+    __tls_ocap = OBUF
+}
+
+// a thread that runs body(c) (c.arg for its use) on `stack` bytes of stack: its control block,
+// or nil if it could not be started (io_error() says why)
+fn __thread_spawn(body: fn(*__ThreadCtl), arg: i64, stack: i64) -> *__ThreadCtl {
+    // from now on output goes line by line (see "output")
+    if __tls_ocap != 0 {
+        flush()
+        __tls_ocap = 0
+    }
+    atomic_store(&__threaded, true)
+    __os_lock(&thr_lock)
+    if thr_free == nil {
+        n := sizeof[__ThreadCtl]()
+        p := __os_map(65536)
+        if p < 0 && p > -4096 {
+            __os_unlock(&thr_lock)
+            __io_result(p)
+            return nil
+        }
+        for k in 0..65536 / n {
+            c := cast[*__ThreadCtl](p + k * n)
+            c.next = thr_free
+            thr_free = c
+        }
+    }
+    c := thr_free
+    thr_free = c.next
+    __os_unlock(&thr_lock)
+    c.body = body
+    c.arg = arg
+    c.joining = 0
+    c.stack = (max(stack, 65536) + 4095) & ~4095
+    c.os = [4]i64{}
+    c.tid = 0
+    c.region = Region{}
+    c.id = atomic_add(&__thread_next, 1) + 1
+    e := __os_thread_create(c)
+    if e != 0 {
+        thr_release(c)
+        __io_result(e)
+        return nil
+    }
+    __io_result(0)
+    return c
+}
+
+priv fn thr_release(c: *__ThreadCtl) {
+    __os_lock(&thr_lock)
+    c.gen += 1
+    c.next = thr_free
+    thr_free = c
+    __os_unlock(&thr_lock)
+}
+
+// the start of a thread made by __thread_spawn (the OS layer calls it on the new thread)
+fn __thread_main(c: *__ThreadCtl) {
+    __tls_id = c.id
+    __os_thread_setup(c)
+    f := c.body
+    f(c)
+    // the end: the output, the arena (regions still entered are given up), the OS layer's
+    if __tls_obuf != 0 {
+        __out_acquire()
+        __out_commit(true)
+        __out_release()
+        __os_unmap(__tls_obuf, OBUF)
+        __tls_obuf = 0
+    }
+    if len(__tls_cap_buf) > 1024 {
+        __os_unmap(cast[i64](ptr(__tls_cap_buf)), len(__tls_cap_buf))
+    }
+    __region_save(__region_top())
+    for k in 0..__region_depth {
+        atomic_store(&__region_stack[k].owner, 0)
+    }
+    c.region = __heap_main
+    __os_thread_cleanup()
+}
+
+// waits until the thread of c has ended; its base arena, which belongs to the caller now
+fn __thread_join(c: *__ThreadCtl) -> Region {
+    __os_thread_join(c)
+    r := c.region
+    thr_release(c)
+    return r
+}
 
 // ---------- optional values ----------
 // a value that may be absent

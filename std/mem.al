@@ -51,26 +51,27 @@ fn zero[T](s: []T) {
 }
 
 // ---------- frame scratch memory ----------
-__frame_marks: [32]i64
-__frame_arenas: [32]*Region
-__frame_depth: i64
+// (per thread, as the arena it works on)
+__tls_frame_marks: [32]i64
+__tls_frame_arenas: [32]*Region
+__tls_frame_depth: i64
 
 // opens a scratch scope: everything allocated from the arena in use until the matching
 // frame_end() is temporary. Scopes nest up to 32 deep. A scope belongs to the arena it was
 // opened in: enter()/leave() calls inside it must be balanced before frame_end().
 fn frame_begin() {
-    assert __frame_depth < 32, "frame_begin: nested too deeply (missing frame_end?)"
-    __frame_marks[__frame_depth] = mark()
-    __frame_arenas[__frame_depth] = __region_top()
-    __frame_depth += 1
+    assert __tls_frame_depth < 32, "frame_begin: nested too deeply (missing frame_end?)"
+    __tls_frame_marks[__tls_frame_depth] = mark()
+    __tls_frame_arenas[__tls_frame_depth] = __region_top()
+    __tls_frame_depth += 1
 }
 
 // closes the innermost scratch scope and releases what was allocated inside it
 fn frame_end() {
-    assert __frame_depth > 0, "frame_end without frame_begin"
-    __frame_depth -= 1
-    assert __frame_arenas[__frame_depth] == __region_top(), "frame_end: the arena in use is not the one of the matching frame_begin (unbalanced enter/leave?)"
-    release(__frame_marks[__frame_depth])
+    assert __tls_frame_depth > 0, "frame_end without frame_begin"
+    __tls_frame_depth -= 1
+    assert __tls_frame_arenas[__tls_frame_depth] == __region_top(), "frame_end: the arena in use is not the one of the matching frame_begin (unbalanced enter/leave?)"
+    release(__tls_frame_marks[__tls_frame_depth])
 }
 
 // ---------- Arena ----------
