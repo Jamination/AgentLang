@@ -251,10 +251,12 @@ priv struct Voice {
 }
 
 // Software mixer: sums the playing voices into an output stream of `rate` Hz with `channels`
-// (1 or 2) channels.
+// (1 or 2) channels. `mixed` counts the frames rendered by mix / mix_i16 (and so by
+// audio_pump / audio_write) since mixer_new: the audio clock, f64(m.mixed) / f64(m.rate) seconds.
 struct Mixer {
     rate: i64
     channels: i64
+    mixed: i64
     master: f32
     voices: []Voice
     serial: u32
@@ -455,6 +457,7 @@ fn mix(m: *Mixer, out: []f32, count: i64) {
     for i in 0..total {
         out[i] = fmin(fmax(out[i], -1.0), 1.0)
     }
+    m.mixed += count
 }
 
 // Like `mix`, producing signed 16-bit samples (rounded to nearest).

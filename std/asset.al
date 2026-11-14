@@ -251,6 +251,67 @@ fn path_stem(p: str) -> str {
     return if d < 0 { b } else { b[..d] }
 }
 
+// ---------- per-user directories ----------
+// The directory for the files of `app` (saves, settings) of the user running the program,
+// created with its missing parents: (path, true); (path, false) if it could not be created
+// (`io_error()`), ("", false) if the environment names no base directory (nothing is done;
+// `io_error()` is 2, "no such file or directory").
+//   Linux:   $XDG_DATA_HOME/app or ~/.local/share/app; $XDG_CONFIG_HOME/app or ~/.config/app
+//            (an XDG variable that is empty or not an absolute path is ignored, as the XDG
+//            base directory specification asks; ~ is $HOME)
+//   Windows: %APPDATA%/app for both, or %USERPROFILE%/AppData/Roaming/app without APPDATA
+when TARGET_OS == Windows {
+    fn data_dir(app: str) -> (str, bool) {
+        return __asset_user_dir(__asset_appdata(), app)
+    }
+
+    fn config_dir(app: str) -> (str, bool) {
+        return __asset_user_dir(__asset_appdata(), app)
+    }
+
+    fn __asset_appdata() -> str {
+        v, _ := env_get("APPDATA")
+        if len(v) > 0 {
+            return v
+        }
+        u, _ := env_get("USERPROFILE")
+        if len(u) > 0 {
+            return path_join(u, "AppData/Roaming")
+        }
+        return ""
+    }
+} else {
+    fn data_dir(app: str) -> (str, bool) {
+        return __asset_user_dir(__asset_xdg("XDG_DATA_HOME", ".local/share"), app)
+    }
+
+    fn config_dir(app: str) -> (str, bool) {
+        return __asset_user_dir(__asset_xdg("XDG_CONFIG_HOME", ".config"), app)
+    }
+
+    // $name if it is an absolute path, else $HOME/home_rel, else ""
+    fn __asset_xdg(name: str, home_rel: str) -> str {
+        v, _ := env_get(name)
+        if len(v) > 0 && v[0] == '/' {
+            return v
+        }
+        h, _ := env_get("HOME")
+        if len(h) > 0 {
+            return path_join(h, home_rel)
+        }
+        return ""
+    }
+}
+
+fn __asset_user_dir(base: str, app: str) -> (str, bool) {
+    if len(base) == 0 {
+        __io_result(-2)
+        return ("", false)
+    }
+    dir := path_join(base, app)
+    return (dir, make_dir(dir))
+}
+
 // ---------- asset loader ----------
 // A loaded file: its bytes and the modification time it had when it was read.
 struct Asset { data: []u8, mtime: i64 }

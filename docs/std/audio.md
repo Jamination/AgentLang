@@ -71,6 +71,7 @@ m.mix(out, n)                                      // render the next n frames
 | `active_voices(m) -> i64` | voices in use |
 | `mix(m, out: []f32, frames: i64)` | render `frames` frames of interleaved `f32` into `out` |
 | `mix_i16(m, out: []i16, frames: i64)` | the same as signed 16-bit samples (rounded) |
+| field `m.mixed: i64` | frames rendered by `mix` / `mix_i16` since `mixer_new` (also those `audio_pump` and `audio_write` render): the audio clock |
 
 Behaviour:
 
@@ -90,6 +91,11 @@ Behaviour:
   speed and `pitch` 2.0 is an octave up. Positions are 32.32 fixed point: results do not depend
   on how the output is split into `mix` calls.
 - **Clipping.** The sum of all voices times the master volume is limited to -1..1.
+- **Audio clock.** `m.mixed` only grows, by the `frames` of every `mix` / `mix_i16` call
+  (silent ones too); `f64(m.mixed) / f64(m.rate)` is the time of the mix in seconds. A mixer
+  fed by `audio_pump` advances with the frames the device consumed, so it runs in real time:
+  sync music-driven game events to it rather than to the frame clock. What is heard lags by the
+  buffer: about `m.mixed - d.buffer_frames` frames have reached the speaker.
 - The mixer references the samples of a `Sound`; keep them alive (do not `release` them) while
   it plays.
 

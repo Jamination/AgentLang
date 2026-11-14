@@ -4,7 +4,7 @@
 program using this module stays a static, libc-free executable. Built with `--target windows`
 it calls kernel32.dll and also accepts Windows paths: see [Windows](#windows).
 
-- file and directory operations, path helpers
+- file and directory operations, the per-user data and config directories, path helpers
 - `Assets`: loads files relative to a root directory, caches them, and tells when a file
   changed on disk (hot reload)
 - `Config`: a reader for `key = value` / INI-style settings files
@@ -43,6 +43,35 @@ allocate from the arena in use (see [mem](mem.md)); wrap temporary work in
 
 Typed data round-trips through the byte views of [mem](mem.md):
 `write_bytes(path, as_bytes(vertices))` and `from_bytes[Vertex](data)`.
+
+## Per-user directories
+
+| Declaration | Description |
+|-------------|-------------|
+| `data_dir(app: str) -> (str, bool)` | The directory for the data of application `app` (save games, high scores) of the user running the program, **created** with its missing parents. |
+| `config_dir(app: str) -> (str, bool)` | The same for its settings. |
+
+| | `data_dir` | `config_dir` |
+|---|---|---|
+| Linux | `$XDG_DATA_HOME/app`, else `$HOME/.local/share/app` | `$XDG_CONFIG_HOME/app`, else `$HOME/.config/app` |
+| Windows | `%APPDATA%/app`, else `%USERPROFILE%/AppData/Roaming/app` | the same as `data_dir` |
+
+- **Result.** `(path, true)` when the directory exists afterwards (also when it existed before);
+  `(path, false)` when it could not be created (`io_error()` says why: a file in the way,
+  no permission); `("", false)` when the environment names no base directory (on Linux
+  `HOME` unset or empty, on Windows neither `APPDATA` nor `USERPROFILE`): nothing is created
+  and `io_error()` is 2 (`no such file or directory`). A game can then keep its settings in
+  memory or fall back to a directory of its own choice.
+- An XDG variable that is empty or not an absolute path is ignored, as the XDG base directory
+  specification asks. The path is built with `path_join` (`/` between the parts, also after
+  the `C:\Users\...` of Windows). `app` is a relative name and may have several components
+  (`"studio/game"`); `""` gives the base directory itself.
+- They read the environment each time and allocate the path: call them once at start-up.
+
+```
+dir, ok := data_dir("star_miner")
+if ok { write_bytes(path_join(dir, "save.json"), save_text) }
+```
 
 ## Paths
 
