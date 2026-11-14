@@ -27,11 +27,11 @@ Interleaved `f32` samples in -1..1, `channels` samples per frame, `rate` frames 
 
 | Function | |
 |----------|---|
-| `sound_new(rate, channels, frames) -> Sound` | silent sound to fill in (allocates) |
+| `sound_new(rate: i64, channels: i64, frames: i64) -> Sound` | silent sound to fill in (allocates) |
 | `frames(s: Sound) -> i64` | number of frames |
 | `duration(s: Sound) -> f32` | length in seconds |
-| `sound_tone(rate, freq: f32, seconds: f32, amp: f32) -> Sound` | mono sine tone (allocates) |
-| `sound_noise(rate, seconds: f32, amp: f32, seed: u64) -> Sound` | mono white noise; the same seed gives the same samples (allocates) |
+| `sound_tone(rate: i64, freq: f32, seconds: f32, amp: f32) -> Sound` | mono sine tone (allocates) |
+| `sound_noise(rate: i64, seconds: f32, amp: f32, seed: u64) -> Sound` | mono white noise; the same seed gives the same samples (allocates) |
 
 ## WAV
 
@@ -60,7 +60,7 @@ m.mix(out, n)                                      // render the next n frames
 
 | Function | |
 |----------|---|
-| `mixer_new(rate, channels, max_voices) -> *Mixer` | create a mixer (allocates once) |
+| `mixer_new(rate: i64, channels: i64, max_voices: i64) -> *Mixer` | create a mixer (allocates once) |
 | `play(m, s: Sound, volume: f32, pan: f32, pitch: f32, looped: bool) -> VoiceId` | start a voice |
 | `valid(id: VoiceId) -> bool` | the handle came from a successful `play` |
 | `playing(m, id) -> bool` | the voice is still in the pool (also while paused) |
@@ -69,8 +69,8 @@ m.mix(out, n)                                      // render the next n frames
 | `set_paused(m, id, paused: bool)` | pause / resume, keeping the position |
 | `set_master_volume(m, volume)` | gain of the whole mix (applied before clipping) |
 | `active_voices(m) -> i64` | voices in use |
-| `mix(m, out: []f32, frames)` | render `frames` frames of interleaved `f32` into `out` |
-| `mix_i16(m, out: []i16, frames)` | the same as signed 16-bit samples (rounded) |
+| `mix(m, out: []f32, frames: i64)` | render `frames` frames of interleaved `f32` into `out` |
+| `mix_i16(m, out: []i16, frames: i64)` | the same as signed 16-bit samples (rounded) |
 
 Behaviour:
 
@@ -97,10 +97,10 @@ Behaviour:
 
 | Function | |
 |----------|---|
-| `audio_open(rate, channels) -> (*AudioDevice, bool)` | open the default playback device with about 50 ms of buffer |
-| `audio_open(name: str, rate, channels, latency_ms) -> (*AudioDevice, bool)` | open a named device (see [Devices](#devices)) with a chosen buffer length |
+| `audio_open(rate: i64, channels: i64) -> (*AudioDevice, bool)` | open the default playback device with about 50 ms of buffer |
+| `audio_open(name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDevice, bool)` | open a named device (see [Devices](#devices)) with a chosen buffer length |
 | `audio_pump(d, m: *Mixer) -> i64` | mix and write as many frames as the device accepts right now; never waits |
-| `audio_write(d, m: *Mixer, frames) -> i64` | mix and write exactly `frames` frames, waiting while the buffer is full |
+| `audio_write(d, m: *Mixer, frames: i64) -> i64` | mix and write exactly `frames` frames, waiting while the buffer is full |
 | `audio_close(d)` | stop at once and close |
 | `audio_error() -> str` | why the last `audio_open` failed; `""` after a successful one |
 | `audio_devices() -> []str` | the names of the playback devices `audio_open` accepts (allocates) |
