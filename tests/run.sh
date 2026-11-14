@@ -9,6 +9,10 @@
 #                     driver, a sound device, a display, a shared library). NAME.need holds a
 #                     shell command that tells whether the prerequisite is there; if it fails
 #                     the test is reported as SKIP together with the text of NAME.why.
+#                     NAME.c is a C library for the test, built before it with the C compiler
+#                     of the target (clang -O2, without frame pointers: libNAME.so, found
+#                     through LD_LIBRARY_PATH; Windows: MinGW -O2, NAME.dll next to the
+#                     program); without that compiler the test is reported as SKIP.
 #                     A program of run/, std/ or sys/ that ends with status 77 (and does not
 #                     expect it) is reported as SKIP with the first line of its standard output:
 #                     for what only the program can find out (no Direct3D 12 device under Wine).
@@ -20,6 +24,7 @@
 # tests/driver/NAME.sh is run with bash, the compiler as $1 and an empty scratch directory as
 #                     $2; it tests the command line (files, paths, exit codes) and must exit 0
 # NAME.flags          (run/, std/, sys/, fail/, check/) options for the compiler, e.g. `-D DEMO`
+# NAME.windows.err    (run/, std/, sys/) replaces NAME.err for --target windows
 # all targets         (Linux runs) `alc check --all-targets` must pass for the programs of
 #                     examples/ (files with `fn main`), for tests/check/NAME.al without
 #                     NAME.target and for the tests of run/ and std/ that use `when`, unless
@@ -67,7 +72,8 @@ else
 fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-TARGET=()
+# (the C libraries of tests/sys, see NAME.c above)
+export LD_LIBRARY_PATH="$TMP/clib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 RUN=()
 BIN=$TMP/bin
 declare -A WSKIP
@@ -118,6 +124,22 @@ for src in $dir/*.al; do
     [[ -f "$dir/$name.why" ]] && why=$(cat "$dir/$name.why")
     echo "SKIP $name: $why"; skip=$((skip+1)); continue
   fi
+  if [[ -f "$dir/$name.c" ]]; then
+    if [[ $WIN == 1 ]]; then
+      cc=(x86_64-w64-mingw32-gcc -O2 -shared -o "$TMP/$name.dll")
+    else
+      mkdir -p "$TMP/clib"
+      cc=(clang -O2 -fomit-frame-pointer -shared -fPIC -o "$TMP/clib/lib$name.so")
+    fi
+    if ! command -v "${cc[0]}" >/dev/null; then
+      echo "SKIP $name: ${cc[0]} is not installed (it builds the test's C library)"; skip=$((skip+1)); continue
+    fi
+    if ! "${cc[@]}" "$dir/$name.c" 2>"$TMP/cerr"; then
+      echo "FAIL $name: the C library does not build"; head -5 "$TMP/cerr"; fail=$((fail+1)); continue
+    fi
+  fi
+  exp_err="$dir/$name.err"
+  [[ $WIN == 1 && -f "$dir/$name.windows.err" ]] && exp_err="$dir/$name.windows.err"
   exp_out="$dir/$name.out"
   exp_code=0
   [[ -f "$dir/$name.code" ]] && exp_code=$(cat "$dir/$name.code")
@@ -151,11 +173,11 @@ for src in $dir/*.al; do
     if [[ "$code" != "$exp_code" ]]; then
       echo "FAIL $label: exit code $code, expected $exp_code"; head -3 "$TMP/err"; ok=0
     fi
-    if [[ -f "$dir/$name.err" ]]; then
+    if [[ -f "$exp_err" ]]; then
       while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         if ! grep -qF -- "$line" "$TMP/err"; then echo "FAIL $label: stderr lacks: $line"; ok=0; fi
-      done <"$dir/$name.err"
+      done <"$exp_err"
     fi
     if [[ $ok == 1 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi
   done

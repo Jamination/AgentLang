@@ -24,16 +24,17 @@
 //     2 * line in an inlined location and as 2 * zigzag(line - the previous such line, from 0)
 //     in a pair.
 //   strings: ULEB128 length, then the bytes
-// Library code is the code of files whose name starts with `<` (the run-time library, the core
-// modules, the generated entry point).
+// Library code is the code of the always-loaded run-time library (`Cx.core_file`: the prelude,
+// its OS layer, the core modules) and of the generated entry point; the bundled modules loaded
+// with `use std.name` count as the program's code.
 
 priv struct Builder {
     m: *Module
+    cx: *Cx
     strs: Vec[u8]
     str_ix: Map[str, i64]
     scopes: Vec[u8]
     scope_ix: Map[(i64, i64), i64]
-    files: []str
     tests: []str
     // the inlined locations of the function being added: by location (number + 1, 0: none
     // yet), their records, how many, and which locations were numbered (to clear `inl`)
@@ -77,8 +78,8 @@ priv fn scope(b: *Builder, fid: i64, file: i64) -> i64 {
     }
     k = b.scopes.len / 8
     b.scope_ix.set((fid, file), k)
-    lib := file < 0 || file >= len(b.files) || starts_with(b.files[file], "<")
-    put32(&b.scopes, str_off(b, if file >= 0 && file < len(b.files) { b.files[file] } else { "?" }))
+    lib := file < 0 || b.cx.core_file(file) || file == b.cx.entry_file
+    put32(&b.scopes, str_off(b, if file >= 0 && file < b.cx.file_names.len { b.cx.file_names[file] } else { "?" }))
     // the name as written: `priv` names plain, nested ones `outer.name`, anonymous ones
     // `outer.fn@line:col`, generic instances `name[T]`, test blocks `test "name"`
     n := ast_plain_text(b.m.funcs[fid].name)
@@ -120,9 +121,9 @@ priv fn inl_value(b: *Builder, l: i64, fid: i64) -> i64 {
 }
 
 // Adds the table for the compiled code `out` to the module and points `__bt_table` at it (no
-// table if the library has no such global or nothing was compiled). files: the file names by
-// index; tests: the names of the test blocks (function __test_k is test k).
-fn bt_attach(m: *Module, out: *Output, files: []str, tests: []str) {
+// table if the library has no such global or nothing was compiled). cx: the files and which of
+// them are library code; tests: the names of the test blocks (function __test_k is test k).
+fn bt_attach(m: *Module, out: *Output, cx: *Cx, tests: []str) {
     gi := -1
     for i, g in m.globals {
         if g.name == "__bt_table" {
@@ -133,7 +134,7 @@ fn bt_attach(m: *Module, out: *Output, files: []str, tests: []str) {
     if gi < 0 || out.funcs.len == 0 || len(out.err) != 0 {
         return
     }
-    b := Builder{m: m, files: files, tests: tests, inl: vec_fill(m.locs.list.len, i32(0))}
+    b := Builder{m: m, cx: cx, tests: tests, inl: vec_fill(m.locs.list.len, i32(0))}
     // the file of each function: that of its own locations
     fn_file := vec_fill(m.funcs.len, -1)
     for l in m.locs.list {

@@ -217,6 +217,9 @@ struct MFunc {
     out_args: i64      // number of outgoing stack argument words
     fconsts: Vec[Bits128]
     has_calls: bool
+    // the prologue saves every callee-saved register (a function using `__ra_addr()`: a stack
+    // walk starting there finds the values of its caller's registers in its frame)
+    save_all: bool
     wide_xmm: bool // some xmm value is a vector: spill slots hold 16 bytes
     xuses: Vec[i64] // the fixed registers read by calls, `ret` and `syscall` (see MInst)
 }

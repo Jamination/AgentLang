@@ -265,9 +265,9 @@ struct Func {
     has_vec: bool
     // a C function in a shared library: index into Module.externs
     ext: Opt[i64]
-    // written in the library (a file whose name starts with `<`): its frames are left out of
-    // stack traces where they are not between frames of the program, and its code inlined
-    // elsewhere takes the location of the call (see src_loc_inlined)
+    // code of the always-loaded run-time library or the entry point (`Cx.core_file`; not of
+    // bundled modules): its frames are left out of stack traces where they are not between
+    // frames of the program, and its code inlined elsewhere takes the location of the call
     lib: bool
 }
 

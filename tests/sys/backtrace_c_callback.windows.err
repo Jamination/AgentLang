@@ -1,0 +1,7 @@
+assertion failed at tests/sys/backtrace_c_callback.al:10: item 3 is bad
+  at tests/sys/backtrace_c_callback.al:10 in check
+  at tests/sys/backtrace_c_callback.al:14 in item
+  at backtrace_c_callback.dll each
+  at backtrace_c_callback.dll run_each
+  at tests/sys/backtrace_c_callback.al:19 in walk
+  at tests/sys/backtrace_c_callback.al:24 in main

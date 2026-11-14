@@ -1236,7 +1236,7 @@ fn regalloc_allocate(mf: *MFunc, order: []i64) -> Alloc {
             used_callee_saved := vec[i64]()
             used_xmm_saved := vec[i64]()
             for r in 0..32 {
-                if (used >> u64(r)) & 1 != 0 {
+                if (used >> u64(r)) & 1 != 0 || mf.save_all && mir_callee_saved(r) {
                     if mir_callee_saved(r) {
                         used_callee_saved.push(r)
                     } else if mir_xmm_saved(r) {

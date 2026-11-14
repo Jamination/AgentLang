@@ -1,0 +1,4 @@
+panic: memory fault (nil dereference, stack overflow or use of released memory)
+  at libc.so.6
+  at tests/sys/backtrace_strlen.al:6 in measure
+  at tests/sys/backtrace_strlen.al:11 in main

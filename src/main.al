@@ -1008,7 +1008,7 @@ priv fn real_main() -> i64 {
     }
     out := x86_compile(&module, ar.emit_asm)
     if opt_enabled("backtrace") {
-        bt_attach(&module, &out, cx.file_names.items(), src.tests.items())
+        bt_attach(&module, &out, &cx, src.tests.items())
     }
     mem("compiled")
     bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
