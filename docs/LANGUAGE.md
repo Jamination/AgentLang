@@ -745,14 +745,14 @@ v.len    len(v)    v[i]    v[a..b]    for x in v    for i, x in v     // checked
 v.push(x: T)    v.pop() -> T               // appends; removes and returns the last element (empty: panic)
 v.last() -> T    v.is_empty() -> bool      // the last element (stays in the Vec); empty: assertion failure (failures name the caller's line; called through a function value: `at ?`)
 v.items() -> []T                           // = v[..]: the elements as a slice (empty Vec: empty slice)
-v.clear()                                  // length 0, capacity kept
-v.truncate(n: i64)                         // keeps the first n elements; nothing happens if n >= v.len; n < 0: assertion failure
+v.clear()    v.truncate(n: i64)            // length 0 (capacity kept); keeps the first n elements: nothing happens if n >= v.len, n < 0: assertion failure
 v.resize(n: i64, x: T)                     // exactly n elements: cuts, or appends copies of x; n < 0: assertion failure
 v.reserve(n: i64)                          // capacity for n elements in total (not n more); length unchanged
 v.extend(s: []T)                           // appends all elements of s; another Vec: v.extend(w[..])
 v.insert(i: i64, x: T)                     // x becomes element i (0 <= i <= v.len), the rest moves up; else assertion failure
 v.remove(i: i64) -> T                      // removes and returns element i, the rest moves down (order kept)
 v.swap_remove(i: i64) -> T                 // removes and returns element i, the last element takes its place (fast)
+v.retain(keep: fn(T) -> bool)              // keeps the x with keep(x), in order, in one pass (keep called once per element); v.retain(ctx, keep: fn(C, T) -> bool)
 v.contains(x: T) -> bool    v.dedup()      // (position: index_of(v[..], x)); removes adjacent equal elements (sort first to remove all duplicates)
 // ---- Map[K, V]: hash map that keeps the order of insertion. K is any type with == (numbers, str, structs, tuples, enums); a NaN key equals nothing (each set adds an entry that cannot be found)
 map[K, V]() -> Map[K, V]                   // the zero value is an empty, usable Map too

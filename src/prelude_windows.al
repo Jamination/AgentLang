@@ -69,11 +69,6 @@ priv extern "kernel32.dll" fn SetWaitableTimer(h: i64, due: *i64, period: i32, r
 priv extern "kernel32.dll" fn CreateFileMappingW(h: i64, security: i64, protect: u32, size_hi: u32, size_lo: u32, name: i64) -> i64
 priv extern "kernel32.dll" fn MapViewOfFile(h: i64, access: u32, off_hi: u32, off_lo: u32, size: i64) -> i64
 priv extern "kernel32.dll" fn UnmapViewOfFile(p: i64) -> i32
-priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
-priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
-priv extern "kernel32.dll" fn CreateThread(security: i64, stack: i64, start: fn(i64) -> u32, arg: i64, flags: u32, id: i64) -> i64
-priv extern "kernel32.dll" fn GetCurrentThreadStackLimits(low: *i64, high: *i64)
-priv extern "kernel32.dll" fn GetActiveProcessorCount(group: u16) -> u32
 priv extern "kernel32.dll" fn AttachConsole(pid: u32) -> i32
 priv extern "kernel32.dll" fn SetStdHandle(which: u32, h: i64) -> i32
 priv extern "kernel32.dll" fn LoadLibraryW(name: *u16) -> i64
@@ -421,10 +416,7 @@ priv fn wide(s: str) -> *u16 {
 
 // the C string p as NUL-terminated UTF-16, in buf if it fits there, else allocated
 priv fn wide_c(buf: []u16, p: *u8) -> *u16 {
-    n := 0
-    while p[n] != 0 {
-        n += 1
-    }
+    n := len(from_cstr(p))
     out := if n < len(buf) { buf } else { alloc[u16](n + 1) }
     k, _ := to_utf16(p, n, ptr(out), false)
     out[k] = 0
@@ -782,8 +774,9 @@ fn __os_test(f: fn()) -> i64 {
     SetEnvironmentVariableW(name, wide(fmt(k)))
     // (CreateProcessW may write into the command line)
     line := GetCommandLineW()
-    cmd := alloc[u16](wcslen(line) + 1)
-    memcopy(ptr(cmd), line, 2 * wcslen(line))
+    n := wcslen(line)
+    cmd := alloc[u16](n + 1)
+    memcopy(ptr(cmd), line, 2 * n)
     h, _ := create_process(ptr(exe), ptr(cmd), handle(0), handle(1), handle(2), 0)
     SetEnvironmentVariableW(name, nil)
     if h == 0 {
@@ -896,7 +889,7 @@ fn args() -> []str {
 // the value of an environment variable; ("", false) if it is not set (names are compared
 // without regard to case, as Windows does)
 fn env_get(name: str) -> (str, bool) {
-    if len(name) == 0 || index_of(name, '=') >= 0 || index_of(name, 0) >= 0 {
+    if len(name) == 0 || contains(name, '=') || contains(name, 0) {
         return ("", false)
     }
     w := wide(name)
@@ -1119,7 +1112,7 @@ priv fn locate(name: str) -> (str, i64) {
     }
     cands := vec[str]()
     cands.push(name)
-    if index_of(name[base..], '.') < 0 {
+    if !contains(name[base..], '.') {
         cands.push(concat(name, ".exe"))
     }
     if base > 0 {
@@ -1150,12 +1143,7 @@ priv fn locate(name: str) -> (str, i64) {
 // appends a as one argument of a command line, quoted so that the Microsoft rules (`args`)
 // give it back unchanged
 priv fn quote_arg(out: *Vec[u8], a: str) {
-    plain := len(a) > 0
-    for c in a {
-        if c == ' ' || c == '\t' || c == '\n' || c == 0x0B || c == '"' {
-            plain = false
-        }
-    }
+    plain := len(a) > 0 && find_any(a, " \t\n\x0b\"", 0) < 0
     if plain {
         out.extend(a)
         return
@@ -1189,7 +1177,7 @@ priv fn quote_arg(out: *Vec[u8], a: str) {
 // around it if it has white space), each argument is quoted by quote_arg
 priv fn command_line(name: str, args: []str) -> str {
     line := vec[u8]()
-    if find(name, " ") >= 0 || find(name, "\t") >= 0 {
+    if find_any(name, " \t", 0) >= 0 {
         line.push('"')
         line.extend(name)
         line.push('"')

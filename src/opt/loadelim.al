@@ -130,16 +130,7 @@ fn loadelim_run(f: *Func) -> bool {
     }
     if changed {
         for bi in 0..f.blocks.len {
-            blk := &f.blocks[bi]
-            n := 0
-            for k in 0..blk.insts.len {
-                v := blk.insts[k]
-                if !dead[v] {
-                    blk.insts[n] = v
-                    n += 1
-                }
-            }
-            blk.insts.len = n
+            f.blocks[bi].insts.retain(dead, fn(dead: []bool, v: i32) -> bool { !dead[v] })
         }
         f.apply_repl(&repl)
     }
