@@ -9,7 +9,7 @@ are `priv` do not appear: a program may reuse their names).
 | Part | What it gives | Reference |
 |------|---------------|-----------|
 | core | printing (`print`, `eprint`), `Vec`, `Map` (insertion-ordered), strings, number formatting and parsing, sorting, `Opt`, file I/O with `io_error()`, `args`, `env_get`, arena memory and regions, `clone`: every signature with its edge cases | [LANGUAGE.md](LANGUAGE.md#standard-library) |
-| built-in types | `f32`, `vec2 vec3 vec4`, `quat`, `mat4` with operators | [std/math.md](std/math.md#the-built-in-types-f32-vec2-vec3-vec4-quat-mat4) |
+| built-in types | `vec2 vec3 vec4`, `quat`, `mat4` with operators | [std/math.md](std/math.md#the-built-in-types-vec2-vec3-vec4-quat-mat4) |
 | math | scalar functions for `f32`/`f64`, vector / quaternion / matrix functions, geometry tests, easing, colour | [std/math.md](std/math.md) |
 | rand | seedable generators, ranges, shuffles, noise | [std/rand.md](std/rand.md) |
 | time | clocks, sleeping, frame clock, fixed timestep, timers | [std/time.md](std/time.md) |

@@ -91,7 +91,7 @@ test "areas" {
 | `(A, B, ...)` | tuple; fields `t.0`, `t.1` |
 | `fn(A, B) -> R` | function value: a plain code pointer; `fn(A)` returns nothing |
 | `Name`, `Name[T, U]` | struct or enum, possibly generic |
-| `vec2 vec3 vec4 quat mat4` | `f32` vectors, quaternion, 4x4 matrix: see [f32, vectors, matrices](#f32-vectors-matrices) |
+| `vec2 vec3 vec4 quat mat4` | `f32` vectors, quaternion, 4x4 matrix: see [Vectors and matrices](#vectors-and-matrices) |
 
 - **No implicit conversions.** Both operands of an operator must have the same type. Untyped
   numeric literals take the type the context asks for (`x: u8 = 200`, `x * 2`, `f(3)`), also
@@ -867,13 +867,12 @@ Everything else is checked. These are not:
   a location written as one scalar type must not be read as another (except through `u8`).
 - `priv` is a naming rule, not protection.
 
-## f32, vectors, matrices
+## Vectors and matrices
 
 `vec2 vec3 vec4` are vectors of 2 / 3 / 4 `f32` (C-compatible: 8 / 12 / 16 bytes), `quat` is
-`(x, y, z, w)`, `mat4` four `vec4` columns. A float literal is an `f32` unless an `f64` is expected.
+`(x, y, z, w)`, `mat4` four `vec4` columns.
 
 ```
-x := 1.5                         // an f32 (the default); f32 and f64 never mix: f32(n), f64(x)
 a := vec3(1.0, 2.0, 3.0)         // constructors: components, vec3(0.5) for all lanes, vec4(a, 1.0)
 c := a + a * 2.0 - a / a         // + - * / work lane-wise; a vector combines with an f32
 a.y = 4.0                        // components x y z w (or r g b a), a[i]; swizzles (read-only): a.zyx

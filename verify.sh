@@ -78,7 +78,7 @@ done
 for d in docs/LANGUAGE.md docs/STDLIB.md; do
   [[ -s $d ]] || { echo "FAIL: $d is missing"; fail=1; }
 done
-grep -q "## f32, vectors, matrices" docs/LANGUAGE.md || { echo "FAIL: the language reference does not cover f32 / vectors"; fail=1; }
+grep -q "## Vectors and matrices" docs/LANGUAGE.md || { echo "FAIL: the language reference does not cover vectors and matrices"; fail=1; }
 # programs that use no system library stay static, libc-free executables
 nstatic=0
 for src in tests/std/*.al; do

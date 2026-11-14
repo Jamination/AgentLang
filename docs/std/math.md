@@ -28,15 +28,13 @@ halfway rotation: 22.5 degrees around y=1.0
 sin(30 deg) = 0.500000  atan2(1, 1) = 0.785398
 ```
 
-## The built-in types: `f32`, `vec2 vec3 vec4`, `quat`, `mat4`
+## The built-in types: `vec2 vec3 vec4`, `quat`, `mat4`
 
 `vec2 vec3 vec4` are vectors of 2 / 3 / 4 `f32` (8 / 12 / 16 bytes, C-compatible), each held in
 one SSE register; `quat` is a quaternion `(x, y, z, w)` of `f32` (`w` is the scalar part);
 `mat4` is a 4x4 `f32` matrix of four `vec4` columns (column-major, 64 bytes).
 
 ```
-x: f32 = 1.5                     // literals adapt; f32 and f64 never mix implicitly
-y := f32(n) * x + f32(d)         // conversions: f32(i), f32(f64), f64(f32), i64(f32) (truncates)
 a := vec3(1.0, 2.0, 3.0)         // constructors: components, one value for all lanes,
 b := vec3(0.5)                   //   or smaller vectors plus components: vec4(a, 1.0)
 c := a + b * 2.0 - a / b         // + - * / work lane-wise; a vector combines with an f32
