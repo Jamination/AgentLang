@@ -102,17 +102,7 @@ fn cleanup_dce(f: *Func) -> bool {
     for bi in 0..f.blocks.len {
         b := &f.blocks[bi]
         before := b.insts.len
-        // keep the live instructions, in order (a loop, not retain: this runs over every
-        // instruction after each pass, and retain costs an indirect call per element)
-        kept := 0
-        for i in 0..before {
-            v := b.insts[i]
-            if live[v] {
-                b.insts[kept] = v
-                kept += 1
-            }
-        }
-        b.insts.len = kept
+        b.insts.retain(live, fn(live: []bool, v: i32) -> bool { live[v] })
         if b.insts.len != before {
             changed = true
         }
@@ -168,17 +158,8 @@ fn cleanup_trivial_phis(f: *Func) -> bool {
     }
     if any {
         for bi in 0..f.blocks.len {
-            b := &f.blocks[bi]
             // keep the instructions that are not replaced, in order
-            kept := 0
-            for i in 0..b.insts.len {
-                v := b.insts[i]
-                if repl[v] == NOV {
-                    b.insts[kept] = v
-                    kept += 1
-                }
-            }
-            b.insts.len = kept
+            f.blocks[bi].insts.retain(repl.items(), fn(repl: []i32, v: i32) -> bool { repl[v] == NOV })
         }
         f.apply_repl(&repl)
     }
