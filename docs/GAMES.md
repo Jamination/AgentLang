@@ -92,6 +92,19 @@ t := g.ents.get(g.target)
 if t != nil { aim_at(t.pos) }
 ```
 
+Short-lived things that nothing refers to by handle (shots, particles, floating texts) can live
+in a plain `Vec`. Remove the dead ones once per step with `retain`, not with `remove` inside a
+loop over the indices (that skips the element after each removed one and moves the rest every
+time):
+
+```
+g.shots.retain(fn(s: Shot) -> bool { s.life > 0.0 })     // one pass, the order is kept
+g.sparks.retain(g.arena, fn(r: f32, p: Spark) -> bool { length(p.pos) < r })   // with a context
+```
+
+When the order does not matter, `v.swap_remove(i)` removes one element in constant time (the
+last element takes its place: look at index `i` again).
+
 ## Memory
 
 There is no `free` and no garbage collector, so there is nothing to leak or double-free:
