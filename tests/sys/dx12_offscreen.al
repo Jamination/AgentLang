@@ -1,18 +1,62 @@
 // Direct3D 12 without a window: on the first hardware adapter (else WARP), and again on WARP,
 // clear a 64 x 64 render target and a depth buffer, draw two triangles with HLSL compiled at
 // run time by D3DCompile (one in front of the cleared depth, one behind it), draw sprites with
-// std.dx12_util's batcher (an atlas texture, one-colour and half-transparent rectangles), copy
-// the target to a readback buffer and check pixels at known positions.
+// the examples' batcher (examples/gamekit/dx12_gpu.al: an atlas texture, one-colour and
+// half-transparent rectangles), copy the target to a readback buffer and check pixels at known
+// positions.
 //
 // Windows only. Without a Direct3D 12 device (Wine without a display: CreateDXGIFactory2 fails
 // with DXGI_ERROR_UNSUPPORTED) it says why and ends with status 77, which tests/run.sh reports
 // as SKIP.
-use std.dx12_util
+use "../../examples/gamekit/dx12_gpu.al"
 
 const SIZE = 64
 const CLEAR = [4]f32{0.2, 0.4, 0.6, 1.0}
 
 struct Vertex { position: vec3, color: vec4 }
+
+// A copy of a 2D texture of 4-byte pixels on its way to the CPU.
+struct Readback {
+    buffer: *ID3D12Resource
+    width: i64
+    height: i64
+    row_pitch: i64        // bytes from one row to the next in the buffer (a multiple of 256)
+}
+
+// Records a copy of a 2D texture of 4-byte pixels (R8G8B8A8, B8G8R8A8) into a new readback
+// buffer; the texture is in `state` before and after. Read it with readback_pixels once the GPU
+// has executed the list.
+fn gpu_readback(g: *Gpu, list: *ID3D12GraphicsCommandList, texture: *ID3D12Resource, state: u32) -> Readback {
+    desc := texture.GetDesc()
+    footprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT
+    total: u64
+    g.device.GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nil, nil, &total)
+    r := Readback{gpu_buffer(g, D3D12_HEAP_TYPE_READBACK, i64(total), D3D12_RESOURCE_STATE_COPY_DEST), i64(desc.Width),
+        i64(desc.Height), i64(footprint.Footprint.RowPitch)}
+    dst := D3D12_TEXTURE_COPY_LOCATION{pResource: r.buffer, Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}
+    *dst.u_PlacedFootprint() = footprint
+    src := D3D12_TEXTURE_COPY_LOCATION{pResource: texture, Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}
+    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE) }
+    list.CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
+    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state) }
+    r
+}
+
+// The pixels of a finished readback, rows packed (width * 4 bytes each; allocates).
+fn readback_pixels(r: *Readback) -> []u8 {
+    out := alloc[u8](r.width * r.height * 4)
+    mapped: *u8
+    whole := D3D12_RANGE{0, u64(r.row_pitch * r.height)}
+    dx_check(r.buffer.Map(0, &whole, &mapped), "ID3D12Resource::Map (readback)")
+    for y in 0..r.height {
+        memcopy(&out[y * r.width * 4], cast[*u8](cast[i64](mapped) + y * r.row_pitch), r.width * 4)
+    }
+    none := D3D12_RANGE{0, 0}
+    r.buffer.Unmap(0, &none)
+    out
+}
+
+fn readback_free(r: *Readback) { com_release(&r.buffer) }
 
 const TRIANGLE = `
 struct V { float4 pos : SV_POSITION; float4 color : COLOR; };

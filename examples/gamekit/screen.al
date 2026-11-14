@@ -1,5 +1,5 @@
 // A std.window window drawn with Direct3D 12 (Windows only): a flip-model swap chain on the
-// window's HWND, two frames in flight, and std.dx12_util's sprite batcher drawing at a fixed
+// window's HWND, two frames in flight, and the sprite batcher of dx12_gpu.al drawing at a fixed
 // virtual resolution that is scaled to the window with its aspect ratio kept (black bars).
 // It resizes the swap chain when the window's size changes (also during a drag of its edge,
 // while std.window keeps the loop running), and reports a removed device.
@@ -14,7 +14,7 @@
 //   screen_close(sc)
 use std.window
 use std.image
-use std.dx12_util
+use "dx12_gpu.al"
 use "font.al"
 
 const SCREEN_FRAMES = 2

@@ -67,7 +67,7 @@ runs on Linux and Windows (`build/alc.exe`), and builds for both (`--target linu
 - `examples/starter/`: a small shooter in software rendering, the game structure of docs/GAMES.md (Linux and Windows)
 - `examples/dx12_starter/`: the same game with Direct3D 12 sprites, WASAPI sound and music, keyboard and gamepad (Windows)
 - `examples/dx12_breakout/`: breakout with a title screen, pause menu, volumes, fullscreen and a bitmap font (Windows)
-- `examples/gamekit/`: the parts both Direct3D 12 games share (screen, font, synthesizer, options)
+- `examples/gamekit/`: the parts both Direct3D 12 games share (GPU set-up and sprite batcher in `dx12_gpu.al`, screen, font, synthesizer, options); example code to copy, not a library
 - `examples/dx12_triangle.al`, `vk_triangle.al`: a triangle with Direct3D 12 (Windows) / Vulkan (Linux)
 - `examples/wayland_window.al`, `win32_input.al`, `audio_tone.al`: a Wayland window, input events, a melody on the sound device
 
