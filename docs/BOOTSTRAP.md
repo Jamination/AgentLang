@@ -71,6 +71,7 @@ executables before and after); the conventions below describe the result.
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
 | `src/elf.al` | ELF writer (Linux) |
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table |
+| `src/backtrace.al` | the table of the stack traces of panics (frames, source lines), added to the module before linking |
 | `src/objwrite.al` | what the two writers share (little-endian output, the layout of text, read-only data, bss, relocations): included by `elf.al` and `pe.al` |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
 | `src/prelude_linux.al`, `prelude_windows.al` | its OS layer for the target (`--target`): system calls on Linux, kernel32.dll on Windows; the functions a layer defines are listed at the top of `prelude.al` |
@@ -221,6 +222,35 @@ Compiling the compiler (about 36,500 lines including the run-time library) takes
   bodies are lowered by `arm_body`, normally right after their tests, but an arm whose value
   needs its type from the other arms (`needs_type`) is lowered after all others. `covers`
   is the whole unreachable-pattern rule.
+- **Stack traces of panics** (`src/backtrace.al`, the walk `__bt_print` in `src/prelude.al`).
+  The code keeps no frame pointer; the walk relies on the frame shape instead: after its
+  prologue (pushes, then one allocation; Windows: a probe loop for a page or more) a function
+  never moves rsp, so the return address of a frame lies at sp + 8 * pushes + allocation.
+  *Source locations*: `Inst.loc` numbers a `SrcLoc` (file, line, function, the location of the
+  call it was inlined at) in `Module.locs`. Lowering stamps every instruction with the location
+  of its statement or expression (`Fx.at`, restored after each), trap blocks with the check's;
+  the inliner rebases the callee's locations onto the call (`src_loc_inlined`; code of a library
+  function, `Func.lib`, takes the call's location); unrolling copies them; other passes leave
+  new instructions at 0. Isel stamps the MIR of each IR instruction (`MInst.loc`, in a padding
+  word: MInst stays 80 bytes), and `emit_emit` records `Code.lines` (offset, location) where the
+  location changes, after branch relaxation, plus the frame shape (`alloc`, `npush`, the
+  prologue offsets); both cross the worker mapping with the code. *The table*: `bt_attach`
+  (after `x86_compile`) encodes per function its start (relative to the first function, as
+  `layout_text` places them), size, frame shape and line data (ULEB128: inlined locations, then
+  offset/line pairs with lines as zigzag deltas), with names and files as strings; it becomes
+  the read-only global `__bt_data`, and the library's `__bt_table` points at it through a data
+  relocation. *The walk*: `__bt_print` (called by `__die`) starts at its caller through the
+  builtin `__ra_addr()` (library only; `Op.RaAddr`, `lea` of `MK_INARG` -1, so the function
+  using it must be `noinline`), or at the faulting instruction recorded by the OS layer's fault
+  handler (Linux: the ucontext of the SIGSEGV/SIGFPE handler on its alternate stack; Windows:
+  the CONTEXT of the vectored handler; a stack overflow there is reported by a new thread,
+  because Wine leaves the handler less than 1 KiB). A faulting instruction may sit in a
+  prologue: the pushes before it are decoded from the code, a probe loop is undone with r11.
+  Each step is checked (the return address inside a function, the frame inside the thread's
+  stack, `__os_stack_range`, and above the last); a fault during the walk ends the program.
+  The walk keeps its state in globals and allocates nothing. Sizes: hello world 1.5 KB of
+  table, the compiler about 190 KB (5%). The walk's two passes (count, then write the first 20
+  and last 5 lines) cost about 10 ms for a million frames.
 
 ## Parallel back end
 
@@ -258,7 +288,7 @@ before it prints them.
 `ALC_DEBUG=verify` (IR verifier between passes), `trace`, `mir`, `unroll`, `mem`;
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
 `partial`, `thread4`, `thread5`, `ifconv`; outside the optimiser `constif`: `if` on a constant
-is not decided while lowering, `deaddata`: all read-only data is linked); `ALC_STD_DIR=<dir>` reads bundled modules from
+is not decided while lowering, `deaddata`: all read-only data is linked, `backtrace`: no stack-trace table); `ALC_STD_DIR=<dir>` reads bundled modules from
 `<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the prelude
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so

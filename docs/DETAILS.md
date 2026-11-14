@@ -9,7 +9,7 @@ C interop, programs for Windows, and the grammar.
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
-[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Regions](#regions) ·
+[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Regions](#regions) ·
 [clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Grammar](#grammar)
 
 ## Overloading and builtin names
@@ -470,6 +470,43 @@ fn main() {
   take the slice once (`xs := v[..]`) or use `for x in v`.
 - `alc build --unchecked` removes index and division checks (out-of-range behaviour is then
   undefined); `assert` and `panic` are kept.
+
+## Stack traces
+
+Every panic (failed check, `assert`, `panic`, `unwrap`, a library function called wrongly, a
+memory or arithmetic fault, stack overflow) writes the call stack to standard error after its
+message, which stays the first line:
+
+```
+panic: index out of bounds at main.al:12
+  at main.al:12 in load_level
+  at main.al:40 in start
+  at main.al:55 in main
+```
+
+- **Format.** One line per frame, innermost first: two spaces, `at FILE:LINE in NAME`; the file
+  as in diagnostics, the line of the call (innermost: of the failing operation). `at ? in NAME`
+  where the line is unknown. Names as written: `outer.name` and `outer.fn@line:col` for nested
+  and anonymous functions, `name[T]` for generic instances, `priv` names plain, `test "name"`
+  for a test block (`alc test` shows the trace of a failing test).
+- **Library frames.** Frames of the run-time library and the core modules (files `<prelude>`,
+  `<std/...>`) before the first frame of the program are left out: the first line is the
+  program's call, the line a caller-location message names (`pop`, `insert`, ...). So are the
+  library frames after the program's last one (start-up, test runner). Library frames between
+  frames of the program (`sort_by` calling a comparison) are shown; a run of more than 7 as its
+  first 4 and last 3 around `  ... N more frames in the library`.
+- **Inlining.** Optimised builds show the same frames as `-O0`: code inlined from a function of
+  the program is reported as a frame of that function at its line, with the call it was inlined
+  at as the next frame. A library function inlined into the program shows as the line of the
+  call.
+- **Length.** More than 25 lines (deep recursion, stack overflow): the first 20, `  ... N more`,
+  the last 5.
+- **Corrupted stacks.** Every step is checked (return address inside a function of the
+  program, frame inside the stack and above the previous one); the trace ends at the first step
+  that fails. Calls through C code end it too.
+- **`ALC_BACKTRACE=0`** in the environment turns the trace off (the message stays). Nothing
+  of it runs unless the program panics; its table costs about 1-2 KB in a small program and 5%
+  of the compiler's executable.
 
 ## Regions
 

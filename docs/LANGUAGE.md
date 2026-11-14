@@ -668,8 +668,8 @@ fn main() {
 
 ## Run-time errors
 
-These stop the program with exit status 1 and a message on standard error (buffered output is
-written first):
+These stop the program with exit status 1, a message on standard error (buffered output is written
+first) and the call stack, innermost first, as `  at file:line in function` ([DETAILS.md](DETAILS.md#stack-traces)):
 
 | Situation | Message |
 |-----------|---------|
