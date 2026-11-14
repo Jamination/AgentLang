@@ -4,7 +4,7 @@
 program using this module stays a static, libc-free executable. Built with `--target windows`
 it calls kernel32.dll and also accepts Windows paths: see [Windows](#windows).
 
-- file and directory operations, path helpers
+- file and directory operations, the per-user data and config directories, path helpers
 - `Assets`: loads files relative to a root directory, caches them, and tells when a file
   changed on disk (hot reload)
 - `Config`: a reader for `key = value` / INI-style settings files
