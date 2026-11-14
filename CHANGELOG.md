@@ -49,16 +49,32 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   easing, colour), `rand`, `time`, `mem` (sub-arenas, pools, ring buffers).
 - Modules: `std.asset` (files, paths, user directories, asset cache, hot reload, config and
   JSON), `std.os` (processes, shared memory), `std.image` (PNG, BMP, deflate), `std.input`
-  (keyboard, mouse, gamepad, action maps), `std.window` (windows, events, software
-  presentation, native handles; X11 on Linux, Win32 on Windows), `std.audio` (WAV, mixer,
-  ALSA / WASAPI device).
-- Bindings: `std.vk` (Vulkan 1.0-1.3 with surface, swapchain and debug-utils extensions, Linux),
-  `std.wayland` (Linux), `std.dx12` (Direct3D 12 / DXGI, Windows; with `hresult_name`,
-  `hresult_code`, `hresult_text`), `std.metal` (type-check only), and raw `std.libc`, `std.x11`,
-  `std.alsa`.
+  (keyboard, mouse, gamepad, action maps, gamepad hot-plug with `GamepadWatch` /
+  `gamepad_changed`), `std.window` (windows, events including `EventMinimize` /
+  `EventRestore` and `Window.minimized`, fullscreen, pointer lock for mouse-look with
+  `set_cursor_locked` and `mouse_delta`, software presentation, native handles; X11 on Linux,
+  Win32 on Windows), `std.audio` (WAV, mixer, ALSA / WASAPI device).
+- Bindings: `std.vk` (Vulkan 1.0-1.3 with the surface, swapchain, debug-utils, layer-settings,
+  memory-budget and memory-priority extensions, Linux), `std.shaderc` (shaderc's C API: GLSL /
+  HLSL to SPIR-V at run time, Linux), `std.wayland` (Linux; with the relative-pointer and
+  pointer-constraints protocols), `std.dx12` (Direct3D 12 / DXGI, Windows; with
+  `hresult_name`, `hresult_code`, `hresult_text`), `std.metal` (type-check only), and raw
+  `std.libc`, `std.x11`, `std.alsa`.
+- `std.vk` adds only what the C headers provide: `sType` constructors, a constructor per union
+  member (`vk_clear_value_color`, `vk_clear_color_value_float32`, ...), the version macros
+  (`vk_make_api_version`, `vk_api_version_major`, ...) and `vk_result_name`. It has no result
+  checking, memory-type search or shader-module helper (`vk_check`, `vk_find_memory_type`,
+  `vk_create_shader_module`, `vk_clear_color` and `vk_version_*` of earlier development
+  states are gone; `examples/vk_renderer/renderer.al` shows the few lines each takes).
+- `std.alsa`: `snd_pcm_hw_params_set_*_near` / `get_*` call the current libasound API (they
+  reached the pre-1.0 symbols); added period, buffer-time, resampling and poll-descriptor
+  functions.
 - Graphics are bindings only: `std` has no renderer, sprite batcher or device set-up code. The
   examples' Direct3D 12 set-up and sprite batcher (`examples/gamekit/dx12_gpu.al`, formerly
-  `std.dx12_util`) are reference code to copy, not a library.
+  `std.dx12_util`) and the Vulkan renderer `examples/vk_renderer` (validation layer and
+  messenger, Vulkan 1.3 features, staging, textures, depth, descriptors, compute, timestamps,
+  frames in flight, X11 and Wayland swapchains with present modes) are reference code to copy,
+  not a library.
 
 ### Tools
 

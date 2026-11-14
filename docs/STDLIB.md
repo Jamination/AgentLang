@@ -26,7 +26,8 @@ are `priv` do not appear: a program may reuse their names).
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6`; Windows: `user32.dll`, `gdi32.dll` | [std/window.md](std/window.md) |
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
-| `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml` | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
+| `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml`, with the surface, swapchain, debug-utils, layer-settings and memory budget / priority extensions; only C-header glue added (sType constructors, union constructors, version macros, `vk_result_name`) | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
+| `std.shaderc` | bindings for shaderc's C API: GLSL / HLSL to SPIR-V at run time, for hot reload (Linux) | `libshaderc_shared.so.1` | [std/shaderc.md](std/shaderc.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings generated from the mingw-w64 headers (Windows only) | `d3d12.dll`, `dxgi.dll`, `d3dcompiler_47.dll`, `user32.dll`, `kernel32.dll` | [std/dx12.md](std/dx12.md) |
 | `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
 | `std.libc`, `std.x11`, `std.alsa` | raw C declarations used by the modules above | the named library | source in `std/` |
