@@ -44,9 +44,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   up the address of its thread's block once where it needs it (before a loop, not in it)
   and every access is then one instruction, instead of four more instructions per
   thread-local variable. `bench/binarytrees.al` executes 12 % fewer instructions (under Wine
-  about 8 % less time, 3 % at the median over code layouts), a loop of `put` 18 % fewer, the
-  compiler 1 % fewer; `alc.exe` is 2.3 % smaller. Behaviour and Linux executables are
-  unchanged.
+  about 3 % less time at the median, up to 11 %), a loop of `put` 18 % fewer, the compiler
+  1.4 % fewer (times unchanged); `alc.exe` is 2.3 % smaller. Behaviour and Linux executables
+  are unchanged.
 
 ## [0.3.0] - 2026-11-15
 

@@ -185,5 +185,6 @@ real timings.
    MSVC, next to the program): the callbacks on a thread the DLL created print their lines.
 3. Speed: build `bench\binarytrees.al` with this `alc.exe` and with the one of 0.3.0, run each
    5 times and note the best times. Expected: the new one is not slower (Wine: 12 % fewer
-   instructions, 1246 -> 1145 ms). Do the same for `alc.exe build src/main.al -o x.exe`
-   (Wine: 1197 -> 1171 ms) and note both pairs.
+   instructions; 1307 -> 1163 ms at best, 3 % at the median, and the time changes by up to
+   10 % from one start to the next with the place of the image). Do the same for `alc.exe
+   build src/main.al -o x.exe` (Wine: 1222 -> 1210 ms, inside the noise) and note both pairs.

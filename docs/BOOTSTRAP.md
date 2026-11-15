@@ -368,27 +368,31 @@ Windows has no register for it, only the TEB (`gs`), whose array of thread block
 by a number the loader chooses. Before, every TLS global a function used cost four
 instructions (the three loads and a `lea`) where its `GAddr` stood after GVN / LICM:
 `__heap_cur` and `__heap_end` of one allocation paid twice. Measured under Wine 11.22 on a
-Ryzen 5 3600 (Windows builds; user-mode instructions and cycles counted with
-`perf_event_open`; times: best of 5, interleaved; before -> now):
+Ryzen 5 3600 (Windows builds, relocatable images; user-mode instructions and cycles counted
+with `perf_event_open`; times: best of 5, interleaved, the best of four Wine sessions;
+before -> now):
 
 | program | instructions | time |
 |---|---|---|
-| `bench/binarytrees.al` (308 million allocations) | 12.49 G -> 10.94 G (-12.4 %) | 1246 -> 1145 ms (median of six Wine sessions 1290 -> 1175 ms) |
-| the same, its hot functions at 8 code offsets 16 bytes apart | | cycles: median 4967 M -> 4805 M (-3.3 %), lowest 4646 M -> 4388 M |
-| `bench/hashmap.al` (no allocation in its loop) | 1.249 G -> 1.249 G | 559 -> 563 ms |
-| a loop of `put` (20 million) | 2.865 G -> 2.345 G (-18 %) | 473 -> 474 ms |
-| the compiler compiling itself | 10.35 G -> 10.23 G (-1.2 %) | 1197 -> 1171 ms |
-| the same at `-O0` | 3.260 G -> 3.235 G (-0.8 %) | 279 -> 278 ms |
-| the same on one thread (`ALC_JOBS=1`) | 9.984 G -> 9.847 G (-1.4 %) | 1406 -> 1402 ms |
-| size of `alc.exe` | | 4,460,544 -> 4,356,608 bytes (-2.3 %) |
+| `bench/binarytrees.al` (308 million allocations) | 12.49 G -> 10.94 G (-12.4 %) | 1307 -> 1163 ms (median of the four sessions 1316 -> 1282 ms) |
+| the same, its hot functions at 8 code offsets 16 bytes apart | | cycles: median 5013 M -> 4849 M (-3.3 %), lowest 4734 M -> 4530 M, highest 5260 M -> 5324 M |
+| `bench/hashmap.al` (no allocation in its loop) | 1.249 G -> 1.249 G | 567 -> 557 ms |
+| a loop of `put` (20 million) | 2.865 G -> 2.345 G (-18 %) | 464 -> 462 ms |
+| the compiler compiling itself | 10.54 G -> 10.38 G (-1.4 %) | 1222 -> 1210 ms |
+| the same at `-O0` | 3.28 G -> 3.29 G | 289 -> 280 ms |
+| the same on one thread (`ALC_JOBS=1`) | 10.13 G -> 9.99 G (-1.3 %) | 1443 -> 1429 ms |
+| size of `alc.exe` | | 4,507,136 -> 4,403,712 bytes (-2.3 %) |
 
-Times of binarytrees are not a steady measure: the same instructions take 4.4 to 5.6 G
-cycles depending on where the code lies (and a few percent more or less from one Wine session
-to the next), because the program is bound by the chain store `__heap_cur` -> load
-`__heap_cur` of consecutive allocations, not by the number of instructions. Linux runs it in
-9.86 G instructions and 4.19 to 4.53 G cycles (median 4.31 G) at the same 8 offsets: Windows
-is left with 3 instructions per allocating call and about 11 % of cycles. Variants, on
-binarytrees (median cycles over the 8 offsets):
+The instructions are exact; the times are not a steady measure. Only binarytrees moves
+beyond the noise (about 3 % at the median), and there the same instructions take 4.4 to 5.6 G
+cycles depending on where the code lies and where the loader puts the image (the best time of
+a session of the new build lay between 1163 and 1306 ms): the old sequences were loads that
+do not depend on the allocation before, which the processor runs beside the chain that most
+likely sets the time (store `__heap_cur` -> load `__heap_cur` of consecutive allocations).
+Linux runs binarytrees in 9.86 G instructions and 4.19 to 4.53 G cycles (median 4.31 G) at
+the same 8 offsets: Windows is left with 3 instructions per allocating call and about 12 %
+of cycles. Variants, measured on binarytrees before the images became relocatable (median
+cycles over the 8 offsets; before 4.99 G, the place per block 4.86 G):
 
 - *One place per function* (the nearest block that dominates all uses): the same
   instructions, 19 % more cycles than the place per block (5.78 G against 4.86 G; the loads
