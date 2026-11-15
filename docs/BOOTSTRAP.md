@@ -97,7 +97,9 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   modes, type-checks `tests/check` and `tests/fail` and runs the `--all-targets` checks.
 - **Wine** (Linux, `--target windows`): the prefix `$WINEPREFIX` (default
   `tmp/win/prefix-tests`) with the null display driver, `DISPLAY` and `WAYLAND_DISPLAY`
-  removed, no sound device; one Wine server for the run, which the runner stops at the end.
+  removed, no sound device, no crash dialog (a program that crashes ends at once with the
+  debugger's report on standard error); one Wine server for the run, which the runner stops
+  at the end.
   After Ctrl+C `tests/run.sh` stops that server (and with it the Windows programs) and
   removes the run's temporary directory, which it hands to the runner in `ALTEST_TMP`.
 - **`verify.sh` stays a bash script and a Linux job.** Beyond the build and the suite it

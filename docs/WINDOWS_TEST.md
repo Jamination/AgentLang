@@ -14,7 +14,7 @@ exact output.
 The conformance tests run on Windows by themselves: `tests\run.bat` builds the runner
 (`tests\run.al`, an AL program) with `build\alc.exe` and starts it; it builds every test
 program in three modes, runs it and compares output, exit status and error messages. Under
-Wine it reports `conformance: 709 passed, 0 failed, 45 skipped` (with MinGW: 724 and 40), the
+Wine it reports `conformance: 793 passed, 0 failed, 24 skipped` (with MinGW: 808 and 19), the
 same result per test as the Linux runner with `--target windows --host-wine build/alc.exe`.
 What Wine cannot prove:
 1. `verify.bat` in cmd, from a fresh copy: `build.bat` rebuilds the compiler (stages 2 and 3
@@ -48,6 +48,12 @@ What Wine cannot prove:
     sleep_ms(600000) }` and an empty `hang.out`, run `tests\run.bat build\alc.exe hang`.
     Expect three lines `FAIL hang [...]: exit code 124, expected 0` after about three
     minutes, no `compile error` line, and no `bin.exe` left in Task Manager.
+11. `tests\run.bat build\alc.exe portable_launch`, twenty times: always `3 passed, 0
+    failed`. Under Wine about one run of the suite in twenty fails this test with `threads:
+    1` in place of `threads: 0`: of the programs that six threads start at the same time
+    (copies of the test itself), one in several thousand dies at its entry point (`wine:
+    Unhandled page fault on execute access to <image base + 0x1000>`). Whether Windows ever
+    does that is the question; if it does, send the `FAIL` lines.
 
 ## 1. The compiler on Windows
 1. `alc.exe build src/main.al -o alc2.exe`, then `fc /b alc.exe alc2.exe`: no differences
