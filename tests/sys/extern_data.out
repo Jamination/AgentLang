@@ -1,8 +1,8 @@
 environment entries: true stdout: 1 stderr: 2
-optind: 1 opterr: 1
-unknown -x: true optind: 3
--b: true optind: 4
-end: -1 optind: 4
+initial values: true true
+written here, read by the library: true true
+written by the library, read here: true
 through pointers: 11 11
 getenv: two true
+restored: true
 written through stdout
