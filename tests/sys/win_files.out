@@ -1,0 +1,38 @@
+backslashes true true true [a] [a] [b]
+mixed true (x, true) (x, true) (x, true) 1
+built true (x, true) true f.txt txt f
+current_dir true true true
+absolute true true (x, true) (x, true)
+relative to the drive's directory true [a] (x, true) (x, true)
+the current drive's root true true (x, true)
+a drive's root true true true true true 0 (, false) is a directory
+the system drive true true true
+no such drive false false [] no such file or directory (, false) no such file or directory false no such file or directory false no such file or directory
+roots C:x C:/x C:\x \x a/b \\srv\sharex \\srv\share/x \\srv\share\x
+root parts C:\ C: C:\ \\srv\share\ \\srv\share\d x   x.y a\b c.d  b.c
+extended true [a] (x, true) (x, true) (x, true) true [b, f.txt, g.txt] true true
+extended parts true x true
+long extended path true true true true (leaf, true) [leaf.txt] 4 true
+long plain path true true true true true
+long cleanup true
+long removed true [a]
+long name false file name too long false file name too long (, false) file name too long true no error true
+NUL (, true) true true (, true) false true [a]
+case true true (1, true) [Case.TXT, a] true [Case.TXT, a] (2, true) true true [a]
+case of a rename true true true 2 (2, true) true
+dot and space at the end true true [a, dot, space] (1, true) (2, true) true true [a]
+false:22 false:22 false:22 false:22 false:22 false:22 false:22 false:22 [a]
+invalid UTF-8 becomes U+FFFD true true (x, true) true
+open without sharing true (, false) device or resource busy false device or resource busy false device or resource busy false device or resource busy
+still there true false 4 true [a, other.txt, used.txt]
+rename over it false true
+open for shared reading (used, true) no error false device or resource busy false device or resource busy
+open with full sharing (used, true) true (new, true) false (new, true) true
+closed false true (again, true) true [a, other.txt]
+the running program true false permission denied false true true true true
+read-only true (r, true) 1 false permission denied false permission denied true [a, other.txt, ro2]
+rename over read-only false permission denied (r, true) [a, other.txt, ro2]
+writable again true true true (o, true) true [a]
+hidden true no error (h2, true) true [a, hidden.txt]
+hidden system true no error (h3, true) true 2 true true
+cleanup true true true [] true false

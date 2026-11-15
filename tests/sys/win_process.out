@@ -1,0 +1,33 @@
+arguments arrive unchanged: true 0
+the C library splits the command line as args() does: true 0
+invalid UTF-8 becomes U+FFFD: true
+an unpaired surrogate stays (WTF-8): true
+copy: true true true
+by path: ([1]
+, 0) ([2]
+, 0) ([3]
+, 0) ([4]
+, 0) ([5]
+, 0) ([6]
+, 0)
+args()[0] is the name as given: true true
+through PATH: ([found]
+, 0) ([upper]
+, 0) -1 no such file or directory
+a name with a dot gets no .exe: true -1 no such file or directory 0
+a text file: -1 exec format error -1 exec format error -1 exec format error
+a program under another extension: ([bin]
+, 0)
+missing: -1 no such file or directory -1 no such file or directory -1 no such file or directory -1 permission denied
+a batch file: -1 exec format error -1 exec format error -1 exec format error -1 exec format error
+through cmd: (batch one two
+, 4) (Windows_NT
+, 0)
+139 139 135 136 136 132 132 134 130 5 52 255 0 
+a fault in the program: 1 panic: memory fault (nil dereference, stack overflow or use of released memory)
+closed standard output: 1 panic: cannot write to standard output: broken pipe
+kill: false invalid argument false invalid argument true true 129 false no such process false
+kill 64: true 192 (192, true)
+kill after the end: true 0
+environment: true true true true true true false false false
+cleanup: [] true
