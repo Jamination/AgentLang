@@ -19,10 +19,11 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `--target windows` directly, with `build\alc.exe`; `--target linux` there builds and
   type-checks the Linux programs. New options: `-j N` (threads), `-v` (list the tests that
   passed). `verify.bat`: build, tests, one line `VERIFY: PASS` or `VERIFY: FAIL`.
-- `std.os`: `Launch{stdin, stdout, stderr, env}` with `run(argv, how)` and `spawn(argv, how)`
-  starts a program with files as its standard streams and with environment variables set or
-  removed; `wait(p, timeout_ns)` waits for a process for a limited time; `NULL_DEVICE` names
-  the null file (`/dev/null`, `NUL`).
+- `std.os`: `Launch{stdin, stdout, stderr, env, group}` with `run(argv, how)` and `spawn(argv,
+  how)` starts a program with files as its standard streams, with environment variables set
+  or removed, and as the leader of a process group (Windows: a job) that `kill` ends as a
+  whole; `wait(p, timeout_ns)` waits for a process for a limited time; `NULL_DEVICE` names the
+  null file (`/dev/null`, `NUL`).
 
 ### Changed
 - `tests/run.sh` runs the tests in parallel, one thread per CPU (the tests of `tests/sys` one

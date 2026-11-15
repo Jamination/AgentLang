@@ -287,7 +287,9 @@ priv fn have(name: str) -> bool {
 // the environment of the run changed by `env` too. The status is what a shell reports: the
 // exit status, 128 + the signal, 127 / 126 if the program is missing / cannot be started
 // (the reason is written to the file of standard error), 124 if it ran longer than limit_s
-// seconds (0: no limit) and was ended.
+// seconds (0: no limit) and was ended. A Windows program with a time limit is ended with
+// everything it started (the program that `alc run` runs, the processes of Wine), which
+// would go on otherwise, keeping the test's files in use.
 priv fn exec(argv: []str, sin: str, sout: str, serr: str, limit_s: i64, env: []str) -> i64 {
     all := cfg.env
     if len(env) > 0 {
@@ -295,7 +297,8 @@ priv fn exec(argv: []str, sin: str, sout: str, serr: str, limit_s: i64, env: []s
         v.extend(env)
         all = v.items()
     }
-    p, ok := spawn(argv, Launch{stdin: sin, stdout: sout, stderr: serr, env: all})
+    how := Launch{stdin: sin, stdout: sout, stderr: serr, env: all, group: limit_s > 0 && cfg.win}
+    p, ok := spawn(argv, how)
     if !ok {
         e := io_error()
         if len(serr) > 0 && serr != NULL_DEVICE {
@@ -310,12 +313,11 @@ priv fn exec(argv: []str, sin: str, sout: str, serr: str, limit_s: i64, env: []s
     if ended {
         return st
     }
+    // asked to end, then ended
     kill(p, 15)
-    _, gone := wait(p, 5 * 1_000_000_000)
-    if !gone {
-        kill(p, 9)
-        wait(p)
-    }
+    sleep_ms(200)
+    kill(p, 9)
+    wait(p)
     return 124
 }
 
@@ -874,20 +876,26 @@ fn main() -> i64 {
     if len(a) > 0 {
         cfg.filter = a[0]
     }
-    // the directory of this run
-    root := "/tmp"
-    for v in []str{"TMPDIR", "TEMP", "TMP"} {
-        d, has := env_get(v)
-        if has && is_dir(d) {
-            root = d
-            break
+    // the directory of this run: the one tests/run.sh made (and removes if the run is
+    // interrupted), or a new one
+    given, has_dir := env_get("ALTEST_TMP")
+    if has_dir && is_dir(given) {
+        cfg.tmp = given
+    } else {
+        root := "/tmp"
+        for v in []str{"TMPDIR", "TEMP", "TMP"} {
+            d, has := env_get(v)
+            if has && is_dir(d) {
+                root = d
+                break
+            }
         }
-    }
-    cfg.tmp = path_join(root, fmt("altest.", process_id()))
-    remove_tree(cfg.tmp)
-    if !make_dir(cfg.tmp) {
-        print(fmt("tests/run: cannot make the directory ", cfg.tmp, ": ", error_text(io_error())))
-        return 2
+        cfg.tmp = path_join(root, fmt("altest.", process_id()))
+        remove_tree(cfg.tmp)
+        if !make_dir(cfg.tmp) {
+            print(fmt("tests/run: cannot make the directory ", cfg.tmp, ": ", error_text(io_error())))
+            return 2
+        }
     }
     if !HOST_WIN {
         // (the C libraries of tests/sys, see NAME.c at the top)

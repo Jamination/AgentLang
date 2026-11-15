@@ -75,7 +75,9 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   the threads, except those of `tests/sys`, which run one after the other on one more thread
   (they share the machine's display, sound and GPU). The modes of one program run in order,
   because a test may write a file named after itself. The lines are printed in the order of
-  the tests, so two runs print the same text. Every program runs with a limit of 60 seconds.
+  the tests, so two runs print the same text. Every program runs with a limit of 60 seconds
+  (status 124); a Windows program is then ended with everything it started (a process group
+  or job: the program under `alc run`, the processes of Wine).
   Measured on 12 CPUs against the bash script the runner replaced (which ran the tests one
   by one), the same 849 / 764 results each: Linux 47.8 s -> 22 s (bounded by `tests/sys`:
   `vk_present` alone takes 16 s of its thread), `--target windows` 45.7 s -> 10.3 s,
@@ -85,7 +87,7 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   library (`tests/sys/NAME.c`: clang on Linux; MinGW-w64 for Windows programs, as
   `x86_64-w64-mingw32-gcc` or, on Windows, `gcc`), what `NAME.need` asks for on Linux
   (libraries, weston, an X display in `AL_TEST_DISPLAY`), what only the program can tell
-  (status 77: no Direct3D 12 device, no glslc). `--target windows` on Linux needs Wine and
+  (status 77: no Direct3D 12 device). `--target windows` on Linux needs Wine and
   stops without it. `tests/driver` (bash scripts for the Linux command line) runs on Linux
   for the Linux target only.
 - **On Windows** the tests are those of `--target windows` (skip list `tests/windows.skip`),
@@ -95,8 +97,9 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   modes, type-checks `tests/check` and `tests/fail` and runs the `--all-targets` checks.
 - **Wine** (Linux, `--target windows`): the prefix `$WINEPREFIX` (default
   `tmp/win/prefix-tests`) with the null display driver, `DISPLAY` and `WAYLAND_DISPLAY`
-  removed, no sound device; one Wine server for the run, which the runner stops at the end
-  (after an interrupted run it ends by itself within a minute).
+  removed, no sound device; one Wine server for the run, which the runner stops at the end.
+  After Ctrl+C `tests/run.sh` stops that server (and with it the Windows programs) and
+  removes the run's temporary directory, which it hands to the runner in `ALTEST_TMP`.
 - **`verify.sh` stays a bash script and a Linux job.** Beyond the build and the suite it
   compares f32 results and ten benchmarks with clang -O2, reads ELF headers with readelf and
   greps the sources: none of that exists on a Windows machine, and all of it tests the

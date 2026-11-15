@@ -21,5 +21,9 @@ still running: 0 false true true
 kill: true (137, true) (137, true) 137
 ends in time: (7, true) (7, true)
 not started: (-1, true) 10
+group: false true true 137 false
+the program it started wrote: true
+group: true true true 137 false
+the program it started wrote: false
 threads: 0 [err, in, out]
 clean: true

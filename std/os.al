@@ -50,6 +50,17 @@ priv struct ProcessState {
     done: bool              // waited for: `status` is final and the id may belong to another process
     status: u8              // 0..255: exit status or 128 + signal
     handle: i64             // what the OS layer knows the process by (Windows: its handle)
+    group: i64              // not 0: what it knows the group of Launch.group by (Windows: the job)
+}
+
+// the process has ended with the status st and was waited for
+priv fn ended(s: *ProcessState, st: i64) {
+    s.done = true
+    s.status = u8(st)
+    if s.group != 0 {
+        __os_group_close(s.group)
+        s.group = 0
+    }
 }
 
 // Starts the program argv[0] (looked up in PATH as by `run`) with the arguments argv[1..], the
@@ -90,8 +101,7 @@ fn wait(p: Process) -> i64 {
         if st < 0 {
             return -1
         }
-        p.state.done = true
-        p.state.status = u8(st)
+        ended(p.state, st)
     }
     __io_result(0)
     return i64(p.state.status)
@@ -112,8 +122,7 @@ fn try_wait(p: Process) -> (i64, bool) {
         if st == -2 {
             return (0, false)
         }
-        p.state.done = true
-        p.state.status = u8(st)
+        ended(p.state, st)
     }
     __io_result(0)
     return (i64(p.state.status), true)
@@ -123,11 +132,15 @@ fn try_wait(p: Process) -> (i64, bool) {
 // that the process is there). false if that fails (io_error()), also once the process has been
 // waited for (3: no such process); a process that has ended but was not waited for takes
 // signals without effect. Windows has no signals: any signal but 0 ends the process at once,
-// and its status is 128 + the signal.
+// and its status is 128 + the signal. A process started with Launch.group: the signal goes to
+// every process of its group.
 fn kill(p: Process, signal: i64) -> bool {
     if p.state == nil || p.state.done {
         __io_result(-3)
         return false
+    }
+    if p.state.group != 0 {
+        return __io_result(__os_kill_group(p.id, p.state.handle, p.state.group, signal)) >= 0
     }
     return __io_result(__os_kill(p.id, p.state.handle, signal)) >= 0
 }
@@ -148,14 +161,13 @@ fn wait(p: Process, timeout_ns: i64) -> (i64, bool) {
         if st == -2 {
             return (0, false)
         }
-        p.state.done = true
-        p.state.status = u8(st)
+        ended(p.state, st)
     }
     __io_result(0)
     return (i64(p.state.status), true)
 }
 
-// ---------- files as standard streams, a changed environment ----------
+// ---------- files as standard streams, a changed environment, process groups ----------
 // How `run` and `spawn` start a program whose streams or environment are not those of this
 // process. The zero value changes nothing.
 struct Launch {
@@ -164,6 +176,9 @@ struct Launch {
     stderr: str             // the same for standard error; the same path as stdout: one file
                             // takes both, in the order written
     env: []str              // "NAME=value" sets a variable for the program, "NAME" removes it
+    group: bool             // the program starts a process group of its own (Windows: a job),
+                            // which the processes it starts belong to as well: `kill` reaches
+                            // all of them
 }
 
 // the file that is always empty when read and drops what is written to it: as Launch.stdin
@@ -179,7 +194,7 @@ when TARGET_OS == Windows {
 fn spawn(argv: []str, how: Launch) -> (Process, bool) {
     state := new[ProcessState]()
     m := mark()
-    pid, handle := __os_spawn_files(argv, how.stdin, how.stdout, how.stderr, how.env)
+    pid, handle, group := __os_spawn_files(argv, how.stdin, how.stdout, how.stderr, how.env, how.group)
     e := io_error()
     release(m)
     __io_result(-e)
@@ -187,6 +202,7 @@ fn spawn(argv: []str, how: Launch) -> (Process, bool) {
         return (Process{}, false)
     }
     state.handle = handle
+    state.group = group
     return (Process{id: pid, state: state}, true)
 }
 

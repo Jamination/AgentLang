@@ -20,7 +20,7 @@ are `priv` do not appear: a program may reuse their names).
 | Module | What it gives | Links against | Reference |
 |--------|---------------|---------------|-----------|
 | `std.asset` | files, directories, per-user data and config directories, paths, cached asset loading, hot-reload polling, config and JSON readers | nothing | [std/asset.md](std/asset.md) |
-| `std.os` | for tools and build scripts: run programs (status, captured output) or start them in the background (wait, kill), shared memory, process id, working directory; loads `std.asset` for files and directories | nothing | [std/os.md](std/os.md) |
+| `std.os` | for tools and build scripts: run programs (status, captured output, files as their standard streams, a changed environment) or start them in the background (wait with a time limit, kill, process groups), shared memory, process id, working directory, threads; loads `std.asset` for files and directories | nothing | [std/os.md](std/os.md) |
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
 | `std.input` | per-frame key / mouse / gamepad state, action maps | nothing (Windows: `xinput1_4.dll` or `xinput9_1_0.dll`, loaded when a gamepad is opened) | [std/input.md](std/input.md) |
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6`; Windows: `user32.dll`, `gdi32.dll` | [std/window.md](std/window.md) |

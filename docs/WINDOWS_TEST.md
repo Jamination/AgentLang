@@ -43,10 +43,11 @@ What Wine cannot prove:
    `conformance: N passed, 0 failed`.
 9. Ctrl+C during a run: the runner and the tests stop; note what is left running (Task
    Manager) and that `%TEMP%\altest.<pid>` stays (delete it by hand).
-10. A test that hangs is ended after 60 seconds (`FAIL ...: exit code 124`): to try it, add
-    `tests\run\hang.al` with `fn main() { sleep_ms(600000) }` and an empty `hang.out`, run
-    `tests\run.bat build\alc.exe hang`, and note whether a `bin.exe` keeps running afterwards
-    (in the default mode the program is a child of `alc run`, which is what gets ended).
+10. A test that hangs is ended after 60 seconds, together with what it started (a job
+    object; under Wine this works): to try it, add `tests\run\hang.al` with `fn main() {
+    sleep_ms(600000) }` and an empty `hang.out`, run `tests\run.bat build\alc.exe hang`.
+    Expect three lines `FAIL hang [...]: exit code 124, expected 0` after about three
+    minutes, no `compile error` line, and no `bin.exe` left in Task Manager.
 
 ## 1. The compiler on Windows
 1. `alc.exe build src/main.al -o alc2.exe`, then `fc /b alc.exe alc2.exe`: no differences

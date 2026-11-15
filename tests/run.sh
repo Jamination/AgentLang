@@ -13,4 +13,11 @@ if [[ ! -x build/altest || tests/run.al -nt build/altest ]]; then
     exit 2
   fi
 fi
-exec build/altest "$@"
+# What the runner cannot do when it is interrupted (Ctrl+C) is done here: its directory is
+# removed, and the Wine server of a --target windows run is stopped, with the Windows programs
+# still running (they are in process groups of their own, which Ctrl+C does not reach).
+export ALTEST_TMP
+ALTEST_TMP=$(mktemp -d) || exit 2
+trap 'rm -rf "$ALTEST_TMP"' EXIT
+trap '[[ " $* " == *" --target windows "* ]] && WINEPREFIX=${WINEPREFIX:-$PWD/tmp/win/prefix-tests} wineserver -k; exit 130' INT TERM
+build/altest "$@"

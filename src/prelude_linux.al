@@ -1187,17 +1187,18 @@ priv fn child_env(changes: []str) -> i64 {
 // Starts argv like __os_spawn, with files in place of the standard streams and a changed
 // environment: `sin` is read as standard input, `sout` and `serr` (created or emptied) take
 // standard output and standard error ("" each: that of this process; serr the same path as
-// sout: one open file takes both); `env` as for child_env. Returns (process id, process id),
-// or (-1, -1) with io_error() (also if a file cannot be opened).
-fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str) -> (i64, i64) {
+// sout: one open file takes both); `env` as for child_env; `group`: the program leads a new
+// process group. Returns (process id, process id, 1 for a group else 0), or (-1, -1, 0) with
+// io_error() (also if a file cannot be opened).
+fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, group: bool) -> (i64, i64, i64) {
     if len(argv) == 0 {
         __io_result(-22)
-        return (-1, -1)
+        return (-1, -1, 0)
     }
     file, e := locate(argv[0])
     if e != 0 {
         __io_result(-e)
-        return (-1, -1)
+        return (-1, -1, 0)
     }
     flush()
     cargs := alloc[i64](len(argv) + 1)
@@ -1236,6 +1237,9 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str) -> 
     if err == 0 {
         pid = syscall(57)
         if pid == 0 {
+            if group {
+                syscall(109, 0, 0)                          // setpgid
+            }
             for k in 0..3 {
                 if fds[k] >= 0 {
                     syscall(33, fds[k], k)
@@ -1247,6 +1251,10 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str) -> 
             syscall(231, 127)
         }
         syscall(3, i64(note[1]))
+        if pid > 0 && group {
+            // (here too: a signal to the group may come before the child has run)
+            syscall(109, pid, pid)
+        }
         if pid < 0 {
             err = pid
             syscall(3, i64(note[0]))
@@ -1259,7 +1267,7 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str) -> 
     }
     if err != 0 {
         __io_result(err)
-        return (-1, -1)
+        return (-1, -1, 0)
     }
     failed: [1]i64
     __os_read(i64(note[0]), cast[i64](ptr(failed)), 8)
@@ -1267,11 +1275,20 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str) -> 
     if failed[0] != 0 {
         __os_wait(pid, pid, true)
         __io_result(-failed[0])
-        return (-1, -1)
+        return (-1, -1, 0)
     }
     __io_result(0)
-    return (pid, pid)
+    return (pid, pid, if group { 1 } else { 0 })
 }
+
+// sends a signal to every process of the group that a process of __os_spawn_files leads: 0
+// or -errno
+fn __os_kill_group(pid: i64, handle: i64, group: i64, signal: i64) -> i64 {
+    return syscall(62, -pid, signal)
+}
+
+// the group of a process that has been waited for is no longer needed
+fn __os_group_close(group: i64) {}
 
 // Waits at most ns nanoseconds for a process of __os_spawn: its status, -2 if it still runs
 // then, -1 if it cannot be waited for (io_error()), as __os_wait.

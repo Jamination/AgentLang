@@ -112,7 +112,7 @@ fn main() {
 
 | Declaration | Description |
 |-------------|-------------|
-| `struct Launch { stdin: str, stdout: str, stderr: str, env: []str }` | How a program is started when the streams or the environment of this process do not fit. The zero value changes nothing. |
+| `struct Launch { stdin: str, stdout: str, stderr: str, env: []str, group: bool }` | How a program is started when the streams or the environment of this process do not fit, or when it must be ended together with what it starts. The zero value changes nothing. |
 | `run(argv: []str, how: Launch) -> i64` | `run` that way: the status, or -1 with `io_error()` if the program could not be started. |
 | `spawn(argv: []str, how: Launch) -> (Process, bool)` | `spawn` that way. |
 | `const NULL_DEVICE` | The file that is always empty and swallows what is written (`"/dev/null"`; Windows: `"NUL"`). |
@@ -131,6 +131,11 @@ fn main() {
 - Unlike `run_capture`, this never waits on a pipe: a program that starts background
   processes of its own does not hold the call up, and any amount of output on both streams
   is safe. Several threads may start programs at the same time, each with its own files.
+- `group: true` makes the program the leader of a new process group, to which the processes
+  it starts belong as well (unless they leave it). `kill(p, s)` then sends the signal to
+  every process of the group, as long as `p` was not waited for: this is how a program with a
+  time limit is ended without leaving its children behind (`wait(p, limit)`, `kill(p, 9)`,
+  `wait(p)`). Such a group is not in the terminal's foreground: Ctrl+C does not reach it.
 
 ```
 use std.os
@@ -272,7 +277,9 @@ With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
   (`.bat`, `.cmd`) as `[]str{"cmd", "/c", file, ...}`.
 - **`Launch`.** `env` names are compared without regard to case, as Windows does
   (`"Path=..."` replaces `PATH`). Programs started at the same time by several threads never
-  inherit each other's files or pipes (process creation is serialised for that).
+  inherit each other's files or pipes (process creation is serialised for that). `group` is a
+  job object: `kill` ends every process in it (`TerminateJobObject`); Ctrl+C in a console
+  still reaches them all.
 - **Arguments** are joined into one command line with the quoting of the Microsoft C library,
   so a program that splits its command line by those rules (every AL program, every C
   program) gets `argv` back unchanged. `cmd.exe` has rules of its own: arguments with quotes or

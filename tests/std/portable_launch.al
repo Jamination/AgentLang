@@ -1,6 +1,6 @@
-// std.os `Launch` (files as standard streams, a changed environment) and `wait` with a time
-// limit, with the same output on every target (also run by `tests/run.sh --target windows`):
-// the program starts copies of itself, also from several threads at once.
+// std.os `Launch` (files as standard streams, a changed environment, a process group) and
+// `wait` with a time limit, with the same output on every target (also run by `tests/run.sh
+// --target windows`): the program starts copies of itself, also from several threads at once.
 use std.os
 
 struct Job { me: str, dir: str, k: i64, bad: *i64 }
@@ -42,6 +42,18 @@ fn main() -> i64 {
     }
     if len(a) > 1 && a[1] == "sleep" {
         sleep_ms(20000)
+        return 0
+    }
+    if len(a) > 2 && a[1] == "nest" {
+        // starts a program that writes the file a[2] after a while, says so, and stays
+        spawn([]str{a[0], "late", a[2]})
+        write_file(concat(a[2], ".ready"), "")
+        sleep_ms(20000)
+        return 0
+    }
+    if len(a) > 2 && a[1] == "late" {
+        sleep_ms(300)
+        write_file(a[2], "late")
         return 0
     }
     me := a[0]
@@ -98,6 +110,31 @@ fn main() -> i64 {
     print("ends in time:", wait(q, 20000 * 1000000), wait(q, -1))
     none: Process
     print("not started:", wait(none, 1000), io_error())
+
+    // a process group: kill reaches what the program has started too (without the group
+    // that program goes on and writes its file)
+    fn until(path: str) {
+        for _ in 0..4000 {
+            if file_exists(path) {
+                return
+            }
+            sleep_ms(5)
+        }
+    }
+    late := path_join(d, "late")
+    for grouped in []bool{false, true} {
+        g, _ := spawn([]str{me, "nest", late}, Launch{stdout: NULL_DEVICE, group: grouped})
+        until(concat(late, ".ready"))
+        print("group:", grouped, kill(g, 0), kill(g, 9), wait(g), kill(g, 9))
+        if grouped {
+            sleep_ms(1000)
+        } else {
+            until(late)
+        }
+        print("the program it started wrote:", file_exists(late))
+        remove_file(late)
+        remove_file(concat(late, ".ready"))
+    }
 
     // several threads start programs at the same time: every one gets its own files
     bad := 0
