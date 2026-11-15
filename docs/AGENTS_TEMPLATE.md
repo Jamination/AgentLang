@@ -1,14 +1,4 @@
-# AGENTS.md template for a game written in AL
-
-Copy this file into the root of a new game repository as `AGENTS.md` and fill in the
-placeholders. It tells an agent which compiler to use, what to read, and the house rules.
-
----
-
-# <Game name>
-
-A game written from scratch in AL (https://github.com/Jamination/AgentLang), for Linux
-(Windows optional).
+A game written from scratch in AL (https://github.com/Jamination/AgentLang), for Linux and Windows.
 
 ## Compiler
 
@@ -36,8 +26,8 @@ Fine print: `docs/DETAILS.md`. Library overview: `docs/STDLIB.md`.
 
 ## Rules
 
-- **Write your own renderer** on the Vulkan bindings (`std.vk`). The standard library has no
-  renderer, sprite batcher or engine, on purpose. Copying ideas from the examples is fine.
+- **Write your own renderer** The standard library has no renderer, sprite batcher or engine,
+  on purpose. Copying ideas from the examples is fine.
 - **Validation layers on during development:** enable `VK_LAYER_KHRONOS_validation` with a
   debug-utils messenger in debug builds (`-D DEBUG`), and treat every message as a bug.
 - **Shaders:** GLSL in `shaders/`, compiled with `glslc` to SPIR-V and built in with
@@ -46,7 +36,6 @@ Fine print: `docs/DETAILS.md`. Library overview: `docs/STDLIB.md`.
   audio device; prints checksums of the game state. Use it to test changes; it is what CI runs.
 - **Deterministic simulation:** fixed time step (`std.time`), seeded random numbers (`std.rand`).
 - **Platform code** only in `when TARGET_OS == ...` blocks, in as few places as possible.
-- Keep it simple: no frameworks, no code generation unless a program in the repo does it.
 
 ## Layout
 
@@ -55,5 +44,5 @@ src/main.al        entry point; `use` the other files
 src/...
 shaders/           GLSL sources (+ compiled .spv)
 assets/            PNG, WAV
-build.sh           compiles shaders and the game
+build.(sh|bat)     compiles shaders and the game
 ```
