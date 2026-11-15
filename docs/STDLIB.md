@@ -23,7 +23,7 @@ are `priv` do not appear: a program may reuse their names).
 | `std.os` | for tools and build scripts: run programs (status, captured output) or start them in the background (wait, kill), shared memory, process id, working directory; loads `std.asset` for files and directories | nothing | [std/os.md](std/os.md) |
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
 | `std.input` | per-frame key / mouse / gamepad state, action maps | nothing (Windows: `xinput1_4.dll` or `xinput9_1_0.dll`, loaded when a gamepad is opened) | [std/input.md](std/input.md) |
-| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6`; Windows: `user32.dll`, `gdi32.dll` | [std/window.md](std/window.md) |
+| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` (`libXi.so.6` if installed, for mouse-look); Windows: `user32.dll`, `gdi32.dll`, `imm32.dll` | [std/window.md](std/window.md) |
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml`, with the surface, swapchain, debug-utils, layer-settings and memory budget / priority extensions; only C-header glue added (sType constructors, union constructors, version macros, `vk_result_name`) | `libvulkan.so.1` | [std/vk.md](std/vk.md) |

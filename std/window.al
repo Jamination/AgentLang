@@ -1,6 +1,7 @@
 // std.window: one native window with an event queue, per-frame input state (std.input) and
 // software presentation of an RGBA8 framebuffer. The window system is in the OS layer:
-// std/window_linux.al (X11, links libX11.so.6) or std/window_windows.al (Win32: user32, gdi32).
+// std/window_linux.al (X11, links libX11.so.6) or std/window_windows.al (Win32: user32, gdi32,
+// imm32).
 // The layer provides `struct WindowOs` and window_open(WindowDesc), set_title, poll,
 // set_cursor_visible, set_cursor_locked, set_text_input, set_fullscreen, present, close and its
 // native handles.

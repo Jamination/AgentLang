@@ -331,7 +331,8 @@ The same program runs on Windows with the same events; what differs:
   (and attaches to the console it is started from: [DETAILS.md](../DETAILS.md#windows)).
 
 `examples/win32_input.al` prints every event it receives on either system: the quickest way
-to see what a keyboard, mouse or gamepad delivers.
+to see what a keyboard, mouse or gamepad delivers (F3 locks the pointer and prints the raw
+motion of each frame, F4 switches text input).
 
 ## Structuring a game on top of it
 
