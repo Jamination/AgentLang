@@ -796,9 +796,10 @@ both systems, except where this section says otherwise.
   line names it. **`env_get`** compares names without regard to case.
 - **Paths** may use `\` as well as `/`, a drive (`C:/x`, `C:x`) or `\\server\share\`; the
   path functions of std.asset know these roots and build paths with `/`. Paths longer than
-  260 UTF-16 units need long-path support enabled in Windows, or the form `\\?\C:\dir\file`
-  ([std/asset.md](std/asset.md#windows)). `current_dir()` is in Windows
-  form (`C:\Users\me`).
+  260 UTF-16 units need long-path support enabled in Windows (the registry setting
+  `LongPathsEnabled`; the executable's manifest declares it long-path aware), or the form
+  `\\?\C:\dir\file` ([std/asset.md](std/asset.md#windows)).
+  `current_dir()` is in Windows form (`C:\Users\me`).
 - **Errors.** `io_error()` is the Linux errno of the same meaning (file not found 2, access
   denied 13, a directory where a file is expected 21, file exists 17, directory not empty 39,
   disk full 28, broken pipe 32, ...); a Windows error without one is 0x10000 + its code, and
@@ -836,6 +837,32 @@ both systems, except where this section says otherwise.
     or nothing, also shows it in a message box (`MessageBoxW` of user32.dll, loaded only then)
     titled with the executable's name, so a game that stops says why; with standard error
     redirected to a file or pipe there is no box.
+- **The image.** The executable is relocatable: Windows loads it at a random address (ASLR
+  with high entropy; the preferred base is 0x140000000), so it also starts where "Mandatory
+  ASLR" is enforced. The address of a global or a function differs from run to run and does
+  not fit in 32 bits: keep it in a pointer or an `i64`.
+- **Manifest.** Every executable carries an application manifest (resource 1 of type 24):
+  `asInvoker` (no elevation prompt, whatever the file is called), Windows 10/11 as supported
+  systems, long-path aware, per-monitor (v2) DPI aware, and UTF-8 as the active code page.
+  The last two change what Windows does for the whole process, from its start:
+  - sizes and positions are physical pixels and Windows scales nothing, also for windows a
+    program makes with its own `user32.dll` calls (std.window asks for the same at run time);
+  - from Windows 10 1903 the `A` functions of Windows (`MessageBoxA`, `CreateFileA`) and of C
+    libraries a program declares (`fopen`) take and return UTF-8, as AL strings are; on
+    older versions they use the system's code page, so declare the `W` functions for text that
+    is not ASCII. The run-time library uses `W` functions only and behaves the same everywhere.
+- **Icon and version information.** `--icon app.ico` puts the images of an icon file into the
+  executable (every size in the file; bitmap and PNG images) as its icon: Explorer and the
+  taskbar show it, and std.window gives it to its windows (`LoadIconW(instance, 1)` for other
+  windows). `--version-info NAME=VALUE`, once per name, sets what the file's Properties show:
+  `FileDescription`, `ProductName`, `CompanyName`, `LegalCopyright`, `FileVersion` (also
+  `ProductVersion`, `Comments`, `InternalName`, `OriginalFilename`, `LegalTrademarks`,
+  `PrivateBuild`, `SpecialBuild`). `FileVersion` and `ProductVersion` are up to four numbers
+  below 65536 (`1.2.3`); `ProductVersion` is `FileVersion` unless given. Values are UTF-8.
+  A file that cannot be read or is not an icon is an error (status 1); a bad or repeated
+  name, and either option without `--target windows`, is a usage error (status 2), like
+  `--gui`. `alc build --target windows --gui --icon game.ico --version-info "FileDescription=My
+  Game" --version-info FileVersion=1.0.2 game.al`.
 - **The compiler on Windows.** `alc build --target windows src/main.al -o alc.exe` (or
   `build/alc.exe` of `./build.sh`) is the compiler for Windows. It writes the same executables
   as the Linux compiler, for both targets; its default `--target` is `windows`. `alc run` /

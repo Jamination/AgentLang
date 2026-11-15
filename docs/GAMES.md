@@ -242,6 +242,24 @@ executable with `embed("file.png")` + `image_decode`: the working directory of a
 from Explorer or a shortcut is not its own folder. Build from Linux; test under Wine
 (`tests/run.sh --target windows`) and then on Windows.
 
+For a release, give the executable its icon and its description:
+
+```
+alc build --target windows --gui game.al -o game.exe --icon game.ico \
+    --version-info "FileDescription=Star Miner" --version-info "ProductName=Star Miner" \
+    --version-info "CompanyName=Example Games" --version-info FileVersion=1.0.2 \
+    --version-info "LegalCopyright=(c) 2026 Example Games"
+```
+
+`--icon` takes an `.ico` file; put 16, 32, 48 and 256 pixel images into it (Explorer, the
+taskbar and the title bar each pick a size; [examples/starter/game.ico](../examples/starter/game.ico)
+is one, made by `tests/pe/mkico.py`). The window of std.window shows it without further code.
+`FileDescription` is the name Windows shows for the program (Task Manager, "Open with");
+`FileVersion` is numbers only (`1.0.2`). Every executable is relocatable (ASLR) and carries a
+manifest: no elevation prompt, per-monitor DPI awareness (pixels are physical pixels), long
+paths, UTF-8 for the `A` functions of Windows. `alc` does not sign executables: an unsigned
+one gets the SmartScreen warning the first time it is started.
+
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
 (events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices

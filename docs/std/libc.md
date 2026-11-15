@@ -22,7 +22,7 @@ On both systems, with the same meaning:
 | Declaration | C |
 |-------------|---|
 | `strlen(s: *u8) -> i64` | length of a C string |
-| `getenv(name: *u8) -> *u8` | an environment variable, `nil` if it is not set (read it with `from_cstr`). Windows: text in the ANSI code page of the system, not UTF-8: `env_get` of the core library is the portable way |
+| `getenv(name: *u8) -> *u8` | an environment variable, `nil` if it is not set (read it with `from_cstr`). Windows: text in the code page of the process, which is UTF-8 on Windows 10 1903 and later (the executable's manifest asks for it) and the system's code page before: `env_get` of the core library is UTF-8 everywhere |
 | `malloc(n: i64) -> *u8`, `free(p: *u8)` | memory of the C library's heap |
 | `qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)` | sorts `n` elements of `size` bytes; `cmp` is any AL function with that signature, also a nested or anonymous one |
 | `printf(format: *u8, ...) -> i32` | to the C library's standard output |
@@ -98,7 +98,9 @@ The C library buffers what `printf` and `fprintf` write, and AL buffers what `pr
   O_BINARY)` once at the start makes the stream write `"\n"` (the same for `c_stderr()`).
 - **Text (Windows).** AL strings are UTF-8. The C library passes bytes through to a file or
   pipe unchanged, but writes to a console in the console's code page: non-ASCII text shows
-  correctly only if that is UTF-8 (`chcp 65001`). `print` always shows UTF-8 correctly.
+  correctly only if that is UTF-8 (`chcp 65001`). `print` always shows UTF-8 correctly. C
+  functions that take file names or return text (`fopen`, `getenv`) use the code page of the
+  process: UTF-8 on Windows 10 1903 and later, through the executable's manifest.
 
 ```
 use std.libc

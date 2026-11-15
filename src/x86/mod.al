@@ -31,7 +31,7 @@ fn x86_live_data(m: *Module, out: *Output) -> Vec[bool] {
     for ci in 0..out.funcs.len {
         for r in out.funcs[ci].code.relocs {
             match r.kind {
-                Abs32Global(g) if !live[g] => {
+                Abs32Global(g), Rel32Global(g) if !live[g] => {
                     live[g] = true
                     work.push(g)
                 }

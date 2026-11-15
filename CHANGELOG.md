@@ -9,6 +9,15 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 ## [Unreleased]
 
 ### Breaking
+- Windows executables are relocatable and loaded at a random address above 4 GiB (see
+  Changed): the address of a global or a function no longer fits in 32 bits and differs from
+  run to run. A program that kept one in an `i32` / `u32` must keep it in a pointer or `i64`.
+- Windows executables carry a manifest (see Added) that makes the process per-monitor DPI
+  aware and gives it the UTF-8 code page from its start: a program that opens windows with its
+  own `user32.dll` calls now gets physical pixels instead of being scaled by Windows, and the
+  `A` functions it declares (`MessageBoxA`, a C library's `fopen`) take UTF-8 instead of the
+  system's code page (Windows 10 1903 and later). Programs using std.window and the run-time
+  library's functions behave as before.
 - Windows, `std.os`: `run`, `run_capture`, `run_capture_all` and `spawn` no longer start a
   batch file (`.bat`, `.cmd`) directly: they fail with `io_error()` 8 (`exec format error`).
   Windows handed such a file to `cmd.exe`, which reads the command line by rules of its own, so
@@ -26,6 +35,21 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   -> stage 2 -> stage 3, `--quick`, `--reseed`), from a committed Windows seed
   `bootstrap/alc.exe`; it also builds the Linux compiler. `build.sh --reseed` now refreshes both
   seeds.
+- `alc build --target windows --icon app.ico`: the executable's icon (all images of the `.ico`
+  file: Explorer, taskbar); std.window gives it to its windows. An unreadable or malformed
+  file is an error.
+- `alc build --target windows --version-info NAME=VALUE` (once per name: `FileDescription`,
+  `ProductName`, `CompanyName`, `FileVersion`, `LegalCopyright`, ...): the version information
+  shown in the file's Properties. Both options without `--target windows` are usage errors.
+- Every Windows executable has an application manifest: `asInvoker`, Windows 10/11 as
+  supported systems, long-path aware, per-monitor (v2) DPI aware, UTF-8 active code page.
+
+### Changed
+- Windows executables support ASLR: they have a base relocation table (`.reloc`), the flags
+  `DYNAMIC_BASE` and `HIGH_ENTROPY_VA` and the preferred base 0x140000000 (before: fixed at
+  0x400000, relocations stripped), so they start where "Mandatory ASLR" is enforced. The code
+  addresses globals, functions and constants relative to `rip` (about 0.5 % more code, no
+  measurable difference in speed). Linux executables are unchanged.
 
 ### Fixed
 - Windows, `std.os`: programs started from several threads at once no longer inherit each

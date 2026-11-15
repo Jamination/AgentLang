@@ -117,9 +117,9 @@ same situation (`not a directory` for a path that goes through a file, `is a dir
 - **Long paths.** A path of more than 260 UTF-16 units works on every Windows when it is
   written in the extended-length form: `\\?\` followed by the full path from the drive
   (`\\?\C:\saves\...`), without `.` or `..`; `/` may separate components there too, so
-  `path_join` works on it. Other long paths work only where long paths are enabled (the
-  `LongPathsEnabled` policy of Windows and the executable's manifest) and fail with `file name
-  too long` or `no such file or directory` elsewhere.
+  `path_join` works on it. Other long paths work only where Windows has long paths enabled
+  (the registry setting `LongPathsEnabled`; the executable's manifest declares it long-path
+  aware) and fail with `file name too long` or `no such file or directory` elsewhere.
 - **Names.** Upper and lower case name the same file (`Save.dat`, `save.dat`); the name keeps
   the case it was created with. No name has one of `< > : " | ? *` or a control character
   (`invalid argument`), or ends in a dot or a space (Windows drops them: `"a."` is `"a"`).

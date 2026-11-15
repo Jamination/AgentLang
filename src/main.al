@@ -66,6 +66,10 @@ enum TargetOs { TargetLinux, TargetWindows }
 target_os: TargetOs
 // `--gui` (Windows only): the PE gets the GUI subsystem instead of the console one (pe_link)
 pe_gui: bool
+// `--icon file.ico` (Windows only): the bytes of the file, checked (ico_error); and
+// `--version-info NAME=VALUE`: the pairs in the order given (see rsrc.al)
+pe_icon: str
+pe_version: Vec[(str, str)]
 
 // modules bundled with the compiler: `use std.<name>`
 // (during development, ALC_STD_DIR=<dir> reads `<dir>/<name>.al` instead of the built-in copy).
@@ -245,7 +249,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -297,6 +301,7 @@ priv fn parse_args() -> Args {
         usage("")
     }
     a := Args{cmd: av[0], opt: 2}
+    icon := "" // the path of --icon
     i := 1
     while i < av.len {
         s := av[i]
@@ -322,6 +327,19 @@ priv fn parse_args() -> Args {
             }
             "--json" => json = true
             "--gui" => pe_gui = true
+            "--icon", "--version-info" => {
+                i += 1
+                if i >= av.len {
+                    usage(if s == "--icon" { "--icon needs an icon file: --icon app.ico" } else { "--version-info needs NAME=VALUE: --version-info FileVersion=1.2.0" })
+                }
+                err := if s == "--icon" { "" } else { version_info_add(av[i]) }
+                if len(err) != 0 {
+                    usage(err)
+                }
+                if s == "--icon" {
+                    icon = av[i]
+                }
+            }
             "--emit-ir" => a.emit_ir = true
             "--emit-asm" => a.emit_asm = true
             "--unchecked" => a.unchecked = true
@@ -350,8 +368,16 @@ priv fn parse_args() -> Args {
     if len(a.input) == 0 {
         usage("")
     }
-    if pe_gui && target_os != TargetWindows {
-        usage("--gui is for Windows executables: add --target windows")
+    if (pe_gui || len(icon) != 0 || !pe_version.is_empty()) && target_os != TargetWindows {
+        usage(fmt(if pe_gui { "--gui" } else if len(icon) != 0 { "--icon" } else { "--version-info" }, " is for Windows executables: add --target windows"))
+    }
+    if len(icon) != 0 {
+        err := ""
+        pe_icon, err = read_to_string(icon)
+        if len(err) != 0 || len(ico_error(pe_icon)) != 0 {
+            driver_error(icon, if len(err) != 0 { fmt("cannot read `", icon, "`: ", err) } else { fmt("`", icon, "` ", ico_error(pe_icon)) })
+            exit(1)
+        }
     }
     if a.all_targets && (a.cmd != "check" || a.target_set) {
         usage("--all-targets is an option of `alc check`, which then checks every target (without --target)")
