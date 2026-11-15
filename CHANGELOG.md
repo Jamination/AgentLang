@@ -14,6 +14,16 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `bootstrap/alc.exe`; it also builds the Linux compiler. `build.sh --reseed` now refreshes both
   seeds.
 
+### Changed
+- Windows: the thread-local data of the run-time library (the arena of `alloc`, `mark` /
+  `release` and regions, the output buffer, `io_error`) is cheaper to reach. A function looks
+  up the address of its thread's block once where it needs it (before a loop, not in it)
+  and every access is then one instruction, instead of four more instructions per
+  thread-local variable. `bench/binarytrees.al` executes 12 % fewer instructions (under Wine
+  about 8 % less time, 3 % at the median over code layouts), a loop of `put` 18 % fewer, the
+  compiler 1 % fewer; `alc.exe` is 2.3 % smaller. Behaviour and Linux executables are
+  unchanged.
+
 ## [0.3.0] - 2026-11-15
 
 ### Breaking

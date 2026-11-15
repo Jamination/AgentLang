@@ -332,9 +332,16 @@ How the run-time library and the compiler implement threads (the rules: DETAILS.
   of C libraries); a static one starts with FS 0, and `__rt_init` (`src/prelude_linux.al`) maps
   the block and a TCB whose first word points to itself and sets FS (`arch_prctl`) before
   anything touches a TLS global. Windows: a TLS directory (zero fill, `AddressOfIndex` =
-  `__win_tls_index`); the address of a TLS global is a value computed where its `GAddr` is
-  (`tls_block` in `src/x86/isel.al`: `gs:[0x58]`, the index, the block, `lea`), once per
-  function after GVN / LICM. Programs without threads differ from before only in that: the
+  `__win_tls_index`); a TLS global is an offset (`win_tls_off`, from `layout_tls`) from a
+  register that holds the address of the thread's block, so an access is `mov rax, [r + off]`
+  (an 8-bit offset for the arena) and needs no relocation. A function has one such register
+  (`tls_base` in `src/x86/isel.al`), set by three loads (`tls_place`: `gs:[0x58]`, the TEB's
+  array of blocks; `__win_tls_index`; the entry) before the first use in a block, before the
+  outermost loop around a use, and not where such a place dominates: at most once per block
+  that needs it, not inside a loop, not on a path without a TLS global unless a loop with one
+  follows. The loads are repeated on a path through several such places (the same value).
+  What was measured and rejected: **Thread block on Windows** below. Programs without
+  threads differ from before only in that: the
   arena, region stack, output state and `io_error` accesses carry the `fs` prefix, the extra
   program header moves the code by 48 bytes, and the library itself changed.
 - **Atomics** are `Op.Atomic` (k = `ATOMIC_*`), not pure and `clobbers()`: every pass that keeps
@@ -354,6 +361,56 @@ How the run-time library and the compiler implement threads (the rules: DETAILS.
 - **The compiler's host.** The compiler is a threaded program too (its parallel back end, below);
   `alc build` unlinks and rewrites an executable that is busy (ETXTBSY: Linux keeps an ended
   multi-threaded process's file mapped while it frees its memory).
+
+**Thread block on Windows.** Linux reaches a TLS global with one `fs`-relative instruction;
+Windows has no register for it, only the TEB (`gs`), whose array of thread blocks is indexed
+by a number the loader chooses. Before, every TLS global a function used cost four
+instructions (the three loads and a `lea`) where its `GAddr` stood after GVN / LICM:
+`__heap_cur` and `__heap_end` of one allocation paid twice. Measured under Wine 11.22 on a
+Ryzen 5 3600 (Windows builds; user-mode instructions and cycles counted with
+`perf_event_open`; times: best of 5, interleaved; before -> now):
+
+| program | instructions | time |
+|---|---|---|
+| `bench/binarytrees.al` (308 million allocations) | 12.49 G -> 10.94 G (-12.4 %) | 1246 -> 1145 ms (median of six Wine sessions 1290 -> 1175 ms) |
+| the same, its hot functions at 8 code offsets 16 bytes apart | | cycles: median 4967 M -> 4805 M (-3.3 %), lowest 4646 M -> 4388 M |
+| `bench/hashmap.al` (no allocation in its loop) | 1.249 G -> 1.249 G | 559 -> 563 ms |
+| a loop of `put` (20 million) | 2.865 G -> 2.345 G (-18 %) | 473 -> 474 ms |
+| the compiler compiling itself | 10.35 G -> 10.23 G (-1.2 %) | 1197 -> 1171 ms |
+| the same at `-O0` | 3.260 G -> 3.235 G (-0.8 %) | 279 -> 278 ms |
+| the same on one thread (`ALC_JOBS=1`) | 9.984 G -> 9.847 G (-1.4 %) | 1406 -> 1402 ms |
+| size of `alc.exe` | | 4,460,544 -> 4,356,608 bytes (-2.3 %) |
+
+Times of binarytrees are not a steady measure: the same instructions take 4.4 to 5.6 G
+cycles depending on where the code lies (and a few percent more or less from one Wine session
+to the next), because the program is bound by the chain store `__heap_cur` -> load
+`__heap_cur` of consecutive allocations, not by the number of instructions. Linux runs it in
+9.86 G instructions and 4.19 to 4.53 G cycles (median 4.31 G) at the same 8 offsets: Windows
+is left with 3 instructions per allocating call and about 11 % of cycles. Variants, on
+binarytrees (median cycles over the 8 offsets):
+
+- *One place per function* (the nearest block that dominates all uses): the same
+  instructions, 19 % more cycles than the place per block (5.78 G against 4.86 G; the loads
+  then stand before the branch that separates the leaf from the inner node). Rejected.
+- *The index taken as 0* (`mov r, gs:[0x58]; mov r, [r]`): 2.8 % fewer instructions, cycles
+  3 % lower, inside the spread of the offsets (the index load does not lengthen the chain of
+  dependent loads). The loader gives the program's block index 0 on Wine also when a DLL with
+  thread-local data of its own is loaded with it, and on Windows as far as known, but nothing
+  promises it, and a check per access costs what it saves. Rejected.
+- *A pointer to the block in a TEB field* (`ArbitraryUserPointer`, `gs:[0x28]`): 5.7 % fewer
+  instructions, cycles 1 % lower (inside the spread). The field is the debugger's and the
+  loader's, other run-time libraries have used it for the same purpose (Go's on
+  windows/amd64), and every thread would have to set it before
+  its first access: threads that C libraries create do not (their callbacks run AL code), nor
+  did the compiler's own thread with the large stack in the experiment (`alc.exe` built this
+  way ended without output). Rejected.
+- *A register reserved for the block in all AL code, or the block passed as a hidden
+  argument*: could at most close the rest of the gap to Linux on such a recursion, and costs
+  a register everywhere; an AL function is called by C as it is (callbacks, on any thread),
+  so every function whose address is taken would need a second entry. Not built.
+- *Hoisting out of loops* needed nothing new: the address was loop-invariant for LICM before
+  (a `GAddr` is pure), and the place before the outermost loop keeps that (a loop that
+  allocates a million nodes: 6.111 G instructions before and now, Linux 6.000 G).
 
 ## Parallel back end
 

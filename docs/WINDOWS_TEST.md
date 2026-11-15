@@ -132,3 +132,17 @@ Build and run each `tests\run\thread_*.al` (output must equal the matching `.out
    crash (this checks `SetThreadStackGuarantee` on new threads).
 4. Executables carry a TLS directory with an empty template: they load and per-thread data works
    (every thread test exercises it).
+
+## 8. Thread-local data (the address of the thread's block)
+Code reaches the arena, the region stack and the output buffer through the TEB (`gs:[0x58]`,
+then the index the loader wrote to the program's TLS directory), once per function where it
+is needed. Wine always gives the program index 0 and cannot show another loader's choices or
+real timings.
+1. `tests\run\thread_local_paths.al`, built normally and with `-O0`: the output equals
+   `thread_local_paths.out`; run each about 20 times.
+2. `tests\sys\thread_ccb.al` (needs `thread_ccb.dll`, built from `thread_ccb.c` with MinGW or
+   MSVC, next to the program): the callbacks on a thread the DLL created print their lines.
+3. Speed: build `bench\binarytrees.al` with this `alc.exe` and with the one of 0.3.0, run each
+   5 times and note the best times. Expected: the new one is not slower (Wine: 12 % fewer
+   instructions, 1246 -> 1145 ms). Do the same for `alc.exe build src/main.al -o x.exe`
+   (Wine: 1197 -> 1171 ms) and note both pairs.
