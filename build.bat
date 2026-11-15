@@ -3,8 +3,11 @@ rem Builds the compiler from its AL sources (src/main.al) with itself, on Window
 rem
 rem   build.bat            seed compiler -> stage 1 -> stage 2 -> stage 3; stages 2 and 3 must be
 rem                        byte-identical (the compiler reproduces itself); installs build\alc.exe,
-rem                        and build\alc: the same compiler for Linux (built by stage 2)
-rem   build.bat --quick    seed compiler -> build\alc.exe only (no self-check, no build\alc)
+rem                        and build\alc: the same compiler for Linux (built by stage 2); then
+rem                        builds the test runner tests\run.al with it: build\altest.exe and
+rem                        build\altest
+rem   build.bat --quick    seed compiler -> build\alc.exe only (no self-check, no build\alc), and
+rem                        build\altest.exe
 rem   build.bat --reseed   after a full build, also replaces the seeds with the new compilers
 rem
 rem The seed is bootstrap\alc.exe, a committed build of an earlier version of this same compiler
@@ -43,6 +46,8 @@ if errorlevel 1 (
 )
 if "%MODE%"=="quick" (
   move /y build\alc-stage1.exe build\alc.exe >nul
+  build\alc.exe build tests/run.al -o build\altest.exe
+  if errorlevel 1 goto norunner
   echo build: build\alc.exe ^(quick, not self-checked^)
   exit /b 0
 )
@@ -75,6 +80,11 @@ if errorlevel 2 (
 copy /y build\alc-stage2.exe build\alc.exe >nul
 move /y build\alc.new build\alc >nul
 del build\alc-stage1.exe build\alc-stage2.exe build\alc-stage3.exe
+rem the test runner (tests\run.bat starts it), built by the new compiler
+build\alc.exe build tests/run.al -o build\altest.exe
+if errorlevel 1 goto norunner
+build\alc.exe build --target linux tests/run.al -o build\altest
+if errorlevel 1 goto norunner
 if "%SAME%"=="checked" (
   echo build: build\alc.exe, self-compiled, stages 2 and 3 identical; build\alc ^(Linux^)
 ) else (
@@ -87,3 +97,7 @@ if "%MODE%"=="reseed" (
   echo build: bootstrap\alc.exe and bootstrap\alc updated
 )
 exit /b 0
+
+:norunner
+echo build: FAIL: build\alc.exe does not compile the test runner tests\run.al
+exit /b 1

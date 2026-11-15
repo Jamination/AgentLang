@@ -4,8 +4,10 @@
 #   ./build.sh            seed compiler -> stage 1 -> stage 2 -> stage 3; stages 2 and 3 must be
 #                         byte-identical (the compiler reproduces itself); installs build/alc,
 #                         and build/alc.exe: the same compiler for Windows (built by stage 2
-#                         while it builds stage 3)
-#   ./build.sh --quick    seed compiler -> build/alc only (no self-check, no build/alc.exe)
+#                         while it builds stage 3); then builds the test runner tests/run.al
+#                         with it: build/altest and build/altest.exe
+#   ./build.sh --quick    seed compiler -> build/alc only (no self-check, no build/alc.exe), and
+#                         build/altest
 #   ./build.sh --reseed   after a full build, also replaces the seeds (bootstrap/alc and, for
 #                         build.bat on Windows, bootstrap/alc.exe) with the new compilers
 #   ./build.sh --windows-check
@@ -32,10 +34,19 @@ done
 [[ $mode == --quick && $wincheck == 1 ]] && { echo "build: --windows-check needs a full build"; exit 2; }
 mkdir -p build
 [[ -x $SEED ]] || { echo "build: no seed compiler at $SEED"; exit 1; }
+# the test runner (tests/run.sh starts it), built by the new compiler: $1 = its file, $2... =
+# compiler options
+runner() {
+  local out=$1; shift
+  if ! build/alc build "$@" tests/run.al -o "$out.new" || ! mv "$out.new" "$out"; then
+    echo "build: FAIL: build/alc does not compile the test runner tests/run.al"; exit 1
+  fi
+}
 # the sources name the standard library relative to src/, so build from the repository root
 if ! "$SEED" build src/main.al -o build/alc-stage1; then echo "build: the seed compiler failed"; exit 1; fi
 if [[ $mode == --quick ]]; then
   mv build/alc-stage1 build/alc
+  runner build/altest
   echo "build: build/alc (quick, not self-checked)"
   exit 0
 fi
@@ -52,6 +63,8 @@ fi
 cp build/alc-stage2 build/alc.new && mv build/alc.new build/alc
 mv build/alc.exe.new build/alc.exe
 rm -f build/alc-stage1 build/alc-stage2 build/alc-stage3
+runner build/altest
+runner build/altest.exe --target windows
 echo "build: build/alc ($(wc -c <build/alc) bytes), self-compiled, stages 2 and 3 identical; build/alc.exe ($(wc -c <build/alc.exe) bytes)"
 if [[ $mode == --reseed ]]; then
   mkdir -p bootstrap
