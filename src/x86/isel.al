@@ -1069,6 +1069,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
     } else {
         // out of components: collapse what we have into a temporary
         t := new_vreg(&self.mf, 0)
+        self.rip_legal(m)
         self.e(Lea, 8, R(t), M(*m))
         *m = mem_new()
         m.base = i32(t)
@@ -1165,7 +1166,28 @@ priv fn atomic(self: *Sel, v: i64) {
 priv fn addr(self: *Sel, v: i64) -> Mem {
     m := mem_new()
     self.addr_term(v, &m, 0, true)
+    self.rip_legal(&m)
     return m
+}
+
+// Windows: a global is addressed relative to rip (the image is relocatable), which takes no base
+// or index register: next to one, the global's address goes to a register first
+priv fn rip_legal(self: *Sel, m: *Mem) {
+    if m.kind != MK_GLOBAL || target_os != TargetWindows || (m.base == NOREG && m.idx == NOREG) {
+        return
+    }
+    t := new_vreg(&self.mf, 0)
+    self.e(Mov, 8, R(t), Opnd.GAddr(i64(m.id), i64(m.disp)))
+    if m.idx == NOREG {
+        m.idx = m.base
+        m.scale = 1
+    } else if m.base != NOREG {
+        self.e(Lea, 8, R(t), M(Mem{base: i32(t), idx: m.base, scale: 1, disp: 0, kind: MK_NORMAL, id: 0}))
+    }
+    m.base = i32(t)
+    m.disp = 0
+    m.kind = MK_NORMAL
+    m.id = 0
 }
 
 // k = c << s with c = 3, 5 or 9, the factors a `lea` with the same register as base and index
@@ -1630,6 +1652,7 @@ priv fn inst(self: *Sel, v: i64) {
                 m := mem_new()
                 self.addr_term(i.args[0], &m, 1, false)
                 self.addr_term(i.args[1], &m, 1, false)
+                self.rip_legal(&m)
                 d := self.vr(v)
                 simple := m.kind == MK_NORMAL && m.idx == NOREG && m.base != NOREG
                 if simple && m.disp == 0 {

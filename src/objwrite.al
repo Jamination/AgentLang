@@ -50,7 +50,7 @@ fn used_externs(m: *Module, out: *Output) -> Vec[i64] {
     for ci in 0..out.funcs.len {
         for r in out.funcs[ci].code.relocs {
             match r.kind {
-                Abs32Global(g) => {
+                Abs32Global(g), Rel32Global(g) => {
                     i, found := by_got.get(g)
                     if found {
                         used[i] = true
@@ -151,7 +151,8 @@ fn layout_tls(m: *Module, gaddr: *Vec[i64], below_tp: bool) -> i64 {
     size
 }
 
-// writes the 32-bit displacements of the code's relocations into text
+// writes the 32-bit displacements of the code's relocations into text (a rip-relative one is
+// relative to the end of its instruction: the field's end, the addend counts what follows it)
 fn patch_text(text: *Vec[u8], out: *Output, func_off: *Vec[i64], func_addr: *Vec[i64], gaddr: *Vec[i64], fpool_addr: i64) {
     for ci in 0..out.funcs.len {
         c := &out.funcs[ci]
@@ -164,6 +165,8 @@ fn patch_text(text: *Vec[u8], out: *Output, func_off: *Vec[i64], func_addr: *Vec
                 Abs32Func(f) => func_addr[f] + i64(r.addend)
                 Abs32FConst(i) => fpool_addr + 16 * i + i64(r.addend)
                 Rel32Func(f) => func_addr[f] - (fa + r.off + 4)
+                Rel32Global(g) => gaddr[g] + i64(r.addend) - (fa + r.off + 4)
+                Rel32FConst(i) => fpool_addr + 16 * i + i64(r.addend) - (fa + r.off + 4)
             }
             assert fits_i32(val), "relocation out of range"
             assert at >= 0 && at + 4 <= text.len

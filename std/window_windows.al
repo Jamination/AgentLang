@@ -41,6 +41,7 @@ priv extern "user32.dll" fn DispatchMessageW(msg: *W32Msg) -> i64
 priv extern "user32.dll" fn SendMessageW(hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i64
 priv extern "user32.dll" fn GetMessageTime() -> i32
 priv extern "user32.dll" fn LoadCursorW(instance: *u8, name: *u16) -> *u8
+priv extern "user32.dll" fn LoadIconW(instance: *u8, name: *u16) -> *u8
 priv extern "user32.dll" fn SetCursor(cursor: *u8) -> *u8
 priv extern "user32.dll" fn GetCursorPos(p: *W32Point) -> i32
 priv extern "user32.dll" fn ScreenToClient(hwnd: *u8, p: *W32Point) -> i32
@@ -913,7 +914,8 @@ priv fn w32_init() -> bool {
     user32 := GetModuleHandleW(w32_wide("user32.dll"))
     release(m)
     if user32 != nil {
-        // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (Windows 10 1703), else system aware
+        // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (Windows 10 1703), else system aware (as
+        // the executable's manifest says already, src/rsrc.al: then the calls change nothing)
         set_ctx := GetProcAddress(user32, ptr("SetProcessDpiAwarenessContext"))
         if set_ctx == nil || cast[fn(*u8) -> i32](set_ctx)(cast[*u8](i64(-4))) == 0 {
             SetProcessDPIAware()
@@ -930,6 +932,7 @@ priv fn w32_init() -> bool {
         size: u32(sizeof[W32WndClass]()),
         proc: w32_window_proc,
         instance: GetModuleHandleW(nil),
+        icon: LoadIconW(GetModuleHandleW(nil), cast[*u16](u64(1))), // `alc build --icon` (else nil: the system's)
         cursor: arrow_cursor,
         background: GetStockObject(4),                             // BLACK_BRUSH
         class_name: ptr(class_name),

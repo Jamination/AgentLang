@@ -288,12 +288,14 @@ minimizes the window, for example).
 
 The same program runs on Windows with the same events; what differs:
 
-- **Pixels and DPI.** The process is made per-monitor DPI aware (v2; system aware before
-  Windows 10 1703) when the first window opens. `width`, `height`, `size(w)`, `EventResize` and
+- **Pixels and DPI.** The process is per-monitor DPI aware (v2; system aware before Windows
+  10 1703): the executable's manifest says so and the first window asks for it again. `width`, `height`, `size(w)`, `EventResize` and
   mouse positions are physical pixels, as on X11, and Windows does not rescale the picture. A
   window opens with a client area of the requested pixels and keeps that pixel size when it
   moves to a monitor of another scale, so on a 200 % display it looks half as large as on a
   100 % one; choose the size from the screen or use fullscreen.
+- **Icon.** A window shows the icon the executable was built with (`alc build --icon app.ico`),
+  in its title bar, on the taskbar and in Alt+Tab; without one, the system's default icon.
 - **Fullscreen** is a borderless window covering the monitor the window is on (no change of
   display mode); windowed restores the previous position and size.
 - **Keys.** Keys that type a character are named by their unshifted character on the layout,

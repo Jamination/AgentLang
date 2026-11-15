@@ -27,8 +27,9 @@ exact output.
    `GetActiveProcessorCount` exist (Windows 8+ / 7+); the compiler starts.
 
 ## 2. Executables (any program)
-1. Loading: AL executables have a fixed base address and no relocations. They load unless the
-   "Mandatory ASLR" exploit-protection setting is forced on; note if it is on and they fail.
+1. Loading: AL executables are relocatable (ASLR, high entropy; preferred base 0x140000000).
+   They load with the "Mandatory ASLR" exploit-protection setting forced on as well as with
+   the defaults; section 8 has the checks.
 2. Stack probes: a program with a large local array (e.g. `x: [1000000]u8` in a function,
    called recursively a few times) runs; deep recursion ends with the stack-overflow panic
    message, not a silent crash.
@@ -132,3 +133,43 @@ Build and run each `tests\run\thread_*.al` (output must equal the matching `.out
    crash (this checks `SetThreadStackGuarantee` on new threads).
 4. Executables carry a TLS directory with an empty template: they load and per-thread data works
    (every thread test exercises it).
+
+## 8. The executable file: ASLR, manifest, icon, version information
+Wine relocates images and applies the manifest (tests/pe/run.sh), and the file format is
+checked on Linux (tests/driver/pe.sh); what only Windows can show:
+Build `tests\pe\res.al` twice: plain as `res_plain.exe`, and as `res_full.exe` with
+`--icon examples\starter\game.ico --version-info "FileDescription=AL resource test"
+--version-info ProductName=Starter --version-info "CompanyName=Example Ltd"
+--version-info FileVersion=1.2.3 --version-info "LegalCopyright=(c) 2026 Example Ltd"`.
+1. `res_plain.exe` prints exactly `tests\pe\res_plain.out`, `res_full.exe`
+   `tests\pe\res_full.out` (the first line says the image was moved from its preferred base;
+   `active code page: 65001` needs Windows 10 1903 or later: note the number on older ones).
+2. `res_plain.exe --verbose`: the `base` line is an address above `7ff000000000`, not
+   `140000000`. Windows may reuse the placement while the image stays cached, so the base can
+   repeat from run to run; it changes after a restart or when the file is rebuilt or copied.
+3. With "Force randomization for images (Mandatory ASLR)" switched on (Windows Security, App &
+   browser control, Exploit protection, system settings; restart): `hello.exe`, the compiler
+   (`alc.exe build examples\hello.al`) and a game start and work.
+4. Process Explorer (column "ASLR") or `Get-ProcessMitigation -Name res_plain.exe` /
+   `dumpbin /headers`: the image has "Dynamic base", "High entropy VA" and "NX compatible".
+5. Explorer shows the icon of `res_full.exe` in every view (small list, large and extra
+   large icons: the 16, 32, 48 and 256 pixel images), on a desktop shortcut and, while it
+   runs, a std.window game built with `--icon` shows it in the title bar, the taskbar and
+   Alt+Tab. `res_plain.exe` has the system's default icon.
+6. Properties of `res_full.exe`, tab Details: File description, Product name, File version
+   1.2.3.0, Product version 1.2.3, Copyright, Language "English (United States)"; Task
+   Manager shows the description as the process name.
+7. Manifest: `mt.exe -inputresource:res_plain.exe;#1 -out:m.xml` (or Resource Hacker)
+   extracts well-formed XML; `sigcheck -m res_plain.exe` prints it. An executable named
+   `setup.exe` or `install.exe` built by `alc` starts without an elevation prompt.
+8. Long paths: with `LongPathsEnabled` set to 1 in
+   `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`, a program reads and writes a file
+   whose full path is longer than 260 characters without the `\\?\` prefix.
+9. On a 150 % or 200 % monitor, a GUI program that opens a window with its own `user32.dll`
+   calls (not std.window) is sharp and sized in physical pixels; the panic message box of a
+   `--gui` program is sharp, not blurred.
+10. A program that declares `extern "user32.dll" fn MessageBoxA(...)` and passes UTF-8 text
+    with non-ASCII characters (`"Grüße, 世界"`) shows it correctly (Windows 10 1903+).
+11. Windows Defender and SmartScreen: note any warning for a fresh `alc` executable, with and
+    without `--icon` / `--version-info` (relocatable images with a manifest and version
+    information look less unusual to scanners than the earlier fixed-base ones).
