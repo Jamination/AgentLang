@@ -845,7 +845,7 @@ alc test file.al               compile and run all `test` blocks, each in its ow
                                per test its output, then `ok   name` / `FAIL name`; status 1 if any failed; the test runner is written to `file.test`
 alc check file.al              type-check only; `--all-targets`: once for every target (Linux, Windows)
 alc sigs file.al [-- std]      one line per declaration: `file:line: signature`; `-- std` adds the library's
-options: -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  --gui (with --target windows: no console window): DETAILS.md#windows
+options: -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  with it: --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows
 ```
 
 Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`
