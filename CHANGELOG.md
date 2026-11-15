@@ -87,6 +87,14 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   focused, is minimized, is being moved or resized or has its menu open, and until a click on
   the title bar, border or caption buttons that activated the window is over; it is hidden
   only while the window holds it.
+- Windows: the thread-local data of the run-time library (the arena of `alloc`, `mark` /
+  `release` and regions, the output buffer, `io_error`) is cheaper to reach. A function looks
+  up the address of its thread's block once where it needs it (before a loop, not in it)
+  and every access is then one instruction, instead of four more instructions per
+  thread-local variable. `bench/binarytrees.al` executes 12 % fewer instructions (under Wine
+  about 3 % less time at the median, up to 11 %), a loop of `put` 18 % fewer, the compiler
+  1.4 % fewer (times unchanged); `alc.exe` is 2.3 % smaller. Behaviour and Linux executables
+  are unchanged.
 
 ### Fixed
 - Windows, `std.os`: programs started from several threads at once no longer inherit each

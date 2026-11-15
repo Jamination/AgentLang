@@ -3,8 +3,7 @@
 // The address of a global, a function or a float constant in the code. Linux: a 32-bit absolute
 // field (Abs32*; the image is loaded at a fixed address). Windows: the image is relocatable and
 // loaded above 4 GiB, so every address is relative to rip (Rel32*), which takes no base or index
-// register (isel: rip_legal); the one 32-bit absolute field left there is the offset of a
-// thread-local global in the thread block (Abs32Global, see layout_tls).
+// register (isel: rip_legal; a thread-local global is an offset from a register there: tls_place).
 priv enum RelocKind {
     Abs32Global(i64),
     Abs32Func(i64),
@@ -98,7 +97,8 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
     }
     match m.kind {
         MK_GLOBAL => {
-            if target_os == TargetWindows && r.base < 0 && r.idx < 0 {
+            if target_os == TargetWindows {
+                assert r.base < 0 && r.idx < 0
                 return rm_rip(Rel32Global(i64(m.id)), r.disp)
             }
             r.reloc = Some(Abs32Global(i64(m.id)))

@@ -238,9 +238,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     for ci in 0..out.funcs.len {
         for r in out.funcs[ci].code.relocs {
             match r.kind {
-                // (the offset of a thread-local global in the thread block)
-                Abs32Global(g) => assert m.globals[g].tls, "an absolute address in Windows code"
-                Abs32Func(_), Abs32FConst(_) => panic("an absolute address in Windows code")
+                Abs32Global(_), Abs32Func(_), Abs32FConst(_) => panic("an absolute address in Windows code")
                 _ => {}
             }
         }
