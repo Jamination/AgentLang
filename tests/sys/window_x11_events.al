@@ -2,11 +2,20 @@
 // display without a window manager such as Xvfb or a rootful Xwayland, never the user's
 // desktop): a second client connection plays the user and the window manager. It resizes the
 // window, minimizes it (_NET_WM_STATE_HIDDEN, unmapping), changes the fullscreen state, moves
-// the pointer while it is locked (set_cursor_locked) and takes the focus away.
+// the mouse while the pointer is locked (set_cursor_locked: XInput 2 raw motion, made with
+// XTEST, then the fallback without that extension, pointer motion) and takes the focus away.
 use std.window
 
 d2: *u8
 win: u64
+
+extern "libXtst.so.6" fn XTestFakeRelativeMotionEvent(dpy: *u8, dx: i32, dy: i32, delay: u64) -> i32
+
+// the user moves the mouse by (dx, dy) counts
+fn mouse(dx: i32, dy: i32) {
+    XTestFakeRelativeMotionEvent(d2, dx, dy, 0)
+    XSync(d2, 0)
+}
 
 // polls (5 ms apart, at most 2 s) until an event of `kind` arrives; false if none came
 fn wait_for(w: *Window, kind: EventKind) -> (Event, bool) {
@@ -122,12 +131,49 @@ fn main() {
     _, got = wait_for(w, EventRestore)
     print(" fullscreen:", w.fullscreen, "minimized:", w.minimized)
 
-    print("locked pointer")
+    print("locked pointer (raw motion)")
     XWarpPointer(d2, 0, win, 0, 0, 0, 0, 100, 80)
     XSync(d2, 0)
     deltas(w, 5)
     w.set_cursor_locked(true)
-    print(" locked:", w.cursor_locked, "pos:", w.input.mouse_pos(), "delta:", deltas(w, 5), "grabbed:", grabbed_by_window(), "centred:", pointer_in_window())
+    print(" locked:", w.cursor_locked, "raw:", w.os.raw_on, "pos:", w.input.mouse_pos(), "delta:", deltas(w, 5), "grabbed:", grabbed_by_window(), "centred:", pointer_in_window())
+    mouse(30, 10)
+    print(" move:", deltas(w, 10), "pos:", w.input.mouse_pos(), "centred:", pointer_in_window())
+    mouse(-50, -20)
+    print(" move:", deltas(w, 10), "pos:", w.input.mouse_pos(), "centred:", pointer_in_window())
+    for i in 0..100 {                                       // further than the screen is wide: no bound
+        mouse(-70, -50)
+    }
+    print(" move:", deltas(w, 10), "pos:", w.input.mouse_pos())
+    // a mouse that reports thousands of times between two polls: nothing is lost, one event
+    for i in 0..3000 {
+        XTestFakeRelativeMotionEvent(d2, 1, 0, 0)
+        XTestFakeRelativeMotionEvent(d2, 0, -1, 0)
+    }
+    XSync(d2, 0)
+    sleep_ms(50)
+    w.poll()
+    print(" fast:", w.input.mouse_delta() + deltas(w, 5), "events:", w.events.len <= 1, "dropped:", w.events.dropped)
+    // pointer motion that is not the mouse's (another client warps the pointer) does not count
+    XWarpPointer(d2, 0, win, 0, 0, 0, 0, 230, 160)
+    XSync(d2, 0)
+    print(" warped:", deltas(w, 10), "centred:", pointer_in_window())
+    XSetInputFocus(d2, XRootWindow(d2, 0), X_REVERT_TO_PARENT, X_CURRENT_TIME)
+    XSync(d2, 0)
+    _, got = wait_for(w, EventUnfocus)
+    mouse(9, 9)
+    print(" unfocused:", got, "raw:", w.os.raw_on, "delta:", deltas(w, 5))
+    print(" focus:", focus(w))
+    deltas(w, 3)
+    mouse(2, 3)
+    print(" raw:", w.os.raw_on, "delta:", deltas(w, 5), "centred:", pointer_in_window())
+    w.set_cursor_locked(false)
+    print(" unlocked:", w.input.mouse_pos(), "delta:", deltas(w, 5), "pointer:", pointer_in_window())
+
+    print("locked pointer (no XInput 2: pointer motion)")
+    w.os.xi = -1
+    w.set_cursor_locked(true)
+    print(" locked:", w.cursor_locked, "raw:", w.os.raw_on, "pos:", w.input.mouse_pos(), "delta:", deltas(w, 5), "grabbed:", grabbed_by_window(), "centred:", pointer_in_window())
     XWarpPointer(d2, 0, win, 0, 0, 0, 0, 230, 160)          // centre + (30, 10)
     XSync(d2, 0)
     print(" move:", deltas(w, 10), "pos:", w.input.mouse_pos(), "centred:", pointer_in_window())

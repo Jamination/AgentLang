@@ -91,11 +91,10 @@ presented: true
 pointer
 hidden: true shown: true false
 locked pointer
-locked: true centred: [160, 100] clipped to the window: true hidden: true
-delta: vec2(30.0, 10.0) moved: vec2(30.0, 10.0)
-delta: vec2(0.0, 0.0) centred: [160, 100]
-delta: vec2(-50.0, -20.0) moved: vec2(-20.0, -10.0) clicked: true
-moved: vec2(-340.0, -210.0)
+locked: true centred: [160, 100] confined to the centre: true hidden: true
+delta: vec2(5.0, 3.0) moved: vec2(5.0, 3.0) centred: [160, 100]
+delta: vec2(-4.0, -5.0) moved: vec2(1.0, -2.0) clicked: true
+moved: vec2(-999.0, -1002.0)
 unlocked: false back: true clip released: true shown: true
 fullscreen
 before poll: (320, 200)

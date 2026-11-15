@@ -1,7 +1,22 @@
 // std.window, Linux layer: the window is an X11 window (libX11.so.6, through std.x11).
 // Loaded by `use std.window` for --target linux; the public API is in std/window.al.
+// A locked pointer is read as XInput 2 raw motion where the server has that extension and
+// libXi.so.6 is installed (it is loaded at run time, when a pointer is first locked).
 use std.x11
 use std.libc
+
+// (libdl.so.2 holds these before glibc 2.34, the C library itself since)
+priv extern "libdl.so.2" fn dlopen(path: *u8, flags: i32) -> *u8
+priv extern "libdl.so.2" fn dlsym(handle: *u8, name: *u8) -> *u8
+
+// XIQueryVersion, XISelectEvents, XIQueryDevice and XIFreeDeviceInfo of libXi.so.6
+priv xi_tried: bool
+priv xi_query_version: *u8
+priv xi_select_events: *u8
+priv xi_query_device: *u8
+priv xi_free_device_info: *u8
+
+priv const XI_ABS_CAP = 8
 
 // The X11 handles of a Window (read them through x11_display / x11_window).
 struct WindowOs {
@@ -31,11 +46,79 @@ struct WindowOs {
     virt_y: i64
     unlock_x: i64                // locked pointer: where it was when locked
     unlock_y: i64
+    xi: i64                      // XInput 2 raw motion on this display: 0 not tried, 1 usable, -1 not
+    xi_opcode: i32               // major opcode of the XInput extension
+    raw_on: bool                 // raw motion is selected (the pointer is grabbed) and moves the virtual position
+    raw_x: f64                   // the virtual position with its fraction (raw motion is not whole counts)
+    raw_y: f64
+    abs_devs: [XI_ABS_CAP]XiAbsDevice    // the display's devices that report positions, read at the grab
+    abs_len: i64
     image: *u8
     image_data: *u8
     image_w: i64
     image_h: i64
     swap_rb: bool
+}
+
+// XIRawEvent of XInput 2 (<X11/extensions/XInput2.h>): the data of an XI_RawMotion event.
+struct XIRawEvent {
+    kind: i32
+    serial: u64
+    send_event: i32
+    display: *u8
+    extension: i32
+    evtype: i32
+    time: u64
+    deviceid: i32
+    sourceid: i32                // the device that moved
+    detail: i32
+    flags: i32
+    mask_len: i32                // bytes of `mask`: one bit per valuator (0: x, 1: y) that has a value
+    mask: *u8
+    values: *f64
+    raw_values: *f64             // one value per set bit, as the device reported it (no acceleration)
+}
+
+// The x and y axes of a pointing device that reports positions (a tablet, a touch screen, the
+// pointer of a virtual machine): which of them do, their ranges, the last positions seen.
+struct XiAbsDevice {
+    id: i32
+    absolute: [2]bool
+    min: [2]f64
+    max: [2]f64
+    seen: [2]bool
+    last: [2]f64
+}
+
+// XIEventMask
+priv struct XiEventMask {
+    deviceid: i32
+    mask_len: i32
+    mask: *u8
+}
+
+// XIDeviceInfo
+priv struct XiDeviceInfo {
+    deviceid: i32
+    name: *u8
+    role: i32
+    attachment: i32
+    enabled: i32
+    num_classes: i32
+    classes: **XiValuatorClass
+}
+
+// XIValuatorClassInfo (the fields `kind` and `sourceid` are those of every XIAnyClassInfo)
+priv struct XiValuatorClass {
+    kind: i32
+    sourceid: i32
+    number: i32
+    label: u64
+    min: f64
+    max: f64
+    value: f64
+    resolution: i32
+    mode: i32
 }
 
 // ---- X11 helpers (no display needed) ----
@@ -153,6 +236,41 @@ fn event_from_x11_button(button: i64, pressed: bool, x: i64, y: i64, mods: u8) -
         7 => Event{kind: if pressed { EventWheel } else { EventNone }, x: 1, mods: mods}
         _ => Event{}
     }
+}
+
+// The motion (dx, dy) of an XInput 2 raw motion event: the raw values of valuators 0 and 1,
+// in device counts as the mouse reports them, before the pointer acceleration of the server.
+// `d` is nil for a device that reports motion. For an axis on which the device reports
+// positions (`d.absolute`), the motion is the difference to its previous position kept in
+// `d`, in pixels of a screen of `screen_w` x `screen_h` that the axis' range spans (0 for the
+// first position).
+fn motion_from_xi_raw(e: *XIRawEvent, d: *XiAbsDevice, screen_w: i64, screen_h: i64) -> (f64, f64) {
+    out: [2]f64
+    if e.mask_len <= 0 || e.mask == nil || e.raw_values == nil {
+        return (0.0, 0.0)
+    }
+    n := 0
+    for axis in 0..2 {
+        if e.mask[0] >> axis & 1 == 0 {
+            continue
+        }
+        v := e.raw_values[n]
+        n += 1
+        if d == nil || !d.absolute[axis] {
+            out[axis] = v
+            continue
+        }
+        span := d.max[axis] - d.min[axis]
+        if span > 0.0 {
+            v = (v - d.min[axis]) * f64(if axis == 0 { screen_w } else { screen_h }) / span
+        }
+        if d.seen[axis] {
+            out[axis] = v - d.last[axis]
+        }
+        d.seen[axis] = true
+        d.last[axis] = v
+    }
+    (out[0], out[1])
 }
 
 priv fn window_utf8_next(buf: []u8, pos: *i64) -> u32 {
@@ -339,18 +457,139 @@ priv fn window_read_wm_state(w: *Window) {
     window_update_minimized(w)
 }
 
-// Pointer motion to (x, y) while the cursor is locked: the motion since the last real position
-// moves the virtual position; the motion caused by the warp back to the centre is skipped.
+// The pointer is at (x, y) while the cursor is locked. Without raw motion, the motion since
+// the last real position moves the virtual position (the motion caused by the warp back to
+// the centre is skipped). With raw motion, and while the pointer is free (another window has
+// the focus), the position is only remembered.
 priv fn window_locked_motion(w: *Window, x: i64, y: i64) {
     o := &w.os
-    if x == o.last_x && y == o.last_y {
-        return
-    }
-    o.virt_x += x - o.last_x
-    o.virt_y += y - o.last_y
+    dx := x - o.last_x
+    dy := y - o.last_y
     o.last_x = x
     o.last_y = y
+    if o.raw_on || !o.grabbed || (dx == 0 && dy == 0) {
+        return
+    }
+    o.virt_x += dx
+    o.virt_y += dy
     window_emit(w, Event{kind: EventMouseMove, x: o.virt_x, y: o.virt_y})
+}
+
+// True if a locked pointer of this window can be read as XInput 2 raw motion: libXi.so.6 is
+// installed and the server has the extension, version 2.0 or later.
+priv fn window_xi_init(w: *Window) -> bool {
+    o := &w.os
+    if o.xi != 0 {
+        return o.xi > 0
+    }
+    o.xi = -1
+    if !xi_tried {
+        xi_tried = true
+        lib := dlopen(ptr("libXi.so.6"), 2)                  // RTLD_NOW
+        if lib != nil {
+            xi_query_version = dlsym(lib, ptr("XIQueryVersion"))
+            xi_select_events = dlsym(lib, ptr("XISelectEvents"))
+            xi_query_device = dlsym(lib, ptr("XIQueryDevice"))
+            xi_free_device_info = dlsym(lib, ptr("XIFreeDeviceInfo"))
+        }
+    }
+    if xi_query_version == nil || xi_select_events == nil || xi_query_device == nil || xi_free_device_info == nil {
+        return false
+    }
+    event: i32
+    error: i32
+    if XQueryExtension(o.dpy, ptr("XInputExtension"), &o.xi_opcode, &event, &error) == 0 {
+        return false
+    }
+    major: i32 = 2
+    minor: i32 = 0
+    if cast[fn(*u8, *i32, *i32) -> i32](xi_query_version)(o.dpy, &major, &minor) != X_SUCCESS {
+        return false
+    }
+    o.xi = 1
+    true
+}
+
+// Selects XI_RawMotion of every master pointer on the root window (raw events go only
+// there), or nothing.
+priv fn window_xi_select(w: *Window, on: bool) {
+    o := &w.os
+    bits: [4]u8
+    if on {
+        bits[2] = 2                                          // XI_RawMotion (17)
+    }
+    m := XiEventMask{deviceid: 1, mask_len: 4, mask: ptr(bits)}  // XIAllMasterDevices
+    cast[fn(*u8, u64, *XiEventMask, i32) -> i32](xi_select_events)(o.dpy, XRootWindow(o.dpy, o.screen), &m, 1)
+}
+
+// Reads which devices of the display report positions on x or y, and the ranges of those axes.
+priv fn window_xi_devices(w: *Window) {
+    o := &w.os
+    o.abs_len = 0
+    n: i32
+    info := cast[fn(*u8, i32, *i32) -> *XiDeviceInfo](xi_query_device)(o.dpy, 0, &n)    // XIAllDevices
+    if info == nil {
+        return
+    }
+    for dev in mkslice[XiDeviceInfo](info, i64(n)) {
+        a := XiAbsDevice{id: dev.deviceid}
+        for k in 0..i64(dev.num_classes) {
+            c := dev.classes[k]
+            // XIValuatorClass, XIModeAbsolute
+            if c.kind == 2 && c.number >= 0 && c.number < 2 && c.mode == 1 {
+                a.absolute[c.number] = true
+                a.min[c.number] = c.min
+                a.max[c.number] = c.max
+            }
+        }
+        if (a.absolute[0] || a.absolute[1]) && o.abs_len < XI_ABS_CAP {
+            o.abs_devs[o.abs_len] = a
+            o.abs_len += 1
+        }
+    }
+    cast[fn(*XiDeviceInfo)](xi_free_device_info)(info)
+}
+
+// An event of an X extension: XI_RawMotion while the pointer is grabbed moves the virtual
+// position. A run of raw motion is kept as one event, its newest position (a mouse may
+// report 8000 times a second).
+priv fn window_generic_event(w: *Window, ev: *XEvent) {
+    o := &w.os
+    if !o.raw_on || x_event_cookie_extension(ev) != o.xi_opcode || XGetEventData(o.dpy, ev) == 0 {
+        return
+    }
+    defer { XFreeEventData(o.dpy, ev) }
+    if x_event_cookie_evtype(ev) != 17 {                     // XI_RawMotion
+        return
+    }
+    raw := cast[*XIRawEvent](x_event_cookie_data(ev))
+    dev: *XiAbsDevice = nil
+    for i in 0..o.abs_len {
+        if o.abs_devs[i].id == raw.sourceid {
+            dev = &o.abs_devs[i]
+        }
+    }
+    dx, dy := motion_from_xi_raw(raw, dev, i64(XDisplayWidth(o.dpy, o.screen)), i64(XDisplayHeight(o.dpy, o.screen)))
+    o.raw_x += dx
+    o.raw_y += dy
+    x := i64(floor(o.raw_x))
+    y := i64(floor(o.raw_y))
+    if x == o.virt_x && y == o.virt_y {
+        return
+    }
+    o.virt_x = x
+    o.virt_y = y
+    e := Event{kind: EventMouseMove, x: x, y: y}
+    q := &w.events
+    if q.len > 0 {
+        last := &q.items[(q.head + q.len - 1) % EVENT_QUEUE_CAP]
+        if last.kind == EventMouseMove {
+            *last = e
+            feed(&w.input, e)
+            return
+        }
+    }
+    window_emit(w, e)
 }
 
 // Keeps a locked pointer grabbed (while the window has the focus) and in the window's centre.
@@ -365,6 +604,13 @@ priv fn window_keep_locked(w: *Window) {
             return
         }
         o.grabbed = true
+        if window_xi_init(w) {
+            window_xi_select(w, true)
+            window_xi_devices(w)
+            o.raw_on = true
+            o.raw_x = f64(o.virt_x)
+            o.raw_y = f64(o.virt_y)
+        }
     }
     cx := w.width / 2
     cy := w.height / 2
@@ -379,6 +625,10 @@ priv fn window_keep_locked(w: *Window) {
 priv fn window_ungrab(w: *Window) {
     o := &w.os
     if o.grabbed {
+        if o.raw_on {
+            window_xi_select(w, false)
+            o.raw_on = false
+        }
         XUngrabPointer(o.dpy, X_CURRENT_TIME)
         o.grabbed = false
     }
@@ -468,6 +718,7 @@ fn poll(w: *Window) {
             }
             X_DESTROY_NOTIFY => w.closing = true
             X_MAPPING_NOTIFY => XRefreshKeyboardMapping(&ev)
+            X_GENERIC_EVENT => window_generic_event(w, &ev)
             _ => {}
         }
     }
@@ -504,10 +755,20 @@ fn set_cursor_visible(w: *Window, visible: bool) {
     XFlush(o.dpy)
 }
 
+// Text entry on / off (Windows: the input method editor). X11 has no such switch: the input
+// method of the session stays attached to the window either way; only `w.text_input` changes.
+fn set_text_input(w: *Window, on: bool) {
+    if w.os.dpy != nil {
+        w.text_input = on
+    }
+}
+
 // Locks the pointer for mouse-look: hidden, kept inside the window (grabbed and warped back to
 // the centre) while the window has the focus, and every motion moves a virtual position
 // without bounds, so `mouse_delta(&w.input)` is the relative motion of the frame (positions
-// in mouse events are that virtual position). Unlocking puts the pointer back where it was.
+// in mouse events are that virtual position). The motion is XInput 2 raw motion (device
+// counts, no pointer acceleration); without that extension or libXi.so.6 it is the motion of
+// the pointer in pixels. Unlocking puts the pointer back where it was.
 fn set_cursor_locked(w: *Window, locked: bool) {
     o := &w.os
     if o.dpy == nil || locked == w.cursor_locked {

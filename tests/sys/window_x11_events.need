@@ -1,1 +1,1 @@
-test -n "$AL_TEST_DISPLAY"
+test -n "$AL_TEST_DISPLAY" && ldconfig -p | grep -q "libXtst\.so\.6" && ldconfig -p | grep -q "libXi\.so\.6"
