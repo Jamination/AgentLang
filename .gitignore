@@ -22,3 +22,6 @@ __pycache__/
 *.exe
 *.test
 *.pyc
+
+# the Windows seed compiler is committed (build.bat starts from it)
+!/bootstrap/alc.exe
