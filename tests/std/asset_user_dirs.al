@@ -44,11 +44,13 @@ when TARGET_OS == Windows {
         prof := path_join(root, "profile")
         roaming := path_join(prof, "AppData/Roaming")
         file := path_join(root, "file")
+        sp := path_join(root, "app data \xc3\xa4\xe6\x97\xa5")
         []Case{
             Case{"own environment", []str{}, []str{APP}, []str{line(path_join(appdata, APP), true), line(path_join(appdata, APP), true)}},
             Case{"variables", []str{fmt("APPDATA=", ad)}, []str{APP}, []str{line(path_join(ad, APP), true), line(path_join(ad, APP), true)}},
             Case{"nested and empty names", []str{fmt("APPDATA=", ad)}, []str{"studio/game", "-"}, []str{line(path_join(ad, "studio/game"), true), line(path_join(ad, "studio/game"), true), line(ad, true), line(ad, true)}},
             Case{"fallback", []str{"APPDATA=", fmt("USERPROFILE=", prof)}, []str{APP}, []str{line(path_join(roaming, APP), true), line(path_join(roaming, APP), true)}},
+            Case{"spaces and non-ASCII text", []str{fmt("APPDATA=", replace(sp, "/", "\\"))}, []str{APP}, []str{line(path_join(replace(sp, "/", "\\"), APP), true), line(path_join(replace(sp, "/", "\\"), APP), true)}},
             Case{"nothing set", []str{"APPDATA=", "USERPROFILE="}, []str{APP}, []str{" false false", " false false", "io_error: no such file or directory"}},
             Case{"cannot be created", []str{fmt("APPDATA=", file)}, []str{APP}, []str{line(path_join(file, APP), false), line(path_join(file, APP), false), "io_error: not a directory"}},
         }
@@ -81,12 +83,14 @@ when TARGET_OS == Windows {
         xc := path_join(root, "xdg-config")
         home := path_join(root, "home")
         file := path_join(root, "file")
+        sp := path_join(root, "app data \xc3\xa4\xe6\x97\xa5")
         []Case{
             // "-": the inherited environment with only the XDG variables changed
             Case{"own environment", []str{"-", fmt("XDG_DATA_HOME=", xd), fmt("XDG_CONFIG_HOME=", xc)}, []str{APP}, []str{line(path_join(xd, APP), true), line(path_join(xc, APP), true)}},
             Case{"variables", []str{fmt("XDG_DATA_HOME=", xd), fmt("XDG_CONFIG_HOME=", xc), fmt("HOME=", home)}, []str{APP}, []str{line(path_join(xd, APP), true), line(path_join(xc, APP), true)}},
             Case{"nested and empty names", []str{fmt("XDG_DATA_HOME=", xd), fmt("XDG_CONFIG_HOME=", xc)}, []str{"studio/game", "-"}, []str{line(path_join(xd, "studio/game"), true), line(path_join(xc, "studio/game"), true), line(xd, true), line(xc, true)}},
             Case{"fallback", []str{fmt("HOME=", home), "XDG_DATA_HOME=rel/data", "XDG_CONFIG_HOME="}, []str{APP}, []str{line(path_join(home, fmt(".local/share/", APP)), true), line(path_join(home, fmt(".config/", APP)), true)}},
+            Case{"spaces and non-ASCII text", []str{fmt("HOME=", sp)}, []str{APP}, []str{line(path_join(sp, fmt(".local/share/", APP)), true), line(path_join(sp, fmt(".config/", APP)), true)}},
             Case{"nothing set", []str{}, []str{APP}, []str{" false false", " false false", "io_error: no such file or directory"}},
             Case{"cannot be created", []str{fmt("HOME=", file)}, []str{APP}, []str{line(path_join(file, fmt(".local/share/", APP)), false), line(path_join(file, fmt(".config/", APP)), false), "io_error: not a directory"}},
         }
