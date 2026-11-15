@@ -8,6 +8,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
 ### Breaking
 - `std.libc`'s `snprintf` is now declared as the variadic C function it is (`snprintf(buf: *u8,
   n: i64, format: *u8, ...)`) instead of taking exactly an `f64` and an `i64`: any number of
@@ -178,7 +180,8 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   C boundary; the compiler compiles sequentially there (no parallel back end).
 - No package manager: code outside `std` is included by path.
 
-[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Jamination/AgentLang/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Jamination/AgentLang/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Jamination/AgentLang/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Jamination/AgentLang/compare/v0.1.0...v0.2.0
