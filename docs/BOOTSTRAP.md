@@ -381,7 +381,7 @@ before -> now):
 | the compiler compiling itself | 10.54 G -> 10.38 G (-1.4 %) | 1222 -> 1210 ms |
 | the same at `-O0` | 3.28 G -> 3.29 G | 289 -> 280 ms |
 | the same on one thread (`ALC_JOBS=1`) | 10.13 G -> 9.99 G (-1.3 %) | 1443 -> 1429 ms |
-| size of `alc.exe` | | 4,507,136 -> 4,403,712 bytes (-2.3 %) |
+| size of `alc.exe` | | 4,523,520 -> 4,420,096 bytes (-2.3 %) |
 
 The instructions are exact; the times are not a steady measure. Only binarytrees moves
 beyond the noise (about 3 % at the median), and there the same instructions take 4.4 to 5.6 G
@@ -405,10 +405,11 @@ cycles over the 8 offsets; before 4.99 G, the place per block 4.86 G):
 - *A pointer to the block in a TEB field* (`ArbitraryUserPointer`, `gs:[0x28]`): 5.7 % fewer
   instructions, cycles 1 % lower (inside the spread). The field is the debugger's and the
   loader's, other run-time libraries have used it for the same purpose (Go's on
-  windows/amd64), and every thread would have to set it before
-  its first access: threads that C libraries create do not (their callbacks run AL code), nor
-  did the compiler's own thread with the large stack in the experiment (`alc.exe` built this
-  way ended without output). Rejected.
+  windows/amd64), and every thread would have to set it before its first access: threads
+  that C libraries create do not (their callbacks run AL code). In the experiment, where only
+  the library's own threads set it, `alc.exe` ended without output (most likely for this
+  reason: it works on a thread it makes with `CreateThread` itself, for the large stack).
+  Rejected.
 - *A register reserved for the block in all AL code, or the block passed as a hidden
   argument*: could at most close the rest of the gap to Linux on such a recursion, and costs
   a register everywhere; an AL function is called by C as it is (callbacks, on any thread),
