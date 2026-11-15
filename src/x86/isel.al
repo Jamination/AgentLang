@@ -398,6 +398,12 @@ priv struct Sel {
     ea_loop: Vec[i32]
     param_of: Vec[i64] // the Param instruction of each parameter, or -1
     loops: Loops
+    // Windows: the register with the address of this thread's block (NOREG: not used), the
+    // blocks with an instruction that uses it, and where the terminator's instructions start
+    // in each selected block (see tls_place)
+    tls_reg: i64
+    tls_uses: Vec[i32]
+    term_at: Vec[i32]
 }
 
 // ---------- frame slots of allocas ----------
@@ -693,8 +699,12 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         ea_loop: ea_loop,
         param_of: vec_fill(f.params.len, -1),
         loops: loops,
+        tls_reg: NOREG,
     }
     nb := f.blocks.len
+    if target_os == TargetWindows {
+        s.term_at = vec_fill(nb, i32(0))
+    }
     s.mf.blocks.reserve(nb)
     for b in 0..nb {
         s.mf.blocks.push(MBlock{insts: vec[MInst](), succs: f.succs(b), depth: if b < len(depths) { depths[b] } else { 0 }, align: false})
@@ -776,7 +786,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 s.out.push(minst_new(Mov, 8, R(d), I(f.insts[v].k)))
                 continue
             }
-            if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr && !s.win_tls(v) || op == FAddr || op == Proj {
+            if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr || op == FAddr || op == Proj {
                 continue
             }
             if cleanup_is_root(op) || s.needed[v] {
@@ -797,8 +807,12 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
             insts.extend(s.out[starts[c]..end])
             end = starts[c]
         }
+        if target_os == TargetWindows {
+            s.term_at[b] = i32(insts.len - if starts.len > 1 { starts[1] } else { s.out.len })
+        }
         s.mf.blocks[b].insts = insts
     }
+    s.tls_place()
     return s.mf
 }
 
@@ -874,9 +888,15 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
     }
     if i.op == GAddr && self.m.globals[i.k].tls {
         if target_os == TargetWindows {
-            // (computed once where it is defined: see tls_block)
-            self.needed[v] = true
-            return self.vr(v)
+            // an offset from the register that holds the address of the thread block
+            b := self.tls_base()
+            off := win_tls_off[i.k]
+            if off == 0 {
+                return b
+            }
+            r := new_vreg(&self.mf, 0)
+            self.e(Lea, 8, R(r), M(Mem{base: i32(b), idx: NOREG, scale: 1, disp: i32(off), kind: MK_NORMAL, id: 0}))
+            return r
         }
         // the thread pointer (fs:0 holds itself), then the global's offset from it
         r := new_vreg(&self.mf, 0)
@@ -1001,7 +1021,21 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
             m.id = i32(i.k)
             return
         }
-        if mem && target_os != TargetWindows {
+        if target_os == TargetWindows {
+            // Windows: an offset from the register with the address of the thread block
+            off := i64(m.disp) + win_tls_off[i.k]
+            if fits_i32(off) && (m.base == NOREG || m.idx == NOREG) {
+                b := i32(self.tls_base())
+                if m.base == NOREG {
+                    m.base = b
+                } else {
+                    m.idx = b
+                    m.scale = 1
+                }
+                m.disp = i32(off)
+                return
+            }
+        } else if mem {
             // Linux: fs-relative, the base and index registers still fold (not for a `lea`)
             m.kind = MK_TLS
             m.id = i32(i.k)
@@ -1078,34 +1112,103 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
     }
 }
 
-// a thread-local global's address on Windows: a value of its own (see tls_block)
-priv fn win_tls(self: *Sel, v: i64) -> bool {
-    i := &self.f.insts[v]
-    return target_os == TargetWindows && i.op == GAddr && self.m.globals[i.k].tls
-}
-
-// the global the Windows loader writes the index of the program's thread block to, or -1 (found
-// by isel_init before any function is selected: the back end's threads only read it)
+// Windows: the global the loader writes the index of the program's thread block to (-1: the
+// run-time library has none) and the offset of every thread-local global in the block
+// (layout_tls; 0 for the other globals). Set by isel_init before any function is selected:
+// the back end's threads only read them.
 priv win_tls_index := -1
+priv win_tls_off: Vec[i64]
 
 fn isel_init(m: *Module) {
     win_tls_index = -1
+    if target_os != TargetWindows {
+        return
+    }
     for gi in 0..m.globals.len {
         if m.globals[gi].name == "__win_tls_index" && !m.globals[gi].readonly {
             win_tls_index = gi
         }
     }
+    win_tls_off = vec_fill(m.globals.len, 0)
+    size := layout_tls(m, &win_tls_off, false)
+    assert fits_i32(size), "isel: the thread block is too large"
 }
 
-// Windows: d = the address of the thread-local global g: the TEB's ThreadLocalStoragePointer
-// (gs:0x58) indexed by __win_tls_index is this thread's block (see layout_tls)
-priv fn tls_block(self: *Sel, d: i64, g: i64) {
+// Windows: the register that holds the address of this thread's block in this function, for
+// an instruction of the block being selected (tls_place sets it where it is needed)
+priv fn tls_base(self: *Sel) -> i64 {
+    if self.tls_reg == NOREG {
+        self.tls_reg = new_vreg(&self.mf, 0)
+    }
+    if self.tls_uses.is_empty() || self.tls_uses.last() != self.cur_block {
+        self.tls_uses.push(self.cur_block)
+    }
+    return self.tls_reg
+}
+
+// the block b, or if b is in a loop the block before the outermost loop around it
+priv fn before_loops(self: *Sel, cfg: *Cfg, b: i64) -> i64 {
+    while b < self.loops.loop_of.len && self.loops.loop_of[b] >= 0 {
+        li := i64(self.loops.loop_of[b])
+        h := self.loops.loops[li].header
+        if h == 0 {
+            break
+        }
+        b = i64(cfg.idom[h])
+    }
+    return b
+}
+
+// Windows: sets the register of the thread block (tls_base) where the function needs it. The
+// address is the entry __win_tls_index of the TEB's ThreadLocalStoragePointer (gs:0x58): three
+// loads, which no thread-local access repeats. A block that uses the register gets them
+// before its first use, a loop that uses it before the loop (the outermost one), and a block
+// that another such place dominates gets none. Several places may set the register on one
+// path: always to the same value.
+priv fn tls_place(self: *Sel) {
+    if self.tls_reg == NOREG {
+        return
+    }
     assert win_tls_index >= 0, "isel: the run-time library lacks __win_tls_index"
+    cfg := cfg_new(self.f)
+    places := vec[i64]()
+    for u in self.tls_uses {
+        p := self.before_loops(&cfg, i64(u))
+        if !contains(&places, p) {
+            places.push(p)
+        }
+    }
+    d := self.tls_reg
     t := new_vreg(&self.mf, 0)
-    self.e(Mov, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0x58, kind: MK_TLS, id: -1}))
-    self.e(Mov, 4, R(t), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(win_tls_index)}))
-    self.e(Mov, 8, R(d), M(Mem{base: i32(d), idx: i32(t), scale: 8, disp: 0, kind: MK_NORMAL, id: 0}))
-    self.e(Lea, 8, R(d), M(Mem{base: i32(d), idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(g)}))
+    for p in places {
+        served := false
+        for q in places {
+            if q != p && cfg.dom(q, p) {
+                served = true
+                break
+            }
+        }
+        if served {
+            continue
+        }
+        // before the first instruction that uses the register, else before the terminator
+        old := self.mf.blocks[p].insts
+        at := i64(self.term_at[p])
+        for k in 0..at {
+            if mir_count_reg(&old[k], d) > 0 {
+                at = k
+                break
+            }
+        }
+        insts := vec[MInst]()
+        insts.reserve(old.len + 3)
+        insts.extend(old[..at])
+        insts.push(minst_new(Mov, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0x58, kind: MK_TLS, id: -1})))
+        insts.push(minst_new(Mov, 4, R(t), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(win_tls_index)})))
+        insts.push(minst_new(Mov, 8, R(d), M(Mem{base: i32(d), idx: i32(t), scale: 8, disp: 0, kind: MK_NORMAL, id: 0})))
+        insts.extend(old[at..])
+        self.mf.blocks[p].insts = insts
+    }
 }
 
 // an atomic operation (Op.Atomic): load `mov`, store and swap `xchg`, add `lock xadd`, cas
@@ -1646,7 +1749,6 @@ priv fn inst(self: *Sel, v: i64) {
     i := &self.f.insts[v]
     ty := i.ty
     match i.op {
-        GAddr => self.tls_block(self.vr(v), i.k)
         Add => {
             if ty == I64 {
                 m := mem_new()

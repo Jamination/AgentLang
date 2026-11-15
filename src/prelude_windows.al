@@ -217,8 +217,8 @@ priv fn on_unhandled(info: i64) -> i32 {
 }
 
 // the index of the program's thread block among the blocks of the thread (TEB at gs:0x58):
-// the loader writes it (AddressOfIndex of the TLS directory); the code of every access to a
-// thread-local global reads it (src/x86/isel.al)
+// the loader writes it (AddressOfIndex of the TLS directory); the code reads it where a
+// function looks up the address of the thread's block (tls_place in src/x86/isel.al)
 __win_tls_index: u32
 
 // sp: what the loader passes (the PEB), not used
