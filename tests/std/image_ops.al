@@ -1,5 +1,6 @@
 // std.image: encoders (round trips through the decoders), compression, pixel operations
 use std.image
+use std.os
 
 fails: i64
 
@@ -86,9 +87,9 @@ fn main() {
 
     // files
     dir := "tmp"
-    syscall(83, cstr(dir), 0o755)
-    p := fmt(dir, "/image_ops_", syscall(39), ".png")
-    b := fmt(dir, "/image_ops_", syscall(39), ".bmp")
+    make_dir(dir)
+    p := fmt(dir, "/image_ops_", process_id(), ".png")
+    b := fmt(dir, "/image_ops_", process_id(), ".bmp")
     pic := picture(40, 30, 4)
     ok("save", png_save(p, pic) && bmp_save(b, pic))
     l1, g1 := image_load(p)
@@ -99,8 +100,7 @@ fn main() {
     m1, bad1 := png_load(b)
     m2, bad2 := image_load("tmp/no_such_image.png")
     ok("load failures", !bad1 && !bad2)
-    syscall(87, cstr(p))
-    syscall(87, cstr(b))
+    ok("remove", remove_file(p) && remove_file(b))
 
     // pixel access and conversion
     img := image_new(4, 3, 4)

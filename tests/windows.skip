@@ -1,26 +1,11 @@
 # Tests that are not run by `tests/run.sh --target windows`: "dir/name reason". Everything
-# else is built for Windows and run under Wine. The files, directories, processes and I/O
-# errors that the Linux-specific std tests cover are tested portably by
-# std/portable_files and std/portable_process.
-run/emit_asm runs the Linux compiler build/alc; makes Linux system calls (getpid)
-run/frame_too_large runs the Linux compiler build/alc; makes Linux system calls (getpid)
-run/link_too_large runs the Linux compiler build/alc; makes Linux system calls (getpid)
-run/io_error Linux system calls (getpid, unlink) and Linux paths (/tmp)
-run/lib_path_nul Linux system calls (unlink) and Linux paths (/tmp)
-run/lib_read_all_size Linux system calls (unlink) and Linux paths (/tmp, /proc)
-run/lib_alloc_limits Linux system calls (fork, wait4)
-run/lib_args_empty_argv Linux system calls (fork, execve with an empty argv)
-run/lib_fmtf_negative Linux system calls (fork, wait4)
-run/lib_stdout_errors Linux system calls (fork, dup2, fcntl) and /dev/full
-std/asset Linux system calls (getpid) and /proc files
-std/asset_data Linux system calls (getpid)
-std/asset_cloexec Linux close-on-exec of descriptors, seen through /proc
-std/asset_io_error Linux system calls (getpid) and /proc files
-std/image_ops Linux system calls (mkdir, unlink, getpid)
-std/os Linux programs (/bin/sh, head, tr) and system calls (chmod)
-std/os_spawn Linux programs (/bin/sh, sleep, echo) and /proc
-std/time_huge runs the Linux program timeout
-std/audio_wav Linux system calls (unlink) and Linux paths (/tmp)
+# else is built for Windows and run under Wine. Only what is Linux by nature is listed: the
+# library tests run on both systems (they work in directories under tmp/ and start
+# themselves as child processes), and tests/sys/win_* add the cases only Windows has.
+run/lib_args_empty_argv an empty argv (execve with argv = {NULL}) is a Linux situation: a Windows process always has a command line
+run/lib_stdout_errors Linux system calls (fork, dup2, fcntl O_NONBLOCK) and /dev/full; a closed standard output on Windows is sys/win_process
+std/asset_cloexec Linux close-on-exec of descriptors, seen through a FIFO and /proc/<pid>/fdinfo
+std/os the Linux half of the std.os tests: /bin/sh, signals a program sends itself, chmod, `#!` scripts (the portable half: std/os_files, std/os_run, std/os_spawn)
 std/window_logic the X11 translation helpers of std.window (key_from_keysym, XEvent accessors) exist only on Linux
 sys/window_nodisplay an X11 display name (WindowDesc.display) means nothing on Windows
 sys/window_x11 needs an X server (AL_TEST_DISPLAY)
@@ -30,14 +15,8 @@ sys/audio_alsa_params std.alsa binds libasound.so.2 (Linux)
 check/wayland std.wayland is Linux only
 check/wayland_window std.wayland is Linux only
 sys/vk_triangle std.vk binds libvulkan.so.1 (Linux)
-sys/libc C libraries with Linux names (libc.so.6)
-sys/nested_fn_callback C libraries with Linux names (libc.so.6)
-sys/extern_data C libraries with Linux names (libc.so.6)
-sys/backtrace_qsort C libraries with Linux names (libc.so.6)
-sys/backtrace_strlen C libraries with Linux names (libc.so.6)
 fail/extern on Windows extern functions may take and return structs (Microsoft x64): other diagnostics
 sys/shaderc std.shaderc binds libshaderc_shared.so.1 (Linux)
 std/vk_glue std.vk binds libvulkan.so.1 (Linux)
 sys/vk_renderer std.vk binds libvulkan.so.1 (Linux)
 sys/vk_present std.vk binds libvulkan.so.1; std.wayland is Linux only
-sys/thread_libc the C library of Linux (libc.so.6)

@@ -1,4 +1,6 @@
 // io_error(): the OS error number of the most recent failed file operation; error_text(e)
+use std.os
+
 fn report(what: str, ok: bool) {
     print(what, ok, io_error(), error_text(io_error()))
 }
@@ -26,12 +28,13 @@ fn main() {
     report("read again", can_read("tests/run/data/const_embed.txt"))
     report("write into missing directory", write_file("tests/run/no_such_dir/x.txt", "x"))
     report("write to a directory", write_file("tests/run/data", "x"))
-    path := fmt("/tmp/al_io_error_", syscall(39), ".txt")
+    make_dir("tmp")
+    path := fmt("tmp/al_io_error_", process_id(), ".txt")
     report("write", write_file(path, "hello"))
     back, ok3 := read_file(path)
     report("read back", ok3)
     print(back)
-    syscall(87, cstr(path))
+    remove_file(path)
     report("read removed", can_read(path))
     // read_all on a bad descriptor
     junk := read_all(987)

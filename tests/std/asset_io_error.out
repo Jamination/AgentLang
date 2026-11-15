@@ -4,7 +4,7 @@ read true 0 no error
 read missing false 2 no such file or directory
 read directory false 21 is a directory
 read below a file false 20 not a directory
-read /proc file true 0 no error
+read a file without a size true 0 no error
 write into missing directory false 2 no such file or directory
 write to a directory false 21 is a directory
 make_dir on a file false 17 file exists

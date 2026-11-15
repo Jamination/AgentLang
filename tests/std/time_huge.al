@@ -3,6 +3,16 @@
 // period count does not fit in an i64 reports the largest i64 instead of a negative count
 use std.os
 
+// starts the program again with `mode`; after 0.2 s it must still run: (running, the status
+// after kill)
+fn still_asleep(me: str, mode: str) -> (bool, i64) {
+    p, _ := spawn([]str{me, mode})
+    sleep_ms(200)
+    _, ended := try_wait(p)
+    kill(p, 9)
+    (!ended, wait(p))
+}
+
 fn main() -> i64 {
     a := args()
     if len(a) > 1 && a[1] == "child-ms" {
@@ -13,7 +23,7 @@ fn main() -> i64 {
         sleep_until(1e300)
         return 0
     }
-    print(run([]str{"timeout", "-s", "KILL", "0.2", a[0], "child-ms"}), run([]str{"timeout", "-s", "KILL", "0.2", a[0], "child-until"}))
+    print(still_asleep(a[0], "child-ms"), still_asleep(a[0], "child-until"))
     sleep_until(0.0 / 0.0)
     t := timer(f64(1e-9), true)
     print(t.tick(f64(1e300)) == 0x7FFF_FFFF_FFFF_FFFF, t.left == t.duration, t.tick(f64(0.0) / 0.0), t.tick(f64(2.5e-9)))

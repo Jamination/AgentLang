@@ -779,6 +779,35 @@ priv fn is_dir_w(w: *u16) -> bool {
     return a != 0xFFFFFFFF && a & 0x10 != 0
 }
 
+// -errno for the error e of a call on the path w. "Path not found" (3) is what Windows says
+// both where a directory on the way is missing (ENOENT) and where a file stands in its place
+// (Linux: ENOTDIR): the nearest part of the path that exists tells which
+priv fn path_error(w: *u16, e: u32) -> i64 {
+    if e != 3 {
+        return -errno_of(e)
+    }
+    i := wcslen(w)
+    loop {
+        // w[..i] without its last component and the separators before it
+        while i > 0 && w[i - 1] != 47 && w[i - 1] != 92 {
+            i -= 1
+        }
+        while i > 0 && (w[i - 1] == 47 || w[i - 1] == 92) {
+            i -= 1
+        }
+        if i == 0 || w[i - 1] == 58 {
+            return -2
+        }
+        c := w[i]
+        w[i] = 0
+        a := GetFileAttributesW(w)
+        w[i] = c
+        if a != 0xFFFFFFFF {
+            return if a & 0x10 == 0 { -20 } else { -2 }
+        }
+    }
+}
+
 // opens a file for reading, or creates or empties it for writing: a handle or -errno
 fn __os_open(path: *u8, write: bool) -> i64 {
     buf: [1024]u16
@@ -791,7 +820,7 @@ fn __os_open(path: *u8, write: bool) -> i64 {
         if e == 5 && is_dir_w(w) {
             return -21
         }
-        return -errno_of(e)
+        return path_error(w, e)
     }
     return h
 }
@@ -1189,32 +1218,45 @@ fn __os_remove_file(path: *u8) -> i64 {
         if e == 5 && is_dir_w(w) {
             return -21
         }
-        return -errno_of(e)
+        return path_error(w, e)
     }
     return 0
 }
 
 fn __os_remove_dir(path: *u8) -> i64 {
     buf: [4096]u16
-    if RemoveDirectoryW(wide_c(buf[..], path)) == 0 {
-        return last_error()
+    w := wide_c(buf[..], path)
+    if RemoveDirectoryW(w) == 0 {
+        return path_error(w, GetLastError())
     }
     return 0
 }
 
 fn __os_make_dir(path: *u8) -> i64 {
     buf: [4096]u16
-    if CreateDirectoryW(wide_c(buf[..], path), 0) == 0 {
-        return last_error()
+    w := wide_c(buf[..], path)
+    if CreateDirectoryW(w, 0) == 0 {
+        return path_error(w, GetLastError())
     }
     return 0
 }
 
+// a file takes the place of an existing file `to`, as on Linux; a directory and a file never
+// replace each other (ENOTDIR / EISDIR there; MoveFileExW says "access denied", Wine moves)
 fn __os_rename(from: *u8, to: *u8) -> i64 {
     a: [4096]u16
     b: [4096]u16
-    if MoveFileExW(wide_c(a[..], from), wide_c(b[..], to), 1) == 0 {      // MOVEFILE_REPLACE_EXISTING
-        return last_error()
+    wf := wide_c(a[..], from)
+    wt := wide_c(b[..], to)
+    af := GetFileAttributesW(wf)
+    at := GetFileAttributesW(wt)
+    if af != 0xFFFFFFFF && at != 0xFFFFFFFF && (af ^ at) & 0x10 != 0 {
+        return if af & 0x10 != 0 { -20 } else { -21 }
+    }
+    if MoveFileExW(wf, wt, 1) == 0 {      // MOVEFILE_REPLACE_EXISTING
+        e := GetLastError()
+        r := path_error(wf, e)
+        return if r == -2 && e == 3 { path_error(wt, e) } else { r }
     }
     return 0
 }
@@ -1247,7 +1289,7 @@ fn __os_list_dir(path: *u8, names: *Vec[str]) -> i64 {
         if e == 2 && is_dir_w(w) {
             return 0
         }
-        return -errno_of(e)
+        return path_error(w, e)
     }
     loop {
         np := cast[*u16](cast[i64](ptr(fd)) + 44)
@@ -1317,13 +1359,18 @@ priv fn locate(name: str) -> (str, i64) {
         cands.push(concat(name, ".exe"))
     }
     if base > 0 {
+        // (a directory cannot be run: "permission denied", as on Linux)
+        e := 2
         for c in cands {
             kind, _, _ := __os_stat(cstr(c))
             if kind == 1 {
                 return (c, 0)
             }
+            if kind == 2 {
+                e = 13
+            }
         }
-        return ("", 2)
+        return ("", e)
     }
     path, _ := env_get("PATH")
     for dir in split(path, ';') {

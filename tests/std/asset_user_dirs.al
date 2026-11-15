@@ -50,7 +50,7 @@ when TARGET_OS == Windows {
             Case{"nested and empty names", []str{fmt("APPDATA=", ad)}, []str{"studio/game", "-"}, []str{line(path_join(ad, "studio/game"), true), line(path_join(ad, "studio/game"), true), line(ad, true), line(ad, true)}},
             Case{"fallback", []str{"APPDATA=", fmt("USERPROFILE=", prof)}, []str{APP}, []str{line(path_join(roaming, APP), true), line(path_join(roaming, APP), true)}},
             Case{"nothing set", []str{"APPDATA=", "USERPROFILE="}, []str{APP}, []str{" false false", " false false", "io_error: no such file or directory"}},
-            Case{"cannot be created", []str{fmt("APPDATA=", file)}, []str{APP}, []str{line(path_join(file, APP), false), line(path_join(file, APP), false), "io_error: no such file or directory"}},
+            Case{"cannot be created", []str{fmt("APPDATA=", file)}, []str{APP}, []str{line(path_join(file, APP), false), line(path_join(file, APP), false), "io_error: not a directory"}},
         }
     }
 
