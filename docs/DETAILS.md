@@ -642,6 +642,26 @@ fn main() {
 - A plain AL function (also a nested or anonymous one) can be passed where C expects a callback
   (`fn(*u8, *u8) -> i32`), as long as its parameters are scalars. It may also be called on a
   thread that the C library created: see [Threads](#threads).
+- **Variadic C functions.** The parameter list of an `extern` function may end in `...` after
+  at least one named parameter: `extern "libc.so.6" fn printf(format: *u8, ...) -> i32`. The
+  named parameters are checked and passed as usual; each further argument is passed with the
+  C default argument promotions, as a C compiler passes it:
+  - `i8`, `i16`, `u8`, `u16` become `i32`, sign-extended from a signed type and zero-extended
+    from an unsigned one (what C's `va_arg(ap, int)` reads); `bool` becomes the `i32` 0 or 1;
+  - `f32` becomes `f64` (its exact value: `f32(1.1)` arrives as 1.100000023841858);
+  - `i32`, `u32`, `i64`, `u64`, `f64`, pointers, function values (a code pointer, as for a
+    callback) and enums without data (a C `int`) are passed as they are;
+  - an untyped integer literal or constant is an `i32` if its value fits, else an `i64` (a
+    decimal literal above the `i64` range a `u64`): `%ld` wants `i64(42)`, as `long` wants
+    `42L` in C; an untyped float literal is an `f64`; `nil` is a `*u8`.
+
+  Structs, tuples, arrays, slices (`str` too: pass `ptr(s)`, which is NUL-terminated for
+  literals, or `cstr(s)`), vectors and matrices, enums with data and `()` are errors that name
+  the argument and its type. A variadic `extern` function cannot be used as a function value,
+  and `...` stands nowhere else: an AL function, nested or anonymous function or function type
+  takes a slice (`xs: []T`) instead. Defining a variadic function in AL (one that C calls,
+  reading its arguments with `va_list`) is not supported. Linux: `al` holds the number of
+  vector registers used, as the System V convention asks of every call of a variadic function.
 - `extern "lib" name: T` declares a global variable (or constant) `name` of the C library,
   with the C type written as `T` (a C struct as an AL struct of the same layout: `extern
   "libwayland-client.so.0" wl_surface_interface: WlInterface`). It is read, assigned and
@@ -684,7 +704,9 @@ fn main() {
   as C does there: one of 1, 2, 4 or 8 bytes travels as an integer of that size, any other is
   passed as a pointer to a copy the caller makes and returned through a hidden pointer. Vector
   types (`vec2` ... `quat`) cannot cross the C boundary.
-- C functions with a variable number of arguments (`printf`) cannot be declared.
+- Calls of variadic C functions (`...`, above) pass a floating-point argument in one of the
+  first four slots in both its xmm register and the slot's integer register, as the convention
+  asks (`va_arg` reads it from the integer register's home in the shadow space).
 
 ## Threads
 
@@ -829,7 +851,7 @@ literal there is written in parentheses).
 ```
 file      = { decl }
 decl      = ["priv"] ["inline" | "noinline"] "fn" IDENT [tparams] params ["->" type] block
-          | ["priv"] "extern" STRING "fn" IDENT params ["->" type]
+          | ["priv"] "extern" STRING "fn" IDENT cparams ["->" type]
           | "extern" STRING IDENT ":" type
           | ["priv"] "struct" IDENT [tparams] "{" { IDENT ":" type [","] } "}"
           | ["priv"] "enum" IDENT [tparams] "{" { IDENT ["(" type {"," type} ")"] [","] } "}"
@@ -840,6 +862,7 @@ decl      = ["priv"] ["inline" | "noinline"] "fn" IDENT [tparams] params ["->" t
           | "when" expr "{" { decl } "}" { "else" "when" expr "{" { decl } "}" } [ "else" "{" { decl } "}" ]
 tparams   = "[" IDENT {"," IDENT} "]"
 params    = "(" [IDENT ":" type {"," IDENT ":" type}] ")"
+cparams   = "(" [IDENT ":" type {"," IDENT ":" type} ["," "..."]] ")"
 type      = IDENT ["[" type {"," type} "]"] | "*" type | "[" "]" type | "[" expr "]" type
           | "fn" "(" [type {"," type}] ")" ["->" type] | "(" type {"," type} ")"
 block     = "{" { stmt } "}"

@@ -272,6 +272,8 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
     if rty == T_ERR {
         return val_err()
     }
+    // Windows: a call of a variadic C function, whose call instruction gets aux 2 (see isel)
+    cvar := false
     match callee {
         Direct(fid) => {
             match self.cx.module.funcs[fid].ext {
@@ -282,6 +284,7 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
                     // Windows: every function has the C calling convention; a C function is
                     // called through its import address table slot
                     callee = Ind(self.extern_slot(x))
+                    cvar = self.cx.module.externs[x].variadic
                 }
                 None => {}
             }
@@ -329,6 +332,7 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
         Direct(fid) => (Op.Call, fid)
         Ind(_) => (Op.CallInd, 0)
     }
+    first := self.f.insts.len
     res: Val
     match rabi {
         RetAbi.None => {
@@ -365,6 +369,14 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
                 }
             }
             res = self.mval(rty, tmp)
+        }
+    }
+    if cvar {
+        for j in first..self.f.insts.len {
+            if self.f.insts[j].op == CallInd {
+                self.f.im(j).aux = 2
+                break
+            }
         }
     }
     if rty == T_NEVER {
@@ -739,7 +751,7 @@ priv fn conversion(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
 
 // The value of function `n`: with explicit type arguments, or with the types taken from
 // the expected function type; of several definitions the one that fits is used.
-fn fn_value(self: *Fx, n: str, explicit: Opt[Vec[i64]], expect: Opt[i64]) -> Opt[Val] {
+fn fn_value(self: *Fx, n: str, explicit: Opt[Vec[i64]], expect: Opt[i64], pos: Pos) -> Opt[Val] {
     cands := self.cx.fn_candidates(n)
     has_want := false
     wp: Vec[i64]
@@ -802,6 +814,10 @@ fn fn_value(self: *Fx, n: str, explicit: Opt[Vec[i64]], expect: Opt[i64]) -> Opt
         ty := self.cx.types.intern(Fn(ptys, rty))
         match self.cx.module.funcs[fid].ext {
             Some(x) => {
+                if self.cx.module.externs[x].variadic {
+                    self.err(pos, fmt("the C function `", ast_plain(d.name), "` takes a variable number of arguments (`...`) and cannot be used as a function value: call it directly"))
+                    return Some(val_err())
+                }
                 // the address of a C function comes from its import slot
                 return Some(self.sval(ty, self.extern_slot(x)))
             }
@@ -876,8 +892,12 @@ fn param_accepts(self: *Fx, d: *FnDecl, pt: *TypeAst, ty: i64, is_recv: bool, ex
 }
 
 // how well parameter `pi` of `d` fits an untyped literal argument: 0 = its default type,
-// 1 = same kind, 2 = generic, 3 = integer literal for a float; None = does not fit
+// 1 = same kind, 2 = generic, 3 = integer literal for a float or an argument for the `...`
+// of a C function; None = does not fit
 priv fn literal_fit(self: *Fx, d: *FnDecl, pi: i64, a: *Expr) -> Opt[i64] {
+    if pi >= d.params.len {
+        return Some(3)
+    }
     pt := &d.params[pi].1
     empty := map[str, i64]()
     if lower_call_mentions_unbound(pt, d.tparams.items(), &empty) {
@@ -933,6 +953,9 @@ fn lower_call_call_overloaded_sigs(s: *Fx, cands: []i64) -> str {
         for j in 0..d.params.len {
             ps.push(ast_type_str(&d.params[j].1))
         }
+        if d.variadic {
+            ps.push("...")
+        }
         parts.push(fmt(d.name, "(", join(ps.items(), ", "), ")"))
     }
     return join(parts.items(), "; ")
@@ -954,7 +977,7 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
             Some(t) => t.len == d.tparams.len
             None => true
         }
-        if d.params.len == total && targs_ok {
+        if (d.params.len == total || (d.variadic && total > d.params.len)) && targs_ok {
             alive.push(di)
         }
     }
@@ -1011,7 +1034,8 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
             for ai in 0..alive.len {
                 di := alive[ai]
                 d := self.cx.fn_decls[di]
-                if self.param_accepts(d, &d.params[off + i].1, v.ty, false, lower_call_as_slice(explicit)) {
+                // (an argument for the `...` of a C function is checked when it is passed)
+                if off + i >= d.params.len || self.param_accepts(d, &d.params[off + i].1, v.ty, false, lower_call_as_slice(explicit)) {
                     keep.push(di)
                 }
             }
@@ -1083,12 +1107,14 @@ fn call_overloaded(self: *Fx, cands: []i64, explicit: Opt[Vec[i64]], recv: Opt[V
             for i in 0..len(args) {
                 a := &args[i]
                 vn := self.variant_ref(a)
-                if vn == "" {
+                d0 := self.cx.fn_decls[ranked[0].1]
+                d1 := self.cx.fn_decls[ranked[1].1]
+                if vn == "" || off + i >= d0.params.len || off + i >= d1.params.len {
                     continue
                 }
                 empty := map[str, i64]()
-                t0 := self.cx.resolve_quiet(&self.cx.fn_decls[ranked[0].1].params[off + i].1, &empty)
-                t1 := self.cx.resolve_quiet(&self.cx.fn_decls[ranked[1].1].params[off + i].1, &empty)
+                t0 := self.cx.resolve_quiet(&d0.params[off + i].1, &empty)
+                t1 := self.cx.resolve_quiet(&d1.params[off + i].1, &empty)
                 match (self.cx.types.k(t0), self.cx.types.k(t1)) {
                     (Enum(_), Enum(_)) if t0 != t1 => {
                         s := lower_call_call_overloaded_sigs(self, cands)
@@ -1123,12 +1149,16 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
             nloc = 1
         }
     }
-    if d.params.len != len(args) + nrecv + nloc {
+    if d.params.len != len(args) + nrecv + nloc && !(d.variadic && len(args) + nrecv > d.params.len) {
         sig := vec[str]()
         for j in 0..d.params.len {
             sig.push(d.params[j].0)
         }
-        self.err(pos, fmt("function `", d.name, "(", join(sig.items(), ", "), ")` expects ", d.params.len, " argument(s), got ", len(args) + nrecv, self.cx.priv_note(d.name, pos)))
+        if d.variadic {
+            sig.push("...")
+        }
+        least := if d.variadic { "at least " } else { "" }
+        self.err(pos, fmt("function `", d.name, "(", join(sig.items(), ", "), ")` expects ", least, d.params.len, " argument(s), got ", len(args) + nrecv, self.cx.priv_note(d.name, pos)))
         lower_call_eval_all(self, args)
         return val_err()
     }
@@ -1191,11 +1221,30 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
         }
         None => {}
     }
+    // the arguments for the `...` of a C function, promoted
+    extra := vec[Val]()
     // pass 1: typed arguments; pass 2: untyped literals
     for pass in 0..2 {
         arg_loop: for i in 0..len(args) {
             a := &args[i]
             pi := i + nrecv
+            if pi >= d.params.len {
+                // (a C function is never generic: everything is passed in pass 1)
+                if pass == 0 {
+                    pv: Opt[Val] = None
+                    for p in pre {
+                        if p.0 == i {
+                            pv = Some(p.1)
+                        }
+                    }
+                    xv := self.vararg(d, pi, a, pv, args[i + 1..])
+                    if xv.ty == T_ERR {
+                        failed = true
+                    }
+                    extra.push(xv)
+                }
+                continue
+            }
             for p in pre {
                 if p.0 != i {
                     continue
@@ -1336,7 +1385,60 @@ fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], r
     if failed {
         return val_err()
     }
+    for x in extra {
+        if x.ty == T_NEVER {
+            // (an argument that does not return: the call is never reached)
+            return val_never()
+        }
+        ptys.push(x.ty)
+        final_vals.push(x)
+    }
     return self.emit_call(Direct(fid), ptys.items(), rty, final_vals)
+}
+
+// Argument `pi` (counted from 0, the receiver included) of a call of the C function `d`, one
+// for its `...`: evaluated without a parameter type (`pv`: already evaluated by overload
+// resolution) and promoted as C promotes the arguments of a variadic function. Untyped
+// integer literals are `i32` if they fit, else `i64` (`u64` beyond it), untyped float literals
+// `f64`, `nil` a `*u8`; integers narrower than 32 bits and `bool` widen to `i32` (sign- or
+// zero-extended as the source type is signed), `f32` to `f64`; 32- and 64-bit integers, `f64`,
+// pointers, function values and enums without data (a C int) pass as they are.
+priv fn vararg(self: *Fx, d: *FnDecl, pi: i64, a: *Expr, pv: Opt[Val], later: []Expr) -> Val {
+    v := match pv {
+        Some(x) => x
+        None => {
+            exp: Opt[i64] = None
+            if self.is_untyped(a) {
+                match (a.k, self.cx.const_eval(a)) {
+                    (Nil, _) => { exp = Some(self.cx.types.ptr_to(T_U8)) }
+                    (_, Some(Float(_))) => { exp = Some(T_F64) }
+                    (Int(_, _), Some(Int(n))) if n < 0 => { exp = Some(T_U64) }
+                    (_, Some(Int(n))) => { exp = Some(if n >= -0x80000000 && n <= 0x7FFFFFFF { T_I32 } else { T_I64 }) }
+                    _ => {}
+                }
+            }
+            self.expr(a, exp)
+        }
+    }
+    if v.ty == T_ERR || v.ty == T_NEVER {
+        return v
+    }
+    hint := ""
+    match self.cx.types.k(v.ty) {
+        Bool => return self.convert(v, T_I32, a.pos)
+        Int(bits, _) if bits < 32 => return self.convert(v, T_I32, a.pos)
+        F32 => return self.convert(v, T_F64, a.pos)
+        Int(_, _), F64, Ptr(_), Fn(_, _) => return self.stabilize(v, later)
+        Enum(e) if self.cx.types.enums[e].simple => return self.stabilize(v, later)
+        Slice(T_U8) => { hint = "pass `ptr(s)` for a C string (a literal is NUL-terminated; `cstr(s)` makes a NUL-terminated copy)" }
+        Slice(_) => { hint = "pass `ptr(xs)` and the length" }
+        Vec(_), Quat, Mat4 => { hint = "pass the components as `f64`" }
+        Enum(_) => { hint = "an enum with data has no C equivalent; pass its fields, or `i64(e)` for the variant number" }
+        Unit => { hint = "it has no value" }
+        _ => { hint = "pass a pointer to it (`&x`) if the C function expects one" }
+    }
+    self.err(a.pos, fmt("argument ", pi + 1, " of `", ast_plain(d.name), "` (for its `...`) has type ", self.tyname(v.ty), ", which cannot be passed to a variadic C function: ", hint))
+    return val_err()
 }
 
 priv fn builtin_word(k: TyK) -> bool {

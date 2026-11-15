@@ -544,12 +544,28 @@ priv fn result(p: *Parser, ret: *Opt[TypeAst]) -> bool {
     return true
 }
 
-// `(a: A, b: B) [-> R]`: the parameters and the result of the function `d`
+priv const NOT_VARIADIC = "`...` (a variable number of arguments) is only for the parameters of an `extern` C function: an AL function takes a slice instead (`xs: []T`)"
+
+// `(a: A, b: B) [-> R]`: the parameters and the result of the function `d`; a C function's
+// parameters may end in `...`
 priv fn fn_sig(p: *Parser, d: *FnDecl) -> bool {
     if !p.expect_p('(') {
         return false
     }
     while !p.is_p(')') {
+        if p.is_p(P_ELLIPSIS) {
+            if is_none(d.ext) {
+                p.errs.push(Diag{pos: p.pos(), msg: NOT_VARIADIC})
+                return false
+            }
+            if d.params.is_empty() {
+                p.errs.push(Diag{pos: p.pos(), msg: "`...` follows at least one named parameter, as in C: `extern \"libc.so.6\" fn printf(format: *u8, ...) -> i32`"})
+                return false
+            }
+            p.bump()
+            d.variadic = true
+            break
+        }
         pn, ok1 := p.ident()
         if !ok1 {
             return false
@@ -1024,6 +1040,10 @@ priv fn ty(p: *Parser) -> (TypeAst, bool) {
 
 priv fn ty_in(p: *Parser) -> (TypeAst, bool) {
     pos := p.pos()
+    if p.is_p(P_ELLIPSIS) {
+        p.errs.push(Diag{pos: pos, msg: NOT_VARIADIC})
+        return fail[TypeAst]()
+    }
     if p.eat_p('*') {
         t, ok := p.ty()
         if !ok {

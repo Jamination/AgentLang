@@ -887,9 +887,9 @@ cross length normalize lerp`, matrices, quaternions): [std/math.md](std/math.md)
 ```
 extern "libc.so.6" fn getenv(name: *u8) -> *u8
 extern "libm.so.6" fn cosf(x: f32) -> f32
+extern "libc.so.6" fn printf(f: *u8, ...) -> i32   // variadic: more arguments, promoted as C does
 extern "libc.so.6" environ: **u8           // a C variable: read, assign, `&environ`; no initializer
-home := from_cstr(getenv(ptr("HOME")))     // literals and str constants are NUL-terminated
-p := cstr(path)                            // NUL-terminated copy of any str
+home := from_cstr(getenv(ptr("HOME")))     // literals and str constants are NUL-terminated; cstr(s): a NUL-terminated copy
 ```
 
 Parameters and results are integers, `bool`, floats, pointers or function values (C `int` is `i32`, `long` is `i64`, `char*` is `*u8`; structs go by pointer). A program that reaches an

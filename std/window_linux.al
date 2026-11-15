@@ -235,7 +235,7 @@ fn window_open(d: WindowDesc) -> (*Window, bool) {
     }
     o.im = XOpenIM(dpy, nil, nil, nil)
     if o.im != nil {
-        o.ic = XCreateIC(o.im, ptr("inputStyle"), X_IM_PREEDIT_NOTHING | X_IM_STATUS_NOTHING,
+        o.ic = XCreateIC(o.im, ptr("inputStyle"), i64(X_IM_PREEDIT_NOTHING | X_IM_STATUS_NOTHING),
             ptr("clientWindow"), o.win, nil)
     }
     set_title(w, d.title)

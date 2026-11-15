@@ -30,7 +30,7 @@ are `priv` do not appear: a program may reuse their names).
 | `std.shaderc` | bindings for shaderc's C API: GLSL / HLSL to SPIR-V at run time, for hot reload (Linux) | `libshaderc_shared.so.1` | [std/shaderc.md](std/shaderc.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings generated from the mingw-w64 headers (Windows only) | `d3d12.dll`, `dxgi.dll`, `d3dcompiler_47.dll`, `user32.dll`, `kernel32.dll` | [std/dx12.md](std/dx12.md) |
 | `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
-| `std.libc`, `std.x11`, `std.alsa` | raw C declarations used by the modules above | the named library | source in `std/` |
+| `std.libc`, `std.x11`, `std.alsa` | raw C declarations used by the modules above; `std.libc` also has the variadic printf family (`printf`, `fprintf`, `dprintf`, `sprintf`, `snprintf`, `sscanf`, with `fflush`, `stdout`, `stderr`) | the named library | source in `std/` |
 
 A program is a static, libc-free executable unless it reaches an `extern` function; then it is a
 dynamically linked executable that needs only the libraries of the functions it can reach.

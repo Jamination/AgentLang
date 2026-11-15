@@ -1,0 +1,4 @@
+variadic_struct_arg.al:6:28: error: argument 2 of `printf` (for its `...`) has type Point, which cannot be passed to a variadic C function: pass a pointer to it (`&x`) if the C function expects one
+variadic_struct_arg.al:7:28: error: argument 2 of `printf` (for its `...`) has type (i64, i64), which cannot be passed to a variadic C function: pass a pointer to it (`&x`) if the C function expects one
+variadic_struct_arg.al:9:30: error: argument 3 of `printf` (for its `...`) has type [2]i32, which cannot be passed to a variadic C function: pass a pointer to it (`&x`) if the C function expects one
+3 error(s)

@@ -1,0 +1,3 @@
+variadic_str_arg.al:5:31: error: argument 2 of `printf` (for its `...`) has type str, which cannot be passed to a variadic C function: pass `ptr(s)` for a C string (a literal is NUL-terminated; `cstr(s)` makes a NUL-terminated copy)
+variadic_str_arg.al:6:25: error: argument 2 of `printf` (for its `...`) has type str, which cannot be passed to a variadic C function: pass `ptr(s)` for a C string (a literal is NUL-terminated; `cstr(s)` makes a NUL-terminated copy)
+2 error(s)

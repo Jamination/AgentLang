@@ -163,6 +163,9 @@ struct FnDecl {
     inl: i64 // 1 = always inline, -1 = never, 0 = auto
     // `extern "lib" fn name(params) -> R`: a C function in the named shared library (no body)
     ext: Opt[str]
+    // the parameter list of a C function ends in `...`: more arguments may follow, passed
+    // with the C default argument promotions (lower_call.al: `vararg`)
+    variadic: bool
     // declared with `priv`: visible only in its own file (see priv.al)
     is_priv: bool
 }
@@ -359,7 +362,8 @@ fn ast_sig_str(f: *FnDecl) -> str {
         None => ""
     }
     head := if f.name == "" { "fn" } else { fmt("fn ", f.name, tparams_str(&f.tparams)) }
-    return fmt(head, "(", fields_str(&f.params), ")", r)
+    dots := if f.variadic { ", ..." } else { "" }
+    return fmt(head, "(", fields_str(&f.params), dots, ")", r)
 }
 
 // `a: A, b: B`: parameters or fields

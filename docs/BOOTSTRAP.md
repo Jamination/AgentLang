@@ -493,7 +493,11 @@ same, the differences are:
   the caller makes) or, as a result, through a hidden pointer that the callee also returns;
   `extern` calls take the same path as calls of AL functions, through the IAT slot. The back
   end (`params_win` and `call` in `src/x86/isel.al`) assigns registers by position, numbers
-  stack arguments by position (words 0-3 are the shadow space every call reserves).
+  stack arguments by position (words 0-3 are the shadow space every call reserves). A call of
+  a variadic C function (`CallInd` with aux 2, set by `emit_call` in `src/lower_call.al`) also
+  copies each floating-point argument of the first four slots into the slot's integer register.
+  (On Linux every C call already sets `al`, aux 1; the promotions of the arguments for `...`
+  are made in `vararg`, `src/lower_call.al`, for both targets.)
 - **Preserved registers.** rsi, rdi (`mir_callee_saved`) and xmm6-xmm15 (`mir_xmm_saved`,
   saved in the frame) are saved by a function that writes them. Calls are still taken to
   clobber them (`CALL_CLOBBER` is the Linux set), which keeps the register allocator the same.
@@ -512,7 +516,9 @@ same, the differences are:
   the modules with an OS layer include the target's one with `when TARGET_OS == ...`.
   `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
   `tests/windows.skip`).
-- `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine.
+- `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine;
+  `tests/sys/c_variadic` checks calls of variadic C functions against the same C library built
+  by clang (Linux) and MinGW (`--target windows`).
 
 ## The compiler on Windows
 

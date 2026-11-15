@@ -228,8 +228,9 @@ extern "libX11.so.6" fn XSetInputFocus(dpy: *u8, focus: u64, revert_to: i32, tim
 extern "libX11.so.6" fn XSetLocaleModifiers(modifiers: *u8) -> *u8
 extern "libX11.so.6" fn XOpenIM(dpy: *u8, db: *u8, res_name: *u8, res_class: *u8) -> *u8
 extern "libX11.so.6" fn XCloseIM(im: *u8) -> i32
-// XCreateIC is variadic in C; this is the (name, value, name, value, NULL) form.
-extern "libX11.so.6" fn XCreateIC(im: *u8, name1: *u8, value1: i64, name2: *u8, value2: u64, end: *u8) -> *u8
+// XCreateIC takes (name, value) pairs ended by NULL, each value a C long or pointer:
+// `XCreateIC(im, ptr("inputStyle"), i64(style), ptr("clientWindow"), win, nil)`.
+extern "libX11.so.6" fn XCreateIC(im: *u8, ...) -> *u8
 extern "libX11.so.6" fn XDestroyIC(ic: *u8)
 extern "libX11.so.6" fn XSetICFocus(ic: *u8)
 extern "libX11.so.6" fn XUnsetICFocus(ic: *u8)

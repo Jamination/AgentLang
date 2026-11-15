@@ -2208,6 +2208,9 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
     nstack := 0
     reg_moves := vec[(i64, Opnd, bool)]()
     stack_moves := vec[(i64, Opnd, u8)]()
+    // Windows, a variadic C function (aux 2): a floating-point argument in one of the first
+    // four slots also goes to the integer register of the slot (va_arg reads it from there)
+    dup_moves := vec[(i64, i64)]()
     if target_os == TargetWindows {
         // by position: argument k in the k-th register (k < 4) or in stack word k (vectors
         // take two); words 0-3 are the shadow space, which every call reserves
@@ -2216,7 +2219,11 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             at := self.f.insts[a].ty
             if ai < WIN_REG_ARGS {
                 if at.is_fp() {
-                    reg_moves.push((XMM0 + ai, R(self.reg(a)), true))
+                    r := self.reg(a)
+                    reg_moves.push((XMM0 + ai, R(r), true))
+                    if i.op == CallInd && i.aux == 2 {
+                        dup_moves.push((WIN_INT_ARGS[ai], r))
+                    }
                 } else {
                     reg_moves.push((WIN_INT_ARGS[ai], self.mov_src(a), false))
                 }
@@ -2267,6 +2274,10 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
     for rm in reg_moves {
         self.e(if rm.2 { MovSd } else { Mov }, 8, R(rm.0), rm.1)
         used.push(rm.0)
+    }
+    for dm in dup_moves {
+        self.e(MovqToR, 8, R(dm.0), R(dm.1))
+        used.push(dm.0)
     }
     if i.op == CallInd && i.aux == 1 {
         // C calling convention: al = number of vector registers used (for variadic callees)

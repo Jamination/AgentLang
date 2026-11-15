@@ -194,6 +194,9 @@ fn lower_new_sig(g: *FnDecl) -> str {
     for i in 0..g.params.len {
         parts.push(ast_type_str(&g.params[i].1))
     }
+    if g.variadic {
+        parts.push("...")
+    }
     return join(parts.items(), ",")
 }
 
@@ -1258,7 +1261,7 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
             }
             got := self.got_global(d.name)
             f.ext = Some(self.module.externs.len)
-            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got, variadic: d.variadic})
         }
         None => {}
     }

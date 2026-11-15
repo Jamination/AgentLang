@@ -1,0 +1,5 @@
+variadic_al_fn.al:3:20: error: `...` (a variable number of arguments) is only for the parameters of an `extern` C function: an AL function takes a slice instead (`xs: []T`)
+variadic_al_fn.al:7:22: error: `...` (a variable number of arguments) is only for the parameters of an `extern` C function: an AL function takes a slice instead (`xs: []T`)
+variadic_al_fn.al:8:21: error: `...` (a variable number of arguments) is only for the parameters of an `extern` C function: an AL function takes a slice instead (`xs: []T`)
+variadic_al_fn.al:9:16: error: `...` (a variable number of arguments) is only for the parameters of an `extern` C function: an AL function takes a slice instead (`xs: []T`)
+4 error(s)

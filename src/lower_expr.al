@@ -257,7 +257,7 @@ priv fn expr_k(self: *Fx, e: *Expr, expect: Opt[i64]) -> Val {
                     if !is_some(self.lookup(n)) && self.cx.fn_candidates(n).len != 0 && !self.cx.has_global(n) {
                         match self.try_type_args(idx.items()) {
                             Some(tys) => {
-                                match self.fn_value(n, Some(tys), expect) {
+                                match self.fn_value(n, Some(tys), expect, e.pos) {
                                     Some(v) => { return v }
                                     None => {
                                         self.err(e.pos, fmt("no definition of `", n, "` takes these type arguments"))
@@ -443,7 +443,7 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
     }
     if self.cx.fn_candidates(n).len != 0 {
         no_targs: Opt[Vec[i64]] = None
-        match self.fn_value(n, no_targs, expect) {
+        match self.fn_value(n, no_targs, expect, pos) {
             Some(v) => { return v }
             None => {
                 self.err(pos, fmt("function `", n, "` cannot be used as a value here: it is generic or overloaded; write `", n, "[T]` or give the destination a function type"))

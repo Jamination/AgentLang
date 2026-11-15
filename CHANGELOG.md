@@ -8,6 +8,27 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Breaking
+- `std.libc`'s `snprintf` is now declared as the variadic C function it is (`snprintf(buf: *u8,
+  n: i64, format: *u8, ...)`) instead of taking exactly an `f64` and an `i64`: any number of
+  arguments of any C-compatible type works, but an untyped integer literal is now passed as a C
+  `int` (`i32`): for `%ld` write `i64(42)`. It can no longer be used as a function value.
+- `std.x11`'s `XCreateIC` is variadic too (`XCreateIC(im: *u8, ...)`): pass each value as an
+  `i64` or a pointer (`i64(style)`, not an untyped constant), ending the list with `nil`.
+
+### Added
+- C variadic functions: the parameter list of an `extern` function may end in `...` (`extern
+  "libc.so.6" fn printf(format: *u8, ...) -> i32`). The further arguments are passed with the C
+  default argument promotions (`i8`, `i16`, `u8`, `u16`, `bool` become `i32`, `f32` becomes
+  `f64`, untyped integer literals are `i32` if they fit, else `i64`, untyped float literals
+  `f64`, `nil` a `*u8`); structs, tuples, arrays, slices (`str`: pass `ptr(s)`), vectors and
+  enums with data are errors. Linux: System V convention (`al` = vector registers used);
+  Windows: floating-point arguments in the first four slots go in both the xmm and the integer
+  register. `...` in an AL function or a function type is an error (take a slice); defining
+  variadic functions in AL is not supported.
+- `std.libc`: `printf`, `fprintf`, `dprintf`, `sprintf`, `sscanf`, `fflush` and the C
+  library's `stdout` and `stderr`.
+
 ## [0.2.2] - 2026-11-14
 
 ### Changed

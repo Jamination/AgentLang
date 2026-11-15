@@ -263,7 +263,7 @@ priv fn rpo_after_inline(f: *Func, rpo: *Vec[i64], at: i64, nb0: i64) -> (Vec[i6
 // of a function's address (FAddr, after the replacements `repl` of inline_run), and the call
 // passes and returns what that function takes and returns (a function value made with `cast`
 // may not); -1 otherwise. A C function's address comes from its import slot, never FAddr; a
-// call with the C convention (aux 1) is left alone anyway.
+// call with the C convention (aux 1, or 2 on Windows) is left alone anyway.
 fn inline_known_target(m: *Module, f: *Func, i: *Inst, repl: []i32) -> i64 {
     if i.op != CallInd || i.aux != 0 {
         return -1

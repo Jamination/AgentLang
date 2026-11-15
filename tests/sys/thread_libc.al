@@ -4,7 +4,7 @@ use std.os
 
 extern "libc.so.6" fn strlen(s: *u8) -> i64
 extern "libc.so.6" fn getenv(name: *u8) -> *u8
-extern "libc.so.6" fn snprintf(buf: *u8, n: i64, f: *u8, x: i64) -> i32
+extern "libc.so.6" fn snprintf(buf: *u8, n: i64, f: *u8, ...) -> i32
 extern "libc.so.6" fn __errno_location() -> *i32
 extern "libc.so.6" fn close(fd: i32) -> i32
 

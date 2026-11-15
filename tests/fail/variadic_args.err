@@ -1,0 +1,8 @@
+variadic_args.al:9:25: error: argument 2 of `printf` (for its `...`) has type []i64, which cannot be passed to a variadic C function: pass `ptr(xs)` and the length
+variadic_args.al:10:29: error: argument 2 of `printf` (for its `...`) has type vec3, which cannot be passed to a variadic C function: pass the components as `f64`
+variadic_args.al:11:31: error: argument 2 of `printf` (for its `...`) has type Shape, which cannot be passed to a variadic C function: an enum with data has no C equivalent; pass its fields, or `i64(e)` for the variant number
+variadic_args.al:12:32: error: argument 2 of `printf` (for its `...`) has type (), which cannot be passed to a variadic C function: it has no value
+variadic_args.al:14:13: error: function `snprintf(buf, n, format, ...)` expects at least 3 argument(s), got 2
+variadic_args.al:15:10: error: the C function `printf` takes a variable number of arguments (`...`) and cannot be used as a function value: call it directly
+variadic_args.al:16:11: error: function `printf(format, ...)` expects at least 1 argument(s), got 0
+7 error(s)

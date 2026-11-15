@@ -127,7 +127,7 @@ enum Op {
     Load,   // args = [addr], aux = alias class
     Store,  // args = [addr, val], ty = type of val, aux = alias class
     Call,   // k = func id
-    CallInd, // args[0] = fn pointer
+    CallInd, // args[0] = fn pointer; aux = 1: Linux C call (sets al), 2: Windows call of a variadic C function
     Syscall,
     Proj, // args[0] = call, k = result index
     Phi,
@@ -370,11 +370,13 @@ fn src_loc_inlined(self: *SrcLocs, l: i32, at: i32, memo: *Map[i32, i32], w: *Wo
 
 // An imported C symbol: calls of a C function load its address from the 8-byte global `got`,
 // which the dynamic loader fills in; for a C variable (`data`) `got` holds the variable's address.
+// `variadic`: a C function declared with `...` (calls of it: CallInd with aux 2 on Windows).
 struct ExternFn {
     name: str
     lib: str
     got: i64
     data: bool
+    variadic: bool
 }
 
 fn ir_canon(ty: T, k: i64) -> i64 {

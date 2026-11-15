@@ -76,6 +76,7 @@ const P_AND_EQ = 0x3D26 // &=
 const P_OR_EQ = 0x3D7C // |=
 const P_XOR_EQ = 0x3D5E // ^=
 const P_RANGE = 0x2E2E // ..
+const P_ELLIPSIS = 0x2E2E2E // ... (the variable arguments of an `extern` C function)
 const P_FAT_ARROW = 0x3E3D // =>
 
 // the text of a keyword
@@ -213,7 +214,7 @@ priv fn ends_stmt(t: Tk) -> bool {
 priv fn punct_len(c: u8, c1: u8, c2: u8) -> i64 {
     return match c {
         '<', '>' => if c1 == c { if c2 == '=' { 3 } else { 2 } } else if c1 == '=' { 2 } else { 1 }
-        '.' => if c1 == '.' { if c2 == '=' { 3 } else { 2 } } else { 1 }
+        '.' => if c1 == '.' { if c2 == '=' || c2 == '.' { 3 } else { 2 } } else { 1 }
         ':' => if c1 == '=' { 2 } else { 1 }
         '-' => if c1 == '>' || c1 == '=' { 2 } else { 1 }
         '=' => if c1 == '=' || c1 == '>' { 2 } else { 1 }

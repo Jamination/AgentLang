@@ -1,0 +1,2 @@
+variadic_first.al:2:30: error: `...` follows at least one named parameter, as in C: `extern "libc.so.6" fn printf(format: *u8, ...) -> i32`
+1 error(s)
