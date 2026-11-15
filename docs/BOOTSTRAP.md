@@ -108,7 +108,8 @@ executables before and after); the conventions below describe the result.
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
 | `src/elf.al` | ELF writer (Linux) |
-| `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table |
+| `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
+| `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
 | `src/backtrace.al` | the table of the stack traces of panics (frames, source lines), added to the module before linking |
 | `src/objwrite.al` | what the two writers share (little-endian output, the layout of text, read-only data, bss, relocations): included by `elf.al` and `pe.al` |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
@@ -544,7 +545,8 @@ is not decided while lowering, `deaddata`: all read-only data is linked, `backtr
 `<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the prelude
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so
-`ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops.
+`ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops;
+`ALC_PE_BASE=<hex>` builds a Windows executable for another preferred base (for the relocation test below).
 
 ## Windows target
 
@@ -567,10 +569,26 @@ same, the differences are:
   clobber them (`CALL_CLOBBER` is the Linux set), which keeps the register allocator the same.
 - **Stack probes.** A frame of 4096 bytes or more is allocated a page at a time, touching each
   page (`stack_probe` in `src/x86/emit.al`): the stack grows through a guard page.
-- **Linking** (`pe_link`): the image is loaded at 0x400000 without base relocations (the code
-  uses 32-bit absolute addresses, as on Linux), sections `.text`, `.rdata`, `.idata` (import
-  descriptors, lookup tables, the IAT, which holds the import slots), `.pdata`, `.data` (with the zero
-  data); the entry point is `__entry`, stack reserve 16 MiB. A reachable `syscall` is an error.
+- **Addresses.** The image is relocatable and its base is above 4 GiB, so the code holds no
+  absolute address. The encoder (`src/x86/emit.al`) addresses a global, a float constant and an
+  import slot relative to rip (`Rel32Global`, `Rel32FConst`; the addend counts an immediate
+  that follows the displacement, `rip_end`) and loads the address of a global or function
+  with `lea r, [rip + x]` where Linux has `mov r, imm32`. A rip-relative operand takes no
+  base or index register: where instruction selection has folded a global with one
+  (`table[i]`), `rip_legal` (`src/x86/isel.al`) first loads the global's address into a
+  register (one more `lea` than on Linux; +0.0 to +0.7 % code, no measurable time). A
+  thread-local global is an offset from the register of the thread block (Threads, above),
+  not a field for the linker; `pe_link` checks that the code has no absolute field (`Abs32*`).
+- **Linking** (`pe_link`): preferred base 0x140000000, `DYNAMIC_BASE | HIGH_ENTROPY_VA`;
+  sections `.text`, `.rdata`, `.pdata`, `.idata` (import descriptors, lookup tables, the IAT,
+  which holds the import slots), `.data` (with the zero data), `.rsrc` (`src/rsrc.al`: the
+  manifest, the icon, the version information; a three-level directory of type, id and
+  language) and `.reloc`: the base relocation table, one `DIR64` entry for every absolute
+  address in the image: the pointers in global data (`Global.relocs`: strings, function
+  values, the stack-trace table) and the four addresses of the TLS directory. Import, unwind
+  and resource tables hold RVAs and need none. Whoever adds an absolute address to the image
+  adds its RVA to `fix`. The entry point is `__entry`, stack reserve 16 MiB. A reachable
+  `syscall` is an error.
 - **Unwind information.** Every function with a frame gets an UNWIND_INFO (`unwind_info` in
   `src/x86/emit.al`, kept in `Code.unwind`: pushes, the allocation, the xmm saves of its
   prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
@@ -583,6 +601,16 @@ same, the differences are:
 - `tests/winabi/run.sh` checks the convention against C compiled by MinGW, under Wine;
   `tests/sys/c_variadic` checks calls of variadic C functions against the same C library built
   by clang (Linux) and MinGW (`--target windows`).
+- **The image as a file**: `tests/pe/check.py` reads PE files. `reloc A.exe B.exe` applies
+  the relocation table of a program built for one base and compares the result, byte for
+  byte, with the same program built for another (`ALC_PE_BASE`): a missed address would still
+  hold the old base. `rsrc` prints the resources after checking the directory. Both run in
+  `tests/driver/pe.sh` (part of `tests/run.sh`: the compiler, two games, the options and their
+  errors). `tests/pe/run.sh` runs `tests/pe/res.al` under Wine, which (from 9.x) loads a
+  `DYNAMIC_BASE` image at a random address as Windows does: the program asks the system for
+  its base, the manifest's settings, the icon and the version information; every program of
+  `tests/run.sh --target windows` runs relocated as well. (The icon and version resources
+  are byte-identical to what GNU `windres` makes from the equivalent `.rc` file.)
 
 ## The compiler on Windows
 

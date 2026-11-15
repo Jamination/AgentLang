@@ -1,0 +1,16 @@
+moved from the preferred base: true
+twice 14
+square 49
+alpha beta gamma
+active code page: 65001
+per-monitor (v2) DPI aware: true
+manifest: true 1102
+icon: true
+version numbers: file 1.2.3.0 product 1.2.3.0
+version FileDescription: AL resource test
+version ProductName: Starter
+version CompanyName: Example Ltd
+version FileVersion: 1.2.3
+version ProductVersion: 1.2.3
+version LegalCopyright: (c) 2026 Example Ltd
+version Comments: none

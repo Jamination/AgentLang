@@ -1,10 +1,16 @@
 // Frame layout, final peepholes, x86-64 encoding and branch relaxation.
 
+// The address of a global, a function or a float constant in the code. Linux: a 32-bit absolute
+// field (Abs32*; the image is loaded at a fixed address). Windows: the image is relocatable and
+// loaded above 4 GiB, so every address is relative to rip (Rel32*), which takes no base or index
+// register (isel: rip_legal; a thread-local global is an offset from a register there: tls_place).
 priv enum RelocKind {
     Abs32Global(i64),
     Abs32Func(i64),
     Rel32Func(i64),
     Abs32FConst(i64), // module float pool index
+    Rel32Global(i64),
+    Rel32FConst(i64),
 }
 
 priv struct Reloc {
@@ -37,6 +43,7 @@ priv struct Frame {
 
 priv struct RM {
     is_reg: bool
+    rip: bool // [rip + disp32]: `reloc` is Rel32*
     reg: u8
     base: i8
     idx: i8
@@ -47,7 +54,12 @@ priv struct RM {
 }
 
 priv fn rm_reg(r: i64) -> RM {
-    return RM{is_reg: true, reg: u8(r & 15), base: -1, idx: -1, scale: 1, disp: 0, reloc: None, seg: 0}
+    return RM{is_reg: true, rip: false, reg: u8(r & 15), base: -1, idx: -1, scale: 1, disp: 0, reloc: None, seg: 0}
+}
+
+// [rip + the address `kind` + disp]
+priv fn rm_rip(kind: RelocKind, disp: i32) -> RM {
+    return RM{is_reg: false, rip: true, reg: 0, base: -1, idx: -1, scale: 1, disp: disp, reloc: Some(kind), seg: 0}
 }
 
 // The code of a function is encoded into one buffer without the jumps; the jumps (and the
@@ -58,6 +70,7 @@ priv struct Enc {
     relocs: Vec[Reloc] // offsets in out
     frame: *Frame
     fpool: []i64 // function-local fconst index -> module pool index
+    rip: i64 // the rip-relative relocation of the instruction being encoded, or -1 (see rip_end)
 }
 
 // room for one more instruction (at most 15 bytes)
@@ -75,7 +88,7 @@ priv inline fn b1(self: *Enc, x: u8) {
 }
 
 priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
-    r := RM{is_reg: false, reg: 0, base: -1, idx: -1, scale: u8(m.scale), disp: i32(m.disp), reloc: None, seg: 0}
+    r := RM{is_reg: false, rip: false, reg: 0, base: -1, idx: -1, scale: u8(m.scale), disp: i32(m.disp), reloc: None, seg: 0}
     if i64(m.base) != NOREG {
         r.base = i8(m.base)
     }
@@ -84,6 +97,10 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
     }
     match m.kind {
         MK_GLOBAL => {
+            if target_os == TargetWindows {
+                assert r.base < 0 && r.idx < 0
+                return rm_rip(Rel32Global(i64(m.id)), r.disp)
+            }
             r.reloc = Some(Abs32Global(i64(m.id)))
         }
         MK_TLS => {
@@ -93,6 +110,10 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
             }
         }
         MK_FCONST => {
+            if target_os == TargetWindows {
+                assert r.base < 0 && r.idx < 0
+                return rm_rip(Rel32FConst(self.fpool[i64(m.id)]), r.disp)
+            }
             r.reloc = Some(Abs32FConst(self.fpool[i64(m.id)]))
         }
         MK_SLOT => {
@@ -161,6 +182,12 @@ priv fn op(self: *Enc, p66: bool, pfx: u8, w: bool, opc: i64, reg: u8, rm: *RM, 
         _ => 0
     }
     has_reloc := is_some(rm.reloc)
+    if rm.rip {
+        self.b1(regf | 5)
+        self.rip = self.relocs.len
+        self.disp32(rm)
+        return
+    }
     if rm.base < 0 {
         // [disp32] or [idx*scale + disp32]
         self.b1(regf | 4)
@@ -207,6 +234,14 @@ priv fn disp32(self: *Enc, rm: *RM) {
 priv fn reloc32(self: *Enc, kind: RelocKind, addend: i32) {
     self.relocs.push(Reloc{off: self.out.len, kind: kind, addend: addend})
     self.imm(0, 4)
+}
+
+// The instruction with the rip-relative relocation `self.rip` ends here: rip is the address of
+// the next instruction, so what follows the field (an immediate) is taken off the addend.
+priv fn rip_end(self: *Enc) {
+    r := &self.relocs[self.rip]
+    r.addend -= i32(self.out.len - (r.off + 4))
+    self.rip = -1
 }
 
 // the low n bytes of k, least significant first
@@ -283,12 +318,22 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             }
             (R(d), GAddr(_, _)), (R(d), FAddr(_)) => {
                 d8 := u8(d & 15)
-                if d8 >= 8 {
-                    e.b1(0x41)
+                if target_os == TargetWindows {
+                    // lea d, [rip + symbol]
+                    rm := match &i.b {
+                        GAddr(g, off) => rm_rip(Rel32Global(g), i32(off))
+                        FAddr(f) => rm_rip(Rel32Func(f), 0)
+                        _ => panic("unreachable")
+                    }
+                    e.op(false, 0, true, 0x8D, d8, &rm, false)
+                } else {
+                    if d8 >= 8 {
+                        e.b1(0x41)
+                    }
+                    e.b1(0xB8 | (d8 & 7))
+                    kind, addend := addr_reloc(&i.b)
+                    e.reloc32(kind, addend)
                 }
-                e.b1(0xB8 | (d8 & 7))
-                kind, addend := addr_reloc(&i.b)
-                e.reloc32(kind, addend)
             }
             (R(d), M(_)) => {
                 rm := e.rm(&i.b)
@@ -306,6 +351,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
                 e.imm(k, min(i64(sz), 4))
             }
             (M(_), GAddr(_, _)), (M(_), FAddr(_)) => {
+                assert target_os != TargetWindows, "encoder: an absolute address in Windows code"
                 rm := e.rm(&i.a)
                 e.op(false, 0, true, 0xC7, 0, &rm, false)
                 kind, addend := addr_reloc(&i.b)
@@ -896,7 +942,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     for b in layout {
         total += mf.blocks[b].insts.len
     }
-    enc := Enc{out: vec[u8](), relocs: vec[Reloc](), frame: &frame, fpool: fpool}
+    enc := Enc{out: vec[u8](), relocs: vec[Reloc](), frame: &frame, fpool: fpool, rip: -1}
     enc.out.reserve(4 * total + 64)
     items := vec[Item]()
     bpos := vec_fill(mf.blocks.len, 0)  // where each block starts in enc.out
@@ -1001,6 +1047,9 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                 err = fmt("function `", mf.name, "` makes a Linux system call (`syscall`), which a Windows executable cannot make")
             }
             enc_inst(&enc, i)
+            if enc.rip >= 0 {
+                enc.rip_end()
+            }
         }
     }
     // relaxation: pre[k] = the bytes the items before item k add
@@ -1090,6 +1139,7 @@ fn emit_pool_fconsts(code: *Code, local: []i64) {
     for j in 0..code.relocs.len {
         match code.relocs[j].kind {
             Abs32FConst(k) => code.relocs[j].kind = Abs32FConst(local[k])
+            Rel32FConst(k) => code.relocs[j].kind = Rel32FConst(local[k])
             _ => {}
         }
     }
