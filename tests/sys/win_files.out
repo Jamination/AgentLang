@@ -35,4 +35,5 @@ rename over read-only false permission denied (r, true) [a, other.txt, ro2]
 writable again true true true (o, true) true [a]
 hidden true no error (h2, true) true [a, hidden.txt]
 hidden system true no error (h3, true) true 2 true true
+a directory over a directory false permission denied [a, e] true true
 cleanup true true true [] true false

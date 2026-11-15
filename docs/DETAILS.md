@@ -796,7 +796,8 @@ both systems, except where this section says otherwise.
   line names it. **`env_get`** compares names without regard to case.
 - **Paths** may use `\` as well as `/`, a drive (`C:/x`, `C:x`) or `\\server\share\`; the
   path functions of std.asset know these roots and build paths with `/`. Paths longer than
-  260 UTF-16 units need long-path support enabled in Windows. `current_dir()` is in Windows
+  260 UTF-16 units need long-path support enabled in Windows, or the form `\\?\C:\dir\file`
+  ([std/asset.md](std/asset.md#windows)). `current_dir()` is in Windows
   form (`C:\Users\me`).
 - **Errors.** `io_error()` is the Linux errno of the same meaning (file not found 2, access
   denied 13, a directory where a file is expected 21, file exists 17, directory not empty 39,
@@ -814,8 +815,9 @@ both systems, except where this section says otherwise.
 - **Memory.** Arenas reserve the same address space (64 GiB, 16 GiB per region) and commit it
   in steps as it is used; committed memory counts against the system's commit limit.
 - **Not available** for `--target windows` (a compile error that names the module):
-  `std.x11`, `std.wayland`, `std.alsa`, `std.vk`, `std.libc` (a program for both systems
-  includes them with `when TARGET_OS == Linux { use std.x11 }`). In
+  `std.x11`, `std.wayland`, `std.alsa`, `std.vk`, `std.shaderc` (a program for both systems
+  includes them with `when TARGET_OS == Linux { use std.x11 }`). `std.libc` binds
+  `msvcrt.dll` there ([std/libc.md](std/libc.md)). In
   std.os, signals do not exist (`kill` with any signal but 0 ends the process; see
   [std/os.md](std/os.md)).
 - **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless

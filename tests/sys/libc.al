@@ -38,7 +38,7 @@ fn main() {
     // variadic: sprintf with the conversions that both C libraries print alike
     big: [256]u8
     u: u8 = 200
-    n = sprintf(&big[0], ptr("%d %lld %u %f %s %c %hhu %x %o %5s|%-4d|%05.1f"), -7, i64(-1) << 40, u32(3000000000), f32(0.25),
+    n = sprintf(&big[0], ptr("%d %lld %u %f %s %c %u %x %o %5s|%-4d|%05.1f"), -7, i64(-1) << 40, u32(3000000000), f32(0.25),
         ptr("str"), 'Q', u, 255, 8, ptr("ab"), 42, 2.5)
     print(n, from_cstr(&big[0]))
     // and those that differ

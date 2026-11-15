@@ -128,5 +128,9 @@ fn main() {
     print("hidden system", write_file(hd, "h3"), why(), read_file(hd), GetFileAttributesA(cstr(hd)) & (HIDDEN | SYSTEM) == HIDDEN | SYSTEM, file_size(hd), rename(hd, fmt(d, "\\h2")), remove_file(fmt(d, "\\h2")))
     SetFileAttributesA(cstr(r), NORMAL)
 
+    // ---- a directory takes the place of no directory, not even an empty one
+    make_dir(fmt(d, "\\e"))
+    print("a directory over a directory", rename(fmt(d, "\\a\\b"), fmt(d, "\\e")), why(), list_dir(d), rename(fmt(d, "\\e"), fmt(d, "\\e2")), remove_dir(fmt(d, "\\e2")))
+
     print("cleanup", remove_file(f), remove_dir(fmt(d, "\\a\\b")), remove_dir(fmt(d, "/a")), list_dir(d), remove_dir(d), file_exists(d))
 }
