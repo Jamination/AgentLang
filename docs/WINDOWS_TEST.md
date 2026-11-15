@@ -50,7 +50,7 @@ Use `examples\starter\game.al` and `examples\win32_input.al` (prints every event
 5. Right Shift alone shows no modifier; releasing two held Shifts in either order leaves both
    released.
 6. Other layouts: QWERTZ, AZERTY (the digit row gives `KEY_1`...), dead keys (`^` then `e`
-   gives `ê`), an IME.
+   gives `ê`); an IME: section 9.
 7. Print Screen gives one press and one release.
 8. On a 150 % or 200 % monitor: the window is exactly its size in physical pixels and sharp;
    moving it to a monitor with another scale causes no resize.
@@ -174,7 +174,46 @@ Build `tests\pe\res.al` twice: plain as `res_plain.exe`, and as `res_full.exe` w
     without `--icon` / `--version-info` (relocatable images with a manifest and version
     information look less unusual to scanners than the earlier fixed-base ones).
 
-## 9. Thread-local data (the address of the thread's block)
+## 9. Mouse-look and the input path (raw input, IME)
+Use `examples\win32_input.al`: F3 locks / frees the pointer; while locked every frame with
+motion prints `look dx dy  sum sx sy` (the frame's raw motion and its sum since the lock); F4
+switches text input. Under Wine raw input comes from Wine's own translation of X11 events or
+of `SendInput`: what a real mouse, Windows' raw input and a real IME do is checked here.
+1. F3: the pointer disappears and `look` lines follow the mouse. However far the mouse moves,
+   the pointer shows up nowhere (also not on a second monitor) and a click never reaches the
+   taskbar or another window. F3 again: the pointer is back where it was when locked.
+2. Units: locked, move the mouse along a ruler by 10 cm, once slowly and once fast: both sums
+   are about the same (no acceleration) and about dpi x 3.94 (800 dpi: about 3150). Changing
+   the pointer speed, "Enhance pointer precision" and the display scale changes nothing.
+3. The same mouse on Linux (`alc run examples/win32_input.al`, F3): about the same sum for
+   the same distance.
+4. A mouse at 1000 Hz, and at 4000 or 8000 Hz if there is one: circle it fast for 10 seconds
+   while locked: no `dropped N events` line, the `look` lines keep up (no motion arrives after
+   the mouse stopped), and a game (`examples\dx12_starter\game.al`) keeps its frame rate.
+5. Alt+Tab while locked: the pointer is visible and free in the other window, the `look`
+   lines stop; Alt+Tab back: locked again, and the first `look` line is small (no jump).
+6. The same with the Windows key, Win+D, Win+L (lock screen) and a UAC prompt: after each the
+   pointer is free on the desktop and locked again when the window is focused.
+7. Locked, Alt+Tab away, then click the window's title bar and drag: the window moves
+   normally and the pointer is taken only when the button is released. The same with the
+   minimise and close buttons (they work: `minimized`, `close requested`), and with resizing by
+   a border.
+8. Alt+Space while locked: the window menu opens with a visible pointer and can be used with
+   the mouse; Escape: locked again. F11 while locked: the pointer stays hidden and locked.
+9. Buttons and wheel while locked: left, right, middle, X1, X2 and the wheel print as before.
+10. A graphics tablet or touch screen while locked: `look` lines follow the pen in pixels, with
+    no jump when it first touches. In a Remote Desktop session and in a virtual machine with
+    mouse integration: `look` lines of plausible size, no huge jumps; note what happens.
+11. A precision touchpad while locked: motion arrives; two-finger scrolling gives wheel events.
+12. With a Japanese, Chinese or Korean input language active and its IME in native mode:
+    W, A, S, D print `key down W ...` and no composition window appears. After F4 typing opens
+    the composition window and the chosen text prints as `text` lines; F4 again: keys only.
+13. Text input off: dead keys and AltGr still type (`^` then `e` gives `ê`), Alt+numpad codes
+    type. Note whether the emoji panel (Win+.) inserts with text input off and on.
+14. Hold W, Alt+Tab away and back without letting go: no `key down W` on return until the key
+    repeats or is pressed again; in the starter game the ship stops when the focus leaves.
+
+## 10. Thread-local data (the address of the thread's block)
 Code reaches the arena, the region stack and the output buffer through the TEB (`gs:[0x58]`,
 then the index the loader wrote to the program's TLS directory), once per function where it
 is needed. Wine always gives the program index 0 and cannot show another loader's choices or

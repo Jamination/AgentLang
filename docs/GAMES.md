@@ -193,8 +193,15 @@ what the game needs.
   `examples/starter/game.al` runs unchanged on both. `std.wayland` binds the Wayland client API
   for a program that wants to talk to the compositor itself.
 - In the loop: skip rendering while `w.minimized`, rebuild the swapchain on `EventResize`;
-  mouse-look with `set_cursor_locked(w, true)` and `mouse_delta`; gamepads plugged in later
-  appear through `gamepad_changed` (see [std/window.md](std/window.md), [std/input.md](std/input.md)).
+  gamepads plugged in later appear through `gamepad_changed` (see [std/window.md](std/window.md),
+  [std/input.md](std/input.md)).
+- Mouse-look: `set_cursor_locked(w, true)`, then `mouse_delta(&w.input)` is each frame the raw
+  motion of the mouse in device counts: no pointer acceleration, the same numbers on Linux
+  (XInput 2 raw motion) and Windows (raw input). Multiply it by the player's sensitivity
+  setting, not by the frame time. Unlock for menus; while the window is not focused the
+  pointer is free by itself ([std/window.md](std/window.md#mouse-look)).
+- Keys are for playing, `EventText` for typing: call `set_text_input(w, true)` only while the
+  player types a name or a chat line (it lets the IME in on Windows).
 - `std.vk`, `std.dx12`: see [Rendering](#rendering).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
@@ -234,8 +241,8 @@ checks the game for Linux and Windows at once.
 ## Windows
 
 **Building and shipping.** `alc build --target windows --gui game.al -o game.exe` makes one
-executable that needs only DLLs every Windows 10/11 has (kernel32, user32, gdi32, ole32, d3d12,
-dxgi, d3dcompiler_47; xinput1_4 is loaded only if a gamepad is opened). `--gui` gives it no
+executable that needs only DLLs every Windows 10/11 has (kernel32, user32, gdi32, imm32, ole32,
+d3d12, dxgi, d3dcompiler_47; xinput1_4 is loaded only if a gamepad is opened). `--gui` gives it no
 console window when started from Explorer; started from a terminal it still prints there, and a
 panic also shows a message box ([DETAILS.md](DETAILS.md#windows)). Build assets into the
 executable with `embed("file.png")` + `image_decode`: the working directory of a program started

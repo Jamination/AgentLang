@@ -236,30 +236,26 @@ fn main() {
     wr: [4]i32
     GetWindowRect(h, &wr)
     SendMessageW(h, 0x20, u64(cast[i64](h)), 0x02000001)
-    print("locked:", w.cursor_locked, "centred:", cur, "clipped to the window:", clip[0] >= wr[0] && clip[2] <= wr[2] && clip[2] - clip[0] == 320, "hidden:", GetCursor() == nil)
-    // the user moves the mouse: the pointer goes to the client position (x, y)
-    fn user_move(h: *u8, x: i32, y: i32) {
-        p := [2]i32{x, y}
-        ClientToScreen(h, &p)
-        SetCursorPos(p[0], p[1])
+    print("locked:", w.cursor_locked, "centred:", cur, "confined to the centre:", clip[0] >= wr[0] && clip[2] <= wr[2] && clip[2] - clip[0] == 1, "hidden:", GetCursor() == nil)
+    // the user moves the mouse by (dx, dy) counts: raw input (more in window_win32_input)
+    fn user_move(dx: i32, dy: i32) {
+        m := [10]i32{0, 0, dx, dy, 0, 1, 0, 0, 0, 0}  // INPUT: a MOUSEINPUT with MOUSEEVENTF_MOVE
+        SendInput(1, cast[*KeyInput](&m), 40)
     }
     start := w.input.mouse_pos()
-    user_move(h, 190, 110)                            // centre + (30, 10)
+    user_move(5, 3)
     show(w)
-    print("delta:", w.input.mouse_delta(), "moved:", w.input.mouse_pos() - start)
-    show(w)                                           // the pointer goes back to the centre: no motion
     GetCursorPos(&cur)
     ScreenToClient(h, &cur)
-    print("delta:", w.input.mouse_delta(), "centred:", cur)
-    user_move(h, 110, 80)                             // centre - (50, 20)
-    post(w, 0x201, 1, 0x0050006E)                     // left button there
+    print("delta:", w.input.mouse_delta(), "moved:", w.input.mouse_pos() - start, "centred:", cur)
+    user_move(-4, -5)
+    post(w, 0x201, 1, 0x0050006E)                     // left button
     post(w, 0x202, 0, 0x0050006E)
     w.poll()                                          // (positions depend on where the pointer started)
     print("delta:", w.input.mouse_delta(), "moved:", w.input.mouse_pos() - start, "clicked:", w.input.mouse_pressed(MOUSE_LEFT))
-    user_move(h, 0, 0)                                // the corner, twice: no bound
-    show(w)
-    show(w)
-    user_move(h, 0, 0)
+    for i in 0..200 {                                 // further than the window is wide: no bound
+        user_move(-5, -5)
+    }
     show(w)
     print("moved:", w.input.mouse_pos() - start)
     print_moves = true

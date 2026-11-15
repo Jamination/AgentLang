@@ -5,7 +5,9 @@
 //   alc run examples/win32_input.al                     Linux
 //   alc build --target windows examples/win32_input.al  then run win32_input.exe on Windows
 //
-// F11 toggles fullscreen, F2 toggles the mouse pointer, Escape or closing the window quits.
+// F11 toggles fullscreen, F2 toggles the mouse pointer, F3 locks / frees the pointer for
+// mouse-look (`look` lines: the frame's mouse_delta in device counts and their sum since the
+// lock), F4 toggles text input (the IME on Windows), Escape or closing the window quits.
 // The window shows a 64 x 36 framebuffer through `present`; the white cross is drawn at
 // `mouse_in_frame`, so it must sit under the pointer at any window size.
 use std.window
@@ -105,6 +107,7 @@ fn main() {
     print("gamepad 0:", if gamepad_open(pad, 0) { "connected" } else { "none" })
     last_axes := pad.axes
     fb := alloc[u8](FB_W * FB_H * 4)
+    look := vec2(0.0)
     while !w.should_close() {
         w.poll()
         loop {
@@ -143,6 +146,20 @@ fn main() {
         }
         if w.input.key_pressed(KEY_F2) {
             w.set_cursor_visible(w.cursor_hidden)
+        }
+        if w.input.key_pressed(KEY_F3) {
+            w.set_cursor_locked(!w.cursor_locked)
+            look = vec2(0.0)
+            print(if w.cursor_locked { "pointer locked" } else { "pointer free" })
+        }
+        if w.input.key_pressed(KEY_F4) {
+            w.set_text_input(!w.text_input)
+            print("text input", if w.text_input { "on" } else { "off" })
+        }
+        d := w.input.mouse_delta()
+        if w.cursor_locked && d != vec2(0.0) {
+            look = look + d
+            print("look      ", d.x, d.y, " sum", look.x, look.y)
         }
         render(fb, w)
         w.present(fb, FB_W, FB_H)

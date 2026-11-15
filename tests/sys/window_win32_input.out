@@ -1,0 +1,92 @@
+raw mouse records
+48
+(5, -3) (-32000, 32000) (0, 0)
+(0, 0) (40, 0) (-1000, 540) (7, 7) (1920, 0)
+(0, 0) (60, 0) (0, 0)
+205 205
+(0, 0)
+locked pointer
+at [37, 31] free shown
+locked: true at [160, 100] held hidden
+  EventMouseMove 0 42 34
+delta: vec2(5.0, 3.0) moved: vec2(5.0, 3.0) at [160, 100] held hidden
+  EventMouseMove 0 38 42
+  EventKeyDown A mods 0 repeat false
+  EventText 97
+  EventMouseMove 0 39 43
+  EventMouseDown 0 39 43
+  EventMouseUp 0 39 43
+  EventMouseMove 0 43 41
+  EventKeyUp A mods 0 repeat false
+delta: vec2(1.0, 7.0) moved: vec2(6.0, 10.0) clicked: true
+delta: vec2(0.0, 0.0) at [160, 100] held hidden
+a fast mouse
+delta: vec2(3000.0, -3000.0) events: 1 dropped: 0
+delta: vec2(0.0, 0.0) events: 0
+focus lost and back
+  EventKeyDown D mods 0 repeat false
+  EventText 100
+before poll: true at [160, 100] free shown
+  EventUnfocus
+held: false released: true locked: true delta: vec2(0.0, 0.0)
+  EventFocus
+at [160, 100] held hidden
+  EventKeyDown D mods 0 repeat false
+  EventKeyDown D mods 0 repeat true
+  EventText 100
+  EventText 100
+  EventMouseMove 0 3045 -2957
+held: true pressed: true delta: vec2(2.0, 2.0)
+  EventKeyUp D mods 0 repeat false
+click on the frame
+  EventUnfocus
+button held: at [160, 100] free shown focused: true
+button up: at [160, 100] held hidden
+window menu
+open: at [163, 103] free shown delta: vec2(0.0, 0.0)
+closed: at [160, 100] held hidden
+minimized
+minimized: true confined: false
+restored: true at [160, 100] held hidden
+unlocked
+locked: false back: true at [37, 31] free shown
+the pointer moves: 4 4
+system keys
+  EventKeyDown LAlt mods 0 repeat false
+  EventKeyDown Enter mods 4 repeat false
+  EventKeyUp Enter mods 4 repeat false
+  EventKeyUp LAlt mods 4 repeat false
+  EventKeyDown F10 mods 0 repeat false
+  EventKeyUp F10 mods 0 repeat false
+  EventKeyDown LAlt mods 0 repeat false
+  EventKeyUp LAlt mods 4 repeat false
+alt held: false closing: false
+text and keys
+  EventKeyDown A mods 0 repeat false
+  EventText 97
+  EventKeyUp A mods 0 repeat false
+  EventKeyDown LShift mods 0 repeat false
+  EventKeyDown A mods 1 repeat false
+  EventText 65
+  EventKeyUp A mods 1 repeat false
+  EventKeyUp LShift mods 1 repeat false
+  EventKeyDown LCtrl mods 0 repeat false
+  EventKeyDown A mods 2 repeat false
+  EventKeyUp A mods 2 repeat false
+  EventKeyUp LCtrl mods 2 repeat false
+text: aA
+takes WM_UNICHAR: 1
+  EventText 128512
+  EventText 122
+input method editor
+attached: false false
+attached: true true
+attached: false false
+alt+f4
+  EventKeyDown LAlt mods 0 repeat false
+  EventKeyDown F4 mods 4 repeat false
+  EventClose
+  EventKeyUp F4 mods 4 repeat false
+  EventKeyUp LAlt mods 4 repeat false
+closing: true
+closed; confined: false

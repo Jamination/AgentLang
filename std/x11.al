@@ -23,6 +23,7 @@ const X_CONFIGURE_NOTIFY = 22
 const X_PROPERTY_NOTIFY = 28
 const X_CLIENT_MESSAGE = 33
 const X_MAPPING_NOTIFY = 34
+const X_GENERIC_EVENT = 35
 
 // event masks (XSelectInput, XSendEvent)
 const X_KEY_PRESS_MASK = 0x1
@@ -153,6 +154,12 @@ fn x_event_message_data(e: *XEvent, index: i64) -> u64 { e.data[7 + index] }
 // XPropertyEvent.atom: the property that changed.
 fn x_event_property_atom(e: *XEvent) -> u64 { e.data[5] }
 
+// XGenericEventCookie (an X_GENERIC_EVENT): the major opcode of the extension, its event type
+// and, between XGetEventData and XFreeEventData, the extension's event structure.
+fn x_event_cookie_extension(e: *XEvent) -> i32 { x_event_i32(e, 32) }
+fn x_event_cookie_evtype(e: *XEvent) -> i32 { x_event_i32(e, 36) }
+fn x_event_cookie_data(e: *XEvent) -> *u8 { cast[*u8](e.data[6]) }
+
 // Fills `e` as a format-32 ClientMessage for `window` with five data longs.
 fn x_client_message(e: *XEvent, window: u64, message_type: u64, d0: u64, d1: u64, d2: u64, d3: u64, d4: u64) {
     *e = XEvent{}
@@ -202,6 +209,9 @@ extern "libX11.so.6" fn XSendEvent(dpy: *u8, win: u64, propagate: i32, mask: i64
 extern "libX11.so.6" fn XPending(dpy: *u8) -> i32
 extern "libX11.so.6" fn XNextEvent(dpy: *u8, event: *XEvent) -> i32
 extern "libX11.so.6" fn XFilterEvent(event: *XEvent, win: u64) -> i32
+extern "libX11.so.6" fn XQueryExtension(dpy: *u8, name: *u8, major_opcode: *i32, first_event: *i32, first_error: *i32) -> i32
+extern "libX11.so.6" fn XGetEventData(dpy: *u8, cookie: *XEvent) -> i32
+extern "libX11.so.6" fn XFreeEventData(dpy: *u8, cookie: *XEvent)
 extern "libX11.so.6" fn XFlush(dpy: *u8) -> i32
 extern "libX11.so.6" fn XSync(dpy: *u8, discard: i32) -> i32
 extern "libX11.so.6" fn XFree(data: *u8) -> i32
