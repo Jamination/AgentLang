@@ -16,14 +16,39 @@ priv const RT_MANIFEST = 24
 //   Windows guesses from the file name whether an old program is an installer to elevate);
 // - supportedOS: Windows 10 and 11 (one id for both), so that the system reports its real
 //   version and behaves as on these versions;
-// - dpiAwareness: per-monitor (v2), as std.window sets at run time: sizes are physical pixels
-//   and nothing is scaled by the system (dpiAware: the same for Windows before 10 1607);
+// - dpiAwareness: per-monitor (v2), else system aware (dpiAware, for Windows before 10 1607):
+//   what std.window asks for at run time (std/window_windows.al): sizes are physical pixels
+//   and the system scales nothing, for every program, with or without a std.window window;
 // - longPathAware: paths over 260 characters work where the system allows them
 //   (LongPathsEnabled in the registry; Windows 10 1607);
-// - activeCodePage UTF-8 (Windows 10 1903): the `A` functions of Windows and the C library
-//   take and return UTF-8, which is what AL strings are. The run-time library itself only
-//   calls `W` functions, with its own conversion, on every version of Windows.
-priv const MANIFEST = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\r\n  <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\">\r\n    <security>\r\n      <requestedPrivileges>\r\n        <requestedExecutionLevel level=\"asInvoker\" uiAccess=\"false\"/>\r\n      </requestedPrivileges>\r\n    </security>\r\n  </trustInfo>\r\n  <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">\r\n    <application>\r\n      <supportedOS Id=\"{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}\"/>\r\n    </application>\r\n  </compatibility>\r\n  <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">\r\n    <windowsSettings>\r\n      <dpiAware xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">true/pm</dpiAware>\r\n      <dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">PerMonitorV2, PerMonitor</dpiAwareness>\r\n      <longPathAware xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">true</longPathAware>\r\n      <activeCodePage xmlns=\"http://schemas.microsoft.com/SMI/2019/WindowsSettings\">UTF-8</activeCodePage>\r\n    </windowsSettings>\r\n  </application>\r\n</assembly>\r\n"
+// - activeCodePage UTF-8 (Windows 10 1903): the `A` functions of Windows and of C libraries
+//   that a program declares take and return UTF-8, which is what AL strings are. The run-time
+//   library itself only calls `W` functions, with its own conversion, so its behaviour is the
+//   same with and without the setting, on every version of Windows.
+priv const MANIFEST = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, system</dpiAwareness>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+`
 
 // the names `--version-info NAME=VALUE` takes: the strings of a version resource
 priv const VERSION_KEYS = [_]str{"Comments", "CompanyName", "FileDescription", "FileVersion", "InternalName", "LegalCopyright",

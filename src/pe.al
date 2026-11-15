@@ -16,16 +16,17 @@ use "rsrc.al"
 priv const SECT_ALIGN = 0x1000
 priv const FILE_ALIGN = 0x200
 
-// The preferred base of the image. ALC_PE_BASE=<hex> sets another one (a multiple of 64 KiB):
-// for tests/pe/check.py, which applies the base relocations of an image built for one base
-// and compares the result with the same program built for another (-1: not a valid base).
+// The preferred base of the image. ALC_PE_BASE=<hex> sets another one (a multiple of 64 KiB
+// from 4 GiB up): for tests/pe/check.py, which applies the base relocations of an image built
+// for one base and compares the result with the same program built for another (-1: not a
+// valid base).
 priv fn image_base() -> i64 {
     s, set := env_get("ALC_PE_BASE")
     if !set {
         return 0x1_4000_0000
     }
     b, ok := parse_i64(s, 16)
-    return if ok && b >= 0x10000 && b % 0x10000 == 0 && b < (1 << 46) { b } else { -1 }
+    return if ok && b >= (1 << 32) && b % 0x10000 == 0 && b <= 0x7FFE_0000_0000 { b } else { -1 }
 }
 
 // The base relocation table for the 8-byte absolute addresses at the RVAs `fix`: per 4 KiB
@@ -73,7 +74,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     }
     base := image_base()
     if base < 0 {
-        return ("", "ALC_PE_BASE is not an image base: hexadecimal digits, a multiple of 10000 (64 KiB)")
+        return ("", "ALC_PE_BASE is not an image base: hexadecimal digits, a multiple of 10000 (64 KiB) from 100000000 (4 GiB) to 7FFE00000000")
     }
     imports := used_externs(m, out)
     for x in imports {
@@ -229,9 +230,9 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     }
     image_end := data_rva + data.len + bss_size
     // the code addresses code and data with 32-bit displacements from rip
-    if image_end > 0x7FFF_0000 {
+    if image_end > 0x7FFF_FFFF {
         return ("", fmt("the program's code and global variables take ", image_end,
-            " bytes; at most ", 0x7FFF_0000, " fit (put large tables in memory from alloc instead)"))
+            " bytes; at most ", 0x7FFF_FFFF, " fit (put large tables in memory from alloc instead)"))
     }
     // ---- relocations ----
     for ci in 0..out.funcs.len {
