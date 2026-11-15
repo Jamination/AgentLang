@@ -808,9 +808,13 @@ priv fn wine_start() {
     // one wine server for the whole run (a starting server writes noise to standard error); the
     // null display driver must be set before the server starts the desktop, hence the restart.
     // The server stays for a minute after its last program, so that it also ends after a run
-    // that was interrupted.
+    // that was interrupted. No crash dialog: a program that crashes ends with the debugger's
+    // report on standard error (nobody could close the dialog: the program would stay until
+    // its time limit, and its dialog would take the foreground from the window tests).
     exec([]str{"wineserver", "-p60"}, "", "", "")
     exec([]str{"wine", "reg", "add", "HKCU\\Software\\Wine\\Drivers", "/v", "Graphics", "/d", "null", "/f"}, "", null, null)
+    exec([]str{"wine", "reg", "add", "HKCU\\Software\\Wine\\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"},
+        "", null, null)
     exec([]str{"wineserver", "-k"}, "", "", "")
     exec([]str{"wineserver", "-p60"}, "", "", "")
     exec([]str{"wine", "cmd", "/c", "exit"}, "", null, null)

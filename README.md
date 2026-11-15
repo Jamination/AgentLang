@@ -50,8 +50,8 @@ build\alc.exe run examples\hello.al
 
 The tests run on both systems: `tests/run.sh` (Linux) and `tests\run.bat` (Windows) start the
 same runner, an AL program (`tests/run.al`) that runs the tests in parallel and ends with
-`conformance: N passed, M failed, K skipped`. On Windows the programs run directly, and a test
-that needs a tool that is not installed (a C compiler, bash) is skipped with the reason.
+`conformance: N passed, M failed, K skipped`. On Windows the programs run directly; the few
+tests that need a C compiler (MinGW-w64) are skipped with that reason when it is not installed.
 `verify.bat` is the whole check there (build, tests, one line `VERIFY: PASS` or `VERIFY: FAIL`);
 `./verify.sh` on Linux adds the comparisons with clang and the benchmarks. More:
 [BOOTSTRAP.md](docs/BOOTSTRAP.md#testing).
