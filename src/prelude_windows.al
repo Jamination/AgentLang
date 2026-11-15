@@ -614,26 +614,34 @@ priv fn wide(s: str) -> *u16 {
     return ptr(out)
 }
 
-// An extended-length path (`\\?\C:\dir\file`, n units at w) reaches the file system as it
-// is written: `/` separates nothing there, so the `/` that path_join puts in becomes `\`
-priv fn verbatim(w: *u16, n: i64) {
-    if n > 4 && w[0] == 92 && w[1] == 92 && w[2] == 63 && w[3] == 92 {
-        for i in 4..n {
-            if w[i] == 47 {
-                w[i] = 92
-            }
-        }
-    }
-}
-
-// the path p (a C string) as NUL-terminated UTF-16, in buf if it fits there, else allocated
+// the C string p as NUL-terminated UTF-16, in buf if it fits there, else allocated
 priv fn wide_c(buf: []u16, p: *u8) -> *u16 {
     n := len(from_cstr(p))
     out := if n < len(buf) { buf } else { alloc[u16](n + 1) }
     k, _ := to_utf16(p, n, ptr(out), false)
     out[k] = 0
-    verbatim(ptr(out), k)
     return ptr(out)
+}
+
+// An extended-length path (`\\?\C:\dir\file`) reaches the file system as it is written:
+// `/` separates nothing there, so the `/` that path_join puts in becomes `\`
+priv fn verbatim(w: *u16) {
+    if w[0] == 92 && w[1] == 92 && w[2] == 63 && w[3] == 92 {
+        i := 4
+        while w[i] != 0 {
+            if w[i] == 47 {
+                w[i] = 92
+            }
+            i += 1
+        }
+    }
+}
+
+// the path p as wide_c gives it, for the file functions
+priv fn wide_path(buf: []u16, p: *u8) -> *u16 {
+    w := wide_c(buf, p)
+    verbatim(w)
+    return w
 }
 
 // ---------- standard handles, reading and writing ----------
@@ -837,7 +845,7 @@ priv fn path_error(w: *u16, e: u32) -> i64 {
 // opens a file for reading, or creates or empties it for writing: a handle or -errno
 fn __os_open(path: *u8, write: bool) -> i64 {
     buf: [1024]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     // GENERIC_WRITE / GENERIC_READ, FILE_SHARE_READ | WRITE | DELETE, CREATE_ALWAYS / OPEN_EXISTING
     h := CreateFileW(w, if write { 0x40000000 } else { 0x80000000 }, 7, 0, if write { 2 } else { 3 }, 0x80, 0)
     if h == INVALID_HANDLE {
@@ -1226,7 +1234,7 @@ priv fn ft_ns(d: *u32, at: i64) -> i64 {
 // is 1 for a file, 2 for a directory, 0 for a device, -1 if there is nothing
 fn __os_stat(path: *u8) -> (i64, i64, i64) {
     buf: [4096]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     // WIN32_FILE_ATTRIBUTE_DATA: attributes, 3 FILETIMEs (creation, access, write), size high, low
     d: [13]u32
     if GetFileAttributesExW(w, 0, &d[0]) == 0 {
@@ -1257,7 +1265,7 @@ fn __os_stat(path: *u8) -> (i64, i64, i64) {
 
 fn __os_remove_file(path: *u8) -> i64 {
     buf: [4096]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     if DeleteFileW(w) == 0 {
         e := GetLastError()
         if e == 5 && is_dir_w(w) {
@@ -1270,7 +1278,7 @@ fn __os_remove_file(path: *u8) -> i64 {
 
 fn __os_remove_dir(path: *u8) -> i64 {
     buf: [4096]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     if RemoveDirectoryW(w) == 0 {
         return path_error(w, GetLastError())
     }
@@ -1279,7 +1287,7 @@ fn __os_remove_dir(path: *u8) -> i64 {
 
 fn __os_make_dir(path: *u8) -> i64 {
     buf: [4096]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     if CreateDirectoryW(w, 0) == 0 {
         return path_error(w, GetLastError())
     }
@@ -1291,8 +1299,8 @@ fn __os_make_dir(path: *u8) -> i64 {
 fn __os_rename(from: *u8, to: *u8) -> i64 {
     a: [4096]u16
     b: [4096]u16
-    wf := wide_c(a[..], from)
-    wt := wide_c(b[..], to)
+    wf := wide_path(a[..], from)
+    wt := wide_path(b[..], to)
     af := GetFileAttributesW(wf)
     at := GetFileAttributesW(wt)
     if af != 0xFFFFFFFF && at != 0xFFFFFFFF && (af ^ at) & 0x10 != 0 {
@@ -1312,7 +1320,7 @@ fn __os_list_dir(path: *u8, names: *Vec[str]) -> i64 {
         return -2
     }
     buf: [4100]u16
-    w := wide_c(buf[..4096], path)
+    w := wide_path(buf[..4096], path)
     // the pattern dir\*
     n := wcslen(w)
     pat := if n + 3 <= len(buf) { buf[..] } else { alloc[u16](n + 3) }
@@ -1534,7 +1542,7 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
     hout := if capture != 0 { pipe_w } else { handle(1) }
     herr := if capture == 2 { pipe_w } else { handle(2) }
     app := wide(file)
-    verbatim(app, wcslen(app))
+    verbatim(app)
     h, pid := create_process(app, wide(line), handle(0), hout, herr, 0)
     if capture != 0 {
         CloseHandle(pipe_w)
