@@ -43,14 +43,14 @@ click on the frame
 button held: at [160, 100] free shown focused: true
 button up: at [160, 100] held hidden
 window menu
-open: at [163, 103] free shown delta: vec2(0.0, 0.0)
+open: moved from [160, 100]: true free shown delta: vec2(0.0, 0.0)
 closed: at [160, 100] held hidden
 minimized
 minimized: true confined: false
 restored: true at [160, 100] held hidden
 unlocked
 locked: false back: true at [37, 31] free shown
-the pointer moves: 4 4
+the pointer moves: true
 system keys
   EventKeyDown LAlt mods 0 repeat false
   EventKeyDown Enter mods 4 repeat false

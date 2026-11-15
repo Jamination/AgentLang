@@ -4,6 +4,11 @@
 use std.audio
 
 fn main() {
+    // on a machine with a sound device there is nothing to test (status 77: SKIP)
+    if len(audio_devices()) > 0 {
+        print("this machine has a sound device")
+        exit(77)
+    }
     print("devices:", audio_devices())
     dev, ok := audio_open(48000, 2)
     print("default opens:", ok, dev == nil)

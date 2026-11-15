@@ -111,6 +111,22 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   are unchanged.
 
 ### Fixed
+- Windows: executables crashed at start on a real Windows ("out of memory" or "memory fault"
+  in the first allocation; Wine was unaffected). The TLS directory asked the loader for a
+  zero-filled thread block through `SizeOfZeroFill`, which Windows does not honour: the
+  thread-local globals (the arena among them) started as garbage. The template now holds the
+  zeroed block. Both seed compilers are rebuilt with the fix.
+- Windows: paths of 248 UTF-16 units or more (absolute or relative) work without the
+  registry setting `LongPathsEnabled`: the run-time library makes them absolute and hands
+  them to Windows as `\\?\C:\...` / `\\?\UNC\server\share\...` (they failed with `no such
+  file or directory` on Windows; Wine has no such limit).
+- `verify.bat` calls `build.bat` and `tests\run.bat` by full path: with
+  `NoDefaultCurrentDirectoryInExePath` set, cmd does not look in the current directory and
+  the build did not start.
+- Tests for real Windows desktops: `window_win32` and `window_win32_input` no longer assume
+  Wine's 1024 x 768 screen and top-left window placement or exact pointer ballistics;
+  `audio_nodevice` is skipped on a machine with a sound device; `win_files` no longer expects
+  a drive root's size to be 0 (NTFS reports one).
 - Windows, `std.os`: programs started from several threads at once no longer inherit each
   other's pipes (`run_capture` in one thread waited until a program that another thread had
   started meanwhile ended).

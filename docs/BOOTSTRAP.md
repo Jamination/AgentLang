@@ -400,8 +400,9 @@ How the run-time library and the compiler implement threads (the rules: DETAILS.
   A dynamically linked program gets the block from glibc's loader in every thread (also those
   of C libraries); a static one starts with FS 0, and `__rt_init` (`src/prelude_linux.al`) maps
   the block and a TCB whose first word points to itself and sets FS (`arch_prctl`) before
-  anything touches a TLS global. Windows: a TLS directory (zero fill, `AddressOfIndex` =
-  `__win_tls_index`); a TLS global is an offset (`win_tls_off`, from `layout_tls`) from a
+  anything touches a TLS global. Windows: a TLS directory (template: the block's size
+  in zero bytes in `.data`, `SizeOfZeroFill` 0, since the Windows loader allocates only the
+  template's size; `AddressOfIndex` = `__win_tls_index`); a TLS global is an offset (`win_tls_off`, from `layout_tls`) from a
   register that holds the address of the thread's block, so an access is `mov rax, [r + off]`
   (an 8-bit offset for the arena) and needs no relocation. A function has one such register
   (`tls_base` in `src/x86/isel.al`), set by three loads (`tls_place`: `gs:[0x58]`, the TEB's

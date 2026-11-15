@@ -4,6 +4,16 @@ Everything Windows-specific was developed on Linux and tested under Wine 11.21. 
 checks Wine cannot prove. Run them on Windows 10 or 11 (x64) and note any that fail, with the
 exact output.
 
+First native run (Windows 11 24H2, 2026-11-15): `verify.bat` passes from a clean `build\`
+(stages 2 and 3 compared by `fc /b`), the suite reports `conformance: 811 passed, 0 failed,
+19 skipped` with MinGW (`dx12_offscreen` runs; `audio_nodevice` skips on a machine with a
+sound device), the same three runs in a row, and `--target linux` `809 passed, 0 failed, 26
+skipped`. What that run found and fixed, all of which Wine hid: thread-local data was never
+zeroed (Windows ignores the TLS directory's `SizeOfZeroFill`: every executable crashed at
+start), paths of 260 units or more failed without `LongPathsEnabled`, and the window tests
+assumed Wine's fixed screen and window placement. Checks of sections 1 to 9 not listed below
+as done are still open.
+
 ## Setup
 1. Copy the repository, including `build/alc.exe` (built by `./build.sh` on Linux), or build it
    on Linux with `./build/alc build --target windows src/main.al -o alc.exe`.
@@ -20,10 +30,12 @@ What Wine cannot prove:
 1. `verify.bat` in cmd, from a fresh copy: `build.bat` rebuilds the compiler (stages 2 and 3
    identical: on Windows `fc /b` really compares them), the suite runs, the Linux programs are
    built, and the last line is `VERIFY: PASS`. Send the whole output if it is `VERIFY: FAIL`.
-2. `tests\run.bat` alone: no `FAIL` line. Expect one skip fewer than under Wine:
-   `dx12_offscreen`, which Wine skips for lack of a Direct3D 12 device (`SKIP dx12_offscreen
-   [default]: no Direct3D 12 device ...`), runs on WARP. Note the summary line and every
-   `SKIP`.
+2. `tests\run.bat` alone: no `FAIL` line. `dx12_offscreen`, which Wine skips for lack of a
+   Direct3D 12 device (`SKIP dx12_offscreen [default]: no Direct3D 12 device ...`), runs on
+   WARP; `audio_nodevice`, which needs a machine without any sound device, skips where there
+   is one (`SKIP audio_nodevice [default]: this machine has a sound device`). Note the
+   summary line and every `SKIP`. The window tests (`window_win32`, `window_win32_input`)
+   move the real pointer and take the focus for a moment: leave the mouse alone meanwhile.
 3. Run it three times: the same lines each time (the tests run in parallel, one thread per
    CPU). If a test fails only sometimes, run `tests\run.bat -j 1` (one test after the other)
    and report whether it still fails: the difference tells a load-sensitive test from a real
@@ -178,8 +190,9 @@ Build and run each `tests\run\thread_*.al` (output must equal the matching `.out
    `thread_unlock`, `thread_region_other`: the message names the thread (`panic in thread N: ...`), shows its stack
    trace, and the exit status is 1. The stack overflow in a thread is reported, not a silent
    crash (this checks `SetThreadStackGuarantee` on new threads).
-4. Executables carry a TLS directory with an empty template: they load and per-thread data works
-   (every thread test exercises it).
+4. Executables carry a TLS directory whose template is the zeroed thread block (Windows does
+   not zero `SizeOfZeroFill`, Wine does): they load and per-thread data works (every thread
+   test exercises it). Done on the first native run.
 
 ## 8. The executable file: ASLR, manifest, icon, version information
 Wine relocates images and applies the manifest (tests/pe/run.sh), and the file format is
@@ -209,9 +222,11 @@ Build `tests\pe\res.al` twice: plain as `res_plain.exe`, and as `res_full.exe` w
 7. Manifest: `mt.exe -inputresource:res_plain.exe;#1 -out:m.xml` (or Resource Hacker)
    extracts well-formed XML; `sigcheck -m res_plain.exe` prints it. An executable named
    `setup.exe` or `install.exe` built by `alc` starts without an elevation prompt.
-8. Long paths: with `LongPathsEnabled` set to 1 in
-   `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`, a program reads and writes a file
-   whose full path is longer than 260 characters without the `\\?\` prefix.
+8. Long paths: a program reads and writes a file whose full path is longer than 260
+   characters without the `\\?\` prefix, with `LongPathsEnabled` 0 or 1 in
+   `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem` (the library adds the prefix). Done with
+   0 on the first native run (`win_files`); a path on a network share (`\\server\share\...`,
+   which becomes `\\?\UNC\server\share\...`) is still to check.
 9. On a 150 % or 200 % monitor, a GUI program that opens a window with its own `user32.dll`
    calls (not std.window) is sharp and sized in physical pixels; the panic message box of a
    `--gui` program is sharp, not blurred.
@@ -272,9 +287,9 @@ git converted the `.out` files to `"\r\n"`, compare ignoring line ends).
    lines about paths below a file (`not a directory`) and about `rename` between a file and a
    directory check error codes that Wine reports differently from Windows.
 2. `tests\sys\win_files.al` (output: `tests\sys\win_files.out`). Note the line it writes to
-   standard error: `long paths without \\?\: work` or `fail (...)`. With `LongPathsEnabled` = 1
-   in `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem` and a long-path-aware manifest it must
-   say `work`; the `\\?\` lines must pass either way.
+   standard error: `long paths without \\?\: work` or `fail (...)`. It must say `work` whatever
+   `LongPathsEnabled` is (the library hands long paths to Windows with `\\?\`); under Wine
+   it says `work` too. The test runs as part of the suite (section 0).
 3. In that test, the lines `hidden` and `hidden system`: `write_file` replaces a hidden file
    (Windows refuses it without the file's attributes; Wine never refuses, so the retry in the
    library has never run).

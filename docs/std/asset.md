@@ -114,12 +114,13 @@ hold any text; invalid UTF-8 becomes U+FFFD. `io_error()` is the Linux error num
 same situation (`not a directory` for a path that goes through a file, `is a directory`,
 `file name too long` for a name of more than 255 units, ...). What differs from Linux:
 
-- **Long paths.** A path of more than 260 UTF-16 units works on every Windows when it is
-  written in the extended-length form: `\\?\` followed by the full path from the drive
-  (`\\?\C:\saves\...`), without `.` or `..`; `/` may separate components there too, so
-  `path_join` works on it. Other long paths work only where Windows has long paths enabled
-  (the registry setting `LongPathsEnabled`; the executable's manifest declares it long-path
-  aware) and fail with `file name too long` or `no such file or directory` elsewhere.
+- **Long paths.** A path of more than 260 UTF-16 units works on every Windows, also without
+  the registry setting `LongPathsEnabled`: the library turns a path of 248 units or more
+  (absolute or relative, with `/` or `\`, `.` and `..`) into the extended-length form, the
+  full path after `\\?\` (`\\?\C:\saves\...`, `\\?\UNC\server\share\...`), before Windows
+  sees it. A path written in that form is taken as it is: from the drive, without `.` or
+  `..`; `/` may separate components there too, so `path_join` works on it. A single name is
+  still at most 255 units (`file name too long`).
 - **Names.** Upper and lower case name the same file (`Save.dat`, `save.dat`); the name keeps
   the case it was created with. No name has one of `< > : " | ? *` or a control character
   (`invalid argument`), or ends in a dot or a space (Windows drops them: `"a."` is `"a"`).

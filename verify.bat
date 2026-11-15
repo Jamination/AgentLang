@@ -12,17 +12,18 @@ setlocal
 cd /d "%~dp0"
 set "FAIL=0"
 echo == build: the compiler compiles itself ==
-call build.bat
+rem (by full path: with NoDefaultCurrentDirectoryInExePath set, cmd does not look in .)
+call "%~dp0build.bat"
 if errorlevel 1 (
   echo FAIL: compiler did not build
   echo VERIFY: FAIL
   exit /b 1
 )
 echo == conformance tests (language, standard library, system, bindings) ==
-call tests\run.bat
+call "%~dp0tests\run.bat"
 if errorlevel 1 set "FAIL=1"
 echo == the same programs for Linux: built and type-checked, not run ==
-call tests\run.bat --target linux
+call "%~dp0tests\run.bat" --target linux
 if errorlevel 1 set "FAIL=1"
 if "%FAIL%"=="0" (
   echo VERIFY: PASS

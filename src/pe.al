@@ -197,9 +197,11 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
         }
     }
     data.resize(align_up(data.len, 16), 0)
-    // the TLS directory (data directory 9): the loader gives every thread a zeroed thread block
-    // of tls_size bytes (see layout_tls; no template data, no callbacks: an empty list after
-    // the directory) and stores the block's index in __win_tls_index, which the code reads
+    // the TLS directory (data directory 9): the loader gives every thread a copy of the
+    // template, tls_size zero bytes after the directory (see layout_tls; no callbacks: an empty
+    // list after the directory), and stores the block's index in __win_tls_index, which the
+    // code reads. The zeros are template data, not SizeOfZeroFill: Windows allocates the
+    // block with the template's size only and leaves the zero fill out (Wine zeroes it).
     tls_size := layout_tls(m, &gaddr, false)
     tls_index := -1
     for gi in 0..m.globals.len {
@@ -209,14 +211,15 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     }
     tls_dir := data.len
     if tls_index >= 0 {
-        empty := base + data_rva + tls_dir + 40
-        put64(&data, empty) // StartAddressOfRawData
-        put64(&data, empty) // EndAddressOfRawData
-        put64(&data, 0)     // AddressOfIndex (below)
-        put64(&data, empty) // AddressOfCallBacks
-        put32(&data, tls_size)
+        list := base + data_rva + tls_dir + 40
+        put64(&data, list + 8)            // StartAddressOfRawData
+        put64(&data, list + 8 + tls_size) // EndAddressOfRawData
+        put64(&data, 0)                   // AddressOfIndex (below)
+        put64(&data, list)                // AddressOfCallBacks
+        put32(&data, 0)                   // SizeOfZeroFill
         put32(&data, 0)
-        put64(&data, 0)     // the empty callback list
+        put64(&data, 0)                   // the empty callback list
+        data.resize(data.len + tls_size, 0)
     }
     data.resize(align_up(data.len, 16), 0)
     bss_size := layout_bss(m, base + data_rva + data.len, &gaddr)

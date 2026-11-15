@@ -56,6 +56,7 @@ priv extern "kernel32.dll" fn GetCurrentProcess() -> i64
 priv extern "kernel32.dll" fn GetCurrentProcessId() -> u32
 priv extern "kernel32.dll" fn GetCurrentDirectoryW(n: u32, buf: *u16) -> u32
 priv extern "kernel32.dll" fn GetFileAttributesW(name: *u16) -> u32
+priv extern "kernel32.dll" fn GetFullPathNameW(name: *u16, n: u32, buf: *u16, file: i64) -> u32
 priv extern "kernel32.dll" fn GetFileAttributesExW(name: *u16, level: i32, info: *u32) -> i32
 priv extern "kernel32.dll" fn GetFileInformationByHandle(h: i64, info: *u32) -> i32
 priv extern "kernel32.dll" fn DeleteFileW(name: *u16) -> i32
@@ -637,11 +638,40 @@ priv fn verbatim(w: *u16) {
     }
 }
 
-// the path p as wide_c gives it, for the file functions
+// the path p as wide_c gives it, for the file functions. A long one (248 units or more: the
+// limit of CreateDirectoryW; MAX_PATH, 260, for the others) becomes an extended-length path:
+// made absolute and normalised by GetFullPathNameW (as Windows does with every short path),
+// then `\\?\C:\...` or `\\?\UNC\server\share\...`, which Windows takes up to 32767 units long
+// without LongPathsEnabled. A path that is already `\\?\` or `\\.\` stays as written.
 priv fn wide_path(buf: []u16, p: *u8) -> *u16 {
     w := wide_c(buf, p)
     verbatim(w)
-    return w
+    n := wcslen(w)
+    if n < 248 || (w[0] == 92 && w[1] == 92 && (w[2] == 63 || w[2] == 46) && w[3] == 92) {
+        return w
+    }
+    need := GetFullPathNameW(w, 0, nil, 0)
+    if need == 0 {
+        return w
+    }
+    full := alloc[u16](i64(need))
+    k := i64(GetFullPathNameW(w, need, ptr(full), 0))
+    if k == 0 || k >= i64(need) {
+        return w
+    }
+    unc := k > 2 && full[0] == 92 && full[1] == 92
+    if !unc && !(k > 2 && full[1] == 58 && full[2] == 92) {
+        return w
+    }
+    prefix := if unc { "\\\\?\\UNC" } else { "\\\\?\\" }
+    skip := if unc { 1 } else { 0 }
+    out := alloc[u16](len(prefix) + k - skip + 1)
+    for i, c in prefix {
+        out[i] = u16(c)
+    }
+    memcopy(cast[i64](ptr(out)) + 2 * len(prefix), cast[i64](ptr(full)) + 2 * skip, 2 * (k - skip))
+    out[len(prefix) + k - skip] = 0
+    return ptr(out)
 }
 
 // ---------- standard handles, reading and writing ----------

@@ -36,7 +36,7 @@ fn main() {
     print("absolute", is_dir(abs), is_dir(replace(abs, "\\", "/")), read_file(fmt(abs, "\\a\\f.txt")), read_file(fmt(to_lower(drive), abs[2..], "/a/f.txt")))
     print("relative to the drive's directory", is_dir(fmt(drive, d)), list_dir(fmt(drive, d)), read_file(fmt(drive, d, "\\a\\f.txt")), read_file(path_join(drive, fmt(d, "/a/f.txt"))))
     print("the current drive's root", is_dir(cwd[2..]), is_dir(fmt(cwd[2..], "\\", d)), read_file(fmt(replace(cwd[2..], "\\", "/"), "/", d, "/a/f.txt")))
-    print("a drive's root", is_dir(fmt(drive, "\\")), is_dir(fmt(drive, "/")), is_dir(drive), len(list_dir(fmt(drive, "\\"))) > 0, len(list_dir(drive)) > 0, file_size(fmt(drive, "\\")), read_file(fmt(drive, "\\")), why())
+    print("a drive's root", is_dir(fmt(drive, "\\")), is_dir(fmt(drive, "/")), is_dir(drive), len(list_dir(fmt(drive, "\\"))) > 0, len(list_dir(drive)) > 0, file_size(fmt(drive, "\\")) >= 0, read_file(fmt(drive, "\\")), why())
     print("the system drive", is_dir("C:\\"), is_dir("c:/"), contains(list_dir("C:\\"), "windows") || contains(list_dir("C:\\"), "Windows"))
     print("no such drive", is_dir("Q:\\"), file_exists("Q:\\x"), list_dir("Q:\\"), why(), read_file("Q:\\x"), why(), write_file("Q:\\x", "x"), why(), make_dir("Q:\\x\\y"), why())
     print("roots", path_join("C:", "x"), path_join("C:\\", "x"), path_join("a", "C:\\x"), path_join("a", "\\x"), path_join("a\\", "b"), path_join("\\\\srv\\share", "x"), path_join("\\\\srv\\share\\", "x"), path_join("a", "\\\\srv\\share\\x"))

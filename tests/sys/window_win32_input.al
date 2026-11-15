@@ -72,6 +72,13 @@ fn show(w: *Window) {
 
 // where the pointer is (client pixels), whether it is confined to that one pixel, and its shape
 fn pointer(w: *Window) -> str {
+    return pointer_from(w, -1, -1)
+}
+
+// the same, but with the position as a move from client pixel (x, y): down and to the right
+// by up to 3 pixels in each direction (Windows moves the pointer by the counts of a relative
+// SendInput through its pointer speed and acceleration settings: 3 counts can be 2 pixels)
+fn pointer_from(w: *Window, x: i32, y: i32) -> str {
     h := win32_hwnd(w)
     cur: [2]i32
     GetCursorPos(&cur)
@@ -80,7 +87,10 @@ fn pointer(w: *Window) -> str {
     held := clip[2] - clip[0] == 1 && clip[3] - clip[1] == 1 && clip[0] == cur[0] && clip[1] == cur[1]
     ScreenToClient(h, &cur)
     SendMessageW(h, 0x20, u64(cast[i64](h)), 0x02000001)             // WM_SETCURSOR, HTCLIENT
-    fmt("at ", cur, if held { " held" } else { " free" }, if GetCursor() == nil { " hidden" } else { " shown" })
+    at := if x < 0 { fmt("at ", cur) } else {
+        fmt("moved from ", [2]i32{x, y}, ": ", cur[0] > x && cur[0] <= x + 3 && cur[1] > y && cur[1] <= y + 3)
+    }
+    fmt(at, if held { " held" } else { " free" }, if GetCursor() == nil { " hidden" } else { " shown" })
 }
 
 fn translation() {
@@ -127,7 +137,13 @@ fn main() {
     }
     h := win32_hwnd(w)
     w.poll()
-    SetCursorPos(40, 60)
+    // client pixel (37, 31) (Wine's null driver opens the window at the top left of the screen:
+    // screen pixel (40, 60); Windows wherever it chooses)
+    p: [2]i32
+    p[0] = 37
+    p[1] = 31
+    ClientToScreen(h, &p)
+    SetCursorPos(p[0], p[1])
     w.poll()
     before: [2]i32
     GetCursorPos(&before)
@@ -206,7 +222,7 @@ fn main() {
     w.poll()
     mouse(3, 3)
     w.poll()
-    print("open:", pointer(w), "delta:", w.input.mouse_delta())
+    print("open:", pointer_from(w, 160, 100), "delta:", w.input.mouse_delta())
     SendMessageW(h, 0x212, 0, 0)                                      // WM_EXITMENULOOP
     w.poll()
     print("closed:", pointer(w))
@@ -230,7 +246,19 @@ fn main() {
     mouse(4, 4)
     w.poll()
     GetCursorPos(&cur)
-    print("the pointer moves:", cur[0] - before[0], cur[1] - before[1])
+    // (by 4 pixels under Wine, by 3 or 4 with Windows' pointer acceleration)
+    dx := cur[0] - before[0]
+    dy := cur[1] - before[1]
+    print("the pointer moves:", dx >= 3 && dx <= 4 && dy >= 3 && dy <= 4)
+    // the WM_MOUSEMOVE of that move, which Windows may deliver a poll later: not printed
+    sleep_ms(50)
+    w.poll()
+    loop {
+        _, more := w.next_event()
+        if !more {
+            break
+        }
+    }
 
     print("system keys")
     // Alt+Enter (the game's fullscreen key), F10, Alt alone: key events, no menu mode

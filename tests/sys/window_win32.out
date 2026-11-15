@@ -98,7 +98,7 @@ moved: vec2(-999.0, -1002.0)
 unlocked: false back: true clip released: true shown: true
 fullscreen
 before poll: (320, 200)
-  EventResize 1024 768
+  EventResize the monitor's size
 covers the monitor: true popup: true
   EventResize 320 200
 windowed: (320, 200) popup: false
@@ -107,8 +107,8 @@ minimize
   EventUnfocus 0 0
   EventMinimize 0 0
 minimized: true size: (320, 200)
-  EventRestore 0 0
   EventFocus 0 0
+  EventRestore 0 0
 minimized: false size: (320, 200)
 menu key and move loop
 poll returned inside the loop: true

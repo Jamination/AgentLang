@@ -26,6 +26,8 @@ extern "user32.dll" fn GetClipCursor(rect: *[4]i32) -> i32
 extern "user32.dll" fn GetWindowRect(hwnd: *u8, rect: *[4]i32) -> i32
 extern "user32.dll" fn ClientToScreen(hwnd: *u8, p: *[2]i32) -> i32
 extern "user32.dll" fn SetCursorPos(x: i32, y: i32) -> i32
+extern "user32.dll" fn MonitorFromWindow(hwnd: *u8, flags: u32) -> *u8
+extern "user32.dll" fn GetMonitorInfoW(monitor: *u8, info: *[10]i32) -> i32
 
 // INPUT with a KEYBDINPUT (40 bytes: the union starts at offset 8)
 struct KeyInput {
@@ -42,25 +44,49 @@ struct KeyInput {
 // (moving the window under the pointer makes Wine send a WM_MOUSEMOVE at a position that
 // depends on where the window opened: not printed in those parts)
 print_moves := true
+// (a fullscreen window's size is that of its monitor: printed as such, not in pixels)
+monitor_sizes := false
+// (the order of some events is Windows': Wine sends WM_SIZE before WM_SETFOCUS on a restore,
+// Windows the focus first; those parts print their events sorted)
+sorted := false
+
+// the size of the monitor the window is on (MONITORINFO: size, the monitor's rectangle, ...)
+fn monitor_size(w: *Window) -> (i64, i64) {
+    mi: [10]i32
+    mi[0] = 40
+    GetMonitorInfoW(MonitorFromWindow(win32_hwnd(w), 2), &mi)       // MONITOR_DEFAULTTONEAREST
+    return (i64(mi[3] - mi[1]), i64(mi[4] - mi[2]))
+}
 
 fn show(w: *Window) {
     flush()
     w.poll()
+    lines := vec[str]()
     loop {
         e, more := w.next_event()
         if !more {
             break
         }
         match e.kind {
-            EventKeyDown, EventKeyUp => print(" ", e.kind, key_name(e.key), "mods", e.mods, "repeat", e.repeat)
-            EventText => print(" ", e.kind, e.codepoint, "mods", e.mods)
+            EventKeyDown, EventKeyUp => lines.push(fmt("  ", e.kind, " ", key_name(e.key), " mods ", e.mods, " repeat ", e.repeat))
+            EventText => lines.push(fmt("  ", e.kind, " ", e.codepoint, " mods ", e.mods))
             EventMouseMove, EventMouseDown, EventMouseUp => {
                 if print_moves || e.kind != EventMouseMove {
-                    print(" ", e.kind, e.key, e.x, e.y, "mods", e.mods)
+                    lines.push(fmt("  ", e.kind, " ", e.key, " ", e.x, " ", e.y, " mods ", e.mods))
                 }
             }
-            _ => print(" ", e.kind, e.x, e.y)
+            EventResize if monitor_sizes => {
+                mw, mh := monitor_size(w)
+                lines.push(fmt("  ", e.kind, if e.x == mw && e.y == mh { " the monitor's size" } else { fmt(" ", e.x, " ", e.y, ", not the monitor's ", mw, " ", mh) }))
+            }
+            _ => lines.push(fmt("  ", e.kind, " ", e.x, " ", e.y))
         }
+    }
+    if sorted {
+        sort(lines.items())
+    }
+    for l in lines {
+        print(l)
     }
 }
 
@@ -88,6 +114,15 @@ fn main() {
         exit(1)
     }
     h := win32_hwnd(w)
+    // the pointer to the corner of the screen farthest from the window: a window that opens
+    // under the pointer gets a WM_MOUSEMOVE (on Windows the window opens where Windows
+    // chooses, in a new place each time; Wine's null driver puts it at the top left)
+    at: [4]i32
+    GetWindowRect(h, &at)
+    mi: [10]i32                                       // MONITORINFO: the monitor's rectangle at 4
+    mi[0] = 40
+    GetMonitorInfoW(MonitorFromWindow(h, 2), &mi)
+    SetCursorPos(if at[0] + at[2] < mi[1] + mi[3] { mi[3] - 1 } else { mi[1] }, if at[1] + at[3] < mi[2] + mi[4] { mi[4] - 1 } else { mi[2] })
     title: [32]u16
     n := GetWindowTextW(h, ptr(title), 32)
     print("title:", title[..n])
@@ -267,12 +302,14 @@ fn main() {
 
     print("fullscreen")
     print_moves = false
+    monitor_sizes = true
     w.set_fullscreen(true)
     print("before poll:", w.size())
     show(w)
     fw, fh := w.size()
     GetClientRect(h, &r)
     print("covers the monitor:", fw > 320 && fh > 200 && r[2] == i32(fw) && r[3] == i32(fh), "popup:", GetWindowLongPtrW(h, -16) & 0x80000000 != 0)
+    monitor_sizes = false
     w.set_fullscreen(false)
     show(w)
     print("windowed:", w.size(), "popup:", GetWindowLongPtrW(h, -16) & 0x80000000 != 0)
@@ -285,7 +322,9 @@ fn main() {
     show(w)
     print("minimized:", w.minimized, "size:", w.size())
     ShowWindow(h, 9)                                  // SW_RESTORE
+    sorted = true
     show(w)
+    sorted = false
     print("minimized:", w.minimized, "size:", w.size())
 
     print_moves = true

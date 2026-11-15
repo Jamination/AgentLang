@@ -795,10 +795,10 @@ both systems, except where this section says otherwise.
   backslashes before quotes, `""` inside quotes); `args()[0]` is the program as the command
   line names it. **`env_get`** compares names without regard to case.
 - **Paths** may use `\` as well as `/`, a drive (`C:/x`, `C:x`) or `\\server\share\`; the
-  path functions of std.asset know these roots and build paths with `/`. Paths longer than
-  260 UTF-16 units need long-path support enabled in Windows (the registry setting
-  `LongPathsEnabled`; the executable's manifest declares it long-path aware), or the form
-  `\\?\C:\dir\file` ([std/asset.md](std/asset.md#windows)).
+  path functions of std.asset know these roots and build paths with `/`. Long paths work
+  without `LongPathsEnabled`: the run-time library hands Windows a path of 248 UTF-16 units
+  or more in the extended-length form `\\?\C:\dir\file`, made absolute first
+  ([std/asset.md](std/asset.md#windows)).
   `current_dir()` is in Windows form (`C:\Users\me`).
 - **Errors.** `io_error()` is the Linux errno of the same meaning (file not found 2, access
   denied 13, a directory where a file is expected 21, file exists 17, directory not empty 39,
