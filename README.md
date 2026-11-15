@@ -35,13 +35,21 @@ fn main() {
 
 ## Getting started
 
-Linux on x86-64 is the only requirement; the repository carries a seed compiler. The compiler
-runs on Linux and Windows (`build/alc.exe`), and builds for both (`--target linux|windows`).
+Linux or Windows on x86-64 is the only requirement; the repository carries a seed compiler for
+each. The compiler runs on both and builds for both (`--target linux|windows`).
 
 ```
-./build.sh                          # the compiler compiles itself -> build/alc
+./build.sh                          # Linux: the compiler compiles itself -> build/alc (and build/alc.exe)
 ./build/alc run examples/hello.al
 ```
+
+```
+build.bat                           :: Windows: the same -> build\alc.exe (and build\alc)
+build\alc.exe run examples\hello.al
+```
+
+The test suites (`tests/run.sh`, `verify.sh`) are bash scripts and run on Linux; on Windows, use
+`alc.exe test file.al` for a program's `test` blocks.
 
 | Command | |
 |---|---|
@@ -123,7 +131,7 @@ The compiler compiles its own 40,000 lines in about 0.125 s without optimisation
 |---|---|
 | `src/` | the compiler: front end, SSA optimizer (`opt/`), x86-64 back end (`x86/`), ELF linker, and the run-time library (`prelude.al`) |
 | `std/` | standard library modules (`use std.<name>`) |
-| `bootstrap/alc` | seed compiler that `build.sh` starts from |
+| `bootstrap/alc`, `bootstrap/alc.exe` | seed compilers that `build.sh` (Linux) and `build.bat` (Windows) start from |
 | `examples/`, `bench/` | sample programs; the benchmarks in AL and C |
 | `tests/` | conformance suite (`tests/run.sh`) and fuzzers (`tests/gen/`) |
 | `verify.sh` | everything: self-compilation to a fixed point, tests, benchmarks |

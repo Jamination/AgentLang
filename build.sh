@@ -6,7 +6,8 @@
 #                         and build/alc.exe: the same compiler for Windows (built by stage 2
 #                         while it builds stage 3)
 #   ./build.sh --quick    seed compiler -> build/alc only (no self-check, no build/alc.exe)
-#   ./build.sh --reseed   after a full build, also replaces the seed with the new compiler
+#   ./build.sh --reseed   after a full build, also replaces the seeds (bootstrap/alc and, for
+#                         build.bat on Windows, bootstrap/alc.exe) with the new compilers
 #   ./build.sh --windows-check
 #                         after a full build, runs build/alc.exe under Wine (in $WINEPREFIX,
 #                         default tmp/win/prefix-tests; no display): it must build itself
@@ -14,6 +15,8 @@
 #
 # The seed is bootstrap/alc, a committed build of an earlier version of this same compiler
 # (override with ALC_SEED=/path/to/alc). No other tool takes part in building the compiler.
+# build.bat is the same script for Windows (seed bootstrap/alc.exe); both produce byte-identical
+# compilers.
 set -u
 cd "$(dirname "$0")" || exit 2
 SEED=${ALC_SEED:-bootstrap/alc}
@@ -53,7 +56,8 @@ echo "build: build/alc ($(wc -c <build/alc) bytes), self-compiled, stages 2 and 
 if [[ $mode == --reseed ]]; then
   mkdir -p bootstrap
   cp build/alc bootstrap/alc
-  echo "build: bootstrap/alc updated"
+  cp build/alc.exe bootstrap/alc.exe
+  echo "build: bootstrap/alc and bootstrap/alc.exe updated"
 fi
 if [[ $wincheck == 1 ]]; then
   command -v wine >/dev/null || { echo "build: --windows-check needs wine"; exit 1; }

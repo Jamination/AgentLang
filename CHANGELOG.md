@@ -8,6 +8,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Added
+- `build.bat`: builds the compiler on Windows the way `build.sh` does on Linux (seed -> stage 1
+  -> stage 2 -> stage 3, `--quick`, `--reseed`), from a committed Windows seed
+  `bootstrap/alc.exe`; it also builds the Linux compiler. `build.sh --reseed` now refreshes both
+  seeds.
+
 ## [0.3.0] - 2026-11-15
 
 ### Breaking

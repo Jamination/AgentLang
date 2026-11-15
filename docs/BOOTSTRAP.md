@@ -10,6 +10,13 @@ repository and no build tool besides `alc`.
 ./build.sh --windows-check  # full build, then the cross-host fixpoint under Wine (below)
 ```
 
+On Windows, `build.bat` does the same from the seed `bootstrap\alc.exe` (`build.bat --quick`,
+`build.bat --reseed`); its stage 2 also builds the Linux compiler `build\alc`. Both scripts
+produce byte-identical compilers, and `--reseed` on either replaces both seeds, so they never
+drift apart: a seed that falls behind could not compile sources that use newer features.
+`build.bat` compares the stages with `fc /b` (Wine's `fc` cannot compare binaries: under Wine it
+warns and skips the comparison).
+
 | Stage | Built by | From | Purpose |
 |-------|----------|------|---------|
 | seed | (committed) `bootstrap/alc` | an earlier state of `src/` | any compiler good enough to compile the current sources |
