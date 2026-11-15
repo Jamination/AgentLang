@@ -1,5 +1,6 @@
 // std.audio: WAV encode / decode round trips in every sample format, generators, bad input.
 use std.audio
+use std.os
 
 fn put3(x: f32) {
     putf(f64(x), 5)
@@ -128,11 +129,11 @@ fn main() {
     print(ok1, ok2, ok3, ok4, ok5, frames(cut))
 
     // files
-    path := "/tmp/al_std_audio_wav_test.wav"
+    make_dir("tmp")
+    path := fmt("tmp/audio_wav_", process_id(), ".wav")
     print(wav_save(path, s, WAV_PCM24))
     back, ok6 := wav_load(path)
     print(ok6, frames(back), back.rate, back.channels, max_diff(s, back) < 0.000001)
-    _, ok7 := wav_load("/nonexistent/dir/x.wav")
-    print(ok7, wav_save("/nonexistent/dir/x.wav", s, WAV_PCM16))
-    syscall(87, cstr(path))
+    _, ok7 := wav_load("tmp/nonexistent/dir/x.wav")
+    print(ok7, wav_save("tmp/nonexistent/dir/x.wav", s, WAV_PCM16), remove_file(path))
 }

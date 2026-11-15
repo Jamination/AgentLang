@@ -1,5 +1,5 @@
 // std.asset: config files and JSON
-use std.asset
+use std.os
 
 fn show(v: *Json, depth: i64) {
     for i in 0..depth {
@@ -36,7 +36,7 @@ fn main() {
     e := config_parse("")
     print(e.keys.len, e.get_i64("x", 7))
     _, okc := config_load("no/such/file.ini")
-    dir := fmt("tmp/asset_data_", syscall(39))
+    dir := fmt("tmp/asset_data_", process_id())
     ini := path_join(dir, "game.ini")
     make_dir(dir)
     write_bytes(ini, text)

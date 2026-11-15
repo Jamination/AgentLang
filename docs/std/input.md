@@ -31,7 +31,8 @@ key_pressed(&inp, ...)   // query
 the frame in which the event arrived. A key that goes down and up within one frame reports
 `key_pressed` and `key_released` in that frame and `key_down` false, so quick taps are never
 lost. When the window loses focus (`EventUnfocus`) every held key and button is released, so
-nothing stays stuck.
+nothing stays stuck; when the focus comes back, a key that is still held counts as pressed
+again at its next press or auto-repeat ([window.md](window.md#keys-and-text)).
 
 If the simulation runs in fixed steps (several or zero steps per rendered frame), read edges
 once per frame and latch them until a step consumes them; see the game loop in
@@ -69,8 +70,8 @@ struct Event { kind: EventKind, key: i64, x: i64, y: i64, codepoint: u32, mods: 
 | `EventResize` | `x`, `y`: new width and height |
 | `EventFocus`, `EventUnfocus` | keyboard focus gained / lost |
 | `EventKeyDown`, `EventKeyUp` | `key`: `KEY_*`; `repeat`: auto-repeat of a held key; `mods` |
-| `EventText` | `codepoint`: one Unicode character typed (layout, shift, dead keys applied) |
-| `EventMouseMove` | `x`, `y`: pointer position in window pixels (a virtual, unbounded position while the window's cursor is locked: see [window.md](window.md#mouse-look)) |
+| `EventText` | `codepoint`: one Unicode character typed (layout, shift, dead keys applied); sent in addition to the key events of the keys that typed it, never for control characters |
+| `EventMouseMove` | `x`, `y`: pointer position in window pixels (while the window's cursor is locked: a virtual, unbounded position that moves by the raw motion of the mouse, in device counts: see [window.md](window.md#mouse-look)) |
 | `EventMouseDown`, `EventMouseUp` | `key`: `MOUSE_*`; `x`, `y`; `mods` |
 | `EventWheel` | `x`, `y`: scroll steps (`y > 0`: away from the user) |
 | `EventMinimize`, `EventRestore` | the window was minimized (iconified) / is shown again; the size does not change |
@@ -102,7 +103,7 @@ per key / mouse button), `mouse_x/y`, `mouse_dx/dy`, `wheel_x/y`, `focused`, `te
 | `shift_down(i)`, `ctrl_down(i)`, `alt_down(i)` | either of the two modifier keys is held |
 | `mouse_down(i, button)`, `mouse_pressed(i, button)`, `mouse_released(i, button)` | the same for `MOUSE_*` buttons |
 | `mouse_pos(i) -> vec2` | pointer position in window pixels |
-| `mouse_delta(i) -> vec2` | pointer movement during this frame (the relative motion for mouse-look while the window's cursor is locked) |
+| `mouse_delta(i) -> vec2` | pointer movement during this frame, in window pixels; while the window's cursor is locked, the raw motion of the mouse in device counts (no pointer acceleration, the same on Linux and Windows: [window.md](window.md#mouse-look)) |
 | `wheel(i) -> vec2` | wheel steps during this frame |
 | `text(i) -> []u32` | code points typed this frame (view, valid until `begin_frame`) |
 | `text_utf8(i, buf: []u8) -> str` | the same as UTF-8 written into `buf`; returns the used part |
@@ -195,7 +196,12 @@ button as `PAD_A` .. `PAD_RSTICK`; sticks as `PAD_AXIS_LX` / `LY` / `RX` / `RY` 
 positive, so XInput's y is negated; raw values without a dead zone, use `pad_stick`); triggers
 as `PAD_AXIS_LT` / `RT` from -1 to 1; the D-pad as `PAD_AXIS_DPAD_X` / `DPAD_Y` with values -1,
 0, 1 (right / down positive), as xpad reports it. Only XInput controllers (Xbox-compatible) are
-seen; other HID gamepads need a driver that offers XInput.
+seen; other HID gamepads need a driver that offers XInput. **XInput knows four controllers**:
+`index` 0..3, a fifth pad is not seen (`gamepad_open` is false for any other index).
+
+**No rumble.** std.input only reads controllers; there is no function for the vibration
+motors (Windows would need `XInputSetState`, Linux a force-feedback effect on the pad's
+`/dev/input/event*` device, which the joystick interface used here does not offer).
 
 ## Example
 

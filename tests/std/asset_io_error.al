@@ -1,5 +1,5 @@
 // std.asset: io_error() after read_bytes / write_bytes and the directory functions
-use std.asset
+use std.os
 
 fn report(what: str, ok: bool) {
     print(what, ok, io_error(), error_text(io_error()))
@@ -11,7 +11,7 @@ fn can_read(path: str) -> bool {
 }
 
 fn main() {
-    d := fmt("tmp/asset_io_error_", syscall(39))
+    d := fmt("tmp/asset_io_error_", process_id())
     remove_file(path_join(d, "a.txt"))
     remove_file(path_join(d, "sub/b.txt"))
     remove_dir(path_join(d, "sub"))
@@ -24,7 +24,12 @@ fn main() {
     report("read missing", can_read(path_join(d, "missing.txt")))
     report("read directory", can_read(d))
     report("read below a file", can_read(path_join(a, "x")))
-    report("read /proc file", can_read("/proc/self/cmdline"))
+    // a file whose size the system does not tell
+    when TARGET_OS == Windows {
+        report("read a file without a size", can_read("NUL"))
+    } else {
+        report("read a file without a size", can_read("/proc/self/cmdline"))
+    }
     report("write into missing directory", write_bytes(path_join(d, "sub/b.txt"), "x"))
     report("write to a directory", write_bytes(d, "x"))
     report("make_dir on a file", make_dir(a))

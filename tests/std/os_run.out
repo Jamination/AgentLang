@@ -1,0 +1,32 @@
+exit 0 0 0
+exit 1 1 0
+exit 7 7 44 255 255
+arguments (a b  c
+, 0)
+parent, child
+stdin (0
+, 0) true true
+working directory true
+children of children 5
+missing program -1 no such file or directory
+missing path -1 no such file or directory (, -1) no such file or directory (, -1) no such file or directory
+a directory -1 permission denied -1 permission denied
+below a file -1 true
+after a start 0 no error
+no name -1 invalid argument -1 no such file or directory
+a failure leaves no output (, -1) (, -1)
+stdout only one
+three
+ 3
+both one
+two
+three
+ 3
+nothing 0 0
+nothing from both 0 9
+1 MB 1048580 0 1048576 true
+2 MB from both 2097156 0 1048576 1048576 true true
+bytes 8 true
+PATH lookup 5 true
+40 in a row 780
+cleanup true false

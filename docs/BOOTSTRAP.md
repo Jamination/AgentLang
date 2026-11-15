@@ -601,7 +601,9 @@ same, the differences are:
   prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
   (exception dispatch, debuggers); functions without a frame are leaf functions.
 - **Run-time library.** `src/prelude_windows.al` replaces `src/prelude_linux.al` (kernel32.dll
-  only); bundled modules with Linux interfaces are refused (`LINUX_ONLY` in `src/main.al`), and
+  only); the bundled modules with Linux interfaces (`std.x11`, `std.wayland`, `std.alsa`,
+  `std.vk`, `std.shaderc`) are refused (`LINUX_ONLY` in `src/main.al`; `std.libc` is not one of
+  them: it binds `msvcrt.dll` in a `when`), and
   the modules with an OS layer include the target's one with `when TARGET_OS == ...`.
   `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
   `tests/windows.skip`).

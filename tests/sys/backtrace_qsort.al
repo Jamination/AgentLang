@@ -1,14 +1,14 @@
 // a panic in a comparison that the C library's qsort called: the trace shows the frames of qsort
-// (glibc, built by GCC) between those of the program
+// (glibc, built by GCC; Windows: msvcrt.dll) between those of the program
 use std.libc
 
-fn check(x: i32) {
-    assert x != 3, "comparing 3"
+fn check(x: i32, y: i32) {
+    assert x != 3 && y != 3, "comparing 3"
 }
 
 fn by_value(a: *u8, b: *u8) -> i32 {
     x := cast[*i32](a)[0]
-    check(x)
+    check(x, cast[*i32](b)[0])
     return x - cast[*i32](b)[0]
 }
 

@@ -2,5 +2,6 @@ own environment true
 variables true
 nested and empty names true
 fallback true
+spaces and non-ASCII text true
 nothing set true
 cannot be created true

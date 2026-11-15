@@ -629,6 +629,27 @@ priv fn wide_c(buf: []u16, p: *u8) -> *u16 {
     return ptr(out)
 }
 
+// An extended-length path (`\\?\C:\dir\file`) reaches the file system as it is written:
+// `/` separates nothing there, so the `/` that path_join puts in becomes `\`
+priv fn verbatim(w: *u16) {
+    if w[0] == 92 && w[1] == 92 && w[2] == 63 && w[3] == 92 {
+        i := 4
+        while w[i] != 0 {
+            if w[i] == 47 {
+                w[i] = 92
+            }
+            i += 1
+        }
+    }
+}
+
+// the path p as wide_c gives it, for the file functions
+priv fn wide_path(buf: []u16, p: *u8) -> *u16 {
+    w := wide_c(buf, p)
+    verbatim(w)
+    return w
+}
+
 // ---------- standard handles, reading and writing ----------
 // 0 / 1 / 2: the standard handles; anything else is a handle
 priv fn handle(fd: i64) -> i64 {
@@ -785,19 +806,73 @@ priv fn is_dir_w(w: *u16) -> bool {
     return a != 0xFFFFFFFF && a & 0x10 != 0
 }
 
+// -errno for the error e of a call on the path w. Two cases that Windows does not tell apart
+// as Linux does: a name of more than 255 units, which no file can have (ENAMETOOLONG), and
+// "path not found" (3), which Windows says both where a directory on the way is missing
+// (ENOENT) and where a file stands in its place (ENOTDIR): the nearest part of the path that
+// exists tells which
+priv fn path_error(w: *u16, e: u32) -> i64 {
+    if e == 2 || e == 3 || e == 123 || e == 206 {
+        run := 0
+        k := 0
+        while w[k] != 0 {
+            run = if w[k] == 47 || w[k] == 92 { 0 } else { run + 1 }
+            if run > 255 {
+                return -36
+            }
+            k += 1
+        }
+    }
+    if e != 3 {
+        return -errno_of(e)
+    }
+    i := wcslen(w)
+    loop {
+        // w[..i] without its last component and the separators before it
+        while i > 0 && w[i - 1] != 47 && w[i - 1] != 92 {
+            i -= 1
+        }
+        while i > 0 && (w[i - 1] == 47 || w[i - 1] == 92) {
+            i -= 1
+        }
+        if i == 0 || w[i - 1] == 58 {
+            return -2
+        }
+        c := w[i]
+        w[i] = 0
+        a := GetFileAttributesW(w)
+        w[i] = c
+        if a != 0xFFFFFFFF {
+            return if a & 0x10 == 0 { -20 } else { -2 }
+        }
+    }
+}
+
 // opens a file for reading, or creates or empties it for writing: a handle or -errno
 fn __os_open(path: *u8, write: bool) -> i64 {
     buf: [1024]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     // GENERIC_WRITE / GENERIC_READ, FILE_SHARE_READ | WRITE | DELETE, CREATE_ALWAYS / OPEN_EXISTING
     h := CreateFileW(w, if write { 0x40000000 } else { 0x80000000 }, 7, 0, if write { 2 } else { 3 }, 0x80, 0)
     if h == INVALID_HANDLE {
         e := GetLastError()
-        // a directory cannot be opened as a file (Linux: EISDIR)
-        if e == 5 && is_dir_w(w) {
+        if e == 5 && write {
+            // CREATE_ALWAYS refuses a hidden or system file that is not given these attributes
+            a := GetFileAttributesW(w)
+            if a != 0xFFFFFFFF && a & 0x11 == 0 && a & 6 != 0 {
+                h = CreateFileW(w, 0x40000000, 7, 0, 2, a & 6, 0)
+                if h != INVALID_HANDLE {
+                    return h
+                }
+                e = GetLastError()
+            }
+        }
+        // a directory cannot be opened as a file (Linux: EISDIR; Windows: "access denied",
+        // for the root of a drive "path not found")
+        if is_dir_w(w) {
             return -21
         }
-        return -errno_of(e)
+        return path_error(w, e)
     }
     return h
 }
@@ -892,9 +967,9 @@ fn __os_unmap(p: i64, n: i64) -> i64 {
 }
 
 // ---------- processes ----------
-// held while a process is created: the inheritable copies of the standard handles below must
-// not be inherited by a process that another thread starts at the same time (it would keep
-// the files and pipes of this one open)
+// one program is started at a time: the inheritable copies of its standard handles exist
+// only meanwhile, so a program that another thread starts never inherits them (it would keep
+// a capture pipe open and run_capture waiting until it ends)
 priv spawn_lock: i64
 
 // starts app with the command line cmd, the three standard handles and the environment block
@@ -902,8 +977,8 @@ priv spawn_lock: i64
 // instruction on: (process handle, process id), or (0, -errno)
 priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env: i64, job: i64) -> (i64, i64) {
     // the child gets inheritable copies of the three handles
+    AcquireSRWLockExclusive(&spawn_lock)
     me := GetCurrentProcess()
-    __os_lock(&spawn_lock)
     src: [3]i64
     src[0] = hin
     src[1] = hout
@@ -935,7 +1010,7 @@ priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env
             CloseHandle(dup[i])
         }
     }
-    __os_unlock(&spawn_lock)
+    ReleaseSRWLockExclusive(&spawn_lock)
     if ok == 0 {
         return (0, -errno_of(e))
     }
@@ -1175,7 +1250,7 @@ priv fn ft_ns(d: *u32, at: i64) -> i64 {
 // is 1 for a file, 2 for a directory, 0 for a device, -1 if there is nothing
 fn __os_stat(path: *u8) -> (i64, i64, i64) {
     buf: [4096]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     // WIN32_FILE_ATTRIBUTE_DATA: attributes, 3 FILETIMEs (creation, access, write), size high, low
     d: [13]u32
     if GetFileAttributesExW(w, 0, &d[0]) == 0 {
@@ -1206,38 +1281,51 @@ fn __os_stat(path: *u8) -> (i64, i64, i64) {
 
 fn __os_remove_file(path: *u8) -> i64 {
     buf: [4096]u16
-    w := wide_c(buf[..], path)
+    w := wide_path(buf[..], path)
     if DeleteFileW(w) == 0 {
         e := GetLastError()
         if e == 5 && is_dir_w(w) {
             return -21
         }
-        return -errno_of(e)
+        return path_error(w, e)
     }
     return 0
 }
 
 fn __os_remove_dir(path: *u8) -> i64 {
     buf: [4096]u16
-    if RemoveDirectoryW(wide_c(buf[..], path)) == 0 {
-        return last_error()
+    w := wide_path(buf[..], path)
+    if RemoveDirectoryW(w) == 0 {
+        return path_error(w, GetLastError())
     }
     return 0
 }
 
 fn __os_make_dir(path: *u8) -> i64 {
     buf: [4096]u16
-    if CreateDirectoryW(wide_c(buf[..], path), 0) == 0 {
-        return last_error()
+    w := wide_path(buf[..], path)
+    if CreateDirectoryW(w, 0) == 0 {
+        return path_error(w, GetLastError())
     }
     return 0
 }
 
+// a file takes the place of an existing file `to`, as on Linux; a directory and a file never
+// replace each other (ENOTDIR / EISDIR there; MoveFileExW says "access denied", Wine moves)
 fn __os_rename(from: *u8, to: *u8) -> i64 {
     a: [4096]u16
     b: [4096]u16
-    if MoveFileExW(wide_c(a[..], from), wide_c(b[..], to), 1) == 0 {      // MOVEFILE_REPLACE_EXISTING
-        return last_error()
+    wf := wide_path(a[..], from)
+    wt := wide_path(b[..], to)
+    af := GetFileAttributesW(wf)
+    at := GetFileAttributesW(wt)
+    if af != 0xFFFFFFFF && at != 0xFFFFFFFF && (af ^ at) & 0x10 != 0 {
+        return if af & 0x10 != 0 { -20 } else { -21 }
+    }
+    if MoveFileExW(wf, wt, 1) == 0 {      // MOVEFILE_REPLACE_EXISTING
+        e := GetLastError()
+        r := path_error(wf, e)
+        return if r == -2 && e == 3 { path_error(wt, e) } else { r }
     }
     return 0
 }
@@ -1248,7 +1336,7 @@ fn __os_list_dir(path: *u8, names: *Vec[str]) -> i64 {
         return -2
     }
     buf: [4100]u16
-    w := wide_c(buf[..4096], path)
+    w := wide_path(buf[..4096], path)
     // the pattern dir\*
     n := wcslen(w)
     pat := if n + 3 <= len(buf) { buf[..] } else { alloc[u16](n + 3) }
@@ -1270,7 +1358,7 @@ fn __os_list_dir(path: *u8, names: *Vec[str]) -> i64 {
         if e == 2 && is_dir_w(w) {
             return 0
         }
-        return -errno_of(e)
+        return path_error(w, e)
     }
     loop {
         np := cast[*u16](cast[i64](ptr(fd)) + 44)
@@ -1340,13 +1428,18 @@ priv fn locate(name: str) -> (str, i64) {
         cands.push(concat(name, ".exe"))
     }
     if base > 0 {
+        // (a directory cannot be run: "permission denied", as on Linux)
+        e := 2
         for c in cands {
             kind, _, _ := __os_stat(cstr(c))
             if kind == 1 {
                 return (c, 0)
             }
+            if kind == 2 {
+                e = 13
+            }
         }
-        return ("", 2)
+        return ("", e)
     }
     path, _ := env_get("PATH")
     for dir in split(path, ';') {
@@ -1415,6 +1508,21 @@ priv fn command_line(name: str, args: []str) -> str {
     return line.items()
 }
 
+// a batch file (.bat, .cmd; Windows ignores dots and spaces at the end of a name)
+priv fn is_batch(file: str) -> bool {
+    n := len(file)
+    while n > 0 && (file[n - 1] == '.' || file[n - 1] == ' ') {
+        n -= 1
+    }
+    if n < 4 || file[n - 4] != '.' {
+        return false
+    }
+    a := file[n - 3] | 0x20
+    b := file[n - 2] | 0x20
+    c := file[n - 1] | 0x20
+    return (a == 'b' && b == 'a' && c == 't') || (a == 'c' && b == 'm' && c == 'd')
+}
+
 // Starts argv; capture: 0 nothing, 1 standard output, 2 standard output and standard error go to
 // a pipe. Returns (process id, process handle, read end of the pipe or -1) once the program
 // runs, (-1, -1, -1) if it could not be started (io_error()).
@@ -1424,6 +1532,11 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
         return (-1, -1, -1)
     }
     file, e := locate(argv[0])
+    // a batch file is no program: CreateProcessW would hand it to cmd.exe, which reads the
+    // command line by rules of its own (an argument could become a command)
+    if e == 0 && is_batch(file) {
+        e = 8
+    }
     if e != 0 {
         __io_result(-e)
         return (-1, -1, -1)
@@ -1444,7 +1557,9 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
     flush()
     hout := if capture != 0 { pipe_w } else { handle(1) }
     herr := if capture == 2 { pipe_w } else { handle(2) }
-    h, pid := create_process(wide(file), wide(line), handle(0), hout, herr, 0, 0)
+    app := wide(file)
+    verbatim(app)
+    h, pid := create_process(app, wide(line), handle(0), hout, herr, 0, 0)
     if capture != 0 {
         CloseHandle(pipe_w)
     }
@@ -1566,6 +1681,10 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, gro
         return (-1, -1, 0)
     }
     file, e := locate(argv[0])
+    // (a batch file is no program: see __os_spawn)
+    if e == 0 && is_batch(file) {
+        e = 8
+    }
     if e != 0 {
         __io_result(-e)
         return (-1, -1, 0)
@@ -1598,7 +1717,9 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, gro
         if group {
             job = CreateJobObjectW(0, 0)
         }
-        h, pid = create_process(wide(file), wide(line), hs[0], hs[1], hs[2], child_env(env), job)
+        app := wide(file)
+        verbatim(app)
+        h, pid = create_process(app, wide(line), hs[0], hs[1], hs[2], child_env(env), job)
     }
     for k in 0..3 {
         if len(paths[k]) != 0 && hs[k] != handle(k) && !(k == 2 && hs[2] == hs[1]) {

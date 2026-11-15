@@ -6,11 +6,11 @@ running: 0 false
 ended: 7 true true 0
 kill 0: true kill 15: true status: 143
 kill after wait: false 3 no such process
-zombie before wait: true wait: 0 after: true
+ended, before wait: true wait: 0 after: false no such process
 copy: 5 (5, true) false
 several: [10, 11, 12, 13, 14]
 missing: false 2 no such file or directory
-not executable: false permission denied
+missing path: false 2 no such file or directory
 directory: false permission denied
 empty argv: false invalid argument
 not started: 0 -1 no child processes (-1, true) false

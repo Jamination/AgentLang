@@ -89,7 +89,7 @@ Use `examples\starter\game.al` and `examples\win32_input.al` (prints every event
 5. Right Shift alone shows no modifier; releasing two held Shifts in either order leaves both
    released.
 6. Other layouts: QWERTZ, AZERTY (the digit row gives `KEY_1`...), dead keys (`^` then `e`
-   gives `ê`), an IME.
+   gives `ê`); an IME: section 9.
 7. Print Screen gives one press and one release.
 8. On a 150 % or 200 % monitor: the window is exactly its size in physical pixels and sharp;
    moving it to a monitor with another scale causes no resize.
@@ -212,3 +212,111 @@ Build `tests\pe\res.al` twice: plain as `res_plain.exe`, and as `res_full.exe` w
 11. Windows Defender and SmartScreen: note any warning for a fresh `alc` executable, with and
     without `--icon` / `--version-info` (relocatable images with a manifest and version
     information look less unusual to scanners than the earlier fixed-base ones).
+
+## 9. Mouse-look and the input path (raw input, IME)
+Use `examples\win32_input.al`: F3 locks / frees the pointer; while locked every frame with
+motion prints `look dx dy  sum sx sy` (the frame's raw motion and its sum since the lock); F4
+switches text input. Under Wine raw input comes from Wine's own translation of X11 events or
+of `SendInput`: what a real mouse, Windows' raw input and a real IME do is checked here.
+1. F3: the pointer disappears and `look` lines follow the mouse. However far the mouse moves,
+   the pointer shows up nowhere (also not on a second monitor) and a click never reaches the
+   taskbar or another window. F3 again: the pointer is back where it was when locked.
+2. Units: locked, move the mouse along a ruler by 10 cm, once slowly and once fast: both sums
+   are about the same (no acceleration) and about dpi x 3.94 (800 dpi: about 3150). Changing
+   the pointer speed, "Enhance pointer precision" and the display scale changes nothing.
+3. The same mouse on Linux (`alc run examples/win32_input.al`, F3): about the same sum for
+   the same distance.
+4. A mouse at 1000 Hz, and at 4000 or 8000 Hz if there is one: circle it fast for 10 seconds
+   while locked: no `dropped N events` line, the `look` lines keep up (no motion arrives after
+   the mouse stopped), and a game (`examples\dx12_starter\game.al`) keeps its frame rate.
+5. Alt+Tab while locked: the pointer is visible and free in the other window, the `look`
+   lines stop; Alt+Tab back: locked again, and the first `look` line is small (no jump).
+6. The same with the Windows key, Win+D, Win+L (lock screen) and a UAC prompt: after each the
+   pointer is free on the desktop and locked again when the window is focused.
+7. Locked, Alt+Tab away, then click the window's title bar and drag: the window moves
+   normally and the pointer is taken only when the button is released. The same with the
+   minimise and close buttons (they work: `minimized`, `close requested`), and with resizing by
+   a border.
+8. Alt+Space while locked: the window menu opens with a visible pointer and can be used with
+   the mouse; Escape: locked again. F11 while locked: the pointer stays hidden and locked.
+9. Buttons and wheel while locked: left, right, middle, X1, X2 and the wheel print as before.
+10. A graphics tablet or touch screen while locked: `look` lines follow the pen in pixels, with
+    no jump when it first touches. In a Remote Desktop session and in a virtual machine with
+    mouse integration: `look` lines of plausible size, no huge jumps; note what happens.
+11. A precision touchpad while locked: motion arrives; two-finger scrolling gives wheel events.
+12. With a Japanese, Chinese or Korean input language active and its IME in native mode:
+    W, A, S, D print `key down W ...` and no composition window appears. After F4 typing opens
+    the composition window and the chosen text prints as `text` lines; F4 again: keys only.
+13. Text input off: dead keys and AltGr still type (`^` then `e` gives `ê`), Alt+numpad codes
+    type. Note whether the emoji panel (Win+.) inserts with text input off and on.
+14. Hold W, Alt+Tab away and back without letting go: no `key down W` on return until the key
+    repeats or is pressed again; in the starter game the ship stops when the focus leaves.
+
+## 10. Files and processes (`std.asset`, `std.os`)
+Under Wine the library tests run as on Linux; Wine's file system and process layer are not
+those of Windows. From the repository root (the tests work in directories under `tmp\`), for
+each test `T` below: `alc.exe build tests\std\T.al -o t.exe`, `t.exe a1 b2 > out.txt`, and
+`out.txt` must equal `tests\std\T.out` byte for byte (the programs write `"\n"` line ends: if
+git converted the `.out` files to `"\r\n"`, compare ignoring line ends).
+1. The tests that run on both systems: `os_files`, `os_run`, `os_spawn`, `os_spawn_threads`,
+   `portable_process`, `asset`, `asset_data`, `asset_io_error`, `asset_user_dirs`, `image_ops`,
+   `audio_wav`, `time_huge`, and `portable_files` with `< tests\std\portable_files.in`. The
+   lines about paths below a file (`not a directory`) and about `rename` between a file and a
+   directory check error codes that Wine reports differently from Windows.
+2. `tests\sys\win_files.al` (output: `tests\sys\win_files.out`). Note the line it writes to
+   standard error: `long paths without \\?\: work` or `fail (...)`. With `LongPathsEnabled` = 1
+   in `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem` and a long-path-aware manifest it must
+   say `work`; the `\\?\` lines must pass either way.
+3. In that test, the lines `hidden` and `hidden system`: `write_file` replaces a hidden file
+   (Windows refuses it without the file's attributes; Wine never refuses, so the retry in the
+   library has never run).
+4. In that test, `open with full sharing`: `rename` over a file that is open fails (`false`),
+   deleting it works; and `the running program`: deleting the program's own file fails with
+   `permission denied`, renaming it works.
+5. Not in the tests (Wine cannot do them): on a network share, `list_dir("\\\\server\\share\\dir")`,
+   `read_bytes` / `write_bytes` there, `path_join("\\\\server\\share", "x")` gives
+   `\\server\share/x`; the same share as `\\?\UNC\server\share\dir`.
+6. Not in the tests: `rename(d + "/a.txt", d + "/A.txt")` changes the case that `list_dir`
+   shows (Wine keeps the old name); a file whose name has an unpaired UTF-16 surrogate
+   (`write_file(d + "/x\xed\xa0\x80y", "")`) can be created and `list_dir` returns the same
+   bytes; `write_file("nul.txt", "x")` on Windows 10 (a device) and 11 (a file).
+7. A file open in another program that locks it (a document open in Excel, a running
+   installer's log): `read_bytes` fails with `device or resource busy`, not a hang or a crash.
+8. Antivirus: run `os_files` and `asset` 20 times in a row; a scanner that holds a fresh file
+   for a moment can make `remove_file` or `rename` fail with `device or resource busy` or
+   `permission denied`. Note how often.
+9. `tests\sys\win_process.al` (output: `tests\sys\win_process.out`): the first two lines compare
+   `args()` with the argument splitting of the real `msvcrt.dll`; `a batch file` must print
+   `-1 exec format error` four times; `through cmd` runs the batch file.
+10. A command line of more than 32767 characters (`run` with one argument of 40000
+    characters): `-1` and an error in `io_error()` (Wine starts the program).
+11. `os_spawn_threads` 20 times: always `no capture waited for a sleeper: true`.
+12. End a running child from Task Manager while its parent is in `wait` (`os_spawn` with the
+    sleep made longer): `wait` returns 1, the exit code Task Manager gives. Ctrl+C in the
+    console while `run` waits for a child ends both.
+
+## 11. The C library (`std.libc`, `msvcrt.dll`)
+Wine's `msvcrt.dll` is a reimplementation: these check the real one. Build and run as in 10,
+with `tests\sys\T.al` and `tests\sys\T.out`; tests with `T.windows.err` must also print those
+lines on standard error (run with `2> err.txt`) and exit with the status in `T.code`.
+1. `libc`: all lines equal. The line after the long `sprintf` line checks `%p`, the three-digit
+   exponent of `%e`, the 32-bit `long` and `%I64d`; the next one `_snprintf` (no NUL, -1).
+2. `nested_fn_callback`, `thread_libc` (20 times: `8 true`), `extern_data`. In `extern_data`,
+   line 1 reads `_environ` and `_iob` without the C start-up code having run; line 3 relies on
+   `_fmode` deciding how `fopen` opens a file.
+3. `backtrace_qsort` (status 1): the trace has at least one `  at msvcrt.dll` line between
+   `by_value` and `sort`. `backtrace_strlen` (status 1): `panic: memory fault ...`, then
+   `  at msvcrt.dll`, `measure`, `main` (the fault is inside the DLL: this goes through the
+   unhandled exception filter).
+4. Formats that Wine accepts and Windows should not: `printf(ptr("%zu|%hhd|\n"), u64(5), 300)`.
+   Note what it prints (documented as unsupported in `docs\std\libc.md`).
+5. A program that ends without `fflush`: `printf(ptr("c\n"))` then `print("al")`, output
+   redirected to a file: under Wine the file holds `al`, then `c` with `"\r\n"`. Note what
+   Windows writes (documented: msvcrt.dll writes its buffer when the process ends).
+6. The same program in a console window: `c` appears (C's standard output is not buffered
+   there); with `flush()` before each `printf` and `fflush(nil)` after, the lines of
+   `print` and `printf` alternate in program order, in a console and in a file.
+7. `printf(ptr("gr\xc3\xbc\xc3\x9fe\n"))` and `print("gr\xc3\xbc\xc3\x9fe")` in a console:
+   `print` shows the umlauts; `printf` shows them only after `chcp 65001`.
+8. On the oldest Windows you care about: `msvcrt.dll` exports `_snprintf`, `__iob_func`,
+   `_fileno`, `_setmode`, `cosf` (a program using `std.libc` starts at all).

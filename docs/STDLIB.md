@@ -23,14 +23,15 @@ are `priv` do not appear: a program may reuse their names).
 | `std.os` | for tools and build scripts: run programs (status, captured output, files as their standard streams, a changed environment) or start them in the background (wait with a time limit, kill, process groups), shared memory, process id, working directory, threads; loads `std.asset` for files and directories | nothing | [std/os.md](std/os.md) |
 | `std.image` | images, PNG and BMP load / save, inflate / deflate, CRC | nothing | [std/image.md](std/image.md) |
 | `std.input` | per-frame key / mouse / gamepad state, action maps | nothing (Windows: `xinput1_4.dll` or `xinput9_1_0.dll`, loaded when a gamepad is opened) | [std/input.md](std/input.md) |
-| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6`; Windows: `user32.dll`, `gdi32.dll` | [std/window.md](std/window.md) |
+| `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` (`libXi.so.6` if installed, for mouse-look); Windows: `user32.dll`, `gdi32.dll`, `imm32.dll` | [std/window.md](std/window.md) |
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml`, with the surface, swapchain, debug-utils, layer-settings and memory budget / priority extensions; only C-header glue added (sType constructors, union constructors, version macros, `vk_result_name`) | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
 | `std.shaderc` | bindings for shaderc's C API: GLSL / HLSL to SPIR-V at run time, for hot reload (Linux) | `libshaderc_shared.so.1` | [std/shaderc.md](std/shaderc.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings generated from the mingw-w64 headers (Windows only) | `d3d12.dll`, `dxgi.dll`, `d3dcompiler_47.dll`, `user32.dll`, `kernel32.dll` | [std/dx12.md](std/dx12.md) |
 | `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
-| `std.libc`, `std.x11`, `std.alsa` | raw C declarations used by the modules above; `std.libc` also has the variadic printf family (`printf`, `fprintf`, `dprintf`, `sprintf`, `snprintf`, `sscanf`, with `fflush`, `stdout`, `stderr`) | the named library | source in `std/` |
+| `std.libc` | a few C library functions for programs that talk to C: the variadic printf family (`printf`, `fprintf`, `sprintf`, `sscanf`, with `fflush`, `c_stdout()`, `c_stderr()`), `qsort`, `malloc`, `free`, `strlen`, `getenv` | `libc.so.6`; Windows: `msvcrt.dll` | [std/libc.md](std/libc.md) |
+| `std.x11`, `std.alsa` | raw C declarations used by the modules above | the named library | source in `std/` |
 
 A program is a static, libc-free executable unless it reaches an `extern` function; then it is a
 dynamically linked executable that needs only the libraries of the functions it can reach.
@@ -38,9 +39,10 @@ For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
 `std.asset`, `std.os`, `std.image`, `std.input`, `std.window` and `std.audio` (its device
-through WASAPI) work the same on Windows (the differences are in their pages). `std.wayland`,
-`std.vk`, `std.shaderc`, `std.libc`, `std.x11` and `std.alsa` use Linux interfaces: `use` of one of them is a
-compile error that names the module and the target. `std.dx12` is the other way round:
+through WASAPI) work the same on Windows (the differences are in their pages); `std.libc`
+binds `msvcrt.dll` there. `std.wayland`, `std.vk`, `std.shaderc`, `std.x11` and `std.alsa`
+use Linux interfaces: `use` of one of them is a compile error that names the module and the
+target. `std.dx12` is the other way round:
 Windows only (a Linux build stops at its Windows DLLs).
 
 Graphics are bindings only: `std.vk` and `std.dx12` give the APIs, and the renderer (device

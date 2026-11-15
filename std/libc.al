@@ -1,24 +1,76 @@
 // std.libc: a few C library functions. Using any of them makes the program dynamically linked.
+// Linux: glibc (libc.so.6, libm.so.6). Windows: msvcrt.dll, the C run-time library that is
+// part of every Windows and exports the printf family as variadic functions (the UCRT,
+// ucrtbase.dll, has them only as functions that take a va_list).
 // The printf family is variadic: the arguments after the format follow the C default argument
-// promotions (an untyped integer literal is an `i32`, so `%ld` wants `i64(42)`; pass strings
+// promotions (an untyped integer literal is an `i32`, so `%lld` wants `i64(42)`; pass strings
 // as `ptr(s)` / `cstr(s)`). Output of printf / fprintf is buffered by the C library, apart
 // from AL's own: `flush()` before and `fflush(nil)` after keep the order.
-extern "libc.so.6" fn getpid() -> i32
-extern "libc.so.6" fn strlen(s: *u8) -> i64
-extern "libc.so.6" fn getenv(name: *u8) -> *u8
-extern "libc.so.6" fn malloc(n: i64) -> *u8
-extern "libc.so.6" fn free(p: *u8)
-extern "libc.so.6" fn qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)
-extern "libc.so.6" fn printf(format: *u8, ...) -> i32
-extern "libc.so.6" fn fprintf(stream: *u8, format: *u8, ...) -> i32
-extern "libc.so.6" fn dprintf(fd: i32, format: *u8, ...) -> i32
-extern "libc.so.6" fn sprintf(buf: *u8, format: *u8, ...) -> i32
-extern "libc.so.6" fn snprintf(buf: *u8, n: i64, format: *u8, ...) -> i32
-extern "libc.so.6" fn sscanf(s: *u8, format: *u8, ...) -> i32
-extern "libc.so.6" fn fflush(stream: *u8) -> i32
-extern "libc.so.6" stdout: *u8
-extern "libc.so.6" stderr: *u8
-extern "libc.so.6" fn dlopen(path: *u8, flags: i32) -> *u8
-extern "libc.so.6" fn dlsym(handle: *u8, name: *u8) -> *u8
-extern "libc.so.6" fn dlerror() -> *u8
-extern "libm.so.6" fn cosf(x: f32) -> f32
+// The same on both systems: strlen, getenv, malloc, free, qsort, printf, fprintf, sprintf,
+// sscanf, fflush, cosf, getpid, c_stdout, c_stderr. More: docs/std/libc.md.
+when TARGET_OS == Windows {
+    extern "msvcrt.dll" fn _getpid() -> i32
+    extern "msvcrt.dll" fn strlen(s: *u8) -> i64
+    extern "msvcrt.dll" fn getenv(name: *u8) -> *u8
+    extern "msvcrt.dll" fn malloc(n: i64) -> *u8
+    extern "msvcrt.dll" fn free(p: *u8)
+    extern "msvcrt.dll" fn qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)
+    extern "msvcrt.dll" fn printf(format: *u8, ...) -> i32
+    extern "msvcrt.dll" fn fprintf(stream: *u8, format: *u8, ...) -> i32
+    extern "msvcrt.dll" fn sprintf(buf: *u8, format: *u8, ...) -> i32
+    // not C's snprintf: no NUL when the text takes n bytes or more, and then the result is -1
+    extern "msvcrt.dll" fn _snprintf(buf: *u8, n: i64, format: *u8, ...) -> i32
+    extern "msvcrt.dll" fn sscanf(s: *u8, format: *u8, ...) -> i32
+    extern "msvcrt.dll" fn fflush(stream: *u8) -> i32
+    // the three standard streams, an array of FILE (48 bytes each): stdin, stdout, stderr
+    extern "msvcrt.dll" fn __iob_func() -> *u8
+    extern "msvcrt.dll" fn _fileno(stream: *u8) -> i32
+    // _setmode(_fileno(c_stdout()), O_BINARY): the stream writes "\n" as it is, not as "\r\n"
+    extern "msvcrt.dll" fn _setmode(fd: i32, mode: i32) -> i32
+    extern "msvcrt.dll" fn cosf(x: f32) -> f32
+
+    const O_BINARY: i32 = 0x8000
+    const O_TEXT: i32 = 0x4000
+
+    fn getpid() -> i32 {
+        return _getpid()
+    }
+
+    // C's stdout and stderr (macros there: Windows has no such variables)
+    fn c_stdout() -> *u8 {
+        return ptr(mkslice[u8](__iob_func(), 144)[48..])
+    }
+
+    fn c_stderr() -> *u8 {
+        return ptr(mkslice[u8](__iob_func(), 144)[96..])
+    }
+} else {
+    extern "libc.so.6" fn getpid() -> i32
+    extern "libc.so.6" fn strlen(s: *u8) -> i64
+    extern "libc.so.6" fn getenv(name: *u8) -> *u8
+    extern "libc.so.6" fn malloc(n: i64) -> *u8
+    extern "libc.so.6" fn free(p: *u8)
+    extern "libc.so.6" fn qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)
+    extern "libc.so.6" fn printf(format: *u8, ...) -> i32
+    extern "libc.so.6" fn fprintf(stream: *u8, format: *u8, ...) -> i32
+    extern "libc.so.6" fn dprintf(fd: i32, format: *u8, ...) -> i32
+    extern "libc.so.6" fn sprintf(buf: *u8, format: *u8, ...) -> i32
+    extern "libc.so.6" fn snprintf(buf: *u8, n: i64, format: *u8, ...) -> i32
+    extern "libc.so.6" fn sscanf(s: *u8, format: *u8, ...) -> i32
+    extern "libc.so.6" fn fflush(stream: *u8) -> i32
+    extern "libc.so.6" stdout: *u8
+    extern "libc.so.6" stderr: *u8
+    extern "libc.so.6" fn dlopen(path: *u8, flags: i32) -> *u8
+    extern "libc.so.6" fn dlsym(handle: *u8, name: *u8) -> *u8
+    extern "libc.so.6" fn dlerror() -> *u8
+    extern "libm.so.6" fn cosf(x: f32) -> f32
+
+    // C's stdout and stderr, under the names that also exist on Windows
+    fn c_stdout() -> *u8 {
+        return stdout
+    }
+
+    fn c_stderr() -> *u8 {
+        return stderr
+    }
+}

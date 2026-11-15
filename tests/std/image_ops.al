@@ -1,5 +1,6 @@
 // std.image: encoders (round trips through the decoders), compression, pixel operations
 use std.image
+use std.os
 
 fails: i64
 
@@ -80,15 +81,26 @@ fn main() {
     ok("zlib text", tgood && tback == text && len(zt) < 400)
     raw, rgood := inflate(deflate(text[..1000]))
     ok("raw deflate", rgood && raw == text[..1000])
+    // into a buffer of the caller: no allocation; a buffer that is too small is refused
+    room := alloc[u8](1000)
+    packed := deflate(text[..1000])
+    zpacked := zlib_compress(text[..900])
+    used := mem_used()
+    n1, into1 := inflate_into(packed, room)
+    n2, into2 := zlib_decompress_into(zpacked, room)
+    _, small1 := inflate_into(packed, room[..999])
+    _, small2 := zlib_decompress_into(zpacked, room[..10])
+    _, bad := zlib_decompress_into("not zlib data", room)
+    ok("into a buffer", into1 && n1 == 1000 && into2 && n2 == 900 && room[..900] == text[..900] && !small1 && !small2 && !bad && mem_used() == used)
     empty, egood := zlib_decompress(zlib_compress(text[..0]))
     ok("zlib empty", egood && len(empty) == 0)
     ok("checksums", crc32("123456789") == 0xCBF43926 && adler32("Wikipedia") == 0x11E60398 && crc32(crc32("1234"), "56789") == 0xCBF43926 && adler32(adler32("Wiki"), "pedia") == 0x11E60398)
 
     // files
     dir := "tmp"
-    syscall(83, cstr(dir), 0o755)
-    p := fmt(dir, "/image_ops_", syscall(39), ".png")
-    b := fmt(dir, "/image_ops_", syscall(39), ".bmp")
+    make_dir(dir)
+    p := fmt(dir, "/image_ops_", process_id(), ".png")
+    b := fmt(dir, "/image_ops_", process_id(), ".bmp")
     pic := picture(40, 30, 4)
     ok("save", png_save(p, pic) && bmp_save(b, pic))
     l1, g1 := image_load(p)
@@ -99,8 +111,7 @@ fn main() {
     m1, bad1 := png_load(b)
     m2, bad2 := image_load("tmp/no_such_image.png")
     ok("load failures", !bad1 && !bad2)
-    syscall(87, cstr(p))
-    syscall(87, cstr(b))
+    ok("remove", remove_file(p) && remove_file(b))
 
     // pixel access and conversion
     img := image_new(4, 3, 4)

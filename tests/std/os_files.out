@@ -1,0 +1,48 @@
+true true true
+true true
+make_dir true true true 0
+write true true false 6 true
+missing false false -1 0
+list [.hidden, Two.txt, b, one.txt] [] 0
+list missing [] no such file or directory
+list a file [] not a directory
+rename true 0 false (hello
+, true)
+rename over a file true (2, true) [.hidden, b]
+rename missing false no such file or directory
+rename into a missing directory false no such file or directory
+rename a directory true [B, a] [c, moved.txt]
+rename a directory over a file false not a directory true
+rename a file over a directory false is a directory (2, true)
+rename to itself true no error (2, true)
+remove_file true 0 false no such file or directory
+remove_dir not empty false directory not empty
+remove_dir of a file false not a directory
+remove_dir true true false no such file or directory
+make_dir below a file false not a directory
+make_dir on a file false file exists
+write below a file false not a directory
+read below a file (, false) not a directory
+remove below a file false not a directory false not a directory
+rename below a file false not a directory false true
+list below a file [] not a directory
+stat below a file false -1
+a trailing separator true [.hidden] false false
+empty path false false (, false) no such file or directory false no such file or directory false false false [] no such file or directory
+dot true true true true
+names 28 28
+[#hash, (paren), -dash, 100%, 9, UPPER, Zed, [sq], _under, a!b, a$b, a&b, a'b, a+b, a,b, a.b.c, a=b, a@b, a^b, a`b, lower, semi;colon, with space.txt, {br}, ~tilde, äöü.txt, 日本語, 😀 smile]
+sorted by byte value: true
+directory names true true [α] [β] true [γ]
+remove true true true
+removed 28 [] true
+many 300 f000 f150 f299
+long name true true true true
+deep true true (leaf, true) 150
+deep removed true [a]
+binary true true 1024
+text is not translated true 8 true
+replace by shorter true (xy, true)
+modified_time true true true true
+directory true true (, false) is a directory
+cleanup true true true true false

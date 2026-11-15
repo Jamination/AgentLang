@@ -273,8 +273,14 @@ With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
 
 - **Finding the program.** A name without `/`, `\` or a drive is looked up in the
   directories of `PATH` (separated by `;`), with `.exe` appended if the name has no extension;
-  a path is used as it is (also with `.exe` appended if it has no extension). Run batch files
-  (`.bat`, `.cmd`) as `[]str{"cmd", "/c", file, ...}`.
+  a path is used as it is (also with `.exe` appended if it has no extension; a name with a
+  dot in it, `tool.v2`, gets none). A file that is not an executable image fails with
+  `exec format error`, a directory with `permission denied`, as on Linux.
+- **Batch files** (`.bat`, `.cmd`) are not programs: starting one fails with `exec format
+  error` (Windows itself would hand it to `cmd.exe`, which reads the command line by rules of
+  its own: an argument could turn into a command). Run them as `[]str{"cmd", "/c", file,
+  ...}`, with a path and arguments that need no quotes: cmd drops the first and the last
+  quote of its command line when there are more than two.
 - **`Launch`.** `env` names are compared without regard to case, as Windows does
   (`"Path=..."` replaces `PATH`). Programs started at the same time by several threads never
   inherit each other's files or pipes (process creation is serialised for that). `group` is a
@@ -282,8 +288,10 @@ With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
   still reaches them all.
 - **Arguments** are joined into one command line with the quoting of the Microsoft C library,
   so a program that splits its command line by those rules (every AL program, every C
-  program) gets `argv` back unchanged. `cmd.exe` has rules of its own: arguments with quotes or
-  `&|<>^` reach it altered.
+  program) gets `argv` back unchanged, also with spaces, quotes, backslashes and non-ASCII
+  text (UTF-16 on the way; invalid UTF-8 becomes U+FFFD). `cmd.exe` has rules of its own:
+  arguments with quotes or `&|<>^%` reach it altered. The whole command line is limited to
+  32767 UTF-16 units.
 - **Status.** The exit code of the program, of which the low 8 bits are the status as on Linux.
   A program ended by an exception gets the status of the matching Linux signal: access
   violation and stack overflow 139 (SIGSEGV), integer or float faults 136 (SIGFPE), illegal
@@ -292,6 +300,9 @@ With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
   `kill(p, s)` with any other `s` from 1 to 64 ends the process at once (`TerminateProcess`)
   with the exit code 128 + `s`, so `wait` returns 137 after `kill(p, 9)` and 143 after
   `kill(p, 15)` as on Linux. A process cannot handle or ignore it.
+- **Threads.** Programs may be started from several threads at once (one at a time inside
+  the library: a program inherits only the standard handles meant for it, so `run_capture`
+  never waits for a program that another thread started).
 - **Shared memory.** `shm_create` makes a file mapping object in the paging file; the
   "descriptor" is its handle, which is not inherited by programs this process starts.
   `map_shared` / `map_readonly` map such a handle or the handle of an open file; `close_fd`

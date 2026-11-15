@@ -18,8 +18,29 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `A` functions it declares (`MessageBoxA`, a C library's `fopen`) take UTF-8 instead of the
   system's code page (Windows 10 1903 and later). Programs using std.window and the run-time
   library's functions behave as before.
+- std.window, mouse-look: while the cursor is locked (`set_cursor_locked`), `mouse_delta`,
+  `mouse_pos` and the positions of mouse events count **raw device counts** (Windows: raw
+  input; Linux: XInput 2 raw motion), no longer pixels of the accelerated pointer: a
+  sensitivity tuned against the old numbers needs retuning (see Changed). The motion of a
+  freed pointer over a locked but unfocused window is no longer reported.
+- std.window on Windows: no input method editor (IME) is attached to a window unless the
+  program calls `set_text_input(w, true)`: a program that takes Chinese, Japanese or Korean
+  text must call it while the user types (see Added). Text of layouts that type characters
+  directly arrives as before.
+- Linux programs that use std.window are also linked against `libdl.so.2` (part of glibc).
+- Windows, `std.os`: `run`, `run_capture`, `run_capture_all` and `spawn` no longer start a
+  batch file (`.bat`, `.cmd`) directly: they fail with `io_error()` 8 (`exec format error`).
+  Windows handed such a file to `cmd.exe`, which reads the command line by rules of its own, so
+  an argument with `"`, `&` or `%` could turn into a command. Write `[]str{"cmd", "/c", file,
+  ...}`.
 
 ### Added
+- `std.libc` is available for `--target windows`, bound to `msvcrt.dll`: `strlen`, `getenv`,
+  `malloc`, `free`, `qsort`, `printf`, `fprintf`, `sprintf`, `sscanf`, `fflush`, `cosf`,
+  `getpid` as on Linux, and `_snprintf`, `_fileno`, `_setmode`, `__iob_func` of that library.
+  `snprintf`, `dprintf`, `dlopen`, `dlsym`, `dlerror` and the variables `stdout` / `stderr`
+  exist on Linux only. Reference: `docs/std/libc.md`.
+- `std.libc`: `c_stdout()` and `c_stderr()`, C's standard streams on both systems.
 - `build.bat`: builds the compiler on Windows the way `build.sh` does on Linux (seed -> stage 1
   -> stage 2 -> stage 3, `--quick`, `--reseed`), from a committed Windows seed
   `bootstrap/alc.exe`; it also builds the Linux compiler. `build.sh --reseed` now refreshes both
@@ -32,6 +53,19 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   shown in the file's Properties. Both options without `--target windows` are usage errors.
 - Every Windows executable has an application manifest: `asInvoker`, Windows 10/11 as
   supported systems, long-path aware, per-monitor (v2) DPI aware, UTF-8 active code page.
+- std.window: `set_text_input(w, on: bool)` and `Window.text_input`: the user types text (on)
+  or plays (off, the default). On Windows it attaches / detaches the IME, so that with an IME
+  language active every key still arrives as a key event while playing; on X11 it changes
+  only the field (the session's input method stays attached).
+- std.window on Windows: `WM_UNICHAR` (UTF-32 text sent by other programs) arrives as
+  `EventText`.
+- std.window helpers for tests and custom loops: `motion_from_raw_mouse` (Windows: one
+  `RAWINPUT` mouse record, `RawInputMouse` / `RawMotion`) and `motion_from_xi_raw` (Linux: one
+  XInput 2 raw event, `XIRawEvent` / `XiAbsDevice`); std.x11: `X_GENERIC_EVENT`,
+  `XQueryExtension`, `XGetEventData`, `XFreeEventData`, `x_event_cookie_extension` / `_evtype`
+  / `_data`.
+- `examples/win32_input.al`: F3 locks the pointer and prints the raw motion of each frame, F4
+  switches text input.
 - The conformance tests run on Windows: the test runner is now an AL program (`tests/run.al`,
   built by `build.sh` / `build.bat` as `build/altest` and `build/altest.exe`) that
   `tests/run.sh` and the new `tests\run.bat` start. On Windows it runs the tests of
@@ -53,11 +87,37 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `tests/run.sh` runs the tests in parallel, one thread per CPU (the tests of `tests/sys` one
   after the other), with the same lines of output in the same order: about 22 s instead of
   48 s on 12 CPUs, 10 s instead of 46 s for `--target windows`.
+- std.window, mouse-look reads the mouse itself instead of the pointer. Windows: raw input
+  (`RegisterRawInputDevices` for the mouse while the window holds the pointer, `WM_INPUT`,
+  `GetRawInputData`); the pointer is confined to the pixel in the centre of the client area
+  (before: to the client area, and moved back with `SetCursorPos`). Linux: XInput 2
+  `XI_RawMotion` through `libXi.so.6`, loaded at run time (without it, or without the
+  extension, the pointer's motion as before). The units are device counts on both systems,
+  independent of pointer speed, acceleration and display scale; devices that report positions
+  (tablets, remote desktop, virtual machines) are differenced in screen pixels.
+- std.window: a run of motion of a locked pointer between two polls is one `EventMouseMove`,
+  so a mouse that reports thousands of times a second cannot fill an event queue.
+- std.window on Windows: a locked pointer is free (and visible) while the window is not
+  focused, is minimized, is being moved or resized or has its menu open, and until a click on
+  the title bar, border or caption buttons that activated the window is over; it is hidden
+  only while the window holds it.
 
 ### Fixed
-- Windows, `std.os`: programs that several threads start at the same time no longer inherit
-  each other's standard-stream handles (a `run_capture` could wait for a program another
-  thread had started).
+- Windows, `std.os`: programs started from several threads at once no longer inherit each
+  other's pipes (`run_capture` in one thread waited until a program that another thread had
+  started meanwhile ended).
+- Windows: `io_error()` after a failed file operation is the Linux number in more cases: 20
+  (`not a directory`) for a path that goes through a file (was 2), 36 (`file name too long`)
+  for a name of more than 255 characters, 21 (`is a directory`) for reading the
+  root of a drive (was 2); running a directory fails with 13 (`permission denied`, was 2).
+- Windows, `rename`: a directory over an existing file and a file over an existing directory
+  fail with `not a directory` / `is a directory`, as on Linux (Windows says `permission
+  denied` for both; under Wine the rename went through).
+- Windows: paths in the extended-length form (`\\?\C:\...`) may contain `/`, so `path_join`
+  works on them (Windows itself takes `/` there as part of a name).
+- Windows: `write_file` / `write_bytes` replace a hidden or system file, which keeps the
+  attribute (`CreateFileW` refuses to replace such a file with `permission denied` unless it
+  is given the same attributes).
 
 ## [0.3.0] - 2026-11-15
 

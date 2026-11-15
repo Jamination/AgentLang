@@ -1,1 +1,1 @@
-no private X display for tests (set AL_TEST_DISPLAY to e.g. an Xvfb display)
+no private X display for tests (set AL_TEST_DISPLAY to e.g. an Xvfb display), or libXtst.so.6 / libXi.so.6 is not installed

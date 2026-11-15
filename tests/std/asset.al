@@ -1,9 +1,10 @@
-// std.asset: files, directories, paths, cached loader (works in tmp/asset_test_<pid>)
-use std.asset
+// std.asset: files, directories, paths, cached loader (works in tmp/asset_test_<pid>); the same
+// output on every target
+use std.os
 
 fn main() {
     // a directory of its own per process, so that concurrent test runs do not collide
-    d := fmt("tmp/asset_test_", syscall(39))
+    d := fmt("tmp/asset_test_", process_id())
     // leftovers of an interrupted run
     remove_file(path_join(d, "ship.txt"))
     remove_file(path_join(d, "level.bin"))
@@ -36,8 +37,14 @@ fn main() {
     none, ok3 := read_bytes(path_join(d, "missing"))
     print(len(none), ok3, write_bytes("no/such/dir/file", "x"), write_bytes(d, "x"))
     print(write_bytes(ship, ""), file_size(ship), read_bytes(ship))
-    proc, ok4 := read_bytes("/proc/self/stat")
-    print(ok4, len(proc) > 0)
+    // a file whose size the system does not tell: it is read to its end
+    when TARGET_OS == Windows {
+        nul, ok4 := read_bytes("NUL")
+        print(ok4, len(nul) == 0)
+    } else {
+        proc, ok4 := read_bytes("/proc/self/stat")
+        print(ok4, len(proc) > 0)
+    }
     mt := modified_time(ship)
     print(mt > 1700000000 * 1000000000, mt / 1000000000 - wall_time() < 5, wall_time() - mt / 1000000000 < 60)
 

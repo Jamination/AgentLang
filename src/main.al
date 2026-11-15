@@ -51,7 +51,6 @@ priv const PRELUDE_WINDOWS = embed("prelude_windows.al")
 
 // bundled modules that only exist for Linux: what a program built for Windows can use instead
 priv const LINUX_ONLY = [_](str, str){
-    ("libc", "declare the functions of a Windows library with `extern \"x.dll\" fn`"),
     ("x11", ""),
     ("wayland", ""),
     ("alsa", ""),

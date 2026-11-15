@@ -109,11 +109,36 @@ accepts everywhere. Names compare without regard to case in Windows itself, but
 | `path_dir("a\b/c")` | `a\b` | `a\b` |
 | `path_base("C:x")` | `C:x` | `x` |
 
-The file functions convert paths to UTF-16 (`CreateFileW`, `FindFirstFileW`, ...); paths of
-more than 260 UTF-16 units need long-path support enabled in Windows. A directory has size 0
-(Linux: the size of its entry table). `remove_file` of a read-only file fails with
-`permission denied` (Linux removes it if the directory is writable). `modified_time` has a
-resolution of 100 ns.
+The file functions convert paths to UTF-16 (`CreateFileW`, `FindFirstFileW`, ...): names may
+hold any text; invalid UTF-8 becomes U+FFFD. `io_error()` is the Linux error number of the
+same situation (`not a directory` for a path that goes through a file, `is a directory`,
+`file name too long` for a name of more than 255 units, ...). What differs from Linux:
+
+- **Long paths.** A path of more than 260 UTF-16 units works on every Windows when it is
+  written in the extended-length form: `\\?\` followed by the full path from the drive
+  (`\\?\C:\saves\...`), without `.` or `..`; `/` may separate components there too, so
+  `path_join` works on it. Other long paths work only where Windows has long paths enabled
+  (the registry setting `LongPathsEnabled`; the executable's manifest declares it long-path
+  aware) and fail with `file name too long` or `no such file or directory` elsewhere.
+- **Names.** Upper and lower case name the same file (`Save.dat`, `save.dat`); the name keeps
+  the case it was created with. No name has one of `< > : " | ? *` or a control character
+  (`invalid argument`), or ends in a dot or a space (Windows drops them: `"a."` is `"a"`).
+  `NUL`, `CON`, `AUX`, `PRN`, `COM1`..., `LPT1`... in any directory are devices, on older
+  Windows versions also with an extension (`nul.txt`): writing to `NUL` succeeds and stores
+  nothing.
+- **Files in use.** A file that another program has open without sharing it cannot be read,
+  written, deleted or renamed meanwhile: `device or resource busy` (16). The file functions
+  themselves share everything while they have a file open. The file of a running program
+  cannot be deleted or written, but renamed.
+- **`rename`** replaces an existing file `to`, but not one that is read-only (`permission
+  denied`) or that some program has open. A directory replaces no existing directory
+  (`permission denied`; Linux: an empty one); a file and a directory never replace each other
+  (`not a directory` / `is a directory`, as on Linux).
+- **Read-only files.** `write_bytes` and `remove_file` fail with `permission denied` (Linux
+  removes the file if the directory is writable); `rename` of the file itself works. Hidden
+  and system files are replaced by `write_bytes` and stay hidden.
+- A directory has size 0 (Linux: the size of its entry table). `modified_time` has a
+  resolution of 100 ns.
 
 ## Asset loader
 
