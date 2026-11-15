@@ -5,7 +5,9 @@ use std.os
 
 fn main() {
     make_dir("tmp")
-    path := fmt("tmp/al_lib_read_all_size_", process_id())
+    // (a name of one length whatever the process id: the copy of the path that read_file
+    // makes for the system is part of what it allocates)
+    path := concat("tmp/al_ras_", fmti(process_id(), 10, '0'))
     write_file(path, "hello")
     m := mark()
     d, ok := read_file(path)

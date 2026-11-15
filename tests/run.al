@@ -38,7 +38,8 @@
 //
 // Tests run at the same time, one thread per CPU (-j N: N threads; -j 1: one test after the
 // other), each in a directory of its own under the temporary directory; the three modes of a
-// test run one after the other, and so do the tests of sys/ (they share the machine's devices).
+// test run one after the other. The tests of sys/ run when the others are done, one after the
+// other: they share the machine's devices and some depend on timing (windows, pointer, sound).
 // The lines are printed in the order of the tests whatever the order they finish in.
 //
 // The default target is the system the runner runs on.
@@ -424,15 +425,23 @@ priv fn prog(j: Job, jd: str, r: *Res) {
     err := path_join(jd, "err")
     cerr := path_join(jd, "cerr")
     cout := path_join(jd, "cout")
-    if !cfg.win && cfg.can_run && file_exists(concat(base, ".need")) &&
-        exec([]str{"bash", concat(base, ".need")}, "", NULL_DEVICE, NULL_DEVICE) != 0 {
+    if !cfg.win && file_exists(concat(base, ".need")) {
         why := "prerequisite missing"
-        if file_exists(concat(base, ".why")) {
+        missing := true
+        if !cfg.can_run {
+            // (the check is a shell command for Linux, and some of these programs are Windows
+            // ones that the check keeps away from a Linux build)
+            why = fmt("its prerequisite (", base, ".need) can only be checked on Linux")
+        } else if exec([]str{"bash", concat(base, ".need")}, "", NULL_DEVICE, NULL_DEVICE) == 0 {
+            missing = false
+        } else if file_exists(concat(base, ".why")) {
             why = content(concat(base, ".why"))
         }
-        r.say(fmt("SKIP ", name, ": ", why))
-        r.skip += 1
-        return
+        if missing {
+            r.say(fmt("SKIP ", name, ": ", why))
+            r.skip += 1
+            return
+        }
     }
     if cfg.can_run && file_exists(concat(base, ".c")) {
         cc := vec[str]()
@@ -674,15 +683,23 @@ priv struct Done { text: str, pass: i64, fail: i64, skip: i64, ready: bool }
 priv struct Pool {
     jobs: []Job
     done: []Done            // per job; written under `mu`
+    left: i64               // jobs of the worker threads that are not done yet; under `mu`
     mu: Mutex
     cv: Cond                // signalled when a job is done
 }
 
 // a thread that runs the jobs `list` (indices), sharing the position in it with the other
-// threads of the same list
-priv struct Lane { pool: *Pool, list: []i64, pos: *i64 }
+// threads of the same list; `alone`: it starts when the worker threads have done all theirs
+priv struct Lane { pool: *Pool, list: []i64, pos: *i64, alone: bool }
 
 priv fn lane(l: Lane) {
+    if l.alone {
+        lock(&l.pool.mu)
+        while l.pool.left > 0 {
+            wait(&l.pool.cv, &l.pool.mu)
+        }
+        unlock(&l.pool.mu)
+    }
     // what a job allocates is given back when it is done; its report is copied out first
     scratch: Region
     loop {
@@ -698,6 +715,9 @@ priv fn lane(l: Lane) {
         reset(&scratch)
         lock(&l.pool.mu)
         l.pool.done[i] = d
+        if !l.alone {
+            l.pool.left -= 1
+        }
         broadcast(&l.pool.cv)
         unlock(&l.pool.mu)
     }
@@ -923,8 +943,9 @@ fn main() -> i64 {
     pool := Pool{jobs: collect()}
     n := len(pool.jobs)
     pool.done = alloc[Done](n)
-    // the tests of tests/sys one after the other in a thread of their own, the others spread
-    // over the worker threads
+    // the tests are spread over the worker threads, except those of tests/sys: they run one
+    // after the other in a thread of their own when the others are done, with the machine to
+    // themselves (displays, sound, GPU, and what they measure in time)
     spread := vec[i64]()
     single := vec[i64]()
     for k, j in pool.jobs {
@@ -934,24 +955,25 @@ fn main() -> i64 {
             spread.push(k)
         }
     }
+    pool.left = spread.len
     spread_pos := 0
     single_pos := 0
     ts := vec[Thread]()
     for _ in 0..min(threads, spread.len) {
-        t, ok := thread_spawn(lane, Lane{&pool, spread.items(), &spread_pos})
+        t, ok := thread_spawn(lane, Lane{&pool, spread.items(), &spread_pos, false})
         if ok {
             ts.push(t)
         }
     }
     if ts.len == 0 {
         // (no thread could be started: this one does the work)
-        lane(Lane{&pool, spread.items(), &spread_pos})
+        lane(Lane{&pool, spread.items(), &spread_pos, false})
     }
-    t, ok := thread_spawn(lane, Lane{&pool, single.items(), &single_pos})
+    t, ok := thread_spawn(lane, Lane{&pool, single.items(), &single_pos, true})
     if ok {
         ts.push(t)
     } else {
-        lane(Lane{&pool, single.items(), &single_pos})
+        lane(Lane{&pool, single.items(), &single_pos, true})
     }
     pass := 0
     fail := 0

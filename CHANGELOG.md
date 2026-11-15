@@ -84,9 +84,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   0x400000, relocations stripped), so they start where "Mandatory ASLR" is enforced. The code
   addresses globals, functions and constants relative to `rip` (about 0.5 % more code, no
   measurable difference in speed). Linux executables are unchanged.
-- `tests/run.sh` runs the tests in parallel, one thread per CPU (the tests of `tests/sys` one
-  after the other), with the same lines of output in the same order: about 22 s instead of
-  48 s on 12 CPUs, 10 s instead of 46 s for `--target windows`.
+- `tests/run.sh` runs the tests in parallel, one thread per CPU (the tests of `tests/sys`
+  after the others, one after the other), with the same lines of output in the same order:
+  about 29 s instead of 60 s on 12 CPUs, 23 s instead of 67 s for `--target windows`.
 - std.window, mouse-look reads the mouse itself instead of the pointer. Windows: raw input
   (`RegisterRawInputDevices` for the mouse while the window holds the pointer, `WM_INPUT`,
   `GetRawInputData`); the pointer is confined to the pixel in the centre of the client area

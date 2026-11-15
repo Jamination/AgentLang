@@ -72,16 +72,17 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   the end; the exit status is 0 if nothing failed.
 - **Parallel.** Each test (a program with its three build modes, a check, a driver script) is
   one job with a directory of its own under the temporary directory; the jobs are spread over
-  the threads, except those of `tests/sys`, which run one after the other on one more thread
-  (they share the machine's display, sound and GPU). The modes of one program run in order,
+  the threads, except those of `tests/sys`: they run when the others are done, one after the
+  other, with the machine to themselves (they share its display, sound and GPU, and window
+  and pointer tests depend on timing). The modes of one program run in order,
   because a test may write a file named after itself. The lines are printed in the order of
   the tests, so two runs print the same text. Every program runs with a limit of 60 seconds
   (status 124); a Windows program is then ended with everything it started (a process group
   or job: the program under `alc run`, the processes of Wine).
   Measured on 12 CPUs against the bash script the runner replaced (which ran the tests one
-  by one), the same 849 / 764 results each: Linux 47.8 s -> 22 s (bounded by `tests/sys`:
-  `vk_present` alone takes 16 s of its thread), `--target windows` 45.7 s -> 10.3 s,
-  `--host-wine` 91 s -> 18 s; `build/altest.exe` itself under Wine 24 s.
+  by one), the same 877 / 830 results each: Linux 60 s -> 29 s (of which `tests/sys` alone
+  22 s: `vk_present` takes 16 s), `--target windows` 67 s -> 23 s, `--host-wine` 116 s ->
+  35 s; `-j 1` 55 s; `build/altest.exe` itself under Wine 36 s.
 - **Tools.** Nothing but the compiler is needed for most tests. A test that needs more is
   reported as `SKIP` with the reason when it is missing: a C compiler for the tests with a C
   library (`tests/sys/NAME.c`: clang on Linux; MinGW-w64 for Windows programs, as
@@ -94,7 +95,8 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   run directly; the default mode of every program goes through `alc run` and the unit tests
   through `alc test`, as with `--host-wine`, so the compiler's own process handling is
   tested too. Linux programs cannot run there: `--target linux` builds each in its three
-  modes, type-checks `tests/check` and `tests/fail` and runs the `--all-targets` checks.
+  modes (those with a `NAME.need` are skipped: the check is a Linux shell command),
+  type-checks `tests/check` and `tests/fail` and runs the `--all-targets` checks.
 - **Wine** (Linux, `--target windows`): the prefix `$WINEPREFIX` (default
   `tmp/win/prefix-tests`) with the null display driver, `DISPLAY` and `WAYLAND_DISPLAY`
   removed, no sound device, no crash dialog (a program that crashes ends at once with the
