@@ -6,7 +6,9 @@ fn main() {
     fifo := fmt("/tmp/al_cloexec_", process_id())
     syscall(133, cstr(fifo), 0o10600, 0)          // mknod(fifo, S_IFIFO | 0600)
     defer { remove_file(fifo) }
-    script := `exec 9>"$1"; for f in /proc/$PPID/fd/*; do if [ "$(readlink $f)" = "$1" ]; then grep flags /proc/$PPID/fdinfo/${f##*/} >&9; fi; done`
+    // (the child's open of the FIFO can return before the descriptor of read_bytes shows in
+    // /proc: it looks until it is there)
+    script := `exec 9>"$1"; n=0; while [ $n -lt 1000 ]; do for f in /proc/$PPID/fd/*; do if [ "$(readlink $f)" = "$1" ]; then grep flags /proc/$PPID/fdinfo/${f##*/} >&9; exit 0; fi; done; n=$((n+1)); done`
     p, ok := spawn([]str{"sh", "-c", script, "sh", fifo})
     text, ok2 := read_bytes(fifo)
     wait(p)
