@@ -57,4 +57,43 @@ fn main() {
     raw[60] = 0xE0
     raw[61] = 0x01
     print(x_event_configure_width(&ev), x_event_configure_height(&ev))
+
+    // XInput 2 raw motion: the raw values of valuators 0 and 1, one per bit set in the mask
+    print(sizeof[XIRawEvent](), sizeof[XiAbsDevice]())
+    vals := [3]f64{2.5, -4.0, 9.0}
+    mask := [1]u8{3}
+    re := XIRawEvent{mask_len: 1, mask: ptr(mask), raw_values: ptr(vals)}
+    put(motion_from_xi_raw(&re, nil, 0, 0), " ")
+    mask[0] = 2                                             // only y moved
+    put(motion_from_xi_raw(&re, nil, 0, 0), " ")
+    mask[0] = 5                                             // x and a third valuator
+    put(motion_from_xi_raw(&re, nil, 0, 0), " ")
+    mask[0] = 4
+    put(motion_from_xi_raw(&re, nil, 0, 0), " ")
+    re.mask_len = 0
+    print(motion_from_xi_raw(&re, nil, 0, 0))
+    // a tablet (positions 0..32767 on both axes) on a 1920 x 1080 screen: differences in pixels
+    tab := XiAbsDevice{id: 9, absolute: [2]bool{true, true}, max: [2]f64{32767.0, 32767.0}}
+    mask[0] = 3
+    re.mask_len = 1
+    for p in [4](f64, f64){(16383.5, 16383.5), (17237.0, 16383.5), (0.0, 32767.0), (32767.0, 32767.0)} {
+        vals[0] = p.0
+        vals[1] = p.1
+        dx, dy := motion_from_xi_raw(&re, &tab, 1920, 1080)
+        put("(", fmtf(dx, 2), ", ", fmtf(dy, 2), ") ")
+    }
+    // a device with a relative x axis and an absolute y axis without a range
+    mix := XiAbsDevice{id: 10, absolute: [2]bool{false, true}}
+    vals[0] = 3.0
+    vals[1] = 100.0
+    put(motion_from_xi_raw(&re, &mix, 1920, 1080), " ")
+    vals[1] = 90.0
+    print(motion_from_xi_raw(&re, &mix, 1920, 1080))
+    // XGenericEventCookie accessors
+    ev = XEvent{}
+    raw[0] = X_GENERIC_EVENT
+    raw[32] = 131
+    raw[36] = 17
+    ev.data[6] = 0x1000
+    print(x_event_type(&ev) == X_GENERIC_EVENT, x_event_cookie_extension(&ev), x_event_cookie_evtype(&ev), cast[i64](x_event_cookie_data(&ev)))
 }

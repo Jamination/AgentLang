@@ -12,8 +12,19 @@ minimize (unmapped)
 fullscreen set by the window manager
  fullscreen: true minimized: true true
  fullscreen: false minimized: false
-locked pointer
- locked: true pos: vec2(100.0, 80.0) delta: vec2(0.0, 0.0) grabbed: true centred: (200, 150)
+locked pointer (raw motion)
+ locked: true raw: true pos: vec2(100.0, 80.0) delta: vec2(0.0, 0.0) grabbed: true centred: (200, 150)
+ move: vec2(30.0, 10.0) pos: vec2(130.0, 90.0) centred: (200, 150)
+ move: vec2(-50.0, -20.0) pos: vec2(80.0, 70.0) centred: (200, 150)
+ move: vec2(-7000.0, -5000.0) pos: vec2(-6920.0, -4930.0)
+ fast: vec2(3000.0, -3000.0) events: true dropped: 0
+ warped: vec2(0.0, 0.0) centred: (200, 150)
+ unfocused: true raw: false delta: vec2(0.0, 0.0)
+ focus: true
+ raw: true delta: vec2(2.0, 3.0) centred: (200, 150)
+ unlocked: vec2(100.0, 80.0) delta: vec2(0.0, 0.0) pointer: (100, 80)
+locked pointer (no XInput 2: pointer motion)
+ locked: true raw: false pos: vec2(100.0, 80.0) delta: vec2(0.0, 0.0) grabbed: true centred: (200, 150)
  move: vec2(30.0, 10.0) pos: vec2(130.0, 90.0) centred: (200, 150)
  move: vec2(-50.0, -20.0) pos: vec2(80.0, 70.0) centred: (200, 150)
  move: vec2(-200.0, -150.0) pos: vec2(-120.0, -80.0)

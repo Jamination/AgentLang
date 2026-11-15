@@ -1,6 +1,6 @@
 // std.window, Windows layer: the window is a Win32 window (user32.dll), `present` draws with
-// GDI (gdi32.dll). Loaded by `use std.window` for --target windows; the public API is in
-// std/window.al.
+// GDI (gdi32.dll), imm32.dll switches the input method editor. Loaded by `use std.window` for
+// --target windows; the public API is in std/window.al.
 //
 // - The process is made per-monitor DPI aware (v2) when the first window opens: sizes are
 //   physical pixels, as on X11, and a window keeps its client size in pixels when it moves to
@@ -13,6 +13,11 @@
 //   that loop switches back to the program's fiber, so `poll` returns (and the game keeps
 //   running) during the drag. Without fibers (ConvertThreadToFiber failed) `poll` pumps
 //   directly and such a loop pauses the program.
+// - A locked pointer (set_cursor_locked) is read as raw input: while the window holds the
+//   pointer the mouse (HID usage page 1, usage 2) is registered with RegisterRawInputDevices
+//   and the WM_INPUT records move a virtual position. Buttons and the wheel stay on the
+//   normal messages.
+// - No input method editor is attached to the window until set_text_input(w, true).
 // All Win32 declarations are file-private: std.dx12 declares some of the same names.
 
 priv extern "kernel32.dll" fn GetModuleHandleW(name: *u16) -> *u8
@@ -838,6 +843,7 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             }
         }
         WM_NCDESTROY => {
+            w32_release_pointer(w)
             o.hwnd = nil
             w.closing = true
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0)

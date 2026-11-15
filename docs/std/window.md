@@ -11,12 +11,13 @@ The window system lives in the module's OS layer: `std/window_linux.al` (X11) or
 `when TARGET_OS == Windows { use std.window_windows } else { use std.window_linux }`.
 
 - **Linux:** a program that calls `window_open` is dynamically linked against `libX11.so.6`
-  (and libc). On a Wayland session it runs through XWayland; a program that wants to talk to
-  the compositor itself uses the bindings of [std.wayland](wayland.md). The helper functions
-  that need no display (`key_from_keysym`, `fit_rect`, `blit_fit`, ...) do not pull the
-  library in.
-- **Windows:** the program imports `user32.dll`, `gdi32.dll` and `kernel32.dll` (all part of
-  Windows); no C run-time library.
+  (and libc with `libdl.so.2`); `libXi.so.6` (XInput 2) is loaded at run time when a pointer
+  is first locked, and is not required. On a Wayland session it runs through XWayland; a
+  program that wants to talk to the compositor itself uses the bindings of
+  [std.wayland](wayland.md). The helper functions that need no display (`key_from_keysym`,
+  `fit_rect`, `blit_fit`, ...) do not pull the library in.
+- **Windows:** the program imports `user32.dll`, `gdi32.dll`, `imm32.dll` and `kernel32.dll`
+  (all part of Windows); no C run-time library.
 
 ## Opening a window
 
@@ -52,7 +53,8 @@ the arena.
 | `size(w) -> (i64, i64)` | current width and height of the drawable area |
 | `set_title(w, title: str)` | change the title |
 | `set_cursor_visible(w, visible: bool)` | hide / show the mouse pointer over the window |
-| `set_cursor_locked(w, locked: bool)` | lock / free the pointer for mouse-look: hidden, kept in the window, `mouse_delta` reports unbounded relative motion (see [Mouse-look](#mouse-look)) |
+| `set_cursor_locked(w, locked: bool)` | lock / free the pointer for mouse-look: hidden, held in the window, `mouse_delta` reports the raw, unbounded motion of the mouse (see [Mouse-look](#mouse-look)) |
+| `set_text_input(w, on: bool)` | the user types text / plays: allows the input method editor while on (see [Keys and text](#keys-and-text)) |
 | `set_fullscreen(w, on: bool)` | switch between fullscreen and windowed |
 | `present(w, pixels: []u8, pw, ph) -> bool` | show an RGBA8 framebuffer of `pw` x `ph` pixels |
 | `mouse_in_frame(w, pw, ph) -> vec2` | mouse position in pixels of a framebuffer shown with `present` |
@@ -63,7 +65,7 @@ the arena.
 
 Public fields of `Window`: `input` (an `Input`, see [input.md](input.md)), `events` (the
 `EventQueue`), `width`, `height`, `closing`, `fullscreen`, `minimized` (between an
-`EventMinimize` and the next `EventRestore`), `cursor_hidden`, `cursor_locked`. The field `os`
+`EventMinimize` and the next `EventRestore`), `cursor_hidden`, `cursor_locked`, `text_input`. The field `os`
 (a `WindowOs`, different per system) holds the backend's handles. The native-handle accessors
 exist only on their system, like the backend's helpers below.
 
@@ -111,44 +113,104 @@ program calls `close(w)`, so the game can save or ask first. To quit from game c
 `w.closing = true`. After `close`, the `Window` remains a valid closed window: `should_close`
 is true, `present` returns false and the other calls do nothing.
 
-Keyboard details: key codes come from the unshifted symbol of the key on the user's layout.
-Auto-repeat arrives as `EventKeyDown` with `repeat` set (it sets `key_repeated`, not
-`key_pressed`). Text arrives separately as `EventText`, already composed by the system's input
-method (layout, shift, dead keys, compose sequences / IME) and delivered as Unicode code points;
-control characters are filtered out. `mods` of key and mouse events are the modifiers held
-before the event (pressing Shift reports no Shift, releasing it does). Mouse wheel motion is
-`EventWheel`, not a button.
+### Keys and text
+
+Key codes come from the unshifted symbol of the key on the user's layout. Auto-repeat arrives
+as `EventKeyDown` with `repeat` set (it sets `key_repeated`, not `key_pressed`). `mods` of key
+and mouse events are the modifiers held before the event (pressing Shift reports no Shift,
+releasing it does). Mouse wheel motion is `EventWheel`, not a button.
+
+Every key press is a key event, and a key that types also sends its text, separately, as
+`EventText`: Unicode code points after layout, Shift, AltGr and dead keys, without control
+characters (Enter, Backspace, Tab, Escape and Ctrl+letter are key events only). A game reads
+keys and ignores the text; a text field reads `EventText` (or `text(&w.input)`) and uses key
+events only for editing (`KEY_BACKSPACE`, `KEY_LEFT`, ...).
+
+`set_text_input(w, true)` says that the user is typing text now (a name, a chat line),
+`set_text_input(w, false)`, the default, that the keyboard plays the game. It decides about
+the **input method editor** (IME: how Chinese, Japanese, Korean and other scripts are typed;
+it takes the key presses and shows candidates until a word is chosen):
+
+- **Windows:** off, no IME is attached to the window (`ImmAssociateContextEx`), so W, A, S, D
+  move the player whatever input language is active, and text still arrives for every layout
+  that types characters directly. On, the window has its default input context again: the
+  IME composes, the finished text arrives as `EventText`, and the keys it takes arrive as
+  `KEY_UNKNOWN`.
+- **Linux:** only `w.text_input` changes. X11 has no such switch: the session's input method
+  (XIM: compose sequences, dead keys; ibus, fcitx) is attached to the window all the time, and
+  one that is in a composing mode takes the keys of a game too.
+
+**Focus.** When the window loses the focus (Alt-Tab, a click elsewhere, the lock screen) every
+held key and button is released, since their releases go elsewhere (`EventUnfocus`; the
+`key_released` edges are set). When the focus comes back nothing is pressed: a key that is
+still held down is reported when it is pressed again, or at its next auto-repeat, which then
+counts as a press (`key_pressed`, `repeat` false).
 
 ### Mouse-look
 
 `set_cursor_locked(w, true)` turns the mouse into a relative device, as first-person cameras
-need: the pointer is hidden and kept inside the window, and `mouse_delta(&w.input)` is the
-motion of the frame in pixels, also when the pointer would have hit the edge of the screen.
+need: the pointer is hidden and held in the window, and `mouse_delta(&w.input)` is the motion
+of the mouse during the frame, without bounds (there is no edge of the screen to hit).
 `mouse_pos` and the `x`, `y` of mouse events are then a virtual position that starts at the
-real one and moves without bounds; button events work as usual. `set_cursor_locked(w, false)`
-shows the pointer again where it was when locked and `mouse_pos` continues from there without
-a jump in `mouse_delta`.
+real one and moves by that motion; button and wheel events work as usual.
+`set_cursor_locked(w, false)` shows the pointer again where it was when locked and `mouse_pos`
+continues from there without a jump in `mouse_delta`.
 
 ```
 w.set_cursor_locked(true)
 loop {
     w.poll()
     d := w.input.mouse_delta()
-    yaw -= d.x * 0.002
-    pitch = fmin(fmax(pitch - d.y * 0.002, -1.5), 1.5)
+    yaw -= d.x * sensitivity                       // e.g. 0.002 radians per count
+    pitch = fmin(fmax(pitch - d.y * sensitivity, -1.5), 1.5)
     if w.input.key_pressed(KEY_ESCAPE) { w.set_cursor_locked(false) }    // open the menu
     ...
 }
 ```
 
+**Units.** While locked, the motion is **raw: device counts, unscaled**, the same on both
+systems. It is what the mouse reports, before the desktop's pointer speed and acceleration
+and whatever the scale of the display: an 800 dpi mouse moved one inch gives 800. The factor
+that turns counts into an angle is the game's sensitivity setting. (Unlocked, `mouse_delta`
+is the motion of the pointer in window pixels, with the desktop's acceleration.)
+
+- **Windows:** raw input. While the window holds the pointer the mouse (HID usage page 1,
+  usage 2) is registered with `RegisterRawInputDevices`, and each `WM_INPUT` record
+  (`GetRawInputData`) moves the virtual position. The pointer is confined to the pixel in the
+  centre of the client area (`ClipCursor`), so it stays put and every click lands in the
+  window. Buttons and the wheel come from the normal messages.
+- **Linux:** XInput 2 raw motion (`XI_RawMotion`, selected on the root window while the
+  window holds the pointer). The window grabs the pointer (`XGrabPointer`, confined to the
+  window, invisible cursor) and warps it back to the centre (`XWarpPointer`) in every `poll`.
+  Under XWayland, Xwayland turns this pattern (grab, hidden cursor, warping) into a Wayland
+  pointer lock, and the raw motion is the compositor's unaccelerated relative motion. X11
+  reports fractions of counts; they accumulate, and the events carry whole counts. Without
+  the XInput extension (2.0 or later) or `libXi.so.6`, the motion is the pointer's instead:
+  pixels, with the desktop's acceleration.
+- **Devices that report positions** (a graphics tablet, a touch screen, remote desktop, the
+  pointer of some virtual machines) have no counts. Their motion is the difference between
+  two positions, in pixels of the screen (Windows: `MOUSE_MOVE_ABSOLUTE` records, scaled to
+  the primary monitor, or to the virtual desktop with `MOUSE_VIRTUAL_DESKTOP`; X11: valuators
+  in absolute mode, scaled to the screen), and it ends where the device's surface ends.
+- **Fast mice.** A mouse may report 8000 times a second. `poll` takes everything that is
+  queued, and a run of motion between two other events is kept as one `EventMouseMove` with
+  the newest position: no queue fills, nothing lags behind, `mouse_delta` is the exact sum.
+- `mouse_pos` and `mouse_delta` are `f32`: exact while the virtual position stays within
+  16 million counts (2^24) of zero.
+
 The lock holds only while the window has the keyboard focus: on `EventUnfocus` the pointer is
-freed (the user can use other windows), on `EventFocus` the window takes it again;
-`w.cursor_locked` stays true throughout. How: on X11 the window grabs the pointer
-(`XGrabPointer`, confined to the window, invisible cursor) and warps it back to the centre
-(`XWarpPointer`) in every `poll` after it moved, skipping the motion the warp itself causes; on
-Windows `ClipCursor` confines it and `SetCursorPos` centres it. The motion is the pointer's,
-with the desktop's acceleration (no raw device input). Under XWayland, Xwayland turns this
-pattern (grab, hidden cursor, warping) into a Wayland pointer lock.
+freed and shown (the user can use other windows), and its motion over the window is not
+reported; on `EventFocus` the window takes it again. `w.cursor_locked` stays true throughout.
+On Windows the pointer is also free while the window is minimized, while the user moves or
+resizes the window or has its menu open, and, when a click on the title bar, a border or a
+caption button activated the window, until that click is done (so the window can be dragged
+or closed). If Windows refuses raw input (no ordinary system does), the pointer stays free
+and there is no motion.
+
+Programs that put the pointer somewhere (`SetCursorPos`, `XWarpPointer`) do not move a locked
+pointer. To play the user in a test, send relative motion: `SendInput` with
+`MOUSEEVENTF_MOVE`, XTEST's `XTestFakeRelativeMotionEvent`. (X servers report XTEST motion to
+a position, as `xdotool mousemove` sends it, as raw motion whose values are the position.)
 
 ### Software presentation
 
@@ -201,12 +263,14 @@ both modules.
 | `key_from_keysym(ks: u64) -> i64` | `KEY_*` code for an X11 keysym (`KEY_UNKNOWN` if none) |
 | `mods_from_x11(state: u32) -> u8` | `MOD_*` bits for an X11 modifier mask |
 | `event_from_x11_button(button, pressed, x, y, mods) -> Event` | mouse / wheel event for an X11 button number |
+| `motion_from_xi_raw(e: *XIRawEvent, d: *XiAbsDevice, screen_w, screen_h) -> (f64, f64)` | the motion of an XInput 2 raw motion event: its raw values of x and y; `d` (nil for a mouse) describes a device that reports positions, which are differenced in screen pixels |
 
 `std.x11` (included by this module) declares the raw Xlib functions with their C names
 (`XOpenDisplay`, `XCreateSimpleWindow`, `XNextEvent`, `XPutImage`, `XInternAtom`,
 `XGetWindowProperty`, `XGrabPointer`, `XWarpPointer`, `XQueryPointer`, `XSetInputFocus`,
-`XIconifyWindow`, ...), the structs `XEvent` (an opaque 192-byte block read with
-`x_event_type`, `x_event_x`, `x_event_detail`, `x_event_property_atom`, ... ), `XSizeHints`,
+`XIconifyWindow`, `XQueryExtension`, `XGetEventData`, ...), the structs `XEvent` (an opaque
+192-byte block read with `x_event_type`, `x_event_x`, `x_event_detail`,
+`x_event_property_atom`, `x_event_cookie_data`, ... ), `XSizeHints`,
 `XColor`, and constants with an `X_` prefix (`X_KEY_PRESS`, `X_STRUCTURE_NOTIFY_MASK`,
 `X_PROPERTY_NOTIFY`, `X_GRAB_SUCCESS`, ...). Use it for anything this module does not cover;
 the display and window id of a `Window` are valid arguments for all of it (`XIconifyWindow`
@@ -218,6 +282,7 @@ minimizes the window, for example).
 |----------|---|
 | `key_from_vk(vk: u32, scan: u32, extended: bool, ch: u32) -> i64` | `KEY_*` code for a virtual key with the scan code and extended flag of its message and its unshifted character (`MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR)`) |
 | `event_from_win32_button(msg: u32, wparam: u64, x, y, mods) -> Event` | mouse press / release for `WM_LBUTTONDOWN` .. `WM_XBUTTONUP` (`EventNone` for other messages) |
+| `motion_from_raw_mouse(s: *RawMotion, r: *RawInputMouse, span_w, span_h) -> (i64, i64)` | the motion of one raw mouse record (`RAWINPUT` of `WM_INPUT`): its counts, or for `MOUSE_MOVE_ABSOLUTE` the difference to the device's last position (kept in `s`) in pixels of an area of `span_w` x `span_h` |
 
 ## Windows
 
@@ -239,12 +304,17 @@ The same program runs on Windows with the same events; what differs:
   `KEY_RALT` (the left Ctrl that Windows sends with it is dropped). Print Screen, of which
   Windows reports only the release, gives a press and a release when it is released. When both
   Shift keys are held, Windows reports only the last release; the window releases both then.
-- **Text** comes from `WM_CHAR` (layout, dead keys, IME); characters outside the BMP arrive as
-  one code point. As on X11, Alt+letter also types the letter.
+- **Text** comes from `WM_CHAR` (layout, dead keys; the IME after `set_text_input(w, true)`:
+  [Keys and text](#keys-and-text)) and `WM_UNICHAR` (UTF-32 sent by other programs);
+  characters outside the BMP arrive as one code point. As on X11, Alt+letter also types the
+  letter.
 - **Mouse.** While a button is held the window keeps the pointer (positions outside the window,
   as with the X11 grab). One `EventWheel` step per notch (`WHEEL_DELTA`, 120); finer motion of
-  touchpads accumulates into steps; `y > 0` away from the user, `x > 0` to the right.
-- **System keys.** Alt and F10 do not enter the window-menu mode (which would stop the game);
+  touchpads accumulates into steps; `y > 0` away from the user, `x > 0` to the right. A locked
+  pointer is read as raw input: [Mouse-look](#mouse-look).
+- **System keys.** Keys pressed while Alt is held, and F10, arrive as `WM_SYSKEYDOWN` /
+  `WM_SYSKEYUP` and are ordinary key events (Alt+Enter is `KEY_ENTER` with `MOD_ALT`). Alt and
+  F10 do not enter the window-menu mode (which would stop the game) and Alt+key does not beep;
   Alt+F4 is an `EventClose`, Alt+Space still opens the window menu.
 - **Minimizing** keeps the size (no `EventResize` to 0 x 0), as on X11: `EventMinimize`,
   then `EventRestore`.
@@ -429,18 +499,25 @@ that many frames, which is handy for automated smoke tests.
 ## Testing
 
 Window logic that does not need a display is covered by `tests/std/window_fit` (scaling and
-conversion, both systems) and `tests/std/window_logic` (X11 key mapping and event translation).
+conversion, both systems) and `tests/std/window_logic` (X11 key mapping, event translation and
+the translation of XInput 2 raw motion from made-up events).
 `tests/sys/window_x11` exercises a real X11 window and `tests/sys/window_x11_events` resize,
-minimize / restore, window-manager fullscreen changes and the locked pointer (a second client
-connection plays the user and the window manager), but only on the display named by the
-environment variable `AL_TEST_DISPLAY`, which must have no window manager (for example an
-`Xvfb` instance: `Xvfb :99 & AL_TEST_DISPLAY=:99 tests/run.sh ./build/alc window`, or a rootful
-`Xwayland :99` inside a headless `weston`); without it the tests are skipped, so the test suite
-never opens a window on the desktop it runs on.
+minimize / restore, window-manager fullscreen changes and the locked pointer, with raw motion
+(a second client connection plays the user through XTEST, and the window manager) and
+without, but only on the display named by the environment variable `AL_TEST_DISPLAY`, which
+must have no window manager (for example an `Xvfb` instance: `Xvfb :99 & AL_TEST_DISPLAY=:99
+tests/run.sh ./build/alc window`, or a rootful `Xwayland :99` inside a headless `weston`), and
+with `libXtst.so.6` and `libXi.so.6` installed; without them the tests are skipped, so the
+test suite never opens a window on the desktop it runs on.
 
 On Windows (`tests/run.sh --target windows`, under Wine with its null display driver: windows
 exist and get messages, nothing is shown), `tests/sys/window_win32` opens a real Win32 window
 and checks the key table, posted and `SendInput` keyboard messages, text, mouse buttons and
 wheel, focus loss, `present` (pixels read back with `GetPixel`), the pointer (also locked),
-fullscreen, minimizing, close requests and leaving a modal move loop; `tests/sys/window_dx12`
-uses std.window together with std.dx12. Both are skipped on Linux.
+fullscreen, minimizing, close requests and leaving a modal move loop;
+`tests/sys/window_win32_input` checks the input path: the translation of raw mouse records
+(made-up `RAWINPUT` records: counts, positions, several devices), a locked pointer moved with
+`SendInput` (Wine makes `WM_INPUT` of it), 6000 reports between two polls, focus loss and
+return, a click on the frame, an open menu, minimizing, key state after the focus came back,
+system keys, text against key events, `WM_UNICHAR` and the input method editor;
+`tests/sys/window_dx12` uses std.window together with std.dx12. All are skipped on Linux.
