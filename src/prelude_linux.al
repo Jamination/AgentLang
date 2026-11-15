@@ -1137,191 +1137,6 @@ fn __os_kill(pid: i64, handle: i64, signal: i64) -> i64 {
     return syscall(62, pid, signal)
 }
 
-// the environment of a started program: this process's, changed by `changes` ("NAME=value"
-// sets a variable, "NAME" removes it; the last change of a name counts)
-priv fn child_env(changes: []str) -> i64 {
-    old := __argv + 8 * (__argc + 1)
-    if len(changes) == 0 {
-        return old
-    }
-    fn name_of(c: str) -> str {
-        eq := index_of(c, '=')
-        return if eq < 0 { c } else { c[..eq] }
-    }
-    envp := cast[*i64](old)
-    out := vec[i64]()
-    i := 0
-    while envp[i] != 0 {
-        p := cast[*u8](envp[i])
-        n := 0
-        while p[n] != 0 && p[n] != '=' {
-            n += 1
-        }
-        keep := true
-        for c in changes {
-            if name_of(c) == mkslice[u8](p, n) {
-                keep = false
-                break
-            }
-        }
-        if keep {
-            out.push(envp[i])
-        }
-        i += 1
-    }
-    for j, c in changes {
-        last := true
-        for d in changes[j + 1..] {
-            if name_of(d) == name_of(c) {
-                last = false
-            }
-        }
-        if last && contains(c, '=') {
-            out.push(cast[i64](cstr(c)))
-        }
-    }
-    out.push(0)
-    return cast[i64](ptr(out.items()))
-}
-
-// Starts argv like __os_spawn, with files in place of the standard streams and a changed
-// environment: `sin` is read as standard input, `sout` and `serr` (created or emptied) take
-// standard output and standard error ("" each: that of this process; serr the same path as
-// sout: one open file takes both); `env` as for child_env; `group`: the program leads a new
-// process group. Returns (process id, process id, 1 for a group else 0), or (-1, -1, 0) with
-// io_error() (also if a file cannot be opened).
-fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, group: bool) -> (i64, i64, i64) {
-    if len(argv) == 0 {
-        __io_result(-22)
-        return (-1, -1, 0)
-    }
-    file, e := locate(argv[0])
-    if e != 0 {
-        __io_result(-e)
-        return (-1, -1, 0)
-    }
-    flush()
-    cargs := alloc[i64](len(argv) + 1)
-    for i, a in argv {
-        cargs[i] = cast[i64](cstr(a))
-    }
-    cfile := cstr(file)
-    envp := child_env(env)
-    // the files (close-on-exec: the child's copies on 0, 1 and 2 are not), then the pipe that
-    // tells whether execve worked, as in __os_spawn
-    fds: [3]i64
-    paths := [3]str{sin, sout, serr}
-    err := 0
-    for k in 0..3 {
-        fds[k] = -1
-        if len(paths[k]) == 0 || err != 0 {
-            continue
-        }
-        if k == 2 && serr == sout {
-            fds[2] = fds[1]
-            continue
-        }
-        // O_RDONLY, or O_WRONLY | O_CREAT | O_TRUNC; both with O_CLOEXEC
-        r := syscall(2, cstr(paths[k]), if k == 0 { 0x80000 } else { 0x80241 }, 0o666)
-        if r < 0 {
-            err = r
-        } else {
-            fds[k] = r
-        }
-    }
-    note: [2]i32
-    if err == 0 {
-        err = min(syscall(293, ptr(note), 0x80000), 0)
-    }
-    pid := -1
-    if err == 0 {
-        pid = syscall(57)
-        if pid == 0 {
-            if group {
-                syscall(109, 0, 0)                          // setpgid
-            }
-            for k in 0..3 {
-                if fds[k] >= 0 {
-                    syscall(33, fds[k], k)
-                }
-            }
-            failed: [1]i64
-            failed[0] = -syscall(59, cfile, ptr(cargs), envp)
-            syscall(1, i64(note[1]), ptr(failed), 8)
-            syscall(231, 127)
-        }
-        syscall(3, i64(note[1]))
-        if pid > 0 && group {
-            // (here too: a signal to the group may come before the child has run)
-            syscall(109, pid, pid)
-        }
-        if pid < 0 {
-            err = pid
-            syscall(3, i64(note[0]))
-        }
-    }
-    for k in 0..3 {
-        if fds[k] >= 0 && !(k == 2 && fds[2] == fds[1]) {
-            syscall(3, fds[k])
-        }
-    }
-    if err != 0 {
-        __io_result(err)
-        return (-1, -1, 0)
-    }
-    failed: [1]i64
-    __os_read(i64(note[0]), cast[i64](ptr(failed)), 8)
-    syscall(3, i64(note[0]))
-    if failed[0] != 0 {
-        __os_wait(pid, pid, true)
-        __io_result(-failed[0])
-        return (-1, -1, 0)
-    }
-    __io_result(0)
-    return (pid, pid, if group { 1 } else { 0 })
-}
-
-// sends a signal to every process of the group that a process of __os_spawn_files leads: 0
-// or -errno
-fn __os_kill_group(pid: i64, handle: i64, group: i64, signal: i64) -> i64 {
-    return syscall(62, -pid, signal)
-}
-
-// the group of a process that has been waited for is no longer needed
-fn __os_group_close(group: i64) {}
-
-// Waits at most ns nanoseconds for a process of __os_spawn: its status, -2 if it still runs
-// then, -1 if it cannot be waited for (io_error()), as __os_wait.
-fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
-    end := sat_add(clock_ns(), ns)
-    // a descriptor of the process that is readable once it has ended (pidfd_open, Linux 5.3;
-    // without it the process is looked at every millisecond)
-    fd := syscall(434, pid, 0)
-    st := 0
-    loop {
-        st = __os_wait(pid, handle, false)
-        left := end - clock_ns()
-        if st != -2 || left <= 0 {
-            break
-        }
-        if fd >= 0 {
-            // struct pollfd: fd, events = POLLIN; ppoll with a timespec
-            pfd: [1]i64
-            pfd[0] = fd | 1 << 32
-            ts: [2]i64
-            ts[0] = left / 1000000000
-            ts[1] = left % 1000000000
-            syscall(271, ptr(pfd), 1, ptr(ts), 0, 8)
-        } else {
-            __os_sleep_ns(min(left, 1000000))
-        }
-    }
-    if fd >= 0 {
-        syscall(3, fd)
-    }
-    return st
-}
-
 // ---------- std.os: shared memory, this process ----------
 // a new anonymous file of `size` bytes in memory (close-on-exec): a descriptor or -errno
 fn __os_shm_create(size: i64) -> i64 {
@@ -1657,4 +1472,193 @@ fn __os_thread_cleanup() {
         __os_unmap(__tls_sigstack, 32768)
         __tls_sigstack = 0
     }
+}
+
+// ---------- std.os: programs with files as standard streams, groups, timed waits ----------
+// (at the end of the file: nothing above moves, so programs that use none of this are built
+// the same, source lines of their stack traces included)
+
+// the environment of a started program: this process's, changed by `changes` ("NAME=value"
+// sets a variable, "NAME" removes it; the last change of a name counts)
+priv fn child_env(changes: []str) -> i64 {
+    old := __argv + 8 * (__argc + 1)
+    if len(changes) == 0 {
+        return old
+    }
+    fn name_of(c: str) -> str {
+        eq := index_of(c, '=')
+        return if eq < 0 { c } else { c[..eq] }
+    }
+    envp := cast[*i64](old)
+    out := vec[i64]()
+    i := 0
+    while envp[i] != 0 {
+        p := cast[*u8](envp[i])
+        n := 0
+        while p[n] != 0 && p[n] != '=' {
+            n += 1
+        }
+        keep := true
+        for c in changes {
+            if name_of(c) == mkslice[u8](p, n) {
+                keep = false
+                break
+            }
+        }
+        if keep {
+            out.push(envp[i])
+        }
+        i += 1
+    }
+    for j, c in changes {
+        last := true
+        for d in changes[j + 1..] {
+            if name_of(d) == name_of(c) {
+                last = false
+            }
+        }
+        if last && contains(c, '=') {
+            out.push(cast[i64](cstr(c)))
+        }
+    }
+    out.push(0)
+    return cast[i64](ptr(out.items()))
+}
+
+// Starts argv like __os_spawn, with files in place of the standard streams and a changed
+// environment: `sin` is read as standard input, `sout` and `serr` (created or emptied) take
+// standard output and standard error ("" each: that of this process; serr the same path as
+// sout: one open file takes both); `env` as for child_env; `group`: the program leads a new
+// process group. Returns (process id, process id, 1 for a group else 0), or (-1, -1, 0) with
+// io_error() (also if a file cannot be opened).
+fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, group: bool) -> (i64, i64, i64) {
+    if len(argv) == 0 {
+        __io_result(-22)
+        return (-1, -1, 0)
+    }
+    file, e := locate(argv[0])
+    if e != 0 {
+        __io_result(-e)
+        return (-1, -1, 0)
+    }
+    flush()
+    cargs := alloc[i64](len(argv) + 1)
+    for i, a in argv {
+        cargs[i] = cast[i64](cstr(a))
+    }
+    cfile := cstr(file)
+    envp := child_env(env)
+    // the files (close-on-exec: the child's copies on 0, 1 and 2 are not), then the pipe that
+    // tells whether execve worked, as in __os_spawn
+    fds: [3]i64
+    paths := [3]str{sin, sout, serr}
+    err := 0
+    for k in 0..3 {
+        fds[k] = -1
+        if len(paths[k]) == 0 || err != 0 {
+            continue
+        }
+        if k == 2 && serr == sout {
+            fds[2] = fds[1]
+            continue
+        }
+        // O_RDONLY, or O_WRONLY | O_CREAT | O_TRUNC; both with O_CLOEXEC
+        r := syscall(2, cstr(paths[k]), if k == 0 { 0x80000 } else { 0x80241 }, 0o666)
+        if r < 0 {
+            err = r
+        } else {
+            fds[k] = r
+        }
+    }
+    note: [2]i32
+    if err == 0 {
+        err = min(syscall(293, ptr(note), 0x80000), 0)
+    }
+    pid := -1
+    if err == 0 {
+        pid = syscall(57)
+        if pid == 0 {
+            if group {
+                syscall(109, 0, 0)                          // setpgid
+            }
+            for k in 0..3 {
+                if fds[k] >= 0 {
+                    syscall(33, fds[k], k)
+                }
+            }
+            failed: [1]i64
+            failed[0] = -syscall(59, cfile, ptr(cargs), envp)
+            syscall(1, i64(note[1]), ptr(failed), 8)
+            syscall(231, 127)
+        }
+        syscall(3, i64(note[1]))
+        if pid > 0 && group {
+            // (here too: a signal to the group may come before the child has run)
+            syscall(109, pid, pid)
+        }
+        if pid < 0 {
+            err = pid
+            syscall(3, i64(note[0]))
+        }
+    }
+    for k in 0..3 {
+        if fds[k] >= 0 && !(k == 2 && fds[2] == fds[1]) {
+            syscall(3, fds[k])
+        }
+    }
+    if err != 0 {
+        __io_result(err)
+        return (-1, -1, 0)
+    }
+    failed: [1]i64
+    __os_read(i64(note[0]), cast[i64](ptr(failed)), 8)
+    syscall(3, i64(note[0]))
+    if failed[0] != 0 {
+        __os_wait(pid, pid, true)
+        __io_result(-failed[0])
+        return (-1, -1, 0)
+    }
+    __io_result(0)
+    return (pid, pid, if group { 1 } else { 0 })
+}
+
+// sends a signal to every process of the group that a process of __os_spawn_files leads: 0
+// or -errno
+fn __os_kill_group(pid: i64, handle: i64, group: i64, signal: i64) -> i64 {
+    return syscall(62, -pid, signal)
+}
+
+// the group of a process that has been waited for is no longer needed
+fn __os_group_close(group: i64) {}
+
+// Waits at most ns nanoseconds for a process of __os_spawn: its status, -2 if it still runs
+// then, -1 if it cannot be waited for (io_error()), as __os_wait.
+fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
+    end := sat_add(clock_ns(), ns)
+    // a descriptor of the process that is readable once it has ended (pidfd_open, Linux 5.3;
+    // without it the process is looked at every millisecond)
+    fd := syscall(434, pid, 0)
+    st := 0
+    loop {
+        st = __os_wait(pid, handle, false)
+        left := end - clock_ns()
+        if st != -2 || left <= 0 {
+            break
+        }
+        if fd >= 0 {
+            // struct pollfd: fd, events = POLLIN; ppoll with a timespec
+            pfd: [1]i64
+            pfd[0] = fd | 1 << 32
+            ts: [2]i64
+            ts[0] = left / 1000000000
+            ts[1] = left % 1000000000
+            syscall(271, ptr(pfd), 1, ptr(ts), 0, 8)
+        } else {
+            __os_sleep_ns(min(left, 1000000))
+        }
+    }
+    if fd >= 0 {
+        syscall(3, fd)
+    }
+    return st
 }

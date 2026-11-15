@@ -45,17 +45,11 @@ priv extern "kernel32.dll" fn GetSystemTimeAsFileTime(ft: *i64)
 priv extern "kernel32.dll" fn GetCommandLineW() -> *u16
 priv extern "kernel32.dll" fn GetEnvironmentVariableW(name: *u16, buf: *u16, n: u32) -> u32
 priv extern "kernel32.dll" fn SetEnvironmentVariableW(name: *u16, value: *u16) -> i32
-priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
-priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
 priv extern "kernel32.dll" fn GetModuleFileNameW(module: i64, buf: *u16, n: u32) -> u32
 priv extern "kernel32.dll" fn CreateProcessW(app: *u16, cmd: *u16, psec: i64, tsec: i64, inherit: i32, flags: u32, env: i64, dir: i64, si: *i64, pi: *i64) -> i32
 priv extern "kernel32.dll" fn WaitForSingleObject(h: i64, ms: u32) -> u32
 priv extern "kernel32.dll" fn GetExitCodeProcess(h: i64, code: *u32) -> i32
 priv extern "kernel32.dll" fn TerminateProcess(h: i64, code: u32) -> i32
-priv extern "kernel32.dll" fn CreateJobObjectW(security: i64, name: i64) -> i64
-priv extern "kernel32.dll" fn AssignProcessToJobObject(job: i64, process: i64) -> i32
-priv extern "kernel32.dll" fn TerminateJobObject(job: i64, code: u32) -> i32
-priv extern "kernel32.dll" fn ResumeThread(thread: i64) -> u32
 priv extern "kernel32.dll" fn CreatePipe(r: *i64, w: *i64, security: i64, size: u32) -> i32
 priv extern "kernel32.dll" fn DuplicateHandle(from_process: i64, h: i64, to_process: i64, out: *i64, access: u32, inherit: i32, options: u32) -> i32
 priv extern "kernel32.dll" fn GetCurrentProcess() -> i64
@@ -973,9 +967,8 @@ fn __os_unmap(p: i64, n: i64) -> i64 {
 priv spawn_lock: i64
 
 // starts app with the command line cmd, the three standard handles and the environment block
-// env (0: this process's), as a process of the job object `job` (0: none) from its first
-// instruction on: (process handle, process id), or (0, -errno)
-priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env: i64, job: i64) -> (i64, i64) {
+// env (0: this process's): (process handle, process id), or (0, -errno)
+priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env: i64) -> (i64, i64) {
     // the child gets inheritable copies of the three handles
     AcquireSRWLockExclusive(&spawn_lock)
     me := GetCurrentProcess()
@@ -998,12 +991,8 @@ priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env
     si[12] = dup[2]
     // PROCESS_INFORMATION: process, thread, process id, thread id
     pi: [3]i64
-    // CREATE_UNICODE_ENVIRONMENT for a block of UTF-16 text; CREATE_SUSPENDED until it is in the job
-    flags: u32 = if env != 0 { 0x400 } else { 0 }
-    if job != 0 {
-        flags |= 4
-    }
-    ok := CreateProcessW(app, cmd, 0, 0, 1, flags, env, 0, &si[0], &pi[0])
+    // CREATE_UNICODE_ENVIRONMENT for a block of UTF-16 text
+    ok := CreateProcessW(app, cmd, 0, 0, 1, if env != 0 { 0x400 } else { 0 }, env, 0, &si[0], &pi[0])
     e := GetLastError()
     for i in 0..3 {
         if dup[i] != 0 {
@@ -1017,11 +1006,6 @@ priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env
     if pi[0] == 0 {
         // (Wine starts a Linux program without a Windows process)
         return (0, -8)
-    }
-    if job != 0 {
-        // (if the job cannot take it, the process runs outside: only itself can be ended then)
-        AssignProcessToJobObject(job, pi[0])
-        ResumeThread(pi[1])
     }
     CloseHandle(pi[1])
     return (pi[0], pi[2] & 0xFFFFFFFF)
@@ -1076,7 +1060,7 @@ fn __os_test(f: fn()) -> i64 {
     n := wcslen(line)
     cmd := alloc[u16](n + 1)
     memcopy(ptr(cmd), line, 2 * n)
-    h, _ := create_process(ptr(exe), ptr(cmd), handle(0), handle(1), handle(2), 0, 0)
+    h, _ := create_process(ptr(exe), ptr(cmd), handle(0), handle(1), handle(2), 0)
     SetEnvironmentVariableW(name, nil)
     if h == 0 {
         return 0
@@ -1559,7 +1543,7 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
     herr := if capture == 2 { pipe_w } else { handle(2) }
     app := wide(file)
     verbatim(app)
-    h, pid := create_process(app, wide(line), handle(0), hout, herr, 0, 0)
+    h, pid := create_process(app, wide(line), handle(0), hout, herr, 0)
     if capture != 0 {
         CloseHandle(pipe_w)
     }
@@ -1613,161 +1597,6 @@ fn __os_kill(pid: i64, handle: i64, signal: i64) -> i64 {
         return last_error()
     }
     return 0
-}
-
-// the environment block (UTF-16) of a started program: this process's, changed by `changes`
-// ("NAME=value" sets a variable, "NAME" removes it; the last change of a name counts; names
-// are compared without regard to case); 0 without changes
-priv fn child_env(changes: []str) -> i64 {
-    if len(changes) == 0 {
-        return 0
-    }
-    // (a name may start with '=': the per-drive directories "=C:=C:\dir")
-    fn name_of(c: str) -> str {
-        eq := if len(c) > 0 { find(c, "=", 1) } else { -1 }
-        return to_lower(if eq < 0 { c } else { c[..eq] })
-    }
-    out := vec[u16]()
-    cur := GetEnvironmentStringsW()
-    if cur != nil {
-        at := 0
-        while cur[at] != 0 {
-            n := wcslen(cast[*u16](cast[i64](cur) + 2 * at))
-            one := mkslice[u16](cast[*u16](cast[i64](cur) + 2 * at), n + 1)
-            name := name_of(narrow(ptr(one), n))
-            keep := true
-            for c in changes {
-                if name_of(c) == name {
-                    keep = false
-                    break
-                }
-            }
-            if keep {
-                out.extend(one)
-            }
-            at += n + 1
-        }
-        FreeEnvironmentStringsW(cur)
-    }
-    for j, c in changes {
-        last := true
-        for d in changes[j + 1..] {
-            if name_of(d) == name_of(c) {
-                last = false
-            }
-        }
-        if last && len(c) > 0 && find(c, "=", 1) > 0 {
-            w := alloc[u16](len(c) + 1)
-            k, _ := to_utf16(ptr(c), len(c), ptr(w), false)
-            out.extend(w[..k + 1])
-        }
-    }
-    if out.len == 0 {
-        out.push(0)
-    }
-    out.push(0)
-    return cast[i64](ptr(out.items()))
-}
-
-// Starts argv like __os_spawn, with files in place of the standard streams and a changed
-// environment: `sin` is read as standard input, `sout` and `serr` (created or emptied) take
-// standard output and standard error ("" each: that of this process; serr the same path as
-// sout: one open file takes both); `env` as for child_env; `group`: the program runs in a new
-// job object, and so does what it starts. Returns (process id, process handle, the job's
-// handle or 0), or (-1, -1, 0) with io_error() (also if a file cannot be opened).
-fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, group: bool) -> (i64, i64, i64) {
-    if len(argv) == 0 {
-        __io_result(-22)
-        return (-1, -1, 0)
-    }
-    file, e := locate(argv[0])
-    // (a batch file is no program: see __os_spawn)
-    if e == 0 && is_batch(file) {
-        e = 8
-    }
-    if e != 0 {
-        __io_result(-e)
-        return (-1, -1, 0)
-    }
-    line := command_line(argv[0], argv[1..])
-    flush()
-    hs: [3]i64
-    paths := [3]str{sin, sout, serr}
-    err := 0
-    for k in 0..3 {
-        hs[k] = handle(k)
-        if len(paths[k]) == 0 || err != 0 {
-            continue
-        }
-        if k == 2 && serr == sout {
-            hs[2] = hs[1]
-            continue
-        }
-        h := __os_open(cstr(paths[k]), k != 0)
-        if h < 0 {
-            err = h
-        } else {
-            hs[k] = h
-        }
-    }
-    h := 0
-    pid := err
-    job := 0
-    if err == 0 {
-        if group {
-            job = CreateJobObjectW(0, 0)
-        }
-        app := wide(file)
-        verbatim(app)
-        h, pid = create_process(app, wide(line), hs[0], hs[1], hs[2], child_env(env), job)
-    }
-    for k in 0..3 {
-        if len(paths[k]) != 0 && hs[k] != handle(k) && !(k == 2 && hs[2] == hs[1]) {
-            CloseHandle(hs[k])
-        }
-    }
-    if h == 0 {
-        if job != 0 {
-            CloseHandle(job)
-        }
-        __io_result(pid)
-        return (-1, -1, 0)
-    }
-    __io_result(0)
-    return (pid, h, job)
-}
-
-// ends every process of the job that a process of __os_spawn_files runs in, and the process
-// itself (it may be outside the job, see create_process), with the exit code 128 + signal;
-// signal 0 only checks. 0 or -errno
-fn __os_kill_group(pid: i64, handle: i64, job: i64, signal: i64) -> i64 {
-    if signal > 0 && signal <= 64 && TerminateJobObject(job, u32(128 + signal)) != 0 {
-        TerminateProcess(handle, u32(128 + signal))
-        return 0
-    }
-    return __os_kill(pid, handle, signal)
-}
-
-// the job of a process that has been waited for is no longer needed (what still runs in it
-// goes on)
-fn __os_group_close(job: i64) {
-    CloseHandle(job)
-}
-
-// Waits at most ns nanoseconds for a process of __os_spawn: its status, -2 if it still runs
-// then, -1 if it cannot be waited for (io_error()), as __os_wait.
-fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
-    end := sat_add(clock_ns(), ns)
-    loop {
-        left := end - clock_ns()
-        // (a wait is at most 0xFFFFFFFE ms long: INFINITE is the value above)
-        ms := if left <= 0 { 0 } else { min((left + 999999) / 1000000, 0xFFFFFFFE) }
-        r := WaitForSingleObject(handle, u32(ms))
-        if r != WAIT_TIMEOUT || end - clock_ns() <= 0 {
-            break
-        }
-    }
-    return __os_wait(pid, handle, false)
 }
 
 // ---------- std.os: shared memory, this process ----------
@@ -1839,7 +1668,7 @@ fn __os_current_dir() -> str {
 // starts the program at path with arguments argv, the standard handles and the environment
 // block env (0: this process's): its process handle, 0 if it could not be started
 fn __win_start(path: str, argv: []str, env: i64) -> i64 {
-    h, _ := create_process(wide(path), wide(command_line(path, argv)), handle(0), handle(1), handle(2), env, 0)
+    h, _ := create_process(wide(path), wide(command_line(path, argv)), handle(0), handle(1), handle(2), env)
     return h
 }
 
@@ -1941,4 +1770,217 @@ fn __os_thread_cleanup() {
         CloseHandle(__tls_sleep_timer)
     }
     __tls_sleep_timer = 0
+}
+
+// ---------- std.os: programs with files as standard streams, groups, timed waits ----------
+// (at the end of the file: nothing above moves, so programs that use none of this are built
+// the same, source lines of their stack traces included)
+priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
+priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
+priv extern "kernel32.dll" fn CreateJobObjectW(security: i64, name: i64) -> i64
+priv extern "kernel32.dll" fn AssignProcessToJobObject(job: i64, process: i64) -> i32
+priv extern "kernel32.dll" fn TerminateJobObject(job: i64, code: u32) -> i32
+priv extern "kernel32.dll" fn ResumeThread(thread: i64) -> u32
+
+// the environment block (UTF-16) of a started program: this process's, changed by `changes`
+// ("NAME=value" sets a variable, "NAME" removes it; the last change of a name counts; names
+// are compared without regard to case); 0 without changes
+priv fn child_env(changes: []str) -> i64 {
+    if len(changes) == 0 {
+        return 0
+    }
+    // (a name may start with '=': the per-drive directories "=C:=C:\dir")
+    fn name_of(c: str) -> str {
+        eq := if len(c) > 0 { find(c, "=", 1) } else { -1 }
+        return to_lower(if eq < 0 { c } else { c[..eq] })
+    }
+    out := vec[u16]()
+    cur := GetEnvironmentStringsW()
+    if cur != nil {
+        at := 0
+        while cur[at] != 0 {
+            n := wcslen(cast[*u16](cast[i64](cur) + 2 * at))
+            one := mkslice[u16](cast[*u16](cast[i64](cur) + 2 * at), n + 1)
+            name := name_of(narrow(ptr(one), n))
+            keep := true
+            for c in changes {
+                if name_of(c) == name {
+                    keep = false
+                    break
+                }
+            }
+            if keep {
+                out.extend(one)
+            }
+            at += n + 1
+        }
+        FreeEnvironmentStringsW(cur)
+    }
+    for j, c in changes {
+        last := true
+        for d in changes[j + 1..] {
+            if name_of(d) == name_of(c) {
+                last = false
+            }
+        }
+        if last && len(c) > 0 && find(c, "=", 1) > 0 {
+            w := alloc[u16](len(c) + 1)
+            k, _ := to_utf16(ptr(c), len(c), ptr(w), false)
+            out.extend(w[..k + 1])
+        }
+    }
+    if out.len == 0 {
+        out.push(0)
+    }
+    out.push(0)
+    return cast[i64](ptr(out.items()))
+}
+
+// create_process for a process that runs in the job object `job` from its first instruction
+// on (and with it what it starts): created suspended, put into the job, resumed
+priv fn create_process_in(job: i64, app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env: i64) -> (i64, i64) {
+    AcquireSRWLockExclusive(&spawn_lock)
+    me := GetCurrentProcess()
+    src: [3]i64
+    src[0] = hin
+    src[1] = hout
+    src[2] = herr
+    dup: [3]i64
+    for i in 0..3 {
+        if src[i] != 0 && src[i] != INVALID_HANDLE {
+            DuplicateHandle(me, src[i], me, &dup[i], 0, 1, 2)    // DUPLICATE_SAME_ACCESS
+        }
+    }
+    si: [13]i64
+    si[0] = 104
+    si[7] = 0x100 << 32
+    si[10] = dup[0]
+    si[11] = dup[1]
+    si[12] = dup[2]
+    pi: [3]i64
+    // CREATE_SUSPENDED, and CREATE_UNICODE_ENVIRONMENT for a block of UTF-16 text
+    ok := CreateProcessW(app, cmd, 0, 0, 1, if env != 0 { 0x404 } else { 4 }, env, 0, &si[0], &pi[0])
+    e := GetLastError()
+    for i in 0..3 {
+        if dup[i] != 0 {
+            CloseHandle(dup[i])
+        }
+    }
+    ReleaseSRWLockExclusive(&spawn_lock)
+    if ok == 0 {
+        return (0, -errno_of(e))
+    }
+    if pi[0] == 0 {
+        return (0, -8)
+    }
+    // (if the job cannot take it, the process runs outside: only itself can be ended then)
+    AssignProcessToJobObject(job, pi[0])
+    ResumeThread(pi[1])
+    CloseHandle(pi[1])
+    return (pi[0], pi[2] & 0xFFFFFFFF)
+}
+
+// Starts argv like __os_spawn, with files in place of the standard streams and a changed
+// environment: `sin` is read as standard input, `sout` and `serr` (created or emptied) take
+// standard output and standard error ("" each: that of this process; serr the same path as
+// sout: one open file takes both); `env` as for child_env; `group`: the program runs in a new
+// job object, and so does what it starts. Returns (process id, process handle, the job's
+// handle or 0), or (-1, -1, 0) with io_error() (also if a file cannot be opened).
+fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, group: bool) -> (i64, i64, i64) {
+    if len(argv) == 0 {
+        __io_result(-22)
+        return (-1, -1, 0)
+    }
+    file, e := locate(argv[0])
+    // (a batch file is no program: see __os_spawn)
+    if e == 0 && is_batch(file) {
+        e = 8
+    }
+    if e != 0 {
+        __io_result(-e)
+        return (-1, -1, 0)
+    }
+    line := command_line(argv[0], argv[1..])
+    flush()
+    hs: [3]i64
+    paths := [3]str{sin, sout, serr}
+    err := 0
+    for k in 0..3 {
+        hs[k] = handle(k)
+        if len(paths[k]) == 0 || err != 0 {
+            continue
+        }
+        if k == 2 && serr == sout {
+            hs[2] = hs[1]
+            continue
+        }
+        h := __os_open(cstr(paths[k]), k != 0)
+        if h < 0 {
+            err = h
+        } else {
+            hs[k] = h
+        }
+    }
+    h := 0
+    pid := err
+    job := 0
+    if err == 0 {
+        app := wide(file)
+        verbatim(app)
+        if group {
+            job = CreateJobObjectW(0, 0)
+        }
+        if job != 0 {
+            h, pid = create_process_in(job, app, wide(line), hs[0], hs[1], hs[2], child_env(env))
+        } else {
+            h, pid = create_process(app, wide(line), hs[0], hs[1], hs[2], child_env(env))
+        }
+    }
+    for k in 0..3 {
+        if len(paths[k]) != 0 && hs[k] != handle(k) && !(k == 2 && hs[2] == hs[1]) {
+            CloseHandle(hs[k])
+        }
+    }
+    if h == 0 {
+        if job != 0 {
+            CloseHandle(job)
+        }
+        __io_result(pid)
+        return (-1, -1, 0)
+    }
+    __io_result(0)
+    return (pid, h, job)
+}
+
+// ends every process of the job that a process of __os_spawn_files runs in, and the process
+// itself (it may be outside the job, see create_process_in), with the exit code 128 +
+// signal; signal 0 only checks. 0 or -errno
+fn __os_kill_group(pid: i64, handle: i64, job: i64, signal: i64) -> i64 {
+    if signal > 0 && signal <= 64 && TerminateJobObject(job, u32(128 + signal)) != 0 {
+        TerminateProcess(handle, u32(128 + signal))
+        return 0
+    }
+    return __os_kill(pid, handle, signal)
+}
+
+// the job of a process that has been waited for is no longer needed (what still runs in it
+// goes on)
+fn __os_group_close(job: i64) {
+    CloseHandle(job)
+}
+
+// Waits at most ns nanoseconds for a process of __os_spawn: its status, -2 if it still runs
+// then, -1 if it cannot be waited for (io_error()), as __os_wait.
+fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
+    end := sat_add(clock_ns(), ns)
+    loop {
+        left := end - clock_ns()
+        // (a wait is at most 0xFFFFFFFE ms long: INFINITE is the value above)
+        ms := if left <= 0 { 0 } else { min((left + 999999) / 1000000, 0xFFFFFFFE) }
+        r := WaitForSingleObject(handle, u32(ms))
+        if r != WAIT_TIMEOUT || end - clock_ns() <= 0 {
+            break
+        }
+    }
+    return __os_wait(pid, handle, false)
 }
