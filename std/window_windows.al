@@ -63,6 +63,12 @@ priv extern "user32.dll" fn SetTimer(hwnd: *u8, id: u64, ms: u32, func: fn(*u8, 
 priv extern "user32.dll" fn KillTimer(hwnd: *u8, id: u64) -> i32
 priv extern "user32.dll" fn PostMessageW(hwnd: *u8, msg: u32, wparam: u64, lparam: i64) -> i32
 priv extern "user32.dll" fn SetProcessDPIAware() -> i32
+priv extern "user32.dll" fn RegisterRawInputDevices(devices: *W32RawInputDevice, n: u32, size: u32) -> i32
+priv extern "user32.dll" fn GetRawInputData(input: i64, cmd: u32, data: *u8, size: *u32, header_size: u32) -> u32
+priv extern "user32.dll" fn GetSystemMetrics(index: i32) -> i32
+priv extern "user32.dll" fn GetAsyncKeyState(vk: i32) -> i16
+
+priv extern "imm32.dll" fn ImmAssociateContextEx(hwnd: *u8, context: *u8, flags: u32) -> i32
 
 priv extern "gdi32.dll" fn StretchDIBits(dc: *u8, x: i32, y: i32, w: i32, h: i32, sx: i32, sy: i32, sw: i32, sh: i32, bits: *u8, info: *W32BitmapInfo, usage: u32, rop: u32) -> i32
 priv extern "gdi32.dll" fn GetStockObject(which: i32) -> *u8
@@ -107,6 +113,36 @@ priv struct W32Point {
     y: i32
 }
 
+// RAWINPUTDEVICE
+priv struct W32RawInputDevice {
+    usage_page: u16
+    usage: u16
+    flags: u32
+    target: *u8
+}
+
+// The RAWINPUT record of a mouse, as WM_INPUT delivers it (48 bytes): RAWINPUTHEADER, RAWMOUSE.
+struct RawInputMouse {
+    kind: u32                    // RIM_TYPEMOUSE (0)
+    size: u32
+    device: *u8
+    wparam: u64
+    flags: u16                   // MOUSE_MOVE_ABSOLUTE (1), MOUSE_VIRTUAL_DESKTOP (2)
+    buttons: u32                 // usButtonFlags, usButtonData
+    raw_buttons: u32
+    last_x: i32                  // motion in device counts, or a position 0..65535 (absolute)
+    last_y: i32
+    extra: u32
+}
+
+// What motion_from_raw_mouse remembers: the last position of the absolute device last seen.
+struct RawMotion {
+    device: *u8
+    abs_seen: bool
+    abs_x: i64
+    abs_y: i64
+}
+
 // MONITORINFO
 priv struct W32MonitorInfo {
     size: u32
@@ -141,12 +177,15 @@ priv const WM_PAINT: u32 = 0x0F
 priv const WM_CLOSE: u32 = 0x10
 priv const WM_CANCELMODE: u32 = 0x1F
 priv const WM_SETCURSOR: u32 = 0x20
+priv const WM_MOUSEACTIVATE: u32 = 0x21
+priv const WM_INPUT: u32 = 0xFF
 priv const WM_KEYDOWN: u32 = 0x100
 priv const WM_KEYUP: u32 = 0x101
 priv const WM_CHAR: u32 = 0x102
 priv const WM_SYSKEYDOWN: u32 = 0x104
 priv const WM_SYSKEYUP: u32 = 0x105
 priv const WM_SYSCHAR: u32 = 0x106
+priv const WM_UNICHAR: u32 = 0x109
 priv const WM_SYSCOMMAND: u32 = 0x112
 priv const WM_MOUSEMOVE: u32 = 0x200
 priv const WM_LBUTTONDOWN: u32 = 0x201
@@ -183,6 +222,8 @@ priv const HTCLIENT = 1
 priv const SC_KEYMENU: u64 = 0xF100
 priv const MK_BUTTONS: u64 = 0x73                // MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2
 priv const VK_ESCAPE: u64 = 0x1B
+priv const MOUSE_MOVE_ABSOLUTE: u16 = 1
+priv const MOUSE_VIRTUAL_DESKTOP: u16 = 2
 priv const PENDING_CAP = 1024
 
 // The Win32 state of a Window (read the handle through win32_hwnd).
@@ -205,9 +246,9 @@ struct WindowOs {
     pending_head: i64
     pending_len: i64
     iconic: bool                 // minimized (WM_SIZE with SIZE_MINIMIZED seen)
-    clipped: bool                // ClipCursor confines the pointer (locked cursor, focused)
-    last_x: i64                  // locked cursor: last real position (client pixels)
-    last_y: i64
+    clipped: bool                // the locked pointer is held: raw input on, confined (ClipCursor), hidden
+    raw: RawMotion               // locked cursor: state of the raw input translation
+    frame_click: bool            // a click on the frame (title bar, border) activated the window and is not over
     virt_x: i64                  // locked cursor: the virtual position reported in events
     virt_y: i64
     unlock_x: i64                // locked cursor: where it was when locked
@@ -346,6 +387,37 @@ fn event_from_win32_button(msg: u32, wparam: u64, x: i64, y: i64, mods: u8) -> E
     }
 }
 
+// The relative motion (dx, dy) of one raw mouse record (the RAWINPUT of a WM_INPUT message):
+// its motion in device counts as the mouse reports them, before the pointer speed and
+// acceleration of Windows. A device that reports positions (MOUSE_MOVE_ABSOLUTE: tablets,
+// remote desktop, some virtual machines) gives the difference to its previous position kept
+// in `s`, in pixels of the area its coordinates span: `span_w` x `span_h`, the size of the
+// virtual desktop if the record has MOUSE_VIRTUAL_DESKTOP, else of the primary monitor. The
+// first position of such a device gives (0, 0), as does a record that is not a mouse's.
+fn motion_from_raw_mouse(s: *RawMotion, r: *RawInputMouse, span_w: i64, span_h: i64) -> (i64, i64) {
+    if r.kind != 0 {
+        return (0, 0)
+    }
+    x := i64(r.last_x)
+    y := i64(r.last_y)
+    if r.flags & MOUSE_MOVE_ABSOLUTE == 0 {
+        return (x, y)
+    }
+    x = x * span_w / 65535
+    y = y * span_h / 65535
+    dx := x - s.abs_x
+    dy := y - s.abs_y
+    if !s.abs_seen || s.device != r.device {
+        dx = 0
+        dy = 0
+    }
+    s.device = r.device
+    s.abs_seen = true
+    s.abs_x = x
+    s.abs_y = y
+    (dx, dy)
+}
+
 // s as NUL-terminated UTF-16 (allocated; invalid UTF-8 becomes U+FFFD)
 priv fn w32_wide(s: str) -> *u16 {
     out := alloc[u16](len(s) + 1)
@@ -399,6 +471,20 @@ priv fn w32_record(w: *Window, e: Event) {
     }
     o.pending[(o.pending_head + o.pending_len) % PENDING_CAP] = e
     o.pending_len += 1
+}
+
+// Records the motion of a locked pointer. A run of motion between two polls is kept as one
+// event, its newest position: a mouse that reports 8000 times a second never fills the queue.
+priv fn w32_record_motion(w: *Window, e: Event) {
+    o := &w.os
+    if o.pending_len > 0 {
+        last := &o.pending[(o.pending_head + o.pending_len - 1) % PENDING_CAP]
+        if last.kind == EventMouseMove {
+            *last = e
+            return
+        }
+    }
+    w32_record(w, e)
 }
 
 // Applies the recorded events in order: input state, event queue, size and close state.
@@ -516,9 +602,40 @@ priv fn w32_char_message(w: *Window, wp: u64) {
         c = 0x10000 + ((o.surrogate - 0xD800) << 10) + (u - 0xDC00)
     }
     o.surrogate = 0
-    if c >= 0x20 && c != 0x7F {
+    w32_text(w, c)
+}
+
+// one typed character (control characters are no text)
+priv fn w32_text(w: *Window, c: u32) {
+    if c >= 0x20 && c != 0x7F && c <= 0x10FFFF && (c < 0xD800 || c > 0xDFFF) {
         w32_record(w, Event{kind: EventText, codepoint: c, mods: w32_mods(w, -1, false)})
     }
+}
+
+// WM_INPUT while the locked pointer is held: the motion of the record moves the virtual position.
+priv fn w32_raw_input(w: *Window, input: i64) {
+    o := &w.os
+    r: RawInputMouse
+    size := u32(sizeof[RawInputMouse]())
+    // RID_INPUT; a record of another size (no mouse) fails
+    if GetRawInputData(input, 0x10000003, cast[*u8](&r), &size, 24) != u32(sizeof[RawInputMouse]()) {
+        return
+    }
+    sw := 0
+    sh := 0
+    if r.flags & MOUSE_MOVE_ABSOLUTE != 0 {
+        // SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN or SM_CXSCREEN, SM_CYSCREEN
+        desktop := r.flags & MOUSE_VIRTUAL_DESKTOP != 0
+        sw = i64(GetSystemMetrics(if desktop { 78 } else { 0 }))
+        sh = i64(GetSystemMetrics(if desktop { 79 } else { 1 }))
+    }
+    dx, dy := motion_from_raw_mouse(&o.raw, &r, sw, sh)
+    if dx == 0 && dy == 0 {
+        return
+    }
+    o.virt_x += dx
+    o.virt_y += dy
+    w32_record_motion(w, Event{kind: EventMouseMove, x: o.virt_x, y: o.virt_y})
 }
 
 // one wheel step per WHEEL_DELTA (120) of motion; smaller motion accumulates
@@ -587,6 +704,14 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             w32_char_message(w, wp)
             return DefWindowProcW(hwnd, msg, wp, lp)
         }
+        WM_UNICHAR => {
+            // one UTF-32 character from another program; 0xFFFF asks whether the window takes them
+            if wp == 0xFFFF {
+                return 1
+            }
+            w32_text(w, u32(wp))
+            return 0
+        }
         WM_SYSCOMMAND => {
             // no menu mode on F10 / Alt, no beep on Alt+letter: only Alt+Space opens the menu
             if wp & 0xFFF0 == SC_KEYMENU && lp != 0x20 {
@@ -594,9 +719,8 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             }
         }
         WM_MOUSEMOVE => {
-            if w.cursor_locked {
-                w32_locked_motion(w, x, y)
-            } else {
+            // (a locked pointer moves by raw input only: WM_INPUT)
+            if !w.cursor_locked {
                 w32_record(w, Event{kind: EventMouseMove, x: x, y: y})
             }
             return 0
@@ -604,9 +728,11 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
         WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP, WM_XBUTTONUP => {
             e := event_from_win32_button(msg, wp, x, y, w32_mods(w, -1, false))
             if w.cursor_locked {
-                w32_locked_motion(w, x, y)
                 e.x = o.virt_x
                 e.y = o.virt_y
+            }
+            if e.kind == EventMouseDown {
+                o.frame_click = false
             }
             // while a button is held the window gets the mouse even outside (as X11 grabs it)
             if e.kind == EventMouseDown {
@@ -625,9 +751,22 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             w32_wheel(w, &o.wheel_x, wp, true)
             return 0
         }
+        WM_MOUSEACTIVATE => {
+            // a click on the title bar, a border or a caption button activates the window: a
+            // locked pointer is not taken before that click has done its work
+            if lp & 0xFFFF != HTCLIENT {
+                o.frame_click = true
+            }
+        }
+        WM_INPUT => {
+            if o.clipped {
+                w32_raw_input(w, lp)
+            }
+            // (DefWindowProcW releases the record)
+        }
         WM_SETCURSOR => {
             if lp & 0xFFFF == HTCLIENT {
-                SetCursor(if w.cursor_hidden || w.cursor_locked { nil } else { arrow_cursor })
+                SetCursor(if w.cursor_hidden || o.clipped { nil } else { arrow_cursor })
                 return 1
             }
         }
@@ -659,7 +798,7 @@ priv fn w32_window_proc(hwnd: *u8, msg: u32, wp: u64, lp: i64) -> i64 {
             return 0
         }
         WM_KILLFOCUS => {
-            w32_unclip(w)
+            w32_release_pointer(w)
             o.fake_ctrl = false
             o.print_down = false
             o.shift_held = [2]bool{false, false}
@@ -816,6 +955,8 @@ fn window_open(d: WindowDesc) -> (*Window, bool) {
     if hwnd == nil {
         return (nil, false)
     }
+    // no input method editor until set_text_input: every key press is a key event
+    ImmAssociateContextEx(hwnd, nil, 0)
     ow, oh := w32_outer_size(o.style, w.width, w.height, w32_dpi(hwnd))
     SetWindowPos(hwnd, nil, 0, 0, i32(ow), i32(oh), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
     if d.fullscreen {
@@ -859,7 +1000,7 @@ priv fn w32_update_cursor(w: *Window) {
     r: W32Rect
     if GetCursorPos(&p) != 0 && WindowFromPoint(p) == hwnd && ScreenToClient(hwnd, &p) != 0 && GetClientRect(hwnd, &r) != 0 &&
         p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom {
-        SetCursor(if w.cursor_hidden || w.cursor_locked { nil } else { arrow_cursor })
+        SetCursor(if w.cursor_hidden || w.os.clipped { nil } else { arrow_cursor })
     }
 }
 
@@ -872,61 +1013,73 @@ fn set_cursor_visible(w: *Window, visible: bool) {
     w32_update_cursor(w)
 }
 
-// Pointer motion to (x, y) while the cursor is locked: the motion since the last real position
-// moves the virtual position; the motion caused by the warp back to the centre is skipped.
-priv fn w32_locked_motion(w: *Window, x: i64, y: i64) {
-    o := &w.os
-    if x == o.last_x && y == o.last_y {
+// Lets the user type text with the input method editor (IME: Chinese, Japanese, Korean, ...)
+// while `on`. Off (the default) no IME is attached to the window: every key press arrives as
+// a key event, and text still arrives for layouts that type characters directly (dead keys
+// included).
+fn set_text_input(w: *Window, on: bool) {
+    if w.os.hwnd == nil || on == w.text_input {
         return
     }
-    o.virt_x += x - o.last_x
-    o.virt_y += y - o.last_y
-    o.last_x = x
-    o.last_y = y
-    w32_record(w, Event{kind: EventMouseMove, x: o.virt_x, y: o.virt_y})
+    w.text_input = on
+    // IACE_DEFAULT (0x10): the window's default input context; else none
+    ImmAssociateContextEx(w.os.hwnd, nil, if on { 0x10 } else { 0 })
 }
 
-priv fn w32_unclip(w: *Window) {
+// Raw input of the mouse (HID usage page 1, usage 2) on, for the window, or off (RIDEV_REMOVE).
+priv fn w32_raw_mouse(hwnd: *u8, on: bool) -> bool {
+    d := W32RawInputDevice{usage_page: 1, usage: 2, flags: if on { 0 } else { 1 }, target: hwnd}
+    RegisterRawInputDevices(&d, 1, u32(sizeof[W32RawInputDevice]())) != 0
+}
+
+// Lets a held pointer go: no raw input, free to leave the window, visible.
+priv fn w32_release_pointer(w: *Window) {
     if w.os.clipped {
-        ClipCursor(nil)
         w.os.clipped = false
+        w32_raw_mouse(nil, false)
+        ClipCursor(nil)
+        w32_update_cursor(w)
     }
 }
 
-// Keeps a locked cursor confined to the client area (while the window has the focus and is
-// not minimized) and in its centre.
+// Holds a locked pointer while the window has the focus, is not minimized and the user is
+// not working on its frame (a move / size / menu loop, the click on the frame that activated
+// it): raw input on, the pointer confined to the pixel in the centre of the client area
+// (so it stays put, and clicks land in the window) and hidden. Lets it go otherwise.
 priv fn w32_keep_locked(w: *Window) {
     o := &w.os
     hwnd := o.hwnd
-    if !w.input.focused || w.minimized {
-        w32_unclip(w)
+    // VK_LBUTTON, VK_RBUTTON, VK_MBUTTON
+    if o.frame_click && modal == 0 && GetAsyncKeyState(1) >= 0 && GetAsyncKeyState(2) >= 0 && GetAsyncKeyState(4) >= 0 {
+        o.frame_click = false
+    }
+    if !w.input.focused || w.minimized || modal > 0 || o.frame_click {
+        w32_release_pointer(w)
         return
     }
-    // (every frame: the window may have moved)
-    r: W32Rect
-    GetClientRect(hwnd, &r)
-    a := W32Point{r.left, r.top}
-    b := W32Point{r.right, r.bottom}
-    ClientToScreen(hwnd, &a)
-    ClientToScreen(hwnd, &b)
-    clip := W32Rect{a.x, a.y, b.x, b.y}
+    if !o.clipped {
+        if !w32_raw_mouse(hwnd, true) {
+            return
+        }
+        o.raw = RawMotion{}
+    }
+    // (every frame: the window may have moved, another program may have changed the clip)
+    c := W32Point{i32(w.width / 2), i32(w.height / 2)}
+    ClientToScreen(hwnd, &c)
+    clip := W32Rect{c.x, c.y, c.x + 1, c.y + 1}
     ClipCursor(&clip)
-    o.clipped = true
-    cx := w.width / 2
-    cy := w.height / 2
-    if o.last_x != cx || o.last_y != cy {
-        c := W32Point{i32(cx), i32(cy)}
-        ClientToScreen(hwnd, &c)
-        SetCursorPos(c.x, c.y)
-        o.last_x = cx
-        o.last_y = cy
+    if !o.clipped {
+        o.clipped = true
+        w32_update_cursor(w)
     }
 }
 
-// Locks the pointer for mouse-look: hidden, kept inside the window (ClipCursor, moved back to
-// the centre) while the window has the focus, and every motion moves a virtual position
-// without bounds, so `mouse_delta(&w.input)` is the relative motion of the frame (positions
-// in mouse events are that virtual position). Unlocking puts the pointer back where it was.
+// Locks the pointer for mouse-look: while the window has the focus the pointer is hidden and
+// stays in the centre of the window (ClipCursor), and the mouse is read as raw input
+// (WM_INPUT): every motion, in device counts without the pointer acceleration of Windows,
+// moves a virtual position without bounds, so `mouse_delta(&w.input)` is the relative motion
+// of the frame (positions in mouse events are that virtual position). Unlocking puts the
+// pointer back where it was.
 fn set_cursor_locked(w: *Window, locked: bool) {
     o := &w.os
     hwnd := o.hwnd
@@ -934,35 +1087,32 @@ fn set_cursor_locked(w: *Window, locked: bool) {
         return
     }
     w.cursor_locked = locked
+    p: W32Point
     if locked {
-        p: W32Point
         GetCursorPos(&p)
         ScreenToClient(hwnd, &p)
-        o.last_x = i64(p.x)
-        o.last_y = i64(p.y)
-        o.unlock_x = o.last_x
-        o.unlock_y = o.last_y
+        o.unlock_x = i64(p.x)
+        o.unlock_y = i64(p.y)
         // the virtual position starts at the real one (also the first motion counts in mouse_delta)
-        o.virt_x = o.last_x
-        o.virt_y = o.last_y
+        o.virt_x = o.unlock_x
+        o.virt_y = o.unlock_y
         w.input.mouse_x = f32(o.virt_x)
         w.input.mouse_y = f32(o.virt_y)
         w.input.mouse_seen = true
         w32_keep_locked(w)
-    } else {
-        if o.clipped {
-            w32_unclip(w)
-            p := W32Point{i32(o.unlock_x), i32(o.unlock_y)}
-            ClientToScreen(hwnd, &p)
-            SetCursorPos(p.x, p.y)
-            o.last_x = o.unlock_x
-            o.last_y = o.unlock_y
-        }
-        // continue from the real position without a jump in mouse_delta
-        w.input.mouse_x = f32(o.last_x)
-        w.input.mouse_y = f32(o.last_y)
+        return
     }
-    w32_update_cursor(w)
+    if o.clipped {
+        w32_release_pointer(w)
+        p = W32Point{i32(o.unlock_x), i32(o.unlock_y)}
+        ClientToScreen(hwnd, &p)
+        SetCursorPos(p.x, p.y)
+    }
+    // continue from the real position without a jump in mouse_delta
+    GetCursorPos(&p)
+    ScreenToClient(hwnd, &p)
+    w.input.mouse_x = f32(p.x)
+    w.input.mouse_y = f32(p.y)
 }
 
 // Makes the window fullscreen (borderless, covering its monitor) or windowed again; the new
@@ -1032,7 +1182,7 @@ fn present(w: *Window, pixels: []u8, pw: i64, ph: i64) -> bool {
 fn close(w: *Window) {
     w.closing = true
     o := &w.os
-    w32_unclip(w)
+    w32_release_pointer(w)
     w32_free_dib(w)
     o.pending_len = 0
     hwnd := o.hwnd

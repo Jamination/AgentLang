@@ -2,7 +2,8 @@
 // software presentation of an RGBA8 framebuffer. The window system is in the OS layer:
 // std/window_linux.al (X11, links libX11.so.6) or std/window_windows.al (Win32: user32, gdi32).
 // The layer provides `struct WindowOs` and window_open(WindowDesc), set_title, poll,
-// set_cursor_visible, set_cursor_locked, set_fullscreen, present, close and its native handles.
+// set_cursor_visible, set_cursor_locked, set_text_input, set_fullscreen, present, close and its
+// native handles.
 use std.input
 
 // How to create a window. Zero fields mean: untitled, 640x480, fixed size, windowed, the
@@ -19,7 +20,7 @@ struct WindowDesc {
 // An open window. `input` is the state for the current frame, `events` what the last poll
 // received; `os` holds the native handles and should be read through the accessors.
 // `minimized` is true between an EventMinimize and the next EventRestore; `cursor_locked`
-// after set_cursor_locked(w, true).
+// after set_cursor_locked(w, true), `text_input` after set_text_input(w, true).
 struct Window {
     input: Input
     events: EventQueue
@@ -30,6 +31,7 @@ struct Window {
     minimized: bool
     cursor_hidden: bool
     cursor_locked: bool
+    text_input: bool
     os: WindowOs
 }
 
