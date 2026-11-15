@@ -1,0 +1,25 @@
+cat: 0 0 [line 1|line 2|]
+separate: 7 [out1 out2|] [err1 ]
+one file: 7 [out1 err1 out2|]
+stderr only: 7 [err1 ]
+no input: 0 []
+zero value: 0
+missing input: -1 2 no such file or directory
+bad output: false 2
+missing program: -1 2
+empty: -1 22
+env: 0
+PL_NEW true new value
+PL_TWICE true second
+PL_GONE false 
+PL_EMPTY true 
+PL_NEVER false 
+this process: false
+inherited, removed: true [PATH false |]
+replaced: [PATH true only this|]
+still running: 0 false true true
+kill: true (137, true) (137, true) 137
+ends in time: (7, true) (7, true)
+not started: (-1, true) 10
+threads: 0 [err, in, out]
+clean: true

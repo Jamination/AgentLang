@@ -45,6 +45,8 @@ priv extern "kernel32.dll" fn GetSystemTimeAsFileTime(ft: *i64)
 priv extern "kernel32.dll" fn GetCommandLineW() -> *u16
 priv extern "kernel32.dll" fn GetEnvironmentVariableW(name: *u16, buf: *u16, n: u32) -> u32
 priv extern "kernel32.dll" fn SetEnvironmentVariableW(name: *u16, value: *u16) -> i32
+priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
+priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
 priv extern "kernel32.dll" fn GetModuleFileNameW(module: i64, buf: *u16, n: u32) -> u32
 priv extern "kernel32.dll" fn CreateProcessW(app: *u16, cmd: *u16, psec: i64, tsec: i64, inherit: i32, flags: u32, env: i64, dir: i64, si: *i64, pi: *i64) -> i32
 priv extern "kernel32.dll" fn WaitForSingleObject(h: i64, ms: u32) -> u32
@@ -886,11 +888,17 @@ fn __os_unmap(p: i64, n: i64) -> i64 {
 }
 
 // ---------- processes ----------
+// held while a process is created: the inheritable copies of the standard handles below must
+// not be inherited by a process that another thread starts at the same time (it would keep
+// the files and pipes of this one open)
+priv spawn_lock: i64
+
 // starts app with the command line cmd, the three standard handles and the environment block
 // env (0: this process's): (process handle, process id), or (0, -errno)
 priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env: i64) -> (i64, i64) {
     // the child gets inheritable copies of the three handles
     me := GetCurrentProcess()
+    __os_lock(&spawn_lock)
     src: [3]i64
     src[0] = hin
     src[1] = hout
@@ -918,6 +926,7 @@ priv fn create_process(app: *u16, cmd: *u16, hin: i64, hout: i64, herr: i64, env
             CloseHandle(dup[i])
         }
     }
+    __os_unlock(&spawn_lock)
     if ok == 0 {
         return (0, -errno_of(e))
     }
@@ -1475,6 +1484,130 @@ fn __os_kill(pid: i64, handle: i64, signal: i64) -> i64 {
         return last_error()
     }
     return 0
+}
+
+// the environment block (UTF-16) of a started program: this process's, changed by `changes`
+// ("NAME=value" sets a variable, "NAME" removes it; the last change of a name counts; names
+// are compared without regard to case); 0 without changes
+priv fn child_env(changes: []str) -> i64 {
+    if len(changes) == 0 {
+        return 0
+    }
+    // (a name may start with '=': the per-drive directories "=C:=C:\dir")
+    fn name_of(c: str) -> str {
+        eq := if len(c) > 0 { find(c, "=", 1) } else { -1 }
+        return to_lower(if eq < 0 { c } else { c[..eq] })
+    }
+    out := vec[u16]()
+    cur := GetEnvironmentStringsW()
+    if cur != nil {
+        at := 0
+        while cur[at] != 0 {
+            n := wcslen(cast[*u16](cast[i64](cur) + 2 * at))
+            one := mkslice[u16](cast[*u16](cast[i64](cur) + 2 * at), n + 1)
+            name := name_of(narrow(ptr(one), n))
+            keep := true
+            for c in changes {
+                if name_of(c) == name {
+                    keep = false
+                    break
+                }
+            }
+            if keep {
+                out.extend(one)
+            }
+            at += n + 1
+        }
+        FreeEnvironmentStringsW(cur)
+    }
+    for j, c in changes {
+        last := true
+        for d in changes[j + 1..] {
+            if name_of(d) == name_of(c) {
+                last = false
+            }
+        }
+        if last && len(c) > 0 && find(c, "=", 1) > 0 {
+            w := alloc[u16](len(c) + 1)
+            k, _ := to_utf16(ptr(c), len(c), ptr(w), false)
+            out.extend(w[..k + 1])
+        }
+    }
+    if out.len == 0 {
+        out.push(0)
+    }
+    out.push(0)
+    return cast[i64](ptr(out.items()))
+}
+
+// Starts argv like __os_spawn, with files in place of the standard streams and a changed
+// environment: `sin` is read as standard input, `sout` and `serr` (created or emptied) take
+// standard output and standard error ("" each: that of this process; serr the same path as
+// sout: one open file takes both); `env` as for child_env. Returns (process id, process
+// handle), or (-1, -1) with io_error() (also if a file cannot be opened).
+fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str) -> (i64, i64) {
+    if len(argv) == 0 {
+        __io_result(-22)
+        return (-1, -1)
+    }
+    file, e := locate(argv[0])
+    if e != 0 {
+        __io_result(-e)
+        return (-1, -1)
+    }
+    line := command_line(argv[0], argv[1..])
+    flush()
+    hs: [3]i64
+    paths := [3]str{sin, sout, serr}
+    err := 0
+    for k in 0..3 {
+        hs[k] = handle(k)
+        if len(paths[k]) == 0 || err != 0 {
+            continue
+        }
+        if k == 2 && serr == sout {
+            hs[2] = hs[1]
+            continue
+        }
+        h := __os_open(cstr(paths[k]), k != 0)
+        if h < 0 && h > -0x20000 {
+            err = h
+        } else {
+            hs[k] = h
+        }
+    }
+    h := 0
+    pid := err
+    if err == 0 {
+        h, pid = create_process(wide(file), wide(line), hs[0], hs[1], hs[2], child_env(env))
+    }
+    for k in 0..3 {
+        if len(paths[k]) != 0 && hs[k] != handle(k) && !(k == 2 && hs[2] == hs[1]) {
+            CloseHandle(hs[k])
+        }
+    }
+    if h == 0 {
+        __io_result(pid)
+        return (-1, -1)
+    }
+    __io_result(0)
+    return (pid, h)
+}
+
+// Waits at most ns nanoseconds for a process of __os_spawn: its status, -2 if it still runs
+// then, -1 if it cannot be waited for (io_error()), as __os_wait.
+fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
+    end := sat_add(clock_ns(), ns)
+    loop {
+        left := end - clock_ns()
+        // (a wait is at most 0xFFFFFFFE ms long: INFINITE is the value above)
+        ms := if left <= 0 { 0 } else { min((left + 999999) / 1000000, 0xFFFFFFFE) }
+        r := WaitForSingleObject(handle, u32(ms))
+        if r != WAIT_TIMEOUT || end - clock_ns() <= 0 {
+            break
+        }
+    }
+    return __os_wait(pid, handle, false)
 }
 
 // ---------- std.os: shared memory, this process ----------

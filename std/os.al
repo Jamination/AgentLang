@@ -132,6 +132,74 @@ fn kill(p: Process, signal: i64) -> bool {
     return __io_result(__os_kill(p.id, p.state.handle, signal)) >= 0
 }
 
+// Waits until the process has ended, but at most timeout_ns nanoseconds: (status, true) once
+// it has ended (it is waited for then), (0, false) if it still runs when the time is over;
+// (-1, true) if it cannot be waited for (see io_error()). wait(p, 0) is try_wait(p).
+fn wait(p: Process, timeout_ns: i64) -> (i64, bool) {
+    if p.state == nil {
+        __io_result(-10)
+        return (-1, true)
+    }
+    if !p.state.done {
+        st := __os_wait_ns(p.id, p.state.handle, max(timeout_ns, 0))
+        if st == -1 {
+            return (-1, true)
+        }
+        if st == -2 {
+            return (0, false)
+        }
+        p.state.done = true
+        p.state.status = u8(st)
+    }
+    __io_result(0)
+    return (i64(p.state.status), true)
+}
+
+// ---------- files as standard streams, a changed environment ----------
+// How `run` and `spawn` start a program whose streams or environment are not those of this
+// process. The zero value changes nothing.
+struct Launch {
+    stdin: str              // the file it reads as standard input ("": that of this process)
+    stdout: str             // the file that takes its standard output, created or emptied
+    stderr: str             // the same for standard error; the same path as stdout: one file
+                            // takes both, in the order written
+    env: []str              // "NAME=value" sets a variable for the program, "NAME" removes it
+}
+
+// the file that is always empty when read and drops what is written to it: as Launch.stdin
+// the program has nothing to read, as stdout / stderr its output is discarded
+when TARGET_OS == Windows {
+    const NULL_DEVICE = "NUL"
+} else {
+    const NULL_DEVICE = "/dev/null"
+}
+
+// `spawn` with the streams and environment of `how`: (Process{}, false) also if one of its
+// files cannot be opened (io_error()). The program is looked up in the PATH of this process.
+fn spawn(argv: []str, how: Launch) -> (Process, bool) {
+    state := new[ProcessState]()
+    m := mark()
+    pid, handle := __os_spawn_files(argv, how.stdin, how.stdout, how.stderr, how.env)
+    e := io_error()
+    release(m)
+    __io_result(-e)
+    if pid < 0 {
+        return (Process{}, false)
+    }
+    state.handle = handle
+    return (Process{id: pid, state: state}, true)
+}
+
+// `run` with the streams and environment of `how`: the status, -1 if the program could not
+// be started (io_error())
+fn run(argv: []str, how: Launch) -> i64 {
+    p, ok := spawn(argv, how)
+    if !ok {
+        return -1
+    }
+    return wait(p)
+}
+
 // runs to the end; capture: 0 nothing, 1 standard output, 2 standard output and standard error
 // go to a pipe whose content is returned
 priv fn start(argv: []str, capture: i64) -> (str, i64) {
