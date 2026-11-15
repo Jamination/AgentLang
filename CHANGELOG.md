@@ -13,6 +13,26 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   -> stage 2 -> stage 3, `--quick`, `--reseed`), from a committed Windows seed
   `bootstrap/alc.exe`; it also builds the Linux compiler. `build.sh --reseed` now refreshes both
   seeds.
+- The conformance tests run on Windows: the test runner is now an AL program (`tests/run.al`,
+  built by `build.sh` / `build.bat` as `build/altest` and `build/altest.exe`) that
+  `tests/run.sh` and the new `tests\run.bat` start. On Windows it runs the tests of
+  `--target windows` directly, with `build\alc.exe`; `--target linux` there builds and
+  type-checks the Linux programs. New options: `-j N` (threads), `-v` (list the tests that
+  passed). `verify.bat`: build, tests, one line `VERIFY: PASS` or `VERIFY: FAIL`.
+- `std.os`: `Launch{stdin, stdout, stderr, env}` with `run(argv, how)` and `spawn(argv, how)`
+  starts a program with files as its standard streams and with environment variables set or
+  removed; `wait(p, timeout_ns)` waits for a process for a limited time; `NULL_DEVICE` names
+  the null file (`/dev/null`, `NUL`).
+
+### Changed
+- `tests/run.sh` runs the tests in parallel, one thread per CPU (the tests of `tests/sys` one
+  after the other), with the same lines of output in the same order: about 22 s instead of
+  48 s on 12 CPUs, 10 s instead of 46 s for `--target windows`.
+
+### Fixed
+- Windows, `std.os`: programs that several threads start at the same time no longer inherit
+  each other's standard-stream handles (a `run_capture` could wait for a program another
+  thread had started).
 
 ## [0.3.0] - 2026-11-15
 

@@ -10,6 +10,44 @@ exact output.
 2. In a terminal (cmd or PowerShell) at the repository root:
    `alc.exe build examples\hello.al` then `hello.exe`: prints a greeting.
 
+## 0. The test suite (run this first)
+The conformance tests run on Windows by themselves: `tests\run.bat` builds the runner
+(`tests\run.al`, an AL program) with `build\alc.exe` and starts it; it builds every test
+program in three modes, runs it and compares output, exit status and error messages. Under
+Wine it reports `conformance: 709 passed, 0 failed, 45 skipped` (with MinGW: 724 and 40), the
+same result per test as the Linux runner with `--target windows --host-wine build/alc.exe`.
+What Wine cannot prove:
+1. `verify.bat` in cmd, from a fresh copy: `build.bat` rebuilds the compiler (stages 2 and 3
+   identical: on Windows `fc /b` really compares them), the suite runs, the Linux programs are
+   built, and the last line is `VERIFY: PASS`. Send the whole output if it is `VERIFY: FAIL`.
+2. `tests\run.bat` alone: no `FAIL` line. Expect one skip fewer than under Wine:
+   `dx12_offscreen`, which Wine skips for lack of a Direct3D 12 device (`SKIP dx12_offscreen
+   [default]: no Direct3D 12 device ...`), runs on WARP. Note the summary line and every
+   `SKIP`.
+3. Run it three times: the same lines each time (the tests run in parallel, one thread per
+   CPU). If a test fails only sometimes, run `tests\run.bat -j 1` (one test after the other)
+   and report whether it still fails: the difference tells a load-sensitive test from a real
+   failure.
+4. Windows Defender or another antivirus scans each new `.exe` (the suite writes and starts
+   about 2000): note the run time (`-j 1` for comparison) and any "access denied" or "file in
+   use" text in a `FAIL`.
+5. Line endings: in a clone made by Git for Windows with its default `core.autocrlf=true`,
+   `git status` is clean and the suite passes (`.gitattributes` keeps every file as committed;
+   with CRLF in the `.out` files every test would fail with `stdout differs`).
+6. A user name or a repository path with a space (`C:\Users\Some Name\...`): the suite passes
+   (the temporary directory is `%TEMP%\altest.<pid>`); afterwards that directory is gone.
+7. With MinGW-w64 on the `PATH` (`x86_64-w64-mingw32-gcc.exe` or `gcc.exe`): the five tests
+   with a C library (`backtrace_c_callback`, `backtrace_c_fault`, `c_variadic`, `thread_ccb`,
+   `thread_ccb_panic`) run instead of `SKIP ...: x86_64-w64-mingw32-gcc is not installed`.
+8. `tests\run.bat --target linux`: prints that Linux programs are only built, then
+   `conformance: N passed, 0 failed`.
+9. Ctrl+C during a run: the runner and the tests stop; note what is left running (Task
+   Manager) and that `%TEMP%\altest.<pid>` stays (delete it by hand).
+10. A test that hangs is ended after 60 seconds (`FAIL ...: exit code 124`): to try it, add
+    `tests\run\hang.al` with `fn main() { sleep_ms(600000) }` and an empty `hang.out`, run
+    `tests\run.bat build\alc.exe hang`, and note whether a `bin.exe` keeps running afterwards
+    (in the default mode the program is a child of `alc run`, which is what gets ended).
+
 ## 1. The compiler on Windows
 1. `alc.exe build src/main.al -o alc2.exe`, then `fc /b alc.exe alc2.exe`: no differences
    (the compiler reproduces itself on Windows).

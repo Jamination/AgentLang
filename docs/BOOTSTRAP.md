@@ -45,6 +45,67 @@ seed before the change to 4-byte enum tags stored every tag in 8 bytes). The com
 depends on the layout of its own types: no `sizeof` or `cast` of an enum (the threads of the
 parallel back end hand their results over as AL values in memory: nothing is serialised).
 
+## Testing
+
+```
+tests/run.sh                        # Linux: the conformance suite with build/alc
+tests/run.sh ./build/alc match      # only the tests whose name contains "match"
+tests/run.sh --target windows       # the programs built for Windows, run under Wine
+tests/run.sh --target windows --host-wine build/alc.exe   # the same with the compiler for Windows under Wine
+./verify.sh                         # Linux: everything (build, suite, results against clang, benchmarks)
+tests\run.bat                       :: Windows: the suite with build\alc.exe, no Wine
+tests\run.bat --target linux        :: Windows: the programs built and type-checked for Linux, not run
+verify.bat                          :: Windows: build, both of the above, one line VERIFY: PASS or VERIFY: FAIL
+```
+
+The runner is an AL program, `tests/run.al` (its top lists the kinds of tests and their
+files); `build.sh` / `build.bat` build it with the new compiler as `build/altest` and
+`build/altest.exe`, and `tests/run.sh` / `tests\run.bat` only start it in the repository root
+(`run.sh` rebuilds it when `tests/run.al` is newer, `run.bat` always). It can also be started
+directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
+
+- **Options**: `-j N` threads (default: one per CPU; `-j 1` runs one test after the other),
+  `-v` also prints `ok   name` for every test that passed, `--target linux|windows`,
+  `--host-wine alc.exe` (Linux), then the compiler (default `./build/alc`, Windows
+  `build/alc.exe`) and a filter. Output: `FAIL name: reason` with the first lines of a diff or
+  of the messages, `SKIP name: reason`, and `conformance: N passed, M failed, K skipped` at
+  the end; the exit status is 0 if nothing failed.
+- **Parallel.** Each test (a program with its three build modes, a check, a driver script) is
+  one job with a directory of its own under the temporary directory; the jobs are spread over
+  the threads, except those of `tests/sys`, which run one after the other on one more thread
+  (they share the machine's display, sound and GPU). The modes of one program run in order,
+  because a test may write a file named after itself. The lines are printed in the order of
+  the tests, so two runs print the same text. Every program runs with a limit of 60 seconds.
+  Measured on 12 CPUs against the bash script the runner replaced (which ran the tests one
+  by one), the same 849 / 764 results each: Linux 47.8 s -> 22 s (bounded by `tests/sys`:
+  `vk_present` alone takes 16 s of its thread), `--target windows` 45.7 s -> 10.3 s,
+  `--host-wine` 91 s -> 18 s; `build/altest.exe` itself under Wine 24 s.
+- **Tools.** Nothing but the compiler is needed for most tests. A test that needs more is
+  reported as `SKIP` with the reason when it is missing: a C compiler for the tests with a C
+  library (`tests/sys/NAME.c`: clang on Linux; MinGW-w64 for Windows programs, as
+  `x86_64-w64-mingw32-gcc` or, on Windows, `gcc`), what `NAME.need` asks for on Linux
+  (libraries, weston, an X display in `AL_TEST_DISPLAY`), what only the program can tell
+  (status 77: no Direct3D 12 device, no glslc). `--target windows` on Linux needs Wine and
+  stops without it. `tests/driver` (bash scripts for the Linux command line) runs on Linux
+  for the Linux target only.
+- **On Windows** the tests are those of `--target windows` (skip list `tests/windows.skip`),
+  run directly; the default mode of every program goes through `alc run` and the unit tests
+  through `alc test`, as with `--host-wine`, so the compiler's own process handling is
+  tested too. Linux programs cannot run there: `--target linux` builds each in its three
+  modes, type-checks `tests/check` and `tests/fail` and runs the `--all-targets` checks.
+- **Wine** (Linux, `--target windows`): the prefix `$WINEPREFIX` (default
+  `tmp/win/prefix-tests`) with the null display driver, `DISPLAY` and `WAYLAND_DISPLAY`
+  removed, no sound device; one Wine server for the run, which the runner stops at the end
+  (after an interrupted run it ends by itself within a minute).
+- **`verify.sh` stays a bash script and a Linux job.** Beyond the build and the suite it
+  compares f32 results and ten benchmarks with clang -O2, reads ELF headers with readelf and
+  greps the sources: none of that exists on a Windows machine, and all of it tests the
+  compiler's output, which is byte-identical whichever host built it (`build.sh
+  --windows-check`, `build.bat`). `verify.bat` is what Windows can add: the compiler rebuilds
+  itself there, and the programs it builds run on real Windows.
+- `tests/winabi/run.sh`, `tests/winaudio/run.sh` (Wine, MinGW, PipeWire) and the fuzzers in
+  `tests/gen/` (Python) are Linux tools as before.
+
 ## Versions and the changelog
 
 The compiler's version is one constant in `src/main.al`: `priv const VERSION = "X.Y.Z"`, three

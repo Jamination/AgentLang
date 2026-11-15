@@ -48,8 +48,20 @@ build.bat                           :: Windows: the same -> build\alc.exe (and b
 build\alc.exe run examples\hello.al
 ```
 
-The test suites (`tests/run.sh`, `verify.sh`) are bash scripts and run on Linux; on Windows, use
-`alc.exe test file.al` for a program's `test` blocks.
+The tests run on both systems: `tests/run.sh` (Linux) and `tests\run.bat` (Windows) start the
+same runner, an AL program (`tests/run.al`) that runs the tests in parallel and ends with
+`conformance: N passed, M failed, K skipped`. On Windows the programs run directly, and a test
+that needs a tool that is not installed (a C compiler, bash) is skipped with the reason.
+`verify.bat` is the whole check there (build, tests, one line `VERIFY: PASS` or `VERIFY: FAIL`);
+`./verify.sh` on Linux adds the comparisons with clang and the benchmarks. More:
+[BOOTSTRAP.md](docs/BOOTSTRAP.md#testing).
+
+```
+tests/run.sh                        # Linux: all tests;  tests/run.sh ./build/alc match: those named *match*
+tests/run.sh --target windows       # Linux: the programs built for Windows, run under Wine
+tests\run.bat                       :: Windows: all tests that apply to Windows
+verify.bat                          :: Windows: build.bat, the tests, VERIFY: PASS
+```
 
 | Command | |
 |---|---|
@@ -133,8 +145,8 @@ The compiler compiles its own 40,000 lines in about 0.125 s without optimisation
 | `std/` | standard library modules (`use std.<name>`) |
 | `bootstrap/alc`, `bootstrap/alc.exe` | seed compilers that `build.sh` (Linux) and `build.bat` (Windows) start from |
 | `examples/`, `bench/` | sample programs; the benchmarks in AL and C |
-| `tests/` | conformance suite (`tests/run.sh`) and fuzzers (`tests/gen/`) |
-| `verify.sh` | everything: self-compilation to a fixed point, tests, benchmarks |
+| `tests/` | conformance suite (`tests/run.sh`, `tests\run.bat`; the runner is `tests/run.al`) and fuzzers (`tests/gen/`) |
+| `verify.sh`, `verify.bat` | everything: self-compilation to a fixed point, tests, benchmarks (Linux); build and tests (Windows) |
 | `CHANGELOG.md` | changes per release; [Versions](#versions) |
 
 ## License

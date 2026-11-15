@@ -1,3 +1,7 @@
+# every file is checked out as committed, also by Git for Windows with core.autocrlf=true: the
+# tests compare program output with tests/*/NAME.out byte for byte, and AL raw strings keep
+# the line ends of their source file
+* -text
 # cmd.exe misreads labels and `goto` in batch files with Unix line endings
 *.bat text eol=crlf
 # compiled seeds are binary

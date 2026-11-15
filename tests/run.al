@@ -607,8 +607,9 @@ priv fn run_job(j: Job, index: i64) -> Res {
             code := exec(cmd.items(), "", out, path_join(jd, "err"), 0, env)
             label := concat("unit/", j.name)
             if !cfg.can_run {
-                // (the test program is built, and that is all this machine can do with it)
-                if code == 0 {
+                // (`alc test` builds the test program and says that this machine cannot run
+                // it: that the program was written is all there is to check)
+                if file_exists(bin) {
                     r.passed(label)
                 } else {
                     r.say(fmt("FAIL ", label, ": compile error"))

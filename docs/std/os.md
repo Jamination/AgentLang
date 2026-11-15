@@ -30,8 +30,8 @@ Linux system calls, no libc: a program using this module stays a static executab
   executable, or a directory; `exec format error`: not a program; `invalid argument`: `argv`
   is empty). A program that started and failed has a status above 0 and `io_error()` 0.
 - The program gets the environment and the standard input of this process, and runs in its
-  working directory. To give it another variable or directory, run it through `env`
-  (`[]str{"env", "CC=clang", "make"}`, `[]str{"env", "-C", dir, "make"}`) or `sh -c`.
+  working directory. Other streams or another environment: [`Launch`](#files-as-standard-streams-another-environment).
+  Another directory: run it through `env` (`[]str{"env", "-C", dir, "make"}`) or `sh -c`.
 - Output that this process has printed but not yet written is written first (`flush()`), so
   the texts of both appear in order. The call returns when the program has ended **and**
   nothing holds its output open any more (a background process it started keeps
@@ -68,7 +68,8 @@ fn main() -> i64 {
 |-------------|-------------|
 | `spawn(argv: []str) -> (Process, bool)` | Starts the program `argv[0]` (found as by `run`) with the arguments `argv[1..]` and returns at once. `(Process{}, false)` if it could not be started; `io_error()` is the reason, as for `run`. |
 | `wait(p: Process) -> i64` | Waits until it has ended; the status as for `run` (exit status, 128 + signal). Waiting again returns the same status. |
-| `try_wait(p: Process) -> (i64, bool)` | Does not block: `(status, true)` once it has ended (it is then waited for), `(0, false)` while it runs, `(-1, true)` if it cannot be waited for (`io_error()`). |
+| `wait(p: Process, timeout_ns: i64) -> (i64, bool)` | Waits at most `timeout_ns` nanoseconds: `(status, true)` once it has ended (it is then waited for), `(0, false)` if it still runs when the time is over, `(-1, true)` if it cannot be waited for (`io_error()`). A time limit is `wait(p, limit)`, then `kill(p, 9)` and `wait(p)` if it returned `false`. |
+| `try_wait(p: Process) -> (i64, bool)` | `wait(p, 0)`: does not block. |
 | `kill(p: Process, signal: i64) -> bool` | Sends a signal: 15 (SIGTERM) asks it to end, 9 (SIGKILL) ends it, 2 is SIGINT, 0 only checks that it is there. `false` with `io_error()` 3 (`no such process`) once it has been waited for. |
 | `pid(p: Process) -> i64` | Its process id. |
 
@@ -104,6 +105,54 @@ fn main() {
     }
     for p in jobs { put(wait(p), " ") }             // 0 1 2
     print()
+}
+```
+
+## Files as standard streams, another environment
+
+| Declaration | Description |
+|-------------|-------------|
+| `struct Launch { stdin: str, stdout: str, stderr: str, env: []str }` | How a program is started when the streams or the environment of this process do not fit. The zero value changes nothing. |
+| `run(argv: []str, how: Launch) -> i64` | `run` that way: the status, or -1 with `io_error()` if the program could not be started. |
+| `spawn(argv: []str, how: Launch) -> (Process, bool)` | `spawn` that way. |
+| `const NULL_DEVICE` | The file that is always empty and swallows what is written (`"/dev/null"`; Windows: `"NUL"`). |
+
+- `stdin` is the path of the file the program reads as its standard input; `stdout` and
+  `stderr` are files that take what it writes, created or emptied when it starts. `""` leaves
+  a stream as that of this process. The same path for `stdout` and `stderr` gives one file
+  with both texts in the order written. `NULL_DEVICE` as `stdin` gives the program nothing to
+  read, as `stdout` / `stderr` it drops the output.
+- `env` changes the environment for the program only: `"NAME=value"` sets a variable (also
+  one this process has), `"NAME"` alone removes it; the last entry of a name counts.
+  Everything else is inherited. The program itself is still looked up in the `PATH` of this
+  process.
+- A file that cannot be opened (a missing input file or output directory) is a failed start:
+  -1 / `(Process{}, false)` with the reason in `io_error()`; no program runs.
+- Unlike `run_capture`, this never waits on a pipe: a program that starts background
+  processes of its own does not hold the call up, and any amount of output on both streams
+  is safe. Several threads may start programs at the same time, each with its own files.
+
+```
+use std.os
+
+fn main() {
+    make_dir("tmp/os_doc")
+    how := Launch{stdin: NULL_DEVICE, stdout: "tmp/os_doc/out.txt", stderr: "tmp/os_doc/err.txt",
+        env: []str{"LC_ALL=C", "DISPLAY"}}                // LC_ALL set, DISPLAY removed
+    status := run([]str{"sh", "-c", "echo $LC_ALL ${DISPLAY:-none}; echo oops >&2; exit 3"}, how)
+    out, _ := read_file("tmp/os_doc/out.txt")
+    err, _ := read_file("tmp/os_doc/err.txt")
+    print(status, trim(out), trim(err))                   // 3 C none oops
+    p, _ := spawn([]str{"sleep", "30"}, Launch{stdout: NULL_DEVICE})
+    st, ended := wait(p, 100_000_000)                     // 0.1 s
+    if !ended {
+        kill(p, 9)
+        st = wait(p)
+    }
+    print(ended, st)                                      // false 137
+    remove_file("tmp/os_doc/out.txt")
+    remove_file("tmp/os_doc/err.txt")
+    remove_dir("tmp/os_doc")
 }
 ```
 
@@ -149,8 +198,8 @@ through their result and `io_error()`, none panics.
 | path text | `path_join(a, b)`, `path_dir(p)`, `path_base(p)`, `path_ext(p)`, `path_stem(p)` |
 
 Not there: changing the working directory or the environment of this process, feeding the
-standard input of a program from a string, time limits (use `timeout`, or `try_wait` and
-`kill`).
+standard input of a program from a string (write a file and name it in `Launch`), walking a
+directory tree (`list_dir` and `is_dir`, level by level).
 
 ## Threads
 
@@ -221,6 +270,9 @@ With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
   directories of `PATH` (separated by `;`), with `.exe` appended if the name has no extension;
   a path is used as it is (also with `.exe` appended if it has no extension). Run batch files
   (`.bat`, `.cmd`) as `[]str{"cmd", "/c", file, ...}`.
+- **`Launch`.** `env` names are compared without regard to case, as Windows does
+  (`"Path=..."` replaces `PATH`). Programs started at the same time by several threads never
+  inherit each other's files or pipes (process creation is serialised for that).
 - **Arguments** are joined into one command line with the quoting of the Microsoft C library,
   so a program that splits its command line by those rules (every AL program, every C
   program) gets `argv` back unchanged. `cmd.exe` has rules of its own: arguments with quotes or
