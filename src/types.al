@@ -786,3 +786,64 @@ priv fn count_leaves(self: *Types, t: i64) -> i64 {
         _ => return 1
     }
 }
+
+// ---------- GPU buffer layouts: std140_size[T]() / std430_size[T]() ----------
+// (size, alignment) of t in a GLSL buffer block laid out by std140 (`std140`) or std430, and
+// "" if the AL layout of t is the same (every field at the offset the rules give it, every
+// array with the stride they give it); else the first difference, at `at` (the path of the
+// field: `Ubo.light.dir`). The shader declares the block with the same members in the same
+// order.
+fn gpu_layout(self: *Types, t: i64, std140: bool, at: str) -> (i64, i64, str) {
+    rules := if std140 { "std140" } else { "std430" }
+    here := if len(at) == 0 { self.name(t) } else { at }
+    match self.k(t) {
+        Int(32, _), F32 => return (4, 4, "")
+        Int(64, _), F64 => return (8, 8, "")
+        Vec(2) => return (8, 8, "")
+        Vec(3) => return (12, 16, "")
+        Vec(_), Quat => return (16, 16, "")
+        Mat4 => return (64, 16, "")
+        Bool => return (0, 0, fmt("`", here, "` is a bool: 1 byte in AL, 4 in GLSL (use u32)"))
+        Int(_, _) => return (0, 0, fmt("`", here, "` is a ", self.name(t), ", which a GLSL buffer block does not have (use i32 or u32)"))
+        Array(e, n) => {
+            es, ea, err := self.gpu_layout(e, std140, fmt(here, "[]"))
+            if len(err) != 0 {
+                return (0, 0, err)
+            }
+            if std140 {
+                ea = align_up(ea, 16)
+            }
+            stride := align_up(es, ea)
+            if stride != self.size_of(e) {
+                why := if e == T_VEC3 { " (a vec3 element takes 16 bytes: use vec4)" } else if std140 && es % 16 != 0 { " (std140 pads every array element to a multiple of 16 bytes: use vec4, or a struct of 16 bytes)" } else if self.size_of(e) % ea != 0 { fmt(" (each element is aligned to ", ea, " bytes: pad ", self.name(e), " to a multiple of it)") } else { "" }
+                return (0, 0, fmt("`", here, "`: the elements of ", self.name(t), " are ", self.size_of(e), " bytes apart in AL and ", stride, " in ", rules, why))
+            }
+            return (stride * n, ea, "")
+        }
+        Struct(s) => {
+            self.layout_struct(s)
+            name := self.structs[s].name
+            off := 0
+            align := 1
+            for i, f in self.structs[s].fields {
+                path := if len(at) == 0 { fmt(name, ".", f.0) } else { fmt(at, ".", f.0) }
+                fs, fa, err := self.gpu_layout(f.1, std140, path)
+                if len(err) != 0 {
+                    return (0, 0, err)
+                }
+                off = align_up(off, fa)
+                if off != self.structs[s].offsets[i] {
+                    return (0, 0, fmt("`", path, "` (", self.name(f.1), ") is at offset ", self.structs[s].offsets[i], " in AL and at ", off, " in ", rules,
+                        " (", rules, " aligns a ", self.name(f.1), " to ", fa, " bytes): add padding before it, or use vec4 for a vec3"))
+                }
+                off += fs
+                align = max(align, fa)
+            }
+            if std140 {
+                align = align_up(align, 16)
+            }
+            return (align_up(off, align), align, "")
+        }
+        _ => return (0, 0, fmt("`", here, "` is a ", self.name(t), ", which cannot be in a GPU buffer (numbers, vectors, mat4, arrays and structs of them)"))
+    }
+}

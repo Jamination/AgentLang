@@ -44,7 +44,7 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     if sig == 8 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
-    __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
+    __die_fault(cast[*i64](info + 16)[0])            // si_addr
 }
 
 // the program headers (AT_PHDR, AT_PHNUM of the auxiliary vector, which follows the
@@ -136,6 +136,19 @@ fn __os_stack_range() -> (i64, i64) {
 fn __os_backtrace_off() -> bool {
     v, set := env_get("ALC_BACKTRACE")
     return set && v == "0"
+}
+
+// ALC_CHECK_MEMORY is set and not "0" (see __released in prelude.al)
+fn __os_check_memory() -> bool {
+    v, set := env_get("ALC_CHECK_MEMORY")
+    return set && v != "" && v != "0"
+}
+
+// takes the pages [p, p + n) of an arena away (ALC_CHECK_MEMORY): a new mapping without access
+// in their place gives their memory back and makes every access fault
+fn __os_page_off(p: i64, n: i64) {
+    // PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|MAP_NORESERVE
+    syscall(9, p, n, 0, 0x4032, -1, 0)
 }
 
 // ---------- stack traces through C libraries ----------

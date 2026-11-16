@@ -1,0 +1,8 @@
+gpu_layout.al:29:29: error: std140_size[Shift]: `Shift.offset` (vec3) is at offset 4 in AL and at 16 in std140 (std140 aligns a vec3 to 16 bytes): add padding before it, or use vec4 for a vec3
+gpu_layout.al:33:29: error: std430_size[Shift]: `Shift.offset` (vec3) is at offset 4 in AL and at 16 in std430 (std430 aligns a vec3 to 16 bytes): add padding before it, or use vec4 for a vec3
+gpu_layout.al:34:30: error: std140_size[Floats]: `Floats.ks`: the elements of [4]f32 are 4 bytes apart in AL and 16 in std140 (std140 pads every array element to a multiple of 16 bytes: use vec4, or a struct of 16 bytes)
+gpu_layout.al:35:28: error: std430_size[Flag]: `Flag.on` is a bool: 1 byte in AL, 4 in GLSL (use u32)
+gpu_layout.al:36:29: error: std430_size[Outer]: `Outer.items`: the elements of [2]Inner are 20 bytes apart in AL and 32 in std430 (each element is aligned to 16 bytes: pad Inner to a multiple of it)
+gpu_layout.al:37:31: error: std430_size[[3]vec3]: `[3]vec3`: the elements of [3]vec3 are 12 bytes apart in AL and 16 in std430 (a vec3 element takes 16 bytes: use vec4)
+gpu_layout.al:38:27: error: std140_size[Ptr]: `Ptr.p` is a *u8, which cannot be in a GPU buffer (numbers, vectors, mat4, arrays and structs of them)
+gpu_layout.al:39:26: error: std430_size[u8]: `u8` is a u8, which a GLSL buffer block does not have (use i32 or u32)

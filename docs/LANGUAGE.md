@@ -137,6 +137,7 @@ test "name" { ... }                        // unit test, run by `alc test`
 use "other.al"                             // include another file (path relative to this file)
 use std.window                             // a module bundled with the compiler (see STDLIB.md)
 extern "libc.so.6" fn getpid() -> i32      // a C function (see C interop)
+extern "libfoo.so.1", "foo.dll" fn f()     // one library per system: the build takes its target's
 priv fn helper(x: i64) -> i64 { ... }      // `priv`: visible only inside this file
 when TARGET_OS == Windows { ... } else { ... }   // compile-time choice: see `when` below
 ```
@@ -659,6 +660,14 @@ fn main() {
 - **A `Vec` or `Map` that grows while a region is in use moves its storage into that region,
   even if it was created elsewhere, and is invalid after the reset.** Containers that must
   survive are grown outside the region, or cloned out.
+  The same holds for a mark: one that grows between `mark()` and `release(m)` (or inside
+  `frame_begin()` / `frame_end()`) has its new storage released with everything else.
+- **`ALC_CHECK_MEMORY=1`** in the environment of a program (no rebuild) finds a use of released
+  memory where it happens: released memory is never handed out again, its pages are taken away
+  (the access faults with `panic: use of released memory: the memory was released by
+  frame_end(): ...`, naming `release`, `frame_end` or `reset`) and partial pages are filled
+  with `0xDE` bytes, and a `Vec` or `Map` stored outside the innermost frame scope that grows
+  inside it stops the program at the push. For debugging only: the memory in use only grows.
 
 ### Threads
 
@@ -679,6 +688,7 @@ These stop the program with exit status 1, a message on standard error (buffered
 | `assert` fails | `assertion failed at file:line: message` |
 | `panic("msg")` | `panic at file:line: msg` |
 | `nil` dereference, stack overflow (deep recursion), write to a string literal or constant | `panic: memory fault (nil dereference, stack overflow or use of released memory)` |
+| use of memory released by `release`, `frame_end` or `reset`, with `ALC_CHECK_MEMORY=1` (see [Memory](#memory)) | `panic: use of released memory: the memory was released by frame_end(): ...` |
 | `pop` / `unwrap` on nothing | `panic: pop from an empty Vec at file:line`, `panic: unwrap of None` |
 | `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` / `resize` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
 | non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave`; a library function called wrongly (empty `sub` in `count`, base 1) | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, `panic at file:line: count: empty substring` (the line of the call), ... |
@@ -696,6 +706,7 @@ Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes 
 | `hash(x) -> u64` | hash of any value that supports `==`; the same on every run and target |
 | `clone(x) -> T` | independent deep copy (see [`clone`](#clonex)) |
 | `sizeof[T]() -> i64` | size of `T` in bytes |
+| `std140_size[T]() -> i64`, `std430_size[T]() -> i64` | size of the struct (or array) `T` in a GLSL buffer block laid out by std140 / std430; a compile error naming the field if the AL layout of `T` differs (a `vec3` before a scalar-aligned field, an array of `f32` under std140, ...). Constant: `const UBO_SIZE = std140_size[Ubo]()` checks where it is declared |
 | `sqrt(x)`, `fabs(x)`, `fmin(a, b)`, `fmax(a, b)` | on `f64`, `f32` and vectors |
 | `popcnt(x) ctz(x) clz(x) bswap(x)`, `rotl(x, n)`, `rotr(x, n)`, `mulhi(a, b)` | integers: bit counting, byte swap, rotation, high half of the double-width product |
 | `panic(msg: str) -> never` | stop with a message |
@@ -845,7 +856,7 @@ alc test file.al               compile and run all `test` blocks, each in its ow
                                per test its output, then `ok   name` / `FAIL name`; status 1 if any failed; the test runner is written to `file.test`
 alc check file.al              type-check only; `--all-targets`: once for every target (Linux, Windows)
 alc sigs file.al [-- std]      one line per declaration: `file:line: signature`; `-- std` adds the library's
-options: -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  with it: --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows
+options: -o path  --out-dir dir (where the executable goes without -o, created if needed; ALC_OUT_DIR=dir sets it for every command, e.g. to keep run/test executables out of the source folder)  -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  for a Windows target (the default on Windows): --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows
 ```
 
 Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`
@@ -889,6 +900,7 @@ extern "libc.so.6" fn getenv(name: *u8) -> *u8
 extern "libm.so.6" fn cosf(x: f32) -> f32
 extern "libc.so.6" fn printf(f: *u8, ...) -> i32   // variadic: more arguments, promoted as C does
 extern "libc.so.6" environ: **u8           // a C variable: read, assign, `&environ`; no initializer
+extern "libvulkan.so.1", "vulkan-1.dll" fn vkDeviceWaitIdle(device: *u8) -> i32   // per system: Windows takes the DLL
 home := from_cstr(getenv(ptr("HOME")))     // literals and str constants are NUL-terminated; cstr(s): a NUL-terminated copy
 ```
 

@@ -186,7 +186,8 @@ priv fn fault(info: i64, anywhere: bool) -> i32 {
             ExitProcess(1)
         }
     }
-    __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "", "")
+    // an access violation: ExceptionInformation[1] (at 0x28 of the EXCEPTION_RECORD) is the address
+    __die_fault(if code == 0xC0000005 { cast[*i64](rec + 0x28)[0] } else { 0 })
 }
 
 // the stack of the thread that faulted (the stack trace walks it, also from another thread)
@@ -263,6 +264,22 @@ priv bt_off: bool
 
 fn __os_backtrace_off() -> bool {
     return bt_off
+}
+
+// ALC_CHECK_MEMORY is set and not "0" (see __released in prelude.al)
+fn __os_check_memory() -> bool {
+    name: [17]u16
+    for i, c in "ALC_CHECK_MEMORY" {
+        name[i] = u16(c)
+    }
+    v: [4]u16
+    n := GetEnvironmentVariableW(ptr(name), ptr(v), 4)
+    return n > 0 && !(n == 1 && v[0] == u16('0'))
+}
+
+// takes the pages [p, p + n) of an arena away (ALC_CHECK_MEMORY): decommitted, an access faults
+fn __os_page_off(p: i64, n: i64) {
+    VirtualFree(p, n, 0x4000)                   // MEM_DECOMMIT
 }
 
 // ---------- stack traces through DLLs ----------

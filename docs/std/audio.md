@@ -186,6 +186,11 @@ while !w.should_close() {
   `latency_ms` 2 to 3 times the worst expected frame time: 50 ms suits 60 Hz games, use
   100 ms or more if frames can take 40 ms. Lower values (20 to 30 ms) work when the frame rate
   is stable.
+- **Start-up**: the first `audio_pump` / `audio_write` fills the buffer and starts the stream.
+  If the device runs dry before the next one (a long first frame: window, swapchain and
+  pipeline creation; or an engine that takes the whole first fill at once, as some WASAPI
+  drivers do), only silence was due: it is not counted in `underruns`. From the second fill
+  on, every stall is.
 - **Choosing and querying.** `latency_ms` sets the buffer; the device reports what it granted
   in `d.buffer_frames` and `d.period_frames`. The period is the device's choice (ALSA's
   `snd_pcm_set_params` usually takes a quarter of the buffer; WASAPI its engine period). On

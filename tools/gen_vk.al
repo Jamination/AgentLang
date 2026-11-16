@@ -21,6 +21,7 @@ priv const EXTENSIONS = [_]str{
     "VK_KHR_xlib_surface",
     "VK_KHR_xcb_surface",
     "VK_KHR_wayland_surface",
+    "VK_KHR_win32_surface",
     "VK_EXT_debug_utils",
     "VK_EXT_layer_settings",
     "VK_EXT_memory_budget",
@@ -28,7 +29,10 @@ priv const EXTENSIONS = [_]str{
 }
 priv const REGISTRY = "/usr/share/vulkan/registry/vk.xml"
 priv const LOADER = "/usr/lib/libvulkan.so.1"
+// the loader of each system: `extern "libvulkan.so.1", "vulkan-1.dll" fn ...` (a build takes the
+// one of its target); the commands of a window-system extension name only the loader of its system
 priv const LIB = "libvulkan.so.1"
+priv const LIB_WINDOWS = "vulkan-1.dll"
 priv const HELPERS = embed("vk_helpers.al")
 
 // paths relative to the root of the repository
@@ -41,6 +45,7 @@ priv const SCRATCH = "tmp/VulkanBindings"
 priv fn c_scalar(name: str) -> (str, i64) {
     match name {
         "void", "Display", "xcb_connection_t", "wl_display", "wl_surface" => ("u8", 0)
+        "HINSTANCE", "HWND" => ("*u8", 8)              // Windows handles: pointers in C
         "char", "uint8_t" => ("u8", 1)
         "int8_t" => ("i8", 1)
         "int16_t" => ("i16", 2)
@@ -61,6 +66,7 @@ priv fn platform_define(platform: str) -> str {
         "xlib" => "VK_USE_PLATFORM_XLIB_KHR"
         "xcb" => "VK_USE_PLATFORM_XCB_KHR"
         "wayland" => "VK_USE_PLATFORM_WAYLAND_KHR"
+        "win32" => "VK_USE_PLATFORM_WIN32_KHR"
         _ => fail(concat("no macro known for platform ", platform))
     }
 }
@@ -307,6 +313,7 @@ priv struct Reg {
     req_commands: Vec[str]
     req_enums: Vec[(*Node, i64)]    // <enum> and the number of its extension (0 inside a version)
     platforms: Vec[str]
+    cmd_platform: Map[str, str]     // the window system of a command of a platform extension
     used: Map[str, bool]            // the set of required types and of all they refer to
     consts: Vec[Const]
     enums: Map[str, Vec[EnumVal]]   // the values of each used enum type
@@ -393,7 +400,14 @@ priv fn select(r: *Reg) {
         e := extensions.get_or(name, nil)
         if e == nil { fail(concat("the registry has no extension ", name)) }
         r.require(e, to_int(e.attr("number")))
-        if e.attr("platform") != "" { r.platforms.push(e.attr("platform")) }
+        if e.attr("platform") != "" {
+            r.platforms.push(e.attr("platform"))
+            for req in e.children("require") {
+                for item in req.kids {
+                    if item.tag == "command" { r.cmd_platform.set(item.attr("name"), e.attr("platform")) }
+                }
+            }
+        }
     }
     for name in r.req_commands {
         c := r.command(name)
@@ -783,12 +797,19 @@ const VK_NULL_HANDLE: u64 = 0`)
             ctexts.push(d.ctext)
         }
         result := if proto.base != "void" || proto.nptr > 0 { concat(" -> ", r.al_type(proto, false).0) } else { "" }
-        if loader_known && !loader.has(name) {
+        // the loader read is the Linux one: it does not export the commands of Windows
+        platform := r.cmd_platform.get_or(name, "")
+        libs := match platform {
+            "" => fmt("\"", LIB, "\", \"", LIB_WINDOWS, "\"")
+            "win32" => fmt("\"", LIB_WINDOWS, "\"")
+            _ => fmt("\"", LIB, "\"")
+        }
+        if loader_known && platform != "win32" && !loader.has(name) {
             missing.push(fmt("//   ", name, ": fn(", join(types[..], ", "), ")", result))
             continue
         }
         out.push(fmt("// ", proto.base, repeat("*", proto.nptr), " ", name, "(", join(ctexts[..], ", "), ")"))
-        out.push(fmt("extern \"", LIB, "\" fn ", name, "(", join(params[..], ", "), ")", result))
+        out.push(fmt("extern ", libs, " fn ", name, "(", join(params[..], ", "), ")", result))
     }
     if !missing.is_empty() {
         out.push(`// Not exported by the loader; get the address with vkGetInstanceProcAddr and cast it to
@@ -843,9 +864,23 @@ priv fn int_consts(r: *Reg) -> []Const {
 // if the generator's own layout computation (it sizes the unions) agrees with the C compiler.
 priv fn verify_c(r: *Reg) -> str {
     out := vec[str]()
-    for p in r.platforms { out.push(concat("#define ", platform_define(p))) }
-    out.push(`#include <vulkan/vulkan.h>
-#include <stdio.h>
+    for p in r.platforms {
+        if p != "win32" { out.push(concat("#define ", platform_define(p))) }
+    }
+    out.push("#include <vulkan/vulkan.h>")
+    if r.platforms.contains("win32") {
+        // vulkan_win32.h wants <windows.h>, which a Linux system does not have: the types it
+        // uses, with the sizes they have on 64-bit Windows
+        out.push(`typedef struct HINSTANCE__ *HINSTANCE;
+typedef struct HWND__ *HWND;
+typedef struct HMONITOR__ *HMONITOR;
+typedef void *HANDLE;
+typedef unsigned int DWORD;
+typedef const unsigned short *LPCWSTR;
+typedef struct _SECURITY_ATTRIBUTES SECURITY_ATTRIBUTES;
+#include <vulkan/vulkan_win32.h>`)
+    }
+    out.push(`#include <stdio.h>
 #include <stddef.h>
 int main(void) {`)
     for name in r.bound_structs() {

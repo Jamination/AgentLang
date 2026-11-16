@@ -1,0 +1,2 @@
+panic: a Vec or Map stored outside the innermost frame_begin()/frame_end() scope grew inside it
+  at tests/run/check_memory_frame.al:21 in main

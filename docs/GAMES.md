@@ -171,7 +171,8 @@ what the game needs.
   ahead of time and built into the executable with `embed("shader.vert.spv")` (or at run time
   with `std.shaderc`, for hot reload), a surface from the window's native handles, validation
   layers through the debug-utils messenger. Vsync is the present mode: FIFO by default, MAILBOX
-  for low latency where offered.
+  for low latency where offered. The same bindings build for Linux and Windows; only the
+  surface extension and its create-info differ (`when TARGET_OS == Windows`).
 - **Direct3D 12**: [std/dx12.md](std/dx12.md): HLSL compiled at run time with `D3DCompile`, a
   swap chain on `win32_hwnd(w)`.
 - **The examples are reference code, not a library**: read them, copy what helps, change it.
@@ -270,7 +271,8 @@ one gets the SmartScreen warning the first time it is started.
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
 (events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
-(WASAPI). Windows only: std.dx12. Linux only: std.vk, std.shaderc, std.x11, std.wayland, std.alsa.
+(WASAPI), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)).
+Windows only: std.dx12. Linux only: std.shaderc, std.x11, std.wayland, std.alsa.
 
 **Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
 

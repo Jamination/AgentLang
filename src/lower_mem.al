@@ -6,7 +6,7 @@
 fn lower_mem_is_builtin(name: str) -> bool {
     // (a `priv` function named like a builtin shares the name in its file as well)
     match ast_plain(name) {
-        "len", "sizeof", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
+        "len", "sizeof", "std140_size", "std430_size", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
         "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed", "panic" => true
         "fmt", "hash", "put", "print", "clone", "mulhi" => true
         "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence" => true
@@ -293,7 +293,7 @@ fn call_shared(self: *Fx, name: str, cands0: Vec[i64], explicit: Opt[Vec[i64]], 
             Some(t) => t.len != 0
             None => false
         }
-        if usable && has_targs && !contains([]str{"sizeof", "cast", "mkslice"}, plain) {
+        if usable && has_targs && !contains([]str{"sizeof", "std140_size", "std430_size", "cast", "mkslice"}, plain) {
             usable = false
             self.err(pos, fmt("the builtin `", name, "` takes no type arguments, and no declared `", name, "` accepts these"))
             lower_call_eval_all(self, bargs)

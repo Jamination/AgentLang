@@ -631,6 +631,11 @@ fn main() {
 }
 ```
 
+- **One library per system.** `extern "libvulkan.so.1", "vulkan-1.dll" fn vkDeviceWaitIdle(...)`
+  names a library for each system; a build takes the first DLL for `--target windows` and the
+  first other name for Linux (a lone name is used for every target, and the linker rejects a
+  `.dll` in a Linux build and anything else in a Windows build, if the function is called).
+  One declaration then serves both systems, without a `when`.
 - Parameters and results must be integers, `bool`, `f32`/`f64`, pointers or function values;
   C structs are passed by pointer (AL structs have C layout: natural alignment). C `int` is
   `i32`, `long`/`size_t` are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.
@@ -690,7 +695,8 @@ fn main() {
 
 **Windows** (`--target windows`):
 
-- `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`), a Windows x86-64
+- `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`; with `--out-dir dir`
+  or `ALC_OUT_DIR=dir` in that directory instead of the source's), a Windows x86-64
   console executable (`--gui`: a GUI one, see [Windows](#windows)). On Linux, `alc run` / `alc test` run it under Wine when `ALC_WINE=1` and
   `WINEPREFIX` are set (no display: no window can open); otherwise they only build it.
 - Functions and variables are imported from DLLs (`extern "kernel32.dll" fn GetStdHandle(n: u32) ->
@@ -825,7 +831,9 @@ both systems, except where this section says otherwise.
   `ALC_WINE=1` (with `WINEPREFIX`) runs it under Wine.
 - **GUI programs (`--gui`).** `alc build --target windows --gui f.al` gives the executable the
   GUI subsystem instead of the console one (the only difference in the file), so a game started
-  from Explorer gets no console window. `--gui` without `--target windows` is a usage error.
+  from Explorer gets no console window. `--gui` for a Linux target (`--target linux`, or no
+  `--target` on Linux) is a usage error; on Windows, where `--target windows` is the default,
+  `alc build --gui f.al` is enough. `--icon` and `--version-info` follow the same rule.
   At run time such a program (it reads the subsystem from its own image header):
   - started from a console (cmd, PowerShell, a terminal) attaches to it
     (`AttachConsole(ATTACH_PARENT_PROCESS)`), so `print` and panics show there; the shell does

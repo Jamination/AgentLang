@@ -187,6 +187,10 @@ struct AudioOs {
     event: *u8
     id: []u16
     started: bool
+    // the buffer was topped up after the first fill that started the stream: from then on an
+    // empty buffer is an underrun (before, it is the start-up silence: a long first frame, or
+    // an engine that takes the whole first fill at once)
+    refilled: bool
     dev_rate: i64
     dev_channels: i64
     dev_buffer: i64
@@ -397,6 +401,7 @@ priv fn wa_disconnect(d: *AudioDevice) {
         o.device = nil
     }
     o.started = false
+    o.refilled = false
 }
 
 // Opens the device named o.name and initialises a stream in its mix format; on failure
@@ -733,6 +738,9 @@ priv fn wa_submit(d: *AudioDevice, m: *Mixer, n: i64, mixing: bool) -> i64 {
         wa_lost(d, hr)
         return mixed
     }
+    if o.started && done > 0 {
+        o.refilled = true
+    }
     if !o.started && done > 0 {
         hr = o.client.vt.Start(o.client)
         if hr < 0 {
@@ -754,7 +762,7 @@ priv fn wa_free(d: *AudioDevice) -> i64 {
         wa_lost(d, hr)
         return -1
     }
-    if o.started && padding == 0 {
+    if o.refilled && padding == 0 {
         d.underruns += 1
     }
     o.dev_buffer - i64(padding)

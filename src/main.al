@@ -54,7 +54,6 @@ priv const LINUX_ONLY = [_](str, str){
     ("x11", ""),
     ("wayland", ""),
     ("alsa", ""),
-    ("vk", ""),
     ("shaderc", ""),
 }
 
@@ -155,6 +154,17 @@ priv fn path_file_name(p: str) -> Opt[str] {
     return Some(name)
 }
 
+// creates the directory p and those above it that are missing (`mkdir -p`)
+priv fn make_dirs(p: str) -> bool {
+    if make_dir(p) {
+        return true
+    }
+    return match path_parent(p) {
+        Some(up) => up != path_trim(p) && make_dirs(up) && make_dir(p)
+        None => false
+    }
+}
+
 // the file name without its last extension
 priv fn path_file_stem(p: str) -> Opt[str] {
     name := match path_file_name(p) {
@@ -216,6 +226,8 @@ priv struct Args {
     cmd: str
     input: str
     output: Opt[str]
+    // --out-dir DIR (or ALC_OUT_DIR): where an executable without -o goes
+    out_dir: Opt[str]
     emit_ir: bool
     emit_asm: bool
     unchecked: bool
@@ -249,7 +261,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --out-dir <dir>\n                directory of the executable when -o is not given (created if\n                needed; default: ALC_OUT_DIR, else the directory of the input)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -324,6 +336,13 @@ priv fn parse_args() -> Args {
                     "windows" => target_os = TargetWindows
                     _ => usage(fmt("unknown target ", av[i], " (linux or windows)"))
                 }
+            }
+            "--out-dir" => {
+                i += 1
+                if i >= av.len || len(av[i]) == 0 {
+                    usage("--out-dir needs a directory: --out-dir build")
+                }
+                a.out_dir = Some(av[i])
             }
             "--json" => json = true
             "--gui" => pe_gui = true
@@ -747,7 +766,7 @@ priv fn sigs_priv(name: str) -> str {
 // `extern "lib" ` in front of the signature of a C function or variable
 priv fn sigs_extern(ext: Opt[str]) -> str {
     return match ext {
-        Some(lib) => fmt("extern \"", lib, "\" ")
+        Some(lib) => fmt("extern \"", join(split(lib, '\n'), "\", \""), "\" ")
         None => ""
     }
 }
@@ -1065,6 +1084,24 @@ priv fn real_main() -> i64 {
         None => {
             stem := path_file_stem(ar.input).or("a.out")
             dir := path_parent(ar.input).or("")
+            // --out-dir, else ALC_OUT_DIR: a build directory instead of the input's
+            od := ar.out_dir
+            if is_none(od) {
+                e, eset := env_get("ALC_OUT_DIR")
+                if eset && len(e) > 0 {
+                    od = Some(e)
+                }
+            }
+            match od {
+                Some(d) => {
+                    if !make_dirs(d) {
+                        driver_error(d, fmt("cannot create the output directory `", d, "`"))
+                        return 1
+                    }
+                    dir = d
+                }
+                None => {}
+            }
             cand := path_join(dir, stem)
             // the test runner gets its own name: `alc test` must not replace the program
             if target_os == TargetWindows {

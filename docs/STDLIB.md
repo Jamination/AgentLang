@@ -26,7 +26,7 @@ are `priv` do not appear: a program may reuse their names).
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces | `libX11.so.6` (`libXi.so.6` if installed, for mouse-look); Windows: `user32.dll`, `gdi32.dll`, `imm32.dll` | [std/window.md](std/window.md) |
 | `std.audio` | WAV, software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libwayland-client.so.0` (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) | [std/wayland.md](std/wayland.md) |
-| `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml`, with the surface, swapchain, debug-utils, layer-settings and memory budget / priority extensions; only C-header glue added (sType constructors, union constructors, version macros, `vk_result_name`) | `libvulkan.so.1` | [std/vk.md](std/vk.md) |
+| `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml`, with the surface (X11, xcb, Wayland, Win32), swapchain, debug-utils, layer-settings and memory budget / priority extensions; only C-header glue added (sType constructors, union constructors, version macros, `vk_result_name`) | `libvulkan.so.1`, `vulkan-1.dll` | [std/vk.md](std/vk.md) |
 | `std.shaderc` | bindings for shaderc's C API: GLSL / HLSL to SPIR-V at run time, for hot reload (Linux) | `libshaderc_shared.so.1` | [std/shaderc.md](std/shaderc.md) |
 | `std.dx12` | Direct3D 12 / DXGI bindings generated from the mingw-w64 headers (Windows only) | `d3d12.dll`, `dxgi.dll`, `d3dcompiler_47.dll`, `user32.dll`, `kernel32.dll` | [std/dx12.md](std/dx12.md) |
 | `std.metal` | Metal bindings over the Objective-C runtime (type-check only: no macOS backend yet) | macOS frameworks | [std/metal.md](std/metal.md) |
@@ -38,9 +38,9 @@ dynamically linked executable that needs only the libraries of the functions it 
 For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
-`std.asset`, `std.os`, `std.image`, `std.input`, `std.window` and `std.audio` (its device
-through WASAPI) work the same on Windows (the differences are in their pages); `std.libc`
-binds `msvcrt.dll` there. `std.wayland`, `std.vk`, `std.shaderc`, `std.x11` and `std.alsa`
+`std.asset`, `std.os`, `std.image`, `std.input`, `std.window`, `std.audio` (its device
+through WASAPI) and `std.vk` (through `vulkan-1.dll`) work the same on Windows (the differences are in their pages); `std.libc`
+binds `msvcrt.dll` there. `std.wayland`, `std.shaderc`, `std.x11` and `std.alsa`
 use Linux interfaces: `use` of one of them is a compile error that names the module and the
 target. `std.dx12` is the other way round:
 Windows only (a Linux build stops at its Windows DLLs).

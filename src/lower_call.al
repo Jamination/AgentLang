@@ -550,7 +550,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                     if !is_var {
                         env := self.tenv
                         cands := self.cx.fn_candidates(n)
-                        is_builtin := n == "sizeof" || n == "cast" || n == "mkslice"
+                        is_builtin := n == "sizeof" || n == "std140_size" || n == "std430_size" || n == "cast" || n == "mkslice"
                         if cands.len != 0 || is_builtin {
                             tys := vec[i64]()
                             for i in 0..targs.len {
@@ -1609,6 +1609,22 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             s := self.cx.types.size_of(t)
             v := self.iconst(I64, i64(s))
             return Some(self.sval(T_I64, v))
+        }
+        "std140_size", "std430_size" => {
+            // the size in a GLSL buffer block; a compile error if the AL layout differs
+            if self.bad_arity(name, nargs, 0, pos) {
+                return Some(val_err())
+            }
+            t := self.one_targ(name, targs, pos)
+            if t < 0 {
+                return Some(val_err())
+            }
+            s, _, err := self.cx.types.gpu_layout(t, name == "std140_size", "")
+            if len(err) != 0 {
+                self.err(pos, fmt(name, "[", self.tyname(t), "]: ", err))
+                return Some(val_err())
+            }
+            return Some(self.sval(T_I64, self.iconst(I64, s)))
         }
         "cast" => {
             if self.bad_arity(name, nargs, 1, pos) {

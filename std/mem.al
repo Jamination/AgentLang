@@ -64,6 +64,10 @@ fn frame_begin() {
     __tls_frame_marks[__tls_frame_depth] = mark()
     __tls_frame_arenas[__tls_frame_depth] = __region_top()
     __tls_frame_depth += 1
+    // (ALC_CHECK_MEMORY: what a Vec or Map that grows is checked against, see the prelude)
+    if __mem_checked() {
+        __frame_floor()
+    }
 }
 
 // closes the innermost scratch scope and releases what was allocated inside it
@@ -71,7 +75,35 @@ fn frame_end() {
     assert __tls_frame_depth > 0, "frame_end without frame_begin"
     __tls_frame_depth -= 1
     assert __tls_frame_arenas[__tls_frame_depth] == __region_top(), "frame_end: the arena in use is not the one of the matching frame_begin (unbalanced enter/leave?)"
+    __tls_release_kind = 1
     release(__tls_frame_marks[__tls_frame_depth])
+    __tls_release_kind = 0
+    if __check_mem == 2 {
+        __frame_floor()
+    }
+}
+
+// from now on, what ALC_CHECK_MEMORY=1 in the environment does (see the prelude): released
+// memory is never handed out again, a later use of it stops the program and names what
+// released it, and a Vec or Map that outlives a frame scope but grows inside it stops the
+// program at once. For debug builds (`when DEBUG { check_released_memory() }`) and tests;
+// the memory in use only grows.
+fn check_released_memory() {
+    __check_mem = 2
+    __frame_floor()
+}
+
+// the innermost scope for the checks of ALC_CHECK_MEMORY; a mark of 0 (taken before the first
+// allocation) is the start of the arena
+fn __frame_floor() {
+    if __tls_frame_depth == 0 {
+        __tls_frame_floor = 0
+        return
+    }
+    m := __tls_frame_marks[__tls_frame_depth - 1]
+    a := __tls_frame_arenas[__tls_frame_depth - 1]
+    __tls_frame_floor = if m == 0 { 1 } else { m }
+    __tls_frame_arena = a
 }
 
 // ---------- Arena ----------

@@ -62,6 +62,7 @@ the arena.
 | `x11_display(w) -> *u8` | Linux: the Xlib `Display*` (nil after `close`) |
 | `x11_window(w) -> u64` | Linux: the X11 window id |
 | `win32_hwnd(w) -> *u8` | Windows: the `HWND` (nil after `close`) |
+| `win32_hinstance(w) -> *u8` | Windows: the `HINSTANCE` of the window (the executable's module), for `VkWin32SurfaceCreateInfoKHR` |
 
 Public fields of `Window`: `input` (an `Input`, see [input.md](input.md)), `events` (the
 `EventQueue`), `width`, `height`, `closing`, `fullscreen`, `minimized` (between an

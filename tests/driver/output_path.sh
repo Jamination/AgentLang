@@ -19,5 +19,15 @@ grep -q "contains NUL bytes" err || fail "binary input: message"
 [[ $(wc -l <err) == 1 ]] || fail "binary input: one line"
 "$ALC" build main.al -o /nonexistent/dir/x 2>err; [[ $? == 1 ]] || fail "unwritable: status"
 grep -q "cannot write" err || fail "unwritable: message"
+# --out-dir / ALC_OUT_DIR: the executable without -o goes there (created), not next to the source
+mkdir -p src && cp main.orig src/main.al && cp lib.al src/lib.al
+"$ALC" build src/main.al --out-dir out/deep || fail "--out-dir build"
+[[ -x out/deep/main && ! -e src/main ]] || fail "--out-dir: executable not in out/deep"
+"$ALC" run src/main.al --out-dir out; [[ $? == 3 && -x out/main && ! -e src/main ]] || fail "--out-dir run"
+ALC_OUT_DIR=out2 "$ALC" test src/main.al || fail "ALC_OUT_DIR test"
+[[ -x out2/main.test && ! -e src/main.test ]] || fail "ALC_OUT_DIR: test runner not in out2"
+ALC_OUT_DIR=out2 "$ALC" build src/main.al -o prog2 || fail "-o with ALC_OUT_DIR"
+[[ -x prog2 && ! -e out2/main ]] || fail "-o must win over ALC_OUT_DIR"
+: > file; "$ALC" build src/main.al --out-dir file 2>err; [[ $? == 1 ]] && grep -q "cannot create the output directory" err || fail "--out-dir on a file"
 "$ALC" build 2>/dev/null; [[ $? == 2 ]] || fail "usage status"
 exit 0

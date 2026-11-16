@@ -35,6 +35,26 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   ...}`.
 
 ### Added
+- `std.vk` builds for `--target windows`: every command is declared for both loaders
+  (`extern "libvulkan.so.1", "vulkan-1.dll" fn ...`), and `VK_KHR_win32_surface` is bound
+  (`VkWin32SurfaceCreateInfoKHR`, `vkCreateWin32SurfaceKHR`,
+  `vkGetPhysicalDeviceWin32PresentationSupportKHR`, which name `vulkan-1.dll` alone). One
+  `use std.vk` serves Linux and Windows; std.window has `win32_hinstance(w)` for the surface.
+- `extern` takes one library per system: `extern "libfoo.so.1", "foo.dll" fn f()`. A
+  Windows build imports from the first DLL, a Linux build from the first other name.
+- `ALC_CHECK_MEMORY=1` in the environment of a program (no rebuild needed) catches the use of
+  released memory: memory given back by `release`, `frame_end` or `reset` of a Region is never
+  handed out again, its pages are taken away and the rest is filled with `0xDE` bytes, and the
+  fault says what released it (`panic: use of released memory: the memory was released by
+  frame_end(): ...`). A `Vec` or `Map` stored outside the innermost `frame_begin()` /
+  `frame_end()` scope that grows inside it stops the program at that push. Without it, a
+  memory fault at an address that is neither near nil nor on the stack suggests the variable.
+- `std140_size[T]()` and `std430_size[T]()`: the size of a struct or array in a GLSL buffer
+  block, and a compile error naming the first field whose AL offset (or array stride) differs
+  from the rules (a `vec3` before a field the rules place elsewhere, an `[N]f32` under std140,
+  a `bool`). Constant-evaluated: `const UBO_SIZE = std140_size[Ubo]()`.
+- `--out-dir DIR` (and `ALC_OUT_DIR=DIR` for every command): the executable of build, run and
+  test goes to DIR (created if needed) when `-o` is not given, instead of next to the source.
 - `std.libc` is available for `--target windows`, bound to `msvcrt.dll`: `strlen`, `getenv`,
   `malloc`, `free`, `qsort`, `printf`, `fprintf`, `sprintf`, `sscanf`, `fflush`, `cosf`,
   `getpid` as on Linux, and `_snprintf`, `_fileno`, `_setmode`, `__iob_func` of that library.
@@ -79,6 +99,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   null file (`/dev/null`, `NUL`).
 
 ### Changed
+- std.audio: a stall of the device before its second fill (a long first frame after
+  `audio_open`, or a WASAPI engine that takes the whole first fill at once) is no longer
+  counted in `underruns`: only silence was due. Every later stall is counted as before.
 - Windows executables support ASLR: they have a base relocation table (`.reloc`), the flags
   `DYNAMIC_BASE` and `HIGH_ENTROPY_VA` and the preferred base 0x140000000 (before: fixed at
   0x400000, relocations stripped), so they start where "Mandatory ASLR" is enforced. The code
@@ -111,6 +134,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   are unchanged.
 
 ### Fixed
+- The documentation said `--gui` (and `--icon`, `--version-info`) without `--target windows` was
+  an error; the rule is a Linux target: on Windows, `--target windows` is the default.
 - Windows: executables crashed at start on a real Windows ("out of memory" or "memory fault"
   in the first allocation; Wine was unaffected). The TLS directory asked the loader for a
   zero-filled thread block through `SizeOfZeroFill`, which Windows does not honour: the

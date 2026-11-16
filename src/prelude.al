@@ -18,6 +18,8 @@
 //   __os_error_text(e)             error_text for numbers it does not know
 //   __os_stack_range() -> (lo, hi) the stack of the running thread, for stack traces
 //   __os_backtrace_off() -> bool   ALC_BACKTRACE=0 is set (without allocating)
+//   __os_check_memory() -> bool    ALC_CHECK_MEMORY is set and not 0 (without allocating)
+//   __os_page_off(p, n)            takes the pages [p, p + n) of an arena away: an access faults
 //   __os_bt_foreign, __os_bt_unwind, __os_bt_where, __BT_SAVED
 //                                  stack traces through C libraries (see __bt_c_init)
 //   __os_thread_create(c) -> errno starts a thread that calls __thread_main(c); 0 or -errno
@@ -798,7 +800,19 @@ fn new[T]() -> *T {
 
 // arena control: everything allocated after mark() is released by release()
 fn mark() -> i64 {
+    if __check_mem != 1 && __mem_checked() {
+        __mark_page()
+    }
     return __heap_cur
+}
+
+// (ALC_CHECK_MEMORY) a mark starts a page, so that everything allocated after it can be taken
+// away by its release
+noinline fn __mark_page() {
+    p := (__heap_cur + 4095) & ~4095
+    if p > __heap_cur && p <= __heap_end {
+        __heap_cur = p
+    }
 }
 
 fn release(m: i64) {
@@ -810,8 +824,105 @@ fn release(m: i64) {
         if __heap_cur > __heap_hwm {
             __heap_hwm = __heap_cur
         }
+        if __check_mem != 1 && __mem_checked() {
+            __heap_cur = __released(m, __heap_cur, __heap_end)
+            return
+        }
         __heap_cur = m
     }
+}
+
+// ---------- ALC_CHECK_MEMORY: catching the use of released memory ----------
+// With ALC_CHECK_MEMORY=1 in the environment (read at the first release), memory that is
+// released (release, frame_end, reset of a Region) is never handed out again: its whole pages
+// are taken away from the program, so that the next access faults and the fault names what
+// released it, and the rest is filled with 0xDE bytes (a pointer read from it is
+// 0xDEDEDEDEDEDEDEDE, not an address). A Vec or Map stored outside the innermost
+// frame_begin()/frame_end() scope that grows inside it stops the program at once: its new
+// storage would be released by frame_end(). A mode for finding bugs: the memory in use
+// (mem_used) only grows, by at least the rest of a page per release.
+__check_mem: i64                    // 0: not read yet, 1: off, 2: on
+// what the next release is (set by frame_end and reset): 0 release(), 1 frame_end(), 2 reset()
+__tls_release_kind: i64
+// the innermost frame scope of std.mem: its mark (0: none) and its arena
+__tls_frame_floor: i64
+__tls_frame_arena: *Region
+// the last released ranges [lo, hi) and their kinds, for the report of a fault
+__released_lo: [1024]i64
+__released_hi: [1024]i64
+__released_kind: [1024]i64
+__released_n: i64
+
+fn __mem_checked() -> bool {
+    if __check_mem == 0 {
+        __check_mem = if __os_check_memory() { 2 } else { 1 }
+    }
+    return __check_mem == 2
+}
+
+// (ALC_CHECK_MEMORY) gives back [m, cur) of an arena that ends at `end` without handing it out
+// again: the new cursor
+noinline fn __released(m: i64, cur: i64, end: i64) -> i64 {
+    kind := __tls_release_kind
+    __tls_release_kind = 0
+    lo := (m + 4095) & ~4095
+    top := cur
+    if lo < cur {
+        top = min((cur + 4095) & ~4095, end)
+        __os_page_off(lo, top - lo)
+    } else {
+        lo = cur
+    }
+    memfill(m, 0xDE, lo - m)
+    i := __released_n % 1024
+    __released_lo[i] = m
+    __released_hi[i] = top
+    __released_kind[i] = kind
+    __released_n += 1
+    return top
+}
+
+// (ALC_CHECK_MEMORY) the Vec or Map whose header is at `at` gets new storage: it must not
+// outlive the frame scope the storage belongs to
+noinline fn __grow_check(at: i64) {
+    if __tls_frame_floor == 0 || __tls_frame_arena != __region_top() {
+        return
+    }
+    if at >= __tls_frame_floor && at < __heap_end {
+        return                      // allocated inside the scope: released with its storage
+    }
+    lo, hi := __os_stack_range()
+    if at >= lo && at < hi {
+        return                      // a local variable (one of the scope or not: not known)
+    }
+    __die("panic: a Vec or Map stored outside the innermost frame_begin()/frame_end() scope grew inside it", "",
+        "its new storage is released by frame_end() while the Vec or Map is still used (ALC_CHECK_MEMORY); reserve its room before frame_begin(), or build it in a Region or an Arena")
+}
+
+// the report of a memory fault at `addr` (0: not known)
+noinline fn __die_fault(addr: i64) -> never {
+    if __check_mem == 2 {
+        for i in 0..min(__released_n, 1024) {
+            if addr >= __released_lo[i] && addr < __released_hi[i] {
+                what := match __released_kind[i] {
+                    1 => "the memory was released by frame_end(): it was allocated inside a frame_begin()/frame_end() scope (also the new storage of a Vec or Map that grew there) and used after the scope ended (ALC_CHECK_MEMORY)"
+                    2 => "the memory was released by reset() of a Region and used afterwards (ALC_CHECK_MEMORY)"
+                    _ => "the memory was released by release() of a mark taken before it was allocated, and used afterwards (ALC_CHECK_MEMORY)"
+                }
+                __die("panic: use of released memory", "", what)
+            }
+        }
+        for k in 0..16 {
+            if u64(__bt_fault_regs.r[k]) == 0xDEDEDEDEDEDEDEDE {
+                __die("panic: memory fault", "", "a register holds 0xDEDEDEDEDEDEDEDE: most likely a pointer read from released memory (ALC_CHECK_MEMORY fills it with 0xDE bytes)")
+            }
+        }
+    }
+    // (not near nil and not on the stack: perhaps a pointer into memory that was released)
+    lo, hi := __os_stack_range()
+    hint := __check_mem != 2 && u64(addr) >= 0x10000 && !(addr >= lo - 0x100000 && addr < hi)
+    __die("panic: memory fault (nil dereference, stack overflow or use of released memory)", "",
+        if hint { "run with ALC_CHECK_MEMORY=1 in the environment to find a use of released memory" } else { "" })
 }
 
 // ---------- regions: independent arenas ----------
@@ -889,6 +1000,11 @@ fn reset(r: *Region) {
         if __heap_cur > __heap_hwm {
             __heap_hwm = __heap_cur
         }
+        if __heap_cur > __heap_base && __check_mem != 1 && __mem_checked() {
+            __tls_release_kind = 2
+            __heap_cur = __released(__heap_base, __heap_cur, __heap_end)
+            return
+        }
         __heap_cur = __heap_base
         return
     }
@@ -898,6 +1014,11 @@ fn reset(r: *Region) {
     }
     if r.cur > r.hwm {
         r.hwm = r.cur
+    }
+    if r.cur > r.base && __check_mem != 1 && __mem_checked() {
+        __tls_release_kind = 2
+        r.cur = __released(r.base, r.cur, r.end)
+        return
     }
     r.cur = r.base
 }
@@ -1934,6 +2055,9 @@ fn vec_fill[T](n: i64, x: T) -> Vec[T] {
 
 fn reserve[T](v: *Vec[T], n: i64) {
     if n > len(v.buf) {
+        if __check_mem == 2 {
+            __grow_check(cast[i64](v))
+        }
         cap := max(len(v.buf) * 2, max(n, 8))
         // the spare capacity is never read before it is written: no need to zero it
         nb := mkslice[T](__alloc_raw(__alloc_size(cap, sizeof[T]())), cap)
@@ -2210,6 +2334,9 @@ fn __map_grow[K, V](m: *Map[K, V]) {
         cap = if cap < 65536 { max(16, cap * 4) } else { cap * 2 }
         if cap > 0x8000_0000 {
             __die("panic: Map too large", "", "")
+        }
+        if __check_mem == 2 {
+            __grow_check(cast[i64](m))
         }
         n := cap / 2
         // (the spare capacity is never read before it is written)

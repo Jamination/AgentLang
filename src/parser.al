@@ -833,13 +833,27 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
     if p.eat_kw(KW_EXTERN) {
         // extern "libfoo.so.1" fn name(a: A) -> R     (a C function; no body)
         // extern "libfoo.so.1" name: T                (a C variable; no initializer)
-        match p.peek() {
-            Str(s) => {
-                p.bump()
-                ext = Some(utf8_lossy(s))
+        // extern "libfoo.so.1", "foo.dll" fn ...      (one library per system: the build
+        //                                              takes the one of its target, lower.al)
+        names := vec[str]()
+        loop {
+            match p.peek() {
+                Str(s) => {
+                    p.bump()
+                    name := utf8_lossy(s)
+                    if len(name) == 0 || find(name, "\n") >= 0 {
+                        return p.err[Decl]("a library name after `extern` is a file name such as `libc.so.6` or `kernel32.dll`")
+                    }
+                    names.push(name)
+                }
+                _ => return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() -> i32`")
             }
-            _ => return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() -> i32`")
+            if !p.eat_p(',') {
+                break
+            }
         }
+        // several names are kept on separate lines of the one string
+        ext = Some(join(names[..], "\n"))
     }
     if p.is_kw(KW_FN) {
         f, ok := p.fn_decl(pos, inl, ext)

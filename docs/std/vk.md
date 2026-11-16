@@ -1,11 +1,11 @@
 # std.vk: Vulkan bindings
 
-The bindings import `libvulkan.so.1`: Linux only, with `--target windows` `use std.vk` is a
-compile error.
+The bindings import the Vulkan loader of the target: `libvulkan.so.1` on Linux, `vulkan-1.dll`
+on Windows (`--target windows`). The same `use std.vk` builds for both.
 
 `use std.vk` gives an AL program the Vulkan API: core 1.0 to 1.3 plus `VK_KHR_surface`,
 `VK_KHR_swapchain`, `VK_KHR_xlib_surface`, `VK_KHR_xcb_surface`, `VK_KHR_wayland_surface`,
-`VK_EXT_debug_utils`, `VK_EXT_layer_settings`, `VK_EXT_memory_budget` and
+`VK_KHR_win32_surface`, `VK_EXT_debug_utils`, `VK_EXT_layer_settings`, `VK_EXT_memory_budget` and
 `VK_EXT_memory_priority`. It is a binding and nothing else: the names, structs and call
 sequences are those of the C API, so the Vulkan specification and any C tutorial apply
 directly. What the module adds is only what the C headers themselves provide or what AL needs
@@ -14,11 +14,17 @@ shader loading and rendering are the program's code: [examples/vk_renderer](#exa
 shows all of it written on the bindings alone.
 
 The module is generated: `std/vk.al` is written by `tools/gen_vk.al` from the Khronos registry
-(`vk.xml`), followed by the version macros of `tools/vk_helpers.al`. It contains 305 structs,
-about 1200 constants and 235 functions. Using it costs about 10 ms of compile time.
+(`vk.xml`), followed by the version macros of `tools/vk_helpers.al`. It contains 306 structs,
+about 1200 constants and 237 functions. Using it costs about 10 ms of compile time.
 
-A program that calls a Vulkan function is dynamically linked against `libvulkan.so.1` (the
-Vulkan loader), which must be installed together with a driver.
+A program that calls a Vulkan function is dynamically linked against the Vulkan loader,
+`libvulkan.so.1` on Linux and `vulkan-1.dll` on Windows (installed with the graphics driver),
+which must be there together with a driver; a program that calls no Vulkan function imports
+nothing of it. Every command is declared with both names,
+`extern "libvulkan.so.1", "vulkan-1.dll" fn vkXxx(...)`, and a build takes the one of its target
+([C interop](../DETAILS.md#c-interop)). The commands of a window-system extension name only
+the loader of their system: `vkCreateWin32SurfaceKHR` in a Linux build, or
+`vkCreateXlibSurfaceKHR` in a Windows build, is a compile error that names the library.
 
 ## Mapping rules
 
@@ -41,9 +47,9 @@ Vulkan loader), which must be installed together with a driver.
 | array parameter `const float blendConstants[4]` | `*f32` |
 | union (`VkClearValue`, `VkClearColorValue`) | `struct { data: [N]u32 }` of the union's size and alignment, plus one constructor per member (below) |
 | struct with bit-fields | not bound (a comment in `std/vk.al` names it; none in the current selection) |
-| command | `extern "libvulkan.so.1" fn vkXxx(...)` with the C parameter names |
+| command | `extern "libvulkan.so.1", "vulkan-1.dll" fn vkXxx(...)` with the C parameter names (window-system commands: only the library of their system) |
 | `VK_API_VERSION_1_x`, `VK_NULL_HANDLE`, `VK_WHOLE_SIZE`, `VK_KHR_SWAPCHAIN_EXTENSION_NAME`, ... | constants (`u32`, `u64`, `str`) |
-| window-system types | `Display*`, `xcb_connection_t*`, `wl_display*`, `wl_surface*` are `*u8`; `Window`, `VisualID` are `u64`; `xcb_window_t`, `xcb_visualid_t` are `u32` |
+| window-system types | `Display*`, `xcb_connection_t*`, `wl_display*`, `wl_surface*`, `HINSTANCE`, `HWND` are `*u8`; `Window`, `VisualID` are `u64`; `xcb_window_t`, `xcb_visualid_t` are `u32` |
 
 AL types have one name each, so the C type of a field or parameter that became `i32`/`u32`/`u64`/`*u8`
 is kept as a comment: every struct field carries `// VkFormat`-style notes and every `extern` is
@@ -81,6 +87,10 @@ current names needs it). Struct names that C defines as a second name of another
   for a typed view (reading back, writing uniforms). The layouts of AL's
   `vec2`/`vec4`/`mat4` (column-major, 16-byte `vec4`) match GLSL's `std140`/`std430` for
   `vec4` and `mat4` members; a `vec3` is 12 bytes in AL and 16-byte aligned in `std140`.
+  `const UBO_SIZE = std140_size[Ubo]()` (`std430_size` for storage buffers) checks a whole
+  struct at compile time and gives its size in the buffer: a field whose AL offset differs
+  from the rules (`Ubo.offset` (vec3) is at offset 4 in AL and at 16 in std140 ...), or an
+  array whose stride differs (`[4]f32` under std140), is a compile error.
 - **Callbacks** (`pfnUserCallback`, allocation callbacks): an AL function with scalar/pointer
   parameters, stored with `cast[*u8](my_callback)` (see the debug messenger below).
 
@@ -371,6 +381,10 @@ platform extension on the instance and `VK_KHR_SWAPCHAIN_EXTENSION_NAME` on the 
   ack would apply to them (weston: "xdg_surface geometry (800 x 600) is larger than the
   configured fullscreen state", then `VK_ERROR_SURFACE_LOST_KHR`). `present.al` requests a
   frame callback with a commit of its own and acknowledges when it fires.
+- **Windows** (`std.window`, `--target windows`): `VkWin32SurfaceCreateInfoKHR` with
+  `hinstance = win32_hinstance(w)` and `hwnd = win32_hwnd(w)`, `vkCreateWin32SurfaceKHR`; the
+  instance extension is `VK_KHR_WIN32_SURFACE_EXTENSION_NAME`. Resizing and minimizing as for X11.
+  Choose the platform extension and the surface with `when TARGET_OS == Windows { ... }`.
 
 **Vsync is the present mode** of the swapchain:
 
@@ -409,7 +423,9 @@ showed nothing: it has no DRI3 device there and cannot import the driver's buffe
 - Only commands that the loader `/usr/lib/libvulkan.so.1` exports (the generator reads its
   dynamic symbol table: what `nm -D --defined-only` lists) become `extern` declarations (an
   `extern` for a missing symbol would stop the program from starting); the others are listed
-  with their AL function types for `vkGetInstanceProcAddr`.
+  with their AL function types for `vkGetInstanceProcAddr`. The Windows-only commands of
+  `VK_KHR_win32_surface` are bound with `"vulkan-1.dll"` alone (`vulkan-1.dll` exports them;
+  the Linux loader does not).
 - `--verify` writes `tmp/VulkanBindings/layout.c` (using `<vulkan/vulkan.h>`) and `layout.al`
   (using `sizeof[T]()` and field addresses), builds them (clang, gcc or cc; `./build/alc`
   with `ALC_STD_DIR=std`), runs them and compares their output (`layout: no mismatches in 1495
@@ -417,7 +433,8 @@ showed nothing: it has no DRI3 device there and cannot import the driver's buffe
   size and every field offset of every struct and the value of every numeric constant, and the
   outputs must be identical. The generator's own layout computation, which sizes the unions,
   is checked against the same numbers: `layout.c` asserts them at compile time. It needs a C
-  compiler and the Vulkan, X11, xcb and Wayland headers. `tests/std/vk_glue.al` checks the
+  compiler and the Vulkan, X11, xcb and Wayland headers (`vulkan_win32.h` is included after
+  typedefs of the few Windows types it uses: a Linux system has no `windows.h`). `tests/std/vk_glue.al` checks the
   union constructors, the version macros, the `sType` constructors and `vk_result_name`.
 - The hand-written part is the version macros in `tools/vk_helpers.al`; edit it there, not in
   `std/vk.al`. It holds only what `vulkan_core.h` defines as macros: no policy.

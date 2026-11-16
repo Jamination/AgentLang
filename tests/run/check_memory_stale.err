@@ -1,0 +1,2 @@
+panic: use of released memory: the memory was released by frame_end()
+  at tests/run/check_memory_stale.al:31 in main

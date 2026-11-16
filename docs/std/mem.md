@@ -62,6 +62,16 @@ zeroed when it is handed out again.
   memory), and a frame scope may contain balanced `enter` / `leave` pairs. A scope must be
   closed in the arena it was opened in: `frame_end()` stops the program with `frame_end: the
   arena in use is not the one of the matching frame_begin` otherwise.
+- **A `Vec` or `Map` that lives longer than the frame must not grow inside it**: its new storage
+  is frame memory and is released by `frame_end()`, while the container still points at it
+  (a chunk loaded during rendering, a cache filled on demand). Give it its room before
+  `frame_begin()`, or keep it in a `Region` that the frame does not release. Run the program
+  with **`ALC_CHECK_MEMORY=1`** in the environment to find such bugs: such a growth stops the
+  program at the push (`panic: a Vec or Map stored outside the innermost
+  frame_begin()/frame_end() scope grew inside it`), and released memory is never reused but
+  taken away, so a later access stops it with `panic: use of released memory: the memory was
+  released by frame_end(): ...` and the stack trace of the access (see
+  [LANGUAGE.md](../LANGUAGE.md#memory)).
 
 ```
 level: Region                                  // lives until the level is unloaded

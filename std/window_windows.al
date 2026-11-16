@@ -1221,3 +1221,9 @@ fn close(w: *Window) {
 fn win32_hwnd(w: *Window) -> *u8 {
     w.os.hwnd
 }
+
+// The HINSTANCE the window class belongs to: the executable's module handle (for Vulkan:
+// VkWin32SurfaceCreateInfoKHR.hinstance, with hwnd = win32_hwnd(w)).
+fn win32_hinstance(w: *Window) -> *u8 {
+    GetModuleHandleW(nil)
+}

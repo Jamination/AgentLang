@@ -170,6 +170,23 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
     }
 }
 
+// The library of `extern "a", "b" fn` for the target (the parser keeps the names on separate
+// lines): with --target windows the first DLL, else the first name that is not one. With no
+// name for the target the first is kept, and the linker reports it if the import is used.
+priv fn target_lib(names: str) -> str {
+    if find(names, "\n") < 0 {
+        return names
+    }
+    libs := split(names, '\n')
+    for lib in libs {
+        dll := len(lib) > 4 && to_lower(lib[len(lib) - 4..]) == ".dll"
+        if dll == (target_os == TargetWindows) {
+            return lib
+        }
+    }
+    libs[0]
+}
+
 // f64 to i64 at compile time, as the processor converts at run time: NaN and values out of
 // range give 0x8000000000000000
 priv const I64_MIN: i64 = 0x8000_0000_0000_0000
@@ -1261,7 +1278,7 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
             }
             got := self.got_global(d.name)
             f.ext = Some(self.module.externs.len)
-            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got, variadic: d.variadic})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: target_lib(lib), got: got, variadic: d.variadic})
         }
         None => {}
     }
@@ -1375,7 +1392,7 @@ priv fn global_new(self: *Cx, d: *GlobalDecl) -> Opt[(i64, i64)] {
             // a C variable of a shared library: the program has only its import slot, which
             // the dynamic loader fills with the variable's address (no copy relocation)
             got := self.got_global(d.name)
-            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: lib, got: got, data: true})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: target_lib(lib), got: got, data: true})
             self.ext_gots.set(got, true)
             self.globals.set(d.name, (ty, got))
             return Some((ty, got))
@@ -2228,6 +2245,27 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                             env := map[str, i64]()
                             match self.expr_type(&targs[0], &env) {
                                 Some(t) => return Some(CV.Int(self.types.size_of(t)))
+                                None => return None
+                            }
+                        }
+                        // const UBO_SIZE = std140_size[Ubo]() checks the layout where it is declared
+                        gpu := match b.k {
+                            Ident("std140_size") => "std140_size"
+                            Ident("std430_size") => "std430_size"
+                            _ => ""
+                        }
+                        if len(gpu) != 0 && targs.len == 1 {
+                            env := map[str, i64]()
+                            match self.expr_type(&targs[0], &env) {
+                                Some(T_ERR) => return None
+                                Some(t) => {
+                                    s, _, err := self.types.gpu_layout(t, gpu == "std140_size", "")
+                                    if len(err) != 0 {
+                                        self.err(e.pos, fmt(gpu, "[", self.types.name(t), "]: ", err))
+                                        return Some(CV.Int(0))
+                                    }
+                                    return Some(CV.Int(s))
+                                }
                                 None => return None
                             }
                         }

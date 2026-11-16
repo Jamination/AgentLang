@@ -10,6 +10,9 @@ priv extern "libc.so.6" fn free(p: *u8)
 struct AudioOs {
     pcm: *u8
     buf: []i16
+    // calls of audio_write that wrote: a stall before the second one is the start-up silence
+    // (a long first frame), not counted as an underrun
+    writes: i64
 }
 
 // why the last audio_open failed
@@ -69,7 +72,9 @@ fn audio_write(d: *AudioDevice, m: *Mixer, count: i64) -> i64 {
         while sent < n {
             r := snd_pcm_writei(d.os.pcm, cast[*u8](ptr(d.os.buf[sent * d.channels..])), u64(n - sent))
             if r < 0 {
-                d.underruns += 1
+                if d.os.writes >= 2 {
+                    d.underruns += 1
+                }
                 if snd_pcm_recover(d.os.pcm, i32(r), 1) < 0 {
                     return total + sent
                 }
@@ -78,6 +83,9 @@ fn audio_write(d: *AudioDevice, m: *Mixer, count: i64) -> i64 {
             sent += r
         }
         total += n
+    }
+    if total > 0 {
+        d.os.writes += 1
     }
     total
 }
@@ -90,7 +98,9 @@ fn audio_pump(d: *AudioDevice, m: *Mixer) -> i64 {
     }
     avail := snd_pcm_avail_update(d.os.pcm)
     if avail < 0 {
-        d.underruns += 1
+        if d.os.writes >= 2 {
+            d.underruns += 1
+        }
         if snd_pcm_recover(d.os.pcm, i32(avail), 1) < 0 {
             return 0
         }
