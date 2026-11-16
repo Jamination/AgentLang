@@ -53,8 +53,6 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   block, and a compile error naming the first field whose AL offset (or array stride) differs
   from the rules (a `vec3` before a field the rules place elsewhere, an `[N]f32` under std140,
   a `bool`). Constant-evaluated: `const UBO_SIZE = std140_size[Ubo]()`.
-- `--out-dir DIR` (and `ALC_OUT_DIR=DIR` for every command): the executable of build, run and
-  test goes to DIR (created if needed) when `-o` is not given, instead of next to the source.
 - `std.libc` is available for `--target windows`, bound to `msvcrt.dll`: `strlen`, `getenv`,
   `malloc`, `free`, `qsort`, `printf`, `fprintf`, `sprintf`, `sscanf`, `fflush`, `cosf`,
   `getpid` as on Linux, and `_snprintf`, `_fileno`, `_setmode`, `__iob_func` of that library.

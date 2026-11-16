@@ -695,8 +695,7 @@ fn main() {
 
 **Windows** (`--target windows`):
 
-- `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`; with `--out-dir dir`
-  or `ALC_OUT_DIR=dir` in that directory instead of the source's), a Windows x86-64
+- `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`), a Windows x86-64
   console executable (`--gui`: a GUI one, see [Windows](#windows)). On Linux, `alc run` / `alc test` run it under Wine when `ALC_WINE=1` and
   `WINEPREFIX` are set (no display: no window can open); otherwise they only build it.
 - Functions and variables are imported from DLLs (`extern "kernel32.dll" fn GetStdHandle(n: u32) ->

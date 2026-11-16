@@ -13,8 +13,6 @@ priv extern "kernel32.dll" fn GetEnvironmentStringsW() -> *u16
 priv extern "kernel32.dll" fn FreeEnvironmentStringsW(block: *u16) -> i32
 priv extern "kernel32.dll" fn GetActiveProcessorCount(group: u16) -> u32
 priv extern "kernel32.dll" fn DeleteFileW(name: *u16) -> i32
-priv extern "kernel32.dll" fn CreateDirectoryW(name: *u16, security: i64) -> i32
-priv extern "kernel32.dll" fn GetFileAttributesW(name: *u16) -> u32
 
 priv const INVALID_HANDLE = -1
 priv const INFINITE: u32 = 0xFFFFFFFF
@@ -141,16 +139,6 @@ fn make_executable(path: str) -> bool {
 
 fn unlink_file(path: str) -> bool {
     return DeleteFileW(__win_wide(path)) != 0
-}
-
-fn make_dir(path: str) -> bool {
-    w := __win_wide(path)
-    if CreateDirectoryW(w, 0) != 0 {
-        return true
-    }
-    // (an existing directory: FILE_ATTRIBUTE_DIRECTORY; INVALID_FILE_ATTRIBUTES has it too)
-    a := GetFileAttributesW(w)
-    return a != 0xFFFFFFFF && (a & 0x10) != 0
 }
 
 // "volume serial number:file index" of the file that path names (following links)

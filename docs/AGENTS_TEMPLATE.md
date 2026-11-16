@@ -2,13 +2,13 @@ A game written from scratch in AL (https://github.com/Jamination/AgentLang), for
 
 ## Compiler
 
-- Version: **0.3.0**. Use `alc-0.3.0` (or `alc`, if `alc --version` prints `alc 0.3.0`).
-- Build: `alc-0.3.0 build src/main.al -o build/<game>`
-- Run: `alc-0.3.0 run src/main.al -- <args>`
-- Tests: `alc-0.3.0 test src/main.al` (every `test` block), plus `alc-0.3.0 run src/main.al -- --headless`
-- Check without building: `alc-0.3.0 check src/main.al` (`--all-targets` if the game has `when` branches)
-- A newer compiler may break code: read the `Breaking` sections of the AL `CHANGELOG.md` before
-  switching, then change the version above.
+- Build: `alc build src/main.al -o build/<game>`
+- Run: `alc run src/main.al -o build/<game> -- <args>`
+- Tests: `alc test src/main.al -o build/<game>.test` (every `test` block), plus `alc run src/main.al -o build/<game> -- --headless`
+- Check without building: `alc check src/main.al` (`--all-targets` if the game has `when` branches)
+- Always pass `-o build/...` (with `.exe` on Windows): without it, run and test write their
+  executables next to the sources.
+- After updating the compiler, read the `Breaking` sections of the AL `CHANGELOG.md` that are new.
 
 ## Read first, in this order
 
@@ -32,6 +32,10 @@ Fine print: `docs/DETAILS.md`. Library overview: `docs/STDLIB.md`.
   debug-utils messenger in debug builds (`-D DEBUG`), and treat every message as a bug.
 - **Shaders:** GLSL in `shaders/`, compiled with `glslc` to SPIR-V and built in with
   `embed("shaders/x.vert.spv")`; keep the compile commands in a build script.
+- **GPU structs:** declare each uniform / storage buffer struct with
+  `const X_SIZE = std140_size[X]()` (or `std430_size`): the compiler checks its layout.
+- **Memory bugs:** when something crashes a few frames after the real mistake, run with
+  `ALC_CHECK_MEMORY=1`: it stops at the use of memory released by `frame_end()` / `release()`.
 - **A headless mode** (`--headless`): scripted input, a fixed number of frames, no window, no
   audio device; prints checksums of the game state. Use it to test changes; it is what CI runs.
 - **Deterministic simulation:** fixed time step (`std.time`), seeded random numbers (`std.rand`).

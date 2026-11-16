@@ -107,15 +107,6 @@ fn unlink_file(path: str) -> bool {
     return syscall(87, cstr(path)) == 0
 }
 
-fn make_dir(path: str) -> bool {
-    r := syscall(83, cstr(path), 511)          // mkdir, mode 0777 (less the umask)
-    if r == 0 {
-        return true
-    }
-    st: [18]i64
-    return r == -17 && syscall(4, cstr(path), ptr(st)) == 0 && (st[3] & 0xF000) == 0x4000
-}
-
 // "device:inode" of the file that path names (following links)
 fn file_id(path: str) -> (str, bool) {
     st: [18]i64
