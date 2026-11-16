@@ -830,36 +830,31 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
         return p.err[Decl]("`priv` is written first: `priv inline fn name(...)`")
     }
     ext: Opt[str] = None
+    ext_const := false
     if p.eat_kw(KW_EXTERN) {
         // extern "libfoo.so.1" fn name(a: A) -> R     (a C function; no body)
         // extern "libfoo.so.1" name: T                (a C variable; no initializer)
-        // extern "libfoo.so.1", "foo.dll" fn ...      (one library per system: the build
-        //                                              takes the one of its target, lower.al)
-        names := vec[str]()
-        loop {
-            match p.peek() {
-                Str(s) => {
-                    p.bump()
-                    name := utf8_lossy(s)
-                    if len(name) == 0 || find(name, "\n") >= 0 {
-                        return p.err[Decl]("a library name after `extern` is a file name such as `libc.so.6` or `kernel32.dll`")
-                    }
-                    names.push(name)
-                }
-                _ => return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() -> i32`")
+        // extern LIB fn ...                           (LIB: a str constant, chosen per
+        //                                              system with `when`; lower.al)
+        match p.peek() {
+            Str(s) => {
+                p.bump()
+                ext = Some(utf8_lossy(s))
             }
-            if !p.eat_p(',') {
-                break
+            Id(n) => {
+                p.bump()
+                ext = Some(n)
+                ext_const = true
             }
+            _ => return p.err[Decl]("expected a library name string after `extern`, e.g. `extern \"libc.so.6\" fn getpid() -> i32`")
         }
-        // several names are kept on separate lines of the one string
-        ext = Some(join(names[..], "\n"))
     }
     if p.is_kw(KW_FN) {
         f, ok := p.fn_decl(pos, inl, ext)
         if !ok {
             return fail[Decl]()
         }
+        f.ext_const = ext_const
         return (Fn(f), true)
     }
     if is_some(ext) && inl == 0 && tk_id(p.peek()) {
@@ -873,6 +868,7 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
                     p.errs.push(Diag{pos: pos, msg: fmt("the `extern` variable `", g.name, "` has no initializer: its value is in the library; write `extern \"lib\" ", g.name, ": T`")})
                 }
                 g.ext = ext
+                g.ext_const = ext_const
                 (Global(g), true)
             }
             _ => (d, true)

@@ -147,6 +147,7 @@ priv fn priv_names(r: *PrivCx, v: *Vec[str]) {
 // a function, top-level or nested: its name, parameters, types and body
 priv fn priv_fn(r: *PrivCx, f: *FnDecl) -> bool {
     f.name = priv_name(r, f.name)
+    f.ext = priv_ext(f.ext, f.ext_const)
     priv_names(r, &f.tparams)
     for i in 0..f.params.len {
         f.params[i].0 = priv_name(r, f.params[i].0)
@@ -186,6 +187,7 @@ priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
         }
         Global(g) => {
             g.name = priv_name(r, g.name)
+            g.ext = priv_ext(g.ext, g.ext_const)
             g.ty = opt_type(r, g.ty)
             g.init = opt_expr(r, g.init)
             Global(g)
@@ -477,5 +479,19 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
         // a nested function is a local name: renamed like the variables of that spelling
         Fn(d) => priv_fn(r, d)
         When(w) => when_arms(r, w)
+    }
+}
+
+// `extern LIB`: the constant LIB as this file names it (a private one is renamed)
+priv fn priv_ext(ext: Opt[str], named: bool) -> Opt[str] {
+    if !named {
+        return ext
+    }
+    return match ext {
+        Some(n) => {
+            nn := renamed(n)
+            if nn != "" { Some(nn) } else { ext }
+        }
+        None => None
     }
 }

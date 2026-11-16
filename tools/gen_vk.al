@@ -29,8 +29,9 @@ priv const EXTENSIONS = [_]str{
 }
 priv const REGISTRY = "/usr/share/vulkan/registry/vk.xml"
 priv const LOADER = "/usr/lib/libvulkan.so.1"
-// the loader of each system: `extern "libvulkan.so.1", "vulkan-1.dll" fn ...` (a build takes the
-// one of its target); the commands of a window-system extension name only the loader of its system
+// the loader of each system: std/vk.al chooses one with `when` as the constant VULKAN, which
+// the commands name (`extern VULKAN fn ...`); those of a window-system extension name the
+// loader of their system directly
 priv const LIB = "libvulkan.so.1"
 priv const LIB_WINDOWS = "vulkan-1.dll"
 priv const HELPERS = embed("vk_helpers.al")
@@ -782,6 +783,8 @@ const VK_NULL_HANDLE: u64 = 0`)
     }
 
     out.push("\n// ---- commands ----")
+    out.push(fmt("// the Vulkan loader of the target system\nwhen TARGET_OS == Windows {\n    priv const VULKAN = \"",
+        LIB_WINDOWS, "\"\n} else {\n    priv const VULKAN = \"", LIB, "\"\n}"))
     loader, loader_known := exported(LOADER)
     missing := vec[str]()
     for name in r.req_commands {
@@ -800,7 +803,7 @@ const VK_NULL_HANDLE: u64 = 0`)
         // the loader read is the Linux one: it does not export the commands of Windows
         platform := r.cmd_platform.get_or(name, "")
         libs := match platform {
-            "" => fmt("\"", LIB, "\", \"", LIB_WINDOWS, "\"")
+            "" => "VULKAN"
             "win32" => fmt("\"", LIB_WINDOWS, "\"")
             _ => fmt("\"", LIB, "\"")
         }

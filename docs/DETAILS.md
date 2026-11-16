@@ -631,11 +631,12 @@ fn main() {
 }
 ```
 
-- **One library per system.** `extern "libvulkan.so.1", "vulkan-1.dll" fn vkDeviceWaitIdle(...)`
-  names a library for each system; a build takes the first DLL for `--target windows` and the
-  first other name for Linux (a lone name is used for every target, and the linker rejects a
-  `.dll` in a Linux build and anything else in a Windows build, if the function is called).
-  One declaration then serves both systems, without a `when`.
+- **The library as a constant.** After `extern` stands the library name or the name of a `str`
+  constant: `extern LIBC fn strlen(s: *u8) -> u64`. A `when` chooses the constant per system,
+  so one set of declarations serves every system:
+  `when TARGET_OS == Windows { priv const LIBC = "msvcrt.dll" } else { priv const LIBC =
+  "libc.so.6" }` (std.libc and std.vk do this). Another kind of constant, or a name that is
+  no constant, is a compile error.
 - Parameters and results must be integers, `bool`, `f32`/`f64`, pointers or function values;
   C structs are passed by pointer (AL structs have C layout: natural alignment). C `int` is
   `i32`, `long`/`size_t` are `i64`/`u64`, `char*` is `*u8`, opaque handles are `*u8`.

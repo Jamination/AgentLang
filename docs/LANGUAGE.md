@@ -896,4 +896,4 @@ home := from_cstr(getenv(ptr("HOME")))     // literals and str constants are NUL
 ```
 
 Parameters and results are integers, `bool`, floats, pointers or function values (C `int` is `i32`, `long` is `i64`, `char*` is `*u8`; structs go by pointer). A program that reaches an
-`extern` function is dynamically linked; every other program is static. `extern "libfoo.so.1", "foo.dll" fn f()` names one library per system (a build takes its target's). More: [DETAILS.md](DETAILS.md#c-interop).
+`extern` function is dynamically linked; every other program is static. `extern LIB fn f()` takes the library from a `str` constant (one per system with `when`). More: [DETAILS.md](DETAILS.md#c-interop).

@@ -170,21 +170,29 @@ fn lower_builtin_type(name: str) -> Opt[i64] {
     }
 }
 
-// The library of `extern "a", "b" fn` for the target (the parser keeps the names on separate
-// lines): with --target windows the first DLL, else the first name that is not one. With no
-// name for the target the first is kept, and the linker reports it if the import is used.
-priv fn target_lib(names: str) -> str {
-    if find(names, "\n") < 0 {
-        return names
+// The library of `extern "lib"`, or of `extern LIB`: the value of the str constant LIB, which a
+// `when` may choose per system (`when TARGET_OS == Windows { const LIB = "foo.dll" } else
+// { const LIB = "libfoo.so.1" }`). "" after an error.
+priv fn extern_lib(self: *Cx, pos: Pos, ext: str, named: bool) -> str {
+    if !named {
+        return ext
     }
-    libs := split(names, '\n')
-    for lib in libs {
-        dll := len(lib) > 4 && to_lower(lib[len(lib) - 4..]) == ".dll"
-        if dll == (target_os == TargetWindows) {
-            return lib
+    d, ok := self.const_decl(ext)
+    if !ok {
+        self.err(pos, fmt("`extern ", ast_plain(ext), "`: no constant `", ast_plain(ext), "`; the library is a string (`extern \"libc.so.6\"`) or the name of a str constant"))
+        return ""
+    }
+    match self.const_value(d, ast_plain(ext)) {
+        Some((_, CV.Str(s))) => {
+            if len(s) == 0 {
+                self.err(pos, fmt("`extern ", ast_plain(ext), "`: the constant is empty: it names the library (`\"libc.so.6\"`, `\"kernel32.dll\"`)"))
+            }
+            return s
         }
+        Some(_) => self.err(pos, fmt("`extern ", ast_plain(ext), "`: the constant `", ast_plain(ext), "` is not a string: it names the library (`\"libc.so.6\"`, `\"kernel32.dll\"`)"))
+        None => {}
     }
-    libs[0]
+    return ""
 }
 
 // f64 to i64 at compile time, as the processor converts at run time: NaN and values out of
@@ -1278,7 +1286,7 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
             }
             got := self.got_global(d.name)
             f.ext = Some(self.module.externs.len)
-            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: target_lib(lib), got: got, variadic: d.variadic})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: self.extern_lib(d.pos, lib, d.ext_const), got: got, variadic: d.variadic})
         }
         None => {}
     }
@@ -1392,7 +1400,7 @@ priv fn global_new(self: *Cx, d: *GlobalDecl) -> Opt[(i64, i64)] {
             // a C variable of a shared library: the program has only its import slot, which
             // the dynamic loader fills with the variable's address (no copy relocation)
             got := self.got_global(d.name)
-            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: target_lib(lib), got: got, data: true})
+            self.module.externs.push(ExternFn{name: ast_plain(d.name), lib: self.extern_lib(d.pos, lib, d.ext_const), got: got, data: true})
             self.ext_gots.set(got, true)
             self.globals.set(d.name, (ty, got))
             return Some((ty, got))

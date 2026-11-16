@@ -20,8 +20,8 @@ about 1200 constants and 237 functions. Using it costs about 10 ms of compile ti
 A program that calls a Vulkan function is dynamically linked against the Vulkan loader,
 `libvulkan.so.1` on Linux and `vulkan-1.dll` on Windows (installed with the graphics driver),
 which must be there together with a driver; a program that calls no Vulkan function imports
-nothing of it. Every command is declared with both names,
-`extern "libvulkan.so.1", "vulkan-1.dll" fn vkXxx(...)`, and a build takes the one of its target
+nothing of it. A `when` at the top of the commands sets the private constant `VULKAN` to the
+loader of the target, and every command names it: `extern VULKAN fn vkXxx(...)`
 ([C interop](../DETAILS.md#c-interop)). The commands of a window-system extension name only
 the loader of their system: `vkCreateWin32SurfaceKHR` in a Linux build, or
 `vkCreateXlibSurfaceKHR` in a Windows build, is a compile error that names the library.
@@ -47,7 +47,7 @@ the loader of their system: `vkCreateWin32SurfaceKHR` in a Linux build, or
 | array parameter `const float blendConstants[4]` | `*f32` |
 | union (`VkClearValue`, `VkClearColorValue`) | `struct { data: [N]u32 }` of the union's size and alignment, plus one constructor per member (below) |
 | struct with bit-fields | not bound (a comment in `std/vk.al` names it; none in the current selection) |
-| command | `extern "libvulkan.so.1", "vulkan-1.dll" fn vkXxx(...)` with the C parameter names (window-system commands: only the library of their system) |
+| command | `extern VULKAN fn vkXxx(...)` with the C parameter names (`VULKAN`: the loader of the target; window-system commands name the library of their system) |
 | `VK_API_VERSION_1_x`, `VK_NULL_HANDLE`, `VK_WHOLE_SIZE`, `VK_KHR_SWAPCHAIN_EXTENSION_NAME`, ... | constants (`u32`, `u64`, `str`) |
 | window-system types | `Display*`, `xcb_connection_t*`, `wl_display*`, `wl_surface*`, `HINSTANCE`, `HWND` are `*u8`; `Window`, `VisualID` are `u64`; `xcb_window_t`, `xcb_visualid_t` are `u32` |
 

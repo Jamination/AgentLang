@@ -162,7 +162,9 @@ struct FnDecl {
     pos: Pos
     inl: i64 // 1 = always inline, -1 = never, 0 = auto
     // `extern "lib" fn name(params) -> R`: a C function in the named shared library (no body)
+    // (`extern LIB fn`: ext is the name of a str constant, ext_const is set; lower.al)
     ext: Opt[str]
+    ext_const: bool
     // the parameter list of a C function ends in `...`: more arguments may follow, passed
     // with the C default argument promotions (lower_call.al: `vararg`)
     variadic: bool
@@ -205,7 +207,9 @@ struct GlobalDecl {
     // declared with `priv`: visible only in its own file (see priv.al)
     is_priv: bool
     // `extern "lib" name: T`: a C variable of the named shared library (no initializer)
+    // (`extern LIB name: T`: ext is the name of a str constant, ext_const is set)
     ext: Opt[str]
+    ext_const: bool
 }
 
 struct TestDecl {

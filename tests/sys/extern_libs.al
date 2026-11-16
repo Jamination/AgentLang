@@ -1,8 +1,13 @@
-// `extern "a", "b" fn`: one library per system, one declaration for both. A build for Windows
-// imports from the DLL, a Linux build from the other name (here the C library of each system).
-extern "libc.so.6", "msvcrt.dll" fn strlen(s: *u8) -> u64
-extern "libc.so.6", "msvcrt.dll" fn abs(x: i32) -> i32
-// a lone name is used for every target (here only called on its system)
+// `extern LIB fn`: the library is a str constant, chosen per system with `when`. One declaration
+// serves both systems (here the C library of each).
+when TARGET_OS == Windows {
+    priv const LIBC = "msvcrt.dll"
+} else {
+    priv const LIBC = "libc.so.6"
+}
+extern LIBC fn strlen(s: *u8) -> u64
+extern LIBC fn abs(x: i32) -> i32
+// a literal name is used for every target (here only called on its system)
 extern "kernel32.dll" fn GetCurrentProcessId() -> u32
 extern "libc.so.6" fn getpid() -> i32
 

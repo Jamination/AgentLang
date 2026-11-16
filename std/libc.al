@@ -8,26 +8,38 @@
 // from AL's own: `flush()` before and `fflush(nil)` after keep the order.
 // The same on both systems: strlen, getenv, malloc, free, qsort, printf, fprintf, sprintf,
 // sscanf, fflush, cosf, getpid, c_stdout, c_stderr. More: docs/std/libc.md.
+
+// the C library and the maths library of each system
+when TARGET_OS == Windows {
+    priv const LIBC = "msvcrt.dll"
+    priv const LIBM = "msvcrt.dll"
+} else {
+    priv const LIBC = "libc.so.6"
+    priv const LIBM = "libm.so.6"
+}
+
+extern LIBC fn strlen(s: *u8) -> i64
+extern LIBC fn getenv(name: *u8) -> *u8
+extern LIBC fn malloc(n: i64) -> *u8
+extern LIBC fn free(p: *u8)
+extern LIBC fn qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)
+extern LIBC fn printf(format: *u8, ...) -> i32
+extern LIBC fn fprintf(stream: *u8, format: *u8, ...) -> i32
+extern LIBC fn sprintf(buf: *u8, format: *u8, ...) -> i32
+extern LIBC fn sscanf(s: *u8, format: *u8, ...) -> i32
+extern LIBC fn fflush(stream: *u8) -> i32
+extern LIBM fn cosf(x: f32) -> f32
+
+// what differs
 when TARGET_OS == Windows {
     extern "msvcrt.dll" fn _getpid() -> i32
-    extern "msvcrt.dll" fn strlen(s: *u8) -> i64
-    extern "msvcrt.dll" fn getenv(name: *u8) -> *u8
-    extern "msvcrt.dll" fn malloc(n: i64) -> *u8
-    extern "msvcrt.dll" fn free(p: *u8)
-    extern "msvcrt.dll" fn qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)
-    extern "msvcrt.dll" fn printf(format: *u8, ...) -> i32
-    extern "msvcrt.dll" fn fprintf(stream: *u8, format: *u8, ...) -> i32
-    extern "msvcrt.dll" fn sprintf(buf: *u8, format: *u8, ...) -> i32
     // not C's snprintf: no NUL when the text takes n bytes or more, and then the result is -1
     extern "msvcrt.dll" fn _snprintf(buf: *u8, n: i64, format: *u8, ...) -> i32
-    extern "msvcrt.dll" fn sscanf(s: *u8, format: *u8, ...) -> i32
-    extern "msvcrt.dll" fn fflush(stream: *u8) -> i32
     // the three standard streams, an array of FILE (48 bytes each): stdin, stdout, stderr
     extern "msvcrt.dll" fn __iob_func() -> *u8
     extern "msvcrt.dll" fn _fileno(stream: *u8) -> i32
     // _setmode(_fileno(c_stdout()), O_BINARY): the stream writes "\n" as it is, not as "\r\n"
     extern "msvcrt.dll" fn _setmode(fd: i32, mode: i32) -> i32
-    extern "msvcrt.dll" fn cosf(x: f32) -> f32
 
     const O_BINARY: i32 = 0x8000
     const O_TEXT: i32 = 0x4000
@@ -46,24 +58,13 @@ when TARGET_OS == Windows {
     }
 } else {
     extern "libc.so.6" fn getpid() -> i32
-    extern "libc.so.6" fn strlen(s: *u8) -> i64
-    extern "libc.so.6" fn getenv(name: *u8) -> *u8
-    extern "libc.so.6" fn malloc(n: i64) -> *u8
-    extern "libc.so.6" fn free(p: *u8)
-    extern "libc.so.6" fn qsort(base: *u8, n: i64, size: i64, cmp: fn(*u8, *u8) -> i32)
-    extern "libc.so.6" fn printf(format: *u8, ...) -> i32
-    extern "libc.so.6" fn fprintf(stream: *u8, format: *u8, ...) -> i32
     extern "libc.so.6" fn dprintf(fd: i32, format: *u8, ...) -> i32
-    extern "libc.so.6" fn sprintf(buf: *u8, format: *u8, ...) -> i32
     extern "libc.so.6" fn snprintf(buf: *u8, n: i64, format: *u8, ...) -> i32
-    extern "libc.so.6" fn sscanf(s: *u8, format: *u8, ...) -> i32
-    extern "libc.so.6" fn fflush(stream: *u8) -> i32
     extern "libc.so.6" stdout: *u8
     extern "libc.so.6" stderr: *u8
     extern "libc.so.6" fn dlopen(path: *u8, flags: i32) -> *u8
     extern "libc.so.6" fn dlsym(handle: *u8, name: *u8) -> *u8
     extern "libc.so.6" fn dlerror() -> *u8
-    extern "libm.so.6" fn cosf(x: f32) -> f32
 
     // C's stdout and stderr, under the names that also exist on Windows
     fn c_stdout() -> *u8 {

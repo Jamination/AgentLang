@@ -1,1 +1,2 @@
-extern_libs.al:2:21: error: expected a library name string after `extern`
+extern_libs.al:3:1: error: `extern NO_SUCH_LIB`: no constant `NO_SUCH_LIB`
+extern_libs.al:4:1: error: `extern COUNT`: the constant `COUNT` is not a string

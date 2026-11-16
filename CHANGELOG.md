@@ -35,13 +35,14 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   ...}`.
 
 ### Added
-- `std.vk` builds for `--target windows`: every command is declared for both loaders
-  (`extern "libvulkan.so.1", "vulkan-1.dll" fn ...`), and `VK_KHR_win32_surface` is bound
+- `std.vk` builds for `--target windows`: every command names the loader of the
+  target (`extern VULKAN fn ...`, with `VULKAN` chosen by a `when`), and `VK_KHR_win32_surface` is bound
   (`VkWin32SurfaceCreateInfoKHR`, `vkCreateWin32SurfaceKHR`,
   `vkGetPhysicalDeviceWin32PresentationSupportKHR`, which name `vulkan-1.dll` alone). One
   `use std.vk` serves Linux and Windows; std.window has `win32_hinstance(w)` for the surface.
-- `extern` takes one library per system: `extern "libfoo.so.1", "foo.dll" fn f()`. A
-  Windows build imports from the first DLL, a Linux build from the first other name.
+- `extern` takes the name of a `str` constant as well as a library name: `extern LIBC fn ...`,
+  with `LIBC` chosen per system by a `when`. std.libc declares the functions both systems
+  share once this way.
 - `ALC_CHECK_MEMORY=1` in the environment of a program (no rebuild needed) catches the use of
   released memory: memory given back by `release`, `frame_end` or `reset` of a Region is never
   handed out again, its pages are taken away and the rest is filled with `0xDE` bytes, and the
