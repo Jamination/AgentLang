@@ -11,7 +11,8 @@ sequences are those of the C API, so the Vulkan specification and any C tutorial
 directly. What the module adds is only what the C headers themselves provide or what AL needs
 to express a C construct (see [Glue](#glue)). Device set-up, memory allocation, error policy,
 shader loading and rendering are the program's code: [examples/vk_renderer](#example-walk-through-examplesvk_renderer)
-shows all of it written on the bindings alone.
+shows all of it written on the bindings alone. [std.gfx](gfx.md) is a 2D renderer on these
+bindings (its Linux backend) for games that need no more than that.
 
 The module is generated: `std/vk.al` is written by `tools/gen_vk.al` from the Khronos registry
 (`vk.xml`), followed by the version macros of `tools/vk_helpers.al`. It contains 306 structs,

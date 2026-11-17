@@ -57,6 +57,7 @@ priv struct Vk {
     sc_format: i32
     sc_extent: VkExtent2D
     sc_vsync: bool
+    sc_window: (i64, i64)           // the window's size the swapchain was made for
     nimages: i64                    // swapchain images (fixed arrays: rebuilding allocates nothing)
     images: [MAX_IMAGES]u64
     views: [MAX_IMAGES]u64
@@ -614,6 +615,7 @@ priv fn build_swapchain(g: *Gfx, v: *Vk) -> bool {
     v.swapchain = handle
     v.sc_extent = extent
     v.sc_vsync = g.vsync
+    v.sc_window = (ww, wh)
     n: u32
     vkGetSwapchainImagesKHR(v.device, handle, &n, nil)
     assert n <= MAX_IMAGES, "gfx: more swapchain images than expected"
@@ -719,7 +721,7 @@ fn begin_frame(g: *Gfx, clear: u32) -> bool {
             sleep_ms(10)
             return false
         }
-        if v.rebuild || ww != g.width || wh != g.height || g.vsync != v.sc_vsync {
+        if v.rebuild || (ww, wh) != v.sc_window || g.vsync != v.sc_vsync {
             if !build_swapchain(g, v) {
                 if g.lost == "" { sleep_ms(10) }
                 return false
