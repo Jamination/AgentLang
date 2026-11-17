@@ -200,7 +200,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     // -g: the DWARF sections (src/dwarf.al), after the others
     dsecs := vec[(str, Vec[u8])]()
     if dbg_on {
-        dsecs = dwarf_sections(m, out, &func_addr, start_addr, start_addr + text.len, start_addr, false)
+        dsecs = dwarf_sections(m, out, &func_addr, &gaddr, start_addr, start_addr + text.len, start_addr, false)
         for s in dsecs {
             shstr = fmt(shstr, s.0, "\0")
         }

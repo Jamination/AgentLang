@@ -328,7 +328,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     coff_strs := vec[u8]()
     if dbg_on {
         put32(&coff_strs, 0)
-        for s in dwarf_sections(m, out, &func_addr, base + text_rva, base + text_rva + text.len, -1, true) {
+        for s in dwarf_sections(m, out, &func_addr, &gaddr, base + text_rva, base + text_rva + text.len, -1, true) {
             l := secs.last()
             name := fmt("/", coff_strs.len)
             coff_strs.extend(s.0)
@@ -477,7 +477,7 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
             func_rva[c.fid] = func_addr[c.fid] - base
         }
         sh_at := 64 + 4 + 20 + 240
-        dbg_pdb = pdb_build(m, out, &func_rva, text_rva, file[sh_at..sh_at + 40 * secs.len], guid.items())
+        dbg_pdb = pdb_build(m, out, &func_rva, text_rva, &gaddr, base, file[sh_at..sh_at + 40 * secs.len], guid.items())
     }
     return (file.items(), "")
 }

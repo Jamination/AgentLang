@@ -98,6 +98,7 @@ priv const AB_VARIANT_PART = 20
 priv const AB_VARIANT = 21
 priv const AB_TAG_MEMBER = 22
 priv const AB_INLINED = 23
+priv const AB_GLOBAL = 24
 
 // the abbreviation table: (code, tag, children, [(attribute, form)])
 priv fn abbrevs() -> Vec[u8] {
@@ -141,6 +142,7 @@ priv fn abbrevs() -> Vec[u8] {
     one(&a, AB_VARIANT, DW_TAG_variant, true, []i64{DW_AT_discr_value, DW_FORM_udata})
     one(&a, AB_TAG_MEMBER, DW_TAG_member, false, []i64{DW_AT_name, DW_FORM_strp, DW_AT_type, DW_FORM_ref4, DW_AT_data_member_location, DW_FORM_udata,
         DW_AT_artificial, DW_FORM_flag_present})
+    one(&a, AB_GLOBAL, DW_TAG_variable, false, []i64{DW_AT_name, DW_FORM_strp, DW_AT_type, DW_FORM_ref4, DW_AT_external, DW_FORM_flag_present, DW_AT_location, DW_FORM_exprloc})
     one(&a, AB_INLINED, 0x1d, true, []i64{DW_AT_name, DW_FORM_strp, 0x58, DW_FORM_udata, 0x59, DW_FORM_udata, DW_AT_ranges, DW_FORM_sec_offset})
     a.push(0)
     return a
@@ -838,7 +840,7 @@ priv fn frame_cie() -> Vec[u8] {
 // The DWARF sections of the program whose functions are at func_addr (by function), in the
 // code section from text_lo to text_hi. start_at >= 0 (ELF): the address of the start code
 // (10 bytes before the functions), whose frame ends the stack.
-fn dwarf_sections(m: *Module, out: *Output, func_addr: *Vec[i64], text_lo: i64, text_hi: i64, start_at: i64, windows: bool) -> Vec[(str, Vec[u8])] {
+fn dwarf_sections(m: *Module, out: *Output, func_addr: *Vec[i64], gaddr: *Vec[i64], text_lo: i64, text_hi: i64, start_at: i64, windows: bool) -> Vec[(str, Vec[u8])] {
     d := Dw{m: m, types: &dbg_cx.types, windows: windows, text_lo: text_lo, tdie: vec_fill(dbg_cx.types.kinds.len, -1)}
     // the compile unit
     put32(&d.info, 0) // unit_length (below)
@@ -870,6 +872,20 @@ fn dwarf_sections(m: *Module, out: *Output, func_addr: *Vec[i64], text_lo: i64, 
         line_seq(&d, &prog, &rows, at, c.code.bytes.len)
         fn_die(&d, c.fid, &c.code, at, &rows)
         fde(&frame, at, &c.code)
+    }
+    // the global variables in the image (not the thread-local ones, not C variables)
+    for n in dbg_cx.globals.keys() {
+        tg, _ := dbg_cx.globals.get(n)
+        ty, gi := tg
+        if gi < 0 || gi >= m.globals.len || m.globals[gi].tls || dbg_cx.ext_gots.has(gi) || gaddr[gi] == 0 || !has_die(ty) {
+            continue
+        }
+        uleb(&d.info, AB_GLOBAL)
+        strp(&d, ast_plain_text(n))
+        tref(&d, ty)
+        uleb(&d.info, 9)
+        d.info.push(0x03) // DW_OP_addr
+        put64(&d.info, gaddr[gi])
     }
     // the types the functions refer to, and the ones those refer to
     qi := 0

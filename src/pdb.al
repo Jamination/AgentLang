@@ -30,6 +30,10 @@ priv fn cstr_out(v: *Vec[u8], s: str) {
     v.push(0)
 }
 
+priv fn u32_at(b: []u8, o: i64) -> i64 {
+    return i64(b[o]) | i64(b[o + 1]) << 8 | i64(b[o + 2]) << 16 | i64(b[o + 3]) << 24
+}
+
 // LLVM's hashStringV1 (the hash of PDB name tables)
 priv fn hash_v1(s: str) -> u32 {
     r: u32 = 0
@@ -639,7 +643,7 @@ priv fn src_path(k: i64, cwd: str) -> str {
 // The PDB of the executable whose functions are at the RVAs func_rva, its code section (the
 // first section) at text_rva, with the section headers `sh` (40 bytes each); guid: 16 bytes,
 // age 1.
-fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, sh: []u8, guid: []u8) -> Vec[u8] {
+fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr: *Vec[i64], base: i64, sh: []u8, guid: []u8) -> Vec[u8] {
     cwd := __os_current_dir()
     names := Names{}
     cv := Cv{types: &dbg_cx.types}
@@ -812,6 +816,31 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, sh: [
         cstr_out(&modinfo, mname)
         while modinfo.len % 4 != 0 {
             modinfo.push(0)
+        }
+    }
+    // the global variables (as in dwarf.al): S_GDATA32 by section and offset
+    for n in dbg_cx.globals.keys() {
+        tg, _ := dbg_cx.globals.get(n)
+        ty, gi := tg
+        if gi < 0 || gi >= m.globals.len || m.globals[gi].tls || dbg_cx.ext_gots.has(gi) || gaddr[gi] == 0 {
+            continue
+        }
+        t := cv_type(&cv, ty)
+        rva := gaddr[gi] - base
+        for i in 0..len(sh) / 40 {
+            va := u32_at(sh, 40 * i + 12)
+            if t != 0 && rva >= va && rva < va + u32_at(sh, 40 * i + 8) {
+                name := ast_plain_text(n)
+                gnames.push(name)
+                goffs.push(syms.len)
+                b := vec[u8]()
+                put32(&b, t)
+                put32(&b, rva - va)
+                put16(&b, i + 1)
+                cstr_out(&b, name)
+                record(&syms, 0x110d, b.items())
+                break
+            }
         }
     }
     // section contributions, by offset
