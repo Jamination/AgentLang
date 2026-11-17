@@ -627,6 +627,12 @@ priv fn run_job(j: Job, index: i64) -> Res {
                 env = []str{if cfg.win { "ALC_WINE=1" } else { "ALC_WINE=0" }}
             }
             code := exec(cmd.items(), "", out, path_join(jd, "err"), 0, env)
+            if len(j.no_run) > 0 {
+                r.say(fmt("SKIP unit/", j.name, ": built, not run under the emulator: ", j.no_run))
+                r.skip += 1
+                remove_tree(jd)
+                return r
+            }
             if cfg.arm64 && cfg.can_run && file_exists(bin) {
                 // (`alc test` built the test program and could not run it: the emulator does)
                 run := vec_of(cfg.runner)

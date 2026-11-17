@@ -28,3 +28,5 @@ std/portable_process starts processes
 unit/basic test blocks run in child processes (fork): not emulated
 unit/priv_tests test blocks run in child processes (fork): not emulated
 std/time_huge starts processes
+run/lib_find_linear too slow under the emulator for the 60 s limit
+run/lib_sort_organ too slow under the emulator for the 60 s limit (-O0)

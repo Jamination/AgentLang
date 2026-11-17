@@ -1256,10 +1256,40 @@ priv fn gpath(dfd: i64, p: i64) -> str {
     return gstr(p)
 }
 
-priv fn write_stat(st: i64, mode: i64, size: i64, mtime_ns: i64) {
+// a stand-in for the inode of a file: a number per absolute, normalised path (the compiler
+// tells files apart by device and inode)
+priv inodes: Map[str, i64]
+
+priv fn inode(path: str) -> i64 {
+    p := if len(path) > 0 && (path[0] == '/' || (len(path) > 1 && path[1] == ':')) { path } else { fmt(__os_current_dir(), "/", path) }
+    parts := vec[str]()
+    for c in split(replace(p, "\\", "/"), '/') {
+        if c == "" || c == "." {
+            continue
+        }
+        if c == ".." {
+            if parts.len > 0 {
+                parts.pop()
+            }
+            continue
+        }
+        parts.push(to_lower(c))
+    }
+    key := join(parts.items(), "/")
+    n, has := inodes.get(key)
+    if !has {
+        n = inodes.len + 2
+        inodes.set(key, n)
+    }
+    return n
+}
+
+priv fn write_stat(st: i64, mode: i64, size: i64, mtime_ns: i64, ino: i64) {
     for k in 0..16 {
         wr64(st + 8 * k, 0)
     }
+    wr64(st, 1)
+    wr64(st + 8, ino)
     wr32(st + 16, mode)
     wr32(st + 20, 1)
     wr64(st + 48, size)
@@ -1312,7 +1342,7 @@ priv fn syscall_(t: *Th) -> bool {
             } else {
                 write := flags & 3 != 0
                 h := __os_open(cstr(p), write)
-                r = if h < 0 { h } else { new_fd(Fd{host: h}) }
+                r = if h < 0 { h } else { new_fd(Fd{host: h, dir: p}) }
             }
         }
         57 => {
@@ -1331,7 +1361,7 @@ priv fn syscall_(t: *Th) -> bool {
             // fstat
             h := host_fd(a0)
             if a0 >= 0 && a0 < fds.len && fds[a0].is_dir {
-                write_stat(a1, 0x41ED, 4096, 0)
+                write_stat(a1, 0x41ED, 4096, 0, inode(fds[a0].dir))
                 r = 0
             } else if h < 0 {
                 r = -9
@@ -1339,20 +1369,21 @@ priv fn syscall_(t: *Th) -> bool {
                 size, reg := __os_fstat(h)
                 if size < 0 && !reg {
                     // a terminal or pipe
-                    write_stat(a1, 0x2190, 0, 0)
+                    write_stat(a1, 0x2190, 0, 0, 1000000 + a0)
                 } else {
-                    write_stat(a1, if reg { 0x81A4 } else { 0x1180 }, max(size, 0), 0)
+                    write_stat(a1, if reg { 0x81A4 } else { 0x1180 }, max(size, 0), 0, if len(fds[a0].dir) > 0 { inode(fds[a0].dir) } else { 1000000 + a0 })
                 }
                 r = 0
             }
         }
         79 => {
             // newfstatat(dfd, path, st, flags)
-            kind, size, mtime := __os_stat(cstr(gpath(a0, a1)))
+            p := gpath(a0, a1)
+            kind, size, mtime := __os_stat(cstr(p))
             if kind < 0 {
                 r = -2
             } else {
-                write_stat(a2, if kind == 1 { 0x81A4 } else if kind == 2 { 0x41ED } else { 0x2190 }, size, mtime)
+                write_stat(a2, if kind == 1 { 0x81A4 } else if kind == 2 { 0x41ED } else { 0x2190 }, size, mtime, inode(p))
                 r = 0
             }
         }
@@ -1674,8 +1705,17 @@ priv fn load(path: str, argv: []str) -> *Th {
         }
     }
     add_region(BASE, BASE + size, img - BASE, BASE, BASE + size)
-    // the stack: 256 MiB, committed as it is used, the top committed now
-    ssize := 256 << 20
+    // the stack: 8 MiB as Linux gives by default (A64EMU_STACK_MB=n: n MiB), committed as it
+    // is used. (getrlimit reports no limit: the compiler then does not start itself again for
+    // a bigger stack, which the emulator could not do; give it one with A64EMU_STACK_MB.)
+    ssize := 8 << 20
+    sv, sset := env_get("A64EMU_STACK_MB")
+    if sset {
+        mb, mok := parse_i64(sv)
+        if mok && mb >= 1 && mb <= 4096 {
+            ssize = mb << 20
+        }
+    }
     s := reserve(ssize)
     if s == 0 {
         eprint("a64emu: no memory for the stack")
@@ -1798,10 +1838,13 @@ fn main() -> i64 {
         t := threads[cur]
         t.excl = -1
         for _ in 0..SLICE {
+            at := t.pc
             if !step(t) {
                 break
             }
             if faulted {
+                // (the faulting instruction: step may have moved on)
+                t.pc = at
                 deliver(t)
             }
         }
