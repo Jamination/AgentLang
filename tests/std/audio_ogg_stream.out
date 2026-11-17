@@ -1,0 +1,14 @@
+open true true 44100 2 11025 0
+seeks 60 of 60 false false true 0
+voice 0 true false false true
+voice 1 true true true true
+voice 2 true true true true
+voice 3 true true true true
+loop true true
+replace false true 1
+stopped 0
+allocation-free true true
+end false 0
+closed 0 false
+chained true true
+trailing true true
