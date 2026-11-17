@@ -95,6 +95,7 @@ priv const STD_MODULES = [_](str, str){
     ("audio", embed("../std/audio.al")),
     ("audio_linux", embed("../std/audio_linux.al")),
     ("audio_windows", embed("../std/audio_windows.al")),
+    ("audio_vorbis", embed("../std/audio_vorbis.al")),
     ("vk", embed("../std/vk.al")),
     ("shaderc", embed("../std/shaderc.al")),
     ("dx12", embed("../std/dx12.al")),

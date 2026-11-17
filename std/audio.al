@@ -237,7 +237,24 @@ struct VoiceId {
     serial: u32
 }
 
-// One slot of the voice pool. `pos` and `step` are source frames in 32.32 fixed point.
+// A source of frames that a voice reads while it plays (play_stream), instead of a Sound held
+// in memory: music decoded as it plays, or audio a program generates. `read(ctx, out, n)`
+// writes up to n interleaved frames of `channels` samples into out and returns how many (0 at
+// the end); `rewind(ctx)` goes back to the start for looping (false: it cannot). `buf` is the
+// voice's window of read-ahead frames (at least 2 frames, typically 1024 or more; Ogg streams
+// bring their own); the mixer calls read and rewind from `mix`, so they must not allocate.
+struct AudioStream {
+    ctx: *u8
+    rate: i64
+    channels: i64
+    read: fn(*u8, []f32, i64) -> i64
+    rewind: fn(*u8) -> bool
+    buf: []f32
+}
+
+// One slot of the voice pool. `pos` and `step` are source frames in 32.32 fixed point. A
+// streamed voice plays from stream.buf, of which `have` frames are filled: pos counts from
+// its start.
 priv struct Voice {
     sound: Sound
     pos: i64
@@ -248,6 +265,10 @@ priv struct Voice {
     active: bool
     looped: bool
     paused: bool
+    streamed: bool
+    ended: bool
+    have: i64
+    stream: AudioStream
 }
 
 // Software mixer: sums the playing voices into an output stream of `rate` Hz with `channels`
@@ -299,6 +320,33 @@ fn play(m: *Mixer, s: Sound, volume: f32, pan: f32, pitch: f32, looped: bool) ->
         if !v.active {
             m.serial += 1
             *v = Voice{sound: s, step: audio_step(m, s, pitch), volume: volume, pan: pan, serial: m.serial, active: true, looped: looped}
+            return VoiceId{i32(i), m.serial}
+        }
+    }
+    VoiceId{}
+}
+
+// Starts playing a stream: like `play`, but the voice reads its frames from `s` as it plays
+// (from where the stream stands; `looped` rewinds it at its end). A voice of this mixer that
+// still plays the same stream (the same ctx) is stopped first. Returns an invalid VoiceId when
+// all voices are busy or the stream has no frames, or `buf` is shorter than 2 frames.
+fn play_stream(m: *Mixer, s: AudioStream, volume: f32, pan: f32, pitch: f32, looped: bool) -> VoiceId {
+    if s.rate <= 0 || s.channels <= 0 || len(s.buf) < 2 * s.channels {
+        return VoiceId{}
+    }
+    for i in 0..len(m.voices) {
+        v := &m.voices[i]
+        if v.active && v.streamed && v.stream.ctx == s.ctx {
+            v.active = false
+        }
+    }
+    for i in 0..len(m.voices) {
+        v := &m.voices[i]
+        if !v.active {
+            m.serial += 1
+            fmt_only := Sound{nil, s.rate, s.channels}
+            *v = Voice{sound: fmt_only, step: audio_step(m, fmt_only, pitch), volume: volume, pan: pan, serial: m.serial, active: true,
+                looped: looped, streamed: true, stream: s}
             return VoiceId{i32(i), m.serial}
         }
     }
@@ -390,13 +438,8 @@ fn active_voices(m: *Mixer) -> i64 {
     n
 }
 
-// adds `count` output frames of one voice to `out` and advances it
-priv fn audio_mix_voice(m: *Mixer, v: *Voice, out: []f32, count: i64) {
-    src := v.sound.samples
-    ch := v.sound.channels
-    right := min(ch, 2) - 1
-    n := frames(v.sound)
-    span := n << 32
+// the gains of a voice's left and right source channel
+priv fn audio_gains(m: *Mixer, v: *Voice) -> (f32, f32) {
     pan := fmin(fmax(v.pan, -1.0), 1.0)
     gain_l := v.volume * m.master
     gain_r := gain_l
@@ -407,6 +450,97 @@ priv fn audio_mix_voice(m: *Mixer, v: *Voice, out: []f32, count: i64) {
         gain_l *= 0.5
         gain_r *= 0.5
     }
+    (gain_l, gain_r)
+}
+
+// tops up a streamed voice's buffer to `cap` frames; at the end of the stream a looped voice
+// rewinds it, others are marked ended
+priv fn audio_refill(v: *Voice, cap: i64) {
+    s := v.stream
+    ch := s.channels
+    rewound := false
+    while v.have < cap {
+        got := s.read(s.ctx, s.buf[v.have * ch..cap * ch], cap - v.have)
+        if got > 0 {
+            v.have += min(got, cap - v.have)
+            rewound = false
+            continue
+        }
+        if !v.looped || rewound || !s.rewind(s.ctx) {
+            v.ended = true
+            return
+        }
+        rewound = true
+    }
+}
+
+// adds `count` output frames of a streamed voice to `out` and advances it
+priv fn audio_mix_stream(m: *Mixer, v: *Voice, out: []f32, count: i64) {
+    ch := v.stream.channels
+    buf := v.stream.buf
+    right := min(ch, 2) - 1
+    cap := len(buf) / ch
+    gain_l, gain_r := audio_gains(m, v)
+    f := 0
+    while f < count {
+        if (v.pos >> 32) + 1 >= v.have && !v.ended {
+            // keep the frames from the current one on, then read more
+            drop := min(v.pos >> 32, v.have)
+            if drop > 0 {
+                copy(buf, buf[drop * ch..v.have * ch])
+                v.have -= drop
+                v.pos -= drop << 32
+            }
+            audio_refill(v, cap)
+            continue
+        }
+        if (v.pos >> 32) >= v.have {
+            break
+        }
+        // frames whose first source frame is below lim can be rendered from the buffer
+        lim := if v.ended { v.have } else { v.have - 1 }
+        n := count - f
+        if v.step > 0 {
+            n = min(n, ((lim << 32) - v.pos + v.step - 1) / v.step)
+        }
+        last := v.have - 1
+        pos := v.pos
+        for k in f..f + n {
+            i0 := pos >> 32
+            i1 := min(i0 + 1, last)
+            t := f32(pos & 0xFFFFFFFF) * (1.0 / 4294967296.0)
+            a := buf[i0 * ch]
+            b := buf[i0 * ch + right]
+            l := (a + (buf[i1 * ch] - a) * t) * gain_l
+            r := (b + (buf[i1 * ch + right] - b) * t) * gain_r
+            if m.channels == 2 {
+                out[k * 2] += l
+                out[k * 2 + 1] += r
+            } else {
+                out[k] += l + r
+            }
+            pos += v.step
+        }
+        v.pos = pos
+        f += n
+    }
+    if v.ended && (v.pos >> 32) >= v.have {
+        v.active = false
+    }
+}
+
+// adds `count` output frames of one voice to `out` and advances it
+priv fn audio_mix_voice(m: *Mixer, v: *Voice, out: []f32, count: i64) {
+    if v.streamed {
+        audio_mix_stream(m, v, out, count)
+        return
+    }
+    src := v.sound.samples
+    ch := v.sound.channels
+    right := min(ch, 2) - 1
+    n := frames(v.sound)
+    span := n << 32
+    gain_l, gain_r := audio_gains(m, v)
     pos := v.pos
     for f in 0..count {
         if pos >= span {
@@ -498,6 +632,9 @@ fn audio_open(rate: i64, channels: i64) -> (*AudioDevice, bool) {
     audio_open("default", rate, channels, 50)
 }
 
+
+// Ogg Vorbis decoding (pure AL)
+use std.audio_vorbis
 
 // the OS layer of the target
 when TARGET_OS == Windows {
