@@ -1,6 +1,6 @@
 // Conformance test runner, for Linux and Windows. tests/run.sh and tests\run.bat build it
 // (build/altest, build\altest.exe) and start it from the repository root.
-// Usage: altest [-j N] [-v] [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
+// Usage: altest [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
 // tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
 //                     every line of NAME.err must appear in stderr; arguments from NAME.args,
 //                     default `a1 b2`; standard input from NAME.in, then without arguments)
@@ -60,7 +60,7 @@
 // Windows, --target linux: the programs are built for Linux (three modes) and checked, not run.
 use std.os
 
-priv const USAGE = "usage: tests/run.sh [-j N] [-v] [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]"
+priv const USAGE = "usage: tests/run.sh [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe]] [path/to/alc] [filter]"
 
 when TARGET_OS == Windows {
     priv const HOST_WIN = true
@@ -71,6 +71,7 @@ when TARGET_OS == Windows {
 // what this run does: set by main before the threads start, then only read
 priv struct Config {
     win: bool               // the programs are built for Windows
+    arm64: bool             // the programs are built for linux-arm64 (and not run)
     can_run: bool           // this machine runs programs of the target (else they are only built)
     via_run: bool           // the default mode runs the program through `alc run`
     verbose: bool
@@ -735,6 +736,8 @@ priv fn collect() -> []Job {
     wskip := map[str, str]()
     if cfg.win {
         wskip = read_list("tests/windows.skip")
+    } else if cfg.arm64 {
+        wskip = read_list("tests/arm64.skip")
     }
     fn add(jobs: *Vec[Job], wskip: *Map[str, str], kind: Kind, dir: str, name: str, ext: str, listed: bool) {
         if len(cfg.filter) > 0 && find(name, cfg.filter) < 0 {
@@ -843,6 +846,7 @@ priv fn wine_start() {
 fn main() -> i64 {
     a := args()[1..]
     win := HOST_WIN
+    arm64 := false
     host_exe := ""
     threads := cpu_count()
     i := 0
@@ -860,10 +864,11 @@ fn main() -> i64 {
         }
         v := a[i + 1]
         if a[i] == "--target" {
-            if v != "windows" && v != "linux" {
+            if v != "windows" && v != "linux" && v != "linux-arm64" {
                 usage()
             }
             win = v == "windows"
+            arm64 = v == "linux-arm64"
         } else if a[i] == "-j" {
             n, ok := parse_i64(v)
             if !ok || n < 1 {
@@ -884,11 +889,13 @@ fn main() -> i64 {
         return 2
     }
     cfg.win = win
-    cfg.can_run = win || !HOST_WIN
+    cfg.arm64 = arm64
+    // (no machine of the runner runs arm64 programs: --target linux-arm64 builds and checks)
+    cfg.can_run = (win || !HOST_WIN) && !arm64
     cfg.via_run = win && (HOST_WIN || len(host_exe) > 0)
     cfg.exe = if win { ".exe" } else { "" }
-    if win != HOST_WIN || win {
-        cfg.target = []str{"--target", if win { "windows" } else { "linux" }}
+    if win != HOST_WIN || win || arm64 {
+        cfg.target = []str{"--target", if win { "windows" } else if arm64 { "linux-arm64" } else { "linux" }}
     }
     if len(host_exe) > 0 {
         cfg.alc = []str{"wine", host_exe}

@@ -1,0 +1,10 @@
+# Tests that tests/run.sh --target linux-arm64 does not build: "dir/name reason".
+
+run/when_top a when TARGET_ARCH == X86_64 with no other branch: the program is written for x86-64 only
+fail/when_order the error it expects comes from the branch of when TARGET_ARCH == X86_64, which arm64 does not take
+sys/backtrace_c_callback calls a C library: --target linux-arm64 makes static executables only
+sys/backtrace_c_fault calls a C library: --target linux-arm64 makes static executables only
+sys/c_variadic calls a C library: --target linux-arm64 makes static executables only
+sys/thread_ccb calls a C library: --target linux-arm64 makes static executables only
+sys/thread_ccb_panic calls a C library: --target linux-arm64 makes static executables only
+sys/thread_libc calls the C library: --target linux-arm64 makes static executables only
