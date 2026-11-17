@@ -1,0 +1,19 @@
+stereo 44100 2 11025 true true true true
+  stream 11025 11025 11025 true true 0
+mono 22050 1 8820 true true true true
+  stream 8820 8820 8820 true true 0
+6ch 48000 6 2400 true true true true
+  stream 2400 2400 2400 true true 0
+lowq 44100 2 6615 true true true true
+  stream 6615 6615 6615 true true 0
+hiq 44100 2 4410 true true true true
+  stream 4410 4410 4410 true true 0
+8k 8000 1 4000 true true true true
+  stream 4000 4000 4000 true true 0
+tiny 44100 2 441 true true true true
+  stream 441 441 441 true true 0
+bad input: false not an Ogg Vorbis stream
+bad input: false truncated page at byte 0
+bad input: false truncated page at byte 0
+bad input: false no Ogg page at byte 0
+missing file: false true

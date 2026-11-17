@@ -296,8 +296,8 @@ priv fn huffman(c: *Book) -> str {
     c.fmask = (1 << fb) - 1
     c.fast = alloc[i32](1 << fb)
     fill(c.fast, -1)
-    c.sorted = alloc[u32](used)
-    c.sorted_entry = alloc[i32](used)
+    // codeword and entry in one key, sorted by codeword
+    keys := alloc[u64](used)
     k := 0
     for i in 0..c.entries {
         l := i64(c.lens[i])
@@ -310,24 +310,16 @@ priv fn huffman(c: *Book) -> str {
                 c.fast[r | f << l] = i32(i)
             }
         }
-        c.sorted[k] = codes[i]
-        c.sorted_entry[k] = i32(i)
+        keys[k] = u64(codes[i]) << 32 | u64(i)
         k += 1
     }
-    // insertion sort is too slow for big books: sort an index by codeword
-    order := alloc[i64](used)
+    sort(keys)
+    c.sorted = alloc[u32](used)
+    c.sorted_entry = alloc[i32](used)
     for i in 0..used {
-        order[i] = i
+        c.sorted[i] = u32(keys[i] >> 32)
+        c.sorted_entry[i] = i32(keys[i] & 0xFFFFFFFF)
     }
-    sort_by(order, c.sorted, fn(s: []u32, a: i64, b: i64) -> bool { s[a] < s[b] })
-    s2 := alloc[u32](used)
-    e2 := alloc[i32](used)
-    for i in 0..used {
-        s2[i] = c.sorted[order[i]]
-        e2[i] = c.sorted_entry[order[i]]
-    }
-    c.sorted = s2
-    c.sorted_entry = e2
     ""
 }
 
