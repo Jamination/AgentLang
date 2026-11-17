@@ -958,7 +958,10 @@ priv fn jpeg_frame_size(d: []u8) -> (i64, i64, i64, bool) {
 fn jpeg_decode(data: []u8) -> (Image, bool) {
     none: Image
     fw, fh, fn_, found := jpeg_frame_size(data)
-    if !found || fw == 0 || fh == 0 || (fn_ != 1 && fn_ != 3 && fn_ != 4) || fw * fh * 3 > MAX_BYTES {
+    // (the component at full resolution alone has this many blocks, each coded in at least
+    // one bit: too short a file for its size is rejected before the pixels are allocated)
+    if !found || fw == 0 || fh == 0 || (fn_ != 1 && fn_ != 3 && fn_ != 4) || fw * fh * 3 > MAX_BYTES ||
+        (fw + 7) / 8 * ((fh + 7) / 8) > len(data) * 8 {
         return (none, false)
     }
     m0 := mark()

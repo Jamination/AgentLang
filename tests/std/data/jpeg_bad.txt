@@ -19,6 +19,7 @@ jpeg_bad_sof_twice.jpg
 jpeg_bad_w0.jpg
 jpeg_bad_h0_dnl.jpg
 jpeg_bad_dims_huge.jpg
+jpeg_bad_dims_big_short.jpg
 jpeg_bad_dims_wide.jpg
 jpeg_bad_precision12.jpg
 jpeg_bad_ncomp0.jpg
