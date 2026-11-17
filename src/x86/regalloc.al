@@ -1017,6 +1017,73 @@ priv fn retain_slot_ne(st: *Vec[(i64, i64)], s: i64) {
     st.retain(s, fn(s: i64, e: (i64, i64)) -> bool { e.0 != s })
 }
 
+// the spill slot an operand reads or writes (any part of it), or -1
+priv fn spill_slot_any(o: *Opnd, first_spill: i64) -> i64 {
+    match o {
+        M(&m) if m.kind == MK_SLOT && i64(m.id) >= first_spill => return i64(m.id)
+        _ => return -1
+    }
+}
+
+// Removes the stores to a spill slot that a later store in the same block overwrites before
+// anything reads the slot. A spilled register defined twice in a row (the copy and the
+// operation of a two-address instruction: `v = u; v -= x`) is stored after each definition,
+// and the store of the first is dead once the reload in between was forwarded. Only the
+// spill code touches these slots (their address is never taken), so the instructions that
+// name a slot are all its accesses.
+priv fn overwritten_stores(mf: *MFunc, order: []i64, first_spill: i64) {
+    // killed[s]: the size of a store to s further down the block with no read of s in between
+    // (0: none)
+    killed := vec_fill(mf.slots.len, 0)
+    touched := vec[i64]()
+    for b in order {
+        insts := &mf.blocks[b].insts
+        drop := vec_fill(insts.len, false)
+        any := false
+        x := insts.len - 1
+        while x >= 0 {
+            i := &insts[x]
+            s := spill_slot(&i.a, first_spill)
+            if (i.op == Mov || i.op == MovSd) && s >= 0 {
+                if killed[s] >= i64(i.sz) {
+                    drop[x] = true
+                    any = true
+                } else {
+                    killed[s] = i64(i.sz)
+                    touched.push(s)
+                }
+                // (the source of a store is a register or an immediate, never a slot)
+            } else {
+                ra := spill_slot_any(&i.a, first_spill)
+                if ra >= 0 {
+                    killed[ra] = 0
+                }
+                rb := spill_slot_any(&i.b, first_spill)
+                if rb >= 0 {
+                    killed[rb] = 0
+                }
+            }
+            x -= 1
+        }
+        for t in touched {
+            killed[t] = 0
+        }
+        touched.clear()
+        if any {
+            n := 0
+            for y in 0..insts.len {
+                if !drop[y] {
+                    if n != y {
+                        insts[n] = insts[y]
+                    }
+                    n += 1
+                }
+            }
+            insts.len = n
+        }
+    }
+}
+
 // After allocation: reuse registers that still hold the value of a spill slot instead of
 // reloading it, and drop stores to slots that are never read.
 priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
@@ -1110,6 +1177,7 @@ priv fn spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
         insts.len = n
         out_state[b] = Some(st)
     }
+    overwritten_stores(mf, order, first_spill)
     // remove stores to slots that are never read
     reads := vec_fill(mf.slots.len, 0)
     for b in order {
