@@ -11,6 +11,14 @@ an x86-64 Windows machine without any arm64 hardware, WSL or QEMU. What was chec
   (`tests/run.sh --target linux-arm64 --emu build/a64emu`), and the compiler built for
   linux-arm64 compiling itself under it.
 
+Results there (2026-11-17): the suite under the emulator `conformance: 722 passed, 0 failed, 63
+skipped` (27 need something of the machine, 28 are built but not run because the emulator
+lacks processes, /proc or file maps, 8 are C-library or x86-64-only tests); built only, `802
+passed, 0 failed, 35 skipped`; the structural check `484 executables, 0 problems`; the compiler
+for linux-arm64 built by the x86-64 compiler (stage 1), by stage 1 under the emulator (stage 2,
+332 s) and by stage 2 (stage 3, 267 s): byte-identical; under the emulator it also builds the
+x86-64 Linux compiler byte for byte as the x86-64 compiler does.
+
 The emulator was written by the same hands as the back end: a misreading of the architecture
 that both share (a flag of a compare, the extension of a load, the order of a pair) would not
 show. These are the checks only a real machine (or QEMU, which is independent) can do. Run them
