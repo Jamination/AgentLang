@@ -75,6 +75,20 @@ fn main() {
         }
         print("channels", ch, "done")
     }
+    // libjpeg-turbo with its accurate DCT, the same quality and subsampling (tests/gen/jpegs.py)
+    // writes the same entropy-coded data: only the arrangement of the header segments differs
+    list, lok_ := read_file("tests/std/data/jpeg_enc.txt")
+    assert lok_, "fixture list missing"
+    for line in lines(list) {
+        parts := split(line, ' ')
+        q, _ := parse_i64(parts[1])
+        src, sok := png_load(fmt("tests/std/data/", parts[0], ".png"))
+        theirs, tok := read_file(fmt("tests/std/data/", parts[0], ".jpg"))
+        assert sok && tok, parts[0]
+        mine := jpeg_encode(src, q)
+        same := mine[find(mine, "\xFF\xDA")..] == theirs[find(theirs, "\xFF\xDA")..]
+        print(parts[0], if same { "scan identical to libjpeg-turbo's" } else { "scan differs" })
+    }
     // the file shrinks with the quality
     big := picture(200, 120, 3)
     s10 := len(jpeg_encode(big, 10))

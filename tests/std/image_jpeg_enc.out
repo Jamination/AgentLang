@@ -2,4 +2,9 @@ channels 1 done
 channels 2 done
 channels 3 done
 channels 4 done
+jpeg_enc_45x27_3_q75 scan identical to libjpeg-turbo's
+jpeg_enc_33x17_3_q75 scan identical to libjpeg-turbo's
+jpeg_enc_45x27_3_q95 scan identical to libjpeg-turbo's
+jpeg_enc_21x11_1_q50 scan identical to libjpeg-turbo's
+jpeg_enc_8x8_3_q30 scan identical to libjpeg-turbo's
 failures: 0

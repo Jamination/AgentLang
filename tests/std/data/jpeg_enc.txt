@@ -1,0 +1,5 @@
+jpeg_enc_45x27_3_q75 75
+jpeg_enc_33x17_3_q75 75
+jpeg_enc_45x27_3_q95 95
+jpeg_enc_21x11_1_q50 50
+jpeg_enc_8x8_3_q30 30

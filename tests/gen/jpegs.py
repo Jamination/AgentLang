@@ -175,6 +175,18 @@ def main():
     add("jpeg_gdi", open(gdi, "rb").read(), "rgb")
     open(os.path.join(OUT, "jpeg.txt"), "w", newline="\n").write("\n".join(good) + "\n")
 
+    # for the encoder: libjpeg-turbo's files (accurate DCT, the settings std.image picks for the
+    # quality) from source pictures, which are kept as PNG
+    enc = []
+    for (w, h, ch, q) in ((45, 27, 3, 75), (33, 17, 3, 75), (45, 27, 3, 95), (21, 11, 1, 50), (8, 8, 3, 30)):
+        name = "jpeg_enc_%dx%d_%d_q%d" % (w, h, ch, q)
+        pix = picture(w, h, ch, seed=w + h)
+        png(os.path.join(OUT, name + ".png"), w, h, ch, pix)
+        sub = 3 if ch == 1 else 0 if q >= 90 else 2
+        open(os.path.join(OUT, name + ".jpg"), "wb").write(tj_encode(pix, w, h, 6 if ch == 1 else 0, sub, q, 4096))
+        enc.append("%s %d" % (name, q))
+    open(os.path.join(OUT, "jpeg_enc.txt"), "w", newline="\n").write("\n".join(enc) + "\n")
+
     # ---- malformed files ----
     base = open(os.path.join(OUT, "jpeg_420.jpg"), "rb").read()
     prog = open(os.path.join(OUT, "jpeg_prog_420.jpg"), "rb").read()
