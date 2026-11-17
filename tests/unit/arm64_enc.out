@@ -1,0 +1,4 @@
+ok   arm64 integer arithmetic
+ok   arm64 logical, moves and bitfields
+ok   arm64 loads, stores and branches
+ok   arm64 floating point and vectors
