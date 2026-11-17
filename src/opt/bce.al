@@ -29,6 +29,8 @@ priv struct BceAffine {
 priv enum Kind {
     Invariant,
     Affine(BceAffine),
+    // the counter of a stepped loop (StepLoop) itself, against a length above its bound
+    Stepped,
 }
 
 // v is defined outside the loop (in_loop: its blocks; def_block: the block of every
@@ -54,6 +56,26 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     if !invariant(end, in_loop, def_block) {
         return None
     }
+    cmp := ci.op
+    // `cur < end` on the counter itself (an inclusive range `for i in a..=b` is lowered so,
+    // which cannot wrap): continuing while cur < end is continuing while cur + 1 <= end, and
+    // cur + 1 cannot wrap then. The loop is described by its next value and `<=`.
+    cur_form := false
+    if f.insts[next].op == Phi {
+        cmp = match cmp {
+            Slt => Sle
+            Ult => Ule
+            Sgt => Sge
+            Ugt => Uge
+            _ => return None
+        }
+        cur := next
+        next = f.insts[cur].phi_input(latch)
+        if next == NOV || f.insts[next].op != Add || f.insts[next].args[0] != cur {
+            return None
+        }
+        cur_form = true
+    }
     ni := &f.insts[next]
     if ni.op != Add {
         return None
@@ -73,6 +95,9 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
         return None
     }
     ty := pi.ty
+    if cur_form && step != 1 && step != -1 {
+        return None
+    }
     if step != 1 && step != -1 {
         // other strides: only with constant bounds, where the last value can be computed
         s0 := match f.is_const(start) {
@@ -107,9 +132,10 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
         }
         return Some(Iv{phi: phi, start: start, step: step, end: end, cmp: ci.op, ty: ty, last_const: Some(i)})
     }
-    o := ci.op
+    o := cmp
     ok := match (step, o) {
         (1, Slt), (1, Ult), (-1, Sgt), (-1, Ugt) => true
+        (1, Sle), (1, Ule), (-1, Sge), (-1, Uge) if cur_form => true
         // inclusive bounds must not sit at the edge of the type (the counter would wrap)
         (1, Sle), (1, Ule), (-1, Sge), (-1, Uge) => match f.is_const(end) {
             Some(k) => {
@@ -134,7 +160,185 @@ priv fn find_iv(f: *Func, header: i64, latch: i64, pre: i64, in_loop: []bool, de
     if !ok {
         return None
     }
-    return Some(Iv{phi: phi, start: start, step: step, end: end, cmp: ci.op, ty: ty, last_const: None})
+    return Some(Iv{phi: phi, start: start, step: step, end: end, cmp: o, ty: ty, last_const: None})
+}
+
+// A loop with an increasing step that is not a constant (`for i in a..=b by s`, also
+// `a..b by s`), lowered so that it cannot wrap: the latch continues while
+//     cur <= end && end - cur >=u s     (exclusive: cur < end && end - cur >u s)
+// with cur the header phi and next = cur + s (s invariant). Whatever s is, every value after
+// the first lies between it and `end` (end included or not): the next value is taken only
+// when it is at most `end` (below it), and cur + s with s <=u end - cur cannot wrap. The
+// comparisons are signed or unsigned as the counter's type.
+// Once the loop is known to be entered only when `start <= end` (`start < end`), the first
+// comparison holds on every iteration and stepped_latch removes it from the latch; the loop
+// is still recognised then (by that entry condition).
+priv struct StepLoop {
+    phi: i64,
+    start: i64,
+    end: i64,
+    incl: bool,
+    first: i64, // the comparison of cur with end (NOV once removed)
+    room: i64,  // the comparison of the distance with s
+}
+
+// Is the loop entered only when `start op end` (op one of `ops`)? The block that is the only
+// way to the preheader, or one above it through blocks with one predecessor, branches on it.
+priv fn entry_cmp(f: *Func, cfg: *Cfg, pre: i64, ops: []Op, start: i64, end: i64) -> bool {
+    b := pre
+    for depth in 0..16 {
+        if cfg.preds[b].len != 1 {
+            return false
+        }
+        p := cfg.preds[b][0]
+        match f.blocks[p].term {
+            Br(c, t, e) if t == b && t != e => {
+                ci := &f.insts[c]
+                if contains(ops, ci.op) && ci.args.len == 2 && same(f, ci.args[0], start) && same(f, ci.args[1], end) {
+                    return true
+                }
+            }
+            _ => {}
+        }
+        b = p
+    }
+    return false
+}
+
+priv fn find_stepped(f: *Func, cfg: *Cfg, header: i64, latch: i64, pre: i64, in_loop: []bool, def_block: []i32) -> Opt[StepLoop] {
+    c, t, e := match f.blocks[latch].term {
+        Br(c0, t0, e0) => (c0, t0, e0)
+        _ => return None
+    }
+    if t != header || in_loop[e] {
+        return None
+    }
+    first := NOV
+    room := c
+    if f.insts[c].op == And {
+        a0 := f.insts[c].args[0]
+        a1 := f.insts[c].args[1]
+        first, room = if f.insts[a0].op == Uge || f.insts[a0].op == Ugt { (a1, a0) } else { (a0, a1) }
+    }
+    ri := &f.insts[room]
+    if ri.op != Uge && ri.op != Ugt {
+        return None
+    }
+    incl := ri.op == Uge
+    dist := &f.insts[ri.args[0]]
+    s := ri.args[1]
+    if dist.op != Sub || !invariant(s, in_loop, def_block) {
+        return None
+    }
+    end := dist.args[0]
+    phi := dist.args[1]
+    pi := &f.insts[phi]
+    if pi.op != Phi || i64(def_block[phi]) != header || pi.args.len != 2 || !invariant(end, in_loop, def_block) {
+        return None
+    }
+    start := pi.phi_input(pre)
+    next := pi.phi_input(latch)
+    if start == NOV || next == NOV {
+        return None
+    }
+    ni := &f.insts[next]
+    if ni.op != Add || ni.args[0] != phi || ni.args[1] != s {
+        return None
+    }
+    if first != NOV {
+        fi := &f.insts[first]
+        ok := if incl { fi.op == Sle || fi.op == Ule } else { fi.op == Slt || fi.op == Ult }
+        if !ok || fi.args[0] != phi || !same(f, fi.args[1], end) {
+            return None
+        }
+    } else {
+        ops := if incl { []Op{Sle, Ule} } else { []Op{Slt, Ult} }
+        if !entry_cmp(f, cfg, pre, ops, start, end) {
+            return None
+        }
+    }
+    return Some(StepLoop{phi: phi, start: start, end: end, incl: incl, first: first, room: room})
+}
+
+// does every value of the stepped loop's counter after the first lie below `ln` (known at
+// compile time)? The bound is `ln` itself for an exclusive loop, or constants with end < ln
+// (end <= ln when exclusive), both of them below 2^63
+priv fn stepped_below(f: *Func, sp: *StepLoop, ln: i64) -> bool {
+    if !sp.incl && same(f, sp.end, ln) {
+        return true
+    }
+    match (f.is_const(sp.end), f.is_const(ln)) {
+        (Some(e), Some(n)) => return e >= 0 && n >= 0 && (e < n || !sp.incl && e <= n)
+        _ => return false
+    }
+}
+
+// Removes `cur <= end` (`cur < end`) from the latch of a stepped loop that is only entered
+// when `start <= end` (`start < end`, the same comparison): it then holds on every iteration
+// (see StepLoop).
+priv fn stepped_latch(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i32]) -> bool {
+    l := &loops.loops[li]
+    h := l.header
+    outside := licm_outside_preds(cfg, loops, li, h)
+    if outside.len != 1 || f.succs(outside[0]).len != 1 || l.latches.len != 1 {
+        return false
+    }
+    pre := outside[0]
+    latch := l.latches[0]
+    _, t, e := match f.blocks[latch].term {
+        Br(c0, t0, e0) if f.insts[c0].op == And => (c0, t0, e0)
+        _ => return false
+    }
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
+    sp := match find_stepped(f, cfg, h, latch, pre, in_loop, def_block_v.items()) {
+        Some(x) => x
+        None => return false
+    }
+    op := f.insts[sp.first].op
+    if !entry_cmp(f, cfg, pre, []Op{op}, sp.start, sp.end) {
+        return false
+    }
+    f.blocks[latch].term = Br(sp.room, t, e)
+    return true
+}
+
+// A check whose condition does not change in the loop and that the loop header makes before
+// anything else (only phis and pure instructions before it) has the same outcome on every
+// iteration as on the first, which runs right after the preheader: it moves there, whatever
+// the shape of the loop (calls, other exits). (A probe loop over a power-of-two table,
+// `i = (i + 1) & (len - 1)`, checks `len != 0` there.)
+priv fn header_check(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i32]) -> bool {
+    l := &loops.loops[li]
+    h := l.header
+    c, ok, trap := match f.blocks[h].term {
+        Br(c0, t0, e0) if t0 != e0 => (c0, t0, e0)
+        _ => return false
+    }
+    if !in_loop[ok] || in_loop[trap] || !opt_is_check_trap(f, trap) {
+        return false
+    }
+    for v in f.blocks[h].insts {
+        o := f.insts[v].op
+        if o != Phi && !o.is_pure() {
+            return false
+        }
+    }
+    outside := licm_outside_preds(cfg, loops, li, h)
+    if outside.len != 1 || f.succs(outside[0]).len != 1 {
+        return false
+    }
+    pre := outside[0]
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
+    if !invariant(c, in_loop, def_block_v.items()) {
+        return false
+    }
+    f.blocks[pre].term = Br(c, h, trap)
+    f.blocks[h].term = Jmp(ok)
+    return true
 }
 
 // match idx as ext(inner) with inner = iv, inner + inv, inner - inv or inv - inner
@@ -282,6 +486,7 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
     iv_opt := find_iv(f, h, latch, pre, in_loop, def_block)
     has_iv := is_some(iv_opt)
     iv := iv_opt.or(Iv{})
+    sp_opt: Opt[StepLoop] = if has_iv { None } else { find_stepped(f, cfg, h, latch, pre, in_loop, def_block) }
     // collect candidate checks
     cands := vec[(i64, i64, i64, i64, i64, i64, Kind)]() // block, cond, ok, trap, idx, len
     for b in l.blocks {
@@ -315,6 +520,10 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
                 Some(a) if zext_cannot_wrap(f, &a, &iv, ln) => cands.push((b, c, t, e, idx, ln, Affine(a)))
                 _ => {}
             }
+        }
+        match &sp_opt {
+            Some(&sp) if idx == sp.phi && stepped_below(f, sp, ln) => cands.push((b, c, t, e, idx, ln, Kind.Stepped))
+            _ => {}
         }
     }
     if cands.is_empty() {
@@ -371,6 +580,12 @@ priv fn hoist_in_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
         match kind {
             Invariant => {
                 add_check(f, &cur, c, trap, h)
+            }
+            Kind.Stepped => {
+                // the first value; the others lie between it and a bound below the length
+                sp := sp_opt.or(StepLoop{})
+                c1 := f.push(pre, Ult, I8, vec_of([]i64{sp.start, ln}), 0)
+                add_check(f, &cur, c1, trap, h)
             }
             Affine(a) => {
                 assert has_iv
@@ -581,6 +796,9 @@ fn bce_run(f: *Func) -> bool {
             }
             loops.mark_blocks(li, in_loop.items(), true)
             hoisted := hoist_in_loop(f, &cfg, &loops, li, in_loop.items(), &def_block)
+            if !hoisted {
+                hoisted = header_check(f, &cfg, &loops, li, in_loop.items(), &def_block)
+            }
             loops.mark_blocks(li, in_loop.items(), false)
             if hoisted {
                 did = true
@@ -601,6 +819,34 @@ fn bce_run(f: *Func) -> bool {
         }
         changed = true
         cleanup_prune_unreachable(f)
+    }
+    // the latches of stepped loops (after hoisting, which recognises them by that latch)
+    any := false
+    for b in 0..f.blocks.len {
+        match f.blocks[b].term {
+            Br(c, _, _) if f.insts[c].op == And => {
+                for a in f.insts[c].args {
+                    o := f.insts[a].op
+                    if (o == Uge || o == Ugt) && f.insts[f.insts[a].args[0]].op == Sub {
+                        any = true
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if any {
+        licm_make_preheaders(f)
+        cfg, loops := cfg_loops(f)
+        def_block := vec[i32]()
+        in_loop := vec_fill(f.blocks.len, false)
+        for li in 0..loops.loops.len {
+            loops.mark_blocks(li, in_loop.items(), true)
+            if stepped_latch(f, &cfg, &loops, li, in_loop.items(), &def_block) {
+                changed = true
+            }
+            loops.mark_blocks(li, in_loop.items(), false)
+        }
     }
     return changed
 }

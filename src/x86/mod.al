@@ -260,7 +260,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     }
     opt_trace("isel", f)
     mf := isel_select(f, m, rpo.items(), loops, depths.items(), aliases.items())
-    layout := block_layout(f)
+    layout := block_layout(f, depths.items())
     // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
     // benchmark suite the padding executed on every loop entry cost more than it gained.
     // (loops is empty without a cycle)
@@ -395,8 +395,10 @@ priv fn has_cycle(f: *Func, rpo: []i64) -> bool {
 }
 
 // Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,
-// with blocks that inevitably trap moved to the end.
-priv fn block_layout(f: *Func) -> Vec[i64] {
+// unless the "then" successor leaves the loop of the block (a smaller loop depth, `depths`)
+// and the other one does not: the loop's own code then follows, and the loop is left by a
+// branch rather than continued by one. Blocks that inevitably trap are moved to the end.
+priv fn block_layout(f: *Func, depths: []i64) -> Vec[i64] {
     n := f.blocks.len
     seen := vec_fill(n, false)
     post := vec[i64]()
@@ -409,7 +411,12 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
         // the successors in reverse order: else, then
         k, s0, s1 := f.succ_pair(b)
         if i < k {
-            s := if k == 2 && i == 0 { s1 } else { s0 }
+            // (the successor visited last follows the block)
+            first, last := (s1, s0)
+            if k == 2 && b < len(depths) && s0 < len(depths) && s1 < len(depths) && depths[s0] < depths[b] && depths[s1] >= depths[b] {
+                first, last = (s0, s1)
+            }
+            s := if k == 2 && i == 0 { first } else { last }
             stack[top].1 = i + 1
             if !seen[s] {
                 seen[s] = true

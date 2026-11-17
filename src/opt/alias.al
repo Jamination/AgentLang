@@ -27,13 +27,21 @@ priv fn off_some_eq(a: Opt[i64], b: Opt[i64]) -> bool {
     }
 }
 
+// A parameter that is the address of an aggregate passed by reference (Func.byref_params)
+// points to the caller's copy for this call: an object of its own, which only the function
+// reaches (through that parameter), like a local alloca. (The pointer only means this while
+// it is a Param: inlining replaces it with the caller's argument.)
+priv inline fn is_private_param(f: *Func, i: *Inst) -> bool {
+    return i.op == Param && i.k < 64 && (f.byref_params >> u64(i.k)) & 1 != 0
+}
+
 priv fn decompose(f: *Func, addr: i64) -> Addr {
     v := addr
     off: Opt[i64] = Some(0)
     depth := 0
     loop {
         i := &f.insts[v]
-        if i.op == Alloca {
+        if i.op == Alloca || is_private_param(f, i) {
             return Addr{base: Base.Alloca(v), off: off}
         }
         if i.op == GAddr {
@@ -78,7 +86,7 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
         return None
     }
     i := &f.insts[v]
-    if i.op == Alloca {
+    if i.op == Alloca || is_private_param(f, i) {
         return Some(Base.Alloca(v))
     }
     if i.op == GAddr {
@@ -124,9 +132,10 @@ fn alias_escaped_known(f: *Func, gen: i64) -> (Vec[bool], bool) {
 fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     n := f.insts.len
     esc := Vec[bool]{buf: alloc[bool](n), len: n}
+    // (the private parameters count as allocas here, see is_private_param)
     any := false
     for v in f.blocks[0].insts {
-        if f.insts[v].op == Alloca {
+        if f.insts[v].op == Alloca || is_private_param(f, &f.insts[v]) {
             any = true
             break
         }
@@ -138,7 +147,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
     // derived[v] = alloca this pointer value is derived from
     derived := vec_fill(n, i32(NOV))
     for v in f.blocks[0].insts {
-        if f.insts[v].op == Alloca {
+        if f.insts[v].op == Alloca || is_private_param(f, &f.insts[v]) {
             derived[v] = v
         }
     }

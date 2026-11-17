@@ -284,6 +284,9 @@ struct Func {
     // a specialised copy (opt/spec.al): the function it copies, whose frame it is in stack
     // traces; -1 for any other function
     copy_of: i64
+    // bit k: parameter k (k < 64) is the address of an aggregate argument passed by reference
+    // (Windows): a copy the caller made for this call, which nothing else can reach
+    byref_params: u64
     // the Work of the thread that is optimising or compiling the function, nil while none is
     // (see Work in base.al)
     w: *Work
