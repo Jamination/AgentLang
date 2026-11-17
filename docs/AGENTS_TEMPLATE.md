@@ -6,6 +6,7 @@ A game written from scratch in AL (https://github.com/Jamination/AgentLang), for
 - Run: `alc run src/main.al -o build/<game> -- <args>`
 - Tests: `alc test src/main.al -o build/<game>.test` (every `test` block), plus `alc run src/main.al -o build/<game> -- --headless`
 - Check without building: `alc check src/main.al` (`--all-targets` if the game has `when` branches)
+- Format before committing: `alc fmt src/` (`alc fmt --check src/` fails if a file is not formatted)
 - Always pass `-o build/...` (with `.exe` on Windows): without it, run and test write their
   executables next to the sources.
 - After updating the compiler, read the `Breaking` sections of the AL `CHANGELOG.md` that are new.

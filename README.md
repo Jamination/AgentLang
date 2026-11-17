@@ -70,6 +70,7 @@ verify.bat                          :: Windows: build.bat, the tests, VERIFY: PA
 | `alc test file.al` | run the file's `test` blocks |
 | `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
 | `alc sigs file.al` | list declarations (`-- std` adds the standard library) |
+| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`) |
 | `alc --version` | the compiler's version and default target |
 
 ## Versions
@@ -99,8 +100,8 @@ between the two versions, then rebuild and run the project's tests with the new 
 
 - [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
 - [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
-- [Standard library](docs/STDLIB.md): strings, collections, files, math, images, windows,
-  input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
+- [Standard library](docs/STDLIB.md): strings, collections, files, sockets, math, images, fonts, windows,
+  input, audio, a 2D renderer, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
 - [Testing on Windows](docs/WINDOWS_TEST.md): checks to run on a real Windows machine
 - [AGENTS.md template](docs/AGENTS_TEMPLATE.md): for a new game repository written by agents
@@ -113,6 +114,9 @@ between the two versions, then rebuild and run the project's tests with the new 
 - `examples/dx12_starter/`: the same game with Direct3D 12 sprites, WASAPI sound and music, keyboard and gamepad (Windows)
 - `examples/dx12_breakout/`: breakout with a title screen, pause menu, volumes, fullscreen and a bitmap font (Windows)
 - `examples/gamekit/`: the parts both Direct3D 12 games share (GPU set-up and sprite batcher in `dx12_gpu.al`, screen, font, synthesizer, options); example code to copy, not a library
+- `examples/gfx_starter/`: the starter game on std.gfx (Linux and Windows)
+- `examples/dx12_crypt/`: a first-person 3D maze with Direct3D 12, mouse-look, gamepad and a scripted test mode (Windows)
+- `examples/font_demo.al`: a TrueType font: wrapped text drawn into an image and a glyph atlas
 - `examples/dx12_triangle.al`, `vk_triangle.al`: a triangle with Direct3D 12 (Windows) / Vulkan (Linux)
 - `examples/wayland_window.al`, `win32_input.al`, `audio_tone.al`: a Wayland window, input events, a melody on the sound device
 
