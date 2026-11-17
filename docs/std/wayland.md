@@ -7,11 +7,19 @@ Linux only: with `--target windows`, `use std.wayland` is a compile error.
 `relative-pointer-unstable-v1` and `pointer-constraints-unstable-v1` (unaccelerated relative
 motion and a locked or confined pointer, for mouse-look), and the parts of `libxkbcommon`
 (keyboard) and `libwayland-cursor` (pointer image) that a window needs. It is a binding of the
-C API, not a window abstraction: `std.window` is the portable window module (it uses X11, which
-works on Wayland sessions through XWayland).
+C API, not a window abstraction: `std.window` is the portable window module (its Linux layer is
+built on this module and uses Wayland when `$WAYLAND_DISPLAY` is set, X11 otherwise).
 
-A program that uses it links against `libwayland-client.so.0`, and against `libxkbcommon.so.0`
-and `libwayland-cursor.so.0` if it calls their functions.
+A program that calls one of the `extern` functions of libwayland-client (`wl_display_connect`,
+...) or uses an `extern` interface table (`&wl_compositor_interface`) links against
+`libwayland-client.so.0`, and against `libxkbcommon.so.0` and `libwayland-cursor.so.0` if it
+calls their functions. The generated part (requests, `*_add_listener`, user data, versions,
+`*_destroy`, the interface tables) calls libwayland-client through function pointers loaded
+with `dlopen` on first use: `wl_client_lib() -> *WlClientLib` (nil if the library, version
+1.20 or later, is not installed) holds `display_connect`, `display_roundtrip`,
+`display_dispatch_pending`, `display_prepare_read`, ..., and `wl_client_interface("wl_seat")`
+is a core interface table from it, for `wl_registry_bind`. A program that goes only through
+these (as std.window does) is not linked against the library and starts without it.
 
 What is bound: 35 interfaces (23 of the core protocol, 5 of `xdg-shell`, 2 of
 `xdg-decoration`, 2 of `relative-pointer`, 3 of `pointer-constraints`) with all their 124
@@ -65,7 +73,7 @@ broken (also after a protocol error: then `wl_display_get_error` is 71, EPROTO, 
 
 The interface tables (`struct wl_interface`, `struct wl_message`, for `wl_registry_bind`): those
 of the core protocol are libwayland-client's own, declared as `extern` variables
-(`&wl_compositor_interface`, as in C). libwayland-client has none for other protocols: theirs
+(`&wl_compositor_interface`, as in C; the bindings themselves find them with `dlsym`). libwayland-client has none for other protocols: theirs
 are built in AL with the C layout on the first call of an `..._interface()` function
 (`xdg_wm_base_interface()`), from constant tables generated with the bindings.
 
