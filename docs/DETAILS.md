@@ -10,7 +10,7 @@ Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
 [Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Regions](#regions) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Grammar](#grammar)
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 
@@ -878,6 +878,57 @@ both systems, except where this section says otherwise.
   use `\` and drive or UNC roots, and appear in diagnostics as written. It runs on a thread
   with a 1 GiB stack and compiles functions in parallel worker threads as on Linux
   (`ALC_JOBS=n` sets the number); see [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
+
+## alc fmt
+
+`alc fmt` gives source files the one layout of the repository's own sources, so that two
+agents who write the same code write the same text and diffs show only real changes.
+
+```
+alc fmt game.al src/            rewrite the files in place (a directory: every .al file in it)
+alc fmt --check src/            change nothing; print the files that would change, status 1 if any
+alc fmt --stdout game.al        print the result instead of writing it
+alc fmt - < game.al             standard input to standard output (for editors and filters)
+```
+
+The status is 0 when everything was formatted (`--check`: nothing would change), 1 when a file
+would change (`--check`) or has an error, 2 for a usage error. A file with a syntax error is not
+changed: its diagnostics are printed as `alc check` prints them, and the other files are still
+formatted (`--stdout` / `-` print such a file as it is).
+
+**What it changes: white space only.** Tokens stay as written and on their lines: no line is
+joined or broken, so a newline that ends a statement can never move (see [Grammar](#grammar)),
+and a long line stays long; break it yourself after an operator, a comma or an opening bracket.
+Comments keep their text and their line.
+
+- **Indentation**: 4 spaces per bracket left open by the lines above (several opened on one line
+  count once); a line that starts with `}`, `)` or `]` stands at the indentation of the line
+  that opened it. A line that continues a statement after a line ending in an operator (or, in a
+  block or a `match`, in a `,`: the patterns of an arm) gets 4 more; further lines of that
+  statement keep that indentation. A comment line is indented like code in its place.
+- **Spaces in a line**: one around binary operators, `=`, `:=`, `op=`, `->`, `=>`; none after a
+  unary operator (`-x`, `*p`, `&v`, `!ok`), around `.`, `..`, `..=`, inside `( )` and `[ ]`,
+  before `,` `;` `:` and before the `(` of a call or the `[` of an index or type argument; one
+  after `,` `;` `:`. A type is written closed up: `[]*T`, `[4]u8`, `fn(i64) -> i64`. A literal has
+  no spaces inside its braces (`Point{1, 2}`, `[]i64{}`), a block one (`{ x * 2 }`, `struct P {
+  x: i64 }`), an empty block none (`{}`).
+- **Comments after code** keep their column (moved with their line's indentation), so aligned
+  comments stay aligned; where the code now reaches the column, one space separates them. A
+  comment line right below one in the same column continues it and stays in that column.
+- **Blank lines**: at most one in a row; none at the start or the end of the file, after a line
+  that ends in an opening bracket, or before a line that starts with a closing one.
+- **Line ends**: none of the lines keeps trailing white space; the file ends in one line end. A
+  file whose first line ends in CRLF gets CRLF everywhere, otherwise LF; a byte order mark stays;
+  raw strings keep their bytes as they are.
+
+**Checked every time.** Before a result is written, `alc fmt` lexes and parses it again: it
+must give the same tokens (the newlines that end statements included) and the same comments,
+and formatting it once more must not change it. If not (a bug of the formatter), the file is
+left as it is with an `internal error of alc fmt` diagnostic. The test `fmt/tree` of
+`tests/run.al` formats copies of every `.al` file of the repository, checks that the result does
+not change again, that the compiler built from the formatted sources reproduces itself and
+compiles `src/main.al` to the same executable, and that scrambling the layout of every file
+(indentation, spaces, blank lines, line ends) formats back to the same text.
 
 ## Grammar
 
