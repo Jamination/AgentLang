@@ -721,3 +721,30 @@ the conformance suite with it).
   built but not run. `ALC_WINE` only applies on Linux.
 - **Paths** may use `\` and drive or UNC roots; the compiler joins paths with `/` and keeps
   them as written in diagnostics and panic locations (so the executables are the same).
+
+## arm64 target
+
+`--target linux-arm64` makes a static AArch64 Linux executable (no C libraries). The front end
+and the optimiser are the same as for x86-64 (`target_os` is Linux); the differences are:
+
+- **Back end** (`src/arm64/`): `mir.al` (three-address machine IR; x16, x17, x18, x29, x30
+  and v31 are reserved), `isel.al` (selection from the SSA IR, one plain selection per
+  operation; narrow integers extended where their upper bits matter, as on x86-64),
+  `regalloc.al` (the iterated register coalescing of `src/x86/regalloc.al` over 26 general and
+  31 SIMD registers; spill code is loads and stores), `emit.al` (frame record in every
+  function, encoding, branch fixups, ADRP/ADD relocations, LL/SC loops for atomics), `enc.al`
+  (one pure function per instruction form), `backtrace.al` (the stack-trace table in the
+  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled on one thread).
+- **Calling convention**: AAPCS64 for AL functions: x0-x7 / v0-v7, results in x0-x3 / v0-v3,
+  further arguments in 8-byte stack words (a vector in two, as on x86-64).
+- **Linking** (`src/elf_arm64.al`): segments aligned to 64 KiB; an entry stub puts the main
+  thread's TLS block (variant I: TPIDR_EL0, a 16-byte TCB, then the block) below the initial
+  stack. Run-time library layer: `src/prelude_linux_arm64.al` (the generic system call table).
+  `TARGET_ARCH` is declared by each OS layer (at its end).
+- **The compiler for arm64**: `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`
+  (`HOST_ARM64` in `src/base.al` selects `src/host_linux_arm64.al`).
+- **Tests**: `tests/unit/arm64_enc.al` (the encoder against known encodings),
+  `tests/arm64/check.al` (structural check of the executables: decoding, branches, stack
+  pointer, registers read before written), `tests/arm64/emu.al` (a user-mode emulator; the
+  runner takes `--target linux-arm64 --emu build/a64emu.exe`, `tests/arm64_emu.skip` lists
+  what it cannot run). What only real hardware can check: `docs/ARM64_TEST.md`.
