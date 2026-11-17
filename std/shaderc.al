@@ -1,10 +1,12 @@
-// std.shaderc: bindings for shaderc's C API (<shaderc/shaderc.h>, libshaderc_shared.so.1):
+// std.shaderc: bindings for shaderc's C API (<shaderc/shaderc.h>; libshaderc_shared.so.1 on
+// Linux, shaderc_shared.dll on Windows):
 // GLSL and HLSL to SPIR-V at run time, for example to reload shaders while a game runs. Names,
 // parameters and values are those of the C header. Mapping: shaderc_compiler_t,
 // shaderc_compile_options_t and shaderc_compilation_result_t are `*u8`; the enums (also
 // shaderc_shader_kind, shaderc_compilation_status) and `int` are `i32`; size_t is `u64`; `bool`
 // is `bool`; `const char*` is `*u8` (string literals are NUL-terminated: `ptr("main")`).
-// Linux only. See docs/std/shaderc.md.
+// The same on both systems (size_t is 64 bits and the enums are int on Microsoft x64 too, and
+// no function takes or returns a struct by value). See docs/std/shaderc.md.
 
 // ---- shaderc_target_env ----
 const shaderc_target_env_vulkan: i32 = 0
@@ -230,103 +232,109 @@ struct shaderc_include_result {
 }
 
 // ---- compiler ----
+// the shaderc library of the target system (Windows: the DLL of the Vulkan SDK's Bin directory)
+when TARGET_OS == Windows {
+    priv const SHADERC = "shaderc_shared.dll"
+} else {
+    priv const SHADERC = "libshaderc_shared.so.1"
+}
 // shaderc_compiler_t shaderc_compiler_initialize(void)
-extern "libshaderc_shared.so.1" fn shaderc_compiler_initialize() -> *u8
+extern SHADERC fn shaderc_compiler_initialize() -> *u8
 // void shaderc_compiler_release(shaderc_compiler_t)
-extern "libshaderc_shared.so.1" fn shaderc_compiler_release(compiler: *u8)
+extern SHADERC fn shaderc_compiler_release(compiler: *u8)
 
 // ---- options ----
 // shaderc_compile_options_t shaderc_compile_options_initialize(void)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_initialize() -> *u8
+extern SHADERC fn shaderc_compile_options_initialize() -> *u8
 // shaderc_compile_options_t shaderc_compile_options_clone(const shaderc_compile_options_t options)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_clone(options: *u8) -> *u8
+extern SHADERC fn shaderc_compile_options_clone(options: *u8) -> *u8
 // void shaderc_compile_options_release(shaderc_compile_options_t options)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_release(options: *u8)
+extern SHADERC fn shaderc_compile_options_release(options: *u8)
 // void shaderc_compile_options_add_macro_definition(shaderc_compile_options_t options, const char* name, size_t name_length, const char* value, size_t value_length)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_add_macro_definition(options: *u8, name: *u8, name_length: u64, value: *u8, value_length: u64)
+extern SHADERC fn shaderc_compile_options_add_macro_definition(options: *u8, name: *u8, name_length: u64, value: *u8, value_length: u64)
 // void shaderc_compile_options_set_source_language(shaderc_compile_options_t options, shaderc_source_language lang)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_source_language(options: *u8, lang: i32)
+extern SHADERC fn shaderc_compile_options_set_source_language(options: *u8, lang: i32)
 // void shaderc_compile_options_set_generate_debug_info(shaderc_compile_options_t options)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_generate_debug_info(options: *u8)
+extern SHADERC fn shaderc_compile_options_set_generate_debug_info(options: *u8)
 // void shaderc_compile_options_set_optimization_level(shaderc_compile_options_t options, shaderc_optimization_level level)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_optimization_level(options: *u8, level: i32)
+extern SHADERC fn shaderc_compile_options_set_optimization_level(options: *u8, level: i32)
 // void shaderc_compile_options_set_forced_version_profile(shaderc_compile_options_t options, int version, shaderc_profile profile)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_forced_version_profile(options: *u8, version: i32, profile: i32)
+extern SHADERC fn shaderc_compile_options_set_forced_version_profile(options: *u8, version: i32, profile: i32)
 // void shaderc_compile_options_set_include_callbacks(shaderc_compile_options_t options, shaderc_include_resolve_fn resolver, shaderc_include_result_release_fn result_releaser, void* user_data)
 //   resolver: fn(user_data: *u8, requested_source: *u8, type: i32, requesting_source: *u8, include_depth: u64) -> *shaderc_include_result
 //   result_releaser: fn(user_data: *u8, include_result: *shaderc_include_result); pass both with cast[*u8](f)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_include_callbacks(options: *u8, resolver: *u8, result_releaser: *u8, user_data: *u8)
+extern SHADERC fn shaderc_compile_options_set_include_callbacks(options: *u8, resolver: *u8, result_releaser: *u8, user_data: *u8)
 // void shaderc_compile_options_set_suppress_warnings(shaderc_compile_options_t options)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_suppress_warnings(options: *u8)
+extern SHADERC fn shaderc_compile_options_set_suppress_warnings(options: *u8)
 // void shaderc_compile_options_set_target_env(shaderc_compile_options_t options, shaderc_target_env target, uint32_t version)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_target_env(options: *u8, target: i32, version: u32)
+extern SHADERC fn shaderc_compile_options_set_target_env(options: *u8, target: i32, version: u32)
 // void shaderc_compile_options_set_target_spirv(shaderc_compile_options_t options, shaderc_spirv_version version)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_target_spirv(options: *u8, version: i32)
+extern SHADERC fn shaderc_compile_options_set_target_spirv(options: *u8, version: i32)
 // void shaderc_compile_options_set_warnings_as_errors(shaderc_compile_options_t options)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_warnings_as_errors(options: *u8)
+extern SHADERC fn shaderc_compile_options_set_warnings_as_errors(options: *u8)
 // void shaderc_compile_options_set_limit(shaderc_compile_options_t options, shaderc_limit limit, int value)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_limit(options: *u8, limit: i32, value: i32)
+extern SHADERC fn shaderc_compile_options_set_limit(options: *u8, limit: i32, value: i32)
 // void shaderc_compile_options_set_auto_bind_uniforms(shaderc_compile_options_t options, bool auto_bind)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_auto_bind_uniforms(options: *u8, auto_bind: bool)
+extern SHADERC fn shaderc_compile_options_set_auto_bind_uniforms(options: *u8, auto_bind: bool)
 // void shaderc_compile_options_set_auto_combined_image_sampler(shaderc_compile_options_t options, bool upgrade)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_auto_combined_image_sampler(options: *u8, upgrade: bool)
+extern SHADERC fn shaderc_compile_options_set_auto_combined_image_sampler(options: *u8, upgrade: bool)
 // void shaderc_compile_options_set_hlsl_io_mapping(shaderc_compile_options_t options, bool hlsl_iomap)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_hlsl_io_mapping(options: *u8, hlsl_iomap: bool)
+extern SHADERC fn shaderc_compile_options_set_hlsl_io_mapping(options: *u8, hlsl_iomap: bool)
 // void shaderc_compile_options_set_hlsl_offsets(shaderc_compile_options_t options, bool hlsl_offsets)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_hlsl_offsets(options: *u8, hlsl_offsets: bool)
+extern SHADERC fn shaderc_compile_options_set_hlsl_offsets(options: *u8, hlsl_offsets: bool)
 // void shaderc_compile_options_set_binding_base(shaderc_compile_options_t options, shaderc_uniform_kind kind, uint32_t base)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_binding_base(options: *u8, kind: i32, base: u32)
+extern SHADERC fn shaderc_compile_options_set_binding_base(options: *u8, kind: i32, base: u32)
 // void shaderc_compile_options_set_binding_base_for_stage(shaderc_compile_options_t options, shaderc_shader_kind shader_kind, shaderc_uniform_kind kind, uint32_t base)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_binding_base_for_stage(options: *u8, shader_kind: i32, kind: i32, base: u32)
+extern SHADERC fn shaderc_compile_options_set_binding_base_for_stage(options: *u8, shader_kind: i32, kind: i32, base: u32)
 // void shaderc_compile_options_set_preserve_bindings(shaderc_compile_options_t options, bool preserve_bindings)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_preserve_bindings(options: *u8, preserve_bindings: bool)
+extern SHADERC fn shaderc_compile_options_set_preserve_bindings(options: *u8, preserve_bindings: bool)
 // void shaderc_compile_options_set_max_id_bound(shaderc_compile_options_t options, uint32_t max_id_bound)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_max_id_bound(options: *u8, max_id_bound: u32)
+extern SHADERC fn shaderc_compile_options_set_max_id_bound(options: *u8, max_id_bound: u32)
 // void shaderc_compile_options_set_auto_map_locations(shaderc_compile_options_t options, bool auto_map)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_auto_map_locations(options: *u8, auto_map: bool)
+extern SHADERC fn shaderc_compile_options_set_auto_map_locations(options: *u8, auto_map: bool)
 // void shaderc_compile_options_set_hlsl_register_set_and_binding_for_stage(shaderc_compile_options_t options, shaderc_shader_kind shader_kind, const char* reg, const char* set, const char* binding)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_hlsl_register_set_and_binding_for_stage(options: *u8, shader_kind: i32, reg: *u8, set: *u8, binding: *u8)
+extern SHADERC fn shaderc_compile_options_set_hlsl_register_set_and_binding_for_stage(options: *u8, shader_kind: i32, reg: *u8, set: *u8, binding: *u8)
 // void shaderc_compile_options_set_hlsl_register_set_and_binding(shaderc_compile_options_t options, const char* reg, const char* set, const char* binding)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_hlsl_register_set_and_binding(options: *u8, reg: *u8, set: *u8, binding: *u8)
+extern SHADERC fn shaderc_compile_options_set_hlsl_register_set_and_binding(options: *u8, reg: *u8, set: *u8, binding: *u8)
 // void shaderc_compile_options_set_hlsl_functionality1(shaderc_compile_options_t options, bool enable)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_hlsl_functionality1(options: *u8, enable: bool)
+extern SHADERC fn shaderc_compile_options_set_hlsl_functionality1(options: *u8, enable: bool)
 // void shaderc_compile_options_set_hlsl_16bit_types(shaderc_compile_options_t options, bool enable)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_hlsl_16bit_types(options: *u8, enable: bool)
+extern SHADERC fn shaderc_compile_options_set_hlsl_16bit_types(options: *u8, enable: bool)
 // void shaderc_compile_options_set_vulkan_rules_relaxed(shaderc_compile_options_t options, bool enable)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_vulkan_rules_relaxed(options: *u8, enable: bool)
+extern SHADERC fn shaderc_compile_options_set_vulkan_rules_relaxed(options: *u8, enable: bool)
 // void shaderc_compile_options_set_invert_y(shaderc_compile_options_t options, bool enable)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_invert_y(options: *u8, enable: bool)
+extern SHADERC fn shaderc_compile_options_set_invert_y(options: *u8, enable: bool)
 // void shaderc_compile_options_set_nan_clamp(shaderc_compile_options_t options, bool enable)
-extern "libshaderc_shared.so.1" fn shaderc_compile_options_set_nan_clamp(options: *u8, enable: bool)
+extern SHADERC fn shaderc_compile_options_set_nan_clamp(options: *u8, enable: bool)
 
 // ---- compiling ----
 // shaderc_compilation_result_t shaderc_compile_into_spv(const shaderc_compiler_t compiler, const char* source_text, size_t source_text_size, shaderc_shader_kind shader_kind, const char* input_file_name, const char* entry_point_name, const shaderc_compile_options_t additional_options)
-extern "libshaderc_shared.so.1" fn shaderc_compile_into_spv(compiler: *u8, source_text: *u8, source_text_size: u64, shader_kind: i32, input_file_name: *u8, entry_point_name: *u8, additional_options: *u8) -> *u8
+extern SHADERC fn shaderc_compile_into_spv(compiler: *u8, source_text: *u8, source_text_size: u64, shader_kind: i32, input_file_name: *u8, entry_point_name: *u8, additional_options: *u8) -> *u8
 // shaderc_compilation_result_t shaderc_compile_into_spv_assembly(...same parameters...)
-extern "libshaderc_shared.so.1" fn shaderc_compile_into_spv_assembly(compiler: *u8, source_text: *u8, source_text_size: u64, shader_kind: i32, input_file_name: *u8, entry_point_name: *u8, additional_options: *u8) -> *u8
+extern SHADERC fn shaderc_compile_into_spv_assembly(compiler: *u8, source_text: *u8, source_text_size: u64, shader_kind: i32, input_file_name: *u8, entry_point_name: *u8, additional_options: *u8) -> *u8
 // shaderc_compilation_result_t shaderc_compile_into_preprocessed_text(...same parameters...)
-extern "libshaderc_shared.so.1" fn shaderc_compile_into_preprocessed_text(compiler: *u8, source_text: *u8, source_text_size: u64, shader_kind: i32, input_file_name: *u8, entry_point_name: *u8, additional_options: *u8) -> *u8
+extern SHADERC fn shaderc_compile_into_preprocessed_text(compiler: *u8, source_text: *u8, source_text_size: u64, shader_kind: i32, input_file_name: *u8, entry_point_name: *u8, additional_options: *u8) -> *u8
 // shaderc_compilation_result_t shaderc_assemble_into_spv(const shaderc_compiler_t compiler, const char* source_assembly, size_t source_assembly_size, const shaderc_compile_options_t additional_options)
-extern "libshaderc_shared.so.1" fn shaderc_assemble_into_spv(compiler: *u8, source_assembly: *u8, source_assembly_size: u64, additional_options: *u8) -> *u8
+extern SHADERC fn shaderc_assemble_into_spv(compiler: *u8, source_assembly: *u8, source_assembly_size: u64, additional_options: *u8) -> *u8
 
 // ---- results ----
 // void shaderc_result_release(shaderc_compilation_result_t result)
-extern "libshaderc_shared.so.1" fn shaderc_result_release(result: *u8)
+extern SHADERC fn shaderc_result_release(result: *u8)
 // size_t shaderc_result_get_length(const shaderc_compilation_result_t result)
-extern "libshaderc_shared.so.1" fn shaderc_result_get_length(result: *u8) -> u64
+extern SHADERC fn shaderc_result_get_length(result: *u8) -> u64
 // size_t shaderc_result_get_num_warnings(const shaderc_compilation_result_t result)
-extern "libshaderc_shared.so.1" fn shaderc_result_get_num_warnings(result: *u8) -> u64
+extern SHADERC fn shaderc_result_get_num_warnings(result: *u8) -> u64
 // size_t shaderc_result_get_num_errors(const shaderc_compilation_result_t result)
-extern "libshaderc_shared.so.1" fn shaderc_result_get_num_errors(result: *u8) -> u64
+extern SHADERC fn shaderc_result_get_num_errors(result: *u8) -> u64
 // shaderc_compilation_status shaderc_result_get_compilation_status(const shaderc_compilation_result_t)
-extern "libshaderc_shared.so.1" fn shaderc_result_get_compilation_status(result: *u8) -> i32
+extern SHADERC fn shaderc_result_get_compilation_status(result: *u8) -> i32
 // const char* shaderc_result_get_bytes(const shaderc_compilation_result_t result)
-extern "libshaderc_shared.so.1" fn shaderc_result_get_bytes(result: *u8) -> *u8
+extern SHADERC fn shaderc_result_get_bytes(result: *u8) -> *u8
 // const char* shaderc_result_get_error_message(const shaderc_compilation_result_t result)
-extern "libshaderc_shared.so.1" fn shaderc_result_get_error_message(result: *u8) -> *u8
+extern SHADERC fn shaderc_result_get_error_message(result: *u8) -> *u8
 
 // ---- versions ----
 // void shaderc_get_spv_version(unsigned int* version, unsigned int* revision)
-extern "libshaderc_shared.so.1" fn shaderc_get_spv_version(version: *u32, revision: *u32)
+extern SHADERC fn shaderc_get_spv_version(version: *u32, revision: *u32)
 // bool shaderc_parse_version_profile(const char* str, int* version, shaderc_profile* profile)
-extern "libshaderc_shared.so.1" fn shaderc_parse_version_profile(str_: *u8, version: *i32, profile: *i32) -> bool
+extern SHADERC fn shaderc_parse_version_profile(str_: *u8, version: *i32, profile: *i32) -> bool

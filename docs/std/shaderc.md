@@ -1,16 +1,35 @@
 # std.shaderc: GLSL and HLSL to SPIR-V at run time
 
 `use std.shaderc` binds the C API of [shaderc](https://github.com/google/shaderc)
-(`<shaderc/shaderc.h>`, `libshaderc_shared.so.1`): the compiler behind `glslc`, as a library.
+(`<shaderc/shaderc.h>`; `libshaderc_shared.so.1` on Linux, `shaderc_shared.dll` on Windows):
+the compiler behind `glslc`, as a library.
 It is the counterpart of `D3DCompile` in the Direct3D 12 bindings: a game can compile its
 shaders while it runs, for example to reload them when their files change. It is a binding,
 not a shader system: what to compile when, caching and error display are the program's.
 
-Linux only (`--target windows` reports `use std.shaderc` as an error). A program that calls a
-shaderc function is dynamically linked against `libshaderc_shared.so.1` (Arch: package
-`shaderc`; Debian/Ubuntu: `libshaderc1`), which must then be installed where it runs. Shaders
-that do not change at run time need neither the library nor this module: compile them when
-building and embed the SPIR-V ([vk.md](vk.md#spir-v-shaders)).
+The same module and the same code for Linux and Windows. A program that calls a shaderc
+function needs the library where it runs, and does not start without it (as with any `extern`
+library, the system loader looks for it before `main`):
+
+- **Linux**: it is dynamically linked against `libshaderc_shared.so.1` (Arch: package
+  `shaderc`; Debian/Ubuntu: `libshaderc1`); without it the dynamic loader stops the program
+  with an error naming the library.
+- **Windows** (`--target windows`): it imports `shaderc_shared.dll`, which the
+  [Vulkan SDK](https://vulkan.lunarg.com/) installs in its `Bin` directory and whose
+  installer adds that directory to `PATH`. Windows looks for the DLL next to the executable,
+  in the system directories and in `PATH`; to ship a game that compiles shaders at run time,
+  put `shaderc_shared.dll` next to the `.exe`. Without it the program does not start: exit
+  status `0xC0000135` (`STATUS_DLL_NOT_FOUND`), and Windows shows a message naming the DLL.
+
+Only the functions a program calls are imported, so a program that uses `std.shaderc` only in
+a development build (for example behind a `const HOT_RELOAD = false`) does not need the
+library when that code is not reachable. Older shaderc releases lack the newest functions:
+the `shaderc_shared.dll` of Vulkan SDK 1.4.304 has every function of this module except
+`shaderc_compile_options_set_max_id_bound`, and a program that calls a function its library
+lacks does not start either (Windows: exit status `0xC0000139`, `STATUS_ENTRYPOINT_NOT_FOUND`).
+
+Shaders that do not change at run time need neither the library nor this module: compile them
+when building and embed the SPIR-V ([vk.md](vk.md#spir-v-shaders)).
 
 ## Mapping
 
@@ -128,4 +147,6 @@ shaderc_compile_options_set_include_callbacks(options, cast[*u8](resolve), cast[
 
 `tests/sys/shaderc.al` compiles GLSL (checking the SPIR-V magic number `0x07230203` and the
 version) and HLSL, a source with an error, a macro definition, the preprocessor and an include
-callback; it is skipped when `libshaderc_shared.so.1` is missing.
+callback, on Linux and Windows; it is skipped when `libshaderc_shared.so.1` is missing (Linux) or
+`shaderc_shared.dll` is in no directory of `PATH` (Windows: `tests/sys/shaderc.windows.need`;
+under Wine it is skipped).
