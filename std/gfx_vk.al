@@ -12,6 +12,7 @@ use std.image
 use std.vk
 
 priv const FRAMES = 2
+priv const MAX_IMAGES = 8
 priv const FOREVER: u64 = 0xFFFF_FFFF_FFFF_FFFF
 priv const TEX_FORMAT: i32 = VK_FORMAT_R8G8B8A8_UNORM
 priv const VALIDATION_LAYER = "VK_LAYER_KHRONOS_validation"
@@ -56,9 +57,10 @@ priv struct Vk {
     sc_format: i32
     sc_extent: VkExtent2D
     sc_vsync: bool
-    images: []u64
-    views: []u64
-    rendered: []u64                 // per swapchain image: signalled when its frame is drawn
+    nimages: i64                    // swapchain images (fixed arrays: rebuilding allocates nothing)
+    images: [MAX_IMAGES]u64
+    views: [MAX_IMAGES]u64
+    rendered: [MAX_IMAGES]u64       // per swapchain image: signalled when its frame is drawn
     acquired: [FRAMES]u64           // per frame slot: signalled when the acquired image is free
     rebuild: bool
     image_index: u32
@@ -586,8 +588,8 @@ priv fn build_swapchain(g: *Gfx, v: *Vk) -> bool {
     count := caps.minImageCount + 1
     if caps.maxImageCount != 0 { count = min(count, caps.maxImageCount) }
     vkDeviceWaitIdle(v.device)
-    for x in v.views { vkDestroyImageView(v.device, x, nil) }
-    for s in v.rendered { vkDestroySemaphore(v.device, s, nil) }
+    for x in v.views[..v.nimages] { vkDestroyImageView(v.device, x, nil) }
+    for s in v.rendered[..v.nimages] { vkDestroySemaphore(v.device, s, nil) }
     info := vk_swapchain_create_info_khr()
     info.surface = v.surface
     info.minImageCount = count
@@ -614,10 +616,9 @@ priv fn build_swapchain(g: *Gfx, v: *Vk) -> bool {
     v.sc_vsync = g.vsync
     n: u32
     vkGetSwapchainImagesKHR(v.device, handle, &n, nil)
-    v.images = alloc[u64](i64(n))
+    assert n <= MAX_IMAGES, "gfx: more swapchain images than expected"
     vkGetSwapchainImagesKHR(v.device, handle, &n, ptr(v.images))
-    v.views = alloc[u64](i64(n))
-    v.rendered = alloc[u64](i64(n))
+    v.nimages = i64(n)
     sem_info := vk_semaphore_create_info()
     for i in 0..i64(n) {
         v.views[i] = view_of(v, v.images[i], v.sc_format, false)
@@ -677,8 +678,8 @@ fn gfx_close(g: *Gfx) {
         for i in 0..len(v.texs) { free_tex(v, i) }
         free_buffer(v, &v.vbuf)
         free_buffer(v, &v.staging)
-        for x in v.views { vkDestroyImageView(v.device, x, nil) }
-        for s in v.rendered { vkDestroySemaphore(v.device, s, nil) }
+        for x in v.views[..v.nimages] { vkDestroyImageView(v.device, x, nil) }
+        for s in v.rendered[..v.nimages] { vkDestroySemaphore(v.device, s, nil) }
         if v.swapchain != 0 { vkDestroySwapchainKHR(v.device, v.swapchain, nil) }
         for b in 0..2 {
             if v.pipeline_format != 0 && v.pipeline_format != TEX_FORMAT { vkDestroyPipeline(v.device, v.pipelines[1][b], nil) }
