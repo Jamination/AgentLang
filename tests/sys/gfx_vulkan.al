@@ -5,7 +5,7 @@
 // runs the Direct3D 12 backend. Any validation error or warning fails the test. Without a
 // Vulkan 1.3 device it ends with status 77 (SKIP).
 //
-// `gfx_vulkan out.png` also writes the frame there.
+// `gfx_vulkan --save out.png` also writes the frame there.
 use std.gfx_vk
 use "data/gfx_scene.al"
 
