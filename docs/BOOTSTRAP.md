@@ -87,7 +87,9 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   reported as `SKIP` with the reason when it is missing: a C compiler for the tests with a C
   library (`tests/sys/NAME.c`: clang on Linux; MinGW-w64 for Windows programs, as
   `x86_64-w64-mingw32-gcc` or, on Windows, `gcc`), what `NAME.need` asks for on Linux
-  (libraries, weston, an X display in `AL_TEST_DISPLAY`), what only the program can tell
+  (libraries, weston, an X display in `AL_TEST_DISPLAY`), the DLLs `NAME.windows.need` lists
+  for a Windows program run on Windows (found through `PATH`; under Wine such a test is
+  skipped: `shaderc_shared.dll` of the Vulkan SDK), what only the program can tell
   (status 77: no Direct3D 12 device). `--target windows` on Linux needs Wine and
   stops without it. `tests/driver` (bash scripts for the Linux command line) runs on Linux
   for the Linux target only.
@@ -668,9 +670,10 @@ same, the differences are:
   prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
   (exception dispatch, debuggers); functions without a frame are leaf functions.
 - **Run-time library.** `src/prelude_windows.al` replaces `src/prelude_linux.al` (kernel32.dll
-  only); the bundled modules with Linux interfaces (`std.x11`, `std.wayland`, `std.alsa`,
-  `std.vk`, `std.shaderc`) are refused (`LINUX_ONLY` in `src/main.al`; `std.libc` is not one of
-  them: it binds `msvcrt.dll` in a `when`), and
+  only); the bundled modules with Linux interfaces (`std.x11`, `std.wayland`, `std.alsa`) are
+  refused (`LINUX_ONLY` in `src/main.al`; `std.libc`, `std.vk` and `std.shaderc` are not among
+  them: they choose their library, `msvcrt.dll`, `vulkan-1.dll`, `shaderc_shared.dll`, with a
+  `when`), and
   the modules with an OS layer include the target's one with `when TARGET_OS == ...`.
   `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
   `tests/windows.skip`).

@@ -1,0 +1,1 @@
+shaderc (the run-time GLSL/HLSL to SPIR-V compiler) comes with the Vulkan SDK, whose installer adds its Bin directory to PATH

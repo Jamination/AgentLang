@@ -54,7 +54,6 @@ priv const LINUX_ONLY = [_](str, str){
     ("x11", ""),
     ("wayland", ""),
     ("alsa", ""),
-    ("shaderc", ""),
 }
 
 // the operating system the executable is built for (`--target linux|windows`); the default

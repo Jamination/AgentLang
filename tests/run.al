@@ -9,6 +9,10 @@
 //                     driver, a sound device, a display, a shared library). NAME.need holds a
 //                     shell command that tells whether the prerequisite is there; if it fails
 //                     the test is reported as SKIP together with the text of NAME.why.
+//                     For a Windows target, NAME.windows.need lists the DLLs (outside the
+//                     system's) the program imports: one that is not in a directory of PATH
+//                     makes the test a SKIP with the text of NAME.windows.why (under Wine the
+//                     check is not made and the test is a SKIP).
 //                     NAME.c is a C library for the test, built before it with the C compiler
 //                     of the target (clang -O2, without frame pointers: libNAME.so, found
 //                     through LD_LIBRARY_PATH; Windows: MinGW -O2, NAME.dll next to the
@@ -50,7 +54,7 @@
 // address where none listens and ALSA an empty configuration, so Wine finds no audio device).
 // fail/ and check/ use `alc check --target windows`, unit/ runs `alc test` under Wine; driver/
 // tests the Linux command line and is not run; the prerequisite checks (NAME.need) are Linux
-// ones and are not run either. Tests that cannot run on Windows are listed with the reason in
+// ones and are not run either (NAME.windows.need is the Windows one, above). Tests that cannot run on Windows are listed with the reason in
 // tests/windows.skip.
 // Linux, --host-wine alc.exe (with --target windows) tests a compiler built for Windows:
 // alc.exe runs under Wine and builds, checks and runs (`alc run` in the default mode,
@@ -441,6 +445,26 @@ priv fn prog(j: Job, jd: str, r: *Res) {
             r.say(fmt("SKIP ", name, ": ", why))
             r.skip += 1
             return
+        }
+    }
+    if cfg.win && cfg.can_run && file_exists(concat(base, ".windows.need")) {
+        // the DLLs the Windows program imports from outside the system (it does not start
+        // without them): looked up in the directories of PATH, which is where Windows finds them
+        for dll in words(concat(base, ".windows.need")) {
+            missing := ""
+            if !HOST_WIN {
+                missing = fmt("its prerequisite (", base, ".windows.need) is only checked on Windows")
+            } else if !have(dll) {
+                missing = fmt(dll, " is not in a directory of PATH")
+                if file_exists(concat(base, ".windows.why")) {
+                    missing = fmt(missing, ": ", content(concat(base, ".windows.why")))
+                }
+            }
+            if len(missing) > 0 {
+                r.say(fmt("SKIP ", name, ": ", missing))
+                r.skip += 1
+                return
+            }
         }
     }
     if cfg.can_run && file_exists(concat(base, ".c")) {
