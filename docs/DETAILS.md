@@ -803,7 +803,7 @@ both systems, except where this section says otherwise.
 - **Paths** may use `\` as well as `/`, a drive (`C:/x`, `C:x`) or `\\server\share\`; the
   path functions of std.asset know these roots and build paths with `/`. Long paths work
   without `LongPathsEnabled`: the run-time library hands Windows a path of 248 UTF-16 units
-  or more in the extended-length form `\\?\C:\dir\file`, made absolute first
+  or more (once made absolute) in the extended-length form `\\?\C:\dir\file`, made absolute first
   ([std/asset.md](std/asset.md#windows)).
   `current_dir()` is in Windows form (`C:\Users\me`).
 - **Errors.** `io_error()` is the Linux errno of the same meaning (file not found 2, access
