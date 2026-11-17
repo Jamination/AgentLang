@@ -10,7 +10,7 @@ use std.gfx_vk
 use "data/gfx_scene.al"
 
 fn main() -> i64 {
-    save := if len(args()) > 1 { args()[1] } else { "" }
+    save := if len(args()) > 2 && args()[1] == "--save" { args()[2] } else { "" }
     print("first device, validation layer on")
     wrong, err := run_scene(GfxDesc{debug: true}, save)
     if err != "" {
