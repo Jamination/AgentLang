@@ -3,7 +3,9 @@
 // machine code of the loops of `incl`, `marks` and `excl` (`--emit-asm`, blocks of depth > 0)
 // has no branch to a block that fails a check; the loop of `data` (an index read from memory)
 // keeps its check. A stepped loop also no longer compares the counter with the bound on every
-// iteration. The results of these loops must not change, out-of-bounds ones included.
+// iteration. A check whose condition does not change in the loop and that the loop header
+// makes first (`len != 0` in the probe loop of `probe`, whatever exits the loop has) moves to
+// the preheader. The results of these loops must not change, out-of-bounds ones included.
 use std.os
 
 // the compiler for the system this program runs on, as ./build.sh builds it
@@ -40,10 +42,24 @@ noinline fn data(v: []i64, idx: []i64) -> i64 {
     }
     return s
 }
+noinline fn probe(t: []i64, key: i64) -> i64 {
+    mask := len(t) - 1
+    i := (key * 7) & mask
+    loop {
+        if t[i] == key {
+            return i
+        }
+        if t[i] == 0 {
+            return -1
+        }
+        i = (i + 1) & mask
+    }
+}
 fn main() {
     v := vec_fill(10, 1)
     excl(v.items(), h(1), h(3))
-    print(incl(v.items(), 9), marks(h(7)), data(v.items(), []i64{1, 2}))
+    t := []i64{0, 5, 9, 4, 0, 3, 0, 2}
+    print(incl(v.items(), 9), marks(h(7)), data(v.items(), []i64{1, 2}), probe(t[..], 3), probe(t[..], 4))
 }
 `
 
@@ -146,7 +162,7 @@ fn main() {
     exe := src[..len(src) - 3]
     write_file(src, SRC)
     out, status := run_capture([]str{ALC, "build", "--emit-asm", src, "-o", exe})
-    print(status, check_jumps(out, "incl"), check_jumps(out, "marks"), check_jumps(out, "excl"), check_jumps(out, "data") > 0)
+    print(status, check_jumps(out, "incl"), check_jumps(out, "marks"), check_jumps(out, "excl"), check_jumps(out, "data") > 0, check_jumps(out, "probe"))
     res, _ := run_capture([]str{exe})
     print(trim(res))
     remove_file(src)

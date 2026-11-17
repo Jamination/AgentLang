@@ -304,6 +304,43 @@ priv fn stepped_latch(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bo
     return true
 }
 
+// A check whose condition does not change in the loop and that the loop header makes before
+// anything else (only phis and pure instructions before it) has the same outcome on every
+// iteration as on the first, which runs right after the preheader: it moves there, whatever
+// the shape of the loop (calls, other exits). (A probe loop over a power-of-two table,
+// `i = (i + 1) & (len - 1)`, checks `len != 0` there.)
+priv fn header_check(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block_v: *Vec[i32]) -> bool {
+    l := &loops.loops[li]
+    h := l.header
+    c, ok, trap := match f.blocks[h].term {
+        Br(c0, t0, e0) if t0 != e0 => (c0, t0, e0)
+        _ => return false
+    }
+    if !in_loop[ok] || in_loop[trap] || !opt_is_check_trap(f, trap) {
+        return false
+    }
+    for v in f.blocks[h].insts {
+        o := f.insts[v].op
+        if o != Phi && !o.is_pure() {
+            return false
+        }
+    }
+    outside := licm_outside_preds(cfg, loops, li, h)
+    if outside.len != 1 || f.succs(outside[0]).len != 1 {
+        return false
+    }
+    pre := outside[0]
+    if def_block_v.len == 0 {
+        *def_block_v = f.block_of()
+    }
+    if !invariant(c, in_loop, def_block_v.items()) {
+        return false
+    }
+    f.blocks[pre].term = Br(c, h, trap)
+    f.blocks[h].term = Jmp(ok)
+    return true
+}
+
 // match idx as ext(inner) with inner = iv, inner + inv, inner - inv or inv - inner
 priv fn match_affine(f: *Func, idx: i64, iv: *Iv, in_loop: []bool, def_block: []i32) -> Opt[BceAffine] {
     ext: Opt[Op] = None
@@ -759,6 +796,9 @@ fn bce_run(f: *Func) -> bool {
             }
             loops.mark_blocks(li, in_loop.items(), true)
             hoisted := hoist_in_loop(f, &cfg, &loops, li, in_loop.items(), &def_block)
+            if !hoisted {
+                hoisted = header_check(f, &cfg, &loops, li, in_loop.items(), &def_block)
+            }
             loops.mark_blocks(li, in_loop.items(), false)
             if hoisted {
                 did = true
