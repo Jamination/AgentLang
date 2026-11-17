@@ -8,3 +8,11 @@ sys/c_variadic calls a C library: --target linux-arm64 makes static executables 
 sys/thread_ccb calls a C library: --target linux-arm64 makes static executables only
 sys/thread_ccb_panic calls a C library: --target linux-arm64 makes static executables only
 sys/thread_libc calls the C library: --target linux-arm64 makes static executables only
+run/debug_info -g: debug information is not written for linux-arm64 yet (refused with a message)
+std/input reads gamepads with x86-64 system call numbers (std.input_linux): refused for linux-arm64
+std/input_gamepad_watch reads gamepads with x86-64 system call numbers (std.input_linux): refused for linux-arm64
+std/net_dns std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
+std/net_http std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
+std/net_ipv6 std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
+std/net_tcp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
+std/net_udp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64

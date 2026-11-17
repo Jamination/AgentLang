@@ -36,7 +36,9 @@ fn main() {
 ## Getting started
 
 Linux or Windows on x86-64 is the only requirement; the repository carries a seed compiler for
-each. The compiler runs on both and builds for both (`--target linux|windows`).
+each. The compiler runs on both and builds for both (`--target linux|windows`), and, experimentally,
+for arm64 Linux (`--target linux-arm64`: static executables, so far verified only under the
+project's own emulator, see [docs/ARM64_TEST.md](docs/ARM64_TEST.md)).
 
 ```
 ./build.sh                          # Linux: the compiler compiles itself -> build/alc (and build/alc.exe)
@@ -104,6 +106,7 @@ between the two versions, then rebuild and run the project's tests with the new 
   input, audio, a 2D renderer, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
 - [Testing on Windows](docs/WINDOWS_TEST.md): checks to run on a real Windows machine
+- [Testing on arm64](docs/ARM64_TEST.md): checks to run on real arm64 Linux (or QEMU) for the experimental arm64 target
 - [AGENTS.md template](docs/AGENTS_TEMPLATE.md): for a new game repository written by agents
 - [How the compiler is built and organised](docs/BOOTSTRAP.md)
 
@@ -145,7 +148,7 @@ The compiler compiles its own 40,000 lines in about 0.125 s without optimisation
 
 | Path | Contents |
 |---|---|
-| `src/` | the compiler: front end, SSA optimizer (`opt/`), x86-64 back end (`x86/`), ELF linker, and the run-time library (`prelude.al`) |
+| `src/` | the compiler: front end, SSA optimizer (`opt/`), x86-64 back end (`x86/`), experimental arm64 back end (`arm64/`), ELF linker, and the run-time library (`prelude.al`) |
 | `std/` | standard library modules (`use std.<name>`) |
 | `bootstrap/alc`, `bootstrap/alc.exe` | seed compilers that `build.sh` (Linux) and `build.bat` (Windows) start from |
 | `examples/`, `bench/` | sample programs; the benchmarks in AL and C |

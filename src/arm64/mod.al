@@ -12,9 +12,9 @@ struct A64Output {
     funcs: Vec[A64Func]
     fpool: Vec[Bits128]
     err: str
-    // the source files (Module.locs) of the system calls of the compiled code: the driver
-    // refuses those of bundled modules, which use the x86-64 numbers
-    syscall_files: Vec[i64]
+    // the source files (Module.locs) of the compiled code: the driver refuses the bundled
+    // modules that make system calls by their x86-64 numbers
+    code_files: Vec[i64]
 }
 
 // the functions to compile, in increasing order: the entry, the functions whose address is in
@@ -62,15 +62,21 @@ fn a64_compile(m: *Module, dump_asm: bool) -> A64Output {
         opt_finish(m, f, w)
     }
     fids := reachable(m)
+    // the source files of the compiled code, inlined code included (the location chains)
     sfiles := vec[i64]()
+    seen_loc := vec_fill(m.locs.list.len, false)
     for fid in fids {
         f := &m.funcs[fid]
         for bi in 0..f.blocks.len {
             for v in f.blocks[bi].insts {
-                i := &f.insts[v]
-                l := i64(i.srcloc())
-                if i.op == Syscall && l > 0 && l < m.locs.list.len && !contains(&sfiles, i64(m.locs.list[l].file)) {
-                    sfiles.push(i64(m.locs.list[l].file))
+                l := i64(f.insts[v].srcloc())
+                while l > 0 && l < m.locs.list.len && !seen_loc[l] {
+                    seen_loc[l] = true
+                    file := i64(m.locs.list[l].file)
+                    if !contains(&sfiles, file) {
+                        sfiles.push(file)
+                    }
+                    l = i64(m.locs.list[l].parent)
                 }
             }
         }
@@ -97,7 +103,7 @@ fn a64_compile(m: *Module, dump_asm: bool) -> A64Output {
         }
         funcs.push(A64Func{fid: fid, code: code})
     }
-    return A64Output{funcs: funcs, fpool: fpool, err: err, syscall_files: sfiles}
+    return A64Output{funcs: funcs, fpool: fpool, err: err, code_files: sfiles}
 }
 
 priv fn compile_fn(m: *Module, fid: i64, w: *Work, dump_asm: bool, mir: bool) -> (A64Code, Vec[Bits128]) {

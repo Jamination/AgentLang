@@ -275,7 +275,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                static AArch64, see docs/ARM64_TEST.md)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -345,7 +345,7 @@ priv fn parse_args() -> Args {
             "--target" => {
                 i += 1
                 if i >= av.len {
-                    usage("--target needs an operating system: linux or windows")
+                    usage("--target needs an operating system: linux, windows or linux-arm64")
                 }
                 a.target_set = true
                 match av[i] {
@@ -1105,10 +1105,14 @@ priv fn real_main() -> i64 {
     out: Output
     if target_arch == ArchArm64 {
         aout = a64_compile(&module, ar.emit_asm)
-        for fi in aout.syscall_files {
+        for fi in aout.code_files {
             fname := file_name(&src.names, fi)
-            if starts_with(fname, "<std/") {
-                driver_error(ar.input, fmt("module `std.", fname[5..len(fname) - 4], "` makes Linux system calls by their x86-64 numbers: it is not available for --target linux-arm64 yet"))
+            if starts_with(fname, "<std/") && find(std_text(fname[5..len(fname) - 4]).or(""), "syscall(") >= 0 {
+                mname := fname[5..len(fname) - 4]
+                if ends_with(mname, "_linux") {
+                    mname = mname[..len(mname) - 6]
+                }
+                driver_error(ar.input, fmt("module `std.", mname, "` makes Linux system calls by their x86-64 numbers: it is not available for --target linux-arm64 yet"))
                 return 1
             }
         }
