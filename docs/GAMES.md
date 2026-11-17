@@ -289,14 +289,9 @@ one gets the SmartScreen warning the first time it is started.
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
 (events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
-<<<<<<< HEAD
-(WASAPI), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
+(WASAPI), std.gfx (Direct3D 12 on Windows, Vulkan on Linux), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
 std.shaderc (`libshaderc_shared.so.1`, or `shaderc_shared.dll` of the Vulkan SDK on Windows).
 Windows only: std.dx12. Linux only: std.x11, std.wayland, std.alsa.
-=======
-(WASAPI), std.gfx (Direct3D 12 on Windows, Vulkan on Linux), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)).
-Windows only: std.dx12. Linux only: std.shaderc, std.x11, std.wayland, std.alsa.
->>>>>>> worktree-agent-a60f85e4cdb51e8a4
 
 **Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
 
