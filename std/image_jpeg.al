@@ -1296,21 +1296,27 @@ priv inline fn jcategory(v: i64) -> i64 {
     if a == 0 { 0 } else { 64 - i64(clz(u64(a))) }
 }
 
-// transforms, quantises and writes the 8x8 block of samples at plane[at..] (stride per row)
-priv fn jencode_block(w: *JWriter, plane: []u8, at: i64, stride: i64, q: []i64, pred: *i64, dct: *JCode, act: *JCode) {
-    d: [64]i64
-    for r in 0..8 {
-        for c in 0..8 {
-            d[r * 8 + c] = i64(plane[at + r * stride + c]) - 128
-        }
-    }
-    jfdct(d[..])
+// Transforms, quantises and writes the 8x8 block of samples at plane[at..] (stride per row);
+// returns its quantised DC coefficient. A dummy block (entirely outside the image, only there
+// to complete an MCU) is written as libjpeg does: the DC coefficient dc and nothing else.
+priv fn jencode_block(w: *JWriter, plane: []u8, at: i64, stride: i64, q: []i64, pred: *i64, dct: *JCode, act: *JCode, dummy: bool, dc: i64) -> i64 {
     zz: [64]i64
-    for k in 0..64 {
-        z := ZIGZAG[k]
-        v := d[z]
-        dv := q[z]
-        zz[k] = if v < 0 { -((-v + (dv >> 1)) / dv) } else { (v + (dv >> 1)) / dv }
+    if dummy {
+        zz[0] = dc
+    } else {
+        d: [64]i64
+        for r in 0..8 {
+            for c in 0..8 {
+                d[r * 8 + c] = i64(plane[at + r * stride + c]) - 128
+            }
+        }
+        jfdct(d[..])
+        for k in 0..64 {
+            z := ZIGZAG[k]
+            v := d[z]
+            dv := q[z]
+            zz[k] = if v < 0 { -((-v + (dv >> 1)) / dv) } else { (v + (dv >> 1)) / dv }
+        }
     }
     diff := zz[0] - *pred
     *pred = zz[0]
@@ -1339,6 +1345,7 @@ priv fn jencode_block(w: *JWriter, plane: []u8, at: i64, stride: i64, q: []i64, 
     if run > 0 {
         jput(w, i64(act.code[0]), i64(act.size[0]))
     }
+    zz[0]
 }
 
 // the quantisation table for a quality 1..100, scaled from a standard one as libjpeg does
@@ -1463,12 +1470,18 @@ priv fn jencode(img: Image, quality: i64) -> []u8 {
     }
     cw := pw
     if sub == 2 {
-        // 2x2 averages for the chroma, with libjpeg's alternating rounding
+        // 2x2 averages for the chroma, with libjpeg's alternating rounding; below the last row
+        // that holds image pixels the last one is repeated (as libjpeg pads)
         cw = pw / 2
+        rows := (img.h + 1) / 2
         for c in 1..3 {
             half := alloc[u8](cw * (ph / 2))
             p := planes[c]
             for y in 0..ph / 2 {
+                if y >= rows {
+                    copy(half[y * cw..(y + 1) * cw], half[(rows - 1) * cw..rows * cw])
+                    continue
+                }
                 for x in 0..cw {
                     a := (2 * y) * pw + 2 * x
                     s := i64(p[a]) + i64(p[a + 1]) + i64(p[a + pw]) + i64(p[a + pw + 1])
@@ -1481,17 +1494,24 @@ priv fn jencode(img: Image, quality: i64) -> []u8 {
     w: JWriter
     w.out = o
     preds: [3]i64
+    // luma blocks of a 2x2 MCU beyond the last block column or row of the image are dummies:
+    // one to the right repeats the DC of the block before it, a row below that of the last block above
+    lbw := (img.w + 7) / 8
+    lbh := (img.h + 7) / 8
     for my in 0..mcuy {
         for mx in 0..mcux {
+            dc := 0
             for v in 0..sub {
+                below := my * sub + v >= lbh
                 for h in 0..sub {
                     at := (my * mw + v * 8) * pw + mx * mw + h * 8
-                    jencode_block(&w, planes[0], at, pw, qd[..64], &preds[0], &codes[0], &codes[1])
+                    dummy := below || mx * sub + h >= lbw
+                    dc = jencode_block(&w, planes[0], at, pw, qd[..64], &preds[0], &codes[0], &codes[1], dummy, dc)
                 }
             }
             for c in 1..ncomp {
                 at := my * 8 * cw + mx * 8
-                jencode_block(&w, planes[c], at, cw, qd[64..], &preds[c], &codes[2], &codes[3])
+                jencode_block(&w, planes[c], at, cw, qd[64..], &preds[c], &codes[2], &codes[3], false, 0)
             }
         }
     }

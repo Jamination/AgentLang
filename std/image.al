@@ -1,8 +1,6 @@
 // std.image: 8-bit images in memory, PNG, BMP and JPEG files, deflate/zlib, CRC-32 and Adler-32.
 // Everything is written in AL: no libc and no shared library is needed.
 
-use std.image_jpeg
-
 // ---------- checksums ----------
 // slicing-by-8 tables for crc32, filled on first use
 priv crc_tab: [2048]u32
@@ -1952,3 +1950,6 @@ fn bmp_save(path: str, img: Image) -> bool {
     release(m)
     ok
 }
+
+// JPEG (jpeg_decode, jpeg_encode, ...) is in its own file
+use std.image_jpeg
