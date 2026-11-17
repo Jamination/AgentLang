@@ -7,12 +7,17 @@
 // operations whose result depends on them (compares, right shifts, division, extensions)
 // extend their operands first; I32 operations use the W registers, which zero the upper half.
 
-// Splits every critical edge (a block with two successors to one with several predecessors),
-// so that the phi copies of an edge have a block of their own; a branch with two equal
-// targets becomes a jump.
+// Splits every edge from a block with two successors to one with several predecessors or with
+// phis, so that the phi copies of an edge always have a block of their own that ends in a
+// jump; a branch with two equal targets becomes a jump.
 fn a_split_critical_edges(f: *Func) {
     preds := f.preds()
     nb := f.blocks.len
+    has_phi := vec_fill(nb, false)
+    for b in 0..nb {
+        ins := &f.blocks[b].insts
+        has_phi[b] = ins.len > 0 && f.insts[ins[0]].op == Phi
+    }
     for b in 0..nb {
         tm := f.blocks[b].term
         match tm {
@@ -25,7 +30,7 @@ fn a_split_critical_edges(f: *Func) {
                 ne := e
                 for which in 0..2 {
                     s := if which == 0 { t } else { e }
-                    if preds[s].len > 1 {
+                    if preds[s].len > 1 || has_phi[s] {
                         nbk := f.new_block()
                         f.blocks[nbk].term = Jmp(s)
                         f.phi_pred_replace(s, b, nbk)
@@ -605,7 +610,7 @@ priv fn term(self: *Sel, b: i64) {
             self.branch(B, 0, t)
         }
         Br(c, t, e) => {
-            // (critical edges are split: the successors of a branch have no phis to copy)
+            // (a_split_critical_edges: the successors of a branch have no phis)
             cc := self.cond(c)
             self.branch(Bcc, cc, t)
             self.branch(B, 0, e)
@@ -1254,7 +1259,6 @@ priv fn atomic(self: *Sel, v: i64) {
             x := self.reg(i.args[1])
             d := self.vr(v)
             self.e(if k == ATOMIC_ADD { AtAdd } else { AtSwap }, sz, d, p, x)
-            self.e(Keep, 0, NOREG, p, x)
         }
         _ => {
             x := self.reg(i.args[1])
@@ -1263,9 +1267,6 @@ priv fn atomic(self: *Sel, v: i64) {
             ci := ainst(AtCas, sz, d, p, x)
             ci.a = i32(y)
             self.out.push(ci)
-            ki := ainst(Keep, 0, NOREG, p, x)
-            ki.a = i32(y)
-            self.out.push(ki)
         }
     }
 }

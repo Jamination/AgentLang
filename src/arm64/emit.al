@@ -447,7 +447,6 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             self.put(a64_cbz(0, true, 16, -5))
         }
         Dmb => self.put(A64_DMB_ISH)
-        Keep => {}
         Fadd, Fsub, Fmul, Fdiv => {
             if i.sz == 16 {
                 op := match i.op {

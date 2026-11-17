@@ -114,9 +114,7 @@ enum AOp {
     AtAdd,   // d = [n]; [n] = d + m
     AtCas,   // d = [n]; if d == m (sz bytes): [n] = a
     Dmb,     // full barrier
-    Keep,    // no code: keeps n, m and a alive up to here (inputs of an atomic loop, which
-             // writes d before it reads them for the last time)
-    Fadd,    // d = n op m; sz 4 (single), 8 (double), 16 (four single lanes)
+    Fadd,   // d = n op m; sz 4 (single), 8 (double), 16 (four single lanes)
     Fsub,
     Fmul,
     Fdiv,
@@ -243,7 +241,7 @@ fn a_decode(mf: *AFunc, i: *AInst, du: []i64, p: i64) -> i64 {
     nd := 0
     match i.op {
         Str, FStr, Stlr => {}
-        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, Dmb, Keep, MemCopy, MemFill => {}
+        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, Dmb, MemCopy, MemFill => {}
         _ => {
             q2 := put(du, q, i.d)
             nd = q2 - q
@@ -267,6 +265,17 @@ fn a_decode(mf: *AFunc, i: *AInst, du: []i64, p: i64) -> i64 {
         Ins => {
             q = put(du, q, i.d)
             q = put(du, q, i.n)
+        }
+        AtSwap, AtAdd, AtCas => {
+            // the loop writes d before it reads n, m and a for the last time: they are listed
+            // as defined too (with their own value), so that d gets a register of its own
+            q = put(du, q, i.n)
+            q = put(du, q, i.m)
+            q = put(du, q, i.a)
+            nd = q - p - 1
+            q = put(du, q, i.n)
+            q = put(du, q, i.m)
+            q = put(du, q, i.a)
         }
         MemCopy, MemFill => {
             // (the registers the loop changes are defined and used)
