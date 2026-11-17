@@ -231,6 +231,7 @@ struct MFunc {
     save_all: bool
     wide_xmm: bool // some xmm value is a vector: spill slots hold 16 bytes
     xuses: Vec[i64] // the fixed registers read by calls, `ret` and `syscall` (see MInst)
+    dvars: Vec[i64] // -g: pairs (variable, frame slot) (src/debug.al)
 }
 
 fn new_vreg(self: *MFunc, class: u8) -> i64 {

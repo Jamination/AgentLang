@@ -538,7 +538,8 @@ priv fn alloca_slots(f: *Func, mf: *MFunc) -> Vec[i32] {
     cand := vec_fill(allocas.len, i32(-1))
     members := vec[i64]()
     for ai in 0..allocas.len {
-        if !escaped[ai] && f.insts[allocas[ai]].k >= 16 && members.len < 4096 {
+        // (-g at -O0: a variable keeps a slot of its own, see src/debug.al)
+        if !escaped[ai] && f.insts[allocas[ai]].k >= 16 && members.len < 4096 && !(dbg_keep_vars && f.insts[allocas[ai]].cap < 0) {
             cand[ai] = i32(members.len)
             members.push(ai)
         }
@@ -754,6 +755,9 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         }
     }
     s.slot_of = alloca_slots(f, &s.mf)
+    if dbg_on {
+        dbg_slots(f, &s.mf, &s.slot_of)
+    }
     // Each block is selected backwards: the terminator, then the instructions from the last
     // one, then (entry block) the parameters. Every piece appends its instructions to s.out
     // in order (a chunk); the block is the chunks in the reverse order.
@@ -770,7 +774,8 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         s.term(b)
         tloc: i32 = 0
         for vi in f.blocks[b].insts.len - 1..=0 by -1 {
-            tloc = f.insts[f.blocks[b].insts[vi]].srcloc()
+            // (a negative one marks the alloca of a variable: src/debug.al)
+            tloc = max(f.insts[f.blocks[b].insts[vi]].srcloc(), i32(0))
             if tloc != 0 {
                 break
             }

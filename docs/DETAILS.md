@@ -9,8 +9,8 @@ C interop, programs for Windows, and the grammar.
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
-[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Regions](#regions) ·
 [clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
+[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Debug information](#debug-information) · [Regions](#regions) ·
 
 ## Overloading and builtin names
 
@@ -523,6 +523,72 @@ panic: index out of bounds at main.al:12
 - **`ALC_BACKTRACE=0`** in the environment turns the trace off (the message stays). Nothing
   of it runs unless the program panics; its table costs about 1-2 KB in a small program and 5%
   of the compiler's executable.
+
+## Debug information
+
+`alc build -g` (also `run` and `test`) adds debug information, so a program can be stepped in
+a debugger and profiled with symbols:
+
+- **Linux**: DWARF 4 in the ELF file (`.debug_info`, `.debug_abbrev`, `.debug_line`,
+  `.debug_str`, `.debug_aranges`, `.debug_ranges`, `.debug_frame`), for gdb, lldb, perf and
+  the like.
+- **Windows**: the same DWARF in the PE file (gdb, lldb) and a PDB next to the executable
+  (`game.exe` -> `game.pdb`, found through the executable's debug directory) for Visual Studio,
+  WinDbg / cdb and the Windows profilers.
+
+What is described: one compile unit for the program; every function with its address range,
+its file and line, its parameters and variables (with their scopes: a variable is visible from
+its declaration to the end of its block; the variable of a `for` loop and the bindings of a
+`match` arm inside their body), the types of these, the line table (a row per statement and
+expression, the line of code inlined from another function being that function's line), the
+global variables (not the thread-local ones), the functions inlined into each function
+(DWARF only) and the call frames (`.debug_frame`; the PE file also has its `.pdata`).
+
+- **`-O0 -g`**: every statement has code and its line: a breakpoint on any line stops there,
+  `next` / `step` go statement by statement, and every variable lives in a frame slot of its own
+  for its whole scope (the compiler keeps named variables in memory at `-O0 -g`, as C compilers
+  do at `-O0`; without `-g` it keeps them in registers). The code is otherwise the same.
+- **With optimisation** `-g` does not change the code (Linux: the code and data of the
+  executable are byte for byte those of the build without `-g`; Windows: the same
+  instructions, but `.rdata` gains the debug directory, which may move the sections after it
+  and so change displacements). Lines are exact for every instruction (each
+  keeps the location of the statement it comes from), but statements are merged, moved and
+  removed, so stepping jumps; inlined calls show as frames of their own in gdb. Variables that
+  stay in memory (their address is taken, or an aggregate that is not split up) are described;
+  the others (in registers) are not: the debugger reports them as unknown.
+- **AL types** as a debugger shows them (the language of the compile unit is C, the closest a
+  debugger knows): integers, `f32` / `f64` and `bool` are base types (`u8` an unsigned char, so
+  a `*u8` prints as text); `str` and `[]T` are a struct `{ptr, len}` (gdb prints the text of a
+  string literal through `ptr`; others have no terminating zero); a tuple a struct `{_0, _1,
+  ...}`; `vec2`..`vec4` and `quat` `{x, y, z, w}`, `mat4` `{cols: [4]vec4}`; an enum without
+  data an enumeration; an enum with data a struct of the tag and the payload of the variant in
+  use (DWARF: a variant part, `{tag = Some, Some = {_0 = 4}}`; PDB: the tag and a union of one
+  struct per variant); `Vec`, `Map` and the other library types are the structs they are. A
+  parameter passed by reference (a struct on Windows) shows as its value (DWARF: a location
+  with a dereference; PDB: a reference type).
+- **Source files** are named as on the command line, relative to the working directory of the
+  build (DWARF: the compile unit's directory; PDB: made absolute). The run-time library and the
+  bundled modules are inside the compiler: their frames have lines (`<prelude>:62`), but there
+  is no file a debugger could show.
+- **Frames.** AL code keeps no frame pointer. `.debug_frame` describes every prologue (the
+  pushes, then one `sub rsp`; on Windows the probe loop of a frame of a page or more, whose
+  CFA is an expression of r11), every epilogue and the entry stub of a Linux executable (the
+  outermost frame). The frame base of a function is its CFA (Linux), or rsp plus the frame
+  (Windows, where gdb unwinds with `.pdata`, not with DWARF), so variables are right from the
+  end of the prologue to the start of an epilogue (stopped on the first instruction of a
+  function, before its prologue, they show garbage).
+- **Size and time.** Nothing changes without `-g`. The compiler built with `-g`: 4.6 -> 8.6 MB
+  (Linux, optimised), 4.1 -> 5.5 MB at `-O0`; for Windows 4.8 -> 7.2 MB plus a 1.2 MB PDB.
+  `-g` makes the `-O0` self-compile about 15 % slower (the variables in memory, the tables).
+
+**Not described**: thread-local globals; C variables (`extern`); variables in registers in
+optimised code; columns; inlined functions in the PDB (their lines are there, as lines of the
+function they were inlined into; no `S_INLINESITE`). The PDB has no checksums of the source
+files, and its GUID is a hash of the code and data (the same program gives the same PDB).
+
+The implementation: `src/debug.al` (what lowering and the back end record), `src/dwarf.al`,
+`src/pdb.al`. Tests: `tests/run/debug_info.al` reads the DWARF of its own executable (ELF or
+PE), `tests/sys/win_pdb.al` its own PDB, both with parsers written in AL.
 
 ## Regions
 
