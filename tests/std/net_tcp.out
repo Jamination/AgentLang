@@ -1,0 +1,21 @@
+listen: true 127.0.0.1 true 0
+peer: 127.0.0.1 true
+send: 5 true
+recv_exact: 11 hello world
+shutdown: true
+end: 0 0 child: 0
+nonblocking: true -1 11 resource temporarily unavailable
+large: 4194304 4194304 true true 0 child: 0
+recv limit: -1 110 connection timed out true true
+poll limit: 0 true 2
+recv in time: 1 x
+poll several: 2 0 1 2
+poll not open: 3 4
+not inherited: 0 true
+send to closed: 1 true
+refused: false 111 connection refused
+connect start: true true true true
+connected: 1 !
+connect start, refused: true true false 111 false 111
+not open: -1 9 -1 false false 9
+closed twice: false 9 bad file descriptor
