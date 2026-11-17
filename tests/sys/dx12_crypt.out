@@ -1,0 +1,31 @@
+picture title frame 10
+  ok the title in large yellow letters
+  ok the help lines in grey
+frame 20 playing gems 0 hp 3 score 0
+picture play frame 120
+  ok GEMS 0/6 at the top left
+  ok three hearts
+  ok the crosshair
+  ok lantern-lit walls in front
+  ok the dark ceiling
+  ok the walls on the map
+frame 300 paused gems 0 hp 3 score 0
+picture menu frame 340
+  ok PAUSED
+  ok the selected menu line
+frame 360 playing gems 0 hp 3 score 0
+frame 700 paused gems 0 hp 3 score 0
+frame 770 playing gems 0 hp 3 score 0
+frame 10843 won gems 6 hp 3 score 1705
+picture won frame 10915
+  ok YOU ESCAPED
+frame 10934 title gems 6 hp 3 score 0
+frame 10940 playing gems 0 hp 3 score 0
+picture wraith frame 11366
+  ok a wraith in front of the player
+frame 11781 lost gems 0 hp 0 score 0
+picture lost frame 11853
+  ok CAUGHT
+frame 11872 title gems 0 hp 0 score 0
+frames 14000 steps 28000 mode title games 2 wins 1 losses 1 best 1705 settings 7 7 5 false fullscreen requests 0 save round trip true
+state ff637c10a8f193d4 audio 40f52217b6fb8346
