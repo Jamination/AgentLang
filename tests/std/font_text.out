@@ -1,0 +1,27 @@
+utf8: [65, 196, 478, 128512, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 90, 65533]
+layout: 65@0.0,800.0#0/0 86@440.0,800.0#1/0 65@870.0,800.0#2/0 72@0.0,1900.0#4/1 87@0.0,3000.0#7/2 32@900.0,3000.0#8/2 111@1150.0,3000.0#9/2
+line_width AVA: 1390.0 AVA at 10 px: 13.9
+line_width up to the newline: 1120.0 empty: 0.0
+text_size: 2700.0 3300.0
+emoji (format 12) and a missing character: 1000.0
+wrap 0.0 : [AH AH AH]
+wrap 5000.0 : [AH AH AH]
+wrap 3000.0 : [AH AH, AH]
+wrap 2500.0 : [AH AH, AH]
+wrap 2000.0 : [AH, AH, AH]
+wrap 1200.0 : [AH, AH, AH]
+wrap 1000.0 : [A, H, A, H, A, H]
+wrap 500.0 : [A, H, A, H, A, H]
+wrap long word: [HH, HH, H, AH]
+wrap spaces and lines: [  A, H, AH  , , H]
+wrapped lines fit: true
+atlas 1 channels: true 128 x 436 glyphs 99 missing 16 28
+  rectangles inside, apart, equal to the bitmaps: true
+  H: 4 20 28 0 -28 24.0 uv true missing: 0
+atlas 4 channels: true 128 x 436 glyphs 99 missing 16 28
+  rectangles inside, apart, equal to the bitmaps: true
+  H: 4 20 28 0 -28 24.0 uv true missing: 0
+atlas errors: atlas: a glyph is 20 pixels wide, wider than the atlas | atlas: channels must be 1 or 4
+draw_text darkness close to the area: true
+atlas and font drawing equal: true
+grey max 255 rgba pixel in the stem vec4(1.0, 0.0, 0.0, 0.5019608) outside vec4(0.0, 0.0, 0.0, 0.0)

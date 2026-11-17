@@ -1,0 +1,39 @@
+empty -> font: file too short
+short -> font: file too short
+text -> font: not a TrueType or OpenType font
+OpenType with CFF outlines -> font: CFF (PostScript) outlines are not supported, only TrueType outlines (glyf)
+CFF table, no glyf -> font: CFF (PostScript) outlines are not supported, only TrueType outlines (glyf)
+no glyf -> font: no 'glyf' table
+head beyond the end -> font: the 'head' table lies outside the file
+loca length huge -> font: the 'loca' table lies outside the file
+2000 tables -> font: table directory cut off
+bad head magic -> font: bad 'head' table
+units per em 0 -> font: bad units per em
+loca format 7 -> font: bad 'loca' format
+no glyphs -> font: no glyphs
+1000 glyphs, loca for 11 -> font: 'loca' table too short
+no hmtx advances -> font: bad 'hmtx' table
+more hmtx advances than glyphs -> parsed; glyphs that cannot be read: []
+only Macintosh character maps -> font: no Unicode character map (cmap format 4 or 12)
+Windows symbol encoding: true true 2 10
+format 4 with 32767 segments -> font: no Unicode character map (cmap format 4 or 12)
+cmap subtable beyond the end -> font: no Unicode character map (cmap format 4 or 12)
+format 12 with too many groups (format 4 used) -> parsed; glyphs that cannot be read: []
+loca decreasing at glyph 3 -> parsed; glyphs that cannot be read: [3, 8]
+last loca beyond glyf -> parsed; glyphs that cannot be read: [10]
+composite 9 contains itself -> parsed; glyphs that cannot be read: [9, 10]
+composites 9 and 10 contain each other -> parsed; glyphs that cannot be read: [9, 10]
+point matching with a point that does not exist -> parsed; glyphs that cannot be read: [10]
+component glyph 999 -> parsed; glyphs that cannot be read: [10]
+contour ends decreasing (glyph 2) -> parsed; glyphs that cannot be read: [2, 9, 10]
+60001 points in a 12-point glyph (4) -> parsed; glyphs that cannot be read: [4]
+60000 bytes of instructions (glyph 5) -> parsed; glyphs that cannot be read: [5]
+composite transform cut off (glyph 8) -> parsed; glyphs that cannot be read: [8]
+GPOS lists beyond the end -> parsed; glyphs that cannot be read: []
+GPOS lookup offset beyond the end -> parsed; glyphs that cannot be read: []
+kern with 65535 pairs -> parsed; glyphs that cannot be read: []
+collection: font 0 true 11 2 | font: the collection has no font 1 | font: not a collection, no font 1
+collection entry beyond the end -> font: collection entry outside the file
+prefixes of 1432 bytes: parsed 140 rejected 1292
+prefixes of 1152 bytes: parsed 168 rejected 984
+damaged copies: parsed 7448 rejected 2552
