@@ -1,6 +1,7 @@
-// std.window, Linux layer, Wayland backend: the window is an xdg_toplevel of the compositor,
-// through std.wayland. Included by std/window_linux.al, which chooses it in window_open
-// (see window_systems) and hands every call on a Wayland window to the functions here.
+// std.window, Linux layer, Wayland backend (EXPERIMENTAL: opt-in, not yet run on a real
+// Wayland session): the window is an xdg_toplevel of the compositor, through std.wayland.
+// Included by std/window_linux.al, which chooses it in window_open only on request (see
+// window_systems) and hands every call on a Wayland window to the functions here.
 //
 // Nothing here links a library: libwayland-client.so.0 (wl_client_lib of std.wayland),
 // libxkbcommon.so.0 and libwayland-cursor.so.0 are loaded with dlopen when a window is opened
@@ -27,9 +28,9 @@ priv const WL_REPEAT_BURST = 4
 
 // ---- Wayland helpers (no compositor needed) ----
 
-// Which window systems window_open tries for WindowDesc.display, given the value of
-// $WAYLAND_DISPLAY: Wayland first when `wayland` is set, then X11 when `x11` is set; the names
-// are the Wayland socket and the X display ("" for the default, $WAYLAND_DISPLAY / $DISPLAY).
+// Which window systems window_open tries: only X11 (`x11`), only Wayland (`wayland`), or
+// both: then X11, and Wayland only if no X display can be opened. The names are the X display
+// and the Wayland socket ("" for the default, $DISPLAY / $WAYLAND_DISPLAY).
 struct WindowSystems {
     wayland: bool
     x11: bool
@@ -37,12 +38,20 @@ struct WindowSystems {
     x11_name: str
 }
 
-// `display` "": Wayland if $WAYLAND_DISPLAY is set (not empty), else or if that fails X11;
-// "wayland": only Wayland; "x11": only X11; a name with a `:` (":1", "host:0.0") is an X
-// display; any other name a Wayland socket ("wayland-1", or an absolute path).
-fn window_systems(display: str, wayland_display: str) -> WindowSystems {
+// For WindowDesc.display and the values of $WAYLAND_DISPLAY and $ALC_WINDOW. `display` "":
+// X11 as always; Wayland (experimental) only when `alc_window` is "wayland", or as a last
+// resort when no X display can be opened and $WAYLAND_DISPLAY is set (not empty);
+// `alc_window` "x11" rules that out too (other values are ignored). "wayland": only Wayland;
+// "wayland:NAME": only Wayland, the socket NAME ("wayland-1", or an absolute path); "x11":
+// only X11; anything else is an X display name, as it always was (":1", "host:0.0"). A display
+// named by the program is not changed by $ALC_WINDOW.
+fn window_systems(display: str, wayland_display: str, alc_window: str) -> WindowSystems {
     if display == "" {
-        return WindowSystems{wayland: wayland_display != "", x11: true}
+        return match alc_window {
+            "wayland" => WindowSystems{wayland: true}
+            "x11" => WindowSystems{x11: true}
+            _ => WindowSystems{x11: true, wayland: wayland_display != ""}
+        }
     }
     if display == "x11" {
         return WindowSystems{x11: true}
@@ -50,10 +59,10 @@ fn window_systems(display: str, wayland_display: str) -> WindowSystems {
     if display == "wayland" {
         return WindowSystems{wayland: true}
     }
-    if find(display, ":") >= 0 {
-        return WindowSystems{x11: true, x11_name: display}
+    if starts_with(display, "wayland:") && display.len > len("wayland:") {
+        return WindowSystems{wayland: true, wayland_name: display[len("wayland:")..]}
     }
-    WindowSystems{wayland: true, wayland_name: display}
+    WindowSystems{x11: true, x11_name: display}
 }
 
 // MOUSE_* for a Linux evdev button code of wl_pointer.button (BTN_LEFT is 0x110); -1 for

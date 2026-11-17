@@ -1,16 +1,17 @@
 // std.window: one native window with an event queue, per-frame input state (std.input) and
 // software presentation of an RGBA8 framebuffer. The window system is in the OS layer:
-// std/window_linux.al (Wayland, std/window_wayland.al, with its libraries loaded at run time;
-// or X11, links libX11.so.6) or std/window_windows.al (Win32: user32, gdi32, imm32).
+// std/window_linux.al (X11, links libX11.so.6; on request the experimental Wayland backend
+// std/window_wayland.al, its libraries loaded at run time) or std/window_windows.al (Win32:
+// user32, gdi32, imm32).
 // The layer provides `struct WindowOs` and window_open(WindowDesc), set_title, poll,
 // set_cursor_visible, set_cursor_locked, set_text_input, set_fullscreen, present, close and its
 // native handles.
 use std.input
 
 // How to create a window. Zero fields mean: untitled, 640x480, fixed size, windowed, the
-// default display (Linux: Wayland if $WAYLAND_DISPLAY is set, else X11 on $DISPLAY; "x11",
-// "wayland", an X display ":1" or a Wayland socket "wayland-1" choose; Windows has no display
-// to choose).
+// default display (Linux: X11 on $DISPLAY; an X display ":1"; "x11"; the experimental Wayland
+// backend with "wayland", "wayland:<socket>" or $ALC_WINDOW=wayland; Windows has no display to
+// choose).
 struct WindowDesc {
     title: str
     width: i64

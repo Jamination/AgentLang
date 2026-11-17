@@ -1,6 +1,6 @@
 # std.window: windows, events and software presentation
 
-`use std.window` opens a native window (Wayland or X11 on Linux, Win32 on Windows), delivers
+`use std.window` opens a native window (X11 on Linux, or on request Wayland; Win32 on Windows), delivers
 its events, keeps the per-frame input state (`std.input`, included automatically) and can show
 an RGBA framebuffer without any GPU API. It also hands out the native handles needed to create
 a Vulkan surface (Linux) or a DXGI swapchain (Windows). The API and the events are the same on
@@ -12,10 +12,11 @@ between X11 and Wayland, whose backend is `std/window_wayland.al`) or `std/windo
 `when TARGET_OS == Windows { use std.window_windows } else { use std.window_linux }`.
 
 - **Linux:** a program that calls `window_open` is dynamically linked against `libX11.so.6`
-  (and libc with `libdl.so.2`), and against nothing else. `window_open` uses Wayland when
-  `$WAYLAND_DISPLAY` is set (see [Choosing the window system](#choosing-the-window-system));
-  `libwayland-client.so.0`, `libxkbcommon.so.0` and `libwayland-cursor.so.0` are then loaded
-  at run time, so the program also starts where they are not installed (and uses X11).
+  (and libc with `libdl.so.2`), and against nothing else. On a Wayland session it runs
+  through XWayland, unless the experimental Wayland backend is asked for (see
+  [Choosing the window system](#choosing-the-window-system)); `libwayland-client.so.0`,
+  `libxkbcommon.so.0` and `libwayland-cursor.so.0` are then loaded at run time, so the
+  program also starts where they are not installed.
   `libXi.so.6` (XInput 2) is loaded at run time when an X11 pointer is first locked, and is
   not required. A program that wants to talk to the compositor itself uses the bindings of
   [std.wayland](wayland.md) (also on the window's own `wl_display` / `wl_surface`). The
@@ -39,7 +40,7 @@ if !ok { ... no display: run headless or exit ... }
 | `width`, `height: i64` | size of the drawable area in pixels; 0 means 640 x 480 |
 | `resizable: bool` | let the user resize the window (default: fixed size) |
 | `fullscreen: bool` | start fullscreen |
-| `display: str` | Linux: the display to connect to; empty means the default (Wayland if `$WAYLAND_DISPLAY` is set, else X11 on `$DISPLAY`); see below (not used on Windows) |
+| `display: str` | Linux: the X display to connect to, e.g. `":1"`; empty means `$DISPLAY`; `"wayland"` / `"wayland:<socket>"` ask for the experimental Wayland backend (see below; not used on Windows) |
 
 `window_open` returns `(nil, false)` when the display cannot be reached (no compositor or X
 server, `DISPLAY` unset; on Windows: the window cannot be created); it never aborts the program
@@ -48,21 +49,28 @@ from the arena.
 
 ### Choosing the window system
 
-On Linux `WindowDesc.display` names the display, and with it the window system:
+**The Wayland backend is experimental and opt-in.** It has been written and type-checked, and
+its translation helpers are unit-tested, but it has **not yet been run on a real Wayland
+session** (see [Wayland](#wayland) for what is still to be checked). By default every window
+on Linux is an X11 window, exactly as before; on a Wayland session that means XWayland. The
+intent is to make Wayland the default on Wayland sessions once it has been verified.
 
 | `display` | |
 |-----------|---|
-| `""` | Wayland when `$WAYLAND_DISPLAY` is set and not empty, the libraries load and the compositor has what the window needs; otherwise (or if that fails) X11 on `$DISPLAY` |
+| `""` | X11 on `$DISPLAY`. Only if no X display can be opened and `$WAYLAND_DISPLAY` is set (a Wayland session without XWayland, where the program could not run before) is Wayland tried. `$ALC_WINDOW` changes this (below) |
+| `"x11"` | only X11, on `$DISPLAY` |
 | `"wayland"` | only Wayland, on `$WAYLAND_DISPLAY` (`wayland-0` if unset) |
-| `"x11"` | only X11, on `$DISPLAY` (on a Wayland session: through XWayland) |
-| a name with a `:` (`":1"`, `"host:0.0"`) | only X11, that X display (as before) |
-| any other name (`"wayland-1"`, `"/run/user/1000/wayland-0"`) | only Wayland, that socket (in `$XDG_RUNTIME_DIR`, or an absolute path) |
+| `"wayland:NAME"` | only Wayland, the socket NAME (in `$XDG_RUNTIME_DIR`, or an absolute path) |
+| anything else (`":1"`, `"host:0.0"`) | only X11, that X display (as before) |
 
-A display chosen by name never falls back to the other system. `window_systems(display,
-wayland_display) -> WindowSystems` is that rule as a function (the second argument is the value
-of `$WAYLAND_DISPLAY`); `wayland_display(w) != nil` tells which one a window got. To let a
-player choose, pass a command-line option or an environment variable of the game through to
-`display`.
+The environment variable **`ALC_WINDOW`** lets a player or tester switch an existing program
+without rebuilding it (like `ALC_CHECK_MEMORY`, it is read by the program at run time):
+`ALC_WINDOW=wayland` makes `display: ""` mean `"wayland"`, `ALC_WINDOW=x11` makes it X11 only
+(no Wayland even without an X display); other values are ignored. A display the program names
+is not changed by it. `window_systems(display, wayland_display, alc_window) -> WindowSystems`
+is that rule as a function (the arguments after the first are the values of
+`$WAYLAND_DISPLAY` and `$ALC_WINDOW`); `wayland_display(w) != nil` tells which system a window
+got.
 
 ## Functions
 
@@ -275,8 +283,8 @@ aspect-preserving rectangle) and `blit_fit(dst: []u32, dw, dh, src: []u8, sw, sh
 
 For `VK_KHR_xlib_surface`, pass `x11_display(w)` as `dpy` and `x11_window(w)` as `window` of
 `VkXlibSurfaceCreateInfoKHR` (the types match: `dpy` is a `*u8`, `window` a `u64`; enable
-`VK_KHR_surface` and `VK_KHR_xlib_surface` on the instance). For a window on Wayland
-(`wayland_display(w) != nil`) use `VK_KHR_wayland_surface` instead: `wayland_display(w)` is
+`VK_KHR_surface` and `VK_KHR_xlib_surface` on the instance). For a window of the experimental
+Wayland backend (`wayland_display(w) != nil`) use `VK_KHR_wayland_surface` instead: `wayland_display(w)` is
 `VkWaylandSurfaceCreateInfoKHR.display`, `wayland_surface(w)` its `surface`. On Wayland the
 surface has no size of its own (`currentExtent` is 0xFFFFFFFF): make the swapchain `size(w)`.
 Recreate the swapchain on `EventResize`; while
@@ -322,7 +330,7 @@ minimizes the window, for example).
 
 | Function | |
 |----------|---|
-| `window_systems(display: str, wayland_display: str) -> WindowSystems` | which systems `window_open` tries for a `WindowDesc.display` and a value of `$WAYLAND_DISPLAY`: `wayland`, `x11` (bools; Wayland first), `wayland_name`, `x11_name` |
+| `window_systems(display: str, wayland_display: str, alc_window: str) -> WindowSystems` | which systems `window_open` tries for a `WindowDesc.display` and the values of `$WAYLAND_DISPLAY` and `$ALC_WINDOW`: `x11`, `wayland` (bools; with both, Wayland only if no X display opens), `x11_name`, `wayland_name` |
 | `button_from_evdev(code: u32) -> i64` | `MOUSE_*` for an evdev button code of `wl_pointer.button` (`BTN_LEFT` 0x110 ...; `BTN_SIDE` / `BTN_BACK` are `MOUSE_X1`, `BTN_EXTRA` / `BTN_FORWARD` `MOUSE_X2`), -1 for others |
 | `event_from_wl_button(code, pressed, x, y, mods) -> Event` | the mouse event of a button (`EventNone` for buttons without a code) |
 | `mods_from_xkb(mask, shift, ctrl, alt, logo: u32) -> u8` | `MOD_*` bits for an xkb modifier mask and the indices of Shift, Control, Mod1, Mod4 in the keymap (32 or more: none) |
@@ -346,9 +354,24 @@ The window's Wayland state is `w.os.wl` (a `WaylandWindow`; nil for an X11 windo
 
 ## Wayland
 
-A window on Wayland is an `xdg_toplevel` (xdg-shell; the compositor must have
-`wl_compositor` version 4, `wl_shm` and `xdg_wm_base`, else `window_open` goes on with X11).
-The same events arrive; what differs from X11:
+**Experimental, opt-in, not yet verified on a real session** (see
+[Choosing the window system](#choosing-the-window-system)). A window on Wayland is an
+`xdg_toplevel` (xdg-shell; the compositor must have `wl_compositor` version 4, `wl_shm` and
+`xdg_wm_base`, else `window_open` returns false). The same events arrive; what differs from
+X11 is listed below. Still to be checked on a real session before it can become the default:
+
+1. `tests/run.sh ./build/alc window` with weston installed (`sys/window_wayland` compares
+   against an expected output that has not been produced by a real run yet).
+2. `ALC_WINDOW=wayland alc run examples/win32_input.al` on GNOME (no decorations) and on KDE or
+   sway (server-side decorations): keys, text, dead keys and compose, auto-repeat, mouse
+   buttons, wheel and touchpad scrolling, focus, resize, fullscreen, minimizing, F3 mouse-look
+   (raw counts), hiding the cursor.
+3. A 200 % output and moving the window between outputs of different scales.
+4. `examples/starter` through `present`, and a Vulkan swapchain on `wayland_surface`.
+5. A system without `libwayland-client.so.0` or `libxkbcommon.so.0`: `display: "wayland"`
+   fails cleanly.
+
+What differs from X11:
 
 - **Pixels and scale.** `width`, `height`, `size(w)`, `EventResize` and mouse positions are
   buffer pixels, as on X11 and Windows. The window opens at the largest scale of the outputs
@@ -612,11 +635,12 @@ the translation of XInput 2 raw motion from made-up events) and
 `tests/std/window_wayland_logic` (the choice of the window system, evdev buttons, xkb
 modifiers, wheel steps, key repeat timing, scale and configure sizes).
 `tests/sys/window_wayland` starts its own headless weston on a private socket (as
-`tests/sys/wayland` does) and opens windows there by naming the socket: present, title,
+`tests/sys/wayland` does) and opens windows there with `display: "wayland:<socket>"`: present, title,
 cursor, lock, fullscreen and back, a resizable window, open / close cycles without a leaked
 descriptor, a socket that does not exist, the compositor going away; it is skipped without
-weston, `libwayland-client.so.0` or `libxkbcommon.so.0`. `tests/sys/window_nodisplay` checks
-that an unusable X display and a missing Wayland socket both fail cleanly.
+weston, `libwayland-client.so.0` or `libxkbcommon.so.0`, and its expected output is a
+prediction that no real run has produced yet. `tests/sys/window_nodisplay` checks that an
+unusable X display fails cleanly (X11 only, as before).
 `tests/sys/window_x11` exercises a real X11 window and `tests/sys/window_x11_events` resize,
 minimize / restore, window-manager fullscreen changes and the locked pointer, with raw motion
 (a second client connection plays the user through XTEST, and the window manager) and

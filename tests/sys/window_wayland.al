@@ -65,11 +65,12 @@ fn main() {
         exit(1)
     }
     // a socket that does not exist: no window, and no X11 either (the name chose Wayland)
-    w0, ok0 := window_open(WindowDesc{title: "never", display: "al-wl-test-no-such-socket"})
+    w0, ok0 := window_open(WindowDesc{title: "never", display: "wayland:al-wl-test-no-such-socket"})
     print("no compositor:", ok0, w0 == nil)
 
     socket := fmt("al-wl-test-", process_id())
     path := path_join(runtime, socket)
+    wl_name := concat("wayland:", socket)
     weston, started := spawn([]str{"env", "-u", "WAYLAND_DISPLAY", "-u", "DISPLAY", "timeout", "-k", "5", "60",
         "weston", "--backend=headless", fmt("--socket=", socket), "--width=800", "--height=600", "--no-config",
         "--log=/dev/null"})
@@ -86,7 +87,7 @@ fn main() {
     fds := open_fds()
 
     // a fixed-size window
-    w, ok := window_open(WindowDesc{title: "AL Wayland window \xc3\xa9", width: 320, height: 200, display: socket})
+    w, ok := window_open(WindowDesc{title: "AL Wayland window \xc3\xa9", width: 320, height: 200, display: wl_name})
     print("open:", ok)
     if !ok {
         stop(weston)
@@ -138,7 +139,7 @@ fn main() {
     w.close()
 
     // a resizable window that presents nothing (as one with a GPU swapchain would)
-    v, vok := window_open(WindowDesc{title: "resizable", width: 300, height: 100, resizable: true, display: socket})
+    v, vok := window_open(WindowDesc{title: "resizable", width: 300, height: 100, resizable: true, display: wl_name})
     v.poll()
     print("resizable:", vok, v.size())
     v.close()
@@ -146,7 +147,7 @@ fn main() {
     // open / close cycles leave no descriptor open
     cycles := 0
     for i in 0..10 {
-        c, cok := window_open(WindowDesc{title: "cycle", width: 64, height: 64, display: socket})
+        c, cok := window_open(WindowDesc{title: "cycle", width: 64, height: 64, display: wl_name})
         if !cok {
             break
         }
@@ -158,7 +159,7 @@ fn main() {
     print("cycles:", cycles, "descriptors left open:", open_fds() - fds)
 
     // the compositor goes away under an open window: the window wants to close
-    g, gok := window_open(WindowDesc{title: "orphan", width: 64, height: 64, display: socket})
+    g, gok := window_open(WindowDesc{title: "orphan", width: 64, height: 64, display: wl_name})
     status := stop(weston)
     gone, _, _ := pump(g, []u8{}, fn(w: *Window) -> bool { w.should_close() })
     print("compositor gone:", gok, status >= 0, gone, g.present(fb, 64, 48))

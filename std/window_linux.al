@@ -1,5 +1,6 @@
-// std.window, Linux layer: the window is a Wayland window (std/window_wayland.al, libraries
-// loaded at run time) or an X11 window (libX11.so.6, through std.x11); window_open chooses.
+// std.window, Linux layer: the window is an X11 window (libX11.so.6, through std.x11), or on
+// request a window of the experimental Wayland backend (std/window_wayland.al, libraries
+// loaded at run time); window_open chooses.
 // Loaded by `use std.window` for --target linux; the public API is in std/window.al.
 // A locked pointer is read as XInput 2 raw motion where the server has that extension and
 // libXi.so.6 is installed (it is loaded at run time, when a pointer is first locked).
@@ -302,20 +303,18 @@ priv fn window_utf8_next(buf: []u8, pos: *i64) -> u32 {
 
 // ---- window ----
 
-// Opens a window as described; (nil, false) if the display cannot be reached. Wayland or X11
-// as `d.display` says (window_systems): with an empty one, Wayland when $WAYLAND_DISPLAY is
-// set and works, else X11. Allocates the Window once (arena); later calls on the window do not
-// allocate from the arena.
+// Opens a window as described; (nil, false) if the display cannot be reached. X11 or the
+// experimental Wayland backend as `d.display` and $ALC_WINDOW say (window_systems): by default
+// X11, and Wayland only when no X display can be opened and $WAYLAND_DISPLAY is set.
+// Allocates the Window once (arena); later calls on the window do not allocate from the arena.
 fn window_open(d: WindowDesc) -> (*Window, bool) {
     top := mark()
-    env, _ := env_get("WAYLAND_DISPLAY")
-    sys := window_systems(d.display, env)
+    wl_env, _ := env_get("WAYLAND_DISPLAY")
+    choice, _ := env_get("ALC_WINDOW")
+    sys := window_systems(d.display, wl_env, choice)
     release(top)
-    if sys.wayland {
-        w, ok := wayland_window_open(d, sys.wayland_name)
-        if ok || !sys.x11 {
-            return (w, ok)
-        }
+    if sys.wayland && !sys.x11 {
+        return wayland_window_open(d, sys.wayland_name)
     }
     setlocale(X_LC_CTYPE, ptr(""))
     XSetLocaleModifiers(ptr(""))
@@ -327,6 +326,11 @@ fn window_open(d: WindowDesc) -> (*Window, bool) {
     dpy := XOpenDisplay(name)
     release(m)
     if dpy == nil {
+        if sys.wayland {
+            // no X display (a Wayland session without XWayland): a program that would not
+            // have run at all tries Wayland
+            return wayland_window_open(d, sys.wayland_name)
+        }
         return (nil, false)
     }
     w := new[Window]()

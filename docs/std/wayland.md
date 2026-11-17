@@ -8,7 +8,9 @@ Linux only: with `--target windows`, `use std.wayland` is a compile error.
 motion and a locked or confined pointer, for mouse-look), and the parts of `libxkbcommon`
 (keyboard) and `libwayland-cursor` (pointer image) that a window needs. It is a binding of the
 C API, not a window abstraction: `std.window` is the portable window module (its Linux layer is
-built on this module and uses Wayland when `$WAYLAND_DISPLAY` is set, X11 otherwise).
+built on this module: its Wayland backend is experimental, opt-in and not yet verified on a
+real session; by default std.window uses X11, which works on Wayland sessions through
+XWayland).
 
 A program that calls one of the `extern` functions of libwayland-client (`wl_display_connect`,
 ...) or uses an `extern` interface table (`&wl_compositor_interface`) links against

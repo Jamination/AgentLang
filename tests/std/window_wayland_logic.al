@@ -3,13 +3,17 @@
 use std.window
 
 fn show(s: WindowSystems) -> str {
-    fmt(if s.wayland { fmt("wayland(", s.wayland_name, ")") } else { "-" }, " ", if s.x11 { fmt("x11(", s.x11_name, ")") } else { "-" })
+    // in the order window_open tries them (with both: Wayland only if X11 fails)
+    fmt(if s.x11 { fmt("x11(", s.x11_name, ")") } else { "-" }, " ", if s.wayland { fmt("wayland(", s.wayland_name, ")") } else { "-" })
 }
 
 fn main() {
-    // WindowDesc.display and $WAYLAND_DISPLAY
-    for d in []str{"", "x11", "wayland", ":1", "host:0.0", "wayland-1", "/run/user/1000/wayland-0"} {
-        print(fmt("\"", d, "\""), show(window_systems(d, "wayland-0")), "|", show(window_systems(d, "")))
+    // WindowDesc.display, $WAYLAND_DISPLAY and $ALC_WINDOW: X11 unless Wayland is asked for
+    for d in []str{"", "x11", "wayland", ":1", "host:0.0", "al-test-not-a-display", "wayland:", "wayland:wayland-1",
+        "wayland:/run/user/1000/wayland-0"} {
+        print(fmt("\"", d, "\""), show(window_systems(d, "wayland-0", "")), "|", show(window_systems(d, "", "")), "|",
+            show(window_systems(d, "wayland-0", "wayland")), "|", show(window_systems(d, "wayland-0", "x11")), "|",
+            show(window_systems(d, "wayland-0", "Wayland")))
     }
 
     // evdev buttons
