@@ -161,11 +161,29 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 
 ## Rendering
 
-The standard library gives bindings, not a renderer: `std.vk` (Vulkan) and `std.dx12`
-(Direct3D 12, Windows), on top of the platform layer (`std.window` with the native handles a
-GPU surface needs, `std.input`, `std.audio`, `std.time`). Device set-up, swap chain,
-pipelines, buffers and the sprite, tile or mesh drawing are the game's own code, shaped by
-what the game needs.
+For 2D, the standard library has a renderer: [std.gfx](std/gfx.md) (sprites, shapes,
+coverage textures for text, blending, a camera transform, scissor, render textures; batched;
+Direct3D 12 on Windows, Vulkan on Linux, chosen by the target). Below it are the bindings,
+`std.vk` (Vulkan) and `std.dx12` (Direct3D 12, Windows), on top of the platform layer
+(`std.window` with the native handles a GPU surface needs, `std.input`, `std.audio`,
+`std.time`); with them, device set-up, swap chain, pipelines, buffers and drawing are the
+game's own code, shaped by what the game needs.
+
+**std.gfx or the bindings?**
+
+- **std.gfx** for a 2D game whose picture is textured quads, shapes and text in painter's
+  order: tiles, sprites, particles (additive), a HUD in a virtual resolution, a minimap or a
+  transition in a render texture. It is about 20 lines of game code from window to a frame
+  ([examples/gfx_starter](../examples/gfx_starter/game.al) next to
+  [examples/dx12_starter](../examples/dx12_starter), which carries ~700 lines of Direct3D 12 for
+  the same picture), runs on Linux and Windows unchanged, needs no shader compiler, allocates
+  nothing per frame (frames sit inside `frame_begin()` / `frame_end()`), and has
+  `gfx_offscreen` + `read_pixels` for pixel tests of the game's own drawing.
+- **The bindings** when the game needs what std.gfx leaves out: 3D, depth buffers, its own
+  shaders (lighting, distortion, palette effects), mipmaps, instancing or compute, more than
+  one window, sRGB or HDR output, MSAA, or control over memory and synchronization. Start
+  from `examples/vk_renderer` or `examples/gamekit/dx12_gpu.al`. The two do not mix in one
+  program's frame: std.gfx owns its device and swap chain.
 
 - **Vulkan**: [std/vk.md](std/vk.md) has the workflow: shaders compiled to SPIR-V with `glslc`
   ahead of time and built into the executable with `embed("shader.vert.spv")` (or at run time
@@ -203,7 +221,7 @@ what the game needs.
   pointer is free by itself ([std/window.md](std/window.md#mouse-look)).
 - Keys are for playing, `EventText` for typing: call `set_text_input(w, true)` only while the
   player types a name or a chat line (it lets the IME in on Windows).
-- `std.vk`, `std.dx12`: see [Rendering](#rendering).
+- `std.gfx`, `std.vk`, `std.dx12`: see [Rendering](#rendering).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
 - `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`. Saves
@@ -271,9 +289,14 @@ one gets the SmartScreen warning the first time it is started.
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
 (events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
+<<<<<<< HEAD
 (WASAPI), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
 std.shaderc (`libshaderc_shared.so.1`, or `shaderc_shared.dll` of the Vulkan SDK on Windows).
 Windows only: std.dx12. Linux only: std.x11, std.wayland, std.alsa.
+=======
+(WASAPI), std.gfx (Direct3D 12 on Windows, Vulkan on Linux), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)).
+Windows only: std.dx12. Linux only: std.shaderc, std.x11, std.wayland, std.alsa.
+>>>>>>> worktree-agent-a60f85e4cdb51e8a4
 
 **Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
 

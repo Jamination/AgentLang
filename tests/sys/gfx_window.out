@@ -1,0 +1,4 @@
+size 240 160 frames ok: true
+without vsync and back: true
+fullscreen followed: true back: true size 240 160
+device lost: false

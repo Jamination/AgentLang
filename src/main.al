@@ -101,6 +101,11 @@ priv const STD_MODULES = [_](str, str){
     ("net", embed("../std/net.al")),
     ("net_linux", embed("../std/net_linux.al")),
     ("net_windows", embed("../std/net_windows.al")),
+    ("gfx", embed("../std/gfx.al")),
+    ("gfx_core", embed("../std/gfx_core.al")),
+    ("gfx_dx12", embed("../std/gfx_dx12.al")),
+    ("gfx_vk", embed("../std/gfx_vk.al")),
+    ("gfx_shaders", embed("../std/gfx_shaders.al")),
 }
 
 // modules that are loaded into every program
