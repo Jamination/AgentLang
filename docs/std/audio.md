@@ -4,13 +4,17 @@
 
 - `Sound`: decoded PCM audio in memory, plus tone / noise generators,
 - WAV decoding and encoding,
-- `Mixer`: a software mixer with a fixed pool of voices (volume, pan, pitch, looping),
+- Ogg Vorbis decoding: whole files into a `Sound`, or streamed while they play (music),
+- `Mixer`: a software mixer with a fixed pool of voices (volume, pan, pitch, looping), which
+  plays sounds in memory and streams,
 - `AudioDevice`: playback fed from the game loop, through ALSA on Linux and WASAPI on Windows
   (`--target windows`), with the same functions and behaviour.
 
-Sounds, WAV and the mixer are pure AL: a program that uses only them stays a static
-executable and its output is bit-for-bit reproducible, so game audio can be tested by
-checksumming the mix. Only the `audio_*` device functions use the system: on Linux ALSA
+Sounds, WAV, Ogg Vorbis and the mixer are pure AL: a program that uses only them stays a
+static executable and its output is bit-for-bit reproducible, so game audio can be tested by
+checksumming the mix. The Vorbis decoder is in `std/audio_vorbis.al`, which `std/audio.al`
+loads on every target; a program that never calls it contains none of its code. Only the
+`audio_*` device functions use the system: on Linux ALSA
 (`libasound.so.2`, declared in `std.alsa`; using one of them makes the program dynamically
 linked), on Windows `ole32.dll` (COM) and the audio engine behind it. The device code is in the
 module's OS layers, `std/audio_linux.al` and `std/audio_windows.al`, which `std/audio.al`
@@ -50,6 +54,62 @@ returns false. Integer encoding rounds to nearest and clips to -1..1; 16-bit and
 decode and re-encode to identical bytes. `embed("jump.wav")` plus `wav_decode` builds sounds
 into the executable.
 
+## Ogg Vorbis
+
+| Function | |
+|----------|---|
+| `ogg_decode(data: str) -> (Sound, bool)` | decode a whole `.ogg` file image (allocates only the samples) |
+| `ogg_load(path: str) -> (Sound, bool)` | read and decode a file |
+| `ogg_error() -> str` | why the last `ogg_open` / `ogg_open_file` / `ogg_decode` / `ogg_load` failed; `""` after a success |
+| `ogg_open(data: str) -> (*OggStream, bool)` | open a stream on a file image (`data` stays referenced) |
+| `ogg_open_file(path: str) -> (*OggStream, bool)` | read a file and open it (the compressed file stays in memory) |
+| `ogg_read(st, out: []f32, frames: i64) -> i64` | decode the next `frames` frames into `out` (interleaved); fewer only at the end |
+| `ogg_seek(st, frame: i64) -> bool` | continue at `frame` (0 ..= `st.frames`); false outside |
+| `ogg_rewind(st) -> bool` | `ogg_seek(st, 0)` |
+| `ogg_close(st)` | further reads return 0 |
+| `audio_stream(st) -> AudioStream` | the stream as a mixer source (below) |
+| `play_stream(m, st, volume, pan, pitch, looped) -> VoiceId` | play it on a mixer, decoding as it plays |
+
+```
+struct OggStream { rate: i64, channels: i64, frames: i64, pos: i64, error: str, dec: *Dec }
+```
+
+`rate` and `channels` are the format, `frames` the exact length, `pos` the next frame
+`ogg_read` returns, `error` why decoding stopped early (`""` if it did not); `dec` is the
+decoder's private state.
+
+- **Short sounds** (effects) are decoded once into a `Sound` with `ogg_load` and played like
+  WAV sounds. **Music** is streamed: `ogg_open_file` keeps only the compressed file (about a
+  tenth of the decoded size) and decodes 1024 frames at a time inside `mix` / `audio_pump`.
+- **What is decoded**: Vorbis I as libvorbis writes it at any quality, sample rate and
+  channel count (1 to 255; mono, stereo, 5.1 tested): codebooks, floor type 1, residue types
+  0, 1 and 2, channel coupling, both block sizes. Floor type 0 (an LSP floor of 2000-era
+  encoders) is not supported: such files fail to open with `floor type 0 is not supported`.
+  The decoded samples are those of libvorbis up to float rounding (within 1e-6 in the
+  tests), and the frame count is the same: the granule positions trim the start and the end
+  as libvorbis does, so a looped stream loops without a gap or a click of padding.
+- **Ogg**: the first Vorbis stream of the file is decoded; pages of other logical streams
+  (multiplexed) are skipped, and what follows its last page (a chained stream, other data)
+  is ignored.
+- **Damaged files never stop the program.** `ogg_open` checks the page structure of the
+  whole file first (capture patterns, lengths, CRC-32 of every page, page sequence) and the
+  three headers; a truncated or changed file fails there with a reason in `ogg_error()`
+  (`truncated page at byte 81920`, `CRC mismatch in the page at byte 4096`, `not an Ogg
+  Vorbis stream`, `bad codebook lengths`, ...). Audio packets are checked as they are
+  decoded: a value out of range ends the stream (`ogg_read` returns fewer frames,
+  `st.error` is `bad audio packet`; `ogg_decode` fails). Codebooks of more than 2^20 entries
+  or 2^22 vector values are refused (encoders use thousands).
+- **Memory.** `ogg_open` allocates the decoder, mostly the codebooks' decoding tables:
+  measured 270 KB for a mono file, 400 to 620 KB for stereo, 780 KB for 5.1 (libvorbis
+  files of any length); `ogg_read`, `ogg_seek` and the mixer never allocate. `ogg_close` does not give the memory back (it is arena memory): open streams in
+  a [region](../LANGUAGE.md#regions) that is reset when the music changes. `ogg_decode`
+  decodes in a region of its own and frees it, so only the samples stay.
+- **Seeking** goes to the page before the frame (positions of all pages are noted by
+  `ogg_open`) and decodes from there: one or two packets of extra work, sample-exact.
+- **Speed**: stereo 44.1 kHz decodes 400 to 800 times faster than real time on a desktop
+  processor (best of 5: 60 s at 108 kbit/s in 73 ms, 30 s at 490 kbit/s in 76 ms, of which
+  `ogg_open` 2 and 5 ms); libvorbisfile takes 110 and 128 ms for the same files there.
+
 ## Mixer
 
 ```
@@ -62,6 +122,7 @@ m.mix(out, n)                                      // render the next n frames
 |----------|---|
 | `mixer_new(rate: i64, channels: i64, max_voices: i64) -> *Mixer` | create a mixer (allocates once) |
 | `play(m, s: Sound, volume: f32, pan: f32, pitch: f32, looped: bool) -> VoiceId` | start a voice |
+| `play_stream(m, s: AudioStream, volume, pan, pitch, looped) -> VoiceId` | start a voice that reads its frames from a stream as it plays (see [Streams](#streams)) |
 | `valid(id: VoiceId) -> bool` | the handle came from a successful `play` |
 | `playing(m, id) -> bool` | the voice is still in the pool (also while paused) |
 | `stop(m, id)`, `stop_all(m)` | end a voice / all voices |
@@ -98,6 +159,50 @@ Behaviour:
   buffer: about `m.mixed - d.buffer_frames` frames have reached the speaker.
 - The mixer references the samples of a `Sound`; keep them alive (do not `release` them) while
   it plays.
+
+### Streams
+
+```
+struct AudioStream {
+    ctx: *u8                              // handed to read and rewind
+    rate: i64
+    channels: i64
+    read: fn(*u8, []f32, i64) -> i64      // read(ctx, out, n): up to n interleaved frames into out; 0 at the end
+    rewind: fn(*u8) -> bool               // back to the start (looping); false: cannot
+    buf: []f32                            // the voice's read-ahead window, at least 2 frames
+}
+```
+
+A streamed voice is a voice like the others (`VoiceId`, volume, pan, pitch, pause, stop, the
+audio clock) whose frames come from `read` while `mix` runs instead of from a `Sound`. The
+mixer reads into `buf` whenever its window runs out and resamples from there exactly as it
+does a `Sound`: a stream renders the same samples as the decoded `Sound` would, with any
+pitch, looped or not, however the output is split into `mix` calls. At the end of the stream
+a looped voice calls `rewind` and goes on reading (the frames on both sides of the loop point
+are interpolated as one), any other voice ends. `play_stream` plays from where the stream
+stands and first stops a voice of the same mixer that plays the same `ctx` (a stream has one
+position). `read` and `rewind` run inside `mix` (and so `audio_pump`): they must not allocate
+and should be quick.
+
+`audio_stream(st)` makes the `AudioStream` of an `OggStream` (`buf`: 1024 frames allocated
+by `ogg_open`), and `play_stream(m, st: *OggStream, ...)` is short for
+`play_stream(m, audio_stream(st), ...)`. A program can stream its own sources the same way
+(a synthesizer, a network stream): `ctx` points at its state (`cast[*u8](p)`, back with
+`cast[*State](ctx)`).
+
+Music in a game: the frame loop stays the same, the stream decodes about 23 ms of audio per
+1024 frames whenever the mixer needs them, well under a millisecond of work.
+
+```
+music, ok := ogg_open_file("music/level1.ogg")    // at load time
+if !ok { eprint(fmt("music: ", ogg_error())) }
+mid := mixer.play_stream(music, 0.6, 0.0, 1.0, true)
+...
+mixer.set_paused(mid, paused)                      // the loop keeps its place
+audio_pump(dev, mixer)                             // once per frame, as for any sound
+...
+mixer.stop(mid)                                    // another track: ogg_rewind(music) restarts it
+```
 
 ## Audio output
 

@@ -9,8 +9,8 @@ C interop, programs for Windows, and the grammar.
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
-[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Regions](#regions) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Grammar](#grammar)
+[Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Debug information](#debug-information) · [Regions](#regions) ·
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 
@@ -524,6 +524,72 @@ panic: index out of bounds at main.al:12
   of it runs unless the program panics; its table costs about 1-2 KB in a small program and 5%
   of the compiler's executable.
 
+## Debug information
+
+`alc build -g` (also `run` and `test`) adds debug information, so a program can be stepped in
+a debugger and profiled with symbols:
+
+- **Linux**: DWARF 4 in the ELF file (`.debug_info`, `.debug_abbrev`, `.debug_line`,
+  `.debug_str`, `.debug_aranges`, `.debug_ranges`, `.debug_frame`), for gdb, lldb, perf and
+  the like.
+- **Windows**: the same DWARF in the PE file (gdb, lldb) and a PDB next to the executable
+  (`game.exe` -> `game.pdb`, found through the executable's debug directory) for Visual Studio,
+  WinDbg / cdb and the Windows profilers.
+
+What is described: one compile unit for the program; every function with its address range,
+its file and line, its parameters and variables (with their scopes: a variable is visible from
+its declaration to the end of its block; the variable of a `for` loop and the bindings of a
+`match` arm inside their body), the types of these, the line table (a row per statement and
+expression, the line of code inlined from another function being that function's line), the
+global variables (not the thread-local ones), the functions inlined into each function
+(DWARF only) and the call frames (`.debug_frame`; the PE file also has its `.pdata`).
+
+- **`-O0 -g`**: every statement has code and its line: a breakpoint on any line stops there,
+  `next` / `step` go statement by statement, and every variable lives in a frame slot of its own
+  for its whole scope (the compiler keeps named variables in memory at `-O0 -g`, as C compilers
+  do at `-O0`; without `-g` it keeps them in registers). The code is otherwise the same.
+- **With optimisation** `-g` does not change the code (Linux: the code and data of the
+  executable are byte for byte those of the build without `-g`; Windows: the same
+  instructions, but `.rdata` gains the debug directory, which may move the sections after it
+  and so change displacements). Lines are exact for every instruction (each
+  keeps the location of the statement it comes from), but statements are merged, moved and
+  removed, so stepping jumps; inlined calls show as frames of their own in gdb. Variables that
+  stay in memory (their address is taken, or an aggregate that is not split up) are described;
+  the others (in registers) are not: the debugger reports them as unknown.
+- **AL types** as a debugger shows them (the language of the compile unit is C, the closest a
+  debugger knows): integers, `f32` / `f64` and `bool` are base types (`u8` an unsigned char, so
+  a `*u8` prints as text); `str` and `[]T` are a struct `{ptr, len}` (gdb prints the text of a
+  string literal through `ptr`; others have no terminating zero); a tuple a struct `{_0, _1,
+  ...}`; `vec2`..`vec4` and `quat` `{x, y, z, w}`, `mat4` `{cols: [4]vec4}`; an enum without
+  data an enumeration; an enum with data a struct of the tag and the payload of the variant in
+  use (DWARF: a variant part, `{tag = Some, Some = {_0 = 4}}`; PDB: the tag and a union of one
+  struct per variant); `Vec`, `Map` and the other library types are the structs they are. A
+  parameter passed by reference (a struct on Windows) shows as its value (DWARF: a location
+  with a dereference; PDB: a reference type).
+- **Source files** are named as on the command line, relative to the working directory of the
+  build (DWARF: the compile unit's directory; PDB: made absolute). The run-time library and the
+  bundled modules are inside the compiler: their frames have lines (`<prelude>:62`), but there
+  is no file a debugger could show.
+- **Frames.** AL code keeps no frame pointer. `.debug_frame` describes every prologue (the
+  pushes, then one `sub rsp`; on Windows the probe loop of a frame of a page or more, whose
+  CFA is an expression of r11), every epilogue and the entry stub of a Linux executable (the
+  outermost frame). The frame base of a function is its CFA (Linux), or rsp plus the frame
+  (Windows, where gdb unwinds with `.pdata`, not with DWARF), so variables are right from the
+  end of the prologue to the start of an epilogue (stopped on the first instruction of a
+  function, before its prologue, they show garbage).
+- **Size and time.** Nothing changes without `-g`. The compiler built with `-g`: 4.6 -> 8.6 MB
+  (Linux, optimised), 4.1 -> 5.5 MB at `-O0`; for Windows 4.8 -> 7.2 MB plus a 1.2 MB PDB.
+  `-g` makes the `-O0` self-compile about 15 % slower (the variables in memory, the tables).
+
+**Not described**: thread-local globals; C variables (`extern`); variables in registers in
+optimised code; columns; inlined functions in the PDB (their lines are there, as lines of the
+function they were inlined into; no `S_INLINESITE`). The PDB has no checksums of the source
+files, and its GUID is a hash of the code and data (the same program gives the same PDB).
+
+The implementation: `src/debug.al` (what lowering and the back end record), `src/dwarf.al`,
+`src/pdb.al`. Tests: `tests/run/debug_info.al` reads the DWARF of its own executable (ELF or
+PE), `tests/sys/win_pdb.al` its own PDB, both with parsers written in AL.
+
 ## Regions
 
 - **Nesting.** `enter` / `leave` form a stack with the main arena at the bottom; up to 64
@@ -803,7 +869,7 @@ both systems, except where this section says otherwise.
 - **Paths** may use `\` as well as `/`, a drive (`C:/x`, `C:x`) or `\\server\share\`; the
   path functions of std.asset know these roots and build paths with `/`. Long paths work
   without `LongPathsEnabled`: the run-time library hands Windows a path of 248 UTF-16 units
-  or more in the extended-length form `\\?\C:\dir\file`, made absolute first
+  or more (once made absolute) in the extended-length form `\\?\C:\dir\file`, made absolute first
   ([std/asset.md](std/asset.md#windows)).
   `current_dir()` is in Windows form (`C:\Users\me`).
 - **Errors.** `io_error()` is the Linux errno of the same meaning (file not found 2, access
@@ -822,9 +888,11 @@ both systems, except where this section says otherwise.
 - **Memory.** Arenas reserve the same address space (64 GiB, 16 GiB per region) and commit it
   in steps as it is used; committed memory counts against the system's commit limit.
 - **Not available** for `--target windows` (a compile error that names the module):
-  `std.x11`, `std.wayland`, `std.alsa`, `std.vk`, `std.shaderc` (a program for both systems
-  includes them with `when TARGET_OS == Linux { use std.x11 }`). `std.libc` binds
-  `msvcrt.dll` there ([std/libc.md](std/libc.md)). In
+  `std.x11`, `std.wayland`, `std.alsa` (a program for both systems includes them with
+  `when TARGET_OS == Linux { use std.x11 }`). `std.libc` binds `msvcrt.dll` there
+  ([std/libc.md](std/libc.md)), `std.vk` `vulkan-1.dll` ([std/vk.md](std/vk.md)) and
+  `std.shaderc` `shaderc_shared.dll`, the DLL of the Vulkan SDK
+  ([std/shaderc.md](std/shaderc.md)). In
   std.os, signals do not exist (`kill` with any signal but 0 ends the process; see
   [std/os.md](std/os.md)).
 - **`alc run` / `alc test`** of a Windows program on Linux build it and stop, unless
@@ -878,6 +946,57 @@ both systems, except where this section says otherwise.
   use `\` and drive or UNC roots, and appear in diagnostics as written. It runs on a thread
   with a 1 GiB stack and compiles functions in parallel worker threads as on Linux
   (`ALC_JOBS=n` sets the number); see [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
+
+## alc fmt
+
+`alc fmt` gives source files the one layout of the repository's own sources, so that two
+agents who write the same code write the same text and diffs show only real changes.
+
+```
+alc fmt game.al src/            rewrite the files in place (a directory: every .al file in it)
+alc fmt --check src/            change nothing; print the files that would change, status 1 if any
+alc fmt --stdout game.al        print the result instead of writing it
+alc fmt - < game.al             standard input to standard output (for editors and filters)
+```
+
+The status is 0 when everything was formatted (`--check`: nothing would change), 1 when a file
+would change (`--check`) or has an error, 2 for a usage error. A file with a syntax error is not
+changed: its diagnostics are printed as `alc check` prints them, and the other files are still
+formatted (`--stdout` / `-` print such a file as it is).
+
+**What it changes: white space only.** Tokens stay as written and on their lines: no line is
+joined or broken, so a newline that ends a statement can never move (see [Grammar](#grammar)),
+and a long line stays long; break it yourself after an operator, a comma or an opening bracket.
+Comments keep their text and their line.
+
+- **Indentation**: 4 spaces per bracket left open by the lines above (several opened on one line
+  count once); a line that starts with `}`, `)` or `]` stands at the indentation of the line
+  that opened it. A line that continues a statement after a line ending in an operator (or, in a
+  block or a `match`, in a `,`: the patterns of an arm) gets 4 more; further lines of that
+  statement keep that indentation. A comment line is indented like code in its place.
+- **Spaces in a line**: one around binary operators, `=`, `:=`, `op=`, `->`, `=>`; none after a
+  unary operator (`-x`, `*p`, `&v`, `!ok`), around `.`, `..`, `..=`, inside `( )` and `[ ]`,
+  before `,` `;` `:` and before the `(` of a call or the `[` of an index or type argument; one
+  after `,` `;` `:`. A type is written closed up: `[]*T`, `[4]u8`, `fn(i64) -> i64`. A literal has
+  no spaces inside its braces (`Point{1, 2}`, `[]i64{}`), a block one (`{ x * 2 }`, `struct P {
+  x: i64 }`), an empty block none (`{}`).
+- **Comments after code** keep their column (moved with their line's indentation), so aligned
+  comments stay aligned; where the code now reaches the column, one space separates them. A
+  comment line right below one in the same column continues it and stays in that column.
+- **Blank lines**: at most one in a row; none at the start or the end of the file, after a line
+  that ends in an opening bracket, or before a line that starts with a closing one.
+- **Line ends**: none of the lines keeps trailing white space; the file ends in one line end. A
+  file whose first line ends in CRLF gets CRLF everywhere, otherwise LF; a byte order mark stays;
+  raw strings keep their bytes as they are.
+
+**Checked every time.** Before a result is written, `alc fmt` lexes and parses it again: it
+must give the same tokens (the newlines that end statements included) and the same comments,
+and formatting it once more must not change it. If not (a bug of the formatter), the file is
+left as it is with an `internal error of alc fmt` diagnostic. The test `fmt/tree` of
+`tests/run.al` formats copies of every `.al` file of the repository, checks that the result does
+not change again, that the compiler built from the formatted sources reproduces itself and
+compiles `src/main.al` to the same executable, and that scrambling the layout of every file
+(indentation, spaces, blank lines, line ends) formats back to the same text.
 
 ## Grammar
 

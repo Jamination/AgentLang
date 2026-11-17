@@ -19,6 +19,11 @@ priv struct Parser {
     too_deep: bool
 }
 
+// `alc fmt` (src/fmt.al): while parser_lits_on, the position of the `{` of every literal
+// (`Name{...}`, `[]T{...}`) is recorded in parser_lits; a block's `{` is not
+parser_lits_on: bool
+parser_lits: Vec[Pos]
+
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
     return Parser{toks: toks, errs: errs, hdr_name: -1, budget: stack_budget()}
 }
@@ -1815,6 +1820,9 @@ priv fn postfix_links(p: *Parser) -> *Expr {
             }
             p.bump()
         } else if p.is_p('{') && typeish(e) && (!p.no_lit || lit_in_header(e)) {
+            if parser_lits_on {
+                parser_lits.push(pos)
+            }
             p.bump()
             save := p.no_lit
             p.no_lit = false

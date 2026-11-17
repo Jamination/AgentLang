@@ -1,0 +1,28 @@
+query: true true 12 34 01 00 00 01 00 00 00 00 00 00 07 65 78 61 6d 70 6c 65 03 63 6f 6d 00 00 01 00 01
+query AAAA: be ef 01 00 00 01 00 00 00 00 00 00 04 69 70 76 36 07 65 78 61 6d 70 6c 65 00 00 1c 00 01
+false false false true false false true true false 
+reply: true 1234 0 false www.example.com 1 [93.184.216.34:0, [2001:db8::1]:0]
+no such name: true 3 www.example.com 0
+cut short: false
+truncated: true true [93.184.216.34:0]
+pointer loop: false
+a query is no reply: false
+pointer outside: false
+conf: [192.0.2.53:53, [::1]:53, 192.0.2.54:53] [corp.example, lab.example] 2 3 5
+default: [127.0.0.1:53] 0 1 5 2
+hosts: [127.0.0.1:1, [::1]:1] [10.1.2.3:2] [10.1.2.3:3, 10.1.2.4:3] []
+a.test true [10.0.0.1:80, [2001:db8::1]:80] 
+a.test. true [10.0.0.1:80, [2001:db8::1]:80] 
+cname.test true [10.0.0.1:80, [2001:db8::1]:80] 
+drop.test true [10.0.0.1:80, [2001:db8::1]:80] 
+wrongid.test true [10.0.0.1:80, [2001:db8::1]:80] 
+only4.test true [10.0.0.1:80] 
+none.test false [] host not found
+nodata.test false [] host not found
+fail.test false [] name server failure
+host true [10.0.0.9:80] 
+1.2.3.4 true [1.2.3.4:80] 
+[::1] true [[::1]:80] 
+silent.test false 110 true
+silent.test, 0.2 s false 110 true
+child: 0

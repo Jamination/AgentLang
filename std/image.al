@@ -1,4 +1,4 @@
-// std.image: 8-bit images in memory, PNG and BMP files, deflate/zlib, CRC-32 and Adler-32.
+// std.image: 8-bit images in memory, PNG, BMP and JPEG files, deflate/zlib, CRC-32 and Adler-32.
 // Everything is written in AL: no libc and no shared library is needed.
 
 // ---------- checksums ----------
@@ -1894,15 +1894,18 @@ fn bmp_encode(img: Image) -> []u8 {
 }
 
 // ---------- files ----------
-// decodes a PNG or BMP file held in memory, told apart by its signature
+// decodes a PNG, BMP or JPEG file held in memory, told apart by its signature
 fn image_decode(data: []u8) -> (Image, bool) {
     if len(data) >= 2 && data[0] == 'B' && data[1] == 'M' {
         return bmp_decode(data)
     }
+    if len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+        return jpeg_decode(data)
+    }
     png_decode(data)
 }
 
-// Loads a PNG or BMP file. Allocates the pixels; the file's bytes stay in the arena too.
+// Loads a PNG, BMP or JPEG file. Allocates the pixels; the file's bytes stay in the arena too.
 fn image_load(path: str) -> (Image, bool) {
     data, ok := read_file(path)
     if !ok {
@@ -1947,3 +1950,6 @@ fn bmp_save(path: str, img: Image) -> bool {
     release(m)
     ok
 }
+
+// JPEG (jpeg_decode, jpeg_encode, ...) is in its own file
+use std.image_jpeg

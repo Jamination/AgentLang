@@ -197,6 +197,14 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         nsyms += 1
     }
     shstr := "\0.text\0.rodata\0.data\0.bss\0.symtab\0.strtab\0.shstrtab\0.dynstr\0.dynsym\0.dynamic\0"
+    // -g: the DWARF sections (src/dwarf.al), after the others
+    dsecs := vec[(str, Vec[u8])]()
+    if dbg_on {
+        dsecs = dwarf_sections(m, out, &func_addr, &gaddr, start_addr, start_addr + text.len, start_addr, false)
+        for s in dsecs {
+            shstr = fmt(shstr, s.0, "\0")
+        }
+    }
     // ---- file assembly ----
     file := vec[u8]()
     file.resize(text_off, 0)
@@ -212,6 +220,11 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     file.extend(strtab.items())
     shstr_off := file.len
     file.extend(shstr)
+    dsec_off := vec[i64]()
+    for s in dsecs {
+        dsec_off.push(file.len)
+        file.extend(s.1.items())
+    }
     sh_off := align_up(file.len, 8)
     file.resize(sh_off, 0)
     sh := vec[u8]()
@@ -241,6 +254,9 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         section(&sh, shstr, ".dynsym", 11, 2, dynsym_at, dynsym_at - BASE, 24 * (externs.len + 1), 8, 1, 8, 24)
         section(&sh, shstr, ".dynamic", 6, 3, dyn_at, dyn_at - BASE, dyn_len, 8, 0, 8, 16)
     }
+    for k, s in dsecs {
+        section(&sh, shstr, s.0, 1, 0, 0, dsec_off[k], s.1.len, 0, 0, 1, 0)
+    }
     file.extend(sh.items())
     // ELF header
     h := vec[u8]()
@@ -256,7 +272,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     put16(&h, 56)
     put16(&h, nph)
     put16(&h, 64)
-    put16(&h, if dynamic { 11 } else { 8 })
+    put16(&h, (if dynamic { 11 } else { 8 }) + dsecs.len)
     put16(&h, 7)
     // program headers
     fn segment(h: *Vec[u8], ty: i64, flags: i64, off: i64, vaddr: i64, filesz: i64, memsz: i64, align: i64) {

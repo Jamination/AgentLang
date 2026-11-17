@@ -165,7 +165,8 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     // linked into one list per value (below).
     ptrs := alloc[bool](n)
     for v in f.blocks[0].insts {
-        if f.insts[v].op == Alloca {
+        // (-g at -O0: the variables keep their slots, see src/debug.al)
+        if f.insts[v].op == Alloca && !(dbg_keep_vars && f.insts[v].cap < 0) {
             ptrs[v] = true
         }
     }
@@ -225,7 +226,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     accs := vec[(i64, i64, T)]()
     slots := vec[(i64, T)]()
     allocas: for a in f.blocks[0].insts {
-        if f.insts[a].op != Alloca || term_used[a] {
+        if f.insts[a].op != Alloca || term_used[a] || !ptrs[a] {
             continue
         }
         derived.clear()

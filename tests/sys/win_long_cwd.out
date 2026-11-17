@@ -1,0 +1,12 @@
+deep true true
+cwd true true
+make_dir at 248 true true no error true [] true
+write true true true no error true no error
+read (deep, true) (beside, true) true false 6 true
+list true 2 true
+forms (deep, true) (beside, true) (beside, true) (deep, true) 4
+rename true no error false (beside, true) true true
+remove true true no error true no error []
+NUL true (, true) false
+back true true
+cleanup false

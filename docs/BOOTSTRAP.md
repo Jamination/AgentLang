@@ -87,7 +87,9 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   reported as `SKIP` with the reason when it is missing: a C compiler for the tests with a C
   library (`tests/sys/NAME.c`: clang on Linux; MinGW-w64 for Windows programs, as
   `x86_64-w64-mingw32-gcc` or, on Windows, `gcc`), what `NAME.need` asks for on Linux
-  (libraries, weston, an X display in `AL_TEST_DISPLAY`), what only the program can tell
+  (libraries, weston, an X display in `AL_TEST_DISPLAY`), the DLLs `NAME.windows.need` lists
+  for a Windows program run on Windows (found through `PATH`; under Wine such a test is
+  skipped: `shaderc_shared.dll` of the Vulkan SDK), what only the program can tell
   (status 77: no Direct3D 12 device). `--target windows` on Linux needs Wine and
   stops without it. `tests/driver` (bash scripts for the Linux command line) runs on Linux
   for the Linux target only.
@@ -110,6 +112,11 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   compiler's output, which is byte-identical whichever host built it (`build.sh
   --windows-check`, `build.bat`). `verify.bat` is what Windows can add: the compiler rebuilds
   itself there, and the programs it builds run on real Windows.
+- **`alc fmt`**: `tests/fmt/NAME.al` with the expected result `NAME.fmt` (or `NAME.err` for a
+  file with a syntax error), and `fmt/tree` (`tests/fmt/tree/check.al`), which formats copies of
+  every `.al` file of the repository, builds the compiler from the formatted sources and
+  formats scrambled layouts back (about 20 s; `check ALC DIR ROUNDS SEED` runs more rounds of
+  scrambling). It runs where the compiler's target is the machine (not under Wine).
 - `tests/winabi/run.sh`, `tests/winaudio/run.sh` (Wine, MinGW, PipeWire) and the fuzzers in
   `tests/gen/` (Python) are Linux tools as before.
 
@@ -172,6 +179,7 @@ executables before and after); the conventions below describe the result.
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
 | `src/lint.al` | checks on the AST that need types: field writes to a struct copy that is never read |
+| `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
@@ -179,6 +187,7 @@ executables before and after); the conventions below describe the result.
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
 | `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
 | `src/backtrace.al` | the table of the stack traces of panics (frames, source lines), added to the module before linking |
+| `src/debug.al`, `dwarf.al`, `pdb.al` | debug information (`-g`, see DETAILS.md): the variables and function lines recorded while lowering and in isel / emit, the line rows and scopes both formats share; DWARF 4 sections for `elf.al` and `pe.al`; the PDB of a Windows executable |
 | `src/objwrite.al` | what the two writers share (little-endian output, the layout of text, read-only data, bss, relocations): included by `elf.al` and `pe.al` |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
 | `src/prelude_linux.al`, `prelude_windows.al` | its OS layer for the target (`--target`): system calls on Linux, kernel32.dll on Windows; the functions a layer defines are listed at the top of `prelude.al` |
@@ -668,9 +677,10 @@ same, the differences are:
   prologue) and a `.pdata` entry, so that the system can walk the stack through AL frames
   (exception dispatch, debuggers); functions without a frame are leaf functions.
 - **Run-time library.** `src/prelude_windows.al` replaces `src/prelude_linux.al` (kernel32.dll
-  only); the bundled modules with Linux interfaces (`std.x11`, `std.wayland`, `std.alsa`,
-  `std.vk`, `std.shaderc`) are refused (`LINUX_ONLY` in `src/main.al`; `std.libc` is not one of
-  them: it binds `msvcrt.dll` in a `when`), and
+  only); the bundled modules with Linux interfaces (`std.x11`, `std.wayland`, `std.alsa`) are
+  refused (`LINUX_ONLY` in `src/main.al`; `std.libc`, `std.vk` and `std.shaderc` are not among
+  them: they choose their library, `msvcrt.dll`, `vulkan-1.dll`, `shaderc_shared.dll`, with a
+  `when`), and
   the modules with an OS layer include the target's one with `when TARGET_OS == ...`.
   `tests/run.sh --target windows` runs the conformance suite under Wine (skip list:
   `tests/windows.skip`).

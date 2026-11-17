@@ -8,6 +8,67 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Added
+- `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a
+  one-channel image is a coverage texture, drawn in the tint's colour, for font atlases),
+  sprites with source rectangle, rotation, origin and tint, rectangles, lines, triangles with
+  per-corner colours, alpha and additive blending, a 2D transform (`camera`, `set_view` for a
+  letterboxed virtual resolution), scissor and render textures. Draws are batched by texture
+  and state, and nothing is allocated per frame. The backend is chosen by the target:
+  Direct3D 12 on Windows, Vulkan 1.3 on Linux (`use std.gfx_vk` gives Vulkan on Windows too);
+  the shaders are precompiled (`tools/gen_gfx_shaders.al`). `gfx_offscreen` and `read_pixels`
+  serve pixel tests. `examples/gfx_starter` is the starter game on it. See docs/std/gfx.md.
+- `std.font`: TrueType / OpenType fonts with TrueType outlines in AL (cmap 4 / 12, composite
+  glyphs, `kern` and GPOS pair kerning, `.ttc`), antialiased glyph rasterisation at any size,
+  glyph atlases into std.image images, and UTF-8 text layout, measuring, line wrapping and
+  drawing into images. CFF outlines are rejected with an error; a malformed font is rejected,
+  never read out of bounds. `examples/font_demo.al`. See docs/std/font.md.
+- `std.net`: TCP (connect with a time limit, non-blocking connect, listen / accept, send / recv
+  with time limits, shutdown), UDP (`udp_bind`, `send_to`, `recv_from`), IPv4 and IPv6 address
+  parsing and formatting, and `poll` over several sockets for game loops. Errors are Linux
+  errno numbers in `io_error()` on both systems. Sockets are never inherited by programs
+  started with std.os, and writing to a closed connection never raises SIGPIPE. `resolve`
+  looks names up: on Linux without libc (`/etc/hosts`, then DNS queries to the servers of
+  `/etc/resolv.conf`; a program stays static), on Windows through `getaddrinfo`. A minimal
+  HTTP/1.1 client (`http_get`, `http_post`, `http_request`; no TLS). See docs/std/net.md.
+- `error_text` knows the socket errors 88 to 115 (`connection refused`, `connection timed
+  out`, ...) and std.net's name-resolution errors.
+- std.audio: Ogg Vorbis decoding in AL (`std/audio_vorbis.al`, loaded by std.audio).
+  `ogg_decode` / `ogg_load` decode a whole file into a `Sound`; `ogg_open`, `ogg_open_file`,
+  `ogg_read`, `ogg_seek`, `ogg_rewind`, `ogg_close` and `ogg_error` stream it without
+  allocating after open. A damaged file fails cleanly. Floor type 0 is not supported.
+- std.audio: streamed voices. `AudioStream` and `play_stream(m, s, volume, pan, pitch, looped)`
+  play frames pulled from a source while mixing, with gapless looping and the same resampling
+  as for a `Sound`; `play_stream(m, st: *OggStream, ...)` / `audio_stream(st)` stream Ogg
+  music.
+- std.image reads and writes JPEG in AL. `jpeg_decode` / `jpeg_load` handle baseline, extended
+  sequential and progressive Huffman-coded files (8-bit), restart intervals, greyscale, YCbCr
+  with any whole-number subsampling, RGB and Adobe CMYK / YCCK, with the same pixels as
+  libjpeg-turbo. `jpeg_encode(img, quality)` / `jpeg_save(path, img, quality)` write baseline
+  files. `image_decode` / `image_load` recognise JPEG by its signature. A truncated file is
+  rejected.
+- std.shaderc builds for `--target windows`: it binds `shaderc_shared.dll`, the DLL the Vulkan
+  SDK installs in its Bin directory, chosen with `when` as std.vk does, so GLSL / HLSL to
+  SPIR-V at run time works for Vulkan games on Windows. As on Linux, a program that calls
+  shaderc does not start without the library; ship the DLL next to the `.exe`.
+  (`shaderc_compile_options_set_max_id_bound` is missing from the DLL of Vulkan SDK 1.4.304.)
+- `alc build -g` (also `run` and `test`): debug information. DWARF 4 in Linux and Windows
+  executables (lines, functions, parameters and variables with their scopes, types, globals,
+  inlined calls, call frames), and on Windows a `.pdb` next to the executable for Visual
+  Studio, WinDbg and profilers. At `-O0 -g` every statement can be stepped and every variable
+  is visible; with optimisation `-g` does not change the code (variables kept in registers are
+  not described). See [DETAILS.md](docs/DETAILS.md#debug-information).
+- `alc fmt`: rewrites source files in the one canonical layout, changing white space only
+  (`--check` lists the files that would change, `--stdout` and `-` for filters); a file with a
+  syntax error is left as it is. See [DETAILS.md](docs/DETAILS.md#alc-fmt).
+- `examples/dx12_crypt`: a first-person maze with Direct3D 12 (meshes, depth buffer, lighting,
+  mouse-look, gamepad, a scripted headless mode and offscreen pixel tests).
+- tests: `NAME.windows.need` lists the DLLs a Windows test program needs; one that is not in a
+  directory of PATH makes the test a SKIP (`NAME.windows.why`). `tests/sys/shaderc` runs on
+  Windows.
+
+## [0.4.0] - 2026-11-17
+
 ### Breaking
 - Windows executables are relocatable and loaded at a random address above 4 GiB (see
   Changed): the address of a global or a function no longer fits in 32 bits and differs from
@@ -339,7 +400,8 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   C boundary; the compiler compiles sequentially there (no parallel back end).
 - No package manager: code outside `std` is included by path.
 
-[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Jamination/AgentLang/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Jamination/AgentLang/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Jamination/AgentLang/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Jamination/AgentLang/compare/v0.2.0...v0.2.1

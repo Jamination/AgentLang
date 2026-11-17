@@ -1,0 +1,68 @@
+font_test.ttf glyphs 11 em 1000 ascent 800 descent -200 gap 100 cmap 12 loca long true hmetrics 11
+  metrics at 50 px: 40.0 -10.0 5.0 55.0
+  glyph indices: [1, 2, 3, 4, 5, 8, 6, 7, 9, 10, 5, 0, 0, 0, 0]
+  advances: [500, 250, 520, 500, 600, 500, 500, 500, 900, 520, 520, 0]
+  lsb: [50, 0, 0, 0, 0, 0, 100, 100, 0, 0, 0, 0]
+  kerning AV VA WA VAD WAD AA HV VH AW: -80 -70 -70 -70 -70 0 0 0 0
+  glyph 0 outline true points 8 contours [4, 8]
+  glyph 1 outline true points 0 contours []
+  glyph 2 outline true points 6 contours [3, 6]
+  glyph 3 outline true points 7 contours [7]
+  glyph 4 outline true points 12 contours [12]
+  glyph 5 outline true points 12 contours [4, 12]
+  glyph 6 outline true points 8 contours [4, 8]
+  glyph 7 outline true points 4 contours [4]
+  glyph 8 outline true points 14 contours [7, 14]
+  glyph 9 outline true points 14 contours [3, 6, 10, 14]
+  glyph 10 outline true points 18 contours [3, 6, 10, 14, 18]
+  glyph 10 macron at 250.0 700.0 550.0 750.0
+  glyph 8 second V (scaled 1, 0.5): 400.0 350.0 800.0 350.0
+  areas at 100.0 px within 0.5%: true
+  areas at 37.0 px within 0.5%: true
+  bitmap 0 40 x 70 at 5 -70
+  bitmap 1 0 x 0 at 0 0
+  bitmap 2 50 x 70 at 0 -70
+  bitmap 3 50 x 70 at 0 -70
+  bitmap 4 50 x 70 at 0 -70
+  bitmap 5 50 x 50 at 0 -50
+  bitmap 6 30 x 10 at 10 -90
+  bitmap 7 30 x 5 at 10 -100
+  bitmap 8 90 x 70 at 0 -70
+  bitmap 9 50 x 90 at 0 -90
+  bitmap 10 55 x 90 at 0 -90
+  H pixels: stem 255 notch 0 bar 255 other values 0
+  H shifted 0.5: 51 0 128 255 128
+font_test_kern.ttf glyphs 11 em 1000 ascent 800 descent -200 gap 100 cmap 4 loca long false hmetrics 10
+  metrics at 50 px: 40.0 -10.0 5.0 55.0
+  glyph indices: [1, 2, 3, 4, 5, 8, 6, 7, 9, 10, 0, 0, 0, 0, 0]
+  advances: [500, 250, 520, 500, 600, 500, 500, 500, 900, 520, 520, 0]
+  lsb: [50, 0, 0, 0, 0, 0, 100, 100, 0, 0, 0, 0]
+  kerning AV VA WA VAD WAD AA HV VH AW: -80 -70 -70 -70 -70 0 0 0 0
+  glyph 0 outline true points 8 contours [4, 8]
+  glyph 1 outline true points 0 contours []
+  glyph 2 outline true points 6 contours [3, 6]
+  glyph 3 outline true points 7 contours [7]
+  glyph 4 outline true points 12 contours [12]
+  glyph 5 outline true points 12 contours [4, 12]
+  glyph 6 outline true points 8 contours [4, 8]
+  glyph 7 outline true points 4 contours [4]
+  glyph 8 outline true points 14 contours [7, 14]
+  glyph 9 outline true points 14 contours [3, 6, 10, 14]
+  glyph 10 outline true points 18 contours [3, 6, 10, 14, 18]
+  glyph 10 macron at 250.0 700.0 550.0 750.0
+  glyph 8 second V (scaled 1, 0.5): 400.0 350.0 800.0 350.0
+  areas at 100.0 px within 0.5%: true
+  areas at 37.0 px within 0.5%: true
+  bitmap 0 40 x 70 at 5 -70
+  bitmap 1 0 x 0 at 0 0
+  bitmap 2 50 x 70 at 0 -70
+  bitmap 3 50 x 70 at 0 -70
+  bitmap 4 50 x 70 at 0 -70
+  bitmap 5 50 x 50 at 0 -50
+  bitmap 6 30 x 10 at 10 -90
+  bitmap 7 30 x 5 at 10 -100
+  bitmap 8 90 x 70 at 0 -70
+  bitmap 9 50 x 90 at 0 -90
+  bitmap 10 55 x 90 at 0 -90
+  H pixels: stem 255 notch 0 bar 255 other values 0
+  H shifted 0.5: 51 0 128 255 128

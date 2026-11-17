@@ -16,6 +16,5 @@ check/wayland std.wayland is Linux only
 check/wayland_window std.wayland is Linux only
 sys/vk_triangle an X11 window and Vulkan surface (Linux); its prerequisite check is a Linux command
 fail/extern on Windows extern functions may take and return structs (Microsoft x64): other diagnostics
-sys/shaderc std.shaderc binds libshaderc_shared.so.1 (Linux)
 sys/vk_renderer needs a Vulkan driver, which Wine does not have; its prerequisite check is a Linux command (on Windows: alc run examples/vk_renderer/offscreen.al)
 sys/vk_present std.wayland is Linux only

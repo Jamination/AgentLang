@@ -1,0 +1,5 @@
+stereo truncated: 0 decoded, 211 refused, true | changed: 200 of 200 refused | fuzzed: 135 decoded, 465 refused
+mono truncated: 0 decoded, 177 refused, true | changed: 200 of 200 refused | fuzzed: 146 decoded, 454 refused
+6ch truncated: 0 decoded, 265 refused, true | changed: 200 of 200 refused | fuzzed: 69 decoded, 531 refused
+headers only: true 0 
+headers cut: false truncated page at byte 58

@@ -1,0 +1,18 @@
+The Ogg Vorbis fixtures (ogg_*.ogg) and their reference decodes (ogg_*.ref.wav, 32-bit float)
+were made on Windows with tests/std/data/ogg_make.c, which loads libsndfile 1.x (encoding,
+with libvorbis 1.3) and libvorbisfile (decoding) from an Audacity installation; nothing was
+downloaded. The input signals are synthesised by ogg_make itself.
+
+  gcc -O2 -o ogg_make.exe ogg_make.c
+  ogg_make enc tones 44100 2 0.25 0.5 ogg_stereo.ogg    stereo, coupled, residue 2, blocks 256/2048
+  ogg_make enc noise 22050 1 0.4  0.3 ogg_mono.ogg      mono, residue 1, blocks 512/1024
+  ogg_make enc tones 48000 6 0.05 0.4 ogg_6ch.ogg       5.1: two submaps, four coupling steps
+  ogg_make enc noise 44100 2 0.15 0.0 ogg_lowq.ogg      lowest quality
+  ogg_make enc tones 44100 2 0.1  1.0 ogg_hiq.ogg       highest quality
+  ogg_make enc noise 8000  1 0.5  0.5 ogg_8k.ogg        one block size (512/512)
+  ogg_make enc noise 44100 2 0.01 0.5 ogg_tiny.ogg      a single audio page (the end is trimmed)
+  ogg_make dec ogg_NAME.ogg ogg_NAME.ref.wav             for each of them
+
+"tones" is a chord per channel with a noise click every 0.1 s (the clicks make the encoder
+switch to short blocks); "noise" is white noise with a decaying envelope every 50 ms. The
+quality is libsndfile's VBR quality, 0 (lowest) to 1 (highest).

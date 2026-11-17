@@ -265,6 +265,10 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     fx.at(pos)
     fx.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
     fx.cur = fx.f.new_block()
+    if dbg_on {
+        dbg_function(fid, pos)
+        dbg_in_params = true
+    }
     pi := 0
     if fx.cx.abi_ret(rty) == SRet {
         p := fx.ins(Param, I64, vec[i64](), pi)
@@ -303,6 +307,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
             }
         }
     }
+    dbg_in_params = false
     want := rty != T_UNIT && rty != T_NEVER
     expect: Opt[i64] = if want { Some(rty) } else { None }
     v := fx.block_value(body, want, expect)
@@ -687,6 +692,9 @@ fn in_scope(self: *Fx, id: i64) -> bool {
 
 // enters (or replaces) the name `name` in the innermost scope
 fn scope_set(self: *Fx, name: str, val: (i64, i64)) {
+    if dbg_on && val.0 > 0 {
+        self.dbg_bind(name, val.0, val.1)
+    }
     id := ast_sym(name)
     if self.in_scope(id) {
         binds[bind_top[id]].val = val
@@ -1360,7 +1368,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             }
             lo_s := self.scalar(lv)
             end := self.scalar(hv)
+            dbg_scope_end = i64(body.end.line) // (-g: the variable lives in the body)
             addr := self.declare(var1, ty, pos)
+            dbg_scope_end = 0
             iv := self.mval(ty, addr)
             self.store_raw(addr, lo_s, it, iv.alias)
             c := self.ins(cmpop, I8, vec_two(lo_s, end), 0)
@@ -1438,7 +1448,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                 Some(v2) => (var1, v2)
                 None => ("_", var1)
             }
+            dbg_scope_end = i64(body.end.line) // (-g: the variable lives in the body)
             iaddr := self.declare(iname, T_I64, pos)
+            dbg_scope_end = 0
             zero := self.iconst(I64, 0)
             self.store_raw(iaddr, zero, I64, AK_I64)
             c := self.ins(Slt, I8, vec_two(zero, ln), 0)
@@ -1451,7 +1463,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             off := self.ins(Mul, I64, vec_two(i, esz), 0)
             ea := self.ins(Add, I64, vec_two(p, off), 0)
             src := self.mval(et, ea)
+            dbg_scope_end = i64(body.end.line) // (-g: the variable lives in the body)
             eaddr := self.declare(ename, et, pos)
+            dbg_scope_end = 0
             dst := self.mval(et, eaddr)
             self.store(dst, src)
             self.loops.push(LoopCtx{brk: bx, cont: bc, scope_depth: self.scopes.len})

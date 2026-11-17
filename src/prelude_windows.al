@@ -655,16 +655,42 @@ priv fn verbatim(w: *u16) {
     }
 }
 
-// the path p as wide_c gives it, for the file functions. A long one (248 units or more: the
-// limit of CreateDirectoryW; MAX_PATH, 260, for the others) becomes an extended-length path:
-// made absolute and normalised by GetFullPathNameW (as Windows does with every short path),
-// then `\\?\C:\...` or `\\?\UNC\server\share\...`, which Windows takes up to 32767 units long
-// without LongPathsEnabled. A path that is already `\\?\` or `\\.\` stays as written.
+// whether the path w (n units, not `\\?\` or `\\.\`) can reach 248 units once Windows makes it
+// absolute. Cheap for the common short path: no GetFullPathNameW, only the length of the
+// current directory (GetCurrentDirectoryW(0, nil) reads it from the process without a system
+// call). A path relative to the current directory (`a\b`, `.\a`, `..\a`) or to its root (`\a`)
+// is at most that length + 1 + n long; `C:\a` and `\\server\share\a` at most n (normalising
+// only shortens); `C:a`, relative to the directory of drive C, which is not known here, is
+// always looked up. Another thread may change the current directory between this bound and
+// the call that uses the path, as it may between any two calls: the path is then resolved
+// against a directory it was not measured with (a program that changes the directory in one
+// thread while another uses relative paths has a race of its own; the run-time library never
+// changes it).
+priv fn may_be_long(w: *u16, n: i64) -> bool {
+    if n >= 248 {
+        return true
+    }
+    if (w[0] == 92 || w[0] == 47) && (w[1] == 92 || w[1] == 47) {
+        return false                // \\server\share\...
+    }
+    if n >= 2 && w[1] == 58 {
+        return n == 2 || (w[2] != 92 && w[2] != 47)   // `C:` / `C:a`: ask; `C:\a`: absolute
+    }
+    // (the length with its NUL)
+    return n + i64(GetCurrentDirectoryW(0, nil)) >= 248
+}
+
+// the path p as wide_c gives it, for the file functions. A long one (248 units or more once
+// absolute: the limit of CreateDirectoryW; MAX_PATH, 260, for the others) becomes an
+// extended-length path: made absolute and normalised by GetFullPathNameW (as Windows does with
+// every short path), then `\\?\C:\...` or `\\?\UNC\server\share\...`, which Windows takes up to
+// 32767 units long without LongPathsEnabled. A path that is already `\\?\` or `\\.\` stays as
+// written, and so does a device (`NUL`, `COM1`).
 priv fn wide_path(buf: []u16, p: *u8) -> *u16 {
     w := wide_c(buf, p)
     verbatim(w)
     n := wcslen(w)
-    if n < 248 || (w[0] == 92 && w[1] == 92 && (w[2] == 63 || w[2] == 46) && w[3] == 92) {
+    if (w[0] == 92 && w[1] == 92 && (w[2] == 63 || w[2] == 46) && w[3] == 92) || !may_be_long(w, n) {
         return w
     }
     need := GetFullPathNameW(w, 0, nil, 0)
@@ -673,8 +699,8 @@ priv fn wide_path(buf: []u16, p: *u8) -> *u16 {
     }
     full := alloc[u16](i64(need))
     k := i64(GetFullPathNameW(w, need, ptr(full), 0))
-    if k == 0 || k >= i64(need) {
-        return w
+    if k < 248 || k >= i64(need) || (full[0] == 92 && full[1] == 92 && (full[2] == 63 || full[2] == 46)) {
+        return w                    // short after all, failed, or a device (`\\.\NUL`)
     }
     unc := k > 2 && full[0] == 92 && full[1] == 92
     if !unc && !(k > 2 && full[1] == 58 && full[2] == 92) {

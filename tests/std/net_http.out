@@ -1,0 +1,20 @@
+/hello  200 OK 5 hello /hello
+/chunked  200 OK 23 Wikipedia in
+
+chunks. /chunked
+/until-close  200 Fine 9 all of it /until-close
+/interim  201 Created 2 ok /interim
+/missing?x=1#frag  404 Not Found 9 not here. /missing?x=1
+/split  200 OK 6 abcdef /split
+post:  200 POST Content-Type: text/plain;Host: local; posted body
+head:  200 5 0
+put:  PUT X-Extra: 1;Host: game.example; 
+slow: cannot receive the response: connection timed out 110 true
+by name: 
+https://example.com/ -> https is not supported (std.net has no TLS)
+ftp://x/ -> not an http:// URL: ftp://x/
+http:// -> no host in URL: http://
+http://h:99999/ -> bad port in URL: http://h:99999/
+http://[::1/ -> bad host in URL: http://[::1/
+http://u@h/ -> user names in URLs are not supported
+child: 0

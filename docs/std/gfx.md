@@ -1,0 +1,221 @@
+# std.gfx
+
+`use std.gfx`. A small 2D renderer on a [std.window](window.md) window: textures from
+[std.image](image.md) images (also one-channel coverage, for font atlases), sprites with a
+source rectangle, rotation, origin and tint, filled rectangles, lines, triangles with a colour
+per corner, alpha and additive blending, a 2D transform (camera, virtual resolution), scissor,
+render textures. Draws are batched: consecutive draws with the same texture and state become
+one draw call.
+
+One API, a backend per target that the program never names: **Direct3D 12** on Windows
+(`std/gfx_dx12.al`, derived from `examples/gamekit/dx12_gpu.al`), **Vulkan 1.3** on Linux
+(`std/gfx_vk.al`, derived from `examples/vk_renderer`; an X11 window). The shaders are compiled
+ahead of time and built into the module (`std/gfx_shaders.al`): running needs no shader
+compiler, and the Direct3D build does not load `d3dcompiler_47.dll`. A program that wants
+Vulkan on Windows writes `use std.gfx_vk` instead of `use std.gfx` (the tests do, to compare
+the backends); everything else stays the same.
+
+```
+use std.window
+use std.image
+use std.gfx
+
+fn main() {
+    w, _ := window_open(WindowDesc{title: "gfx", width: 960, height: 540, resizable: true})
+    g, err := gfx_open(w, GfxDesc{})
+    if err != "" { panic(err) }
+    img, _ := image_load("ship.png")
+    ship := g.texture(img, FilterNearest)
+    angle := 0.0
+    while !w.should_close() {
+        w.poll()
+        angle += 0.02
+        if g.begin_frame(0xFF201810) {                  // false while minimized: skip the frame
+            g.set_view(320.0, 180.0)                     // draw in 320 x 180, letterboxed
+            g.rect(vec4(0.0, 0.0, 320.0, 180.0), 0xFF402010)
+            g.sprite(ship, vec4(0.0, 0.0, f32(ship.w), f32(ship.h)), vec2(160.0, 90.0),
+                vec2(32.0), angle, vec2(16.0), 0xFFFFFFFF)   // turned about its centre
+            g.line(vec2(10.0, 170.0), vec2(310.0, 170.0), 2.0, 0xFF00FF00)
+            err = g.end_frame()                          // draws, presents (vsync)
+            if err != "" { panic(err) }                  // the device was lost: why
+        }
+    }
+    gfx_close(g)
+    w.close()
+}
+```
+
+[examples/gfx_starter](../../examples/gfx_starter/game.al) is a complete game on it: the
+Direct3D 12 starter without its 700 lines of device, swap chain and batcher code, and portable.
+
+## Conventions
+
+- **Coordinates** are pixels of the current target, origin top left, y down, before the
+  transform. A rotation by a positive angle turns clockwise on screen.
+- **Rectangles** are `vec4`: `(x, y, w, h)`.
+- **Colours** are `u32` RGBA8 with red in the lowest byte, as `color_u32(vec4(r, g, b, a))`
+  of std.math gives them: `0xAABBGGRR` as a literal (`0xFFFFFFFF` white, `0xFF0000FF` red).
+  Blending uses straight (not premultiplied) alpha.
+- **Errors**: what depends on the machine (no device, a lost device) is returned as text;
+  misuse (drawing outside a frame, a freed texture) stops the program with a message.
+
+## Opening and frames
+
+```
+struct GfxDesc {
+    max_quads: i64        // sprites + rectangles + lines per frame; 0: 16384 (a triangle counts half)
+    max_textures: i64     // textures alive at once; 0: 256
+    software: bool        // the software rasterizer: WARP (Direct3D 12), a CPU device such as lavapipe (Vulkan, if installed)
+    debug: bool           // the Direct3D 12 debug layer / Vulkan validation layer (with synchronization validation), if installed
+}
+```
+
+| Function | |
+|---|---|
+| `gfx_open(w: *Window, d: GfxDesc) -> (*Gfx, str)` | the first hardware device (discrete before integrated), else (Direct3D 12) WARP; a swap chain on the window. `(nil, why)` if there is none |
+| `gfx_offscreen(width, height, d) -> (*Gfx, str)` | no window: the screen is an image that `read_pixels` returns after `end_frame` (tests, screenshots, tools) |
+| `begin_frame(g, clear: u32) -> bool` | starts a frame cleared to `clear`; follows the window's size and `g.vsync`; waits for the frame two frames back. `false`: nothing to draw into (minimized, after a 10 ms sleep so a loop does not spin; or the device is lost): draw nothing, do not call `end_frame` |
+| `end_frame(g) -> str` | replays the frame on the GPU and presents it; `""` or why it failed |
+| `gfx_close(g)` | waits for the GPU and releases everything (not the window) |
+
+Fields of `Gfx` to read: `width`, `height` (the screen in pixels: the window's drawable area),
+`device` (the GPU's name, `"... (WARP)"`), `lost` (`""`, or why the device stopped), `stats`
+(of the last finished frame: `frames`, `draw_calls`, `vertices`, `passes`, `dropped`). To set:
+`vsync` (default true; false presents at once: Direct3D 12 `Present(0, 0)`, Vulkan MAILBOX,
+else IMMEDIATE).
+
+**Window size and fullscreen.** Fullscreen is std.window's (`w.set_fullscreen(on)`, a
+borderless window; DXGI's own Alt+Enter is switched off). `begin_frame` resizes the swap chain
+whenever the window's size differs, also while the user drags an edge; nothing else is needed.
+
+**Device loss** (driver update or crash, GPU reset, unplugged): the failing `end_frame` (or
+`begin_frame`) sets `g.lost` to the reason (the Direct3D removal reason, the Vulkan result),
+`end_frame` returns it, and from then on `begin_frame` returns false. Recreating the device
+and the textures is left to the program (close, `gfx_open` again, upload again); the
+examples end with the message.
+
+**Memory.** After `gfx_open` the renderer allocates nothing per frame: vertices go straight
+into a mapped GPU buffer per frame in flight, commands into a fixed array, swap-chain
+rebuilds into fixed arrays. A frame can therefore sit inside `frame_begin()` / `frame_end()`
+of std.mem ([GAMES.md](../GAMES.md#memory)). What does not fit into `max_quads` or the command
+array is dropped and counted in `g.stats.dropped`. Two things are allocated in the arena in
+use: the error texts (`g.lost`, the result of `end_frame`): read them before `frame_end`; and
+`texture` of an image with two or three channels (converted to RGBA first).
+
+## Textures
+
+```
+struct Texture { id: i64, w: i64, h: i64 }      // a value to keep and copy; Texture{} is none
+enum Filter { FilterNearest, FilterLinear }
+```
+
+| Function | |
+|---|---|
+| `texture(g, img: Image, f: Filter) -> Texture` | uploads the image (waits for the GPU). **One channel is coverage**: drawn as the tint's colour with the channel as alpha (a font atlas: `Image{w, h, 1, coverage}`); two, three and four channels become RGBA |
+| `render_texture(g, w, h, f) -> Texture` | an RGBA texture to draw into (`set_target`) and to draw with; transparent at first |
+| `update_texture(g, t, x, y, img: Image)` | replaces a region (one channel for a coverage texture, else three or four); waits for the GPU. Called during a frame it changes what the whole frame shows, also draws made before it (they are replayed at `end_frame`) |
+| `read_texture(g, t) -> Image` | the pixels (4 channels, 1 for coverage); not during a frame |
+| `read_pixels(g) -> Image` | the screen of a `gfx_offscreen` renderer |
+| `free_texture(g, t)` | waits for the GPU and releases it; not during a frame |
+
+Filtering clamps at the edges. There are no mipmaps.
+
+## Drawing
+
+All between `begin_frame` and `end_frame`, in painter's order.
+
+| Function | |
+|---|---|
+| `sprite(g, t, x, y: f32)` | the whole texture at its size, top left at (x, y) |
+| `sprite(g, t, src: vec4, dst: vec4, tint: u32)` | texture rectangle `src` (texture pixels; a negative w or h mirrors) into rectangle `dst` |
+| `sprite(g, t, src, pos: vec2, size: vec2, rotation: f32, origin: vec2, tint)` | `size` large, turned by `rotation` radians about `origin` (a point of the drawn rectangle from its top left corner), which lands on `pos` |
+| `rect(g, r: vec4, color: u32)` | filled rectangle |
+| `line(g, a, b: vec2, width: f32, color)` | `width` wide, square ends at a and b |
+| `triangle(g, a, b, c: vec2, ca, cb, cc: u32)` | a colour per corner, interpolated |
+| `clear(g, color)` | fills the whole current target (also outside the scissor) |
+
+Text is std.font's (a separate module): its glyph atlas is an image with per-glyph rectangles,
+uploaded with `texture` and drawn with `sprite(g, atlas, glyph_rect, dst, colour)`; a
+one-channel (coverage) atlas takes the colour of the tint.
+
+## State
+
+The state applies to the draws after it and is reset by `begin_frame` (identity transform,
+alpha blending, no scissor, the screen as target).
+
+| Function | |
+|---|---|
+| `set_blend(g, b: Blend)` | `BlendAlpha` (`src * a + dst * (1 - a)`) or `BlendAdd` (`src * a + dst`: light, fire) |
+| `set_transform(g, m: Xform)` | the transform of everything drawn after it (also of `rect`, `line`, `triangle`) |
+| `set_view(g, vw, vh: f32) -> Xform` | a virtual resolution: sets the transform and scissor so that a vw x vh area fills the target as far as it fits, centred, aspect kept, offset on whole pixels; returns the transform (`apply(inverse(m), mouse)` is the mouse in virtual pixels) |
+| `set_scissor(g, x, y, w, h: i64)` / `reset_scissor(g)` | draw only inside the rectangle (target pixels, not transformed) |
+| `set_target(g, t: Texture)` / `reset_target(g)` | draw into a render texture / the screen again; resets transform and scissor. A texture cannot be drawn into itself |
+
+## Transforms
+
+```
+struct Xform { x: vec2, y: vec2, t: vec2 }       // p' = x * p.x + y * p.y + t
+```
+
+| Function | |
+|---|---|
+| `xform_identity()` | (the zero `Xform` is not the identity) |
+| `xform_translate(v: vec2)`, `xform_scale(s: vec2)`, `xform_rotate(angle: f32)` | |
+| `xform_mul(a, b) -> Xform` | b first, then a (the matrix product a * b) |
+| `apply(m, p: vec2) -> vec2`, `inverse(m) -> Xform` | |
+| `camera(center: vec2, zoom: f32, rotation: f32, view: vec2) -> Xform` | the world point `center` in the middle of a view of `view` pixels, `zoom` times larger, the camera turned by `rotation` |
+| `fit_view(vw, vh: f32, tw, th: i64) -> (Xform, x, y, w, h)` | what `set_view` uses: the transform and the area in target pixels |
+
+A scrolling world under a fixed-resolution HUD:
+
+```
+view := g.set_view(320.0, 180.0)
+g.set_transform(xform_mul(view, camera(player.pos, 2.0, 0.0, vec2(320.0, 180.0))))
+draw_world(g)
+g.set_transform(view)                            // the HUD in virtual pixels
+draw_hud(g)
+```
+
+## How it works
+
+Drawing functions only write vertices (20 bytes: position, texture coordinate, RGBA8 colour;
+six per quad, no index buffer) into this frame's region of a persistently mapped upload
+buffer and append commands (draw, target, clear) to a fixed array; a draw joins the previous
+draw command when the texture, blend mode and scissor are the same, and untextured shapes join
+any (their texture coordinate says "no texture"). `end_frame` records one command list from
+that: per draw command a texture binding and `DrawInstanced` / `vkCmdDraw`; per target change
+the barriers (Direct3D: `PIXEL_SHADER_RESOURCE` <-> `RENDER_TARGET`; Vulkan: dynamic
+rendering, `SHADER_READ_ONLY` <-> `COLOR_ATTACHMENT`). Two frames are in flight. Uploads and
+read-backs go through a staging buffer and wait for the GPU.
+
+| | Direct3D 12 | Vulkan |
+|---|---|---|
+| device | first hardware adapter, feature level 11.0; else WARP | Vulkan 1.3 with dynamic rendering and synchronization2; discrete before integrated |
+| screen | flip-discard swap chain, 2 buffers, `R8G8B8A8_UNORM` | swapchain, `B8G8R8A8_UNORM` / `R8G8B8A8_UNORM`, FIFO or MAILBOX / IMMEDIATE |
+| shaders | DXBC (shader model 5.0) from `tools/gfx/sprite.hlsl` | SPIR-V from `tools/gfx/sprite.vert`, `sprite.frag` |
+| textures | `R8G8B8A8_UNORM`; coverage `R8_UNORM` with the view swizzle (1, 1, 1, r) | the same formats and swizzle |
+| bindings | root constants (view), a texture table and a sampler table | push constants (view), a combined image sampler set per texture |
+
+Regenerating the shaders (Windows, needs `glslc` of the Vulkan SDK; D3DCompile comes with
+Windows): `build\alc.exe run tools/gen_gfx_shaders.al`, then rebuild `alc`. The output is
+byte-identical when nothing changed.
+
+## Tests
+
+- `tests/unit/gfx_batch.al`: the batcher and the transforms without a GPU (draw merging,
+  state changes, vertices of rotated / mirrored / transformed sprites, lines, render-target and
+  clear commands, dropping, texture ids, camera, `fit_view`).
+- `tests/sys/gfx_offscreen.al`: the backend of the target renders the scene of
+  `tests/sys/data/gfx_scene.al` offscreen, on the first device and on the software rasterizer,
+  and checks 28 pixels (sprites, mirroring, alpha and additive blending, coverage with a tint,
+  scissor, transform, line, triangle colours, a render texture, linear filtering, a texture
+  updated during the frame). Run on Windows 11 with an AMD Radeon 780M and with WARP.
+- `tests/sys/gfx_vulkan.al`: the same scene on the Vulkan backend with the validation layer
+  (synchronization validation on); every message fails the test. On Windows its frame is
+  byte-identical to the Direct3D 12 frame on the same GPU.
+- `tests/sys/gfx_window.al`, `gfx_window_vk.al`: a window, frames with and without vsync,
+  fullscreen and back with the swap chain following (Windows; on Linux they would need an X
+  display). `tests/sys/gfx_starter.al`: the example for 60 frames.
+
+Not verified: the Vulkan backend on Linux (X11 surface) has only been type-checked and built
+(`alc check --target linux`), not run; device loss has not been provoked.

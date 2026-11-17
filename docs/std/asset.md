@@ -115,8 +115,9 @@ same situation (`not a directory` for a path that goes through a file, `is a dir
 `file name too long` for a name of more than 255 units, ...). What differs from Linux:
 
 - **Long paths.** A path of more than 260 UTF-16 units works on every Windows, also without
-  the registry setting `LongPathsEnabled`: the library turns a path of 248 units or more
-  (absolute or relative, with `/` or `\`, `.` and `..`) into the extended-length form, the
+  the registry setting `LongPathsEnabled`: the library turns a path of 248 units or more once
+  made absolute (absolute or relative, with `/` or `\`, `.` and `..`; a short relative path in
+  a deep working directory as well) into the extended-length form, the
   full path after `\\?\` (`\\?\C:\saves\...`, `\\?\UNC\server\share\...`), before Windows
   sees it. A path written in that form is taken as it is: from the drive, without `.` or
   `..`; `/` may separate components there too, so `path_join` works on it. A single name is

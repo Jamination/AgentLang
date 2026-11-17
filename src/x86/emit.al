@@ -33,6 +33,10 @@ struct Code {
     npush: i32
     push_end: i32
     alloc_end: i32
+    // -g (src/debug.al): the epilogues, as pairs (offset of the `add rsp` or first `pop`, offset
+    // of the `ret`); the variables in the frame, as pairs (variable, offset from the CFA)
+    epis: Vec[i32]
+    dvars: Vec[i32]
 }
 
 priv struct Frame {
@@ -949,6 +953,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     bitem := vec_fill(mf.blocks.len, 0) // the items before it
     unwind := vec[u8]()
     lines := vec[i32]()
+    epis := vec[i32]()
     last_loc: i32 = 0
     push_end := 0
     alloc_end := 0
@@ -1034,6 +1039,9 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                     li := minst_new(MovSd, 16, R(r), xmm_slot(xmm_off, k))
                     enc_inst(&enc, &li)
                 }
+                if dbg_on {
+                    epis.push(i32(enc.out.len))
+                }
                 if size > 0 {
                     ai := minst_new(Add, 8, R(RSP), I(i64(size)))
                     enc_inst(&enc, &ai)
@@ -1041,6 +1049,9 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
                 for y in alloc.used_callee_saved.len - 1..=0 by -1 {
                     pi := minst_new(Pop, 8, R(alloc.used_callee_saved[y]), Opnd.None)
                     enc_inst(&enc, &pi)
+                }
+                if dbg_on {
+                    epis.push(i32(enc.out.len))
                 }
             }
             if i.op == Syscall && target_os == TargetWindows && len(err) == 0 {
@@ -1129,8 +1140,25 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         }
         lines[2 * li] = i32(o + pre[ki])
     }
+    dvars := vec[i32]()
+    if dbg_on {
+        ki = 0
+        for ei in 0..epis.len {
+            o := i64(epis[ei])
+            while ki < ni && items[ki].pos <= o {
+                ki += 1
+            }
+            epis[ei] = i32(o + pre[ki])
+        }
+        // the variables: from the CFA (the address above the return address)
+        above := i64(size) + 8 * i64(npush) + 8
+        for k in 0..mf.dvars.len / 2 {
+            dvars.push(i32(mf.dvars[2 * k]))
+            dvars.push(i32(i64(slot_off[mf.dvars[2 * k + 1]]) - above))
+        }
+    }
     return Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind, lines: lines, alloc: size, npush: npush,
-        push_end: i32(push_end), alloc_end: i32(alloc_end)}
+        push_end: i32(push_end), alloc_end: i32(alloc_end), epis: epis, dvars: dvars}
 }
 
 // rewrites the float constant relocations of code from indices into the function's own list

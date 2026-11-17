@@ -1,0 +1,10 @@
+debug directory: true codeview true
+rsds: true age 1 the executable's path with .pdb true
+info: version 20000404 age 1 same guid true /names true
+dbi: true 19990903 machine 8664
+modules: true this file's true
+probe: true S_FRAMEPROC true variables k inner p inner in a block inside k's true
+lines: true file true
+public probe: true
+type Pair: 2 members, 16 bytes true
+section headers: true

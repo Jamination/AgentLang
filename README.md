@@ -65,11 +65,12 @@ verify.bat                          :: Windows: build.bat, the tests, VERIFY: PA
 
 | Command | |
 |---|---|
-| `alc build file.al` | compile to an executable (`-o path`, `-O0`, `--unchecked`) |
+| `alc build file.al` | compile to an executable (`-o path`, `-O0`, `--unchecked`, `-g` for debuggers and profilers: DWARF; on Windows also a `.pdb`) |
 | `alc run file.al` | build and run |
 | `alc test file.al` | run the file's `test` blocks |
 | `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
 | `alc sigs file.al` | list declarations (`-- std` adds the standard library) |
+| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`) |
 | `alc --version` | the compiler's version and default target |
 
 ## Versions
@@ -79,14 +80,14 @@ each one changes. A project pins the compiler it is written for:
 
 ```
 git clone https://github.com/Jamination/AgentLang && cd AgentLang
-git checkout v0.3.0 && ./build.sh
+git checkout v0.4.0 && ./build.sh
 cp build/alc build/alc.exe ~/game/tools/       # or install on the PATH, below
 ```
 
 On a machine shared by several projects, install each release beside the others and let
-`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.3.0 && ln -sfn alc-0.3.0
+`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.4.0 && ln -sfn alc-0.4.0
 ~/.local/bin/alc`. A project that must not change with a new release can call the versioned
-name (`alc-0.3.0`); the [AGENTS.md template](docs/AGENTS_TEMPLATE.md) calls plain `alc`.
+name (`alc-0.4.0`); the [AGENTS.md template](docs/AGENTS_TEMPLATE.md) calls plain `alc`.
 
 The standard library ships inside the compiler, so one executable is the whole toolchain;
 `alc --version` names it. While the version is 0.x, a new minor version (0.2) may break
@@ -99,8 +100,8 @@ between the two versions, then rebuild and run the project's tests with the new 
 
 - [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
 - [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
-- [Standard library](docs/STDLIB.md): strings, collections, files, math, images, windows,
-  input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
+- [Standard library](docs/STDLIB.md): strings, collections, files, sockets, math, images, fonts, windows,
+  input, audio, a 2D renderer, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
 - [Testing on Windows](docs/WINDOWS_TEST.md): checks to run on a real Windows machine
 - [AGENTS.md template](docs/AGENTS_TEMPLATE.md): for a new game repository written by agents
@@ -113,6 +114,9 @@ between the two versions, then rebuild and run the project's tests with the new 
 - `examples/dx12_starter/`: the same game with Direct3D 12 sprites, WASAPI sound and music, keyboard and gamepad (Windows)
 - `examples/dx12_breakout/`: breakout with a title screen, pause menu, volumes, fullscreen and a bitmap font (Windows)
 - `examples/gamekit/`: the parts both Direct3D 12 games share (GPU set-up and sprite batcher in `dx12_gpu.al`, screen, font, synthesizer, options); example code to copy, not a library
+- `examples/gfx_starter/`: the starter game on std.gfx (Linux and Windows)
+- `examples/dx12_crypt/`: a first-person 3D maze with Direct3D 12, mouse-look, gamepad and a scripted test mode (Windows)
+- `examples/font_demo.al`: a TrueType font: wrapped text drawn into an image and a glyph atlas
 - `examples/dx12_triangle.al`, `vk_triangle.al`: a triangle with Direct3D 12 (Windows) / Vulkan (Linux)
 - `examples/wayland_window.al`, `win32_input.al`, `audio_tone.al`: a Wayland window, input events, a melody on the sound device
 

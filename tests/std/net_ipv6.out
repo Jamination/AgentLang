@@ -1,0 +1,9 @@
+udp: ::1 true true
+datagram: 3 six true ::1
+to IPv4: true
+listen: true :: true
+connect: true true ::1 true
+tcp: 8 over six
+peer: true
+v6 only: false 111
+localhost: true true
