@@ -43,8 +43,6 @@ on a 64-bit Arm Linux (Raspberry Pi 4/5 with a 64-bit OS, AWS Graviton, an Amper
    thread_nil, thread_overflow, check_memory_frame, std/backtrace_module print the same
    frames as on x86-64. A stack overflow faults in the callee (BL does not touch the stack):
    the first frame of the trace is the callee's line, then the calls as on x86-64.
-   Known difference: `backtrace_div --unchecked` expects the SIGFPE of x86-64's division by
-   zero, which arm64 does not raise.
 3. The tests the emulator could not run (tests/arm64_emu.skip: processes, /proc, /dev/full,
    ALC_CHECK_MEMORY page protection, memfd) run here for the first time: os, os_run,
    os_spawn, os_shm, portable_launch, portable_process, lib_stdout_errors, lib_alloc_limits,
@@ -71,5 +69,8 @@ on a 64-bit Arm Linux (Raspberry Pi 4/5 with a 64-bit OS, AWS Graviton, an Amper
 ## 4. Numbers that differ by design from x86-64
 - Floating-point to integer conversions out of range or of NaN give 0x8000... as on x86-64
   (src/arm64/emit.al, `Fcvtzs`): `print(i64(1e30), i32(0.0 / 0.0))` prints the same on both.
-- Integer division by zero and `INT_MIN / -1` in `--unchecked` code do not trap on arm64
-  (x86-64: SIGFPE): the result is 0 or INT_MIN. Checked code (the default) panics on both.
+- Integer division by zero faults on both, also in `--unchecked` code: arm64 has no such
+  fault, so the code tests the divisor (`cbnz`) and executes `brk #1`, whose SIGTRAP the run-time
+  library reports as the arithmetic fault (`tests/run/backtrace_div.al --unchecked`). Check
+  that the kernel delivers SIGTRAP for `brk` to the handler. `INT_MIN / -1` in `--unchecked`
+  code faults on x86-64 and gives INT_MIN on arm64; checked code panics on both.

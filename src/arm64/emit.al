@@ -420,6 +420,10 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             }
         }
         Brk => self.put(a64_brk(0))
+        DivTrap => {
+            self.put(a64_cbz(s, true, x(i.n), 2))
+            self.put(a64_brk(1))
+        }
         Ldar => self.put(a64_ldar(log2(i64(i.sz)), x(i.d), x(i.n)))
         Stlr => self.put(a64_stlr(log2(i64(i.sz)), x(i.a), x(i.n)))
         AtSwap, AtAdd => {

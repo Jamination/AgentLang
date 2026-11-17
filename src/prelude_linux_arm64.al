@@ -46,7 +46,8 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     }
     __bt_fault_pc = pc
     __bt_fault_regs.r[4] = sp
-    if sig == 8 {
+    // (SIGTRAP: the BRK #1 of a division by zero, see DivTrap in src/arm64)
+    if sig == 8 || sig == 5 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
     __die_fault(cast[*i64](info + 16)[0])            // si_addr
@@ -108,6 +109,7 @@ fn __rt_init(sp: i64) {
     syscall(134, 11, ptr(sa), 0, 8)                  // rt_sigaction: SIGSEGV, SIGBUS, SIGFPE
     syscall(134, 7, ptr(sa), 0, 8)
     syscall(134, 8, ptr(sa), 0, 8)
+    syscall(134, 5, ptr(sa), 0, 8)                   // SIGTRAP: division by zero
 }
 // the frames of this thread lie in its stack (the lower end only bounds a stack pointer that
 // is nonsense); a thread a C library created: around the current stack pointer (the walk's

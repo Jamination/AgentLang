@@ -108,6 +108,7 @@ enum AOp {
     Ret,     // fixed result registers in xuses
     Svc,     // system call: x8 and x0-x5 in xuses, result in x0; cc 1: clone of a thread
     Brk,     // trap
+    DivTrap, // traps (BRK #1, SIGTRAP) if n is 0: the division fault of x86-64, also unchecked (sz 4 / 8)
     Ldar,    // d = [n], acquire (sz 1 / 2 / 4 / 8)
     Stlr,    // [n] = a, release
     AtSwap,  // d = [n]; [n] = m (a loop of exclusive accesses)
@@ -241,7 +242,7 @@ fn a_decode(mf: *AFunc, i: *AInst, du: []i64, p: i64) -> i64 {
     nd := 0
     match i.op {
         Str, FStr, Stlr => {}
-        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, Dmb, MemCopy, MemFill => {}
+        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, DivTrap, Dmb, MemCopy, MemFill => {}
         _ => {
             q2 := put(du, q, i.d)
             nd = q2 - q

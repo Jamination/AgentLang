@@ -805,6 +805,13 @@ priv fn inst(self: *Sel, v: i64) {
             sz := osz(ty)
             x := self.ext32(i.args[0], signed)
             y := self.ext32(i.args[1], signed)
+            match self.f.is_const(i.args[1]) {
+                Some(k) if k != 0 => {}
+                _ => {
+                    // x86-64 faults on a division by zero, checked or not (SIGFPE): so does this
+                    self.e(DivTrap, sz, NOREG, y, NOREG)
+                }
+            }
             d := self.vr(v)
             op := if signed { Sdiv } else { Udiv }
             if i.op == SDiv || i.op == UDiv {

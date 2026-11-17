@@ -75,6 +75,8 @@ priv cache_next: i64
 // the address of the last fault (0: none) of the running instruction
 priv fault_addr: i64
 priv faulted: bool
+// the signal of the fault: 11 (SIGSEGV) for memory, 5 (SIGTRAP) for BRK
+priv fault_sig: i64 = 11
 
 // a region with [clo, chi) committed (an empty range: anywhere in it)
 priv fn add_region(lo: i64, hi: i64, delta: i64, clo: i64, chi: i64) {
@@ -935,8 +937,14 @@ priv fn step(t: *Th) -> bool {
         return syscall_(t)
     }
     if w & 0xFFE0001F == 0xD4200000 {
-        eprint(fmt("a64emu: brk at ", hex(u64(t.pc), 8)))
-        exit(133)
+        if handlers[5] == 0 {
+            eprint(fmt("a64emu: brk at ", hex(u64(t.pc), 8)))
+            exit(133)
+        }
+        faulted = true
+        fault_sig = 5
+        fault_addr = t.pc
+        return true
     }
     if w & 0xFFFFFFE0 == 0xD53BD040 {
         setr(t, rd, t.tp, true)
@@ -1625,8 +1633,10 @@ priv fn clone(t: *Th, flags: i64, stack: i64, ptid: i64, tls: i64, ctid: i64) ->
 // layer's __on_fault reads si_addr at info + 16 and pc in the ucontext at 176 + 8 + 8 * 32)
 priv fn deliver(t: *Th) {
     a := fault_addr
+    sig := fault_sig
     faulted = false
-    h := handlers[11]
+    fault_sig = 11
+    h := handlers[sig]
     if h == 0 || t.in_signal {
         eprint(fmt("a64emu: segmentation fault at ", hex(u64(t.pc), 8), ", address ", hex(u64(a), 8)))
         exit(139)
@@ -1639,7 +1649,7 @@ priv fn deliver(t: *Th) {
     for k in 0..(256 + 600) / 8 {
         wr64(top + 8 * k, 0)
     }
-    wr32(info, 11)
+    wr32(info, sig)
     wr64(info + 16, a)
     for k in 0..31 {
         wr64(uc + 184 + 8 * k, t.x[k])
@@ -1650,7 +1660,7 @@ priv fn deliver(t: *Th) {
         eprint(fmt("a64emu: fault while delivering a fault at ", hex(u64(t.pc), 8)))
         exit(139)
     }
-    t.x[0] = 11
+    t.x[0] = sig
     t.x[1] = info
     t.x[2] = uc
     t.x[30] = 0
