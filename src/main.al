@@ -83,6 +83,7 @@ priv const STD_MODULES = [_](str, str){
     ("asset", embed("../std/asset.al")),
     ("os", embed("../std/os.al")),
     ("image", embed("../std/image.al")),
+    ("image_jpeg", embed("../std/image_jpeg.al")),
     ("x11", embed("../std/x11.al")),
     ("wayland", embed("../std/wayland.al")),
     ("alsa", embed("../std/alsa.al")),
