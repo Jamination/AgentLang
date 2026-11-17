@@ -219,6 +219,12 @@ fn a64_ldst_simm9(size: i64, opc: i64, rt: i64, rn: i64, off: i64) -> u32 {
     return w(0x38000000 | size << 30 | opc << 22 | (off & 0x1FF) << 12 | r5(rn) << 5 | r5(rt))
 }
 
+// post-index: [rn], #off (rn += off after the access)
+fn a64_ldst_post(size: i64, opc: i64, rt: i64, rn: i64, off: i64) -> u32 {
+    assert off >= -256 && off < 256, "a64: post-index offset out of range"
+    return w(0x38000400 | size << 30 | opc << 22 | (off & 0x1FF) << 12 | r5(rn) << 5 | r5(rt))
+}
+
 // register offset: [rn, rm, lsl #size] if scaled, else [rn, rm]
 fn a64_ldst_reg(size: i64, opc: i64, rt: i64, rn: i64, rm: i64, scaled: bool) -> u32 {
     return w(0x38200800 | size << 30 | opc << 22 | r5(rm) << 16 | 3 << 13 | (if scaled { 1 << 12 } else { 0 }) | r5(rn) << 5 | r5(rt))

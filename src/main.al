@@ -32,6 +32,13 @@ use "x86/isel.al"
 use "x86/regalloc.al"
 use "x86/emit.al"
 use "x86/mod.al"
+use "arm64/enc.al"
+use "arm64/mir.al"
+use "arm64/isel.al"
+use "arm64/regalloc.al"
+use "arm64/emit.al"
+use "arm64/mod.al"
+use "elf_arm64.al"
 use "elf.al"
 use "pe.al"
 use "backtrace.al"
@@ -48,6 +55,7 @@ priv const PRELUDE = embed("prelude.al")
 // prelude.al)
 priv const PRELUDE_LINUX = embed("prelude_linux.al")
 priv const PRELUDE_WINDOWS = embed("prelude_windows.al")
+priv const PRELUDE_LINUX_ARM64 = embed("prelude_linux_arm64.al")
 
 // bundled modules that only exist for Linux: what a program built for Windows can use instead
 priv const LINUX_ONLY = [_](str, str){
@@ -63,6 +71,10 @@ priv const LINUX_ONLY = [_](str, str){
 enum TargetOs { TargetLinux, TargetWindows }
 
 target_os: TargetOs
+// the processor (`--target linux-arm64`: AArch64, src/arm64 and src/elf_arm64.al)
+enum TargetArch { ArchX86_64, ArchArm64 }
+
+target_arch: TargetArch
 // `--gui` (Windows only): the PE gets the GUI subsystem instead of the console one (pe_link)
 pe_gui: bool
 // `--icon file.ico` (Windows only): the bytes of the file, checked (ico_error); and
@@ -321,7 +333,11 @@ priv fn parse_args() -> Args {
                 match av[i] {
                     "linux" => target_os = TargetLinux
                     "windows" => target_os = TargetWindows
-                    _ => usage(fmt("unknown target ", av[i], " (linux or windows)"))
+                    "linux-arm64" => {
+                        target_os = TargetLinux
+                        target_arch = ArchArm64
+                    }
+                    _ => usage(fmt("unknown target ", av[i], " (linux, windows or linux-arm64)"))
                 }
             }
             "--json" => json = true
@@ -807,6 +823,9 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     // The layer declares TARGET_OS, which `when` conditions use.
     prelude := PRELUDE
     layer_name, layer := if target_os == TargetWindows { ("prelude_windows.al", PRELUDE_WINDOWS) } else { ("prelude_linux.al", PRELUDE_LINUX) }
+    if target_arch == ArchArm64 {
+        layer_name, layer = ("prelude_linux_arm64.al", PRELUDE_LINUX_ARM64)
+    }
     pre_path, pre_set := env_get("ALC_PRELUDE")
     if pre_set {
         t, err := read_to_string(pre_path)
@@ -1049,12 +1068,21 @@ priv fn real_main() -> i64 {
             }
         }
     }
-    out := x86_compile(&module, ar.emit_asm)
-    if opt_enabled("backtrace") {
-        bt_attach(&module, &out, &cx, src.tests.items())
+    bytes := ""
+    link_err := ""
+    if target_arch == ArchArm64 {
+        // (no stack-trace table yet: a panic prints its message only)
+        aout := a64_compile(&module, ar.emit_asm)
+        mem("compiled")
+        bytes, link_err = elf_arm64_link(&module, &aout)
+    } else {
+        out := x86_compile(&module, ar.emit_asm)
+        if opt_enabled("backtrace") {
+            bt_attach(&module, &out, &cx, src.tests.items())
+        }
+        mem("compiled")
+        bytes, link_err = if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     }
-    mem("compiled")
-    bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     if len(link_err) != 0 {
         driver_error(ar.input, link_err)
         return 1
@@ -1106,6 +1134,11 @@ priv fn real_main() -> i64 {
         }
         if target_os == TargetLinux && TARGET_OS == Windows {
             driver_error(out_path, fmt("built `", out_path, "`, a Linux executable, which cannot run on Windows"))
+            return 1
+        }
+        if target_arch == ArchArm64 {
+            // (the compiler itself runs on x86-64 only)
+            driver_error(out_path, fmt("built `", out_path, "`, an arm64 executable, which cannot run on this processor"))
             return 1
         }
         code := run_program(out_path, ar.rest.items())

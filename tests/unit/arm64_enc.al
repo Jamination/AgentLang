@@ -112,6 +112,8 @@ test "arm64 loads, stores and branches" {
         Row{"strb w0, [x1]", 0x39000020, a64_ldst_uimm(0, 0, 0, 1, 0)},
         Row{"ldr x0, [x1, x2, lsl #3]", 0xf8627820, a64_ldst_reg(3, 1, 0, 1, 2, true)},
         Row{"ldr x0, [x1, x2]", 0xf8626820, a64_ldst_reg(3, 1, 0, 1, 2, false)},
+        Row{"ldr x0, [x1], #8", 0xf8408420, a64_ldst_post(3, 1, 0, 1, 8)},
+        Row{"strb w16, [x0], #1", 0x38001410, a64_ldst_post(0, 0, 16, 0, 1)},
         Row{"ldur x0, [x29, #-8]", 0xf85f83a0, a64_ldst_simm9(3, 1, 0, 29, -8)},
         Row{"stur x0, [x29, #-8]", 0xf81f83a0, a64_ldst_simm9(3, 0, 0, 29, -8)},
         Row{"ldr d0, [x1]", 0xfd400020, a64_fldst_uimm(8, true, 0, 1, 0)},
