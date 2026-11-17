@@ -48,8 +48,14 @@ fn align_up(x: i64, a: i64) -> i64 {
 //   cpu_count() -> i64             the number of CPUs this process may use, at least 1
 // The rest goes through the OS layer of the run-time library (the `__os_*` functions of
 // src/prelude_linux.al / prelude_windows.al).
+// (HOST_ARM64: the compiler built for linux-arm64, `alc build --target linux-arm64 -D
+// HOST_ARM64=true src/main.al`, whose host has the system calls of arm64)
+const HOST_ARM64 = false
+
 when TARGET_OS == Windows {
     use "host_windows.al"
+} else when HOST_ARM64 {
+    use "host_linux_arm64.al"
 } else {
     use "host_linux.al"
 }

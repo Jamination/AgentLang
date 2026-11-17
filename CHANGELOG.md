@@ -8,7 +8,21 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Breaking
+- `enum Arch` has a second variant, `Arm64` (the new target below): a `match` on `TARGET_ARCH`
+  needs an arm for it or `_`.
+  `TARGET_ARCH` is now declared by the OS layer of the target instead of the prelude (nothing
+  changes for programs).
+
 ### Added
+- `--target linux-arm64` (experimental): static AArch64 Linux executables without C libraries,
+  with `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
+  (`tests/arm64/emu.al`; `tests/run.sh --target linux-arm64 --emu build/a64emu`), not yet on
+  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g`, `extern` C functions,
+  and the modules that make system calls by their x86-64 numbers (`std.net`, the gamepads of
+  `std.input`), which are refused with a message.
+- The compiler builds for arm64 Linux (experimental, as above):
+  `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`.
 - `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a
   one-channel image is a coverage texture, drawn in the tint's colour, for font atlases),
   sprites with source rectangle, rotation, origin and tint, rectangles, lines, triangles with

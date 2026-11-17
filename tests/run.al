@@ -1,6 +1,6 @@
 // Conformance test runner, for Linux and Windows. tests/run.sh and tests\run.bat build it
 // (build/altest, build\altest.exe) and start it from the repository root.
-// Usage: altest [-j N] [-v] [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
+// Usage: altest [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
 // tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
 //                     every line of NAME.err must appear in stderr; arguments from NAME.args,
 //                     default `a1 b2`; standard input from NAME.in, then without arguments)
@@ -72,7 +72,7 @@
 // Windows, --target linux: the programs are built for Linux (three modes) and checked, not run.
 use std.os
 
-priv const USAGE = "usage: tests/run.sh [-j N] [-v] [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]"
+priv const USAGE = "usage: tests/run.sh [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe] [--emu path/to/a64emu]] [path/to/alc] [filter]"
 
 when TARGET_OS == Windows {
     priv const HOST_WIN = true
@@ -83,13 +83,14 @@ when TARGET_OS == Windows {
 // what this run does: set by main before the threads start, then only read
 priv struct Config {
     win: bool               // the programs are built for Windows
+    arm64: bool             // the programs are built for linux-arm64 (run under --emu, else only built)
     can_run: bool           // this machine runs programs of the target (else they are only built)
     via_run: bool           // the default mode runs the program through `alc run`
     verbose: bool
     alc: []str              // the compiler, as the start of a command
     alc_abs: str            // its absolute path, for the driver tests
     target: []str           // the compiler's --target option, or nothing
-    runner: []str           // what a built program is started with: nothing, or wine
+    runner: []str           // what a built program is started with: nothing, wine, or the arm64 emulator
     exe: str                // ".exe" for Windows programs
     wcc: str                // the C compiler for Windows DLLs
     filter: str
@@ -108,6 +109,7 @@ priv struct Job {
     src: str
     skipped: bool           // listed in tests/windows.skip (for a Windows target)
     why: str                // its reason there
+    no_run: str             // linux-arm64 under the emulator: built, not run, for this reason
 }
 
 // what a job reports
@@ -440,7 +442,9 @@ priv fn prog(j: Job, jd: str, r: *Res) {
     if !cfg.win && file_exists(concat(base, ".need")) {
         why := "prerequisite missing"
         missing := true
-        if !cfg.can_run {
+        if cfg.arm64 {
+            why = "it needs something of the machine (a NAME.need): not under the arm64 emulator"
+        } else if !cfg.can_run {
             // (the check is a shell command for Linux, and some of these programs are Windows
             // ones that the check keeps away from a Linux build)
             why = fmt("its prerequisite (", base, ".need) can only be checked on Linux")
@@ -534,6 +538,9 @@ priv fn prog(j: Job, jd: str, r: *Res) {
             r.passed(label)
             continue
         }
+        if len(j.no_run) > 0 {
+            continue
+        }
         // (with via_run the default mode runs the program through `alc run`: arguments, input
         // and exit status pass through the compiler)
         cmd := vec_of(cfg.runner)
@@ -583,6 +590,10 @@ priv fn prog(j: Job, jd: str, r: *Res) {
         } else {
             r.fail += 1
         }
+    }
+    if len(j.no_run) > 0 && cfg.can_run {
+        r.say(fmt("SKIP ", name, ": built, not run under the emulator: ", j.no_run))
+        r.skip += 1
     }
 }
 
@@ -717,6 +728,19 @@ priv fn run_job(j: Job, index: i64) -> Res {
                 env = []str{if cfg.win { "ALC_WINE=1" } else { "ALC_WINE=0" }}
             }
             code := exec(cmd.items(), "", out, path_join(jd, "err"), 0, env)
+            if len(j.no_run) > 0 {
+                r.say(fmt("SKIP unit/", j.name, ": built, not run under the emulator: ", j.no_run))
+                r.skip += 1
+                remove_tree(jd)
+                return r
+            }
+            if cfg.arm64 && cfg.can_run && file_exists(bin) {
+                // (`alc test` built the test program and could not run it: the emulator does)
+                run := vec_of(cfg.runner)
+                run.push(bin)
+                none: []str
+                code = exec(run.items(), NULL_DEVICE, out, path_join(jd, "err"), 60, none)
+            }
             label := concat("unit/", j.name)
             if !cfg.can_run {
                 // (`alc test` builds the test program and says that this machine cannot run
@@ -855,8 +879,14 @@ priv fn collect() -> []Job {
     wskip := map[str, str]()
     if cfg.win {
         wskip = read_list("tests/windows.skip")
+    } else if cfg.arm64 {
+        wskip = read_list("tests/arm64.skip")
     }
-    fn add(jobs: *Vec[Job], wskip: *Map[str, str], kind: Kind, dir: str, name: str, ext: str, listed: bool) {
+    emu_skip := map[str, str]()
+    if cfg.arm64 && cfg.can_run {
+        emu_skip = read_list("tests/arm64_emu.skip")
+    }
+    fn add(jobs: *Vec[Job], wskip: *Map[str, str], emu_skip: *Map[str, str], kind: Kind, dir: str, name: str, ext: str, listed: bool) {
         if len(cfg.filter) > 0 && find(name, cfg.filter) < 0 {
             return
         }
@@ -864,30 +894,31 @@ priv fn collect() -> []Job {
         if listed {
             key := fmt(dir[len("tests/")..], "/", name)
             j.why, j.skipped = wskip.get(key)
+            j.no_run = emu_skip.get_or(key, "")
         }
         jobs.push(j)
     }
     for dir in []str{"tests/run", "tests/std", "tests/sys"} {
         for name in stems(dir, ".al") {
-            add(&jobs, &wskip, Prog, dir, name, ".al", true)
+            add(&jobs, &wskip, &emu_skip, Prog, dir, name, ".al", true)
         }
     }
     for name in stems("tests/check", ".al") {
-        add(&jobs, &wskip, Check, "tests/check", name, ".al", true)
+        add(&jobs, &wskip, &emu_skip, Check, "tests/check", name, ".al", true)
     }
     for name in stems("tests/fail", ".al") {
-        add(&jobs, &wskip, Fail, "tests/fail", name, ".al", true)
+        add(&jobs, &wskip, &emu_skip, Fail, "tests/fail", name, ".al", true)
     }
     for name in stems("tests/unit", ".al") {
-        add(&jobs, &wskip, Unit, "tests/unit", name, ".al", true)
+        add(&jobs, &wskip, &emu_skip, Unit, "tests/unit", name, ".al", true)
     }
     // `alc fmt`: the command (any target: it builds nothing), the whole tree (the compiler and
     // the check program must run here)
     for name in stems("tests/fmt", ".al") {
-        add(&jobs, &wskip, Fmt, "tests/fmt", name, ".al", true)
+        add(&jobs, &wskip, &emu_skip, Fmt, "tests/fmt", name, ".al", true)
     }
     if cfg.win == HOST_WIN {
-        add(&jobs, &wskip, FmtTree, "tests/fmt", "tree", "/check.al", false)
+        add(&jobs, &wskip, &emu_skip, FmtTree, "tests/fmt", "tree", "/check.al", false)
     }
     // every target: the programs whose code differs per target (`when`), see the top
     if !cfg.win {
@@ -917,14 +948,14 @@ priv fn collect() -> []Job {
                 } else if !has_line(slurp(src), "when ", true) {
                     continue
                 }
-                add(&jobs, &wskip, All, dir, name, ".al", false)
+                add(&jobs, &wskip, &emu_skip, All, dir, name, ".al", false)
             }
         }
     }
     // the Linux command line, by bash scripts
     if !cfg.win && !HOST_WIN {
         for name in stems("tests/driver", ".sh") {
-            add(&jobs, &wskip, Driver, "tests/driver", name, ".sh", false)
+            add(&jobs, &wskip, &emu_skip, Driver, "tests/driver", name, ".sh", false)
         }
     }
     return jobs.items()
@@ -971,6 +1002,8 @@ priv fn wine_start() {
 fn main() -> i64 {
     a := args()[1..]
     win := HOST_WIN
+    arm64 := false
+    emu := ""
     host_exe := ""
     threads := cpu_count()
     i := 0
@@ -980,7 +1013,7 @@ fn main() -> i64 {
             i += 1
             continue
         }
-        if a[i] != "--target" && a[i] != "--host-wine" && a[i] != "-j" {
+        if a[i] != "--target" && a[i] != "--host-wine" && a[i] != "-j" && a[i] != "--emu" {
             break
         }
         if i + 1 >= len(a) || len(a[i + 1]) == 0 {
@@ -988,10 +1021,13 @@ fn main() -> i64 {
         }
         v := a[i + 1]
         if a[i] == "--target" {
-            if v != "windows" && v != "linux" {
+            if v != "windows" && v != "linux" && v != "linux-arm64" {
                 usage()
             }
             win = v == "windows"
+            arm64 = v == "linux-arm64"
+        } else if a[i] == "--emu" {
+            emu = v
         } else if a[i] == "-j" {
             n, ok := parse_i64(v)
             if !ok || n < 1 {
@@ -1012,11 +1048,17 @@ fn main() -> i64 {
         return 2
     }
     cfg.win = win
-    cfg.can_run = win || !HOST_WIN
+    cfg.arm64 = arm64
+    // (arm64 programs run under the emulator tests/arm64/emu.al given with --emu, else they are
+    // built and checked)
+    if len(emu) > 0 && !arm64 {
+        usage()
+    }
+    cfg.can_run = if arm64 { len(emu) > 0 } else { win || !HOST_WIN }
     cfg.via_run = win && (HOST_WIN || len(host_exe) > 0)
     cfg.exe = if win { ".exe" } else { "" }
-    if win != HOST_WIN || win {
-        cfg.target = []str{"--target", if win { "windows" } else { "linux" }}
+    if win != HOST_WIN || win || arm64 {
+        cfg.target = []str{"--target", if win { "windows" } else if arm64 { "linux-arm64" } else { "linux" }}
     }
     if len(host_exe) > 0 {
         cfg.alc = []str{"wine", host_exe}
@@ -1063,6 +1105,9 @@ fn main() -> i64 {
     if win && !HOST_WIN {
         wine_start()
         cfg.runner = []str{"wine"}
+    }
+    if arm64 && len(emu) > 0 {
+        cfg.runner = []str{emu}
     }
     if !cfg.can_run {
         print("tests/run: this machine cannot run Linux programs: they are built and checked, not run")

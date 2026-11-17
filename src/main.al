@@ -32,6 +32,14 @@ use "x86/isel.al"
 use "x86/regalloc.al"
 use "x86/emit.al"
 use "x86/mod.al"
+use "arm64/enc.al"
+use "arm64/mir.al"
+use "arm64/isel.al"
+use "arm64/regalloc.al"
+use "arm64/emit.al"
+use "arm64/mod.al"
+use "arm64/backtrace.al"
+use "elf_arm64.al"
 use "elf.al"
 use "pe.al"
 use "backtrace.al"
@@ -52,6 +60,7 @@ priv const PRELUDE = embed("prelude.al")
 // prelude.al)
 priv const PRELUDE_LINUX = embed("prelude_linux.al")
 priv const PRELUDE_WINDOWS = embed("prelude_windows.al")
+priv const PRELUDE_LINUX_ARM64 = embed("prelude_linux_arm64.al")
 
 // bundled modules that only exist for Linux: what a program built for Windows can use instead
 priv const LINUX_ONLY = [_](str, str){
@@ -66,6 +75,10 @@ priv const LINUX_ONLY = [_](str, str){
 enum TargetOs { TargetLinux, TargetWindows }
 
 target_os: TargetOs
+// the processor (`--target linux-arm64`: AArch64, src/arm64 and src/elf_arm64.al)
+enum TargetArch { ArchX86_64, ArchArm64 }
+
+target_arch: TargetArch
 // `--gui` (Windows only): the PE gets the GUI subsystem instead of the console one (pe_link)
 pe_gui: bool
 // `--icon file.ico` (Windows only): the bytes of the file, checked (ico_error); and
@@ -262,7 +275,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                static AArch64, see docs/ARM64_TEST.md)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -306,8 +319,11 @@ priv fn parse_args() -> Args {
     if TARGET_OS == Windows {
         target_os = TargetWindows
     }
+    if HOST_ARM64 {
+        target_arch = ArchArm64
+    }
     if av.len >= 1 && (av[0] == "--version" || av[0] == "version") {
-        print(fmt("alc ", VERSION, "\ndefault target: ", if target_os == TargetWindows { "windows" } else { "linux" }, " x86-64"))
+        print(fmt("alc ", VERSION, "\ndefault target: ", if target_os == TargetWindows { "windows" } else { "linux" }, if target_arch == ArchArm64 { " arm64" } else { " x86-64" }))
         exit(0)
     }
     if av.len < 2 {
@@ -329,13 +345,23 @@ priv fn parse_args() -> Args {
             "--target" => {
                 i += 1
                 if i >= av.len {
-                    usage("--target needs an operating system: linux or windows")
+                    usage("--target needs an operating system: linux, windows or linux-arm64")
                 }
                 a.target_set = true
                 match av[i] {
-                    "linux" => target_os = TargetLinux
-                    "windows" => target_os = TargetWindows
-                    _ => usage(fmt("unknown target ", av[i], " (linux or windows)"))
+                    "linux" => {
+                        target_os = TargetLinux
+                        target_arch = ArchX86_64
+                    }
+                    "windows" => {
+                        target_os = TargetWindows
+                        target_arch = ArchX86_64
+                    }
+                    "linux-arm64" => {
+                        target_os = TargetLinux
+                        target_arch = ArchArm64
+                    }
+                    _ => usage(fmt("unknown target ", av[i], " (linux, windows or linux-arm64)"))
                 }
             }
             "--json" => json = true
@@ -381,6 +407,9 @@ priv fn parse_args() -> Args {
     }
     if len(a.input) == 0 {
         usage("")
+    }
+    if dbg_on && target_arch == ArchArm64 {
+        usage("-g: debug information is not written for --target linux-arm64 yet (only x86-64: DWARF on Linux, PDB on Windows)")
     }
     if (pe_gui || len(icon) != 0 || !pe_version.is_empty()) && target_os != TargetWindows {
         usage(fmt(if pe_gui { "--gui" } else if len(icon) != 0 { "--icon" } else { "--version-info" }, " is for Windows executables: add --target windows"))
@@ -822,6 +851,9 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     // The layer declares TARGET_OS, which `when` conditions use.
     prelude := PRELUDE
     layer_name, layer := if target_os == TargetWindows { ("prelude_windows.al", PRELUDE_WINDOWS) } else { ("prelude_linux.al", PRELUDE_LINUX) }
+    if target_arch == ArchArm64 {
+        layer_name, layer = ("prelude_linux_arm64.al", PRELUDE_LINUX_ARM64)
+    }
     pre_path, pre_set := env_get("ALC_PRELUDE")
     if pre_set {
         t, err := read_to_string(pre_path)
@@ -1068,9 +1100,30 @@ priv fn real_main() -> i64 {
             }
         }
     }
-    out := x86_compile(&module, ar.emit_asm)
-    if opt_enabled("backtrace") {
-        bt_attach(&module, &out, &cx, src.tests.items())
+    // the back end (arm64: src/arm64); the linker runs below, once the output path is known
+    aout: A64Output
+    out: Output
+    if target_arch == ArchArm64 {
+        aout = a64_compile(&module, ar.emit_asm)
+        for fi in aout.code_files {
+            fname := file_name(&src.names, fi)
+            if starts_with(fname, "<std/") && find(std_text(fname[5..len(fname) - 4]).or(""), "syscall(") >= 0 {
+                mname := fname[5..len(fname) - 4]
+                if ends_with(mname, "_linux") {
+                    mname = mname[..len(mname) - 6]
+                }
+                driver_error(ar.input, fmt("module `std.", mname, "` makes Linux system calls by their x86-64 numbers: it is not available for --target linux-arm64 yet"))
+                return 1
+            }
+        }
+        if opt_enabled("backtrace") {
+            a64_bt_attach(&module, &aout, &cx, src.tests.items())
+        }
+    } else {
+        out = x86_compile(&module, ar.emit_asm)
+        if opt_enabled("backtrace") {
+            bt_attach(&module, &out, &cx, src.tests.items())
+        }
     }
     mem("compiled")
     if dbg_on {
@@ -1122,7 +1175,7 @@ priv fn real_main() -> i64 {
             dbg_pdb_path = replace(dbg_pdb_path, "/", "\\")
         }
     }
-    bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
+    bytes, link_err := if target_arch == ArchArm64 { elf_arm64_link(&module, &aout) } else if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     if len(link_err) != 0 {
         driver_error(ar.input, link_err)
         return 1
@@ -1150,6 +1203,11 @@ priv fn real_main() -> i64 {
         }
         if target_os == TargetLinux && TARGET_OS == Windows {
             driver_error(out_path, fmt("built `", out_path, "`, a Linux executable, which cannot run on Windows"))
+            return 1
+        }
+        if (target_arch == ArchArm64) != HOST_ARM64 {
+            // (HOST_ARM64: the compiler built for linux-arm64 runs there)
+            driver_error(out_path, fmt("built `", out_path, "`, an ", if target_arch == ArchArm64 { "arm64" } else { "x86-64" }, " executable, which cannot run on this processor"))
             return 1
         }
         code := run_program(out_path, ar.rest.items())

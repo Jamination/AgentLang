@@ -2057,3 +2057,6 @@ fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
     }
     return __os_wait(pid, handle, false)
 }
+
+// the processor of this layer (see enum Arch in prelude.al; at the end: nothing above moves)
+const TARGET_ARCH = Arch.X86_64
