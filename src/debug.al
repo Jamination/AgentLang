@@ -40,12 +40,18 @@ dbg_fn_line: Vec[i32]
 dbg_fn_file: Vec[i32]
 // the parameters of the function being lowered are being declared
 dbg_in_params: bool
+// > 0: the last line of the scope of the variables being declared (a `for` loop's variables and
+// a `match` arm's bindings live in the body that follows)
+dbg_scope_end: i64
 // for the linkers: the type checker's tables (types, files, signatures) and the names of the
 // test blocks (function __test_k is test k)
 dbg_cx: *Cx
 dbg_tests: []str
 // the file given on the command line (the name of the compile unit)
 dbg_main_file: i64
+// Windows: the path of the PDB as the executable names it (absolute), and its bytes (pe_link)
+dbg_pdb_path: str
+dbg_pdb: Vec[u8]
 
 // the name of function fid as written (as in stack traces: `priv` names plain, nested ones
 // `outer.name`, test blocks `test "name"`); a specialised copy has the name of the original
@@ -140,7 +146,9 @@ fn dbg_bind(self: *Fx, name: str, ty: i64, addr: i64) {
         line = self.cx.module.locs.list[self.loc].line
     }
     end: i32 = 0
-    if !dbg_in_params && self.blocks.len > 0 {
+    if dbg_scope_end > 0 {
+        end = i32(dbg_scope_end)
+    } else if !dbg_in_params && self.blocks.len > 0 {
         end = self.blocks.last().end.line
     }
     k := dbg_vars.len
@@ -156,6 +164,82 @@ fn dbg_bind(self: *Fx, name: str, ty: i64, addr: i64) {
         v.indirect = true
         dbg_vars.push(v)
     }
+}
+
+// A scope of variables in a function: the lines first..last, its variables (pairs: variable,
+// offset from the CFA) and the scopes inside it. A variable declared in a block is visible from
+// its line to the end of the block; the code of a scope is the code of those lines of the
+// function itself (dbg_runs), which at -O0 follows the source.
+struct DbgScope {
+    first: i64
+    last: i64
+    vars: Vec[i64]
+    kids: Vec[i64]
+}
+
+// the scopes of the variables of a compiled function: [0] is the function (its parameters and
+// the variables of its outermost block), the others nested by their lines
+fn dbg_scopes(code: *Code) -> Vec[DbgScope] {
+    sc := vec[DbgScope]()
+    sc.push(DbgScope{first: 0, last: 0x7FFFFFFF})
+    vs := vec[(i64, i64, i64, i64)]() // (first, -last, variable, offset)
+    for x in 0..code.dvars.len / 2 {
+        k := i64(code.dvars[2 * x])
+        off := i64(code.dvars[2 * x + 1])
+        v := &dbg_vars[k]
+        if v.param || v.end == 0 {
+            // (parameters first, in their order)
+            sc[0].vars.push(k)
+            sc[0].vars.push(off)
+        } else {
+            vs.push((i64(v.line), -i64(v.end), k, off))
+        }
+    }
+    sort_by(vs.items(), fn(a: (i64, i64, i64, i64), b: (i64, i64, i64, i64)) -> bool { a.0 < b.0 || a.0 == b.0 && (a.1 < b.1 || a.1 == b.1 && a.2 < b.2) })
+    stack := vec_one(0)
+    for x in vs {
+        first := x.0
+        last := -x.1
+        top := stack.last()
+        if sc[top].first != first || sc[top].last != last {
+            while stack.len > 1 && !(first >= sc[stack.last()].first && last <= sc[stack.last()].last) {
+                stack.pop()
+            }
+            sc.push(DbgScope{first: first, last: last})
+            sc[stack.last()].kids.push(sc.len - 1)
+            stack.push(sc.len - 1)
+            top = sc.len - 1
+        }
+        sc[top].vars.push(x.2)
+        sc[top].vars.push(x.3)
+    }
+    return sc
+}
+
+// the code of the lines first..last of the function itself, as (start, end) offsets within
+// lo..hi (rows: of a function of `size` bytes)
+fn dbg_runs(rows: *Vec[DbgRow], size: i64, first: i64, last: i64, lo: i64, hi: i64) -> Vec[(i64, i64)] {
+    runs := vec[(i64, i64)]()
+    k := 0
+    while k < rows.len {
+        r := &rows[k]
+        if !(r.own && r.line >= first && r.line <= last) {
+            k += 1
+            continue
+        }
+        start := r.off
+        k += 1
+        while k < rows.len && rows[k].own && rows[k].line >= first && rows[k].line <= last {
+            k += 1
+        }
+        end := if k < rows.len { rows[k].off } else { size }
+        start = max(start, lo)
+        end = min(end, hi)
+        if end > start {
+            runs.push((start, end))
+        }
+    }
+    return runs
 }
 
 // isel: the frame slots of the variables of f (slot_of: by alloca) go to mf.dvars as pairs

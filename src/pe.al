@@ -109,6 +109,25 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
             rodata.extend(c.code.unwind.items())
         }
     }
+    // -g: the debug directory (one entry: CodeView) and its RSDS record (GUID, age 1, the path
+    // of the PDB); the GUID is filled in below, from the image
+    dbgdir_at := -1
+    if dbg_on {
+        rodata.resize(align_up(rodata.len, 4), 0)
+        dbgdir_at = rodata.len
+        put32(&rodata, 0)
+        put32(&rodata, 0)
+        put32(&rodata, 0)
+        put32(&rodata, 2) // IMAGE_DEBUG_TYPE_CODEVIEW
+        put32(&rodata, 24 + len(dbg_pdb_path) + 1)
+        put32(&rodata, ro_rva + rodata.len + 8)
+        put32(&rodata, 0) // its file offset (below)
+        rodata.extend("RSDS")
+        rodata.resize(rodata.len + 16, 0)
+        put32(&rodata, 1)
+        rodata.extend(dbg_pdb_path)
+        rodata.push(0)
+    }
     // ---- .pdata: the exception table, a RUNTIME_FUNCTION (start, end, unwind information)
     // per function with a frame, in the order of the addresses (functions without one are
     // leaf functions: the return address is at [rsp]) ----
@@ -263,6 +282,21 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
             fix.push(gaddr[gi] - base + rl.0)
         }
     }
+    guid := vec[u8]()
+    if dbgdir_at >= 0 {
+        // (from the code and the read-only data: the same program gives the same GUID)
+        h1: u64 = 0xcbf29ce484222325
+        h2: u64 = 0x84222325cbf29ce4
+        for part in [][]u8{text.items(), rodata.items()} {
+            for x in part {
+                h1 = (h1 ^ u64(x)) * 0x100000001b3
+                h2 = (h2 ^ u64(x)) * 0x100000001b3 + 1
+            }
+        }
+        put64(&guid, i64(h1))
+        put64(&guid, i64(h2))
+        copy(rodata[dbgdir_at + 32..dbgdir_at + 48], guid.items())
+    }
     // ---- .rsrc, .reloc ----
     rs_rva := if data.len + bss_size == 0 { data_rva } else { align_up(image_end, SECT_ALIGN) }
     rsrc := pe_resources(rs_rva)
@@ -377,6 +411,10 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
                 put32(&h, pd_rva)
                 put32(&h, pdata.len)
             }
+            6 if dbgdir_at >= 0 => {
+                put32(&h, ro_rva + dbgdir_at)
+                put32(&h, 28)
+            }
             5 if !reloc.is_empty() => {
                 put32(&h, rl_rva)
                 put32(&h, reloc.len)
@@ -426,6 +464,20 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     if !coff_strs.is_empty() {
         set32(&file, strs_at, file.len)
         file.extend(coff_strs.items())
+    }
+    if dbgdir_at >= 0 {
+        // the file offset of the RSDS record; the PDB (src/pdb.al), for main to write
+        for si, s in secs {
+            if s.name == ".rdata" {
+                set32(&file, raw_at[si] + dbgdir_at + 24, raw_at[si] + dbgdir_at + 28)
+            }
+        }
+        func_rva := vec_fill(m.funcs.len, 0)
+        for c in out.funcs {
+            func_rva[c.fid] = func_addr[c.fid] - base
+        }
+        sh_at := 64 + 4 + 20 + 240
+        dbg_pdb = pdb_build(m, out, &func_rva, text_rva, file[sh_at..sh_at + 40 * secs.len], guid.items())
     }
     return (file.items(), "")
 }

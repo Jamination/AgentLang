@@ -1368,7 +1368,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             }
             lo_s := self.scalar(lv)
             end := self.scalar(hv)
+            dbg_scope_end = i64(body.end.line) // (-g: the variable lives in the body)
             addr := self.declare(var1, ty, pos)
+            dbg_scope_end = 0
             iv := self.mval(ty, addr)
             self.store_raw(addr, lo_s, it, iv.alias)
             c := self.ins(cmpop, I8, vec_two(lo_s, end), 0)
@@ -1446,7 +1448,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
                 Some(v2) => (var1, v2)
                 None => ("_", var1)
             }
+            dbg_scope_end = i64(body.end.line) // (-g: the variable lives in the body)
             iaddr := self.declare(iname, T_I64, pos)
+            dbg_scope_end = 0
             zero := self.iconst(I64, 0)
             self.store_raw(iaddr, zero, I64, AK_I64)
             c := self.ins(Slt, I8, vec_two(zero, ln), 0)
@@ -1459,7 +1463,9 @@ priv fn for_stmt(self: *Fx, var1: str, var2: Opt[str], lo: *Expr, hi_o: Opt[*Exp
             off := self.ins(Mul, I64, vec_two(i, esz), 0)
             ea := self.ins(Add, I64, vec_two(p, off), 0)
             src := self.mval(et, ea)
+            dbg_scope_end = i64(body.end.line) // (-g: the variable lives in the body)
             eaddr := self.declare(ename, et, pos)
+            dbg_scope_end = 0
             dst := self.mval(et, eaddr)
             self.store(dst, src)
             self.loops.push(LoopCtx{brk: bx, cont: bc, scope_depth: self.scopes.len})

@@ -37,6 +37,7 @@ use "pe.al"
 use "backtrace.al"
 use "debug.al"
 use "dwarf.al"
+use "pdb.al"
 use "priv.al"
 use "lower_mem.al"
 use "when.al"
@@ -1063,11 +1064,6 @@ priv fn real_main() -> i64 {
         dbg_tests = src.tests.items()
         dbg_main_file = n_prelude
     }
-    bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
-    if len(link_err) != 0 {
-        driver_error(ar.input, link_err)
-        return 1
-    }
     out_path := match ar.output {
         Some(op) => op
         None => {
@@ -1095,6 +1091,31 @@ priv fn real_main() -> i64 {
             driver_error(out_path, fmt("the output `", out_path, "` is the source file `", name, "`: choose another path with -o"))
             return 1
         }
+    }
+    if dbg_on && target_os == TargetWindows {
+        // the PDB next to the executable: prog.exe -> prog.pdb (its absolute path goes into the
+        // executable)
+        stem := if ends_with(to_lower(out_path), ".exe") { out_path[..len(out_path) - 4] } else { out_path }
+        dbg_pdb_path = fmt(stem, ".pdb")
+        if host_root(dbg_pdb_path) == 0 {
+            rel := if starts_with(dbg_pdb_path, "./") || starts_with(dbg_pdb_path, ".\\") { dbg_pdb_path[2..] } else { dbg_pdb_path }
+            cwd := __os_current_dir()
+            if len(cwd) != 0 {
+                dbg_pdb_path = fmt(cwd, if TARGET_OS == Windows { "\\" } else { "/" }, rel)
+            }
+        }
+        if TARGET_OS == Windows {
+            dbg_pdb_path = replace(dbg_pdb_path, "/", "\\")
+        }
+    }
+    bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
+    if len(link_err) != 0 {
+        driver_error(ar.input, link_err)
+        return 1
+    }
+    if !dbg_pdb.is_empty() && !write_file(dbg_pdb_path, dbg_pdb.items()) {
+        driver_error(dbg_pdb_path, fmt("cannot write `", dbg_pdb_path, "`: ", os_error(io_error())))
+        return 1
     }
     // (a busy executable cannot be written but can be replaced: Linux keeps the file of a
     // process that has ended mapped while it tears down its memory, which takes a moment after

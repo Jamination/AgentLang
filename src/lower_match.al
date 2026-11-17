@@ -1259,6 +1259,8 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
     npats := arm.pats.len
     self.switch_to(a.body_b)
     self.push_scope()
+    // (-g: the variables of the arm live in its body)
+    dbg_scope_end = i64(arm.body.end.line)
     if a.use_slots {
         for i in 0..a.slots.len {
             self.scope_set(a.slots[i].0, (a.slots[i].1, a.slots[i].2))
@@ -1286,6 +1288,7 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
         }
         None => {}
     }
+    dbg_scope_end = 0
     exp := match m.slot {
         Some(s) => Some(s.ty)
         None => m.expect

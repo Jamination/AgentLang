@@ -449,58 +449,25 @@ priv fn var_die(d: *Dw, k: i64, off: i64) {
     var_loc(d, off, v.indirect)
 }
 
-// a scope of variables in a function: the lines first..last, its variables (pairs: variable,
-// offset) and the scopes inside it
-priv struct Scope {
-    first: i64
-    last: i64
-    vars: Vec[i64]
-    kids: Vec[i64]
-}
-
-// the address ranges of the code of the lines first..last of the function itself (rows: of a
-// function at address `at` with `size` bytes) as an entry of .debug_ranges; -1 if there is none
-priv fn scope_ranges(d: *Dw, rows: *Vec[DbgRow], at: i64, size: i64, first: i64, last: i64) -> i64 {
-    o := d.ranges.len
-    any := false
-    k := 0
-    while k < rows.len {
-        r := &rows[k]
-        if !(r.own && r.line >= first && r.line <= last) {
-            k += 1
-            continue
-        }
-        start := r.off
-        k += 1
-        while k < rows.len && rows[k].own && rows[k].line >= first && rows[k].line <= last {
-            k += 1
-        }
-        end := if k < rows.len { rows[k].off } else { size }
-        if end > start {
-            put64(&d.ranges, at + start - d.text_lo)
-            put64(&d.ranges, at + end - d.text_lo)
-            any = true
-        }
-    }
-    if !any {
-        return -1
-    }
-    put64(&d.ranges, 0)
-    put64(&d.ranges, 0)
-    return o
-}
-
-priv fn scope_die(d: *Dw, sc: *Vec[Scope], s: i64, rows: *Vec[DbgRow], at: i64, size: i64) {
+// the variables of scope s and its scopes as lexical blocks (rows: of a function at address
+// `at` with `size` bytes); a scope without code is left out
+priv fn scope_die(d: *Dw, sc: *Vec[DbgScope], s: i64, rows: *Vec[DbgRow], at: i64, size: i64) {
     for x in 0..sc[s].vars.len / 2 {
         var_die(d, sc[s].vars[2 * x], sc[s].vars[2 * x + 1])
     }
     for c in sc[s].kids {
-        r := scope_ranges(d, rows, at, size, sc[c].first, sc[c].last)
-        if r < 0 {
+        runs := dbg_runs(rows, size, sc[c].first, sc[c].last, 0, size)
+        if runs.is_empty() {
             continue
         }
         uleb(&d.info, AB_BLOCK)
-        put32(&d.info, r)
+        put32(&d.info, d.ranges.len)
+        for r in runs {
+            put64(&d.ranges, at + r.0 - d.text_lo)
+            put64(&d.ranges, at + r.1 - d.text_lo)
+        }
+        put64(&d.ranges, 0)
+        put64(&d.ranges, 0)
         scope_die(d, sc, c, rows, at, size)
         d.info.push(0)
     }
@@ -533,41 +500,7 @@ priv fn fn_die(d: *Dw, fid: i64, code: *Code, at: i64, rows: *Vec[DbgRow]) {
     if has_die(rty) {
         tref(d, rty)
     }
-    // the scopes: the function, then one per (first line, last line) of variables declared in
-    // blocks, nested by their lines
-    sc := vec[Scope]()
-    sc.push(Scope{first: 0, last: 0x7FFFFFFF})
-    vs := vec[(i64, i64, i64, i64)]() // (first, -last, variable, offset)
-    for x in 0..code.dvars.len / 2 {
-        k := i64(code.dvars[2 * x])
-        off := i64(code.dvars[2 * x + 1])
-        v := &dbg_vars[k]
-        if v.param || v.end == 0 {
-            // parameters first, in their order
-            sc[0].vars.push(k)
-            sc[0].vars.push(off)
-        } else {
-            vs.push((i64(v.line), -i64(v.end), k, off))
-        }
-    }
-    sort_by(vs.items(), fn(a: (i64, i64, i64, i64), b: (i64, i64, i64, i64)) -> bool { a.0 < b.0 || a.0 == b.0 && (a.1 < b.1 || a.1 == b.1 && a.2 < b.2) })
-    stack := vec_one(0)
-    for x in vs {
-        first := x.0
-        last := -x.1
-        top := stack.last()
-        if sc[top].first != first || sc[top].last != last {
-            while stack.len > 1 && !(first >= sc[stack.last()].first && last <= sc[stack.last()].last) {
-                stack.pop()
-            }
-            sc.push(Scope{first: first, last: last})
-            sc[stack.last()].kids.push(sc.len - 1)
-            stack.push(sc.len - 1)
-            top = sc.len - 1
-        }
-        sc[top].vars.push(x.2)
-        sc[top].vars.push(x.3)
-    }
+    sc := dbg_scopes(code)
     scope_die(d, &sc, 0, rows, at, code.bytes.len)
     d.info.push(0)
 }
