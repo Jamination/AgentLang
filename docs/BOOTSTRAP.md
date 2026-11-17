@@ -112,6 +112,11 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   compiler's output, which is byte-identical whichever host built it (`build.sh
   --windows-check`, `build.bat`). `verify.bat` is what Windows can add: the compiler rebuilds
   itself there, and the programs it builds run on real Windows.
+- **`alc fmt`**: `tests/fmt/NAME.al` with the expected result `NAME.fmt` (or `NAME.err` for a
+  file with a syntax error), and `fmt/tree` (`tests/fmt/tree/check.al`), which formats copies of
+  every `.al` file of the repository, builds the compiler from the formatted sources and
+  formats scrambled layouts back (about 20 s; `check ALC DIR ROUNDS SEED` runs more rounds of
+  scrambling). It runs where the compiler's target is the machine (not under Wine).
 - `tests/winabi/run.sh`, `tests/winaudio/run.sh` (Wine, MinGW, PipeWire) and the fuzzers in
   `tests/gen/` (Python) are Linux tools as before.
 
@@ -174,6 +179,7 @@ executables before and after); the conventions below describe the result.
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
 | `src/lint.al` | checks on the AST that need types: field writes to a struct copy that is never read |
+| `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
 | `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
