@@ -474,7 +474,7 @@ fn tcp_connect(to: Addr, timeout_ns: i64) -> (Socket, bool) {
     if !ok {
         return (Socket{}, false)
     }
-    r := wait_fd(s.fd, POLL_WRITE, timeout_ns)
+    r := if s.state.failed != 0 { POLL_WRITE } else { wait_fd(s.fd, POLL_WRITE, timeout_ns) }
     if r <= 0 {
         close(s)
         __io_result(if r == 0 { -110 } else { r })
@@ -518,8 +518,8 @@ fn tcp_connect(host: str, port: i64, timeout_ns: i64) -> (Socket, bool) {
 }
 
 // Starts a connection and returns at once with a non-blocking socket (for a game loop): poll
-// it for POLL_WRITE, then tcp_connect_check tells how it went. (Socket{}, false) if it could
-// not even be started (io_error()).
+// it for POLL_WRITE, then tcp_connect_check tells how it went (also when the system refused
+// at once). (Socket{}, false) only if no socket can be made (io_error()).
 fn tcp_connect_start(to: Addr) -> (Socket, bool) {
     fd := __net_socket(to.v6, false)
     if fd < 0 {
@@ -530,13 +530,13 @@ fn tcp_connect_start(to: Addr) -> (Socket, bool) {
     sa: [32]u8
     n := to_sockaddr(to, &sa)
     r := __net_connect(fd, &sa[0], n)
-    if r < 0 && r != -115 {
-        __net_close(fd)
-        __io_result(r)
-        return (Socket{}, false)
-    }
     s := new_socket(fd, to.v6, false, true)
     s.state.connecting = r == -115
+    if r < 0 && r != -115 {
+        // (Linux may refuse a loopback connection at once: reported by tcp_connect_check, as
+        // on Windows)
+        s.state.failed = -r
+    }
     __io_result(0)
     return (s, true)
 }
@@ -853,7 +853,8 @@ fn recv_from(s: Socket, buf: []u8, timeout_ns: i64) -> (i64, Addr) {
 // ---------- poll ----------
 // Waits until at least one item is ready for what it wants, at most timeout_ns (0: only looks,
 // < 0: no limit). Sets every item's `ready` and returns how many are ready (0: the time ran
-// out), or -1 (io_error()). An item whose socket is not open is ready with POLL_ERROR.
+// out), or -1 (io_error()). An item whose socket is not open is ready with POLL_ERROR, one
+// whose connection failed with POLL_ERROR and what it wants.
 // Allocates nothing for up to 64 items (call it every frame).
 fn poll(items: []PollItem, timeout_ns: i64) -> i64 {
     n := len(items)
@@ -875,6 +876,11 @@ fn poll(items: []PollItem, timeout_ns: i64) -> i64 {
         st := items[i].sock.state
         if st == nil || !st.open {
             items[i].ready = POLL_ERROR
+            bad += 1
+            continue
+        }
+        if st.failed != 0 {
+            items[i].ready = POLL_ERROR | (items[i].want & (POLL_READ | POLL_WRITE))
             bad += 1
             continue
         }
@@ -909,6 +915,10 @@ fn poll(s: Socket, want: i64, timeout_ns: i64) -> i64 {
     fd := fd_of(s)
     if fd < 0 {
         return -1
+    }
+    if s.state.failed != 0 {
+        __io_result(0)
+        return POLL_ERROR | (want & (POLL_READ | POLL_WRITE))
     }
     r := wait_fd(fd, want & (POLL_READ | POLL_WRITE), timeout_ns)
     if r < 0 {
@@ -1337,4 +1347,258 @@ priv fn dns_query(name: str, conf: DnsConfig, end: i64) -> ([]Addr, i64) {
         }
     }
     return (nil, if failed { NET_DNS_FAILURE } else { 110 })
+}
+
+// ---------- HTTP/1.1 client (plain TCP, no TLS) ----------
+// A response of http_get / http_post / http_request.
+struct HttpResponse {
+    status: i64             // 200, 404, ...
+    reason: str             // "OK", "Not Found", ...
+    headers: [](str, str)   // as received; names compared without regard to case by http_header
+    body: str               // decoded (chunked transfer coding removed)
+}
+
+// the value of the first header of that name ("" if there is none)
+fn http_header(r: HttpResponse, name: str) -> str {
+    want := to_lower(name)
+    for h in r.headers {
+        if to_lower(h.0) == want {
+            return h.1
+        }
+    }
+    return ""
+}
+
+// GET url ("http://host[:port]/path?query"): (the response, "") or (HttpResponse{}, a message).
+// Any status counts as a response (404 too); redirects are not followed. https:// is not
+// supported (there is no TLS).
+fn http_get(url: str, timeout_ns: i64) -> (HttpResponse, str) {
+    return http_request("GET", url, nil, "", timeout_ns)
+}
+
+// POST body with the Content-Type content_type
+fn http_post(url: str, content_type: str, body: str, timeout_ns: i64) -> (HttpResponse, str) {
+    return http_request("POST", url, [](str, str){("Content-Type", content_type)}, body, timeout_ns)
+}
+
+// Any method, with more headers (Host, Content-Length, Connection: close and User-Agent are
+// added unless given). The whole exchange takes at most timeout_ns (< 0: no limit).
+fn http_request(method: str, url: str, headers: [](str, str), body: str, timeout_ns: i64) -> (HttpResponse, str) {
+    none: HttpResponse
+    host, port, path, err := http_url(url)
+    if err != "" {
+        __io_result(-22)
+        return (none, err)
+    }
+    end := if timeout_ns < 0 { 0x7FFF_FFFF_FFFF_FFFF } else { sat_add(clock_ns(), timeout_ns) }
+    s, ok := tcp_connect(host, port, timeout_ns)
+    if !ok {
+        return (none, fmt("cannot connect to ", host, ":", port, ": ", error_text(io_error())))
+    }
+    defer { close_keep(s) }
+    req := vec[u8]()
+    req.extend(fmt(method, " ", path, " HTTP/1.1\r\n"))
+    given := map[str, bool]()
+    for h in headers {
+        given.set(to_lower(h.0), true)
+        req.extend(fmt(h.0, ": ", h.1, "\r\n"))
+    }
+    if !given.has("host") {
+        hp := if find(host, ":") >= 0 { fmt("[", host, "]") } else { host }
+        req.extend(if port == 80 { fmt("Host: ", hp, "\r\n") } else { fmt("Host: ", hp, ":", port, "\r\n") })
+    }
+    if !given.has("user-agent") { req.extend("User-Agent: AL-std.net\r\n") }
+    if !given.has("connection") { req.extend("Connection: close\r\n") }
+    if (len(body) > 0 || method == "POST" || method == "PUT") && !given.has("content-length") {
+        req.extend(fmt("Content-Length: ", len(body), "\r\n"))
+    }
+    req.extend("\r\n")
+    req.extend(body)
+    if !send_all(s, req.items()) {
+        return (none, fmt("cannot send the request: ", error_text(io_error())))
+    }
+    got := vec[u8]()
+    buf := alloc[u8](65536)
+    loop {
+        r, state := http_parse(got.items(), method == "HEAD")
+        if state == 1 {
+            __io_result(0)
+            return (r, "")
+        }
+        if state < 0 {
+            __io_result(-22)
+            return (none, "malformed response")
+        }
+        left := end - clock_ns()
+        if left <= 0 {
+            __io_result(-110)
+            return (none, "no complete response in time")
+        }
+        n := recv(s, buf, if timeout_ns < 0 { -1 } else { left })
+        if n < 0 {
+            return (none, fmt("cannot receive the response: ", error_text(io_error())))
+        }
+        if n == 0 {
+            // the end of the connection ends a body without a length
+            r2, st2 := http_parse(got.items(), method == "HEAD")
+            if st2 == 2 {
+                __io_result(0)
+                return (r2, "")
+            }
+            __io_result(-104)
+            return (none, "the connection ended before the response was complete")
+        }
+        got.extend(buf[..n])
+    }
+}
+
+// closes s and keeps io_error() as it was (the reason of a failure)
+priv fn close_keep(s: Socket) {
+    e := io_error()
+    close(s)
+    __io_result(-e)
+}
+
+// "http://host:port/path": (host, port, path, "") or an error message
+priv fn http_url(url: str) -> (str, i64, str, str) {
+    if starts_with(to_lower(url), "https://") {
+        return ("", 0, "", "https is not supported (std.net has no TLS)")
+    }
+    if !starts_with(to_lower(url), "http://") {
+        return ("", 0, "", fmt("not an http:// URL: ", url))
+    }
+    rest := url[7..]
+    slash := find_any(rest, "/?#", 0)
+    auth := if slash < 0 { rest } else { rest[..slash] }
+    path := if slash < 0 { "/" } else { rest[slash..] }
+    hash_at := find(path, "#")
+    if hash_at >= 0 { path = path[..hash_at] }
+    if len(path) == 0 || path[0] != '/' { path = concat("/", path) }
+    if find(auth, "@") >= 0 {
+        return ("", 0, "", "user names in URLs are not supported")
+    }
+    host := auth
+    port := 80
+    if starts_with(auth, "[") {
+        close := find(auth, "]")
+        if close < 0 {
+            return ("", 0, "", fmt("bad host in URL: ", url))
+        }
+        host = auth[1..close]
+        tail := auth[close + 1..]
+        if len(tail) > 0 {
+            if tail[0] != ':' { return ("", 0, "", fmt("bad host in URL: ", url)) }
+            p, ok := parse_i64(tail[1..])
+            if !ok || p < 1 || p > 65535 { return ("", 0, "", fmt("bad port in URL: ", url)) }
+            port = p
+        }
+    } else {
+        colon := find(auth, ":")
+        if colon >= 0 {
+            host = auth[..colon]
+            p, ok := parse_i64(auth[colon + 1..])
+            if !ok || p < 1 || p > 65535 { return ("", 0, "", fmt("bad port in URL: ", url)) }
+            port = p
+        }
+    }
+    if len(host) == 0 {
+        return ("", 0, "", fmt("no host in URL: ", url))
+    }
+    return (host, port, path, "")
+}
+
+// the response in data: (it, 1) when complete, (it, 2) when only the end of the connection can
+// complete it (no length), (_, 0) when more is needed, (_, -1) when it is malformed
+priv fn http_parse(data: []u8, head: bool) -> (HttpResponse, i64) {
+    r: HttpResponse
+    start := 0
+    loop {
+        hend := find(data[start..], "\r\n\r\n")
+        if hend < 0 {
+            return (r, 0)
+        }
+        hend += start
+        ls := lines(replace(data[start..hend], "\r\n", "\n"))
+        first := ls[0]
+        if !starts_with(first, "HTTP/1.") || len(first) < 12 {
+            return (r, -1)
+        }
+        st, ok := parse_i64(first[9..12])
+        if !ok {
+            return (r, -1)
+        }
+        r.status = st
+        r.reason = if len(first) > 13 { first[13..] } else { "" }
+        hs := vec[(str, str)]()
+        for l in ls[1..] {
+            colon := find(l, ":")
+            if colon <= 0 {
+                return (r, -1)
+            }
+            hs.push((l[..colon], trim(l[colon + 1..])))
+        }
+        r.headers = hs.items()
+        start = hend + 4
+        // 1xx: an interim response, the real one follows
+        if st >= 100 && st < 200 {
+            continue
+        }
+        break
+    }
+    rest := data[start..]
+    if head || r.status == 204 || r.status == 304 {
+        return (r, 1)
+    }
+    if to_lower(http_header(r, "Transfer-Encoding")) == "chunked" {
+        b := vec[u8]()
+        at := 0
+        loop {
+            nl := find(rest, "\r\n", at)
+            if nl < 0 {
+                return (r, 0)
+            }
+            size_text := rest[at..nl]
+            semi := find(size_text, ";")
+            if semi >= 0 { size_text = size_text[..semi] }
+            size, okn := parse_i64(trim(size_text), 16)
+            if !okn || size < 0 {
+                return (r, -1)
+            }
+            at = nl + 2
+            if size == 0 {
+                // trailers up to an empty line
+                loop {
+                    nl2 := find(rest, "\r\n", at)
+                    if nl2 < 0 {
+                        return (r, 0)
+                    }
+                    if nl2 == at {
+                        break
+                    }
+                    at = nl2 + 2
+                }
+                r.body = b.items()
+                return (r, 1)
+            }
+            if at + size + 2 > len(rest) {
+                return (r, 0)
+            }
+            b.extend(rest[at..at + size])
+            at += size + 2
+        }
+    }
+    cl := http_header(r, "Content-Length")
+    if cl != "" {
+        n, okl := parse_i64(trim(cl))
+        if !okl || n < 0 {
+            return (r, -1)
+        }
+        if len(rest) < n {
+            return (r, 0)
+        }
+        r.body = rest[..n]
+        return (r, 1)
+    }
+    r.body = rest
+    return (r, 2)
 }
