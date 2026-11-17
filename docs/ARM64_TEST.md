@@ -11,14 +11,16 @@ an x86-64 Windows machine without any arm64 hardware, WSL or QEMU. What was chec
   (`tests/run.sh --target linux-arm64 --emu build/a64emu`), and the compiler built for
   linux-arm64 compiling itself under it.
 
-Results there (2026-11-17): the suite under the emulator `conformance: 722 passed, 0 failed, 63
-skipped` (27 need something of the machine, 28 are built but not run because the emulator
-lacks processes, /proc or file maps, 8 are C-library or x86-64-only tests); built only, `802
-passed, 0 failed, 35 skipped`; the structural check `484 executables, 0 problems`; the compiler
-for linux-arm64 built by the x86-64 compiler (stage 1), by stage 1 under the emulator (stage 2,
-332 s) and by stage 2 (stage 3, 267 s): byte-identical; under the emulator it also builds the
-x86-64 Linux compiler byte for byte as the x86-64 compiler does.
-
+Results there (2026-11-17, after the merge of release 0.4.0): the suite under the emulator
+`conformance: 754 passed, 0 failed, 81 skipped` in 138 s with `-j 4` (35 need something of the
+machine, 30 are built but not run because the emulator lacks processes, /proc or file maps or
+is too slow for the 60 s limit, 16 are C-library, x86-64-only, `-g`, std.net or gamepad tests);
+built only, `840 passed, 0 failed, 51 skipped`; the structural check `505 executables, 0
+problems`; the compiler for linux-arm64 built by the x86-64 compiler (stage 1), by stage 1
+under the emulator (stage 2, 187 s) and by stage 2 (stage 3, 191 s): byte-identical.
+Refused for linux-arm64 with a message (not wrong code): `-g`, `extern` C functions, and code
+of the bundled modules that make system calls by their x86-64 numbers (std.net, the gamepads
+of std.input).
 The emulator was written by the same hands as the back end: a misreading of the architecture
 that both share (a flag of a compare, the extension of a load, the order of a pair) would not
 show. These are the checks only a real machine (or QEMU, which is independent) can do. Run them

@@ -30,3 +30,5 @@ unit/priv_tests test blocks run in child processes (fork): not emulated
 std/time_huge starts processes
 run/lib_find_linear too slow under the emulator for the 60 s limit
 run/lib_sort_organ too slow under the emulator for the 60 s limit (-O0)
+std/font_bad too slow under the emulator for the 60 s limit (97 s; its output was checked by hand)
+std/audio_ogg_bad too slow under the emulator for the 60 s limit (138 s; its output was checked by hand)

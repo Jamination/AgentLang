@@ -1483,7 +1483,25 @@ priv fn syscall_(t: *Th) -> bool {
             }
             r = 0
         }
-        226 => r = 0 // mprotect (the guard page of a thread's stack stays usable)
+        226 => {
+            // mprotect: PROT_NONE at the start of a region (the guard page below a thread's
+            // stack) takes those pages out of it, so that an overflow faults; anything else is
+            // accepted as it is
+            if a2 == 0 {
+                for k in 0..regions.len {
+                    g := &regions[k]
+                    if g.lo == a0 && a0 + a1 < g.hi {
+                        g.lo = a0 + a1
+                        g.clo = max(g.clo, g.lo)
+                        g.chi = max(g.chi, g.clo)
+                    }
+                }
+                for k in 0..4 {
+                    cache[k] = Region{}
+                }
+            }
+            r = 0
+        }
         93 => {
             // exit: this thread
             t.wait = 3
