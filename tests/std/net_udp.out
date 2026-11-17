@@ -1,0 +1,16 @@
+bind: true true 127.0.0.1 true true
+send_to: 4
+recv_from: 4 ping true
+reply: 4 pong true
+cut: 10 9
+empty: 0 0
+large: 60000 0
+large back: 60000 true
+limit: -1 110 0.0.0.0:0 true
+nonblocking: true -1 11 -1 11
+poll: 1 1
+to nobody: 4
+after: -1 110
+still works: 5 still
+other family: true true
+closed: -1 9

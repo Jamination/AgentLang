@@ -3580,6 +3580,7 @@ fn error_text(e: i64) -> str {
         39 => "directory not empty"
         40 => "too many levels of symbolic links"
         122 => "disk quota exceeded"
+        _ if e >= 88 && e <= 115 || e > 0x20000 && e < 0x20010 => __net_error_text(e)
         _ => __os_error_text(e)
     }
 }
@@ -4036,3 +4037,42 @@ enum Os { Linux, Windows }
 enum Arch { X86_64 }
 
 const TARGET_ARCH = Arch.X86_64
+
+// ---------- network error texts (std.net) ----------
+// error_text of the socket errors (88..115) and of std.net's name resolution errors
+fn __net_error_text(e: i64) -> str {
+    match e {
+        88 => "socket operation on non-socket"
+        89 => "destination address required"
+        90 => "message too long"
+        91 => "protocol wrong type for socket"
+        92 => "protocol not available"
+        93 => "protocol not supported"
+        94 => "socket type not supported"
+        95 => "operation not supported"
+        96 => "protocol family not supported"
+        97 => "address family not supported by protocol"
+        98 => "address already in use"
+        99 => "cannot assign requested address"
+        100 => "network is down"
+        101 => "network is unreachable"
+        102 => "network dropped connection on reset"
+        103 => "software caused connection abort"
+        104 => "connection reset by peer"
+        105 => "no buffer space available"
+        106 => "transport endpoint is already connected"
+        107 => "transport endpoint is not connected"
+        108 => "cannot send after transport endpoint shutdown"
+        109 => "too many references"
+        110 => "connection timed out"
+        111 => "connection refused"
+        112 => "host is down"
+        113 => "no route to host"
+        114 => "operation already in progress"
+        115 => "operation now in progress"
+        0x20001 => "host not found"
+        0x20002 => "name server failure"
+        0x20003 => "temporary failure in name resolution"
+        _ => __os_error_text(e)
+    }
+}
