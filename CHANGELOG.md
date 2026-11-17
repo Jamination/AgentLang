@@ -8,6 +8,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
 ### Breaking
 - Windows executables are relocatable and loaded at a random address above 4 GiB (see
   Changed): the address of a global or a function no longer fits in 32 bits and differs from
@@ -339,7 +341,8 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   C boundary; the compiler compiles sequentially there (no parallel back end).
 - No package manager: code outside `std` is included by path.
 
-[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Jamination/AgentLang/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Jamination/AgentLang/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Jamination/AgentLang/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Jamination/AgentLang/compare/v0.2.0...v0.2.1
