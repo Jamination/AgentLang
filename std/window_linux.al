@@ -1,9 +1,11 @@
-// std.window, Linux layer: the window is an X11 window (libX11.so.6, through std.x11).
+// std.window, Linux layer: the window is a Wayland window (std/window_wayland.al, libraries
+// loaded at run time) or an X11 window (libX11.so.6, through std.x11); window_open chooses.
 // Loaded by `use std.window` for --target linux; the public API is in std/window.al.
 // A locked pointer is read as XInput 2 raw motion where the server has that extension and
 // libXi.so.6 is installed (it is loaded at run time, when a pointer is first locked).
 use std.x11
 use std.libc
+use std.window_wayland
 
 // (libdl.so.2 holds these before glibc 2.34, the C library itself since)
 priv extern "libdl.so.2" fn dlopen(path: *u8, flags: i32) -> *u8
@@ -18,8 +20,10 @@ priv xi_free_device_info: *u8
 
 priv const XI_ABS_CAP = 8
 
-// The X11 handles of a Window (read them through x11_display / x11_window).
+// The handles of a Window: those of X11 (read them through x11_display / x11_window), or `wl`
+// for a window on Wayland (nil for an X11 window; wayland_display / wayland_surface).
 struct WindowOs {
+    wl: *WaylandWindow
     dpy: *u8
     win: u64
     screen: i32
@@ -298,15 +302,27 @@ priv fn window_utf8_next(buf: []u8, pos: *i64) -> u32 {
 
 // ---- window ----
 
-// Opens a window as described; (nil, false) if the display cannot be reached. Allocates the
-// Window once (arena); later calls on the window do not allocate from the arena.
+// Opens a window as described; (nil, false) if the display cannot be reached. Wayland or X11
+// as `d.display` says (window_systems): with an empty one, Wayland when $WAYLAND_DISPLAY is
+// set and works, else X11. Allocates the Window once (arena); later calls on the window do not
+// allocate from the arena.
 fn window_open(d: WindowDesc) -> (*Window, bool) {
+    top := mark()
+    env, _ := env_get("WAYLAND_DISPLAY")
+    sys := window_systems(d.display, env)
+    release(top)
+    if sys.wayland {
+        w, ok := wayland_window_open(d, sys.wayland_name)
+        if ok || !sys.x11 {
+            return (w, ok)
+        }
+    }
     setlocale(X_LC_CTYPE, ptr(""))
     XSetLocaleModifiers(ptr(""))
     m := mark()
     name: *u8 = nil
-    if len(d.display) > 0 {
-        name = cstr(d.display)
+    if len(sys.x11_name) > 0 {
+        name = cstr(sys.x11_name)
     }
     dpy := XOpenDisplay(name)
     release(m)
@@ -364,6 +380,10 @@ fn window_open(d: WindowDesc) -> (*Window, bool) {
 
 // Sets the window title (UTF-8).
 fn set_title(w: *Window, title: str) {
+    if w.os.wl != nil {
+        wayland_set_title(w, title)
+        return
+    }
     o := &w.os
     if o.dpy == nil {
         return
@@ -640,6 +660,10 @@ priv fn window_ungrab(w: *Window) {
 fn poll(w: *Window) {
     begin_frame(&w.input)
     clear_events(&w.events)
+    if w.os.wl != nil {
+        wayland_poll(w)
+        return
+    }
     o := &w.os
     if o.dpy == nil {
         return
@@ -742,6 +766,10 @@ priv fn window_blank_cursor(w: *Window) -> u64 {
 
 // Shows or hides the mouse pointer while it is over the window.
 fn set_cursor_visible(w: *Window, visible: bool) {
+    if w.os.wl != nil {
+        wayland_set_cursor_visible(w, visible)
+        return
+    }
     o := &w.os
     if o.dpy == nil || visible != w.cursor_hidden {
         return
@@ -758,7 +786,7 @@ fn set_cursor_visible(w: *Window, visible: bool) {
 // Text entry on / off (Windows: the input method editor). X11 has no such switch: the input
 // method of the session stays attached to the window either way; only `w.text_input` changes.
 fn set_text_input(w: *Window, on: bool) {
-    if w.os.dpy != nil {
+    if w.os.dpy != nil || (w.os.wl != nil && w.os.wl.display != nil) {
         w.text_input = on
     }
 }
@@ -770,6 +798,10 @@ fn set_text_input(w: *Window, on: bool) {
 // counts, no pointer acceleration); without that extension or libXi.so.6 it is the motion of
 // the pointer in pixels. Unlocking puts the pointer back where it was.
 fn set_cursor_locked(w: *Window, locked: bool) {
+    if w.os.wl != nil {
+        wayland_set_cursor_locked(w, locked)
+        return
+    }
     o := &w.os
     if o.dpy == nil || locked == w.cursor_locked {
         return
@@ -812,6 +844,10 @@ fn set_cursor_locked(w: *Window, locked: bool) {
 // Asks the window manager to make the window fullscreen (borderless, covering the screen) or
 // windowed again; the new size arrives as an EventResize in a later poll.
 fn set_fullscreen(w: *Window, on: bool) {
+    if w.os.wl != nil {
+        wayland_set_fullscreen(w, on)
+        return
+    }
     o := &w.os
     if o.dpy == nil || on == w.fullscreen {
         return
@@ -839,6 +875,9 @@ priv fn window_free_image(w: *Window) {
 // display is not a 24/32-bit true-color one. Keeps a window-sized conversion buffer (C heap,
 // reallocated only when the window size changes).
 fn present(w: *Window, pixels: []u8, pw: i64, ph: i64) -> bool {
+    if w.os.wl != nil {
+        return wayland_present(w, pixels, pw, ph)
+    }
     o := &w.os
     if o.dpy == nil || o.depth < 24 || x_visual_class(o.visual) != X_TRUE_COLOR || w.width <= 0 || w.height <= 0 {
         return false
@@ -866,6 +905,10 @@ fn present(w: *Window, pixels: []u8, pw: i64, ph: i64) -> bool {
 // Destroys the window and disconnects from the display; the Window stays valid as a closed
 // window (should_close is true, other calls do nothing).
 fn close(w: *Window) {
+    if w.os.wl != nil {
+        wayland_close(w)
+        return
+    }
     w.closing = true
     o := &w.os
     if o.dpy == nil {

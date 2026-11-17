@@ -131,6 +131,10 @@ fn helpers() {
         keep(&r)
     }
     {
+        r: *WlInterface = wl_client_interface(zero[str]())
+        keep(&r)
+    }
+    {
         r: f64 = wl_fixed_to_double(zero[i32]())
         keep(&r)
     }

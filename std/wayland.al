@@ -249,6 +249,22 @@ priv fn wl_core_interface(index: i64) -> *WlInterface {
     wl_core_tables[index]
 }
 
+// The interface table of the core protocol named `name` ("wl_compositor") inside the loaded
+// libwayland-client, for wl_registry_bind without the `extern` table (&wl_compositor_interface
+// is the same table); nil if the library cannot be loaded or the core protocol has no such
+// interface.
+fn wl_client_interface(name: str) -> *WlInterface {
+    if wl_client_lib() == nil {
+        return nil
+    }
+    for i, t in WL_CORE_TABLES {
+        if t[..t.len - len("_interface")] == name {
+            return wl_core_tables[i]
+        }
+    }
+    nil
+}
+
 // wl_fixed_t (24.8 fixed point, an i32: surface coordinates of pointer events, axis values).
 fn wl_fixed_to_double(f: i32) -> f64 { f64(f) / 256.0 }
 fn wl_fixed_from_double(d: f64) -> i32 { i32(d * 256.0) }
