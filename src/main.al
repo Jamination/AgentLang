@@ -38,6 +38,7 @@ use "arm64/isel.al"
 use "arm64/regalloc.al"
 use "arm64/emit.al"
 use "arm64/mod.al"
+use "arm64/backtrace.al"
 use "elf_arm64.al"
 use "elf.al"
 use "pe.al"
@@ -304,8 +305,11 @@ priv fn parse_args() -> Args {
     if TARGET_OS == Windows {
         target_os = TargetWindows
     }
+    if HOST_ARM64 {
+        target_arch = ArchArm64
+    }
     if av.len >= 1 && (av[0] == "--version" || av[0] == "version") {
-        print(fmt("alc ", VERSION, "\ndefault target: ", if target_os == TargetWindows { "windows" } else { "linux" }, " x86-64"))
+        print(fmt("alc ", VERSION, "\ndefault target: ", if target_os == TargetWindows { "windows" } else { "linux" }, if target_arch == ArchArm64 { " arm64" } else { " x86-64" }))
         exit(0)
     }
     if av.len < 2 {
@@ -331,8 +335,14 @@ priv fn parse_args() -> Args {
                 }
                 a.target_set = true
                 match av[i] {
-                    "linux" => target_os = TargetLinux
-                    "windows" => target_os = TargetWindows
+                    "linux" => {
+                        target_os = TargetLinux
+                        target_arch = ArchX86_64
+                    }
+                    "windows" => {
+                        target_os = TargetWindows
+                        target_arch = ArchX86_64
+                    }
                     "linux-arm64" => {
                         target_os = TargetLinux
                         target_arch = ArchArm64
@@ -1071,8 +1081,10 @@ priv fn real_main() -> i64 {
     bytes := ""
     link_err := ""
     if target_arch == ArchArm64 {
-        // (no stack-trace table yet: a panic prints its message only)
         aout := a64_compile(&module, ar.emit_asm)
+        if opt_enabled("backtrace") {
+            a64_bt_attach(&module, &aout, &cx, src.tests.items())
+        }
         mem("compiled")
         bytes, link_err = elf_arm64_link(&module, &aout)
     } else {
@@ -1136,9 +1148,9 @@ priv fn real_main() -> i64 {
             driver_error(out_path, fmt("built `", out_path, "`, a Linux executable, which cannot run on Windows"))
             return 1
         }
-        if target_arch == ArchArm64 {
-            // (the compiler itself runs on x86-64 only)
-            driver_error(out_path, fmt("built `", out_path, "`, an arm64 executable, which cannot run on this processor"))
+        if (target_arch == ArchArm64) != HOST_ARM64 {
+            // (HOST_ARM64: the compiler built for linux-arm64 runs there)
+            driver_error(out_path, fmt("built `", out_path, "`, an ", if target_arch == ArchArm64 { "arm64" } else { "x86-64" }, " executable, which cannot run on this processor"))
             return 1
         }
         code := run_program(out_path, ar.rest.items())

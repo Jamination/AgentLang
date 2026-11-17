@@ -35,7 +35,17 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
         __os_exit(1)
     }
     __tls_in_fault = true
-    __bt_fault_pc = cast[*i64](uc + 176 + 8 + 8 * 32)[0]
+    // the stack walk's registers: sp in r[4] (the slot of x86-64's rsp)
+    regs := cast[*i64](uc + 176 + 8)
+    pc := regs[32]
+    sp := regs[31]
+    // a fault on the first instruction of a function (`stp x29, x30, [sp, #-16]!`: a stack
+    // that overflows) has no frame of the function yet: the walk starts at its call
+    if cast[*u32](pc)[0] == 0xA9BF7BFD {
+        pc = regs[30] - 4
+    }
+    __bt_fault_pc = pc
+    __bt_fault_regs.r[4] = sp
     if sig == 8 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }

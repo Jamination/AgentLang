@@ -39,7 +39,10 @@ struct A64Code {
     err: str
     // (code offset, source location) where the location changes, as Code.lines (x86)
     lines: Vec[i32]
-    frame: bool
+    // the frame for stack traces (src/arm64/backtrace.al): the bytes from sp after the
+    // prologue to the saved return address (rest + 8), and where the prologue ends
+    ra_off: i64
+    prologue_end: i64
 }
 
 priv struct Fr {
@@ -590,7 +593,9 @@ priv fn frame(mf: *AFunc, alloc: *AAlloc) -> Fr {
     gpr_off := off
     off += 8 * alloc.saved_gpr.len
     rest := align_up(off, 16)
-    has := mf.has_calls || rest > 0 || mf.save_all
+    // (every function keeps a frame record: the stack walk of a panic follows x29 and finds
+    // the return address at a fixed place in each frame)
+    has := true
     return Fr{has: has, rest: rest, slot_off: slot_off, gpr_off: gpr_off, fpr_off: fpr_off}
 }
 
@@ -603,13 +608,16 @@ fn a_emit(mf: *AFunc, alloc: *AAlloc, layout: []i64) -> A64Code {
             " bytes; at most 2 GiB are possible (allocate large arrays with alloc[T](n))")
         fr.rest = 0
     }
-    // prologue
+    // prologue (prologue_end: after the allocation; the saves below it may fault, on a stack
+    // that overflows, with the frame complete)
+    prologue_end := 0
     if fr.has {
         e.put(a64_ldstp(false, false, 3, 29, 30, 31, -16)) // stp x29, x30, [sp, #-16]!
         e.put(a64_add_imm(1, false, false, 29, 31, 0, false)) // mov x29, sp
         if fr.rest > 0 {
             e.addi(1, true, 31, 31, fr.rest)
         }
+        prologue_end = 4 * e.words.len
         for k, r in alloc.saved_gpr {
             e.ldst_sp(false, false, fr.gpr_off + 8 * k, r)
         }
@@ -670,7 +678,7 @@ fn a_emit(mf: *AFunc, alloc: *AAlloc, layout: []i64) -> A64Code {
     for wd in e.words {
         put32(&bytes, i64(wd))
     }
-    return A64Code{bytes: bytes, relocs: e.relocs, err: err, lines: lines, frame: fr.has}
+    return A64Code{bytes: bytes, relocs: e.relocs, err: err, lines: lines, ra_off: fr.rest + 8, prologue_end: prologue_end}
 }
 
 // float constant relocations: from indices into the function's list to the module pool
