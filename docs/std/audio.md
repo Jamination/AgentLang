@@ -106,9 +106,9 @@ decoder's private state.
   decodes in a region of its own and frees it, so only the samples stay.
 - **Seeking** goes to the page before the frame (positions of all pages are noted by
   `ogg_open`) and decodes from there: one or two packets of extra work, sample-exact.
-- **Speed**: stereo 44.1 kHz decodes about 400 times faster than real time on a desktop
-  processor (60 s of 108 kbit/s music in 140 ms, 30 s at 490 kbit/s in 140 ms, with
-  `ogg_open` 5 to 8 ms of that), as fast as libvorbis.
+- **Speed**: stereo 44.1 kHz decodes 400 to 800 times faster than real time on a desktop
+  processor (best of 5: 60 s at 108 kbit/s in 73 ms, 30 s at 490 kbit/s in 76 ms, of which
+  `ogg_open` 2 and 5 ms); libvorbisfile takes 110 and 128 ms for the same files there.
 
 ## Mixer
 
