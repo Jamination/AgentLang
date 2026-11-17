@@ -35,6 +35,8 @@ use "x86/mod.al"
 use "elf.al"
 use "pe.al"
 use "backtrace.al"
+use "debug.al"
+use "dwarf.al"
 use "priv.al"
 use "lower_mem.al"
 use "when.al"
@@ -248,7 +250,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -343,6 +345,7 @@ priv fn parse_args() -> Args {
             "--emit-asm" => a.emit_asm = true
             "--unchecked" => a.unchecked = true
             "-O0" => a.opt = 0
+            "-g" => dbg_on = true
             "-D" => {
                 i += 1
                 if i >= av.len {
@@ -993,6 +996,7 @@ priv fn check_all(ar: *Args) -> i64 {
 
 priv fn real_main() -> i64 {
     ar := parse_args()
+    dbg_keep_vars = dbg_on && ar.opt == 0
     test_mode := ar.cmd == "test"
     if !(ar.cmd == "build" || ar.cmd == "run" || ar.cmd == "test" || ar.cmd == "check" || ar.cmd == "sigs") {
         usage(fmt("unknown command ", ar.cmd))
@@ -1054,6 +1058,11 @@ priv fn real_main() -> i64 {
         bt_attach(&module, &out, &cx, src.tests.items())
     }
     mem("compiled")
+    if dbg_on {
+        dbg_cx = &cx
+        dbg_tests = src.tests.items()
+        dbg_main_file = n_prelude
+    }
     bytes, link_err := if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     if len(link_err) != 0 {
         driver_error(ar.input, link_err)

@@ -265,6 +265,10 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
     fx.at(pos)
     fx.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
     fx.cur = fx.f.new_block()
+    if dbg_on {
+        dbg_function(fid, pos)
+        dbg_in_params = true
+    }
     pi := 0
     if fx.cx.abi_ret(rty) == SRet {
         p := fx.ins(Param, I64, vec[i64](), pi)
@@ -303,6 +307,7 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
             }
         }
     }
+    dbg_in_params = false
     want := rty != T_UNIT && rty != T_NEVER
     expect: Opt[i64] = if want { Some(rty) } else { None }
     v := fx.block_value(body, want, expect)
@@ -687,6 +692,9 @@ fn in_scope(self: *Fx, id: i64) -> bool {
 
 // enters (or replaces) the name `name` in the innermost scope
 fn scope_set(self: *Fx, name: str, val: (i64, i64)) {
+    if dbg_on && val.0 > 0 {
+        self.dbg_bind(name, val.0, val.1)
+    }
     id := ast_sym(name)
     if self.in_scope(id) {
         binds[bind_top[id]].val = val

@@ -288,6 +288,21 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
         // (discardable: the loader needs it only while it loads the image)
         secs.push(Section{name: ".reloc", rva: rl_rva, data: reloc, vsize: reloc.len, flags: 0x42000040})
     }
+    // -g: the DWARF sections (src/dwarf.al), discardable; their names are longer than 8
+    // bytes: the section table names them "/N", N the offset of the name in the COFF string
+    // table (as MinGW's linker does; gdb, lldb and the LLVM tools read them so)
+    coff_strs := vec[u8]()
+    if dbg_on {
+        put32(&coff_strs, 0)
+        for s in dwarf_sections(m, out, &func_addr, base + text_rva, base + text_rva + text.len, -1, true) {
+            l := secs.last()
+            name := fmt("/", coff_strs.len)
+            coff_strs.extend(s.0)
+            coff_strs.push(0)
+            secs.push(Section{name: name, rva: align_up(l.rva + l.vsize, SECT_ALIGN), data: s.1, vsize: s.1.len, flags: 0x42000040})
+        }
+        set32(&coff_strs, 0, coff_strs.len)
+    }
     hdr_size := align_up(64 + 4 + 20 + 240 + 40 * secs.len, FILE_ALIGN)
     last := secs.last()
     image_size := align_up(last.rva + last.vsize, SECT_ALIGN)
@@ -302,6 +317,8 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
     put16(&h, 0x8664)
     put16(&h, secs.len)
     put32(&h, 0) // time stamp: none (the output depends on the input only)
+    // the COFF symbol table (no symbols) and string table: at the end of the file (-g)
+    strs_at := h.len
     put32(&h, 0)
     put32(&h, 0)
     put16(&h, 240)
@@ -405,6 +422,10 @@ fn pe_link(m: *Module, out: *Output) -> (str, str) {
         file.resize(raw_at[si], 0)
         file.extend(s.data.items())
         file.resize(raw_at[si] + align_up(s.data.len, FILE_ALIGN), 0)
+    }
+    if !coff_strs.is_empty() {
+        set32(&file, strs_at, file.len)
+        file.extend(coff_strs.items())
     }
     return (file.items(), "")
 }
