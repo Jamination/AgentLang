@@ -1222,6 +1222,10 @@ fn fn_abi(self: *Cx, f: *Func, ptys: []i64, rty: i64) {
                 }
             }
             ByRef => {
+                // (emit_call passes a fresh copy: see Func.byref_params)
+                if f.params.len < 64 {
+                    f.byref_params |= u64(1) << u64(f.params.len)
+                }
                 f.params.push(I64)
             }
         }
