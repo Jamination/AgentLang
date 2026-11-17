@@ -1,0 +1,1 @@
+Windows PDB test: runs with tests/run.sh --target windows (under Wine) and on Windows

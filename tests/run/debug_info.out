@@ -1,0 +1,18 @@
+.debug_abbrev true
+.debug_info true
+.debug_line true
+.debug_str true
+.debug_aranges true
+.debug_frame true
+unit: true true true
+probe: line 30 returns i64 inside the unit true
+  var k: i64 line 31 (fbreg)
+  var inner: i64 line 34 (fbreg)
+  var p: Pair line 37 (fbreg)
+  var c: Shape line 39 (fbreg)
+  inner in a block inside k's: true
+type Pair size 16 x@0 y@8
+type Shape size 32 tag@0 variants 2
+probe lines: within its source true from its start true the call in main true
+aranges: true true
+frame: entry rsp+8 true body one rule true
