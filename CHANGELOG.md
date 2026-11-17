@@ -67,6 +67,15 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   directory of PATH makes the test a SKIP (`NAME.windows.why`). `tests/sys/shaderc` runs on
   Windows.
 
+### Changed
+- Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a
+  step computed at run time (`by s`) move out of the loop where the bound allows it, and a
+  check that does not change in a loop and comes first in it is made once before the loop.
+- Windows: a slice, string or struct passed as an argument is no longer reloaded in the called
+  function after every store or call.
+- Code generation: fewer stores to spill slots; a loop that is left from the "then" side of a
+  branch falls through into its own code.
+
 ## [0.4.0] - 2026-11-17
 
 ### Breaking
