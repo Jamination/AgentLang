@@ -634,8 +634,11 @@ priv fn src_path(k: i64, cwd: str) -> str {
     if len(n) == 0 {
         return "?"
     }
-    if starts_with(n, "<") || host_root(n) > 0 || len(cwd) == 0 {
+    if starts_with(n, "<") {
         return n
+    }
+    if host_root(n) > 0 || len(cwd) == 0 {
+        return replace(n, "/", "\\")
     }
     return fmt(cwd, "\\", replace(n, "/", "\\"))
 }

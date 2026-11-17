@@ -179,6 +179,7 @@ executables before and after); the conventions below describe the result.
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
 | `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
 | `src/backtrace.al` | the table of the stack traces of panics (frames, source lines), added to the module before linking |
+| `src/debug.al`, `dwarf.al`, `pdb.al` | debug information (`-g`, see DETAILS.md): the variables and function lines recorded while lowering and in isel / emit, the line rows and scopes both formats share; DWARF 4 sections for `elf.al` and `pe.al`; the PDB of a Windows executable |
 | `src/objwrite.al` | what the two writers share (little-endian output, the layout of text, read-only data, bss, relocations): included by `elf.al` and `pe.al` |
 | `src/prelude.al` | the run-time library of every AL program (embedded into the compiler) |
 | `src/prelude_linux.al`, `prelude_windows.al` | its OS layer for the target (`--target`): system calls on Linux, kernel32.dll on Windows; the functions a layer defines are listed at the top of `prelude.al` |
