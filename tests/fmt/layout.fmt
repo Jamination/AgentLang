@@ -1,0 +1,48 @@
+// the layout rules of `alc fmt`: this file is written badly on purpose, layout.fmt is the result
+use std.math
+priv const LIMIT = 3      // trailing comments keep their column
+const GRID = [2][3]u8{[3]u8{1, 2, 3}, [3]u8{4, 5, 6}}
+struct Point { x: i64, y: i64 }
+struct Wide {
+    a: i64,   // a
+    b: []*Point   // b
+                  // continues the comment of b
+    // a comment of its own
+}
+enum Shape { Circle(f64), Rect(f64, f64), Empty, Tri }
+
+fn area(s: Shape) -> f64 {
+    match s {
+        Circle(r) => 3.0 * r * r
+        Rect(w, h) => { w * h }
+        Empty,
+            Tri => 0.0
+    }
+}
+
+fn pick[T](a: T, b: T, first: bool) -> T { if first { a } else { b } }
+fn main() {
+    xs := []i64{1, 2, 3}
+    p := &xs[0]
+    *p = -*p + -1
+    m := map[str, i64]()
+    m.set("a", 1)
+    total := 0
+    for i in 0..len(xs) by 1 {
+        total += xs[i] * 2 - xs[i..i + 1].len()
+    }
+    if total > 0 &&
+        !m.has("b") {
+        print(total, LIMIT, GRID[1][2])
+    }
+    long := xs[0] +
+        xs[1] +
+        xs[2]
+    f := fn(a: i64) -> i64 { a * 2 }
+    print(long, f(2), area(Rect(2.0, 3.0)), pick[i64](1, 2, true), Point{x: 1, y: -2}, t())
+    outer:
+    for x in xs { for y in xs { if y > x { continue outer } } }
+    q := Point{x: 1, y: 2}
+    if (q == Point{x: 1, y: 2}) { print("same") }
+}
+fn t() -> (i64, f64) { (1, 2.5) }

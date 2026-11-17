@@ -1,0 +1,50 @@
+// lines that continue a statement: line breaks stay where they are (a newline after an
+// operator, a comma or an opening bracket continues the statement); the indentation is computed
+enum Op { Add, Sub, Mul, Div, Rem, Shl, Shr }
+
+fn big(op: Op) -> bool {
+    match op {
+        Add, Sub,
+        Mul => true
+            Div, Rem,
+                Shl => {
+                    false
+                }
+        _ => false
+    }
+}
+
+fn sum(a: i64,
+        b: i64,
+    c: i64) -> i64 {
+        a +
+    b +
+            c
+}
+
+fn main() {
+    total := sum(1,
+    2,
+            3)
+    nested := sum(sum(1, 2,
+        3), sum(4,
+                5, 6),
+            7)
+    if total > 0 &&
+    nested > 0 {
+        print(total, nested)
+    }
+    words := []str{
+    "a", "b",
+        "c"}
+    for w in []str{"x",
+            "y"} {
+        print(w, words.len,
+        big(Add), big(Shl))
+    }
+    call := fn(a: i64,
+        b: i64) -> i64 {
+            a * b
+        }
+    print(call(2, 3))
+}

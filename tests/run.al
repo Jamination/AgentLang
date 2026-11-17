@@ -23,6 +23,14 @@
 // tests/unit/NAME.al  is run with `alc test`; stdout must equal NAME.out (exit code from NAME.code)
 // tests/driver/NAME.sh is run with bash, the compiler as $1 and an empty scratch directory as
 //                     $2; it tests the command line (files, paths, exit codes) and must exit 0
+// tests/fmt/NAME.al   `alc fmt`: with NAME.fmt, the result of formatting NAME.al (in place,
+//                     --stdout and standard input) must be NAME.fmt byte for byte, and NAME.fmt
+//                     must not change again (--check); with NAME.err, NAME.al has a syntax
+//                     error: status 1, every line of NAME.err in the diagnostics, the file left
+//                     as it is
+// fmt/tree            tests/fmt/tree/check.al, built and run with the compiler and a scratch
+//                     directory: the guarantees of `alc fmt` on copies of every .al file of the
+//                     repository (see there); only where the compiler's target is this machine
 // NAME.flags          (run/, std/, sys/, fail/, check/) options for the compiler, e.g. `-D DEMO`
 // NAME.checked        (run/, std/, sys/) the program is not built with --unchecked
 // NAME.windows.err    (run/, std/, sys/) replaces NAME.err for --target windows
@@ -87,7 +95,7 @@ priv struct Config {
 
 priv cfg: Config
 
-priv enum Kind { Prog, Check, Fail, Unit, All, Driver }
+priv enum Kind { Prog, Check, Fail, Unit, All, Driver, Fmt, FmtTree }
 
 priv struct Job {
     kind: Kind
@@ -554,6 +562,75 @@ priv fn prog(j: Job, jd: str, r: *Res) {
     }
 }
 
+// a test of `alc fmt` (tests/fmt/NAME.al, see the top); base: the path without `.al`
+priv fn fmt_job(j: Job, jd: str, base: str, r: *Res) {
+    label := concat("fmt/", j.name)
+    src := slurp(j.src)
+    copy := path_join(jd, "x.al")
+    out := path_join(jd, "out")
+    err := path_join(jd, "err")
+    write_file(copy, src)
+    fn alc(args: []str) -> Vec[str] {
+        v := vec_of(cfg.alc)
+        v.push("fmt")
+        v.extend(args)
+        return v
+    }
+    problems := vec[str]()
+    if file_exists(concat(base, ".err")) {
+        // a syntax error: status 1, the diagnostics, the file as it was
+        st := exec(alc([]str{copy}).items(), "", out, err)
+        if st != 1 {
+            problems.push(fmt("exit status ", st, ", expected 1"))
+        }
+        if slurp(copy) != src {
+            problems.push("the file was changed")
+        }
+        if problems.is_empty() && !lines_present(r, label, "diagnostics lack", concat(base, ".err"), slurp(err), true) {
+            r.fail += 1
+            return
+        }
+    } else {
+        want := slurp(concat(base, ".fmt"))
+        // in place
+        st := exec(alc([]str{copy}).items(), "", out, err)
+        got := slurp(copy)
+        if st != 0 || got != want {
+            problems.push(fmt("in place: exit status ", st, "\n", head(slurp(err), 3), diff(want, got, 10)))
+        }
+        // --stdout and standard input
+        st = exec(alc([]str{"--stdout", j.src}).items(), "", out, err)
+        got = slurp(out)
+        if st != 0 || got != want {
+            problems.push(fmt("--stdout: exit status ", st, "\n", diff(want, got, 10)))
+        }
+        st = exec(alc([]str{"-"}).items(), j.src, out, err)
+        got = slurp(out)
+        if st != 0 || got != want {
+            problems.push(fmt("standard input: exit status ", st, "\n", diff(want, got, 10)))
+        }
+        // --check: the input is listed if it changes, the result is not
+        st = exec(alc([]str{"--check", j.src}).items(), "", out, err)
+        changes := src != want
+        if st != (if changes { 1 } else { 0 }) || (len(slurp(out)) > 0) != changes {
+            problems.push(fmt("--check of NAME.al: exit status ", st, ", output: ", slurp(out)))
+        }
+        write_file(copy, want)
+        st = exec(alc([]str{"--check", copy}).items(), "", out, err)
+        if st != 0 || len(slurp(out)) != 0 {
+            problems.push(fmt("not idempotent: --check of NAME.fmt: exit status ", st, ", output: ", slurp(out)))
+        }
+    }
+    if problems.is_empty() {
+        r.passed(label)
+        return
+    }
+    for p in problems {
+        r.say(fmt("FAIL ", label, ": ", trim_right(p, "\n")))
+    }
+    r.fail += 1
+}
+
 priv fn run_job(j: Job, index: i64) -> Res {
     r := Res{}
     if j.skipped {
@@ -660,6 +737,25 @@ priv fn run_job(j: Job, index: i64) -> Res {
                 r.fail += 1
             }
         }
+        Fmt => fmt_job(j, jd, base, &r)
+        FmtTree => {
+            check := path_join(jd, concat("check", cfg.exe))
+            build := vec_of(cfg.alc)
+            build.extend([]str{"build", j.src, "-o", check})
+            scratch := path_join(jd, "tree")
+            make_dir(scratch)
+            if exec(build.items(), "", out, out) != 0 {
+                r.say("FAIL fmt/tree: tests/fmt/tree/check.al does not build")
+                r.show(head(slurp(out), 5))
+                r.fail += 1
+            } else if exec([]str{check, cfg.alc[0], scratch}, "", out, out) == 0 {
+                r.passed("fmt/tree")
+            } else {
+                r.say("FAIL fmt/tree")
+                r.show(head(slurp(out), 10))
+                r.fail += 1
+            }
+        }
         Driver => {
             scratch := path_join(cfg.tmp, concat("driver_", j.name))
             make_dir(scratch)
@@ -760,6 +856,14 @@ priv fn collect() -> []Job {
     }
     for name in stems("tests/unit", ".al") {
         add(&jobs, &wskip, Unit, "tests/unit", name, ".al", true)
+    }
+    // `alc fmt`: the command (any target: it builds nothing), the whole tree (the compiler and
+    // the check program must run here)
+    for name in stems("tests/fmt", ".al") {
+        add(&jobs, &wskip, Fmt, "tests/fmt", name, ".al", true)
+    }
+    if cfg.win == HOST_WIN {
+        add(&jobs, &wskip, FmtTree, "tests/fmt", "tree", "/check.al", false)
     }
     // every target: the programs whose code differs per target (`when`), see the top
     if !cfg.win {
