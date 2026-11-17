@@ -5,11 +5,12 @@
 // One compile unit for the whole program (language C99, the closest a debugger knows: it
 // prints AL values as C structs), covering the code section; one subprogram per compiled
 // function with its parameters and variables (lexical blocks for the scopes of variables
-// declared inside blocks), and the types they need. The line table has one sequence per
-// function. Frames: .debug_frame describes the prologues and epilogues of the back end
-// (pushes, then one `sub rsp`; no frame pointer); the frame base of a function is its CFA on
-// Linux and rsp plus the frame size on Windows, where debuggers unwind with .pdata and not
-// with DWARF call frame information.
+// declared inside blocks), the functions inlined into it (inlined_subroutine, from the chains
+// of SrcLoc.parent), and the types they need. The line table has one sequence per function.
+// Frames: .debug_frame describes the prologues and epilogues of the back end (pushes, then
+// one `sub rsp`, on Windows the stack probe of a large frame; no frame pointer). The frame
+// base of a function is its CFA on Linux, and rsp plus the frame size on Windows, where gdb
+// unwinds with .pdata (DW_OP_call_frame_cfa needs a frame unwound by DWARF).
 //
 // AL types in DWARF: integers, f32 / f64 and bool are base types (u8 an unsigned char, so a
 // `*u8` prints as text), pointers, arrays (`[N]T`); a slice (`[]T`, `str`) is a struct
@@ -96,6 +97,7 @@ priv const AB_STRUCT_EMPTY = 19
 priv const AB_VARIANT_PART = 20
 priv const AB_VARIANT = 21
 priv const AB_TAG_MEMBER = 22
+priv const AB_INLINED = 23
 
 // the abbreviation table: (code, tag, children, [(attribute, form)])
 priv fn abbrevs() -> Vec[u8] {
@@ -139,6 +141,7 @@ priv fn abbrevs() -> Vec[u8] {
     one(&a, AB_VARIANT, DW_TAG_variant, true, []i64{DW_AT_discr_value, DW_FORM_udata})
     one(&a, AB_TAG_MEMBER, DW_TAG_member, false, []i64{DW_AT_name, DW_FORM_strp, DW_AT_type, DW_FORM_ref4, DW_AT_data_member_location, DW_FORM_udata,
         DW_AT_artificial, DW_FORM_flag_present})
+    one(&a, AB_INLINED, 0x1d, true, []i64{DW_AT_name, DW_FORM_strp, 0x58, DW_FORM_udata, 0x59, DW_FORM_udata, DW_AT_ranges, DW_FORM_sec_offset})
     a.push(0)
     return a
 }
@@ -473,6 +476,81 @@ priv fn scope_die(d: *Dw, sc: *Vec[DbgScope], s: i64, rows: *Vec[DbgRow], at: i6
     }
 }
 
+// a function inlined into the code being described: the call it was inlined at (a location),
+// the function, its code (runs of offsets) and the functions inlined into it
+priv struct Inl {
+    call: i64
+    fid: i64
+    runs: Vec[(i64, i64)]
+    kids: Vec[i64]
+}
+
+// The functions inlined into a function at address `at` of `size` bytes, from the locations of
+// its rows: a row of inlined code has a location whose chain of calls (SrcLoc.parent) leads
+// out to a line of the function; each call of the chain is an inlined_subroutine (named like
+// the function, with the call's file and line) whose ranges are the code of all such rows.
+priv fn inlined(d: *Dw, rows: *Vec[DbgRow], at: i64, size: i64) {
+    locs := &d.m.locs.list
+    nodes := vec_one(Inl{call: 0, fid: -1})
+    key := map[(i64, i64), i64]()
+    chain := vec[(i64, i64)]()
+    for k, r in *rows {
+        if r.loc <= 0 || locs[r.loc].parent == 0 {
+            continue
+        }
+        start := r.off
+        end := if k + 1 < rows.len { rows[k + 1].off } else { size }
+        if end <= start {
+            continue
+        }
+        // the calls from the outside in: (call location, the function inlined there)
+        chain.clear()
+        l := r.loc
+        while l > 0 && locs[l].parent != 0 && chain.len < 64 {
+            chain.push((i64(locs[l].parent), i64(locs[l].func)))
+            l = i64(locs[l].parent)
+        }
+        n := 0
+        for i in chain.len - 1..=0 by -1 {
+            c, f := chain[i]
+            next, found := key.get((n, c))
+            if !found {
+                next = nodes.len
+                nodes.push(Inl{call: c, fid: f})
+                nodes[n].kids.push(next)
+                key.set((n, c), next)
+            }
+            n = next
+            runs := &nodes[n].runs
+            if !runs.is_empty() && runs[runs.len - 1].1 == start {
+                runs[runs.len - 1].1 = end
+            } else {
+                runs.push((start, end))
+            }
+        }
+    }
+    fn emit(d: *Dw, nodes: *Vec[Inl], n: i64, at: i64) {
+        for c in nodes[n].kids {
+            x := &nodes[c]
+            cl := &d.m.locs.list[x.call]
+            uleb(&d.info, AB_INLINED)
+            strp(d, dbg_fn_name(d.m, x.fid))
+            uleb(&d.info, file_num(d, i64(cl.file)))
+            uleb(&d.info, i64(cl.line))
+            put32(&d.info, d.ranges.len)
+            for r in x.runs {
+                put64(&d.ranges, at + r.0 - d.text_lo)
+                put64(&d.ranges, at + r.1 - d.text_lo)
+            }
+            put64(&d.ranges, 0)
+            put64(&d.ranges, 0)
+            emit(d, nodes, c, at)
+            d.info.push(0)
+        }
+    }
+    emit(d, &nodes, 0, at)
+}
+
 // the subprogram of compiled function fid at address `at`
 priv fn fn_die(d: *Dw, fid: i64, code: *Code, at: i64, rows: *Vec[DbgRow]) {
     m := d.m
@@ -502,6 +580,7 @@ priv fn fn_die(d: *Dw, fid: i64, code: *Code, at: i64, rows: *Vec[DbgRow]) {
     }
     sc := dbg_scopes(code)
     scope_die(d, &sc, 0, rows, at, code.bytes.len)
+    inlined(d, rows, at, code.bytes.len)
     d.info.push(0)
 }
 

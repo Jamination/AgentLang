@@ -88,6 +88,7 @@ struct DbgRow {
     file: i64
     line: i64
     own: bool // a line of the function itself (not of code inlined into it)
+    loc: i64  // the source location (Module.locs; 0: none)
 }
 
 // the rows of the code of compiled function fid0 (consecutive locations of one line are one
@@ -103,10 +104,10 @@ fn dbg_rows(m: *Module, fid0: i64, code: *Code) -> Vec[DbgRow] {
             continue
         }
         s := &m.locs.list[l]
-        r := DbgRow{off: if rows.is_empty() { 0 } else { o }, file: i64(s.file), line: i64(s.line), own: s.parent == 0 && i64(s.func) == fid}
+        r := DbgRow{off: if rows.is_empty() { 0 } else { o }, file: i64(s.file), line: i64(s.line), own: s.parent == 0 && i64(s.func) == fid, loc: l}
         if !rows.is_empty() {
             last := &rows[rows.len - 1]
-            if last.file == r.file && last.line == r.line {
+            if last.loc == r.loc || last.own && r.own && last.file == r.file && last.line == r.line {
                 continue
             }
             if last.off == r.off {
