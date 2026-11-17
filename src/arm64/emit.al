@@ -210,7 +210,8 @@ priv fn mem_base(self: *Enc, i: *AInst) -> (i64, i64) {
     f := self.fr
     match i.k {
         AK_SLOT => return (31, f.slot_off[i.id] + i.imm)
-        AK_INARG => return (31, f.rest + 16 + 8 * i64(i.id) + i.imm)
+        // (a function without a frame leaves sp at the entry value: the arguments start there)
+        AK_INARG => return (31, (if f.has { f.rest + 16 } else { 0 }) + 8 * i64(i.id) + i.imm)
         AK_OUTARG => return (31, 8 * i64(i.id) + i.imm)
         _ => return (x(i.n), i.imm)
     }
@@ -495,7 +496,29 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             }
         }
         Scvtf => self.put(a64_scvtf(if i.k == 8 { 1 } else { 0 }, ftype(i.sz), x(i.d), x(i.n)))
-        Fcvtzs => self.put(a64_fcvtzs(s, if i.k == 8 { 1 } else { 0 }, x(i.d), x(i.n)))
+        Fcvtzs => {
+            // the x86-64 result (cvttsd2si, which the constant folder follows too): NaN and
+            // values out of range give the "integer indefinite" 0x8000..., where FCVTZS
+            // saturates and gives 0 for NaN. The conversion is done in 64 bits, then checked.
+            d := x(i.d)
+            n := x(i.n)
+            ft := if i.k == 8 { 1 } else { 0 }
+            self.put(a64_fcvtzs(1, ft, d, n))
+            self.put(a64_fcmp(ft, n, n)) // V: unordered (NaN)
+            if i.sz == 8 {
+                self.put(a64_movw(1, 2, 16, 0x8000, 3)) // x16 = 0x8000000000000000
+                self.put(a64_csel(1, 0, d, 16, d, A64_VS))
+                self.put(a64_add_imm(1, true, false, 17, 16, 1, false)) // x17 = 0x7FFF...F
+                self.put(a64_add_reg(1, true, true, 31, d, 17, A64_LSL, 0))
+                self.put(a64_csel(1, 0, d, 16, d, A64_EQ)) // saturated above
+            } else {
+                self.put(a64_movw(1, 2, 16, 0x8000, 1)) // x16 = 0x80000000
+                self.put(a64_csel(1, 0, d, 16, d, A64_VS))
+                self.put(a64_bfm(1, 0, 17, d, 0, 31)) // x17 = sxtw(w d)
+                self.put(a64_add_reg(1, true, true, 31, 17, d, A64_LSL, 0))
+                self.put(a64_csel(1, 0, d, 16, d, A64_NE)) // not a 32-bit value
+            }
+        }
         FmovToV => self.put(a64_fmov_gen(s, true, x(i.d), x(i.n)))
         FmovToX => self.put(a64_fmov_gen(s, false, x(i.d), x(i.n)))
         DupV => self.put(a64_dup4s(x(i.d), x(i.n), i64(i.sh)))
