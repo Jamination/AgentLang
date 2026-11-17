@@ -52,6 +52,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   SPIR-V at run time works for Vulkan games on Windows. As on Linux, a program that calls
   shaderc does not start without the library; ship the DLL next to the `.exe`.
   (`shaderc_compile_options_set_max_id_bound` is missing from the DLL of Vulkan SDK 1.4.304.)
+- `alc build -g` (also `run` and `test`): debug information. DWARF 4 in Linux and Windows
+  executables (lines, functions, parameters and variables with their scopes, types, globals,
+  inlined calls, call frames), and on Windows a `.pdb` next to the executable for Visual
+  Studio, WinDbg and profilers. At `-O0 -g` every statement can be stepped and every variable
+  is visible; with optimisation `-g` does not change the code (variables kept in registers are
+  not described). See [DETAILS.md](docs/DETAILS.md#debug-information).
 - `alc fmt`: rewrites source files in the one canonical layout, changing white space only
   (`--check` lists the files that would change, `--stdout` and `-` for filters); a file with a
   syntax error is left as it is. See [DETAILS.md](docs/DETAILS.md#alc-fmt).

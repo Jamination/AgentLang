@@ -9,8 +9,8 @@ C interop, programs for Windows, and the grammar.
 Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
 [Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Debug information](#debug-information) · [Regions](#regions) ·
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 

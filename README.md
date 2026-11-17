@@ -65,7 +65,7 @@ verify.bat                          :: Windows: build.bat, the tests, VERIFY: PA
 
 | Command | |
 |---|---|
-| `alc build file.al` | compile to an executable (`-o path`, `-O0`, `--unchecked`) |
+| `alc build file.al` | compile to an executable (`-o path`, `-O0`, `--unchecked`, `-g` for debuggers and profilers: DWARF; on Windows also a `.pdb`) |
 | `alc run file.al` | build and run |
 | `alc test file.al` | run the file's `test` blocks |
 | `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
