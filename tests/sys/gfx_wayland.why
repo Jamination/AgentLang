@@ -1,0 +1,1 @@
+weston (the test starts its own headless compositor), a writable XDG_RUNTIME_DIR, libwayland-client.so.0, libxkbcommon.so.0 or libvulkan.so.1 is missing. Note: gfx_wayland.out is the PREDICTED output of std.gfx on the experimental Wayland backend; it has never been produced by a real run

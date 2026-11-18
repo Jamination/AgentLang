@@ -20,7 +20,7 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   (`tests/arm64/emu.al`; `tests/run.sh --target linux-arm64 --emu build/a64emu`), not yet on
   arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g`, `extern` C functions,
   and the modules that make system calls by their x86-64 numbers (`std.net`, the gamepads of
-  `std.input`), which are refused with a message.
+  `std.input`, the Wayland backend of `std.window`), which are refused with a message.
 - The compiler builds for arm64 Linux (experimental, as above):
   `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`.
 - `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a
@@ -80,8 +80,24 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - tests: `NAME.windows.need` lists the DLLs a Windows test program needs; one that is not in a
   directory of PATH makes the test a SKIP (`NAME.windows.why`). `tests/sys/shaderc` runs on
   Windows.
+- `std.window` (experimental, opt-in, not yet verified on a real session): a Wayland backend
+  on Linux, used only on request: `WindowDesc.display` `"wayland"` or `"wayland:<socket>"`, or
+  `ALC_WINDOW=wayland` in the environment (`ALC_WINDOW=x11` forces X11). By default nothing
+  changes, except that a program with no X display to open and `$WAYLAND_DISPLAY` set now tries
+  Wayland instead of failing. `wayland_display(w)` / `wayland_surface(w)` give the handles for
+  `VK_KHR_wayland_surface`; integer buffer scales; xdg-shell, server-side decorations where
+  offered, xkbcommon keys and text, relative pointer and pointer lock. The checklist for a real
+  session is in docs/std/window.md (Wayland).
+- `std.gfx` on a Wayland window of std.window (experimental, never run on a compositor yet):
+  the Vulkan backend creates a `VK_KHR_wayland_surface` surface, makes the swapchain the
+  window's pixel size (surface size times buffer scale) and follows its configure events; X11
+  windows are unchanged. The checklist is in docs/std/gfx.md (Wayland).
 
 ### Changed
+- `std.wayland`: the generated functions (requests, listeners, interface tables) load
+  libwayland-client with `dlopen` on first use (`wl_client_lib()`, `wl_client_interface(name)`)
+  instead of linking it, so a program that uses only them (std.window does) needs `libdl.so.2`
+  and starts without libwayland; calling its `extern` functions still links the library.
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a
   step computed at run time (`by s`) move out of the loop where the bound allows it, and a
   check that does not change in a loop and comes first in it is made once before the loop.
