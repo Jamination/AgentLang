@@ -18,3 +18,4 @@ sys/vk_triangle an X11 window and Vulkan surface (Linux); its prerequisite check
 fail/extern on Windows extern functions may take and return structs (Microsoft x64): other diagnostics
 sys/vk_renderer needs a Vulkan driver, which Wine does not have; its prerequisite check is a Linux command (on Windows: alc run examples/vk_renderer/offscreen.al)
 sys/vk_present std.wayland is Linux only
+fail/extern_arm64 the diagnostics of the arm64 C convention (structs by value, function values): Windows passes structs by its own rules

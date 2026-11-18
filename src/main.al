@@ -9,6 +9,7 @@ use "lower.al"
 use "lower_fn.al"
 use "lower_expr.al"
 use "lower_call.al"
+use "lower_ccall.al"
 use "lower_vec.al"
 use "lower_nested.al"
 use "lint.al"
@@ -27,6 +28,8 @@ use "opt/simplify.al"
 use "opt/spec.al"
 use "opt/tre.al"
 use "opt/unroll.al"
+use "spread.al"
+use "regalloc.al"
 use "x86/mir.al"
 use "x86/isel.al"
 use "x86/regalloc.al"
@@ -40,6 +43,7 @@ use "arm64/emit.al"
 use "arm64/mod.al"
 use "arm64/backtrace.al"
 use "elf_arm64.al"
+use "macho.al"
 use "elf.al"
 use "pe.al"
 use "backtrace.al"
@@ -61,6 +65,7 @@ priv const PRELUDE = embed("prelude.al")
 priv const PRELUDE_LINUX = embed("prelude_linux.al")
 priv const PRELUDE_WINDOWS = embed("prelude_windows.al")
 priv const PRELUDE_LINUX_ARM64 = embed("prelude_linux_arm64.al")
+priv const PRELUDE_MACOS = embed("prelude_macos.al")
 
 // bundled modules that only exist for Linux: what a program built for Windows can use instead
 priv const LINUX_ONLY = [_](str, str){
@@ -72,7 +77,7 @@ priv const LINUX_ONLY = [_](str, str){
 // the operating system the executable is built for (`--target linux|windows`); the default
 // is the one the compiler runs on (parse_args). Read by the back end (calling convention,
 // frames), the linker (ELF or PE) and wherever the run-time library is chosen.
-enum TargetOs { TargetLinux, TargetWindows }
+enum TargetOs { TargetLinux, TargetWindows, TargetMacOS }
 
 target_os: TargetOs
 // the processor (`--target linux-arm64`: AArch64, src/arm64 and src/elf_arm64.al)
@@ -126,6 +131,7 @@ priv const STD_MODULES = [_](str, str){
     ("gfx_dx12", embed("../std/gfx_dx12.al")),
     ("gfx_vk", embed("../std/gfx_vk.al")),
     ("gfx_shaders", embed("../std/gfx_shaders.al")),
+    ("gfx_text", embed("../std/gfx_text.al")),
 }
 
 // modules that are loaded into every program
@@ -281,7 +287,7 @@ priv fn usage(why: str) -> never {
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
         concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                static AArch64, see docs/ARM64_TEST.md)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
 
@@ -351,7 +357,7 @@ priv fn parse_args() -> Args {
             "--target" => {
                 i += 1
                 if i >= av.len {
-                    usage("--target needs an operating system: linux, windows or linux-arm64")
+                    usage("--target needs an operating system: linux, windows, linux-arm64 or macos")
                 }
                 a.target_set = true
                 match av[i] {
@@ -363,11 +369,15 @@ priv fn parse_args() -> Args {
                         target_os = TargetWindows
                         target_arch = ArchX86_64
                     }
+                    "macos" => {
+                        target_os = TargetMacOS
+                        target_arch = ArchArm64
+                    }
                     "linux-arm64" => {
                         target_os = TargetLinux
                         target_arch = ArchArm64
                     }
-                    _ => usage(fmt("unknown target ", av[i], " (linux, windows or linux-arm64)"))
+                    _ => usage(fmt("unknown target ", av[i], " (linux, windows, linux-arm64 or macos)"))
                 }
             }
             "--json" => json = true
@@ -415,7 +425,7 @@ priv fn parse_args() -> Args {
         usage("")
     }
     if dbg_on && target_arch == ArchArm64 {
-        usage("-g: debug information is not written for --target linux-arm64 yet (only x86-64: DWARF on Linux, PDB on Windows)")
+        usage(fmt("-g: debug information is not written for --target ", if target_os == TargetMacOS { "macos" } else { "linux-arm64" }, " yet (only x86-64: DWARF on Linux, PDB on Windows)"))
     }
     if (pe_gui || len(icon) != 0 || !pe_version.is_empty()) && target_os != TargetWindows {
         usage(fmt(if pe_gui { "--gui" } else if len(icon) != 0 { "--icon" } else { "--version-info" }, " is for Windows executables: add --target windows"))
@@ -512,6 +522,11 @@ priv fn register_all(self: *Sources) {
 priv fn add_text(self: *Sources, name: str, text: str, dir: Opt[str], lib: bool) -> i64 {
     file := self.names.len
     self.names.push(name)
+    if dbg_on {
+        // (-g: the PDB's checksums of the source files)
+        dbg_texts.resize(file + 1, "")
+        dbg_texts[file] = text
+    }
     toks := lexer_lex(text, file, &self.errs)
     has_when := false
     for t in toks {
@@ -535,11 +550,11 @@ priv fn use_file(self: *Sources, file: i64, path: str, pos: Pos, out: *Vec[Item]
     if starts_with(path, "std:") {
         mname := path[4..]
         // (once, where the program asks for it: not again for the modules it uses)
-        if target_os == TargetWindows && is_some(dir) {
+        if (target_os == TargetWindows || target_os == TargetMacOS) && is_some(dir) {
             for lo in LINUX_ONLY {
                 if lo.0 == mname {
                     more := if len(lo.1) == 0 { "" } else { fmt("; ", lo.1) }
-                    self.errs.push(Diag{pos: pos, msg: fmt("module `std.", mname, "` is not available for --target windows (it uses Linux system interfaces)", more)})
+                    self.errs.push(Diag{pos: pos, msg: fmt("module `std.", mname, "` is not available for --target ", if target_os == TargetMacOS { "macos" } else { "windows" }, " (it uses Linux system interfaces)", more)})
                 }
             }
         }
@@ -863,7 +878,7 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     prelude := PRELUDE
     layer_name, layer := if target_os == TargetWindows { ("prelude_windows.al", PRELUDE_WINDOWS) } else { ("prelude_linux.al", PRELUDE_LINUX) }
     if target_arch == ArchArm64 {
-        layer_name, layer = ("prelude_linux_arm64.al", PRELUDE_LINUX_ARM64)
+        layer_name, layer = if target_os == TargetMacOS { ("prelude_macos.al", PRELUDE_MACOS) } else { ("prelude_linux_arm64.al", PRELUDE_LINUX_ARM64) }
     }
     pre_path, pre_set := env_get("ALC_PRELUDE")
     if pre_set {
@@ -936,6 +951,34 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool, need_main: bool)
             }
             _ => {
                 decls.push(d)
+            }
+        }
+    }
+    if has_c {
+        // an OS layer with `__os_c_thread_create` / `__os_c_thread_join` (src/prelude_linux_arm64.al):
+        // a program that declares C functions makes its threads with those (the C library's),
+        // which call the layer's own as `__os_clone_thread_*`; other programs never see them
+        has_twin := false
+        for d in decls {
+            match d {
+                Fn(f) if f.name == "__os_c_thread_create" => has_twin = true
+                _ => {}
+            }
+        }
+        if has_twin {
+            for i in 0..decls.len {
+                match decls[i] {
+                    Fn(&f) => {
+                        for w in []str{"create", "join"} {
+                            if f.name == fmt("__os_thread_", w) {
+                                f.name = fmt("__os_clone_thread_", w)
+                            } else if f.name == fmt("__os_c_thread_", w) {
+                                f.name = fmt("__os_thread_", w)
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -1133,7 +1176,7 @@ priv fn real_main() -> i64 {
                 if ends_with(mname, "_linux") {
                     mname = mname[..len(mname) - 6]
                 }
-                driver_error(ar.input, fmt("module `std.", mname, "` makes Linux system calls by their x86-64 numbers: it is not available for --target linux-arm64 yet"))
+                driver_error(ar.input, fmt("module `std.", mname, "` makes Linux system calls by their x86-64 numbers: it is not available for --target ", if target_os == TargetMacOS { "macos" } else { "linux-arm64" }, " yet"))
                 return 1
             }
         }
@@ -1196,7 +1239,7 @@ priv fn real_main() -> i64 {
             dbg_pdb_path = replace(dbg_pdb_path, "/", "\\")
         }
     }
-    bytes, link_err := if target_arch == ArchArm64 { elf_arm64_link(&module, &aout) } else if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
+    bytes, link_err := if target_os == TargetMacOS { macho_link(&module, &aout, path_file_name(out_path).or("a.out")) } else if target_arch == ArchArm64 { elf_arm64_link(&module, &aout) } else if target_os == TargetWindows { pe_link(&module, &out) } else { elf_link(&module, &out) }
     if len(link_err) != 0 {
         driver_error(ar.input, link_err)
         return 1
@@ -1221,6 +1264,10 @@ priv fn real_main() -> i64 {
     if ar.cmd == "run" || ar.cmd == "test" {
         if target_os == TargetWindows && TARGET_OS != Windows {
             return run_windows(out_path, ar.rest.items())
+        }
+        if target_os == TargetMacOS {
+            driver_error(out_path, fmt("built `", out_path, "`, a macOS executable, which cannot run here"))
+            return 1
         }
         if target_os == TargetLinux && TARGET_OS == Windows {
             driver_error(out_path, fmt("built `", out_path, "`, a Linux executable, which cannot run on Windows"))
@@ -1300,6 +1347,6 @@ priv t0: i64
 priv fn mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
-        eput(fmt("[mem] ", phase, ": ", (mem_used() + x86_thread_mem()) >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
+        eput(fmt("[mem] ", phase, ": ", (mem_used() + spread_thread_mem()) >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
     }
 }

@@ -4,8 +4,8 @@
 [std.image](image.md) images (also one-channel coverage, for font atlases), sprites with a
 source rectangle, rotation, origin and tint, filled rectangles, lines, triangles with a colour
 per corner, alpha and additive blending, a 2D transform (camera, virtual resolution), scissor,
-render textures. Draws are batched: consecutive draws with the same texture and state become
-one draw call.
+render textures; TrueType text with `use std.gfx_text` ([Text](#text)). Draws are batched:
+consecutive draws with the same texture and state become one draw call.
 
 One API, a backend per target that the program never names: **Direct3D 12** on Windows
 (`std/gfx_dx12.al`, derived from `examples/gamekit/dx12_gpu.al`), **Vulkan 1.3** on Linux
@@ -118,7 +118,10 @@ enum Filter { FilterNearest, FilterLinear }
 | `read_pixels(g) -> Image` | the screen of a `gfx_offscreen` renderer |
 | `free_texture(g, t)` | waits for the GPU and releases it; not during a frame |
 
-Filtering clamps at the edges. There are no mipmaps.
+Filtering clamps at the edges. There are no mipmaps. With straight alpha the linear filter
+mixes the colour of transparent texels into the edges of what is drawn: give them the colour
+of their neighbours, not black (std.font's 4-channel atlases are white in every pixel; a
+coverage texture has no colour to mix).
 
 ## Drawing
 
@@ -134,9 +137,83 @@ All between `begin_frame` and `end_frame`, in painter's order.
 | `triangle(g, a, b, c: vec2, ca, cb, cc: u32)` | a colour per corner, interpolated |
 | `clear(g, color)` | fills the whole current target (also outside the scissor) |
 
-Text is std.font's (a separate module): its glyph atlas is an image with per-glyph rectangles,
-uploaded with `texture` and drawn with `sprite(g, atlas, glyph_rect, dst, colour)`; a
-one-channel (coverage) atlas takes the colour of the tint.
+Text: [below](#text), `std.gfx_text`.
+
+## Text
+
+`use std.gfx_text` beside `use std.gfx` (or `use std.gfx_vk`): TrueType text from
+[std.font](font.md), drawn through the batcher. A separate module, so that a game without text
+carries none of the font code (a std.gfx program is as large with `use std.gfx_text` as
+without until it calls it: 74,240 bytes for a small offscreen program on Windows, 156,160 with
+a font and `draw_text`), and std.font stays usable without a GPU.
+
+```
+use std.gfx
+use std.gfx_text
+
+f, err := font_load("C:/Windows/Fonts/segoeui.ttf")         // std.font; font_parse(embed("x.ttf"))
+font, _ := gfx_font(g, f, 16.0, char_range(32, 126))       // once, at load time
+...
+g.draw_text(font, 8.0, 8.0, fmt("Score ", score), 0xFFFFFFFF)        // every frame
+g.draw_text(font, f32(g.width) - 8.0, 8.0, "HP 3", 0xFF40E0FF, AlignRight)
+g.draw_text_box(font, vec4(40.0, 100.0, 300.0, 0.0), story, 0xFFC0C0C0, AlignLeft)
+```
+
+```
+struct GfxFont { atlas: Atlas, tex: Texture, size: f32, filter: Filter, ... }   // a value to keep and copy
+enum TextAlign { AlignLeft, AlignCenter, AlignRight }
+```
+
+| Function | |
+|---|---|
+| `gfx_font(g, f: Font, px: f32, chars: []i64) -> (GfxFont, str)` | rasterises the characters (those the font has) at an em size of `px` pixels into a one-channel atlas (std.font's `atlas_build`, as wide as needed) and uploads it as a coverage texture, linear filter. `""` or what is wrong (a size of 0 or above 2048) |
+| `gfx_font(g, a: Atlas, filter) -> GfxFont` | from an atlas of your own (1 or 4 channels) |
+| `gfx_font_add(g, &font, chars) -> str` | puts more characters in: a new atlas and texture (the old one is freed: not during a frame) |
+| `gfx_font_free(g, font)` | frees the texture (not during a frame) |
+| `draw_text(g, font, x, y, text, color: u32)` | UTF-8 text, `'\n'` breaks lines; (x, y) is the top left corner of the first line, whose baseline is the font's ascent below y; kerning from the font |
+| `draw_text(g, font, x, y, text, color, align)` | x is the left end, the centre or the right end of every line |
+| `draw_text_box(g, font, r: vec4, text, color, align) -> f32` | wrapped into the width of r (at `'\n'` and spaces; a word wider than the box between characters: std.font's `wrap_text`), lines aligned in it from its top; lines that would reach below r are not drawn (a height of 0: no limit). Returns the height of the lines drawn |
+| `text_size(font, text) -> (f32, f32)` | the widest line and the number of lines times the line height, as `draw_text` draws it |
+| `text_size(font, text, max_w) -> (f32, f32)` | the same wrapped to `max_w`, as `draw_text_box` draws it |
+| `line_height(font) -> f32` | baseline to baseline |
+
+**Characters.** A GfxFont has a fixed set of characters; one outside it (or one the font does
+not have) is drawn as the font's missing glyph, glyph 0 (usually a box), with that glyph's
+advance. Glyphs are not added on demand while drawing: that would rasterise (allocate) and
+upload (wait for the GPU) in the middle of a frame, and an atlas that grows inside
+`frame_begin()` / `frame_end()` would grow into the frame's scratch memory and be gone after it.
+Text known only at run time (a player's name, a chat line) goes through `gfx_font_add` between
+frames; a set for a language is given at load time (`char_range(32, 126)` and
+`char_range(160, 255)` for Western European text).
+
+**Pixels.** The pen position of every glyph is rounded to a whole pixel of the target, after
+the transform, when the transform only scales and moves (also under `set_view`); each glyph
+quad then starts on a pixel corner and, at the font's own size, every texel lands on one
+pixel: the text is exactly std.font's `draw_text(&img, atlas, ...)` of the same string (see
+Tests). Under a turned transform the pens are not rounded and the glyphs are filtered.
+
+**Size and scaling.** A GfxFont is rasterised at one pixel size, `font.atlas.px`. It is drawn
+at `font.size` units of the current transform (`px` at first). Drawn larger, by a scaled
+`set_view` or `set_transform` or by a larger `size`, its glyphs are magnified by the texture
+filter: soft with `FilterLinear`, blocky with `FilterNearest`. For sharp text in a virtual
+resolution, rasterise at the size the text has on the screen and draw at the virtual size:
+
+```
+view := g.set_view(320.0, 180.0)                              // scale view.x.x, e.g. 3.0 in 960 x 540
+hud, _ = gfx_font(g, f, 10.0 * view.x.x, char_range(32, 126)) // when the scale changes, between frames
+hud.size = 10.0                                               // 10 virtual pixels, 30 rasterised
+```
+
+`examples/gfx_starter` does this (it makes its fonts anew in a Region when the window's size
+changes). HiDPI works the same way: `g.width` / `g.height` are physical pixels, so text drawn
+without a transform is drawn at `px` physical pixels; multiply `px` by the display's scale
+for text of the same apparent size.
+
+**Memory and batching.** `draw_text`, `draw_text_box` and `text_size` allocate nothing (UTF-8
+is decoded in place, glyphs are looked up in the atlas, wrapping is computed line by line), so
+they sit inside a frame's `frame_begin()` / `frame_end()` with the `fmt` that builds the text.
+All text of one GfxFont is one texture: with nothing else in between, it is one draw call.
+`gfx_font` and `gfx_font_add` allocate the atlas (keep it out of the frame's scratch memory).
 
 ## State
 
@@ -213,6 +290,19 @@ byte-identical when nothing changed.
 - `tests/sys/gfx_vulkan.al`: the same scene on the Vulkan backend with the validation layer
   (synchronization validation on); every message fails the test. On Windows its frame is
   byte-identical to the Direct3D 12 frame on the same GPU.
+- `tests/unit/gfx_text.al`: std.gfx_text without a GPU (glyph quads with kerning, measuring
+  and wrapping against std.font, alignment, box height, missing glyphs, size against raster
+  size, rounding to target pixels, no allocation while drawing, `gfx_font_add`).
+- `tests/sys/gfx_text.al` (the backend of the target, first device and WARP) and
+  `gfx_text_vk.al` (Vulkan, validation layer on): text drawn offscreen and compared per pixel
+  with std.font drawing the same string into an image: kerning, a wrapped paragraph, right
+  and centred lines, non-ASCII characters (composites, a code point above U+FFFF), missing
+  glyphs, `gfx_font_add`, a `set_view` scaled by 2 (a 24-pixel font at size 12), and white
+  text from a 4-channel atlas on white under a linear filter (no dark fringe). On Windows 11
+  with a Radeon 780M the largest difference is 1 of 255 (blending rounding; 0 with WARP),
+  against std.font with the atlas and, where every pen is on a whole pixel, with the font's own
+  subpixel rasteriser too; the Direct3D 12 and Vulkan frames are byte-identical; 0 validation
+  messages.
 - `tests/sys/gfx_window.al`, `gfx_window_vk.al`: a window, frames with and without vsync,
   fullscreen and back with the swap chain following (Windows; on Linux they would need an X
   display). `tests/sys/gfx_starter.al`: the example for 60 frames.

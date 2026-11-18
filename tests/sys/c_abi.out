@@ -1,0 +1,26 @@
+ints9 ok
+floats10 ok
+mixed18 ok
+not false true
+neg8 100 inc16 65001 half 2.5
+twice 42 6
+hfa_regs ok
+hfa_spill ok
+composite_spill ok
+small_structs ok
+big_structs ok
+big_structs copies 1 10
+ret_f3 1.5 2.5 3.5 ret_d4 3.0 6.0 9.0 12.0 ret_d1 3.5 ret_f2 2.5 -2.5
+ret_i3 3 4 5 ret_c3 -7 -6 -5 ret_m 3 6 9
+ret_fi 3.25 3 ret_dl 3.75 -3 ret_big 3 4 5
+va_hash ok
+va_hash many ok
+call_ints ok
+call_floats ok
+call_mixed ok
+call_narrow ok
+saved_regs ok
+saved_regs result ok
+sp_mod16 ok
+abi_counter 5
+abi_counter 8 8

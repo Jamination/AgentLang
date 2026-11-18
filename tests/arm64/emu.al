@@ -581,12 +581,17 @@ priv fn step(t: *Th) -> bool {
             a := sreg(t, rn) + ((w >> 10) & 0xFFF) * bytes
             access(t, a, bytes, rt_of(w), v, load, ext)
         } else if (w >> 24) & 3 == 0 && (w >> 21) & 1 == 1 && (w >> 10) & 3 == 2 {
-            // register offset (LSL or UXTX only)
+            // register offset: UXTW, LSL (UXTX), SXTW, SXTX
             opt := (w >> 13) & 7
-            if opt != 3 {
+            if opt != 2 && opt != 3 && opt != 6 && opt != 7 {
                 unknown(t, w)
             }
             off := creg(t, rm)
+            if opt == 2 {
+                off = off & 0xFFFF_FFFF
+            } else if opt == 6 {
+                off = sx(off & 0xFFFF_FFFF, 32)
+            }
             if (w >> 12) & 1 == 1 {
                 off = off << i64(ctz(u64(bytes)))
             }
@@ -757,6 +762,13 @@ priv fn step(t: *Th) -> bool {
         t.pc = if (x != 0) == nz { t.pc + 4 * sx((w >> 5) & 0x7FFFF, 19) } else { next }
         return true
     }
+    if w & 0x7E000000 == 0x36000000 {
+        // TBZ, TBNZ (in C code)
+        bit := ((w >> 31) & 1) << 5 | (w >> 19) & 31
+        nz := (w >> 24) & 1 == 1
+        t.pc = if ((creg(t, rd) >> bit) & 1 != 0) == nz { t.pc + 4 * sx((w >> 5) & 0x3FFF, 14) } else { next }
+        return true
+    }
     match w & 0xFFFFFC1F {
         0xD61F0000 => {
             t.pc = creg(t, rn)
@@ -783,11 +795,17 @@ priv fn step(t: *Th) -> bool {
             r := addf(t, creg(t, rn), b, sub, sf, setf)
             setr(t, rd, r, sf)
         } else {
-            // extended register: UXTX / LSL #0 only
-            if (w >> 10) & 0x3F != 0x18 {
+            // extended register: Rm extended by option (UXTB, UXTH, UXTW, UXTX, SXTB, SXTH, SXTW,
+            // SXTX), then shifted left by imm3 (0-4)
+            opt := (w >> 13) & 7
+            amt := (w >> 10) & 7
+            if amt > 4 {
                 unknown(t, w)
             }
-            r := addf(t, sreg(t, rn), creg(t, rm), sub, sf, setf)
+            m := creg(t, rm)
+            bits := 8 << (opt & 3)
+            m = if bits < 64 { if opt >= 4 { sx(m, bits) } else { m & ones(bits) } } else { m }
+            r := addf(t, sreg(t, rn), m << amt, sub, sf, setf)
             if setf {
                 setr(t, rd, r, sf)
             } else {
@@ -1003,6 +1021,46 @@ priv fn step(t: *Th) -> bool {
         t.pc = next
         return true
     }
+    // ---- FMADD, FMSUB, FNMADD, FNMSUB (in C code; computed as a product and a sum, rounded
+    // twice where the hardware rounds once: exact whenever the product is) ----
+    if w & 0xFF000000 == 0x1F000000 && (w >> 22) & 3 < 2 {
+        dbl := (w >> 22) & 1 == 1
+        ra := (w >> 10) & 31
+        neg_p := (w >> 15) & 1 == 1
+        neg_a := (w >> 21) & 1 == 1
+        if dbl {
+            p := f64of(t.vlo[rn]) * f64of(t.vlo[rm])
+            a := f64of(t.vlo[ra])
+            setv(t, rd, b64((if neg_a { -a } else { a }) + (if neg_p != neg_a { -p } else { p })))
+        } else {
+            p := f32of(t.vlo[rn]) * f32of(t.vlo[rm])
+            a := f32of(t.vlo[ra])
+            setv(t, rd, b32((if neg_a { -a } else { a }) + (if neg_p != neg_a { -p } else { p })))
+        }
+        t.pc = next
+        return true
+    }
+    // ---- conversions with a fixed point (FCVTZS, SCVTF: in C code) ----
+    if w & 0x7F200000 == 0x1E000000 && (w >> 22) & 3 < 2 {
+        dbl := (w >> 22) & 1 == 1
+        fbits := 64 - ((w >> 10) & 0x3F)
+        scale: f64 = 1.0
+        for _ in 0..fbits {
+            scale *= 2.0
+        }
+        kind := (w >> 16) & 31
+        if kind == 0x18 {
+            a := if dbl { f64of(t.vlo[rn]) } else { f64(f32of(t.vlo[rn])) }
+            setr(t, rd, fcvtzs(a * scale, sf), sf)
+        } else if kind == 2 {
+            x := if sf { creg(t, rn) } else { sx(creg(t, rn) & 0xFFFF_FFFF, 32) }
+            setv(t, rd, if dbl { b64(f64(x) / scale) } else { b32(f32(f64(x) / scale)) })
+        } else {
+            unknown(t, w)
+        }
+        t.pc = next
+        return true
+    }
     // ---- scalar floating point ----
     if w & 0x7F200000 == 0x1E200000 {
         ft := (w >> 22) & 3
@@ -1073,6 +1131,23 @@ priv fn step(t: *Th) -> bool {
                     5 => setv(t, rd, b64(f64(x)))
                     _ => unknown(t, w)
                 }
+            }
+            t.pc = next
+            return true
+        }
+        if (w >> 10) & 7 == 4 && (w >> 5) & 31 == 0 {
+            // FMOV (immediate): imm8 = a:b:cd:efgh is +-(16 + efgh) / 16 * 2^(exponent from b:cd)
+            i := (w >> 13) & 0xFF
+            a8 := (i >> 7) & 1
+            b8 := (i >> 6) & 1
+            cd := (i >> 4) & 3
+            efgh := i & 15
+            if dbl {
+                bits := a8 << 63 | (1 - b8) << 62 | (if b8 == 1 { 0xFF } else { 0 }) << 54 | cd << 52 | efgh << 48
+                setv(t, rd, u64(bits))
+            } else {
+                bits := a8 << 31 | (1 - b8) << 30 | (if b8 == 1 { 0x1F } else { 0 }) << 25 | cd << 23 | efgh << 19
+                setv(t, rd, u64(bits))
             }
             t.pc = next
             return true
@@ -1791,7 +1866,350 @@ priv fn load(path: str, argv: []str) -> *Th {
     t[0].pc = entry
     t[0].tid = 1
     t[0].excl = -1
+    // a dynamically linked program (PT_DYNAMIC): what the C library's loader would do
+    for k in 0..phnum {
+        h := phoff + 56 * k
+        if u16_(b, h) == 2 {
+            dyn_load(&t[0], path, b, phoff, phnum, u64_(b, h + 16))
+        }
+    }
     return &t[0]
+}
+
+// ---------- dynamic linking ----------
+// For a dynamically linked program (an `extern` of --target linux-arm64) the emulator is the
+// loader (there is no arm64 C library or ld-linux-aarch64.so.1 here): it maps the libraries of
+// DT_NEEDED, found in the directories of A64EMU_LIBRARY_PATH or LD_LIBRARY_PATH (separated by
+// ':' or ';') and the program's own directory, at an address the host chooses (the guest sees
+// them where the host has them); applies the relocations R_AARCH64_RELATIVE, GLOB_DAT,
+// JUMP_SLOT and ABS64 of the libraries and the program (BIND_NOW: an undefined symbol that is
+// not weak ends the run with status 127); gives the main thread its thread block as glibc does
+// on arm64 (TLS variant I: TPIDR_EL0 points to a 16-byte TCB, the program's PT_TLS block follows
+// at +16); and puts an r_debug with the list of link maps (l_addr, l_name, l_ld, l_next, l_prev)
+// into DT_DEBUG of the program's dynamic section. Not supported (a message, status 127): thread
+// locals of libraries, initialisers of libraries (DT_INIT, DT_INIT_ARRAY), copy relocations,
+// libraries this machine has no file for (the C library itself: libc.so.6).
+
+priv struct DynObj {
+    name: str
+    base: i64     // load bias (0 for the program)
+    dyn: i64      // address of the dynamic section
+    symtab: i64
+    strtab: i64
+    nsyms: i64
+    lm: i64       // its link map
+}
+
+priv objs: Vec[DynObj]
+
+priv fn dyn_fail(msg: str) -> never {
+    eprint(fmt("a64emu: ", msg))
+    exit(127)
+}
+
+// the value of dynamic tag `tag` of object o, or `none`
+priv fn dyn_tag(o: *DynObj, tag: i64, none: i64) -> i64 {
+    p := o.dyn
+    for _ in 0..4096 {
+        tg := rd64(p)
+        if tg == 0 {
+            break
+        }
+        if tg == tag {
+            return rd64(p + 8)
+        }
+        p += 16
+    }
+    return none
+}
+
+// the address (with the object's bias) of an address-valued tag, 0 if absent
+priv fn dyn_addr(o: *DynObj, tag: i64) -> i64 {
+    v := dyn_tag(o, tag, 0)
+    return if v == 0 { 0 } else { o.base + v }
+}
+
+// fills in symtab, strtab and the number of symbols (DT_HASH's nchain, or counted from
+// DT_GNU_HASH: the highest symbol a bucket starts with, then its chain to the end)
+priv fn dyn_symbols(o: *DynObj) {
+    o.symtab = dyn_addr(o, 6)
+    o.strtab = dyn_addr(o, 5)
+    h := dyn_addr(o, 4)
+    if h != 0 {
+        o.nsyms = rd32(h + 4)
+        return
+    }
+    g := dyn_addr(o, 0x6ffffef5)
+    if g == 0 {
+        o.nsyms = 0
+        return
+    }
+    nb := rd32(g)
+    symoff := rd32(g + 4)
+    buckets := g + 16 + 8 * rd32(g + 8)
+    chain := buckets + 4 * nb
+    top := 0
+    for k in 0..nb {
+        top = max(top, rd32(buckets + 4 * k))
+    }
+    if top < symoff {
+        o.nsyms = symoff
+        return
+    }
+    while rd32(chain + 4 * (top - symoff)) & 1 == 0 {
+        top += 1
+    }
+    o.nsyms = top + 1
+}
+
+// the address of the defined global or weak symbol `name` in the libraries (in load order), 0
+// if there is none
+priv fn dyn_lookup(name: str) -> i64 {
+    for o in objs {
+        for k in 1..o.nsyms {
+            s := o.symtab + 24 * k
+            bind := rd8(s + 4) >> 4
+            typ := rd8(s + 4) & 15
+            if rd16(s + 6) == 0 || (bind != 1 && bind != 2) || typ == 6 {
+                continue
+            }
+            if gstr(o.strtab + rd32(s)) == name {
+                return o.base + rd64(s + 8)
+            }
+        }
+    }
+    return 0
+}
+
+// the relocations of object o: DT_RELA / DT_RELASZ and DT_JMPREL / DT_PLTRELSZ (RELA)
+priv fn dyn_relocate(o: *DynObj) {
+    for tabs in [2](i64, i64){(7, 8), (23, 2)} {
+        at := dyn_addr(o, tabs.0)
+        size := dyn_tag(o, tabs.1, 0)
+        if at == 0 || size == 0 {
+            continue
+        }
+        for k in 0..size / 24 {
+            r := at + 24 * k
+            off := rd64(r)
+            info := rd64(r + 8)
+            add := rd64(r + 16)
+            typ := info & 0xFFFFFFFF
+            sym := info >> 32
+            match typ {
+                0 => {}
+                1027 => wr64(o.base + off, o.base + add)                 // R_AARCH64_RELATIVE
+                257, 1025, 1026 => {                                       // ABS64, GLOB_DAT, JUMP_SLOT
+                    s := o.symtab + 24 * sym
+                    name := gstr(o.strtab + rd32(s))
+                    v := 0
+                    if rd16(s + 6) != 0 && rd8(s + 4) >> 4 == 0 {
+                        v = o.base + rd64(s + 8)                           // a local symbol
+                    } else {
+                        v = dyn_lookup(name)
+                        if v == 0 && rd8(s + 4) >> 4 != 2 {
+                            dyn_fail(fmt(o.name, ": undefined symbol `", name, "` (the emulator has no arm64 C library: only the libraries it can find are loaded)"))
+                        }
+                    }
+                    wr64(o.base + off, if v == 0 { 0 } else { v + add })
+                }
+                _ => dyn_fail(fmt(o.name, ": relocation type ", typ, " is not supported by the emulator's loader"))
+            }
+        }
+    }
+}
+
+// the file of library `name`: A64EMU_LIBRARY_PATH, LD_LIBRARY_PATH, the program's directory
+priv fn lib_file(name: str, prog: str) -> str {
+    dirs := vec[str]()
+    for var in []str{"A64EMU_LIBRARY_PATH", "LD_LIBRARY_PATH"} {
+        v, has := env_get(var)
+        if has {
+            for d in split(replace(v, ";", ":"), ':') {
+                if len(d) > 0 {
+                    dirs.push(d)
+                }
+            }
+        }
+    }
+    slash := max(rfind(prog, "/"), rfind(prog, "\\"))
+    dirs.push(if slash < 0 { "." } else { prog[..slash] })
+    for d in dirs {
+        p := fmt(d, "/", name)
+        _, ok := read_file(p)
+        if ok {
+            return p
+        }
+    }
+    return ""
+}
+
+// maps the shared object at path (its PT_LOAD segments at one host-chosen place)
+priv fn map_lib(name: str, path: str) -> DynObj {
+    b, ok := read_file(path)
+    if !ok || len(b) < 64 || b[..4] != "\x7FELF" {
+        dyn_fail(fmt("cannot read the library ", path))
+    }
+    fn u16_(b: str, at: i64) -> i64 {
+        return i64(b[at]) | i64(b[at + 1]) << 8
+    }
+    fn u64_(b: str, at: i64) -> i64 {
+        x := 0
+        for k in 0..8 {
+            x |= i64(b[at + k]) << (8 * k)
+        }
+        return x
+    }
+    if u16_(b, 16) != 3 || u16_(b, 18) != 183 {
+        dyn_fail(fmt(path, " is not an AArch64 shared object"))
+    }
+    phoff := u64_(b, 32)
+    phnum := u16_(b, 56)
+    lo := -1
+    hi := 0
+    dynv := 0
+    for k in 0..phnum {
+        h := phoff + 56 * k
+        ty := u16_(b, h)
+        if ty == 1 {
+            va := u64_(b, h + 16)
+            lo = if lo < 0 { va } else { min(lo, va) }
+            hi = max(hi, va + u64_(b, h + 40))
+        } else if ty == 2 {
+            dynv = u64_(b, h + 16)
+        } else if ty == 7 {
+            dyn_fail(fmt(path, ": thread-local data of a library is not supported by the emulator"))
+        }
+    }
+    lo = lo & ~0xFFFF
+    size := align_up(hi - lo, 0x10000)
+    img := reserve(size)
+    if img == 0 || !commit(img, size) {
+        dyn_fail("no memory for a library")
+    }
+    base := img - lo
+    for k in 0..phnum {
+        h := phoff + 56 * k
+        if u16_(b, h) == 1 {
+            memcopy(cast[*u8](base + u64_(b, h + 16)), cast[*u8](cast[i64](ptr(b)) + u64_(b, h + 8)), u64_(b, h + 32))
+        }
+    }
+    add_region(img, img + size, 0, img, img + size)
+    o := DynObj{name: name, base: base, dyn: base + dynv}
+    if dyn_tag(&o, 12, 0) != 0 || (dyn_tag(&o, 25, 0) != 0 && dyn_tag(&o, 27, 0) != 0) {
+        dyn_fail(fmt(path, ": initialisers of libraries (DT_INIT, DT_INIT_ARRAY) are not supported by the emulator"))
+    }
+    return o
+}
+
+// guest memory for the loader's own data (r_debug, link maps, the main thread's block)
+priv fn dyn_mem(n: i64) -> i64 {
+    size := align_up(n, 0x10000)
+    p := reserve(size)
+    if p == 0 || !commit(p, size) {
+        dyn_fail("no memory")
+    }
+    add_region(p, p + size, 0, p, p + size)
+    return p
+}
+
+priv fn dyn_load(t: *Th, path: str, b: str, phoff: i64, phnum: i64, dynv: i64) {
+    prog := DynObj{name: path, base: 0, dyn: dynv}
+    dyn_symbols(&prog)
+    // the libraries, breadth first (each one's DT_NEEDED after it)
+    queue := vec[DynObj]()
+    names := vec[str]()
+    pending := vec[DynObj]()
+    pending.push(prog)
+    while !pending.is_empty() {
+        o := pending.remove(0)
+        p := o.dyn
+        for _ in 0..4096 {
+            tg := rd64(p)
+            if tg == 0 {
+                break
+            }
+            if tg == 1 {
+                nm := gstr(o.strtab + rd64(p + 8))
+                if !names.contains(nm) {
+                    names.push(nm)
+                    f := lib_file(nm, path)
+                    if len(f) == 0 {
+                        dyn_fail(fmt("cannot find the library ", nm, " (looked in A64EMU_LIBRARY_PATH, LD_LIBRARY_PATH and the program's directory; the emulator has no arm64 C library)"))
+                    }
+                    l := map_lib(nm, f)
+                    dyn_symbols(&l)
+                    pending.push(l)
+                    queue.push(l)
+                }
+            }
+            p += 16
+        }
+    }
+    objs = queue
+    for k in 0..objs.len {
+        dyn_relocate(&objs[k])
+    }
+    dyn_relocate(&prog)
+    // r_debug and the link maps: the program, then the libraries
+    all := vec_of([]DynObj{prog})
+    all.extend(objs.items())
+    strs := 0
+    for o in all {
+        strs += len(o.name) + 1
+    }
+    mem := dyn_mem(48 + 40 * all.len + strs)
+    s := mem + 48 + 40 * all.len
+    for k, o in all {
+        lm := mem + 48 + 40 * k
+        wr64(lm, o.base)
+        for j in 0..len(o.name) {
+            wr8(s + j, i64(o.name[j]))
+        }
+        wr8(s + len(o.name), 0)
+        wr64(lm + 8, s)
+        s += len(o.name) + 1
+        wr64(lm + 16, o.dyn)
+        wr64(lm + 24, if k + 1 < all.len { lm + 40 } else { 0 })
+        wr64(lm + 32, if k > 0 { lm - 40 } else { 0 })
+    }
+    wr32(mem, 1)                 // r_version
+    wr64(mem + 8, mem + 48)      // r_map
+    p := dynv
+    for _ in 0..4096 {
+        if rd64(p) == 0 {
+            break
+        }
+        if rd64(p) == 21 {
+            wr64(p + 8, mem)     // DT_DEBUG
+        }
+        p += 16
+    }
+    // the main thread's thread block: TCB (16 bytes), then the program's PT_TLS block
+    fn u64_(b: str, at: i64) -> i64 {
+        x := 0
+        for k in 0..8 {
+            x |= i64(b[at + k]) << (8 * k)
+        }
+        return x
+    }
+    for k in 0..phnum {
+        h := phoff + 56 * k
+        if i64(b[h]) | i64(b[h + 1]) << 8 == 7 {
+            if u64_(b, h + 48) > 16 {
+                dyn_fail("a thread block aligned to more than 16 bytes")
+            }
+            memsz := u64_(b, h + 40)
+            tp := dyn_mem(16 + memsz + 16)
+            filesz := u64_(b, h + 32)
+            for j in 0..filesz {
+                wr8(tp + 16 + j, i64(b[u64_(b, h + 8) + j]))
+            }
+            t.tp = tp
+        }
+    }
+    // (x0: the loader's termination function; none here)
+    t.x[0] = 0
 }
 
 // the environment of the host, as NAME=value strings

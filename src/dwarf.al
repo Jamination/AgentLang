@@ -99,6 +99,10 @@ priv const AB_VARIANT = 21
 priv const AB_TAG_MEMBER = 22
 priv const AB_INLINED = 23
 priv const AB_GLOBAL = 24
+priv const AB_PARAM_LIST = 25 // a parameter with a location list
+priv const AB_VAR_LIST = 26
+priv const AB_PARAM_OUT = 27 // a parameter without a location (optimised out)
+priv const AB_VAR_OUT = 28
 
 // the abbreviation table: (code, tag, children, [(attribute, form)])
 priv fn abbrevs() -> Vec[u8] {
@@ -124,6 +128,12 @@ priv fn abbrevs() -> Vec[u8] {
     var_attrs := []i64{DW_AT_name, DW_FORM_strp, DW_AT_decl_file, DW_FORM_udata, DW_AT_decl_line, DW_FORM_udata, DW_AT_type, DW_FORM_ref4, DW_AT_location, DW_FORM_exprloc}
     one(&a, AB_PARAM, DW_TAG_formal_parameter, false, var_attrs)
     one(&a, AB_VAR, DW_TAG_variable, false, var_attrs)
+    list_attrs := []i64{DW_AT_name, DW_FORM_strp, DW_AT_decl_file, DW_FORM_udata, DW_AT_decl_line, DW_FORM_udata, DW_AT_type, DW_FORM_ref4, DW_AT_location, DW_FORM_sec_offset}
+    one(&a, AB_PARAM_LIST, DW_TAG_formal_parameter, false, list_attrs)
+    one(&a, AB_VAR_LIST, DW_TAG_variable, false, list_attrs)
+    out_attrs := []i64{DW_AT_name, DW_FORM_strp, DW_AT_decl_file, DW_FORM_udata, DW_AT_decl_line, DW_FORM_udata, DW_AT_type, DW_FORM_ref4}
+    one(&a, AB_PARAM_OUT, DW_TAG_formal_parameter, false, out_attrs)
+    one(&a, AB_VAR_OUT, DW_TAG_variable, false, out_attrs)
     one(&a, AB_BLOCK, DW_TAG_lexical_block, true, []i64{DW_AT_ranges, DW_FORM_sec_offset})
     one(&a, AB_BASE, DW_TAG_base_type, false, []i64{DW_AT_name, DW_FORM_strp, DW_AT_encoding, DW_FORM_data1, DW_AT_byte_size, DW_FORM_data1})
     one(&a, AB_PTR, DW_TAG_pointer_type, false, []i64{DW_AT_byte_size, DW_FORM_data1, DW_AT_type, DW_FORM_ref4})
@@ -182,6 +192,7 @@ priv struct Dw {
     strs: Vec[u8]
     str_ix: Map[str, i64]
     ranges: Vec[u8]
+    loc: Vec[u8] // .debug_loc
     text_lo: i64
     // types: the DIE offset of each type (by type id, -1: not yet written), the types still to
     // write, and the references to types to fill in (position in info, type)
@@ -443,22 +454,105 @@ priv fn var_loc(d: *Dw, off: i64, indirect: bool) {
     d.info.extend(e.items())
 }
 
-priv fn var_die(d: *Dw, k: i64, off: i64) {
+// the DWARF number of register r (0..15, xmm0..15 as 16..31)
+priv fn dw_regno(r: i64) -> i64 {
+    return if r < 16 { dwreg(r) } else { 17 + (r - 16) }
+}
+
+// the location expression of a range (indirect: the place holds the variable's address)
+priv fn range_expr(d: *Dw, r: *DbgRange, indirect: bool, size: i64) -> Vec[u8] {
+    e := vec[u8]()
+    match i64(r.kind) {
+        DL_REG => {
+            n := dw_regno(r.val)
+            if indirect {
+                if n < 32 {
+                    e.push(u8(0x70 + n)) // DW_OP_bregN 0
+                } else {
+                    e.push(0x92) // DW_OP_bregx
+                    uleb(&e, n)
+                }
+                sleb(&e, 0)
+            } else if n < 32 {
+                e.push(u8(0x50 + n)) // DW_OP_regN
+            } else {
+                e.push(0x90) // DW_OP_regx
+                uleb(&e, n)
+            }
+        }
+        DL_FB => {
+            // DW_OP_fbreg: the frame base is the CFA (Windows: rsp + the frame, the same in
+            // the body, where these ranges are)
+            e.push(0x91)
+            sleb(&e, r.val)
+            if indirect {
+                e.push(0x06) // DW_OP_deref
+            }
+        }
+        DL_INT => {
+            e.push(0x11) // DW_OP_consts
+            sleb(&e, r.val)
+            e.push(0x9f) // DW_OP_stack_value
+        }
+        DL_F32, DL_F64 => {
+            n := if i64(r.kind) == DL_F32 { 4 } else { 8 }
+            e.push(0x9e) // DW_OP_implicit_value
+            uleb(&e, n)
+            for b in 0..n {
+                e.push(u8((r.val >> (8 * b)) & 0xFF))
+            }
+        }
+        _ => {}
+    }
+    return e
+}
+
+priv fn var_die(d: *Dw, k: i64, off: i64, code: *Code, at: i64) {
     v := &dbg_vars[k]
-    uleb(&d.info, if v.param { AB_PARAM } else { AB_VAR })
+    ranges := off == DV_RANGES
+    nr := 0
+    if ranges {
+        for r in code.dranges {
+            if i64(r.var) == k {
+                nr += 1
+            }
+        }
+    }
+    uleb(&d.info, if !ranges { if v.param { AB_PARAM } else { AB_VAR } } else if nr > 0 { if v.param { AB_PARAM_LIST } else { AB_VAR_LIST } } else if v.param { AB_PARAM_OUT } else { AB_VAR_OUT })
     strp(d, v.name)
     fid := v.func
     uleb(&d.info, if fid < dbg_fn_file.len { file_num(d, i64(dbg_fn_file[fid])) } else { 0 })
     uleb(&d.info, i64(v.line))
     tref(d, v.ty)
-    var_loc(d, off, v.indirect)
+    if !ranges {
+        var_loc(d, off, v.indirect)
+    } else if nr > 0 {
+        // a location list in .debug_loc: (start, end) from the unit's base address, the
+        // expression
+        put32(&d.info, d.loc.len)
+        for r in code.dranges {
+            if i64(r.var) != k {
+                continue
+            }
+            e := range_expr(d, &r, v.indirect, d.types.size_of(v.ty))
+            if e.is_empty() {
+                continue
+            }
+            put64(&d.loc, at + i64(r.lo) - d.text_lo)
+            put64(&d.loc, at + i64(r.hi) - d.text_lo)
+            put16(&d.loc, e.len)
+            d.loc.extend(e.items())
+        }
+        put64(&d.loc, 0)
+        put64(&d.loc, 0)
+    }
 }
 
 // the variables of scope s and its scopes as lexical blocks (rows: of a function at address
 // `at` with `size` bytes); a scope without code is left out
-priv fn scope_die(d: *Dw, sc: *Vec[DbgScope], s: i64, rows: *Vec[DbgRow], at: i64, size: i64) {
+priv fn scope_die(d: *Dw, sc: *Vec[DbgScope], s: i64, rows: *Vec[DbgRow], at: i64, size: i64, code: *Code) {
     for x in 0..sc[s].vars.len / 2 {
-        var_die(d, sc[s].vars[2 * x], sc[s].vars[2 * x + 1])
+        var_die(d, sc[s].vars[2 * x], sc[s].vars[2 * x + 1], code, at)
     }
     for c in sc[s].kids {
         runs := dbg_runs(rows, size, sc[c].first, sc[c].last, 0, size)
@@ -473,18 +567,9 @@ priv fn scope_die(d: *Dw, sc: *Vec[DbgScope], s: i64, rows: *Vec[DbgRow], at: i6
         }
         put64(&d.ranges, 0)
         put64(&d.ranges, 0)
-        scope_die(d, sc, c, rows, at, size)
+        scope_die(d, sc, c, rows, at, size, code)
         d.info.push(0)
     }
-}
-
-// a function inlined into the code being described: the call it was inlined at (a location),
-// the function, its code (runs of offsets) and the functions inlined into it
-priv struct Inl {
-    call: i64
-    fid: i64
-    runs: Vec[(i64, i64)]
-    kids: Vec[i64]
 }
 
 // The functions inlined into a function at address `at` of `size` bytes, from the locations of
@@ -492,46 +577,8 @@ priv struct Inl {
 // out to a line of the function; each call of the chain is an inlined_subroutine (named like
 // the function, with the call's file and line) whose ranges are the code of all such rows.
 priv fn inlined(d: *Dw, rows: *Vec[DbgRow], at: i64, size: i64) {
-    locs := &d.m.locs.list
-    nodes := vec_one(Inl{call: 0, fid: -1})
-    key := map[(i64, i64), i64]()
-    chain := vec[(i64, i64)]()
-    for k, r in *rows {
-        if r.loc <= 0 || locs[r.loc].parent == 0 {
-            continue
-        }
-        start := r.off
-        end := if k + 1 < rows.len { rows[k + 1].off } else { size }
-        if end <= start {
-            continue
-        }
-        // the calls from the outside in: (call location, the function inlined there)
-        chain.clear()
-        l := r.loc
-        while l > 0 && locs[l].parent != 0 && chain.len < 64 {
-            chain.push((i64(locs[l].parent), i64(locs[l].func)))
-            l = i64(locs[l].parent)
-        }
-        n := 0
-        for i in chain.len - 1..=0 by -1 {
-            c, f := chain[i]
-            next, found := key.get((n, c))
-            if !found {
-                next = nodes.len
-                nodes.push(Inl{call: c, fid: f})
-                nodes[n].kids.push(next)
-                key.set((n, c), next)
-            }
-            n = next
-            runs := &nodes[n].runs
-            if !runs.is_empty() && runs[runs.len - 1].1 == start {
-                runs[runs.len - 1].1 = end
-            } else {
-                runs.push((start, end))
-            }
-        }
-    }
-    fn emit(d: *Dw, nodes: *Vec[Inl], n: i64, at: i64) {
+    nodes := dbg_inlined(d.m, rows, size)
+    fn emit(d: *Dw, nodes: *Vec[DbgInl], n: i64, at: i64) {
         for c in nodes[n].kids {
             x := &nodes[c]
             cl := &d.m.locs.list[x.call]
@@ -581,7 +628,7 @@ priv fn fn_die(d: *Dw, fid: i64, code: *Code, at: i64, rows: *Vec[DbgRow]) {
         tref(d, rty)
     }
     sc := dbg_scopes(code)
-    scope_die(d, &sc, 0, rows, at, code.bytes.len)
+    scope_die(d, &sc, 0, rows, at, code.bytes.len, code)
     inlined(d, rows, at, code.bytes.len)
     d.info.push(0)
 }
@@ -613,6 +660,9 @@ priv fn line_seq(d: *Dw, p: *Vec[u8], rows: *Vec[DbgRow], at: i64, size: i64) {
         }
         dl := r.line - line
         da := r.off - addr
+        if r.pe {
+            p.push(10) // DW_LNS_set_prologue_end
+        }
         if dl >= LINE_BASE && dl < LINE_BASE + LINE_RANGE && (dl - LINE_BASE) + LINE_RANGE * da + OPCODE_BASE <= 255 {
             p.push(u8((dl - LINE_BASE) + LINE_RANGE * da + OPCODE_BASE))
         } else {
@@ -873,19 +923,24 @@ fn dwarf_sections(m: *Module, out: *Output, func_addr: *Vec[i64], gaddr: *Vec[i6
         fn_die(&d, c.fid, &c.code, at, &rows)
         fde(&frame, at, &c.code)
     }
-    // the global variables in the image (not the thread-local ones, not C variables)
+    // the global variables in the image (not the thread-local ones); a C variable (`extern`)
+    // where its import slot points, which the dynamic loader fills
     for n in dbg_cx.globals.keys() {
         tg, _ := dbg_cx.globals.get(n)
         ty, gi := tg
-        if gi < 0 || gi >= m.globals.len || m.globals[gi].tls || dbg_cx.ext_gots.has(gi) || gaddr[gi] == 0 || !has_die(ty) {
+        if gi < 0 || gi >= m.globals.len || m.globals[gi].tls || gaddr[gi] == 0 || !has_die(ty) {
             continue
         }
+        ext := dbg_cx.ext_gots.has(gi)
         uleb(&d.info, AB_GLOBAL)
         strp(&d, ast_plain_text(n))
         tref(&d, ty)
-        uleb(&d.info, 9)
+        uleb(&d.info, if ext { 10 } else { 9 })
         d.info.push(0x03) // DW_OP_addr
         put64(&d.info, gaddr[gi])
+        if ext {
+            d.info.push(0x06) // DW_OP_deref
+        }
     }
     // the types the functions refer to, and the ones those refer to
     qi := 0
@@ -921,6 +976,9 @@ fn dwarf_sections(m: *Module, out: *Output, func_addr: *Vec[i64], gaddr: *Vec[i6
     secs.push((".debug_aranges", aranges))
     if !d.ranges.is_empty() {
         secs.push((".debug_ranges", d.ranges))
+    }
+    if !d.loc.is_empty() {
+        secs.push((".debug_loc", d.loc))
     }
     secs.push((".debug_frame", frame))
     return secs

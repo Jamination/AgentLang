@@ -1275,17 +1275,22 @@ fn inst_fn(self: *Cx, di: i64, targs: Vec[i64]) -> i64 {
         Some(lib) => {
             // a C function: scalar arguments and result only (Windows: structs too, passed as
             // the Microsoft x64 convention passes them)
+            // (arm64: structs by the rules of the Arm procedure call standard, lower_ccall.al)
             bad := -1
             for i in 0..ptys.len + 1 {
                 t := if i < ptys.len { ptys[i] } else { rty }
-                if t != T_UNIT && t != T_NEVER && t != T_ERR && (!(self.types.is_scalar(t) || target_os == TargetWindows) || is_some(self.types.vec_lanes(t))) {
+                if t != T_UNIT && t != T_NEVER && t != T_ERR && (!(self.types.is_scalar(t) || target_os == TargetWindows || target_arch == ArchArm64) || is_some(self.types.vec_lanes(t))) {
+                    bad = t
+                    break
+                }
+                if target_arch == ArchArm64 && t != T_UNIT && t != T_NEVER && t != T_ERR && !self.types.is_scalar(t) && !self.c_aggregate_ok(t) {
                     bad = t
                     break
                 }
             }
             if bad >= 0 {
                 tn := self.types.name(bad)
-                what := if target_os == TargetWindows { "pass integers, floats, pointers and structs" } else { "pass integers, floats and pointers" }
+                what := if target_os == TargetWindows || target_arch == ArchArm64 { "pass integers, floats, pointers and structs" } else { "pass integers, floats and pointers" }
                 self.err(d.pos, fmt("extern function `", d.name, "`: ", tn, " cannot cross the C boundary (", what, ")"))
             }
             got := self.got_global(d.name)

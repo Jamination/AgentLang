@@ -290,6 +290,11 @@ struct Func {
     // the Work of the thread that is optimising or compiling the function, nil while none is
     // (see Work in base.al)
     w: *Work
+    // -g, optimising (src/debug.al): the values of the promoted variables by source location,
+    // recorded by mem2reg while drec; the locations whose code was copied (unrolled) since
+    dexp: Vec[DbgExp]
+    dtaint: Vec[i32]
+    drec: bool
 }
 
 enum RelocTarget {
@@ -997,6 +1002,14 @@ fn apply_repl(self: *Func, map: *Vec[i32]) {
                 }
             }
             _ => {}
+        }
+    }
+    // -g: the values recorded for the variables (src/debug.al) follow; a replacement is equal
+    // to the value it replaces
+    for e in 0..self.dexp.len {
+        x := i64(self.dexp[e].val)
+        if x >= 0 && x < map.len && map[x] != NOV {
+            self.dexp[e].val = i32(apply_repl_find(map, x))
         }
     }
 }
