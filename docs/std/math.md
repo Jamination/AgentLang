@@ -68,7 +68,8 @@ untyped: they become `f32` or `f64` from context.
 | Functions | |
 |-----------|---|
 | `sin cos tan asin acos atan atan2(y, x)` | radians; `sin_cos(x)` returns `(sin, cos)` in one go |
-| `exp log log2 pow(x, y) fmod(x, y)` | C semantics for zero, negative, infinite and NaN arguments |
+| `exp log log2 log10 pow(x, y) fmod(x, y)` | C semantics for zero, negative, infinite and NaN arguments (`log10(0.0)` is `-INF`, of a negative number NaN); `log2` / `log10` are exact for powers of 2 / of 10 |
+| `ldexp(x, n: i64)` `frexp(x) -> (T, i64)` | `x * 2^n` rounded once (also into the subnormals; beyond the range `+-INF`); `x` as `(m, e)` with `x == m * 2^e`, `0.5 <= \|m\| < 1`, exact (`(x, 0)` for 0, `INF`, NaN) |
 | `sqrt fabs fmin fmax` | built in (one instruction) |
 | `floor ceil round trunc fract` | exact; `round` rounds halves away from zero |
 | `sign clamp saturate` | `saturate` clamps to 0..1; `clamp` also for `i64` |
@@ -82,6 +83,9 @@ Accuracy, measured by `tests/std/math_scalar.al` against the C library on 160 in
 function and precision (including huge arguments, denormals, infinities and NaN): every
 transcendental function is within 1 ulp in both `f32` and `f64`, except the `f64` `tan`
 (computed as `sin / cos`), which can be off by 2 ulp; `fmod` is exact. The test allows 2 ulp.
+`log10` (added later, `tests/std/math_log10.al`) agrees with a double-double reference on all
+2556 `f64` inputs tested and is within 1 ulp in `f32` (99.5% exactly rounded); `ldexp` and
+`frexp` are exact (`ldexp` rounds once).
 The `f32` versions are single-precision kernels, not `f64` round trips.
 
 ## Vectors (`vec2`, `vec3`, `vec4`)
@@ -152,8 +156,19 @@ ease_out_elastic ease_out_bounce ease_out_back`. All map 0 to 0 and 1 to 1.
 ## Colour
 
 `rgb_to_hsv(vec3) hsv_to_rgb(vec3)` (all components 0..1), `srgb_to_linear linear_to_srgb`
-(`f32` or `vec3`), `color_u32(vec4) -> u32` (RGBA8, red in the lowest byte, which is the byte
-order of an RGBA framebuffer) and `color_vec4(u32)`.
+(`f32` or `vec3`), `color_u32(vec4) -> u32` and `color_vec4(u32)`.
+
+A colour as a `u32` is RGBA8 with **red in the lowest byte**: the bytes R, G, B, A in memory,
+the order of an RGBA framebuffer, an std.image pixel and std.gfx's colours. Written as a
+literal it therefore reads `0xAABBGGRR`: `0xFF3C5A78` is the brown R 0x78, G 0x5A, B 0x3C, and
+`0xFF785A3C` a blue. Build colours from bytes instead:
+
+| Function | |
+|---|---|
+| `rgba8(r: u8, g: u8, b: u8, a: u8) -> u32` | `rgba8(255, 128, 0, 255)` is `0xFF0080FF`; constant when the bytes are: `const WALL = rgb8(120, 90, 60)` is a `u32` constant, a byte beyond 255 a compile error |
+| `rgb8(r: u8, g: u8, b: u8) -> u32` | `rgba8(r, g, b, 255)` |
+| `color_u32(vec4) -> u32` | from components 0..1 (clamped, rounded) |
+| `color_vec4(u32) -> vec4` | the inverse: components 0..1 |
 
 ## Tests
 

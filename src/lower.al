@@ -1507,7 +1507,7 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     }
     cv, ct := self.const_eval_t(e)
     match cv {
-        Some(Int(_)) => T_I64
+        Some(Int(_)) => ct.or(T_I64)
         Some(Float(_)) => ct.or(T_F32)
         Some(Bool(_)) => T_BOOL
         Some(Str(_)) => T_STR
@@ -2115,6 +2115,11 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
         }
         Call(c, args) => {
             v := self.const_eval(e)
+            match c.k {
+                // rgba8 / rgb8 return a u32
+                Ident(n) if is_some(v) && is_rgba8_call(self, n, args.len) => return (v, Some(T_U32))
+                _ => {}
+            }
             if args.len != 1 {
                 return (v, None)
             }
@@ -2212,6 +2217,24 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         None => return None
                     }
                 }
+                // the library's colour constructors rgba8(r, g, b, a) / rgb8(r, g, b)
+                Ident(n) if is_rgba8_call(self, n, args.len) => return const_rgba8(self, n, args.items())
+                // offsetof[T](field): checked where it is declared, as std140_size
+                Index(b, targs) if args.len == 1 && targs.len == 1 && b.k == Ident("offsetof") && !self.declares_like("offsetof", 1, 1) => {
+                    env := map[str, i64]()
+                    match self.expr_type(&targs[0], &env) {
+                        Some(T_ERR) => return None
+                        Some(t) => {
+                            off, _, err := self.offset_of(t, &args[0])
+                            if len(err) != 0 {
+                                self.err(e.pos, fmt("offsetof[", self.types.name(t), "]: ", err))
+                                return Some(CV.Int(0))
+                            }
+                            return Some(CV.Int(off))
+                        }
+                        None => return None
+                    }
+                }
                 _ => {}
             }
             if args.len == 1 {
@@ -2248,6 +2271,15 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         return Some(CV.Float(f64(f32(i))))
                     }
                     (F32, Float(f)) => return Some(CV.Float(f64(f32(f))))
+                    (Enum(eid), Int(i)) if self.types.enums[eid].simple => {
+                        // Color(i): the variant with that number
+                        n := self.types.enums[eid].variants.len
+                        if i < 0 || i >= n {
+                            self.err(e.pos, enum_range_msg(self.types.name(t), if src_u64 && i < 0 { fmt(u64(i)) } else { fmt(i) }, n))
+                            return None
+                        }
+                        return Some(CV.Variant(t, i))
+                    }
                     _ => return None
                 }
             }
@@ -2269,6 +2301,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         gpu := match b.k {
                             Ident("std140_size") => "std140_size"
                             Ident("std430_size") => "std430_size"
+                            Ident("hlsl_cbuffer_size") if !self.declares_like("hlsl_cbuffer_size", 1, 0) => "hlsl_cbuffer_size"
                             _ => ""
                         }
                         if len(gpu) != 0 && targs.len == 1 {
@@ -2276,12 +2309,26 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                             match self.expr_type(&targs[0], &env) {
                                 Some(T_ERR) => return None
                                 Some(t) => {
-                                    s, _, err := self.types.gpu_layout(t, gpu == "std140_size", "")
+                                    s, _, err := if gpu == "hlsl_cbuffer_size" { self.types.hlsl_cbuffer(t) } else { self.types.gpu_layout(t, gpu == "std140_size", "") }
                                     if len(err) != 0 {
                                         self.err(e.pos, fmt(gpu, "[", self.types.name(t), "]: ", err))
                                         return Some(CV.Int(0))
                                     }
                                     return Some(CV.Int(s))
+                                }
+                                None => return None
+                            }
+                        }
+                        if targs.len == 1 && b.k == Ident("variant_count") && !self.declares_like("variant_count", 1, 0) {
+                            env := map[str, i64]()
+                            match self.expr_type(&targs[0], &env) {
+                                Some(T_ERR) => return None
+                                Some(t) => {
+                                    n, err := self.variant_count(t)
+                                    if len(err) != 0 {
+                                        self.err(e.pos, err)
+                                    }
+                                    return Some(CV.Int(n))
                                 }
                                 None => return None
                             }
@@ -2295,6 +2342,133 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         _ => {}
     }
     return None
+}
+
+// Is `n(args)` with `nargs` arguments a call of std.math's rgba8 / rgb8 (which constants may
+// call: `const WALL = rgb8(120, 90, 60)`)? Not if the program declares a function of the name
+// with that many parameters.
+priv fn is_rgba8_call(self: *Cx, n: str, nargs: i64) -> bool {
+    return (n == "rgba8" && nargs == 4 || n == "rgb8" && nargs == 3) && !self.declares_like(n, 0, nargs)
+}
+
+// rgba8(r, g, b, a) of constant bytes: red in the lowest byte, as the library function
+priv fn const_rgba8(self: *Cx, n: str, args: []Expr) -> Opt[CV] {
+    c := 0
+    for i, a in args {
+        v, t := self.const_eval_t(&a)
+        x := match v {
+            Some(Int(x)) => x
+            _ => return None
+        }
+        if is_some(t) && t != Some(T_U8) {
+            self.err(a.pos, fmt("argument ", i + 1, " of `", n, "` has type ", self.types.name(t.or(T_ERR)), ", not u8"))
+            return None
+        }
+        if x < 0 || x > 255 {
+            self.err(a.pos, fmt("argument ", i + 1, " of `", n, "`: ", x, " does not fit in u8 (0 to 255)"))
+            return None
+        }
+        c |= x << (8 * i)
+    }
+    if len(args) == 3 {
+        c |= 255 << 24
+    }
+    return Some(CV.Int(c))
+}
+
+// variant_count[E](): the number of variants of the enum `t`, or an error
+fn variant_count(self: *Cx, t: i64) -> (i64, str) {
+    match self.types.k(t) {
+        Enum(eid) => return (self.types.enums[eid].variants.len, "")
+        _ => return (0, fmt("variant_count[", self.types.name(t), "]: `", self.types.name(t), "` is not an enum"))
+    }
+}
+
+// the error of a constant conversion `Name(i)` to an enum with `n` variants
+fn enum_range_msg(name: str, i: str, n: i64) -> str {
+    return fmt("`", name, "(", i, ")`: ", name, " has ", n, " variants, numbered 0 to ", n - 1)
+}
+
+// Does the program declare a function `n` with `ntargs` type parameters and `nargs`
+// parameters? Then a call of the builtin `n` in a constant is that function's (not constant).
+fn declares_like(self: *Cx, n: str, ntargs: i64, nargs: i64) -> bool {
+    if self.scope_prelude {
+        // library code means the builtin
+        return false
+    }
+    ds, _ := self.fn_over_of(n)
+    for d in ds {
+        if self.fn_decls[d].tparams.len == ntargs && self.fn_decls[d].params.len == nargs {
+            return true
+        }
+    }
+    return false
+}
+
+// offsetof[T](path): the offset in bytes of the part `path` of the struct `t` (a field `uv`, a
+// field of a field `light.dir`, an element of an array with a constant index `lights[2].dir`),
+// with the type of that part; or the error text
+fn offset_of(self: *Cx, t: i64, path: *Expr) -> (i64, i64, str) {
+    match path.k {
+        Ident(n) => {
+            match self.types.k(t) {
+                Struct(_) => return offset_field(self, t, ast_plain(n), self.types.name(t))
+                _ => return (0, 0, fmt("`", self.types.name(t), "` is not a struct (offsetof[T](field) needs one)"))
+            }
+        }
+        Field(b, n) => {
+            off, bt, err := self.offset_of(t, b)
+            if len(err) != 0 {
+                return (0, 0, err)
+            }
+            fo, ft, ferr := offset_field(self, bt, n, ast_expr_str(b))
+            return (off + fo, ft, ferr)
+        }
+        Index(b, idx) => {
+            off, bt, err := self.offset_of(t, b)
+            if len(err) != 0 {
+                return (0, 0, err)
+            }
+            here := ast_expr_str(b)
+            match self.types.k(bt) {
+                Array(et, n) => {
+                    cv: Opt[CV] = if idx.len == 1 { self.const_eval(&idx[0]) } else { None }
+                    i := match cv {
+                        Some(Int(i)) => i
+                        _ => return (0, 0, fmt("the index of `", here, "` must be one constant integer"))
+                    }
+                    if i < 0 || i >= n {
+                        return (0, 0, fmt("index ", i, " is out of range for `", here, "` (", self.types.name(bt), ")"))
+                    }
+                    return (off + i * self.types.size_of(et), et, "")
+                }
+                _ => return (0, 0, fmt("`", here, "` is a ", self.types.name(bt), ", not an array"))
+            }
+        }
+        _ => return (0, 0, "name a field: offsetof[T](field), offsetof[T](a.b), offsetof[T](items[2].x)")
+    }
+}
+
+// the field `n` of the struct `t` (written `here` in the path): its offset and type
+priv fn offset_field(self: *Cx, t: i64, n: str, here: str) -> (i64, i64, str) {
+    match self.types.k(t) {
+        Struct(sid) => {
+            self.types.layout_struct(sid)
+            fields := self.types.structs[sid].fields
+            names := vec[str]()
+            for i, f in fields {
+                if f.0 == n {
+                    return (self.types.structs[sid].offsets[i], f.1, "")
+                }
+                names.push(f.0)
+            }
+            have := if names.is_empty() { "it has none" } else { fmt("its fields: ", join(names.items(), ", ")) }
+            return (0, 0, fmt("`", self.types.name(t), "` has no field `", n, "` (", have, ")"))
+        }
+        Ptr(_) => return (0, 0, fmt("`", here, "` is a ", self.types.name(t), ": offsetof does not follow pointers"))
+        Array(_, _) => return (0, 0, fmt("`", here, "` is a ", self.types.name(t), ": name an element (`", here, "[0].", n, "`)"))
+        _ => return (0, 0, fmt("`", here, "` is a ", self.types.name(t), ", which has no fields"))
+    }
 }
 
 // write a constant initializer into `data` at `off`

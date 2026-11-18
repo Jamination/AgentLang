@@ -4132,3 +4132,8 @@ fn __net_error_text(e: i64) -> str {
         _ => __os_error_text(e)
     }
 }
+
+// Color(i) with an i that is no variant's number
+noinline fn __enum_fail(loc: str, i: i64, name: str, n: i64) -> never {
+    __die("panic: not a variant at ", loc, fmt(name, "(", i, "): ", name, " has ", n, " variants, numbered 0 to ", n - 1))
+}

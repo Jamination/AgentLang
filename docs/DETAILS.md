@@ -84,6 +84,17 @@ fn main() {
   are then used in the program. The library's `Opt[T]` and the program's are different types,
   and the library's helpers accept only the library's.
 - `print` shows a variant by its bare name. A payload is evaluated exactly once.
+- **Numbers.** `i64(e)` (or any integer type) is the number of `e`'s variant, counted from 0
+  in declaration order. For an enum without data the reverse is a conversion written with the
+  enum's name: `Color(i)` (also `Mode[T](i)`) takes any integer type and is the variant with
+  number `i`; a number that is no variant's stops the program (`panic: not a variant at
+  file:line: Color(7): Color has 3 variants, numbered 0 to 2`), or the compilation when `i` is
+  a literal or untyped constant. `variant_count[E]()` is the number of variants of any enum.
+  Both are constants where their arguments are: `const LAST = Kind(variant_count[Kind]() - 1)`,
+  `names: [variant_count[Kind]()]str`. All variants in order:
+  `for i in 0..variant_count[Kind]() { k := Kind(i) ... }`; a number read from a file is
+  checked first: `if n >= 0 && n < variant_count[Kind]() { kind = Kind(n) }`. A variant's name
+  as text is `fmt(k)`.
 
 ## Constants
 
@@ -96,6 +107,18 @@ fn main() {
   `const MODE = Mode.Fast`, `const M: Mode = Fast`); `embed("file")`; names of other
   constants. A constant cannot depend on itself. The address of an `extern` function is not a
   constant.
+- The builtins `sizeof[T]()`, `offsetof[T](field)`, `std140_size[T]()`, `std430_size[T]()`
+  and `hlsl_cbuffer_size[T]()` are untyped integer constants there (`const UV = offsetof[Vertex](uv)` can stand where a `u32`
+  is expected); in a function body they are `i64` values (`u32(offsetof[Vertex](uv))`). The
+  argument of `offsetof` names a field and is never evaluated: a field (`uv`), a field of a
+  field (`light.dir`), an element of an array field with a constant index (`lights[2]`,
+  `lights[N - 1].dir`); it does not follow pointers. A wrong name is a compile error that lists
+  the struct's fields. A program's own function of the name with one type parameter and one
+  parameter takes the call (in a constant too, where it is then not constant).
+- Of the library's functions only `rgba8(r, g, b, a)` and `rgb8(r, g, b)` (std.math) are constant
+  with constant bytes, as `u32` values: `const WALL = rgb8(120, 90, 60)`. A byte beyond 0..255, or
+  a typed argument that is not a `u8`, is a compile error; a program's own function of the name
+  and number of parameters takes the call.
 - An annotated type must match the value (`const UNIT: Point = Point{1, 1}`).
 - An aggregate (array, struct, tuple) or vector / matrix constant is stored once in read-only
   memory. Assigning to it or to a part of it, and `&` on it or on a part of it are compile

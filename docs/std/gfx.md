@@ -53,8 +53,9 @@ Direct3D 12 starter without its 700 lines of device, swap chain and batcher code
 - **Coordinates** are pixels of the current target, origin top left, y down, before the
   transform. A rotation by a positive angle turns clockwise on screen.
 - **Rectangles** are `vec4`: `(x, y, w, h)`.
-- **Colours** are `u32` RGBA8 with red in the lowest byte, as `color_u32(vec4(r, g, b, a))`
-  of std.math gives them: `0xAABBGGRR` as a literal (`0xFFFFFFFF` white, `0xFF0000FF` red).
+- **Colours** are `u32` RGBA8 with red in the lowest byte, as `rgb8(r, g, b)`, `rgba8(r, g, b, a)`
+  (bytes, usable in a `const`) and `color_u32(vec4(r, g, b, a))` of std.math give them: a literal
+  reads `0xAABBGGRR` (`0xFFFFFFFF` white, `0xFF0000FF` red; `rgb8(255, 0, 0)` says it plainly).
   Blending uses straight (not premultiplied) alpha.
 - **Errors**: what depends on the machine (no device, a lost device) is returned as text;
   misuse (drawing outside a frame, a freed texture) stops the program with a message.

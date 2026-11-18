@@ -30,6 +30,10 @@ struct DrawConsts {
     fx: vec4              // x: emission, y: fog distance, z: lantern flash, w: unused
 }
 
+// The number of root constants: hlsl_cbuffer_size checks that DrawConsts is laid out as the cbuffer
+// (176 bytes, a multiple of 16: the size of the struct).
+const DRAW_VALUES = hlsl_cbuffer_size[DrawConsts]() / 4
+
 // A range of vertices of the mesh buffer.
 struct Mesh { first: i64, count: i64 }
 
@@ -179,11 +183,10 @@ priv fn mesh_of(v: *Vec[MeshVertex], first: i64) -> Mesh { Mesh{first, v.len - f
 // The parts shared by both kinds of renderer: pipeline, meshes, sprites. "" or what failed.
 priv fn renderer_setup(r: *Renderer) -> str {
     g := &r.g
-    assert sizeof[MeshVertex]() == 28 && sizeof[DrawConsts]() == 176, "unexpected layout of the GPU structs"
     params: [1]D3D12_ROOT_PARAMETER
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
     params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
-    params[0].u_Constants().Num32BitValues = u32(sizeof[DrawConsts]() / 4)
+    params[0].u_Constants().Num32BitValues = DRAW_VALUES
     root_desc := D3D12_ROOT_SIGNATURE_DESC{NumParameters: 1, pParameters: ptr(params),
         Flags: D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT}
     root, err := dx_root_signature(g, &root_desc)
@@ -194,9 +197,9 @@ priv fn renderer_setup(r: *Renderer) -> str {
     ps, perr := dx_compile(MESH_SHADER, "ps_main", "ps_5_0")
     if perr != "" { return perr }
     layout := [3]D3D12_INPUT_ELEMENT_DESC{
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: 0},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("NORMAL"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: 12},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: 24},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: u32(offsetof[MeshVertex](pos))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("NORMAL"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: u32(offsetof[MeshVertex](normal))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: u32(offsetof[MeshVertex](color))},
     }
     desc := dx_pipeline_desc(r.root, vs, ps, RENDER_FORMAT)
     desc.InputLayout = D3D12_INPUT_LAYOUT_DESC{ptr(layout), 3}
@@ -423,7 +426,7 @@ fn camera(g: *Game, alpha: f32, aspect: f32) -> (vec3, mat4) {
 }
 
 priv fn draw(list: *ID3D12GraphicsCommandList, c: *DrawConsts, m: Mesh) {
-    list.SetGraphicsRoot32BitConstants(0, u32(sizeof[DrawConsts]() / 4), cast[*u8](c), 0)
+    list.SetGraphicsRoot32BitConstants(0, DRAW_VALUES, cast[*u8](c), 0)
     list.DrawInstanced(u32(m.count), 1, u32(m.first), 0)
 }
 
@@ -551,10 +554,10 @@ fn render_frame(r: *Renderer, g: *Game, alpha: f32, note: str, capture: bool) ->
 // ---- the HUD -----------------------------------------------------------------------------------
 
 const WHITE: u32 = 0xFFFFFFFF
-const GREY: u32 = 0xFFA0A0A0
-const YELLOW: u32 = 0xFF40E0FF
-const RED: u32 = 0xFF3030E0
-const GREEN: u32 = 0xFF60E060
+const GREY = rgb8(160, 160, 160)
+const YELLOW = rgb8(255, 224, 64)
+const RED = rgb8(224, 48, 48)
+const GREEN = rgb8(96, 224, 96)
 
 // A line of text with its top left corner at (x, y), `scale` HUD pixels per font pixel.
 fn draw_text(s: *Sprites, f: Font, x: f32, y: f32, scale: f32, text: str, color: u32) {

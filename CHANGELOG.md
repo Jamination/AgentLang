@@ -130,6 +130,27 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - tests: `NAME.windows.need` lists the DLLs a Windows test program needs; one that is not in a
   directory of PATH makes the test a SKIP (`NAME.windows.why`). `tests/sys/shaderc` runs on
   Windows.
+- `offsetof[T](field) -> i64`: the offset of a field of a struct, also nested (`light.dir`) and
+  in an array with a constant index (`lights[2].dir`); a constant like `sizeof[T]()`, for input
+  layouts and vertex attributes. An unknown field is a compile error that lists the fields.
+- `hlsl_cbuffer_size[T]()`: the sibling of `std140_size` for HLSL constant buffers and root
+  constants: the size of the cbuffer (rounded up to 16 bytes), and a compile error naming the
+  first field whose AL offset differs from where HLSL packs it (a vector across a 16-byte
+  register, an array element or struct not starting a register, a `bool`). The rules are
+  checked against D3DCompile's shader reflection (`tests/sys/hlsl_cbuffer.al`).
+- An enum without data from its variant number: `Color(i)`, the reverse of `i64(c)`, for any
+  integer type; a number that is no variant's stops the program (`panic: not a variant`), or
+  the compilation when it is a constant. `variant_count[E]()`: the number of variants. Both
+  are constants where their arguments are (`[variant_count[Kind]()]str`).
+- std.math: `rgba8(r, g, b, a)` and `rgb8(r, g, b)`: a `u32` colour from `u8` bytes, red in the
+  lowest byte (a literal reads `0xAABBGGRR`), as `color_u32` and std.gfx; constant with constant
+  bytes (`const WALL = rgb8(120, 90, 60)`), a byte beyond 255 a compile error.
+- std.math: `log10`, `ldexp(x, n)` and `frexp(x) -> (m, e)` for `f32` and `f64`, with C's results
+  for 0, negative numbers, infinities, NaN and subnormals; `ldexp` rounds once, `log10` is exact
+  for powers of ten.
+- std.input: `feed_motion(i, dx, dy)`: relative mouse motion for scripted and headless runs, as a
+  locked cursor's raw motion (`mouse_delta` grows, `mouse_pos` moves with it); docs/std/input.md
+  now says how mouse deltas are computed from the positions of mouse events.
 
 ### Changed
 - docs/AGENTS_TEMPLATE.md is platform-neutral: no absolute paths, a section per renderer
@@ -180,6 +201,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   still compiled only as far as a program reaches them, and the tests check all of them for
   every target (`tests/check/std_targets.al` now includes `std.font`, and
   `std_targets_vk.al` the Vulkan backend of `std.gfx` with `std.vk`).
+
+### Fixed
+- A global initialised from a typed integer constant (`x := K` with `const K: i32 = 7`, or a
+  `u32` from `rgb8`) has the constant's type; it was taken as `i64` and rejected.
 
 ## [0.4.0] - 2026-11-17
 

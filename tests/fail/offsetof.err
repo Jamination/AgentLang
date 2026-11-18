@@ -1,0 +1,12 @@
+offsetof.al:16:29: error: offsetof[Vertex]: `Vertex` has no field `normal` (its fields: pos, uv, color)
+offsetof.al:20:25: error: offsetof[Mesh]: `Vertex` has no field `uvs` (its fields: pos, uv, color)
+offsetof.al:21:25: error: offsetof[Mesh]: index 8 is out of range for `verts` ([8]Vertex)
+offsetof.al:22:25: error: offsetof[Mesh]: the index of `verts` must be one constant integer
+offsetof.al:23:25: error: offsetof[Mesh]: `first` is a *Vertex: offsetof does not follow pointers
+offsetof.al:24:25: error: offsetof[Mesh]: `verts` is a [8]Vertex: name an element (`verts[0].pos`)
+offsetof.al:25:27: error: offsetof[Vertex]: `pos` is a vec3, which has no fields
+offsetof.al:26:25: error: offsetof[vec3]: `vec3` is not a struct (offsetof[T](field) needs one)
+offsetof.al:27:27: error: offsetof[Vertex]: name a field: offsetof[T](field), offsetof[T](a.b), offsetof[T](items[2].x)
+offsetof.al:28:26: error: offsetof[Empty]: `Empty` has no field `a` (it has none)
+offsetof.al:29:27: error: `offsetof` takes 1 argument(s), got 0
+offsetof.al:30:19: error: `offsetof` needs one type argument: `offsetof[T](...)`

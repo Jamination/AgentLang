@@ -2093,3 +2093,143 @@ fn color_u32(c: vec4) -> u32 {
 fn color_vec4(c: u32) -> vec4 {
     vec4(f32(c & 0xFF), f32((c >> 8) & 0xFF), f32((c >> 16) & 0xFF), f32(c >> 24)) * 0.003921569
 }
+
+// RGBA8 from bytes, as color_u32 packs it: red in the lowest byte, so a u32 literal reads
+// 0xAABBGGRR (rgba8(255, 128, 0, 255) is 0xFF0080FF); with constant bytes it is a constant
+fn rgba8(r: u8, g: u8, b: u8, a: u8) -> u32 {
+    u32(r) | u32(g) << 8 | u32(b) << 16 | u32(a) << 24
+}
+
+// rgba8(r, g, b, 255): an opaque colour (rgb8(255, 0, 0) is 0xFF0000FF, red)
+fn rgb8(r: u8, g: u8, b: u8) -> u32 {
+    rgba8(r, g, b, 255)
+}
+
+// ---------- base 10 logarithms, binary exponents (f64 and f32) ----------
+// (after the rest of the file, whose lines stay where they were)
+
+// 1/ln(10) and log10(2), each split into a head whose product with a short operand is exact
+// and the rest (fdlibm)
+const __IVLN10_HI = 4.34294481878168880939e-01
+const __IVLN10_LO = 2.50829467116452752298e-11
+const __LOG10_2HI = 3.01029995663611771306e-01
+const __LOG10_2LO = 3.69423907715893078616e-13
+const __IVLN10F_HI = 4.3432617188e-01
+const __IVLN10F_LO = -3.1689971365e-05
+const __LOG10_2HIF = 3.0102920532e-01
+const __LOG10_2LOF = 7.9034151668e-07
+
+// base 10 logarithm (exact for 1, 10, 100, ... 10^22); -INF for 0, NaN for x < 0
+fn log10(x: f64) -> f64 {
+    if !(x > 0.0) {
+        return if x == 0.0 { -INF } else { NAN }
+    }
+    if x == INF {
+        return x
+    }
+    k, f := __log_split(x)
+    h, r := __log1p_k(f)
+    hi := __trunc32(f - h)
+    lo := (f - hi) - h + r
+    vh := hi * __IVLN10_HI
+    y := f64(k) * __LOG10_2HI
+    vl := f64(k) * __LOG10_2LO + (lo + hi) * __IVLN10_LO + lo * __IVLN10_HI
+    w := y + vh
+    vl += (y - w) + vh
+    vl + w
+}
+
+// base 10 logarithm (exact for 1, 10, 100, ... 10^10); -INF for 0, NaN for x < 0
+fn log10(x: f32) -> f32 {
+    if !(x > 0.0) {
+        return if x == 0.0 { -INF } else { NAN }
+    }
+    if x == INF {
+        return x
+    }
+    k, f := __log_splitf(x)
+    h, r := __log1p_kf(f)
+    hi := __trunc12(f - h)
+    lo := (f - hi) - h + r
+    f32(k) * __LOG10_2LOF + (lo + hi) * __IVLN10F_LO + lo * __IVLN10F_HI + hi * __IVLN10F_HI + f32(k) * __LOG10_2HIF
+}
+
+// x * 2^n, rounded once (also to a subnormal or to 0; beyond the range: +-INF); C's ldexp
+fn ldexp(x: f64, n: i64) -> f64 {
+    y := x
+    e := n
+    if e > 1023 {
+        y *= 8.98846567431158e307                      // 2^1023
+        e -= 1023
+        if e > 1023 {
+            y *= 8.98846567431158e307
+            e = min(e - 1023, 1023)
+        }
+    } else if e < -1022 {
+        // 2^-1022 * 2^53 in each step: the last multiplication alone rounds
+        y *= 2.004168360008973e-292
+        e += 1022 - 53
+        if e < -1022 {
+            y *= 2.004168360008973e-292
+            e = max(e + 1022 - 53, -1022)
+        }
+    }
+    y * __pow2(e)
+}
+
+// x * 2^n, rounded once (also to a subnormal or to 0; beyond the range: +-INF); C's ldexpf
+fn ldexp(x: f32, n: i64) -> f32 {
+    y := x
+    e := n
+    if e > 127 {
+        y *= 1.7014118346046923e38                     // 2^127
+        e -= 127
+        if e > 127 {
+            y *= 1.7014118346046923e38
+            e = min(e - 127, 127)
+        }
+    } else if e < -126 {
+        // 2^-126 * 2^24 in each step: the last multiplication alone rounds
+        y *= 1.9721522630525295e-31
+        e += 126 - 24
+        if e < -126 {
+            y *= 1.9721522630525295e-31
+            e = max(e + 126 - 24, -126)
+        }
+    }
+    y * __pow2f(e)
+}
+
+// (m, e) with x == m * 2^e and 0.5 <= |m| < 1 (exact); (x, 0) for 0, INF and NaN; C's frexp
+fn frexp(x: f64) -> (f64, i64) {
+    bits := cast[u64](x)
+    ee := i64((bits >> 52) & 0x7FF)
+    if ee == 0 {
+        if x == 0.0 {
+            return (x, 0)
+        }
+        m, e := frexp(x * 18446744073709551616.0)     // a subnormal: times 2^64
+        return (m, e - 64)
+    }
+    if ee == 0x7FF {
+        return (x, 0)
+    }
+    (cast[f64]((bits & 0x800FFFFFFFFFFFFF) | 0x3FE0000000000000), ee - 0x3FE)
+}
+
+// (m, e) with x == m * 2^e and 0.5 <= |m| < 1 (exact); (x, 0) for 0, INF and NaN; C's frexpf
+fn frexp(x: f32) -> (f32, i64) {
+    bits := cast[u32](x)
+    ee := i64((bits >> 23) & 0xFF)
+    if ee == 0 {
+        if x == 0.0 {
+            return (x, 0)
+        }
+        m, e := frexp(x * 18446744073709551616.0)     // a subnormal: times 2^64
+        return (m, e - 64)
+    }
+    if ee == 0xFF {
+        return (x, 0)
+    }
+    (cast[f32]((bits & 0x807FFFFF) | 0x3F000000), ee - 0x7E)
+}

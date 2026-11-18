@@ -118,8 +118,8 @@ fn create_pipeline(app: *App) {
     ps, perr := dx_compile(SHADER, "ps_main", "ps_5_0")
     if perr != "" { panic(perr) }
     layout := [2]D3D12_INPUT_ELEMENT_DESC{
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: 0},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R32G32B32A32_FLOAT, AlignedByteOffset: 8},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: u32(offsetof[Vertex](position))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R32G32B32A32_FLOAT, AlignedByteOffset: u32(offsetof[Vertex](color))},
     }
     desc := dx_pipeline_desc(app.root, vs, ps, FORMAT)
     desc.InputLayout = D3D12_INPUT_LAYOUT_DESC{ptr(layout), 2}

@@ -554,7 +554,7 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                     if !is_var {
                         env := self.tenv
                         cands := self.cx.fn_candidates(n)
-                        is_builtin := n == "sizeof" || n == "std140_size" || n == "std430_size" || n == "cast" || n == "mkslice"
+                        is_builtin := lower_mem_takes_targs(n)
                         if cands.len != 0 || is_builtin {
                             tys := vec[i64]()
                             for i in 0..targs.len {
@@ -750,6 +750,19 @@ priv fn conversion(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
         }
     }
     v := self.expr(&args[0], exp)
+    match (self.cx.types.k(to), self.cx.types.k(v.ty)) {
+        (Enum(eid), Int(_, _)) if self.cx.types.enums[eid].simple && self.is_untyped(&args[0]) => {
+            // Color(9) with a literal or untyped constant: the error at compile time
+            match self.cx.const_eval(&args[0]) {
+                Some(Int(i)) if i < 0 || i >= self.cx.types.enums[eid].variants.len => {
+                    self.err(pos, enum_range_msg(self.tyname(to), if v.ty == T_U64 && i < 0 { fmt(u64(i)) } else { fmt(i) }, self.cx.types.enums[eid].variants.len))
+                    return val_err()
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
     return self.convert(v, to, pos)
 }
 
@@ -1628,8 +1641,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             v := self.iconst(I64, i64(s))
             return Some(self.sval(T_I64, v))
         }
-        "std140_size", "std430_size" => {
-            // the size in a GLSL buffer block; a compile error if the AL layout differs
+        "variant_count" => {
             if self.bad_arity(name, nargs, 0, pos) {
                 return Some(val_err())
             }
@@ -1637,7 +1649,40 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             if t < 0 {
                 return Some(val_err())
             }
-            s, _, err := self.cx.types.gpu_layout(t, name == "std140_size", "")
+            n, err := self.cx.variant_count(t)
+            if len(err) != 0 {
+                self.err(pos, err)
+                return Some(val_err())
+            }
+            return Some(self.sval(T_I64, self.iconst(I64, n)))
+        }
+        "offsetof" => {
+            // the offset of a field: the argument names it and is not evaluated
+            if self.bad_arity(name, nargs, 1, pos) {
+                return Some(val_err())
+            }
+            t := self.one_targ(name, targs, pos)
+            if t < 0 {
+                return Some(val_err())
+            }
+            off, _, err := self.cx.offset_of(t, &args[0])
+            if len(err) != 0 {
+                self.err(pos, fmt(name, "[", self.tyname(t), "]: ", err))
+                return Some(val_err())
+            }
+            return Some(self.sval(T_I64, self.iconst(I64, off)))
+        }
+        "std140_size", "std430_size", "hlsl_cbuffer_size" => {
+            // the size in a GLSL buffer block / an HLSL constant buffer; a compile error if the
+            // AL layout differs
+            if self.bad_arity(name, nargs, 0, pos) {
+                return Some(val_err())
+            }
+            t := self.one_targ(name, targs, pos)
+            if t < 0 {
+                return Some(val_err())
+            }
+            s, _, err := if name == "hlsl_cbuffer_size" { self.cx.types.hlsl_cbuffer(t) } else { self.cx.types.gpu_layout(t, name == "std140_size", "") }
             if len(err) != 0 {
                 self.err(pos, fmt(name, "[", self.tyname(t), "]: ", err))
                 return Some(val_err())

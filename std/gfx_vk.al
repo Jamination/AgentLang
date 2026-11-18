@@ -284,9 +284,9 @@ priv fn make_pipelines(v: *Vk, format: i32) -> [2]u64 {
     stages[1].pName = ptr("main")
     binding := VkVertexInputBindingDescription{0, u32(sizeof[GfxVertex]()), VK_VERTEX_INPUT_RATE_VERTEX}
     attributes := [3]VkVertexInputAttributeDescription{
-        VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
-        VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
-        VkVertexInputAttributeDescription{2, 0, VK_FORMAT_R8G8B8A8_UNORM, 16},
+        VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32_SFLOAT, POS_AT},
+        VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32_SFLOAT, UV_AT},
+        VkVertexInputAttributeDescription{2, 0, VK_FORMAT_R8G8B8A8_UNORM, COLOR_AT},
     }
     vertex_input := vk_pipeline_vertex_input_state_create_info()
     vertex_input.vertexBindingDescriptionCount = 1
@@ -1070,3 +1070,8 @@ fn read_pixels(g: *Gfx) -> Image {
     assert g.offscreen, "read_pixels: only for gfx_offscreen (draw into a render_texture and read_texture it)"
     read_texture(g, Texture{vk(g).screen_tex, g.width, g.height})
 }
+
+// where the vertex attributes find the fields of a vertex
+priv const POS_AT: u32 = offsetof[GfxVertex](pos)
+priv const UV_AT: u32 = offsetof[GfxVertex](uv)
+priv const COLOR_AT: u32 = offsetof[GfxVertex](color)

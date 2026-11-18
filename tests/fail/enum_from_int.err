@@ -1,0 +1,7 @@
+enum_from_int.al:6:18: error: `Color(3)`: Color has 3 variants, numbered 0 to 2
+enum_from_int.al:7:18: error: `Color(-1)`: Color has 3 variants, numbered 0 to 2
+enum_from_int.al:10:16: error: `Color(7)`: Color has 3 variants, numbered 0 to 2
+enum_from_int.al:11:16: error: cannot convert i64 to Shape: Shape has variants with data (only an enum without data is made from a variant number)
+enum_from_int.al:12:29: error: variant_count[i64]: `i64` is not an enum
+enum_from_int.al:13:31: error: `variant_count` takes 0 argument(s), got 1
+enum_from_int.al:14:16: error: cannot convert f32 to Color (use cast[T](x) for reinterpretation)

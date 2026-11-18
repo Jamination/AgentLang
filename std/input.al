@@ -671,3 +671,17 @@ when TARGET_OS == Windows {
 } else {
     use std.input_linux
 }
+
+// ---- relative motion ----
+// (after the rest of the file, whose lines stay where they were)
+
+// Moves the pointer by (dx, dy), as the raw motion of a locked cursor does (window.md, mouse-look):
+// mouse_delta grows by (dx, dy) and mouse_pos moves with it, without bounds. For scripted and
+// headless runs (a bot's mouse-look); a mouse event fed later takes its delta from the moved position.
+fn feed_motion(i: *Input, dx: f32, dy: f32) {
+    i.mouse_dx += dx
+    i.mouse_dy += dy
+    i.mouse_x += dx
+    i.mouse_y += dy
+    i.mouse_seen = true
+}

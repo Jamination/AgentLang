@@ -847,3 +847,84 @@ fn gpu_layout(self: *Types, t: i64, std140: bool, at: str) -> (i64, i64, str) {
         _ => return (0, 0, fmt("`", here, "` is a ", self.name(t), ", which cannot be in a GPU buffer (numbers, vectors, mat4, arrays and structs of them)"))
     }
 }
+
+// ---------- HLSL constant buffers: hlsl_cbuffer_size[T]() ----------
+// (size, alignment, "") of t as a whole constant buffer: its size rounded up to 16 bytes, as
+// shader reflection reports it; or the first difference of the AL layout
+fn hlsl_cbuffer(self: *Types, t: i64) -> (i64, i64, str) {
+    s, _, _, err := self.hlsl_layout(t, "")
+    return (align_up(s, 16), 16, err)
+}
+
+// (size, alignment, starts a register) of t in an HLSL constant buffer (a cbuffer or root
+// constants), and "" if the AL layout of t is the same; else the first difference, at `at`.
+// The packing rules, checked against the offsets D3DCompile's shader reflection reports
+// (tests/sys/hlsl_cbuffer.al): a variable does not cross a 16-byte register (a float2 at 12
+// moves to 16), a double (and a 64-bit integer) is 8-aligned, a bool is 4 bytes; arrays,
+// structs and matrices start a register; every array element but the last takes a multiple
+// of 16 bytes; a struct ends after its last member, and what follows an array or a struct is
+// packed right after it.
+fn hlsl_layout(self: *Types, t: i64, at: str) -> (i64, i64, bool, str) {
+    here := if len(at) == 0 { self.name(t) } else { at }
+    match self.k(t) {
+        Int(32, _), F32 => return (4, 4, false, "")
+        Int(64, _), F64 => return (8, 8, false, "")
+        Vec(n) => return (4 * n, 4, false, "")
+        Quat => return (16, 4, false, "")
+        Mat4 => return (64, 16, true, "")
+        Bool => return (0, 0, false, fmt("`", here, "` is a bool: 1 byte in AL, 4 in HLSL (use u32)"))
+        Int(_, _) => return (0, 0, false, fmt("`", here, "` is a ", self.name(t), ", which an HLSL constant buffer does not have (use i32 or u32)"))
+        Array(e, n) => {
+            es, _, _, err := self.hlsl_layout(e, fmt(here, "[]"))
+            if len(err) != 0 {
+                return (0, 0, false, err)
+            }
+            stride := align_up(es, 16)
+            if stride != self.size_of(e) {
+                why := match self.k(e) {
+                    Struct(_) => fmt(" (HLSL starts every element on a 16-byte boundary: pad ", self.name(e), " to a multiple of 16 bytes)")
+                    _ => " (HLSL starts every element on a 16-byte boundary: use vec4)"
+                }
+                return (0, 0, false, fmt("`", here, "`: the elements of ", self.name(t), " are ", self.size_of(e), " bytes apart in AL and ", stride, " in HLSL", why))
+            }
+            return (if n == 0 { 0 } else { stride * (n - 1) + es }, 16, true, "")
+        }
+        Struct(s) => {
+            self.layout_struct(s)
+            name := self.structs[s].name
+            off := 0
+            after_reg := false
+            prev := ""
+            for i, f in self.structs[s].fields {
+                path := if len(at) == 0 { fmt(name, ".", f.0) } else { fmt(at, ".", f.0) }
+                fs, fa, reg, err := self.hlsl_layout(f.1, path)
+                if len(err) != 0 {
+                    return (0, 0, false, err)
+                }
+                packed := align_up(off, fa)
+                why := ""
+                if reg {
+                    off = align_up(off, 16)
+                    why = "HLSL starts an array, a struct or a mat4 on a 16-byte boundary: add padding before it"
+                } else if packed / 16 != (packed + fs - 1) / 16 {
+                    off = align_up(packed, 16)
+                    why = fmt("a ", self.name(f.1), " does not cross a 16-byte boundary in HLSL: add padding before it")
+                } else if after_reg {
+                    off = packed
+                    why = fmt("HLSL packs it right after the last member or element of `", prev, "`, which ends earlier in HLSL")
+                } else {
+                    off = packed
+                    why = fmt("HLSL aligns a ", self.name(f.1), " to ", fa, " bytes")
+                }
+                if off != self.structs[s].offsets[i] {
+                    return (0, 0, false, fmt("`", path, "` (", self.name(f.1), ") is at offset ", self.structs[s].offsets[i], " in AL and at ", off, " in HLSL (", why, ")"))
+                }
+                off += fs
+                after_reg = reg
+                prev = path
+            }
+            return (off, 16, true, "")
+        }
+        _ => return (0, 0, false, fmt("`", here, "` is a ", self.name(t), ", which cannot be in a GPU buffer (numbers, vectors, mat4, arrays and structs of them)"))
+    }
+}

@@ -1,0 +1,12 @@
+hlsl_cbuffer.al:20:45: error: hlsl_cbuffer_size[Straddle]: `Straddle.d` (vec2) is at offset 12 in AL and at 16 in HLSL (a vec2 does not cross a 16-byte boundary in HLSL: add padding before it)
+hlsl_cbuffer.al:23:40: error: hlsl_cbuffer_size[FloatArray]: `FloatArray.ks`: the elements of [4]f32 are 4 bytes apart in AL and 16 in HLSL (HLSL starts every element on a 16-byte boundary: use vec4)
+hlsl_cbuffer.al:24:46: error: hlsl_cbuffer_size[StructAfterFloat]: `StructAfterFloat.s` (Pair) is at offset 4 in AL and at 16 in HLSL (HLSL starts an array, a struct or a mat4 on a 16-byte boundary: add padding before it)
+hlsl_cbuffer.al:25:43: error: hlsl_cbuffer_size[MatAfterFloat]: `MatAfterFloat.m` (mat4) is at offset 4 in AL and at 16 in HLSL (HLSL starts an array, a struct or a mat4 on a 16-byte boundary: add padding before it)
+hlsl_cbuffer.al:26:44: error: hlsl_cbuffer_size[Vec4AfterFloat]: `Vec4AfterFloat.v` (vec4) is at offset 4 in AL and at 16 in HLSL (a vec4 does not cross a 16-byte boundary in HLSL: add padding before it)
+hlsl_cbuffer.al:27:39: error: hlsl_cbuffer_size[Vec3Array]: `Vec3Array.vs`: the elements of [2]vec3 are 12 bytes apart in AL and 16 in HLSL (HLSL starts every element on a 16-byte boundary: use vec4)
+hlsl_cbuffer.al:28:40: error: hlsl_cbuffer_size[InnerArray]: `InnerArray.items`: the elements of [2]Inner are 20 bytes apart in AL and 32 in HLSL (HLSL starts every element on a 16-byte boundary: pad Inner to a multiple of 16 bytes)
+hlsl_cbuffer.al:29:41: error: hlsl_cbuffer_size[AfterPadded]: `AfterPadded.x` (f32) is at offset 16 in AL and at 12 in HLSL (HLSL packs it right after the last member or element of `AfterPadded.s`, which ends earlier in HLSL)
+hlsl_cbuffer.al:30:34: error: hlsl_cbuffer_size[Flag]: `Flag.on` is a bool: 1 byte in AL, 4 in HLSL (use u32)
+hlsl_cbuffer.al:31:35: error: hlsl_cbuffer_size[Small]: `Small.n` is a u16, which an HLSL constant buffer does not have (use i32 or u32)
+hlsl_cbuffer.al:32:33: error: hlsl_cbuffer_size[Ptr]: `Ptr.p` is a *u8, which cannot be in a GPU buffer (numbers, vectors, mat4, arrays and structs of them)
+hlsl_cbuffer.al:33:34: error: `hlsl_cbuffer_size` takes 0 argument(s), got 1
