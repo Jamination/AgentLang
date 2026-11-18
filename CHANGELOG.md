@@ -83,6 +83,11 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `offsetof[T](field) -> i64`: the offset of a field of a struct, also nested (`light.dir`) and
   in an array with a constant index (`lights[2].dir`); a constant like `sizeof[T]()`, for input
   layouts and vertex attributes. An unknown field is a compile error that lists the fields.
+- `hlsl_cbuffer_size[T]()`: the sibling of `std140_size` for HLSL constant buffers and root
+  constants: the size of the cbuffer (rounded up to 16 bytes), and a compile error naming the
+  first field whose AL offset differs from where HLSL packs it (a vector across a 16-byte
+  register, an array element or struct not starting a register, a `bool`). The rules are
+  checked against D3DCompile's shader reflection (`tests/sys/hlsl_cbuffer.al`).
 
 ### Changed
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a

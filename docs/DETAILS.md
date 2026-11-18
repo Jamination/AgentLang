@@ -96,8 +96,8 @@ fn main() {
   `const MODE = Mode.Fast`, `const M: Mode = Fast`); `embed("file")`; names of other
   constants. A constant cannot depend on itself. The address of an `extern` function is not a
   constant.
-- The builtins `sizeof[T]()`, `offsetof[T](field)`, `std140_size[T]()` and `std430_size[T]()`
-  are untyped integer constants there (`const UV = offsetof[Vertex](uv)` can stand where a `u32`
+- The builtins `sizeof[T]()`, `offsetof[T](field)`, `std140_size[T]()`, `std430_size[T]()`
+  and `hlsl_cbuffer_size[T]()` are untyped integer constants there (`const UV = offsetof[Vertex](uv)` can stand where a `u32`
   is expected); in a function body they are `i64` values (`u32(offsetof[Vertex](uv))`). The
   argument of `offsetof` names a field and is never evaluated: a field (`uv`), a field of a
   field (`light.dir`), an element of an array field with a constant index (`lights[2]`,

@@ -1626,8 +1626,9 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             }
             return Some(self.sval(T_I64, self.iconst(I64, off)))
         }
-        "std140_size", "std430_size" => {
-            // the size in a GLSL buffer block; a compile error if the AL layout differs
+        "std140_size", "std430_size", "hlsl_cbuffer_size" => {
+            // the size in a GLSL buffer block / an HLSL constant buffer; a compile error if the
+            // AL layout differs
             if self.bad_arity(name, nargs, 0, pos) {
                 return Some(val_err())
             }
@@ -1635,7 +1636,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             if t < 0 {
                 return Some(val_err())
             }
-            s, _, err := self.cx.types.gpu_layout(t, name == "std140_size", "")
+            s, _, err := if name == "hlsl_cbuffer_size" { self.cx.types.hlsl_cbuffer(t) } else { self.cx.types.gpu_layout(t, name == "std140_size", "") }
             if len(err) != 0 {
                 self.err(pos, fmt(name, "[", self.tyname(t), "]: ", err))
                 return Some(val_err())

@@ -30,6 +30,10 @@ struct DrawConsts {
     fx: vec4              // x: emission, y: fog distance, z: lantern flash, w: unused
 }
 
+// The number of root constants: hlsl_cbuffer_size checks that DrawConsts is laid out as the cbuffer
+// (176 bytes, a multiple of 16: the size of the struct).
+const DRAW_VALUES = hlsl_cbuffer_size[DrawConsts]() / 4
+
 // A range of vertices of the mesh buffer.
 struct Mesh { first: i64, count: i64 }
 
@@ -179,11 +183,10 @@ priv fn mesh_of(v: *Vec[MeshVertex], first: i64) -> Mesh { Mesh{first, v.len - f
 // The parts shared by both kinds of renderer: pipeline, meshes, sprites. "" or what failed.
 priv fn renderer_setup(r: *Renderer) -> str {
     g := &r.g
-    assert sizeof[DrawConsts]() == 176, "unexpected layout of the GPU structs"
     params: [1]D3D12_ROOT_PARAMETER
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
     params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
-    params[0].u_Constants().Num32BitValues = u32(sizeof[DrawConsts]() / 4)
+    params[0].u_Constants().Num32BitValues = DRAW_VALUES
     root_desc := D3D12_ROOT_SIGNATURE_DESC{NumParameters: 1, pParameters: ptr(params),
         Flags: D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT}
     root, err := dx_root_signature(g, &root_desc)
@@ -423,7 +426,7 @@ fn camera(g: *Game, alpha: f32, aspect: f32) -> (vec3, mat4) {
 }
 
 priv fn draw(list: *ID3D12GraphicsCommandList, c: *DrawConsts, m: Mesh) {
-    list.SetGraphicsRoot32BitConstants(0, u32(sizeof[DrawConsts]() / 4), cast[*u8](c), 0)
+    list.SetGraphicsRoot32BitConstants(0, DRAW_VALUES, cast[*u8](c), 0)
     list.DrawInstanced(u32(m.count), 1, u32(m.first), 0)
 }
 

@@ -698,7 +698,7 @@ Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes 
 | `hash(x) -> u64` | hash of any value that supports `==`; the same on every run and target |
 | `clone(x) -> T` | independent deep copy (see [`clone`](#clonex)) |
 | `sizeof[T]() -> i64`, `offsetof[T](field) -> i64` | size of `T` in bytes; offset of a field of the struct `T`, also nested and in an array with a constant index: `offsetof[V](uv)`, `offsetof[Ubo](lights[2].dir)`. Constants, like the two below |
-| `std140_size[T]() -> i64`, `std430_size[T]() -> i64` | size of the struct (or array) `T` in a GLSL buffer block laid out by std140 / std430; a compile error naming the field if the AL layout of `T` differs (a `vec3` before a scalar-aligned field, an array of `f32` under std140, ...). Constant: `const UBO_SIZE = std140_size[Ubo]()` checks where it is declared |
+| `std140_size[T]()`, `std430_size[T]()`, `hlsl_cbuffer_size[T]()` | size (`i64`) of the struct (or array) `T` in a GLSL buffer block laid out by std140 / std430, or in an HLSL constant buffer (rounded up to 16); a compile error naming the field if the AL layout of `T` differs (a `vec3` before a scalar-aligned field, an array of `f32`, a `vec2` across 16 bytes in HLSL, ...). Constant: `const UBO_SIZE = std140_size[Ubo]()` checks where it is declared |
 | `sqrt(x)`, `fabs(x)`, `fmin(a, b)`, `fmax(a, b)` | on `f64`, `f32` and vectors |
 | `popcnt(x) ctz(x) clz(x) bswap(x)`, `rotl(x, n)`, `rotr(x, n)`, `mulhi(a, b)` | integers: bit counting, byte swap, rotation, high half of the double-width product |
 | `panic(msg: str) -> never` | stop with a message |

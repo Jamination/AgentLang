@@ -2280,6 +2280,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         gpu := match b.k {
                             Ident("std140_size") => "std140_size"
                             Ident("std430_size") => "std430_size"
+                            Ident("hlsl_cbuffer_size") if !self.declares_like("hlsl_cbuffer_size", 1, 0) => "hlsl_cbuffer_size"
                             _ => ""
                         }
                         if len(gpu) != 0 && targs.len == 1 {
@@ -2287,7 +2288,7 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                             match self.expr_type(&targs[0], &env) {
                                 Some(T_ERR) => return None
                                 Some(t) => {
-                                    s, _, err := self.types.gpu_layout(t, gpu == "std140_size", "")
+                                    s, _, err := if gpu == "hlsl_cbuffer_size" { self.types.hlsl_cbuffer(t) } else { self.types.gpu_layout(t, gpu == "std140_size", "") }
                                     if len(err) != 0 {
                                         self.err(e.pos, fmt(gpu, "[", self.types.name(t), "]: ", err))
                                         return Some(CV.Int(0))
