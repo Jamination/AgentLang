@@ -1,0 +1,6 @@
+self and DLL true true
+copies true true true
+status 1
+assertion true
+DLL frames named true true
+cleanup true

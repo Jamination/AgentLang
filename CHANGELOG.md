@@ -157,6 +157,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `run_capture_all`, `spawn`, `alc run` and `alc test` ("no such file or directory"), although
   the file functions and the program search took such paths: `CreateProcessW` now gets the
   extended-length form.
+- Windows stack traces: a frame of a DLL whose path is 260 units or more was named by the end
+  of the path cut at 260 units (a directory's name) instead of the DLL's file name; the title
+  of a GUI program's panic message box was cut the same way at 519 units. Module file names
+  are now read into a buffer that grows.
 
 ## [0.4.0] - 2026-11-17
 

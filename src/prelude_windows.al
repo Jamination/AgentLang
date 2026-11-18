@@ -386,10 +386,10 @@ noinline fn __os_bt_where(q: i64) -> (str, str, i64) {
         return ("", "", q)
     }
     h := bt_mod
-    // (non-ASCII characters of the name as '?')
+    // (non-ASCII characters of the name as '?'; a path cut at 260 units: bt_long_name, at the end)
     n := i64(GetModuleFileNameW(h, ptr(bt_wname), 260))
-    k := 0
-    for i in 0..min(n, 260) {
+    k := if n >= 260 { bt_long_name(h) } else { 0 }
+    for i in 0..(if n >= 260 { 0 } else { n }) {
         c := bt_wname[i]
         if c == u16('\\') || c == u16('/') {
             k = 0
@@ -481,7 +481,7 @@ fn __os_panic(kind: str, loc: str, msg: str) {
     }
     // the title: the executable's file name
     path: [520]u16
-    k := i64(GetModuleFileNameW(0, ptr(path), 519))
+    k := module_base_name(0, ptr(path), 520)    // (the file name alone: the loop below keeps it)
     path[k] = 0
     start := 0
     for i in 0..k {
@@ -2075,4 +2075,50 @@ const TARGET_ARCH = Arch.X86_64
 priv fn app_path(file: str) -> *u16 {
     none: []u16
     return wide_path(none, cstr(file))
+}
+
+// ---------- module file names of any length ----------
+// GetModuleFileNameW cuts a path silently at the size of the buffer it is given. These read it
+// into a buffer that grows (up to the 32767 units of an extended-length path) and keep the file
+// name. The memory is VirtualAlloc's, not the arena's: they run during a panic, which may be one
+// for want of memory, and a stack trace allocates nothing.
+
+// the file name of module h (0: the program), without its directory, as UTF-16 in out (room for
+// cap units with the NUL; cut there): its length in units, 0 if it cannot be read
+priv fn module_base_name(h: i64, out: *u16, cap: i64) -> i64 {
+    size := 512
+    loop {
+        mem := VirtualAlloc(0, 2 * size, 0x3000, 4)         // MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+        if mem == 0 {
+            return 0
+        }
+        w := cast[*u16](mem)
+        n := i64(GetModuleFileNameW(h, w, u32(size)))
+        if n < size || size >= 32768 {
+            start := 0
+            for i in 0..n {
+                if w[i] == 92 || w[i] == 47 {
+                    start = i + 1
+                }
+            }
+            k := max(min(n - start, cap - 1), 0)
+            memcopy(cast[i64](out), mem + 2 * start, 2 * k)
+            out[k] = 0
+            VirtualFree(mem, 0, 0x8000)                         // MEM_RELEASE
+            return k
+        }
+        VirtualFree(mem, 0, 0x8000)
+        size *= 2
+    }
+}
+
+// __os_bt_where for a DLL whose path is 260 units or more: its file name into bt_name
+// (non-ASCII characters as '?'), through bt_wname; the length
+priv fn bt_long_name(h: i64) -> i64 {
+    k := module_base_name(h, ptr(bt_wname), 260)
+    for i in 0..k {
+        c := bt_wname[i]
+        bt_name[i] = if c < 128 { u8(c) } else { u8('?') }
+    }
+    return k
 }
