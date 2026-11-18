@@ -44,6 +44,19 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   glyph atlases into std.image images, and UTF-8 text layout, measuring, line wrapping and
   drawing into images. CFF outlines are rejected with an error; a malformed font is rejected,
   never read out of bounds. `examples/font_demo.al`. See docs/std/font.md.
+- `std.gfx_text`: text for std.gfx with std.font's fonts. `gfx_font(g, font, px, chars)` makes
+  a `GfxFont` (the glyphs at one pixel size as a coverage texture; `gfx_font(g, atlas,
+  filter)` from an atlas of one's own, `gfx_font_add`, `gfx_font_free`); `draw_text(g, font, x,
+  y, text, color)` draws UTF-8 text with kerning and `'\n'`, also aligned (`AlignLeft`,
+  `AlignCenter`, `AlignRight`); `draw_text_box` wraps into a rectangle as `wrap_text` does;
+  `text_size` and `line_height` measure. Pens are rounded to whole target pixels, so the GPU
+  draws what std.font's `draw_text` with the atlas draws into an image (within 1 of 255 per
+  channel on Direct3D 12 and Vulkan); `font.size` draws a font rasterised at the size it has on
+  the screen at its virtual size under `set_view`; characters outside the font's set draw as
+  its missing glyph; drawing allocates nothing. A separate module: a std.gfx program without
+  text does not grow. std.font's 4-channel atlases are now white in every pixel (alpha 0
+  between the glyphs), so a linear filter no longer darkens the glyphs' edges.
+  `examples/gfx_starter` draws its text with it in a system font. See docs/std/gfx.md#text.
 - `std.net`: TCP (connect with a time limit, non-blocking connect, listen / accept, send / recv
   with time limits, shutdown), UDP (`udp_bind`, `send_to`, `recv_from`), IPv4 and IPv6 address
   parsing and formatting, and `poll` over several sockets for game loops. Errors are Linux
@@ -96,6 +109,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   function after every store or call.
 - Code generation: fewer stores to spill slots; a loop that is left from the "then" side of a
   branch falls through into its own code.
+- `--target linux-arm64` compiles functions in parallel threads as the x86-64 back end does
+  (the same executable whatever the number of threads, `ALC_JOBS`): the compiler for arm64
+  builds in about 0.25 s instead of 0.45 s at `-O0` on 16 CPUs.
 
 ## [0.4.0] - 2026-11-17
 

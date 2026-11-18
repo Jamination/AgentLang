@@ -28,6 +28,8 @@ use "opt/simplify.al"
 use "opt/spec.al"
 use "opt/tre.al"
 use "opt/unroll.al"
+use "spread.al"
+use "regalloc.al"
 use "x86/mir.al"
 use "x86/isel.al"
 use "x86/regalloc.al"
@@ -127,6 +129,7 @@ priv const STD_MODULES = [_](str, str){
     ("gfx_dx12", embed("../std/gfx_dx12.al")),
     ("gfx_vk", embed("../std/gfx_vk.al")),
     ("gfx_shaders", embed("../std/gfx_shaders.al")),
+    ("gfx_text", embed("../std/gfx_text.al")),
 }
 
 // modules that are loaded into every program
@@ -1308,6 +1311,6 @@ priv t0: i64
 priv fn mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
-        eput(fmt("[mem] ", phase, ": ", (mem_used() + x86_thread_mem()) >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
+        eput(fmt("[mem] ", phase, ": ", (mem_used() + spread_thread_mem()) >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
     }
 }

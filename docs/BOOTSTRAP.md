@@ -182,7 +182,10 @@ executables before and after); the conventions below describe the result.
 | `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
-| `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
+| `src/spread.al` | what the two back-end drivers share: the reachable functions (`Refs`), the number of threads and the parallel compile of functions (`spread_run`) |
+| `src/regalloc.al` | the register allocator of both back ends (iterated register coalescing: liveness, interference graph, coalescing, simplify / select, spill choice and spill rounds), generic over the target's machine function and instruction types; the target supplies the rest ([register allocation](#register-allocation)) |
+| `src/x86/*.al` | instruction selection, the x86-64 part of register allocation (register file, spill code with memory operands), encoder; `mod.al` is the backend driver |
+| `src/arm64/*.al`, `src/elf_arm64.al` | the arm64 back end (`--target linux-arm64`) and its ELF writer: instruction selection, the arm64 part of register allocation (register file, spill loads and stores), encoder, driver ([arm64 target](#arm64-target)) |
 | `src/elf.al` | ELF writer (Linux) |
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
 | `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
@@ -496,13 +499,53 @@ cycles over the 8 offsets; before 4.99 G, the place per block 4.86 G):
   (a `GAddr` is pure), and the place before the outermost loop keeps that (a loop that
   allocates a million nodes: 6.111 G instructions before and now, Linux 6.000 G).
 
+## Register allocation
+
+One allocator serves both back ends: `src/regalloc.al` (iterated register coalescing after
+George and Appel) is generic over the target's machine function type `F` (`MFunc`, `AFunc`)
+and instruction type `I` (`MInst`, `AInst`): `ra_allocate[MFunc, MInst]` in
+`src/x86/regalloc.al`, `ra_allocate[AFunc, AInst]` in `src/arm64/regalloc.al`. AL has no
+traits; a generic function is compiled per type like a template, so the shared code calls the
+target's functions by name (`ra_decode(mf, ..)`, `ra_order(mf, cls)`, ...: the list is at the
+top of `src/regalloc.al`), and overloading on `*MFunc` / `*AFunc` picks the target's. These
+functions are `inline`, and the constant ones ignore their argument (`ra_npre` gives the number
+of machine registers, 32 or 65, for an `Irc[F]` without reading anything), so each instance is
+the code a copy of the allocator for one target would be: comparing the selected machine code
+of the compiler's allocator functions before and after the change, the hot ones (graph
+building, simplify, coalesce, the Briggs and George tests, liveness, select) differ only in
+frame slot numbers and the lengths of the "file:line" strings of their bounds checks; the
+self-compile takes the same time (best of 7 runs, interleaved, three times: optimised 1150 to
+1155 ms against 1154 to 1164 ms before, `-O0` 260 to 261 ms against 261 to 266 ms).
+
+Shared: decoding the instructions once per round, liveness, the interference graph (bit
+matrix or hash set, the lists), coalescing, simplify / freeze / spill choice, select with
+biased colouring, the spill rounds (choice of the registers, new slots, temporaries loaded
+before and stored after, unspillable temporaries), the rewrite to machine registers.
+Per target, because only the target knows it: the register file and allocation order, the
+call clobbers, which registers an instruction defines and uses (`mir_decode` / `a_decode`:
+x86-64 two-address operations and fixed registers, the early-clobber operands of the arm64
+atomic loops are expressed there as defs, uses and machine registers), the spill code
+(`ra_spill_load` / `ra_spill_store`, and `ra_spill_direct`: x86-64 accesses a slot as a memory
+operand of the instruction where one is allowed, arm64 turns a copy with one spilled side into
+the load or store), and the pass after allocation that forwards spill slots kept in registers
+and removes dead stores (`ra_spill_forward`): it recognises the target's spill code and
+rewrites it in the target's forms (x86-64 replaces memory operands of any instruction and
+also removes stores that a later one overwrites; arm64 has only loads to rewrite), so a shared
+version would be little more than the per-block state (`ra_st_*`, shared).
+
+The result (`RaResult`, in `Alloc` / `AAlloc` as `assign`) includes where each virtual
+register ended up: `RaAssign` (machine register by node, or the spill slot of a register that
+was spilled), built at the end of `ra_allocate`: the place for debug information on
+register-allocated variables to read the assignment.
+
 ## Parallel back end
 
-`x86_compile` compiles functions independently of each other. With more than one CPU and
-enough functions (**Number of threads** below) the compiler's thread
-and worker threads compile them together, on Linux and Windows alike (`compile_spread` in
-`src/x86/mod.al`; the threads are the run-time library's, started by `worker_start` in
-`src/base.al`). The functions are in one list, largest first, and every thread takes the next
+`x86_compile` and `a64_compile` (the arm64 back end) compile functions independently of each
+other. With more than one CPU and enough functions (**Number of threads** below) the
+compiler's thread and worker threads compile them together, on Linux and Windows alike
+(`compile_spread` in `src/x86/mod.al` and `src/arm64/mod.al`, with what both share in
+`src/spread.al`: `spread_run`, the reachable functions; the threads are the run-time
+library's, started by `worker_start` in `src/base.al`). The functions are in one list, largest first, and every thread takes the next
 one with an `atomic_add` on the position in the list, so all threads finish at about the same
 time. A thread puts the result of a function (`Done`: machine code, relocations, float
 constants, frame shape, line table) into that function's element of a result array; it is
@@ -523,7 +566,7 @@ computes the reachable functions as a sequential compile does and keeps only the
 Optimised builds compute the reachable functions first and compile only those (at least 64) in
 the threads.
 
-**Number of threads** (`spread_threads` in `src/x86/mod.al`), the compiler's thread included:
+**Number of threads** (`spread_threads` in `src/spread.al`), the compiler's thread included:
 one per CPU (Linux: the CPUs of `sched_getaffinity`, limited by a cgroup quota in
 `/sys/fs/cgroup/cpu.max`; Windows: `GetActiveProcessorCount`), at most 32, and at most one per
 24 functions at `-O0` (where the threads also optimise them) or per 12 functions when
@@ -741,11 +784,14 @@ is Linux); the differences are:
 - **Back end** (`src/arm64/`): `mir.al` (three-address machine IR; x16, x17, x18, x29, x30
   and v31 are reserved), `isel.al` (selection from the SSA IR, one plain selection per
   operation; narrow integers extended where their upper bits matter, as on x86-64),
-  `regalloc.al` (the iterated register coalescing of `src/x86/regalloc.al` over 26 general and
+  `regalloc.al` (the arm64 part of the register allocator of `src/regalloc.al`: 26 general and
   31 SIMD registers; spill code is loads and stores), `emit.al` (frame record in every
   function, encoding, branch fixups, ADRP/ADD relocations, LL/SC loops for atomics), `enc.al`
   (one pure function per instruction form), `backtrace.al` (the stack-trace table in the
-  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled on one thread).
+  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled by several threads
+  as on x86-64, see [parallel back end](#parallel-back-end); the source files of the compiled
+  code are recorded per function before it is compiled and merged in the order of the
+  functions).
 - **Calling convention**: AAPCS64 for AL functions: x0-x7 / v0-v7, results in x0-x3 / v0-v3,
   further arguments in 8-byte stack words (a vector in two, as on x86-64).
   For scalars this is the C convention too, so any AL function with scalar parameters is a C

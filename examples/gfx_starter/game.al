@@ -1,10 +1,10 @@
 // examples/dx12_starter drawn with std.gfx instead of its own Direct3D 12 code: the same rules
 // (../starter/logic.al), sounds and music (../dx12_starter/sound.al), headless run
-// (../dx12_starter/headless.al), options (../gamekit/options.al) and bitmap font
-// (../gamekit/font.al, baked into the atlas). What dx12_starter takes from gamekit's
-// dx12_gpu.al and screen.al (device, swap chain, frames in flight, sprite batcher, letterbox,
-// resizing: about 700 lines) is std.gfx here, and the game runs on Linux (Vulkan) as well as
-// Windows (Direct3D 12):
+// (../dx12_starter/headless.al) and options (../gamekit/options.al). What dx12_starter takes
+// from gamekit's dx12_gpu.al and screen.al (device, swap chain, frames in flight, sprite
+// batcher, letterbox, resizing: about 700 lines) is std.gfx here, its bitmap font is a
+// TrueType font of the system drawn with std.gfx_text, and the game runs on Linux (Vulkan) as
+// well as Windows (Direct3D 12):
 //
 //   alc run examples/gfx_starter/game.al                 play
 //   alc run examples/gfx_starter/game.al -- --headless   no window, GPU or sound device: checksums
@@ -16,50 +16,86 @@ use std.window
 use std.audio
 use std.image
 use std.gfx
+use std.gfx_text
 use "../starter/logic.al"
 use "../dx12_starter/sound.al"
 use "../dx12_starter/headless.al"
 use "../gamekit/options.al"
-use "../gamekit/font.al"
 
-const DISC_X = 0                 // the entity sprite in the atlas: a soft white disc
-const DISC_Y = FONT_ATLAS_H
-const DISC_SIZE = 16
+const DISC_SIZE = 16             // the entity sprite: a soft white disc
 const WHITE: u32 = 0xFFFFFFFF
+const TEXT_PX: f32 = 10.0        // em sizes of the two fonts in virtual pixels
+const TITLE_PX: f32 = 20.0
 
-// The atlas: the font, and below it a disc that every entity is drawn with, tinted.
-fn make_atlas() -> (Image, Font) {
-    img := image_new(FONT_ATLAS_W, FONT_ATLAS_H + DISC_SIZE, 4)
-    font := font_bake(&img, 0, 0)
+// The disc that every entity is drawn with, tinted.
+fn make_disc() -> Image {
+    img := image_new(DISC_SIZE, DISC_SIZE, 4)
     c := f32(DISC_SIZE) / 2.0
     for y in 0..DISC_SIZE {
         for x in 0..DISC_SIZE {
             d := length(vec2(f32(x) + 0.5, f32(y) + 0.5) - vec2(c))
-            img.set(DISC_X + x, DISC_Y + y, vec4(1.0, 1.0, 1.0, clamp(c - d, 0.0, 1.0)))
+            img.set(x, y, vec4(1.0, 1.0, 1.0, clamp(c - d, 0.0, 1.0)))
         }
     }
-    (img, font)
+    img
 }
 
-// A line of text with its top left corner at (x, y), each font pixel `scale` pixels large.
-fn draw_text(g: *Gfx, atlas: Texture, f: Font, x: f32, y: f32, scale: f32, text: str, color: u32) {
-    cx := x
-    for c in text {
-        if c != ' ' {
-            gx, gy := cell(f, c)
-            g.sprite(atlas, vec4(f32(gx), f32(gy), f32(GLYPH_W), f32(GLYPH_H)),
-                vec4(cx, y, f32(GLYPH_W) * scale, f32(GLYPH_H) * scale), color)
+// A font of the system; without one, the font that std.font is tested with (its own letters
+// are only A, V, H, o and W: the others show as its missing glyph, a box).
+const FONT_PATHS = [_]str{
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+}
+const TEST_FONT = embed("../../tests/std/data/font_test.ttf")
+
+fn load_font() -> Font {
+    for p in FONT_PATHS {
+        f, err := font_load(p)
+        if err == "" {
+            return f
         }
-        cx += f32(GLYPH_ADVANCE) * scale
     }
+    eprint("no system font found: the text is drawn with the test font of std.font")
+    f, _ := font_parse(TEST_FONT)
+    f
 }
 
-fn draw_centered(g: *Gfx, atlas: Texture, f: Font, x: f32, y: f32, scale: f32, text: str, color: u32) {
-    draw_text(g, atlas, f, floor(x - text_width(text, scale) / 2.0), y, scale, text, color)
+// The fonts of the HUD. They are rasterised at the size they have on the screen (their size in
+// virtual pixels times the scale of the view) and drawn at their virtual size, so the text is
+// as sharp in a large window as in a small one; a new window size makes them anew.
+struct Text { font: Font, scale: f32, small: GfxFont, big: GfxFont }
+
+text_mem: Region                 // the atlases of the fonts in use (reset when they are made anew)
+
+fn fonts_for(g: *Gfx, t: *Text, scale: f32) {
+    if scale == t.scale || !(scale > 0.0) {
+        return
+    }
+    if t.scale > 0.0 {
+        gfx_font_free(g, t.small)
+        gfx_font_free(g, t.big)
+    }
+    reset(&text_mem)
+    enter(&text_mem)
+    err := ""
+    t.small, err = gfx_font(g, t.font, TEXT_PX * scale, char_range(32, 126))
+    assert err == "", err
+    t.big, err = gfx_font(g, t.font, TITLE_PX * scale, char_range(32, 126))
+    assert err == "", err
+    leave()
+    t.small.size = TEXT_PX
+    t.big.size = TITLE_PX
+    t.scale = scale
 }
 
 // Drawing only reads the game. `alpha` is how far the display is between two simulation steps.
-fn render(g: *Gfx, atlas: Texture, font: Font, game: *Game, alpha: f32, paused: bool, note: str) -> str {
+fn render(g: *Gfx, disc: Texture, t: *Text, game: *Game, alpha: f32, paused: bool, note: str) -> str {
     if !g.begin_frame(0xFF000000) {
         return ""                                          // minimized
     }
@@ -72,23 +108,22 @@ fn render(g: *Gfx, atlas: Texture, font: Font, game: *Game, alpha: f32, paused: 
         e := &game.ents.items[i]
         p := e.pos + e.vel * (alpha / f32(HZ))
         r := e.radius + 0.5
-        g.sprite(atlas, vec4(f32(DISC_X), f32(DISC_Y), f32(DISC_SIZE), f32(DISC_SIZE)), vec4(p.x - r, p.y - r, 2.0 * r, 2.0 * r), e.color)
+        g.sprite(disc, vec4(0.0, 0.0, f32(DISC_SIZE), f32(DISC_SIZE)), vec4(p.x - r, p.y - r, 2.0 * r, 2.0 * r), e.color)
     }
-    draw_text(g, atlas, font, 4.0, 4.0, 1.0, fmt("SCORE ", game.score), WHITE)
-    hp := fmt("HP ", player_hp(game))
-    draw_text(g, atlas, font, f32(WORLD_W) - 4.0 - text_width(hp, 1.0), 4.0, 1.0, hp, 0xFF40E0FF)
+    g.draw_text(t.small, 4.0, 2.0, fmt("Score ", game.score), WHITE)
+    g.draw_text(t.small, f32(WORLD_W) - 4.0, 2.0, fmt("HP ", player_hp(game)), 0xFF40E0FF, AlignRight)
     cx := f32(WORLD_W) / 2.0
     if game.over {
-        draw_centered(g, atlas, font, cx, 70.0, 2.0, "GAME OVER", 0xFF4060FF)
-        draw_centered(g, atlas, font, cx, 96.0, 1.0, "FIRE TO PLAY AGAIN, ESCAPE TO QUIT", WHITE)
+        g.draw_text(t.big, cx, 64.0, "Game over", 0xFF4060FF, AlignCenter)
+        g.draw_text(t.small, cx, 94.0, "Fire to play again, Escape to quit", WHITE, AlignCenter)
     }
     if paused {
         g.rect(vec4(0.0, 0.0, f32(WORLD_W), f32(WORLD_H)), 0x99000000)
-        draw_centered(g, atlas, font, cx, 76.0, 2.0, "PAUSED", WHITE)
-        draw_centered(g, atlas, font, cx, 100.0, 1.0, "CLICK THE WINDOW TO GO ON", WHITE)
+        g.draw_text(t.big, cx, 70.0, "Paused", WHITE, AlignCenter)
+        g.draw_text(t.small, cx, 100.0, "Click the window to go on", WHITE, AlignCenter)
     }
     if note != "" {
-        draw_text(g, atlas, font, 4.0, f32(WORLD_H) - 11.0, 1.0, note, 0xFF60C0FF)
+        g.draw_text(t.small, 4.0, f32(WORLD_H) - line_height(t.small) - 1.0, note, 0xFF60C0FF)
     }
     g.end_frame()
 }
@@ -104,8 +139,8 @@ fn run_window(o: GameOptions) {
         panic(err)
     }
     g.vsync = o.vsync
-    img, font := make_atlas()
-    atlas := g.texture(img, FilterNearest)
+    disc := g.texture(make_disc(), FilterNearest)
+    text := Text{font: load_font()}
     snd := starter_sound()
     dev, opened := audio_open(o.audio, AUDIO_RATE, 2, 60)   // no sound device: the audio calls do nothing
     if !opened {
@@ -150,9 +185,14 @@ fn run_window(o: GameOptions) {
         play_events(&snd, &game)
         snd.mixer.set_paused(snd.music_voice, paused || !snd.music_on)
         audio_pump(dev, snd.mixer)
-        note := if dev != nil && dev.lost { "SOUND DEVICE LOST, RECONNECTING" } else { "" }
+        note := if dev != nil && dev.lost { "Sound device lost, reconnecting" } else { "" }
+        ww, wh := w.size()                                 // the size begin_frame will draw at
+        if ww > 0 && wh > 0 && !w.minimized {
+            view, _, _, _, _ := fit_view(f32(WORLD_W), f32(WORLD_H), ww, wh)
+            fonts_for(g, &text, view.x.x)                  // (not in the frame's scratch memory)
+        }
         frame_begin()                                      // the texts of this frame are scratch memory
-        rerr := render(g, atlas, font, &game, steps.alpha(), paused, note)
+        rerr := render(g, disc, &text, &game, steps.alpha(), paused, note)
         if rerr != "" {
             panic(rerr)                                    // the GPU was lost (the text is scratch too: use it before frame_end)
         }
