@@ -2409,7 +2409,7 @@ fn __map_grow[K, V](m: *Map[K, V]) {
 
 // stores v for k, replacing the value of a key that is present (a new key comes last in keys())
 fn set[K, V](m: *Map[K, V], k: K, v: V) {
-    tag :=u32(hash(k) >> 32) | 0x8000_0000
+    tag := u32(hash(k) >> 32) | 0x8000_0000
     slot := -1              // where a new entry goes: the first reusable slot on the way
     if len(m.index) != 0 {
         mask := u32(len(m.index) - 1)
