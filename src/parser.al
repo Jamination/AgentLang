@@ -1307,17 +1307,30 @@ priv fn block(p: *Parser) -> *Block {
             break
         }
         s, ok := p.stmt()
+        // `print(x) x = 2`: the next statement starts on the same line
+        two := false
         if ok {
             stmt_stack.push(s)
             if !p.at_end() {
                 p.err[bool]("expected end of statement")
-                p.sync_stmt()
+                // (not after a hint of its own: `switch x {`)
+                two = !ends_with(p.errs.last().msg, ")") && p.toks[p.i - 1].pos.line == p.pos().line && match p.peek() {
+                    Id(_), Int(_, _), Float(_, _), Str(_) => true
+                    Kw(k) => k != KW_ELSE
+                    _ => false
+                }
             }
-        } else {
+        }
+        // (only if what the braces hold could be the fields of a literal; not when the error
+        // already has a hint of its own)
+        lit := after_name && p.errs.len > nerr && !ends_with(p.errs[nerr].msg, ")") && p.lit_like(open)
+        if two && !lit {
+            p.add_note("two statements on one line are separated by `;`")
+        }
+        if !ok || !p.at_end() {
             p.sync_stmt()
         }
-        // (not when the error already has a hint of its own)
-        if after_name && p.errs.len > nerr && !ends_with(p.errs[nerr].msg, ")") {
+        if lit {
             p.errs[nerr].msg = fmt(p.errs[nerr].msg, " (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)")
         }
         after_name = false
@@ -1331,6 +1344,22 @@ priv fn block(p: *Parser) -> *Block {
     b.stmts = vec_of(stmt_stack[base..])
     b.end = end
     return b
+}
+
+// After an error in a block that follows a header ending in a name (`if p == Point {`): the
+// braces at token `open` hold what could be the fields of a literal (`{1, 2}`, `{x: 1}`).
+// Parsed again as a literal body; the parser's state, errors included, is left as it was.
+priv fn lit_like(p: *Parser, open: i64) -> bool {
+    saved := *p
+    nerr := p.errs.len
+    nlits := parser_lits.len
+    p.i = open + 1
+    p.no_lit = false
+    _, ok := p.lit_body()
+    *p = saved
+    p.errs.truncate(nerr)
+    parser_lits.truncate(nlits)
+    return ok
 }
 
 priv fn sync_stmt(p: *Parser) {

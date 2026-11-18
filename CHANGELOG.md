@@ -95,6 +95,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   bracket is named (`P{2, "y",` followed by `}` under the declaration). A declaration keyword
   in column 1 inside a struct, enum, `match` or never-closed block ends it with that error
   instead of being read as a field or statement.
+- Two statements on one line without `;` (`print(x) x = 2`): the error says that they are
+  separated by `;`. The hint about a struct literal in the header of `if` / `while` / `for` /
+  `match` is only given when the braces could hold the fields of a literal.
 
 ## [0.4.0] - 2026-11-17
 
