@@ -1035,9 +1035,9 @@ priv fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: 
                 }
                 cv := self.expr(c, Some(x.ty))
                 if ca {
-                    return self.binary_vals(op, cv, x, pos)
+                    return self.binary_named(op, cv, x, pos, a, b)
                 }
-                return self.binary_vals(op, x, cv, pos)
+                return self.binary_named(op, x, cv, pos, a, b)
             }
         }
     }
@@ -1055,10 +1055,30 @@ priv fn binary(self: *Fx, op: BinOp, a: *Expr, b: *Expr, expect: Opt[i64], pos: 
         l = self.expr(a, exp)
         r = self.expr(b, Some(l.ty))
     }
-    return self.binary_vals(op, l, r, pos)
+    return self.binary_named(op, l, r, pos, a, b)
+}
+
+// an operand as a diagnostic names it: its source form if that is short (`e1`, `p.x`, `""`),
+// else "the left operand" / "the right operand"
+priv fn operand_name(e: *Expr, side: str, ty: str) -> str {
+    s := if e == nil { "" } else { ast_expr_str(e) }
+    if len(s) == 0 || len(s) > 40 || find(s, "...") >= 0 || contains(s, '`') {
+        return fmt("the ", side, " operand is ", ty)
+    }
+    for c in s {
+        if c < 0x20 {
+            return fmt("the ", side, " operand is ", ty)
+        }
+    }
+    return fmt("`", s, "` is ", ty)
 }
 
 fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
+    return self.binary_named(op, l, r, pos, nil, nil)
+}
+
+// `l op r`; `a` and `b`, if not nil, are the operands as written (for diagnostics)
+priv fn binary_named(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos, a: *Expr, b: *Expr) -> Val {
     if l.ty == T_ERR || r.ty == T_ERR {
         return val_err()
     }
@@ -1086,17 +1106,23 @@ fn binary_vals(self: *Fx, op: BinOp, l: Val, r: Val, pos: Pos) -> Val {
         None => {}
     }
     if l.ty != r.ty {
-        a := self.tyname(l.ty)
-        b := self.tyname(r.ty)
+        ta := self.tyname(l.ty)
+        tb := self.tyname(r.ty)
         ptr_or_fn := match self.cx.types.k(l.ty) {
             Ptr(_), Fn(_, _) => true
             _ => false
         }
+        // (`assert e1 == "" && e2 == ""`: which comparison, which operand)
+        what := if a == nil { fmt(ta, " and ", tb) } else { fmt(operand_name(a, "left", ta), ", ", operand_name(b, "right", tb)) }
+        msg := fmt("operands of `", ast_bin_text(op), "` have different types: ", what)
         if self.cx.types.is_scalar(l.ty) && self.cx.types.is_scalar(r.ty) && !ptr_or_fn {
-            self.err(pos, fmt("operands have different types: ", a, " and ", b, " (convert explicitly, e.g. `", a, "(x)`)"))
-        } else {
-            self.err(pos, fmt("operands have different types: ", a, " and ", b))
+            x := "x"
+            if b != nil && starts_with(operand_name(b, "right", tb), "`") {
+                x = ast_expr_str(b)
+            }
+            msg = fmt(msg, " (convert explicitly, e.g. `", ta, "(", x, ")`)")
         }
+        self.err(pos, msg)
         return val_err()
     }
     if is_cmp(op) {

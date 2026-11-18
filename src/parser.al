@@ -2231,6 +2231,11 @@ priv fn primary(p: *Parser) -> *Expr {
         }
         _ => {
             p.err[bool]("expected expression")
+            // `f(a,` and then the `}` of the block: the `(` is not closed
+            match p.peek() {
+                P(')'), P(']'), P('}'), Nl, Eof => p.add_note(p.unclosed_note())
+                _ => {}
+            }
             return nil
         }
     }

@@ -17,6 +17,6 @@ variant `Some` takes 1 value(s), got 2
 cannot infer type arguments of enum `Maybe` for `None`; annotate the destination type or write `Maybe[T].None`
 (the null pointer is `nil`)
 `Green` is a variant of several enums (`Color`, `Light`)
-operands have different types: Opt[i64] and Maybe[i64]
+operands of `==` have different types: `r` is Opt[i64], `s` is Maybe[i64]
 argument 1 of `is_some` has type Maybe[i64], which does not match the parameter type
 type mismatch: expected Opt[i64], found `None`, a variant of enum `Maybe`

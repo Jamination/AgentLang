@@ -1,8 +1,8 @@
-types.al:5:12: error: operands have different types: i64 and f32
+types.al:5:12: error: operands of `+` have different types: `x` is i64, `y` is f32 (convert explicitly, e.g. `i64(y)`)
 expects 2 argument(s), got 1
 types.al:7:10: error: unknown identifier `undefined_name`
 has no field `foo`
 integer literal 300 does not fit in u8
-operands have different types: str and i64
+operands of `+` have different types: `"str"` is str, `1` is i64
 this function does not return a value
 function `g` must return a value of type i64
