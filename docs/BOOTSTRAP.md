@@ -182,8 +182,10 @@ executables before and after); the conventions below describe the result.
 | `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
+| `src/spread.al` | what the two back-end drivers share: the reachable functions (`Refs`), the number of threads and the parallel compile of functions (`spread_run`) |
 | `src/regalloc.al` | the register allocator of both back ends (iterated register coalescing: liveness, interference graph, coalescing, simplify / select, spill choice and spill rounds), generic over the target's machine function and instruction types; the target supplies the rest ([register allocation](#register-allocation)) |
 | `src/x86/*.al` | instruction selection, the x86-64 part of register allocation (register file, spill code with memory operands), encoder; `mod.al` is the backend driver |
+| `src/arm64/*.al`, `src/elf_arm64.al` | the arm64 back end (`--target linux-arm64`) and its ELF writer: instruction selection, the arm64 part of register allocation (register file, spill loads and stores), encoder, driver ([arm64 target](#arm64-target)) |
 | `src/elf.al` | ELF writer (Linux) |
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
 | `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
@@ -538,11 +540,12 @@ register-allocated variables to read the assignment.
 
 ## Parallel back end
 
-`x86_compile` compiles functions independently of each other. With more than one CPU and
-enough functions (**Number of threads** below) the compiler's thread
-and worker threads compile them together, on Linux and Windows alike (`compile_spread` in
-`src/x86/mod.al`; the threads are the run-time library's, started by `worker_start` in
-`src/base.al`). The functions are in one list, largest first, and every thread takes the next
+`x86_compile` and `a64_compile` (the arm64 back end) compile functions independently of each
+other. With more than one CPU and enough functions (**Number of threads** below) the
+compiler's thread and worker threads compile them together, on Linux and Windows alike
+(`compile_spread` in `src/x86/mod.al` and `src/arm64/mod.al`, with what both share in
+`src/spread.al`: `spread_run`, the reachable functions; the threads are the run-time
+library's, started by `worker_start` in `src/base.al`). The functions are in one list, largest first, and every thread takes the next
 one with an `atomic_add` on the position in the list, so all threads finish at about the same
 time. A thread puts the result of a function (`Done`: machine code, relocations, float
 constants, frame shape, line table) into that function's element of a result array; it is
@@ -563,7 +566,7 @@ computes the reachable functions as a sequential compile does and keeps only the
 Optimised builds compute the reachable functions first and compile only those (at least 64) in
 the threads.
 
-**Number of threads** (`spread_threads` in `src/x86/mod.al`), the compiler's thread included:
+**Number of threads** (`spread_threads` in `src/spread.al`), the compiler's thread included:
 one per CPU (Linux: the CPUs of `sched_getaffinity`, limited by a cgroup quota in
 `/sys/fs/cgroup/cpu.max`; Windows: `GetActiveProcessorCount`), at most 32, and at most one per
 24 functions at `-O0` (where the threads also optimise them) or per 12 functions when
@@ -784,7 +787,10 @@ and the optimiser are the same as for x86-64 (`target_os` is Linux); the differe
   31 SIMD registers; spill code is loads and stores), `emit.al` (frame record in every
   function, encoding, branch fixups, ADRP/ADD relocations, LL/SC loops for atomics), `enc.al`
   (one pure function per instruction form), `backtrace.al` (the stack-trace table in the
-  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled on one thread).
+  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled by several threads
+  as on x86-64, see [parallel back end](#parallel-back-end); the source files of the compiled
+  code are recorded per function before it is compiled and merged in the order of the
+  functions).
 - **Calling convention**: AAPCS64 for AL functions: x0-x7 / v0-v7, results in x0-x3 / v0-v3,
   further arguments in 8-byte stack words (a vector in two, as on x86-64).
 - **Linking** (`src/elf_arm64.al`): segments aligned to 64 KiB; an entry stub puts the main

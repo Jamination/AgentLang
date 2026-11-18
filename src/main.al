@@ -27,6 +27,7 @@ use "opt/simplify.al"
 use "opt/spec.al"
 use "opt/tre.al"
 use "opt/unroll.al"
+use "spread.al"
 use "regalloc.al"
 use "x86/mir.al"
 use "x86/isel.al"
@@ -1280,6 +1281,6 @@ priv t0: i64
 priv fn mem(phase: str) {
     v, found := env_get("ALC_DEBUG")
     if found && v == "mem" {
-        eput(fmt("[mem] ", phase, ": ", (mem_used() + x86_thread_mem()) >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
+        eput(fmt("[mem] ", phase, ": ", (mem_used() + spread_thread_mem()) >> 20, " MB, work heap peak ", work_peak(work_main()) >> 20, " MB, ", (clock_ns() - t0) / 1000000, " ms\n"))
     }
 }
