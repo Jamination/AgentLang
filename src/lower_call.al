@@ -278,6 +278,10 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
         Direct(fid) => {
             match self.cx.module.funcs[fid].ext {
                 Some(x) => {
+                    if target_arch == ArchArm64 {
+                        // the AAPCS64 C convention, laid out in lower_ccall.al
+                        return self.c_call_a64(self.extern_slot(x), self.cx.fn_sigs[fid].0.len, ptys, rty, args)
+                    }
                     if target_os != TargetWindows {
                         return self.emit_extern_call(x, ptys, rty, args)
                     }
@@ -830,6 +834,20 @@ fn fn_value(self: *Fx, n: str, explicit: Opt[Vec[i64]], expect: Opt[i64], pos: P
                 if self.cx.module.externs[x].variadic {
                     self.err(pos, fmt("the C function `", ast_plain(d.name), "` takes a variable number of arguments (`...`) and cannot be used as a function value: call it directly"))
                     return Some(val_err())
+                }
+                if target_arch == ArchArm64 {
+                    // (a call through a function value has the convention of AL functions,
+                    // which is the C one for scalars only)
+                    for t in ptys {
+                        if !self.cx.types.is_scalar(t) {
+                            self.err(pos, fmt("the C function `", ast_plain(d.name), "` takes a struct by value and cannot be used as a function value on arm64: call it directly"))
+                            return Some(val_err())
+                        }
+                    }
+                    if rty != T_UNIT && rty != T_NEVER && !self.cx.types.is_scalar(rty) {
+                        self.err(pos, fmt("the C function `", ast_plain(d.name), "` returns a struct by value and cannot be used as a function value on arm64: call it directly"))
+                        return Some(val_err())
+                    }
                 }
                 // the address of a C function comes from its import slot
                 return Some(self.sval(ty, self.extern_slot(x)))

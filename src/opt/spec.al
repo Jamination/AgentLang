@@ -87,6 +87,8 @@ priv fn spec_copy(m: *Module, gid: i64, j: i64, k: i64) -> Func {
     c.params = vec_of(g.params.items())
     c.rets = vec_of(g.rets.items())
     c.insts = vec_of(g.insts.items())
+    c.dexp = vec_of(g.dexp.items())
+    c.dtaint = vec_of(g.dtaint.items())
     for v in 0..c.insts.len {
         i := &c.insts[v]
         n := len(i.args)

@@ -4033,7 +4033,7 @@ fn or[T](o: Opt[T], default: T) -> T {
 // ---------- target ----------
 // The system and processor the program is built for, constants for `when` and `if`:
 // `when TARGET_OS == Windows { ... }`. TARGET_OS and TARGET_ARCH are declared by the OS layer.
-enum Os { Linux, Windows }
+enum Os { Linux, Windows, MacOS }
 enum Arch { X86_64, Arm64 }
 
 // (TARGET_ARCH is declared by the OS layer, at its end; this line keeps the lines below)

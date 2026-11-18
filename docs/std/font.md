@@ -113,15 +113,19 @@ struct Atlas { font: Font, px: f32, scale: f32, metrics: FontMetrics, img: Image
 
 | Function | |
 |----------|---|
-| `atlas_build(f, px, chars: []i64, width, channels) -> (Atlas, str)` | rasterises the code points `chars` (repeats ignored) and glyph 0 at size `px`, packed in rows (tallest first, 1 pixel apart) into an image `width` pixels wide and as high as needed; `channels` 1: coverage, 4: white RGB with the coverage as alpha (straight alpha). `""` or what is wrong (a glyph wider than the image, another channel count) |
+| `atlas_build(f, px, chars: []i64, width, channels) -> (Atlas, str)` | rasterises the code points `chars` (repeats ignored) and glyph 0 at size `px`, packed in rows (tallest first, 1 pixel apart) into an image `width` pixels wide and as high as needed; `channels` 1: coverage, 4: the coverage as alpha (straight alpha) and white RGB in every pixel, also the empty ones, so that a GPU's linear filter mixes no black into the glyphs' edges. `""` or what is wrong (a glyph wider than the image, another channel count) |
 | `char_range(first, last) -> []i64` | the code points `first..=last`: `char_range(32, 126)` is printable ASCII |
 | `atlas_glyph(a, cp) -> AtlasGlyph` | the glyph of a code point, or `a.missing` |
 
-A GPU renderer uploads `a.img.pix`, then for each `GlyphPos` of `layout_text(a.font, a.px,
-text)` draws the quad of `atlas_glyph(a, p.cp)` at `(x + p.x + g.xoff, y + p.y + g.yoff)`,
-`g.w` x `g.h` pixels, with texture coordinates `(g.u0, g.v0)`-`(g.u1, g.v1)` (round the pen
-position to whole pixels for crisp text). Glyphs are rasterised at a pen position on a
-whole pixel.
+With [std.gfx](gfx.md#text), `use std.gfx_text` does all of this: `gfx_font(g, f, px, chars)`
+and `g.draw_text(font, x, y, text, colour)` (alignment, wrapping, `text_size`), drawing
+exactly what `draw_text(&img, atlas, ...)` below draws into an image. Another GPU renderer
+uploads `a.img.pix`, then for each `GlyphPos` of `layout_text(a.font, a.px, text)` draws the
+quad of `atlas_glyph(a, p.cp)` at `(x + p.x + g.xoff, y + p.y + g.yoff)`, `g.w` x `g.h`
+pixels, with texture coordinates `(g.u0, g.v0)`-`(g.u1, g.v1)`, the pen position rounded to
+whole pixels (`floor(v + 0.5)`) for crisp text: glyphs are rasterised at a pen position on a
+whole pixel, and the 1-pixel gap between them keeps a linear filter from mixing in a
+neighbour.
 
 ## Text
 

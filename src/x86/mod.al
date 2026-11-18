@@ -54,94 +54,12 @@ fn x86_live_data(m: *Module, out: *Output) -> Vec[bool] {
     return live
 }
 
-// The functions that each function calls or takes the address of, from its optimised IR (in
-// the order of its IR): of[f] once known[f]. In compile_spread each entry is written by the
-// thread that optimises the function (the slice in its arena).
-priv struct Refs {
-    of: Vec[[]i64]
-    known: Vec[bool]
-}
-
-priv fn refs_new(n: i64) -> Refs {
-    none: []i64
-    return Refs{of: vec_fill(n, none), known: vec_fill(n, false)}
-}
-
-// records the references of function fid
-priv fn refs_add(r: *Refs, m: *Module, fid: i64) {
-    f := &m.funcs[fid]
-    list := vec[i64]()
-    for bi in 0..f.blocks.len {
-        for v in f.blocks[bi].insts {
-            i := &f.insts[v]
-            if i.op == Call || i.op == FAddr {
-                list.push(i.k)
-            }
-        }
-    }
-    r.of[fid] = list.items()
-    r.known[fid] = true
-}
-
-// The functions to compile, in increasing order: the entry, the functions whose address is in
-// global data, and whatever these call or take the address of (r: the references of every
-// function).
-priv fn reachable_funcs(m: *Module, r: *Refs) -> Vec[i64] {
-    seen := vec_fill(m.funcs.len, false)
-    work := vec_of([]i64{m.entry})
-    seen[m.entry] = true
-    // function pointers stored in global data: these functions are roots as well (what they
-    // call must be compiled too)
-    for gi in 0..m.globals.len {
-        for rl in m.globals[gi].relocs {
-            match rl.1 {
-                Func(f) if !seen[f] => {
-                    seen[f] = true
-                    work.push(f)
-                }
-                _ => {}
-            }
-        }
-    }
-    out := vec[i64]()
-    while !work.is_empty() {
-        f := work.pop()
-        out.push(f)
-        for k in r.of[f] {
-            if !seen[k] {
-                seen[k] = true
-                work.push(k)
-            }
-        }
-    }
-    sort(out.items())
-    return out
-}
-
 // the machine code of one function; its float constant relocations are indices into fconsts
 // (the module pool is assembled afterwards, in the order of the functions)
 priv struct Done {
     code: Code
     fconsts: Vec[Bits128]
     ok: bool
-}
-
-// The number of threads that compile functions together (see "Parallel back end" in
-// docs/BOOTSTRAP.md): one per CPU, at most MAX_THREADS, and with at least FUNCS_PER_THREAD_O0
-// functions per thread at -O0 (optimised and compiled), FUNCS_PER_THREAD when optimising (only
-// compiled, but bigger after inlining): a thread costs its start and some memory, which a few
-// small functions do not repay. ALC_JOBS=n sets the number exactly.
-priv const MAX_THREADS = 32
-priv const FUNCS_PER_THREAD_O0 = 24
-priv const FUNCS_PER_THREAD = 12
-
-// the threads for count functions with per functions per thread: nw unless exact (ALC_JOBS)
-// says it is fixed
-priv fn spread_threads(nw: i64, exact: bool, count: i64, per: i64) -> i64 {
-    if exact {
-        return nw
-    }
-    return max(1, min(nw, count / per))
 }
 
 priv struct Opts {
@@ -161,21 +79,12 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     }
     isel_init(m)
     // Functions are compiled independently of each other: with several CPUs, worker threads
-    // compile them together with this one (spread_threads). Debug output that is written per
-    // function (mir, trace, verify) keeps the plain order.
-    nw := min(cpu_count(), MAX_THREADS)
-    exact := false
-    jobs, jobs_set := env_get("ALC_JOBS")
-    if jobs_set {
-        j, jok := parse_i64(jobs)
-        if jok && j >= 1 {
-            nw = j
-            exact = true
-        }
-    }
+    // compile them together with this one (spread_threads in src/spread.al). Debug output that
+    // is written per function (mir, trace, verify) keeps the plain order.
+    nw, exact := spread_jobs()
     par := nw > 1 && !dump_asm && (!dbg_set || dbg == "mem")
     n := m.funcs.len
-    fused := par && opt_deferred() && n >= 64
+    fused := par && opt_deferred() && n >= SPREAD_MIN
     no_done: Done
     // made[f]: the code of function f made by compile_spread (!ok: not made there)
     made := vec_fill(n, no_done)
@@ -191,7 +100,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
                 lowered.push(f)
             }
         }
-        made = compile_spread(m, lowered.items(), &o, spread_threads(nw, exact, lowered.len, FUNCS_PER_THREAD_O0), &r)
+        made = compile_spread(m, lowered.items(), &o, spread_threads(nw, exact, lowered.len, SPREAD_PER_O0), &r)
     }
     w := work_main()
     for f in 0..n {
@@ -201,8 +110,8 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
         }
     }
     fids := reachable_funcs(m, &r)
-    if par && !fused && fids.len >= 64 {
-        made = compile_spread(m, fids.items(), &o, spread_threads(nw, exact, fids.len, FUNCS_PER_THREAD), nil)
+    if par && !fused && fids.len >= SPREAD_MIN {
+        made = compile_spread(m, fids.items(), &o, spread_threads(nw, exact, fids.len, SPREAD_PER), nil)
     }
     done := vec_fill(fids.len, no_done)
     for i in 0..fids.len {
@@ -300,81 +209,34 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     return d
 }
 
-// What the threads of compile_spread share. Only `next` is written by several of them (with
-// atomic_add); an element of `done` or of the tables of `r` is written by the thread that took
-// the function, and read by the caller after the threads have been joined.
+// What the threads of compile_spread share: an element of `done` or of the tables of `r` is
+// written by the thread that took the function, and read by the caller after the threads have
+// been joined.
 priv struct Spread {
     m: *Module
     o: *Opts
-    order: []i64  // the functions, largest first
-    next: i64     // the position in `order` of the next function to take
     done: []Done  // by function
     r: *Refs      // nil: the references are known already
 }
 
-priv struct Job {
-    s: *Spread
-    w: *Work // the thread's own
-}
-
-// the bytes the arenas of the joined worker threads hold (for ALC_DEBUG=mem)
-priv thread_bytes: i64
-
-fn x86_thread_mem() -> i64 {
-    return thread_bytes
-}
-
-// Compiles the functions cand in nw threads: this one and nw - 1 worker threads (fewer if they
-// cannot be started). They take the functions in turn from one list, largest first, so that
-// all finish at about the same time; each function is optimised (what opt_optimize left to the
-// back end, opt_finish), its references are recorded in r (unless r is nil) and it is
-// compiled. Every thread works in a Work of its own, and what it keeps (the optimised IR, the
-// references, the code) is in its arena, which stays after the join. Returns the code by
-// function (!ok: not in cand).
+// Compiles the functions cand in nw threads (spread_run in src/spread.al), largest first: each
+// function is optimised (what opt_optimize left to the back end, opt_finish), its references
+// are recorded in r (unless r is nil) and it is compiled. What a thread keeps (the optimised
+// IR, the references, the code) is in its arena, which stays after the join. Returns the code
+// by function (!ok: not in cand).
 priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> Vec[Done] {
-    n := m.funcs.len
-    sizes := vec_fill(n, 0)
-    order := vec_of(cand)
-    for f in cand {
-        sizes[f] = m.funcs[f].insts.len
-    }
-    sort_by(order.items(), sizes.items(), fn(s: []i64, a: i64, b: i64) -> bool { s[a] > s[b] || (s[a] == s[b] && a < b) })
+    order := spread_order(m, cand)
     no_done: Done
-    done := vec_fill(n, no_done)
-    s := Spread{m: m, o: o, order: order.items(), next: 0, done: done.items(), r: r}
-    // (works[t]: the Work of worker thread t)
-    works := alloc[Work](nw)
-    threads := vec[*__ThreadCtl]()
-    for t in 1..nw {
-        c := worker_start(spread_worker, Job{s: &s, w: &works[t]})
-        if c == nil {
-            break
-        }
-        threads.push(c)
-    }
-    spread_worker(Job{s: &s, w: work_main()})
-    for t in 0..threads.len {
-        thread_bytes += worker_join(threads[t])
-        work_free(&works[t + 1])
-    }
-    return done
-}
-
-// a thread of compile_spread (also the caller's own share)
-priv fn spread_worker(j: Job) {
-    s := j.s
-    loop {
-        k := atomic_add(&s.next, 1)
-        if k >= len(s.order) {
-            return
-        }
-        f := s.order[k]
-        opt_finish(s.m, f, j.w)
+    done := vec_fill(m.funcs.len, no_done)
+    s := Spread{m: m, o: o, done: done.items(), r: r}
+    spread_run(order.items(), nw, &s, fn(s: *Spread, f: i64, w: *Work) {
+        opt_finish(s.m, f, w)
         if s.r != nil {
             refs_add(s.r, s.m, f)
         }
-        s.done[f] = compile_fn(s.m, f, s.o, j.w)
-    }
+        s.done[f] = compile_fn(s.m, f, s.o, w)
+    })
+    return done
 }
 
 // is there an edge between reachable blocks that goes back in the reverse postorder (or a

@@ -1,0 +1,4 @@
+extern function `vec_in_struct`: V cannot cross the C boundary (pass integers, floats, pointers and structs)
+extern function `empty`: E cannot cross the C boundary (pass integers, floats, pointers and structs)
+the C function `takes` takes a struct by value and cannot be used as a function value on arm64: call it directly
+the C function `returns` returns a struct by value and cannot be used as a function value on arm64: call it directly

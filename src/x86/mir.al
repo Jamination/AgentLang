@@ -187,7 +187,9 @@ struct MInst {
     sz: u8
     sz2: u8
     cc: u8
-    tgt: i32 // jump target block, called function, or the immediate third operand (imul3, shufps)
+    // jump target block, called function, or the immediate third operand (imul3, shufps); -g:
+    // of the other operations, the IR value (+ 1) the destination receives (src/debug.al)
+    tgt: i32
     loc: i32 // the source location (Inst.loc) of the IR instruction it was selected for, 0: none
     a: Opnd
     b: Opnd
@@ -232,6 +234,7 @@ struct MFunc {
     wide_xmm: bool // some xmm value is a vector: spill slots hold 16 bytes
     xuses: Vec[i64] // the fixed registers read by calls, `ret` and `syscall` (see MInst)
     dvars: Vec[i64] // -g: pairs (variable, frame slot) (src/debug.al)
+    dbg: DbgMF      // -g: what the locations of the variables are found from (dbg_ranges)
 }
 
 fn new_vreg(self: *MFunc, class: u8) -> i64 {

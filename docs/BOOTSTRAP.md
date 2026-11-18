@@ -177,12 +177,15 @@ executables before and after); the conventions below describe the result.
 | `src/host_linux.al`, `host_windows.al` | the compiler's host (the functions listed at the top of `base.al`: running programs, the big stack, the CPU count): included by `base.al` with `when TARGET_OS == ...` |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
-| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
+| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions), `lower_ccall.al` (calls of C functions on arm64: AAPCS64) |
 | `src/lint.al` | checks on the AST that need types: field writes to a struct copy that is never read |
 | `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
-| `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
+| `src/spread.al` | what the two back-end drivers share: the reachable functions (`Refs`), the number of threads and the parallel compile of functions (`spread_run`) |
+| `src/regalloc.al` | the register allocator of both back ends (iterated register coalescing: liveness, interference graph, coalescing, simplify / select, spill choice and spill rounds), generic over the target's machine function and instruction types; the target supplies the rest ([register allocation](#register-allocation)) |
+| `src/x86/*.al` | instruction selection, the x86-64 part of register allocation (register file, spill code with memory operands), encoder; `mod.al` is the backend driver |
+| `src/arm64/*.al`, `src/elf_arm64.al` | the arm64 back end (`--target linux-arm64`) and its ELF writer: instruction selection, the arm64 part of register allocation (register file, spill loads and stores), encoder, driver ([arm64 target](#arm64-target)) |
 | `src/elf.al` | ELF writer (Linux) |
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
 | `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
@@ -496,13 +499,53 @@ cycles over the 8 offsets; before 4.99 G, the place per block 4.86 G):
   (a `GAddr` is pure), and the place before the outermost loop keeps that (a loop that
   allocates a million nodes: 6.111 G instructions before and now, Linux 6.000 G).
 
+## Register allocation
+
+One allocator serves both back ends: `src/regalloc.al` (iterated register coalescing after
+George and Appel) is generic over the target's machine function type `F` (`MFunc`, `AFunc`)
+and instruction type `I` (`MInst`, `AInst`): `ra_allocate[MFunc, MInst]` in
+`src/x86/regalloc.al`, `ra_allocate[AFunc, AInst]` in `src/arm64/regalloc.al`. AL has no
+traits; a generic function is compiled per type like a template, so the shared code calls the
+target's functions by name (`ra_decode(mf, ..)`, `ra_order(mf, cls)`, ...: the list is at the
+top of `src/regalloc.al`), and overloading on `*MFunc` / `*AFunc` picks the target's. These
+functions are `inline`, and the constant ones ignore their argument (`ra_npre` gives the number
+of machine registers, 32 or 65, for an `Irc[F]` without reading anything), so each instance is
+the code a copy of the allocator for one target would be: comparing the selected machine code
+of the compiler's allocator functions before and after the change, the hot ones (graph
+building, simplify, coalesce, the Briggs and George tests, liveness, select) differ only in
+frame slot numbers and the lengths of the "file:line" strings of their bounds checks; the
+self-compile takes the same time (best of 7 runs, interleaved, three times: optimised 1150 to
+1155 ms against 1154 to 1164 ms before, `-O0` 260 to 261 ms against 261 to 266 ms).
+
+Shared: decoding the instructions once per round, liveness, the interference graph (bit
+matrix or hash set, the lists), coalescing, simplify / freeze / spill choice, select with
+biased colouring, the spill rounds (choice of the registers, new slots, temporaries loaded
+before and stored after, unspillable temporaries), the rewrite to machine registers.
+Per target, because only the target knows it: the register file and allocation order, the
+call clobbers, which registers an instruction defines and uses (`mir_decode` / `a_decode`:
+x86-64 two-address operations and fixed registers, the early-clobber operands of the arm64
+atomic loops are expressed there as defs, uses and machine registers), the spill code
+(`ra_spill_load` / `ra_spill_store`, and `ra_spill_direct`: x86-64 accesses a slot as a memory
+operand of the instruction where one is allowed, arm64 turns a copy with one spilled side into
+the load or store), and the pass after allocation that forwards spill slots kept in registers
+and removes dead stores (`ra_spill_forward`): it recognises the target's spill code and
+rewrites it in the target's forms (x86-64 replaces memory operands of any instruction and
+also removes stores that a later one overwrites; arm64 has only loads to rewrite), so a shared
+version would be little more than the per-block state (`ra_st_*`, shared).
+
+The result (`RaResult`, in `Alloc` / `AAlloc` as `assign`) includes where each virtual
+register ended up: `RaAssign` (machine register by node, or the spill slot of a register that
+was spilled), built at the end of `ra_allocate`: the place for debug information on
+register-allocated variables to read the assignment.
+
 ## Parallel back end
 
-`x86_compile` compiles functions independently of each other. With more than one CPU and
-enough functions (**Number of threads** below) the compiler's thread
-and worker threads compile them together, on Linux and Windows alike (`compile_spread` in
-`src/x86/mod.al`; the threads are the run-time library's, started by `worker_start` in
-`src/base.al`). The functions are in one list, largest first, and every thread takes the next
+`x86_compile` and `a64_compile` (the arm64 back end) compile functions independently of each
+other. With more than one CPU and enough functions (**Number of threads** below) the
+compiler's thread and worker threads compile them together, on Linux and Windows alike
+(`compile_spread` in `src/x86/mod.al` and `src/arm64/mod.al`, with what both share in
+`src/spread.al`: `spread_run`, the reachable functions; the threads are the run-time
+library's, started by `worker_start` in `src/base.al`). The functions are in one list, largest first, and every thread takes the next
 one with an `atomic_add` on the position in the list, so all threads finish at about the same
 time. A thread puts the result of a function (`Done`: machine code, relocations, float
 constants, frame shape, line table) into that function's element of a result array; it is
@@ -523,7 +566,7 @@ computes the reachable functions as a sequential compile does and keeps only the
 Optimised builds compute the reachable functions first and compile only those (at least 64) in
 the threads.
 
-**Number of threads** (`spread_threads` in `src/x86/mod.al`), the compiler's thread included:
+**Number of threads** (`spread_threads` in `src/spread.al`), the compiler's thread included:
 one per CPU (Linux: the CPUs of `sched_getaffinity`, limited by a cgroup quota in
 `/sys/fs/cgroup/cpu.max`; Windows: `GetActiveProcessorCount`), at most 32, and at most one per
 24 functions at `-O0` (where the threads also optimise them) or per 12 functions when
@@ -629,7 +672,10 @@ is not decided while lowering, `deaddata`: all read-only data is linked, `backtr
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so
 `ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops;
-`ALC_PE_BASE=<hex>` builds a Windows executable for another preferred base (for the relocation test below).
+`ALC_PE_BASE=<hex>` builds a Windows executable for another preferred base (for the relocation test below);
+`ALC_DBGLOC=<function>` (with `-g`, optimising) prints what the variable locations of that
+function are found from (src/debug.al: the values recorded by source location, the machine
+code and the values each register and slot holds before every instruction).
 
 ## Windows target
 
@@ -734,27 +780,104 @@ the conformance suite with it).
 
 ## arm64 target
 
-`--target linux-arm64` makes a static AArch64 Linux executable (no C libraries). The front end
-and the optimiser are the same as for x86-64 (`target_os` is Linux); the differences are:
+`--target linux-arm64` makes an AArch64 Linux executable: static, or dynamically linked when
+it calls C functions. The front end and the optimiser are the same as for x86-64 (`target_os`
+is Linux); the differences are:
 
 - **Back end** (`src/arm64/`): `mir.al` (three-address machine IR; x16, x17, x18, x29, x30
   and v31 are reserved), `isel.al` (selection from the SSA IR, one plain selection per
   operation; narrow integers extended where their upper bits matter, as on x86-64),
-  `regalloc.al` (the iterated register coalescing of `src/x86/regalloc.al` over 26 general and
+  `regalloc.al` (the arm64 part of the register allocator of `src/regalloc.al`: 26 general and
   31 SIMD registers; spill code is loads and stores), `emit.al` (frame record in every
   function, encoding, branch fixups, ADRP/ADD relocations, LL/SC loops for atomics), `enc.al`
   (one pure function per instruction form), `backtrace.al` (the stack-trace table in the
-  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled on one thread).
+  format of `src/backtrace.al`), `mod.al` (driver; functions are compiled by several threads
+  as on x86-64, see [parallel back end](#parallel-back-end); the source files of the compiled
+  code are recorded per function before it is compiled and merged in the order of the
+  functions).
 - **Calling convention**: AAPCS64 for AL functions: x0-x7 / v0-v7, results in x0-x3 / v0-v3,
   further arguments in 8-byte stack words (a vector in two, as on x86-64).
-- **Linking** (`src/elf_arm64.al`): segments aligned to 64 KiB; an entry stub puts the main
-  thread's TLS block (variant I: TPIDR_EL0, a 16-byte TCB, then the block) below the initial
-  stack. Run-time library layer: `src/prelude_linux_arm64.al` (the generic system call table).
-  `TARGET_ARCH` is declared by each OS layer (at its end).
+  For scalars this is the C convention too, so any AL function with scalar parameters is a C
+  callback as it is (x19-x28 and d8-d15 preserved, sp 16-byte aligned at calls, x18 untouched).
+- **C calls** (`src/lower_ccall.al`): a call of an `extern` function is laid out by the lowering,
+  where the C types are known, by the rules of AAPCS64 (integers, floats, structs by value:
+  HFAs in v registers, composites of up to 16 bytes in x registers, larger ones by reference,
+  "no register left" moving the argument and everything after it of its class to the stack;
+  results in x0/x1, v0-v3 or memory whose address goes in x8; narrow integers extended to 32
+  bits). It makes `CallInd` with aux `CCALL_AUX` (3) and k = number of x registers | number of v
+  registers << 4 | an x8 pointer << 8, the arguments in that order, then the stack pieces (one
+  8-byte slot each); `call` in `src/arm64/isel.al` only places them (fixed registers in the
+  instruction's `xuses`, as for any call; x8 is a clobbered register the allocator knows). The
+  optimiser leaves calls with aux != 0 alone (no inlining, devirtualisation, specialisation). A
+  C function that takes or returns a struct cannot be a function value (a call through one has
+  the AL convention). The import slot is loaded with ADRP + LDR (`LdrG`, relocation
+  `AR_LDR64`).
+- **Linking** (`src/elf_arm64.al`): segments aligned to 64 KiB; the entry stub of a static
+  program puts the main thread's TLS block (variant I: TPIDR_EL0, a 16-byte TCB, then the block)
+  below the initial stack. A program that reaches a C function is dynamically linked as on
+  x86-64 (ET_EXEC at 0x400000, PT_INTERP `/lib/ld-linux-aarch64.so.1`, DT_NEEDED, undefined
+  dynamic symbols, a SysV hash table, one `R_AARCH64_GLOB_DAT` per import slot, BIND_NOW, no
+  PLT, DT_DEBUG; sections `.interp`, `.dynstr`, `.dynsym`, `.hash`, `.rela.dyn`, `.dynamic`);
+  its entry stub only calls `__entry`: the C library's loader owns TPIDR_EL0 and gives every
+  thread the executable's block at TPIDR_EL0 + 16 (glibc and musl place it there for a PT_TLS
+  aligned to 16), which is what the code addresses. Run-time library layer:
+  `src/prelude_linux_arm64.al` (the generic system call table). Its thread functions for a
+  program that declares C functions (`__os_c_thread_create` / `__os_c_thread_join`: the C
+  library's `pthread_create`, found through r_debug and DT_GNU_HASH as on x86-64) replace
+  `__os_thread_create` / `__os_thread_join` by name in `program` (src/main.al), which renames
+  the clone-based ones to `__os_clone_thread_*`: other programs never refer to them, so static
+  programs are built exactly as before (an `if` on a constant would still have changed the
+  numbering of functions at -O0 and the inlining of `__thread_main`). Stack traces stop at the
+  first C frame (no CFI unwinder for arm64 yet). `TARGET_ARCH` is declared by each OS layer
+  (at its end).
 - **The compiler for arm64**: `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`
   (`HOST_ARM64` in `src/base.al` selects `src/host_linux_arm64.al`).
 - **Tests**: `tests/unit/arm64_enc.al` (the encoder against known encodings),
   `tests/arm64/check.al` (structural check of the executables: decoding, branches, stack
-  pointer, registers read before written), `tests/arm64/emu.al` (a user-mode emulator; the
+  pointer, registers read before written; the dynamic section, symbols, relocations and import
+  slots; the argument registers of every C call of a program whose source declares the C
+  function, by the independent classifier `tests/arm64/aapcs.al`, which `tests/unit/aapcs64.al`
+  checks against clang's placements), `tests/arm64/emu.al` (a user-mode emulator; the
   runner takes `--target linux-arm64 --emu build/a64emu.exe`, `tests/arm64_emu.skip` lists
-  what it cannot run). What only real hardware can check: `docs/ARM64_TEST.md`.
+  what it cannot run). The emulator is also the dynamic loader of such programs (the libraries
+  of DT_NEEDED from `A64EMU_LIBRARY_PATH` / `LD_LIBRARY_PATH`, their relocations, the main
+  thread's block as glibc makes it, r_debug); the runner builds the C library of a
+  `tests/sys/NAME.c` with clang for it (`--target=aarch64-linux-gnu`, freestanding, ld.lld:
+  `clang` in PATH or `ALTEST_CLANG`), so `tests/sys/c_abi` runs AL code against C that clang
+  compiled, in both directions. What only real hardware can check: `docs/ARM64_TEST.md`.
+
+## macOS target
+
+`--target macos` (experimental, never run) sets `target_os` to `TargetMacOS` and `target_arch`
+to arm64: the arm64 back end with these differences.
+
+- **Linking** (`src/macho.al`): a PIE Mach-O for macOS 11+ in 16 KiB pages: `__PAGEZERO`,
+  `__TEXT` (`__text`: an entry stub that dyld calls as `main`, passing argv on to `__entry`;
+  `__const`), `__DATA_CONST` (`__got`, the import slots; the read-only globals that hold
+  addresses), `__DATA` (`__data`, `__thread_vars`, `__thread_bss`, `__bss`), `__LINKEDIT`
+  (chained fixups in format `DYLD_CHAINED_PTR_64`, the exports trie, symbols, the indirect
+  symbols of `__got`, the code signature). Load commands as ld64 writes them (LC_MAIN,
+  LC_LOAD_DYLINKER, LC_LOAD_DYLIB per library (libSystem first), LC_BUILD_VERSION 11.0,
+  LC_UUID from the SHA-256 of the file, LC_CODE_SIGNATURE: an ad-hoc, linker-signed
+  CodeDirectory over 4 KiB pages, hashed by `src/sha256.al`). Its output is the same for any
+  `ALC_JOBS`; the signature's identifier is the output's file name.
+- **Thread-local data**: the block of the calling thread is the result of the program's one
+  thread-local variable descriptor (`Tlv` in src/arm64: `adrp`/`add x0`, `ldr x16, [x0]`,
+  `blr x16`, modelled as an instruction that defines x0, as a system call does: the thunk keeps
+  every other register but x16, x17, x30, which the allocator never uses). Decision: TLV
+  descriptors rather than a pthread key. dyld allocates the block of every thread on its first
+  use, also of threads that C libraries start (whose callbacks run AL code that allocates); a
+  key would need a check and a slow path at every access for such threads, or reading Apple's
+  private TSD slots directly (as Go does). TPIDR_EL0, which the Linux layer owns, is not the
+  program's on Darwin. Cost: a call per access of a function's first thread-local global in a
+  block, where Linux has `mrs`.
+- **Calling convention**: Apple's variant for C calls (src/lower_ccall.al: stack arguments packed
+  at their size, variadic arguments all on the stack) and for AL functions too (`mac_slot` in
+  src/arm64/isel.al), so that AL functions stay C callbacks. Not done: narrow results of AL
+  functions are not extended to 32 bits (Apple's callers expect it).
+- **Run-time library**: `src/prelude_macos.al` over libSystem (`extern`s: macOS has no stable
+  system call interface); error numbers mapped to Linux ones; locks with `__ulock_wait` /
+  `__ulock_wake`; threads with pthreads; processes with fork / execve. `TARGET_OS == MacOS`.
+- **Tests**: `tests/macho/check.al` (structural, also on a file made by ld64.lld),
+  `tests/unit/aapcs64.al` (Apple's rows), llvm-objdump by hand. What only a Mac can check:
+  `docs/MACOS_TEST.md`.
