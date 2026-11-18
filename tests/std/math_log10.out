@@ -1,0 +1,5 @@
+log10: 0.3010299956639812 -0.3010299956639812 3.0915149455092013 0.30103 -3.0 0.845098
+log10 f64: 2556 inputs, 2556 as the reference, at most 0 ulp off; f32: 12942 inputs, 12874 as the reference, at most 1 ulp off
+ldexp: 5e-324 8.98846567431158e307 1e-45 1.7014118e38 56.0 0.875
+frexp: (0.625, 4) (-0.8, -3) (0.5, -1073)
+failures: 0

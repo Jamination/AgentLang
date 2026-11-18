@@ -136,6 +136,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - std.math: `rgba8(r, g, b, a)` and `rgb8(r, g, b)`: a `u32` colour from `u8` bytes, red in the
   lowest byte (a literal reads `0xAABBGGRR`), as `color_u32` and std.gfx; constant with constant
   bytes (`const WALL = rgb8(120, 90, 60)`), a byte beyond 255 a compile error.
+- std.math: `log10`, `ldexp(x, n)` and `frexp(x) -> (m, e)` for `f32` and `f64`, with C's results
+  for 0, negative numbers, infinities, NaN and subnormals; `ldexp` rounds once, `log10` is exact
+  for powers of ten.
 
 ### Changed
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a

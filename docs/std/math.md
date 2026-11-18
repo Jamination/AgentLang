@@ -68,7 +68,8 @@ untyped: they become `f32` or `f64` from context.
 | Functions | |
 |-----------|---|
 | `sin cos tan asin acos atan atan2(y, x)` | radians; `sin_cos(x)` returns `(sin, cos)` in one go |
-| `exp log log2 pow(x, y) fmod(x, y)` | C semantics for zero, negative, infinite and NaN arguments |
+| `exp log log2 log10 pow(x, y) fmod(x, y)` | C semantics for zero, negative, infinite and NaN arguments (`log10(0.0)` is `-INF`, of a negative number NaN); `log2` / `log10` are exact for powers of 2 / of 10 |
+| `ldexp(x, n: i64)` `frexp(x) -> (T, i64)` | `x * 2^n` rounded once (also into the subnormals; beyond the range `+-INF`); `x` as `(m, e)` with `x == m * 2^e`, `0.5 <= \|m\| < 1`, exact (`(x, 0)` for 0, `INF`, NaN) |
 | `sqrt fabs fmin fmax` | built in (one instruction) |
 | `floor ceil round trunc fract` | exact; `round` rounds halves away from zero |
 | `sign clamp saturate` | `saturate` clamps to 0..1; `clamp` also for `i64` |
@@ -82,6 +83,9 @@ Accuracy, measured by `tests/std/math_scalar.al` against the C library on 160 in
 function and precision (including huge arguments, denormals, infinities and NaN): every
 transcendental function is within 1 ulp in both `f32` and `f64`, except the `f64` `tan`
 (computed as `sin / cos`), which can be off by 2 ulp; `fmod` is exact. The test allows 2 ulp.
+`log10` (added later, `tests/std/math_log10.al`) agrees with a double-double reference on all
+2556 `f64` inputs tested and is within 1 ulp in `f32` (99.5% exactly rounded); `ldexp` and
+`frexp` are exact (`ldexp` rounds once).
 The `f32` versions are single-precision kernels, not `f64` round trips.
 
 ## Vectors (`vec2`, `vec3`, `vec4`)
