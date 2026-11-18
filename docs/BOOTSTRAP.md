@@ -182,7 +182,8 @@ executables before and after); the conventions below describe the result.
 | `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
-| `src/x86/*.al` | instruction selection, register allocation, encoder; `mod.al` is the backend driver |
+| `src/regalloc.al` | the register allocator of both back ends (iterated register coalescing: liveness, interference graph, coalescing, simplify / select, spill choice and spill rounds), generic over the target's machine function and instruction types; the target supplies the rest ([register allocation](#register-allocation)) |
+| `src/x86/*.al` | instruction selection, the x86-64 part of register allocation (register file, spill code with memory operands), encoder; `mod.al` is the backend driver |
 | `src/elf.al` | ELF writer (Linux) |
 | `src/pe.al` | PE32+ writer (Windows, `--target windows`): sections, DLL import table, base relocations |
 | `src/rsrc.al` | the resources of a Windows executable (`.rsrc`): manifest, icon (`--icon`), version information (`--version-info`); included by `pe.al` |
@@ -496,6 +497,45 @@ cycles over the 8 offsets; before 4.99 G, the place per block 4.86 G):
   (a `GAddr` is pure), and the place before the outermost loop keeps that (a loop that
   allocates a million nodes: 6.111 G instructions before and now, Linux 6.000 G).
 
+## Register allocation
+
+One allocator serves both back ends: `src/regalloc.al` (iterated register coalescing after
+George and Appel) is generic over the target's machine function type `F` (`MFunc`, `AFunc`)
+and instruction type `I` (`MInst`, `AInst`): `ra_allocate[MFunc, MInst]` in
+`src/x86/regalloc.al`, `ra_allocate[AFunc, AInst]` in `src/arm64/regalloc.al`. AL has no
+traits; a generic function is compiled per type like a template, so the shared code calls the
+target's functions by name (`ra_decode(mf, ..)`, `ra_order(mf, cls)`, ...: the list is at the
+top of `src/regalloc.al`), and overloading on `*MFunc` / `*AFunc` picks the target's. These
+functions are `inline`, and the constant ones ignore their argument (`ra_npre` gives the number
+of machine registers, 32 or 65, for an `Irc[F]` without reading anything), so each instance is
+the code a copy of the allocator for one target would be: comparing the selected machine code
+of the compiler's allocator functions before and after the change, the hot ones (graph
+building, simplify, coalesce, the Briggs and George tests, liveness, select) differ only in
+frame slot numbers and the lengths of the "file:line" strings of their bounds checks; the
+self-compile takes the same time (best of 7 runs, interleaved, three times: optimised 1150 to
+1155 ms against 1154 to 1164 ms before, `-O0` 260 to 261 ms against 261 to 266 ms).
+
+Shared: decoding the instructions once per round, liveness, the interference graph (bit
+matrix or hash set, the lists), coalescing, simplify / freeze / spill choice, select with
+biased colouring, the spill rounds (choice of the registers, new slots, temporaries loaded
+before and stored after, unspillable temporaries), the rewrite to machine registers.
+Per target, because only the target knows it: the register file and allocation order, the
+call clobbers, which registers an instruction defines and uses (`mir_decode` / `a_decode`:
+x86-64 two-address operations and fixed registers, the early-clobber operands of the arm64
+atomic loops are expressed there as defs, uses and machine registers), the spill code
+(`ra_spill_load` / `ra_spill_store`, and `ra_spill_direct`: x86-64 accesses a slot as a memory
+operand of the instruction where one is allowed, arm64 turns a copy with one spilled side into
+the load or store), and the pass after allocation that forwards spill slots kept in registers
+and removes dead stores (`ra_spill_forward`): it recognises the target's spill code and
+rewrites it in the target's forms (x86-64 replaces memory operands of any instruction and
+also removes stores that a later one overwrites; arm64 has only loads to rewrite), so a shared
+version would be little more than the per-block state (`ra_st_*`, shared).
+
+The result (`RaResult`, in `Alloc` / `AAlloc` as `assign`) includes where each virtual
+register ended up: `RaAssign` (machine register by node, or the spill slot of a register that
+was spilled), built at the end of `ra_allocate`: the place for debug information on
+register-allocated variables to read the assignment.
+
 ## Parallel back end
 
 `x86_compile` compiles functions independently of each other. With more than one CPU and
@@ -740,7 +780,7 @@ and the optimiser are the same as for x86-64 (`target_os` is Linux); the differe
 - **Back end** (`src/arm64/`): `mir.al` (three-address machine IR; x16, x17, x18, x29, x30
   and v31 are reserved), `isel.al` (selection from the SSA IR, one plain selection per
   operation; narrow integers extended where their upper bits matter, as on x86-64),
-  `regalloc.al` (the iterated register coalescing of `src/x86/regalloc.al` over 26 general and
+  `regalloc.al` (the arm64 part of the register allocator of `src/regalloc.al`: 26 general and
   31 SIMD registers; spill code is loads and stores), `emit.al` (frame record in every
   function, encoding, branch fixups, ADRP/ADD relocations, LL/SC loops for atomics), `enc.al`
   (one pure function per instruction form), `backtrace.al` (the stack-trace table in the
