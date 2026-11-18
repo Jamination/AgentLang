@@ -2092,3 +2092,14 @@ fn color_u32(c: vec4) -> u32 {
 fn color_vec4(c: u32) -> vec4 {
     vec4(f32(c & 0xFF), f32((c >> 8) & 0xFF), f32((c >> 16) & 0xFF), f32(c >> 24)) * 0.003921569
 }
+
+// RGBA8 from bytes, as color_u32 packs it: red in the lowest byte, so a u32 literal reads
+// 0xAABBGGRR (rgba8(255, 128, 0, 255) is 0xFF0080FF); with constant bytes it is a constant
+fn rgba8(r: u8, g: u8, b: u8, a: u8) -> u32 {
+    u32(r) | u32(g) << 8 | u32(b) << 16 | u32(a) << 24
+}
+
+// rgba8(r, g, b, 255): an opaque colour (rgb8(255, 0, 0) is 0xFF0000FF, red)
+fn rgb8(r: u8, g: u8, b: u8) -> u32 {
+    rgba8(r, g, b, 255)
+}

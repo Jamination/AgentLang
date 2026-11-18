@@ -1,0 +1,4 @@
+rgba8.al:3:17: error: argument 1 of `rgba8`: 256 does not fit in u8 (0 to 255)
+rgba8.al:4:19: error: argument 2 of `rgb8`: -1 does not fit in u8 (0 to 255)
+rgba8.al:5:16: error: argument 1 of `rgb8` has type i64, not u8
+rgba8.al:8:25: error: integer literal 300 does not fit in u8

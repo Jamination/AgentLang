@@ -1507,7 +1507,7 @@ priv fn const_type_of(self: *Cx, e: *Expr) -> i64 {
     }
     cv, ct := self.const_eval_t(e)
     match cv {
-        Some(Int(_)) => T_I64
+        Some(Int(_)) => ct.or(T_I64)
         Some(Float(_)) => ct.or(T_F32)
         Some(Bool(_)) => T_BOOL
         Some(Str(_)) => T_STR
@@ -2115,6 +2115,11 @@ fn const_eval_t(self: *Cx, e: *Expr) -> (Opt[CV], Opt[i64]) {
         }
         Call(c, args) => {
             v := self.const_eval(e)
+            match c.k {
+                // rgba8 / rgb8 return a u32
+                Ident(n) if is_some(v) && is_rgba8_call(self, n, args.len) => return (v, Some(T_U32))
+                _ => {}
+            }
             if args.len != 1 {
                 return (v, None)
             }
@@ -2212,6 +2217,8 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         None => return None
                     }
                 }
+                // the library's colour constructors rgba8(r, g, b, a) / rgb8(r, g, b)
+                Ident(n) if is_rgba8_call(self, n, args.len) => return const_rgba8(self, n, args.items())
                 // offsetof[T](field): checked where it is declared, as std140_size
                 Index(b, targs) if args.len == 1 && targs.len == 1 && b.k == Ident("offsetof") && !self.declares_like("offsetof", 1, 1) => {
                     env := map[str, i64]()
@@ -2335,6 +2342,38 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         _ => {}
     }
     return None
+}
+
+// Is `n(args)` with `nargs` arguments a call of std.math's rgba8 / rgb8 (which constants may
+// call: `const WALL = rgb8(120, 90, 60)`)? Not if the program declares a function of the name
+// with that many parameters.
+priv fn is_rgba8_call(self: *Cx, n: str, nargs: i64) -> bool {
+    return (n == "rgba8" && nargs == 4 || n == "rgb8" && nargs == 3) && !self.declares_like(n, 0, nargs)
+}
+
+// rgba8(r, g, b, a) of constant bytes: red in the lowest byte, as the library function
+priv fn const_rgba8(self: *Cx, n: str, args: []Expr) -> Opt[CV] {
+    c := 0
+    for i, a in args {
+        v, t := self.const_eval_t(&a)
+        x := match v {
+            Some(Int(x)) => x
+            _ => return None
+        }
+        if is_some(t) && t != Some(T_U8) {
+            self.err(a.pos, fmt("argument ", i + 1, " of `", n, "` has type ", self.types.name(t.or(T_ERR)), ", not u8"))
+            return None
+        }
+        if x < 0 || x > 255 {
+            self.err(a.pos, fmt("argument ", i + 1, " of `", n, "`: ", x, " does not fit in u8 (0 to 255)"))
+            return None
+        }
+        c |= x << (8 * i)
+    }
+    if len(args) == 3 {
+        c |= 255 << 24
+    }
+    return Some(CV.Int(c))
 }
 
 // variant_count[E](): the number of variants of the enum `t`, or an error

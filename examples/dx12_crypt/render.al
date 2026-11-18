@@ -554,10 +554,10 @@ fn render_frame(r: *Renderer, g: *Game, alpha: f32, note: str, capture: bool) ->
 // ---- the HUD -----------------------------------------------------------------------------------
 
 const WHITE: u32 = 0xFFFFFFFF
-const GREY: u32 = 0xFFA0A0A0
-const YELLOW: u32 = 0xFF40E0FF
-const RED: u32 = 0xFF3030E0
-const GREEN: u32 = 0xFF60E060
+const GREY = rgb8(160, 160, 160)
+const YELLOW = rgb8(255, 224, 64)
+const RED = rgb8(224, 48, 48)
+const GREEN = rgb8(96, 224, 96)
 
 // A line of text with its top left corner at (x, y), `scale` HUD pixels per font pixel.
 fn draw_text(s: *Sprites, f: Font, x: f32, y: f32, scale: f32, text: str, color: u32) {

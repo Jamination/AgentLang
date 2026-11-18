@@ -213,7 +213,7 @@ resolved in this order:
 A `const` is a compile-time constant. Its initialiser is built from literals, other constants,
 arithmetic on them (`const DT = 1.0 / 60.0`), `T{...}` literals and tuples, names of non-generic functions, variants
 without data, `nil`, and `embed("file")` (the content of a file as a `str`, read at compile
-time, path relative to the source file). Function calls are not constant. Global initialisers
+time, path relative to the source file). Function calls are not constant (except `rgb8` / `rgba8` colours: [std/math.md](std/math.md#colour)). Global initialisers
 follow the same rules.
 
 - The type is taken from the value unless annotated (`const MASK: u32 = 0xFF00`). A typed or

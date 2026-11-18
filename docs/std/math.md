@@ -152,8 +152,19 @@ ease_out_elastic ease_out_bounce ease_out_back`. All map 0 to 0 and 1 to 1.
 ## Colour
 
 `rgb_to_hsv(vec3) hsv_to_rgb(vec3)` (all components 0..1), `srgb_to_linear linear_to_srgb`
-(`f32` or `vec3`), `color_u32(vec4) -> u32` (RGBA8, red in the lowest byte, which is the byte
-order of an RGBA framebuffer) and `color_vec4(u32)`.
+(`f32` or `vec3`), `color_u32(vec4) -> u32` and `color_vec4(u32)`.
+
+A colour as a `u32` is RGBA8 with **red in the lowest byte**: the bytes R, G, B, A in memory,
+the order of an RGBA framebuffer, an std.image pixel and std.gfx's colours. Written as a
+literal it therefore reads `0xAABBGGRR`: `0xFF3C5A78` is the brown R 0x78, G 0x5A, B 0x3C, and
+`0xFF785A3C` a blue. Build colours from bytes instead:
+
+| Function | |
+|---|---|
+| `rgba8(r: u8, g: u8, b: u8, a: u8) -> u32` | `rgba8(255, 128, 0, 255)` is `0xFF0080FF`; constant when the bytes are: `const WALL = rgb8(120, 90, 60)` is a `u32` constant, a byte beyond 255 a compile error |
+| `rgb8(r: u8, g: u8, b: u8) -> u32` | `rgba8(r, g, b, 255)` |
+| `color_u32(vec4) -> u32` | from components 0..1 (clamped, rounded) |
+| `color_vec4(u32) -> vec4` | the inverse: components 0..1 |
 
 ## Tests
 

@@ -26,10 +26,10 @@ const TILES_PNG = embed("tiles.png")
 const TILES_Y = FONT_ATLAS_H             // the tiles' place in the atlas, below the font
 
 const WHITE: u32 = 0xFFFFFFFF
-const YELLOW: u32 = 0xFF40E0FF
-const GREY: u32 = 0xFFA0A0A0
-const BACKGROUND: u32 = 0xFF281810
-const WALL: u32 = 0xFF706860
+const YELLOW = rgb8(255, 224, 64)
+const GREY = rgb8(160, 160, 160)
+const BACKGROUND = rgb8(16, 24, 40)
+const WALL = rgb8(96, 104, 112)
 
 // The atlas: the font, and below it the tiles decoded from the PNG.
 fn make_atlas() -> (Image, Font) {

@@ -115,6 +115,10 @@ fn main() {
   `lights[N - 1].dir`); it does not follow pointers. A wrong name is a compile error that lists
   the struct's fields. A program's own function of the name with one type parameter and one
   parameter takes the call (in a constant too, where it is then not constant).
+- Of the library's functions only `rgba8(r, g, b, a)` and `rgb8(r, g, b)` (std.math) are constant
+  with constant bytes, as `u32` values: `const WALL = rgb8(120, 90, 60)`. A byte beyond 0..255, or
+  a typed argument that is not a `u8`, is a compile error; a program's own function of the name
+  and number of parameters takes the call.
 - An annotated type must match the value (`const UNIT: Point = Point{1, 1}`).
 - An aggregate (array, struct, tuple) or vector / matrix constant is stored once in read-only
   memory. Assigning to it or to a part of it, and `&` on it or on a part of it are compile

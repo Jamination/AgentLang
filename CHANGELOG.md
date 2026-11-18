@@ -133,6 +133,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   integer type; a number that is no variant's stops the program (`panic: not a variant`), or
   the compilation when it is a constant. `variant_count[E]()`: the number of variants. Both
   are constants where their arguments are (`[variant_count[Kind]()]str`).
+- std.math: `rgba8(r, g, b, a)` and `rgb8(r, g, b)`: a `u32` colour from `u8` bytes, red in the
+  lowest byte (a literal reads `0xAABBGGRR`), as `color_u32` and std.gfx; constant with constant
+  bytes (`const WALL = rgb8(120, 90, 60)`), a byte beyond 255 a compile error.
 
 ### Changed
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a
@@ -145,6 +148,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `--target linux-arm64` compiles functions in parallel threads as the x86-64 back end does
   (the same executable whatever the number of threads, `ALC_JOBS`): the compiler for arm64
   builds in about 0.25 s instead of 0.45 s at `-O0` on 16 CPUs.
+
+### Fixed
+- A global initialised from a typed integer constant (`x := K` with `const K: i32 = 7`, or a
+  `u32` from `rgb8`) has the constant's type; it was taken as `i64` and rejected.
 
 ## [0.4.0] - 2026-11-17
 
