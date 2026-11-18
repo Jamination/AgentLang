@@ -26,6 +26,7 @@ const AR_LDR64: u8 = 3 // the low 12 bits of the target, scaled by 8, of an 8-by
 const AT_GLOBAL: u8 = 0
 const AT_FUNC: u8 = 1
 const AT_FCONST: u8 = 2 // float pool entry (a module pool index after a64_pool_fconsts)
+const AT_TLV: u8 = 3    // macOS: the thread-local variable descriptor of the thread block
 
 struct A64Reloc {
     off: i64
@@ -393,6 +394,12 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             self.addi(1, false, x(i.d), base, off)
         }
         AdrG => self.adr(x(i.d), AT_GLOBAL, i64(i.id), i.imm)
+        Tlv => {
+            // adrp x0, desc; add x0, x0, :lo12:desc; ldr x16, [x0]; blr x16 (as clang does)
+            self.adr(0, AT_TLV, 0, 0)
+            self.put(a64_ldst_uimm(3, 1, 16, 0, 0))
+            self.put(a64_br(1, 16))
+        }
         LdrG => {
             self.reloc(AR_ADRP, AT_GLOBAL, i64(i.id), 0)
             self.put(a64_adrp(x(i.d), 0))

@@ -13,8 +13,19 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   needs an arm for it or `_`.
   `TARGET_ARCH` is now declared by the OS layer of the target instead of the prelude (nothing
   changes for programs).
+- `enum Os` has a third variant, `MacOS` (`--target macos` below): a `match` on `TARGET_OS`
+  needs an arm for it or `_`; `when TARGET_OS == Windows { ... } else { ... }` takes the else
+  branch for macOS, so check that it suits macOS (or add `else when TARGET_OS == MacOS`).
 
 ### Added
+- `--target macos` (experimental, never run): arm64 Mach-O executables for macOS 11 and later
+  (Apple silicon), with chained fixups, an ad-hoc code signature, thread-local data through
+  dyld's descriptors, a run-time library over libSystem (`src/prelude_macos.al`), C functions
+  by Apple's variant of the Arm calling convention, and dylibs or frameworks as `extern`
+  libraries; the core library, std.image, std.font, std.asset, std.os, the mixer of std.audio
+  and std.metal build. Checked structurally only (`tests/macho/check.al`, LLVM's tools); see
+  docs/MACOS_TEST.md. Not yet: `-g`, std.net, std.input, std.window, audio devices, stack
+  traces through C frames, `--all-targets` for macOS.
 - `--target linux-arm64` (experimental): AArch64 Linux executables, with
   `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
   (`tests/arm64/emu.al`; `tests/run.sh --target linux-arm64 --emu build/a64emu`), not yet on

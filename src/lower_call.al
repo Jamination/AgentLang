@@ -280,7 +280,7 @@ priv fn emit_call(self: *Fx, callee: Callee, ptys: []i64, rty: i64, args: Vec[Va
                 Some(x) => {
                     if target_arch == ArchArm64 {
                         // the AAPCS64 C convention, laid out in lower_ccall.al
-                        return self.c_call_a64(self.extern_slot(x), ptys, rty, args)
+                        return self.c_call_a64(self.extern_slot(x), self.cx.fn_sigs[fid].0.len, ptys, rty, args)
                     }
                     if target_os != TargetWindows {
                         return self.emit_extern_call(x, ptys, rty, args)

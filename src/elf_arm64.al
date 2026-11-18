@@ -22,7 +22,7 @@ priv const SEG_ALIGN = 0x10000
 
 // the read-only globals the code refers to, directly or through the data of other kept
 // globals (writable globals are all kept): what x86_live_data does for the x86-64 code
-priv fn live_data(m: *Module, out: *A64Output) -> Vec[bool] {
+fn a64_live_data(m: *Module, out: *A64Output) -> Vec[bool] {
     live := vec_fill(m.globals.len, !opt_enabled("deaddata"))
     if !opt_enabled("deaddata") {
         return live
@@ -160,7 +160,7 @@ fn elf_arm64_link(m: *Module, out: *A64Output) -> (str, str) {
     // ---- rodata: the float pool, then the read-only globals ----
     ro_off := align_up(text_off + text.len, 16)
     fpool_addr := BASE + ro_off
-    live := live_data(m, out)
+    live := a64_live_data(m, out)
     rodata := vec[u8]()
     for bits in out.fpool {
         put64(&rodata, i64(bits.lo))

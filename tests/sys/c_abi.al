@@ -9,6 +9,8 @@
 // computes the same hash from what it passed.
 when TARGET_OS == Windows {
     priv const LIB = "c_abi.dll"
+} else when TARGET_OS == MacOS {
+    priv const LIB = "libc_abi.dylib"
 } else {
     priv const LIB = "libc_abi.so"
 }

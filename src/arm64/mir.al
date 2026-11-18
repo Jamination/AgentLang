@@ -96,6 +96,8 @@ enum AOp {
     FStr,    // memory = a
     AdrG,    // d = the address of global id, + imm
     LdrG,    // d = the 8 bytes at global id (an import slot: ADRP + LDR)
+    Tlv,     // macOS: x0 (d) = the thread block, from the thread-local variable descriptor (a call of
+             // its thunk, which preserves every register but x0, x16, x17 and x30)
     AdrF,    // d = the address of function id
     AdrS,    // d = the address of a memory operand (frame slot, incoming argument)
     FConst,  // d = float constant pool entry id (sz 4 / 8 / 16)

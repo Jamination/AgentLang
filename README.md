@@ -39,7 +39,9 @@ Linux or Windows on x86-64 is the only requirement; the repository carries a see
 each. The compiler runs on both and builds for both (`--target linux|windows`), and, experimentally,
 for arm64 Linux (`--target linux-arm64`, with C libraries through the Arm calling convention;
 so far verified only under the project's own emulator, C calls against C compiled by clang,
-never on arm64 hardware or with a real C library: see [docs/ARM64_TEST.md](docs/ARM64_TEST.md)).
+never on arm64 hardware or with a real C library: see [docs/ARM64_TEST.md](docs/ARM64_TEST.md)),
+and for macOS on Apple silicon (`--target macos`: Mach-O executables that have never run on a
+Mac, checked structurally only: see [docs/MACOS_TEST.md](docs/MACOS_TEST.md)).
 
 ```
 ./build.sh                          # Linux: the compiler compiles itself -> build/alc (and build/alc.exe)

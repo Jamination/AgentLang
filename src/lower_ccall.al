@@ -27,6 +27,11 @@
 // - results: an integer or float in x0 / v0; an HFA in v0-v3; a composite of up to 16 bytes in
 //   x0 (and x1); a larger one in memory the caller provides, whose address it passes in x8.
 //
+// macOS (--target macos, Apple's variant: "Writing ARM64 code for Apple platforms"): the same
+// registers; stack arguments packed at their own size and alignment (a narrow integer in 1 or
+// 2 bytes; a composite still in 8-byte aligned words), and every variadic argument in an 8-byte
+// stack slot, none in registers. (The pieces carry their size: isel places them by the same rule.)
+//
 // Vector types (vec2 ... mat4) do not cross the C boundary (lower.al refuses them).
 
 const CCALL_AUX = 3
@@ -66,12 +71,24 @@ priv struct CLay {
     ngrn: i64
     nsrn: i64
     nsaa: i64 // bytes of stack arguments so far
+    darwin: bool
 }
 
-// a stack piece (an IR value of 1-8 bytes): Linux gives it an 8-byte slot
+// a stack piece (an IR value of 1-8 bytes): Linux gives it an 8-byte slot, macOS its own size at
+// its own alignment (composites are 8-byte words, so they stay 8-byte aligned)
 priv fn piece(self: *Fx, l: *CLay, v: i64) {
     l.stack.push(v)
-    l.nsaa += 8
+    if l.darwin {
+        sz := match self.f.insts[v].ty {
+            I8 => 1
+            I16 => 2
+            I32, F32 => 4
+            _ => 8
+        }
+        l.nsaa = align_up(l.nsaa, sz) + sz
+    } else {
+        l.nsaa += 8
+    }
 }
 
 // aligns the next stack argument to 16 bytes with a zero piece
@@ -99,11 +116,20 @@ priv fn c_words(self: *Fx, t: i64, v: Val) -> Vec[i64] {
 }
 
 // one argument of type t
-priv fn c_arg(self: *Fx, l: *CLay, t: i64, v: Val) {
+priv fn c_arg(self: *Fx, l: *CLay, t: i64, v: Val, variadic: bool) {
     types := &self.cx.types
     if types.is_scalar(t) {
         s := self.scalar(v)
         it := self.irt(t)
+        if l.darwin && variadic {
+            // macOS: every variadic argument in an 8-byte stack slot (promoted already: no f32,
+            // no integer narrower than 32 bits)
+            if it != F64 && it != I64 {
+                s = self.ins(if types.is_signed(t) { SExt } else { ZExt }, I64, vec_one(s), 0)
+            }
+            self.piece(l, s)
+            return
+        }
         if it == F32 || it == F64 {
             if l.nsrn < C_NREG {
                 l.vs.push(s)
@@ -113,6 +139,7 @@ priv fn c_arg(self: *Fx, l: *CLay, t: i64, v: Val) {
             }
             return
         }
+        narrow := s
         if it == I8 || it == I16 {
             s = self.ins(if types.is_signed(t) { SExt } else { ZExt }, I32, vec_one(s), 0)
         }
@@ -120,7 +147,8 @@ priv fn c_arg(self: *Fx, l: *CLay, t: i64, v: Val) {
             l.xs.push(s)
             l.ngrn += 1
         } else {
-            self.piece(l, s)
+            // (macOS packs a narrow integer on the stack in its own size)
+            self.piece(l, if l.darwin { narrow } else { s })
         }
         return
     }
@@ -175,9 +203,9 @@ priv fn c_arg(self: *Fx, l: *CLay, t: i64, v: Val) {
 
 // A call of the C function `x` (an extern) with the arguments `args` of types `ptys` (the
 // declared parameters, then the promoted variadic ones) and the result type rty.
-fn c_call_a64(self: *Fx, target: i64, ptys: []i64, rty: i64, args: Vec[Val]) -> Val {
+fn c_call_a64(self: *Fx, target: i64, nnamed: i64, ptys: []i64, rty: i64, args: Vec[Val]) -> Val {
 
-    l := CLay{}
+    l := CLay{darwin: target_os == TargetMacOS}
     // the result: in registers (x0, x1 or v0-v3), or memory whose address goes in x8
     sret := NOV
     rt := T.Void
@@ -200,7 +228,7 @@ fn c_call_a64(self: *Fx, target: i64, ptys: []i64, rty: i64, args: Vec[Val]) -> 
         }
     }
     for i in 0..min(args.len, len(ptys)) {
-        self.c_arg(&l, ptys[i], args[i])
+        self.c_arg(&l, ptys[i], args[i], i >= nnamed)
     }
     ir_args := vec_one(target)
     if sret != NOV {

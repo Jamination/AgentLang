@@ -780,6 +780,12 @@ procedure call standard (AAPCS64), as GCC and Clang call them there:
 - Verified under the project's emulator against C built by clang only; see
   [ARM64_TEST.md](ARM64_TEST.md#5-c-libraries-and-dynamic-linking).
 
+**macOS** (`--target macos`, experimental, arm64, never run): as arm64 Linux above, with
+Apple's variant of the convention (stack arguments packed, variadic arguments on the stack).
+Libraries are dylibs or frameworks by path: `extern "/usr/lib/libobjc.A.dylib" fn ...`,
+`extern "/System/Library/Frameworks/Metal.framework/Metal" fn ...`; the run-time library uses
+`/usr/lib/libSystem.B.dylib`. See [MACOS_TEST.md](MACOS_TEST.md).
+
 **Windows** (`--target windows`):
 
 - `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`), a Windows x86-64

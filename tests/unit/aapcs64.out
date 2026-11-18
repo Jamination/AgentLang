@@ -1,2 +1,3 @@
 ok   aapcs64 linux: scalars
 ok   aapcs64 linux: composites
+ok   aapcs64 macos

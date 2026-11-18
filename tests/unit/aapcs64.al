@@ -72,3 +72,26 @@ test "aapcs64 linux: composites" {
     ok = row("five floats are no HFA", []CT{rec([]CT{CT.Arr(vec_of([]CT{f32_()}), 5)})}, 1, None, false, "&x0 -> void") && ok
     assert ok
 }
+
+test "aapcs64 macos" {
+    // (`clang --target=arm64-apple-macos11 -O1 -S`, the same signatures)
+    // t5: stack arguments packed by their size and alignment
+    ok := row("narrow stack arguments", []CT{i64_(), i64_(), i64_(), i64_(), i64_(), i64_(), i64_(), i64_(), i8_(), i16_(), i32_()}, 11, Some(i8_()), true,
+        "x0 x1 x2 x3 x4 x5 x6 x7 [sp+0,1] [sp+2,2] [sp+4,4] -> x0")
+    // t4: a float, then a double at its alignment
+    ok = row("floats past v7", []CT{f32_(), f32_(), f32_(), f32_(), f32_(), f32_(), f32_(), f32_(), f32_(), f64_()}, 10, Some(f32_()), true,
+        "v0 v1 v2 v3 v4 v5 v6 v7 [sp+0,4] [sp+8,8] -> v0") && ok
+    // t8: composites on the stack in 8-byte aligned slots of whole words
+    c3 := rec([]CT{i8_(), i8_(), i8_()})
+    ok = row("composites on the stack", []CT{i64_(), i64_(), i64_(), i64_(), i64_(), i64_(), i64_(), i64_(), i8_(), c3, i16_(), i3(), i32_()}, 13, Some(c3), true,
+        "x0 x1 x2 x3 x4 x5 x6 x7 [sp+0,1] [sp+8,3] [sp+16,2] [sp+24,12] [sp+40,4] -> x0") && ok
+    // t1: the HFA that does not fit goes to the stack, rounded up to 8
+    ok = row("hfa spill", []CT{f64_(), f64_(), f64_(), f64_(), f64_(), f64_(), f3(), f64_()}, 8, Some(f64_()), true,
+        "v0 v1 v2 v3 v4 v5 [sp+0,12] [sp+16,8] -> v0") && ok
+    // t7, t9: every variadic argument in an 8-byte stack slot, composites too
+    ok = row("variadic", []CT{i32_(), f64_(), i32_(), f64_(), i32_()}, 1, Some(i64_()), true,
+        "x0 [sp+0,8] [sp+8,4] [sp+16,8] [sp+24,4] -> x0") && ok
+    ok = row("variadic composites", []CT{i32_(), f64_(), i32_(), f3(), l2(), i64_()}, 1, Some(i64_()), true,
+        "x0 [sp+0,8] [sp+8,4] [sp+16,12] [sp+32,16] [sp+48,8] -> x0") && ok
+    assert ok
+}

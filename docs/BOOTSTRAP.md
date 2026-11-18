@@ -842,3 +842,39 @@ is Linux); the differences are:
   `tests/sys/NAME.c` with clang for it (`--target=aarch64-linux-gnu`, freestanding, ld.lld:
   `clang` in PATH or `ALTEST_CLANG`), so `tests/sys/c_abi` runs AL code against C that clang
   compiled, in both directions. What only real hardware can check: `docs/ARM64_TEST.md`.
+
+## macOS target
+
+`--target macos` (experimental, never run) sets `target_os` to `TargetMacOS` and `target_arch`
+to arm64: the arm64 back end with these differences.
+
+- **Linking** (`src/macho.al`): a PIE Mach-O for macOS 11+ in 16 KiB pages: `__PAGEZERO`,
+  `__TEXT` (`__text`: an entry stub that dyld calls as `main`, passing argv on to `__entry`;
+  `__const`), `__DATA_CONST` (`__got`, the import slots; the read-only globals that hold
+  addresses), `__DATA` (`__data`, `__thread_vars`, `__thread_bss`, `__bss`), `__LINKEDIT`
+  (chained fixups in format `DYLD_CHAINED_PTR_64`, the exports trie, symbols, the indirect
+  symbols of `__got`, the code signature). Load commands as ld64 writes them (LC_MAIN,
+  LC_LOAD_DYLINKER, LC_LOAD_DYLIB per library (libSystem first), LC_BUILD_VERSION 11.0,
+  LC_UUID from the SHA-256 of the file, LC_CODE_SIGNATURE: an ad-hoc, linker-signed
+  CodeDirectory over 4 KiB pages, hashed by `src/sha256.al`). Its output is the same for any
+  `ALC_JOBS`; the signature's identifier is the output's file name.
+- **Thread-local data**: the block of the calling thread is the result of the program's one
+  thread-local variable descriptor (`Tlv` in src/arm64: `adrp`/`add x0`, `ldr x16, [x0]`,
+  `blr x16`, modelled as an instruction that defines x0, as a system call does: the thunk keeps
+  every other register but x16, x17, x30, which the allocator never uses). Decision: TLV
+  descriptors rather than a pthread key. dyld allocates the block of every thread on its first
+  use, also of threads that C libraries start (whose callbacks run AL code that allocates); a
+  key would need a check and a slow path at every access for such threads, or reading Apple's
+  private TSD slots directly (as Go does). TPIDR_EL0, which the Linux layer owns, is not the
+  program's on Darwin. Cost: a call per access of a function's first thread-local global in a
+  block, where Linux has `mrs`.
+- **Calling convention**: Apple's variant for C calls (src/lower_ccall.al: stack arguments packed
+  at their size, variadic arguments all on the stack) and for AL functions too (`mac_slot` in
+  src/arm64/isel.al), so that AL functions stay C callbacks. Not done: narrow results of AL
+  functions are not extended to 32 bits (Apple's callers expect it).
+- **Run-time library**: `src/prelude_macos.al` over libSystem (`extern`s: macOS has no stable
+  system call interface); error numbers mapped to Linux ones; locks with `__ulock_wait` /
+  `__ulock_wake`; threads with pthreads; processes with fork / execve. `TARGET_OS == MacOS`.
+- **Tests**: `tests/macho/check.al` (structural, also on a file made by ld64.lld),
+  `tests/unit/aapcs64.al` (Apple's rows), llvm-objdump by hand. What only a Mac can check:
+  `docs/MACOS_TEST.md`.

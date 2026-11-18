@@ -32,7 +32,8 @@
 //   declares the C function (`extern`, parsed here with its struct types): the argument
 //   registers that the classification of tests/arm64/aapcs.al (an independent implementation of
 //   the Arm procedure call standard) assigns, and x8 for a result in memory, are written on
-//   every path to the call. (Whether the right values are in them is what tests/sys/c_abi
+//   every path to the call (a register that still holds an argument of the calling function
+//   counts: it may be passed on). (Whether the right values are in them is what tests/sys/c_abi
 //   checks, against C compiled by clang, under the emulator.)
 //
 // Output: a line per problem, then `arm64 check: N executables, F functions, W instructions,
@@ -1128,55 +1129,6 @@ priv fn check_func(name: str, b: str, text_off: i64, text_addr: i64, fn_: Func, 
             }
         }
     }
-    // for the C calls: the registers written on every path from the entry, the arguments of the
-    // function itself not counted (so that an argument register of a call holds something the
-    // function put there)
-    cg := vec_fill(n, ~u64(0))
-    cf := vec_fill(n, ~u64(0))
-    has_blr := false
-    for i in ins {
-        has_blr = has_blr || i.kind == K_BLR
-    }
-    if has_blr && cs.sigs.len > 0 {
-        cg[0] = ENTRY_G & ~u64(0x1FF)
-        cf[0] = ENTRY_F & ~u64(0xFF)
-        cseen := vec_fill(n, false)
-        cseen[0] = true
-        cwork := vec_of([]i64{0})
-        while !cwork.is_empty() {
-            k := cwork.pop()
-            i := &ins[k]
-            gs := cg[k] | i.du_g
-            fs := cf[k] | i.du_f
-            if i.kind == K_BL || i.kind == K_BLR {
-                gs = (gs & ~CALL_KILL_G) | CALL_SET_G
-                fs = CALL_SET_F
-            }
-            succ := vec[i64]()
-            match i.kind {
-                K_B => succ.push(k + i.target)
-                K_BCOND => {
-                    succ.push(k + i.target)
-                    succ.push(k + 1)
-                }
-                K_RET, K_BR, K_BRK => {}
-                _ => succ.push(k + 1)
-            }
-            for s in succ {
-                if s < 0 || s >= n {
-                    continue
-                }
-                ng := cg[s] & gs
-                nf := cf[s] & fs
-                if !cseen[s] || ng != cg[s] || nf != cf[s] {
-                    cseen[s] = true
-                    cg[s] = ng
-                    cf[s] = nf
-                    cwork.push(s)
-                }
-            }
-        }
-    }
     for k in 0..n {
         if !seen[k] {
             continue
@@ -1217,8 +1169,8 @@ priv fn check_func(name: str, b: str, text_off: i64, text_addr: i64, fn_: Func, 
                 ret := sig.ret
                 locs, rl := aapcs64(sig.args.items(), sig.nfixed, ret, false)
                 ng, nf := loc_regs(locs.items(), rl)
-                mg := ng & ~cg[k]
-                mf := nf & ~cf[k]
+                mg := ng & ~in_g[k]
+                mf := nf & ~in_f[k]
                 if mg != 0 || mf != 0 {
                     say(p, &errs, fmt(where(name, fn_, k), ": the C call of `", sym, "` (", loc_text(locs.items(), rl), ") does not write ",
                         if mg != 0 { fmt("x", ctz(mg)) } else { fmt("v", ctz(mf)) }, " on every path"))
