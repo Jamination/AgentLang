@@ -35,11 +35,19 @@ done
 mkdir -p build
 [[ -x $SEED ]] || { echo "build: no seed compiler at $SEED"; exit 1; }
 # the test runner (tests/run.sh starts it), built by the new compiler: $1 = its file, $2... =
-# compiler options
+# compiler options. Built under another name, then moved over the old one (Linux replaces a
+# running program's file; build.bat does the same in its way): one with the same bytes is left
+# as it is (only touched, so that tests/run.sh does not rebuild it)
 runner() {
   local out=$1; shift
-  if ! build/alc build "$@" tests/run.al -o "$out.new" || ! mv "$out.new" "$out"; then
+  if ! build/alc build "$@" tests/run.al -o "$out.new"; then
+    rm -f "$out.new"
     echo "build: FAIL: build/alc does not compile the test runner tests/run.al"; exit 1
+  fi
+  if cmp -s "$out.new" "$out"; then
+    rm -f "$out.new"; touch "$out"
+  elif ! mv "$out.new" "$out"; then
+    echo "build: FAIL: cannot replace $out"; exit 1
   fi
 }
 # the sources name the standard library relative to src/, so build from the repository root

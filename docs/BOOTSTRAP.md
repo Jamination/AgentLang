@@ -63,7 +63,13 @@ verify.bat                          :: Windows: build, both of the above, one li
 The runner is an AL program, `tests/run.al` (its top lists the kinds of tests and their
 files); `build.sh` / `build.bat` build it with the new compiler as `build/altest` and
 `build/altest.exe`, and `tests/run.sh` / `tests\run.bat` only start it in the repository root
-(`run.sh` rebuilds it when `tests/run.al` is newer, `run.bat` always). It can also be started
+(`run.sh` rebuilds it when `tests/run.al` is newer, `run.bat` always, with `build.bat
+--runner`). A test run keeps the runner and the compiler open, and Windows writes no file of a
+running program: `build.bat` therefore builds each under another name and leaves the old one
+in place when the bytes are the same; a changed one replaces it, and a running one is renamed
+away first (`build\altest.old*.exe`, removed by a later build), so `build.bat --quick` and a
+second `tests\run.bat` work while tests run (`build.sh` does the same with `mv`, which Linux
+allows over a running program). It can also be started
 directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
 
 - **Options**: `-j N` threads (default: one per CPU; `-j 1` runs one test after the other),

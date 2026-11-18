@@ -1,0 +1,4 @@
+held true
+build.bat --runner 0 (no output)
+runner in place true true
+no new file left true

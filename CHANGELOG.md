@@ -97,6 +97,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   or a byte order mark fails with that reason (`NAME.out has CRLF line endings: expected files
   must use LF`) instead of "stdout differs" and a diff of lines that look the same.
 
+### Fixed
+- `build.bat --quick` (and a second `tests\run.bat`) failed while a test run was in progress,
+  which keeps `build\altest.exe` and `build\alc.exe` open: both are now built under another
+  name, left as they are when their bytes did not change, and otherwise replace the old file
+  (a running one is renamed away first). `build.bat --runner` builds only the test runner.
+
 ## [0.4.0] - 2026-11-17
 
 ### Breaking
