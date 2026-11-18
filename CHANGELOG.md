@@ -139,6 +139,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - std.math: `log10`, `ldexp(x, n)` and `frexp(x) -> (m, e)` for `f32` and `f64`, with C's results
   for 0, negative numbers, infinities, NaN and subnormals; `ldexp` rounds once, `log10` is exact
   for powers of ten.
+- std.input: `feed_motion(i, dx, dy)`: relative mouse motion for scripted and headless runs, as a
+  locked cursor's raw motion (`mouse_delta` grows, `mouse_pos` moves with it); docs/std/input.md
+  now says how mouse deltas are computed from the positions of mouse events.
 
 ### Changed
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a

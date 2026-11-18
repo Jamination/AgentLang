@@ -206,9 +206,9 @@ fn script(g: *Game, inp: *Input, b: *Bot, f: i64) {
         ly: i16 = if fabs(turn_left) < 0.5 { -32000 } else { 0 }
         gamepad_event(&inp.pad, 2, u8(PAD_AXIS_LY), ly)
     } else {
-        counts := i64(round(-turn_left / mouse_scale(g.settings)))
-        // positions, not motion: the Input takes the difference to the last position
-        inp.feed(Event{kind: EventMouseMove, x: i64(inp.mouse_x) + clamp(counts, -60, 60), y: i64(inp.mouse_y)})
+        counts := clamp(i64(round(-turn_left / mouse_scale(g.settings))), -60, 60)
+        // mouse-look: the relative motion of the locked cursor, in counts
+        inp.feed_motion(f32(counts), 0.0)
         hold(inp, KEY_W, fabs(turn_left) < 0.5)
     }
 }

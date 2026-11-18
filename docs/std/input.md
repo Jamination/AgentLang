@@ -95,6 +95,7 @@ per key / mouse button), `mouse_x/y`, `mouse_dx/dy`, `wheel_x/y`, `focused`, `te
 |----------|---|
 | `begin_frame(i: *Input)` | start a new frame |
 | `feed(i: *Input, e: Event)` | apply one event |
+| `feed_motion(i: *Input, dx: f32, dy: f32)` | move the pointer by `(dx, dy)` as a locked cursor's raw motion does: for scripted and headless runs (below) |
 | `release_all(i: *Input)` | release every held key and mouse button |
 | `key_down(i, key) -> bool` | the key is held |
 | `key_pressed(i, key) -> bool` | it went down this frame |
@@ -111,6 +112,17 @@ per key / mouse button), `mouse_x/y`, `mouse_dx/dy`, `wheel_x/y`, `focused`, `te
 | `key_from_name(name) -> i64` | inverse of `key_name`, ignoring letter case; `KEY_UNKNOWN` if none |
 
 Unknown key or button numbers are never an error: queries return false, events are ignored.
+
+**How the mouse delta is computed.** Mouse events carry positions, not motion: each
+`EventMouseMove` / `EventMouseDown` / `EventMouseUp` sets `mouse_pos` and adds the difference
+to the previous position to `mouse_delta` (the first position an `Input` sees adds nothing);
+`begin_frame` sets the delta to zero and keeps the position. A locked cursor works the same way:
+the window turns the raw motion into a virtual, unbounded position and feeds that. A script
+that plays mouse-look therefore does not feed positions (a position computed from a rounded
+`mouse_pos` or a fresh `Input` at (0, 0) gives a jump) but motion: `feed_motion(&inp, dx, dy)` adds
+`(dx, dy)` (fractions too) to `mouse_delta` and moves `mouse_pos` by the same amount, as the
+locked cursor's virtual position moves; a position fed afterwards counts from there
+(`tests/std/input_motion.al`, `examples/dx12_crypt/headless.al`).
 
 ## ActionMap
 
