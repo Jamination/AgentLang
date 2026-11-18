@@ -89,6 +89,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   function after every store or call.
 - Code generation: fewer stores to spill slots; a loop that is left from the "then" side of a
   branch falls through into its own code.
+- A `{`, `(` or `[` that is never closed: the error (also at the end of the file) says where it
+  was opened, ``expected `}`, found keyword `fn` (the `{` opened at 4:6 is not closed)``. When a
+  closing bracket stands left of the indentation of the line that opened its bracket, the inner
+  bracket is named (`P{2, "y",` followed by `}` under the declaration). A declaration keyword
+  in column 1 inside a struct, enum, `match` or never-closed block ends it with that error
+  instead of being read as a field or statement.
 
 ## [0.4.0] - 2026-11-17
 

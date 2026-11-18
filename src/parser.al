@@ -363,7 +363,127 @@ priv fn expect_p(p: *Parser, c: i64) -> bool {
         return true
     }
     p.err[bool](fmt("expected `", lexer_p_text(c), "`"))
+    if c == ')' || c == ']' || c == '}' {
+        p.add_note(p.unclosed_note())
+    }
     return false
+}
+
+// adds `note` to the last diagnostic: in parentheses, or after the hint it has
+priv fn add_note(p: *Parser, note: str) {
+    if len(note) == 0 || p.errs.is_empty() {
+        return
+    }
+    d := &p.errs[p.errs.len - 1]
+    if ends_with(d.msg, ")") {
+        d.msg = fmt(d.msg[..len(d.msg) - 1], "; ", note, ")")
+    } else {
+        d.msg = fmt(d.msg, " (", note, ")")
+    }
+}
+
+priv fn opener_of(t: Tk) -> i64 {
+    return match t {
+        P(')') => '('
+        P(']') => '['
+        P('}') => '{'
+        _ => 0
+    }
+}
+
+priv fn is_opener(t: Tk) -> bool {
+    return t == P('(') || t == P('[') || t == P('{')
+}
+
+// the column where the line of token j starts (its first token)
+priv fn line_indent(p: *Parser, j: i64) -> i64 {
+    k := j
+    while k > 0 && p.toks[k - 1].t != Nl && p.toks[k - 1].pos.line == p.toks[j].pos.line {
+        k -= 1
+    }
+    return i64(p.toks[k].pos.col)
+}
+
+// Where a closing bracket was expected: if the innermost bracket open before the current
+// token is never closed (by the brackets as written), the note that says where it was opened.
+// A bracket inside it that is closed by a bracket standing first on its line to the left of
+// the indentation of the line that opened it is named instead: that closing bracket was most
+// likely meant for an outer one (`P{2, "y",` then `}` under the declaration). Only after an error.
+priv fn unclosed_note(p: *Parser) -> str {
+    j := p.i - 1
+    depth := 0
+    while j >= 0 {
+        t := p.toks[j].t
+        if opener_of(t) != 0 {
+            depth += 1
+        } else if is_opener(t) {
+            if depth == 0 {
+                break
+            }
+            depth -= 1
+        }
+        j -= 1
+    }
+    if j < 0 {
+        return ""
+    }
+    blame := p.unclosed_at(j)
+    if blame < 0 {
+        return ""
+    }
+    b := p.toks[blame]
+    open := match b.t {
+        P(q) => lexer_p_text(q)
+        _ => ""
+    }
+    return fmt("the `", open, "` opened at ", b.pos.line, ":", b.pos.col, " is not closed")
+}
+
+// -1 if the opening bracket at token j is closed later by the brackets as written (a closing
+// bracket of another kind, or the end of the file: it is not). Else the bracket that most
+// likely lacks its closing one: j, or a bracket inside it closed (before the current token)
+// by a bracket that stands first on its line, left of the indentation of the line that opened it.
+priv fn unclosed_at(p: *Parser, j: i64) -> i64 {
+    stk := vec_one(j)
+    blame := -1
+    for k in j + 1..p.toks.len {
+        t := p.toks[k].t
+        if is_opener(t) {
+            stk.push(k)
+            continue
+        }
+        o := opener_of(t)
+        if o == 0 {
+            continue
+        }
+        top := stk.last()
+        if p.toks[top].t != P(o) {
+            break
+        }
+        if stk.len == 1 {
+            return -1
+        }
+        prev := p.toks[k - 1]
+        first := prev.t == Nl || prev.pos.line < p.toks[k].pos.line
+        if blame < 0 && k < p.i && first && i64(p.toks[k].pos.col) < p.line_indent(top) {
+            blame = top
+        }
+        stk.pop()
+    }
+    return if blame < 0 { j } else { blame }
+}
+
+// at a keyword in column 1 that starts a declaration (`fn`, `struct`, `const`, ...): where a
+// struct or enum body, a `match` or a block that is never closed is still open, its `}` is
+// most likely missing
+priv fn decl_at_col1(p: *Parser) -> bool {
+    if p.pos().col != 1 {
+        return false
+    }
+    return match p.peek() {
+        Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_PRIV), Kw(KW_EXTERN), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_USE), Kw(KW_TEST), Kw(KW_WHEN) => true
+        _ => false
+    }
 }
 
 priv fn ident(p: *Parser) -> (str, bool) {
@@ -730,6 +850,10 @@ priv fn struct_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl
         if p.eat_p('}') {
             break
         }
+        if p.decl_at_col1() {
+            p.expect_p('}')
+            return fail[Decl]()
+        }
         if p.is_kw(KW_PRIV) {
             return p.err[Decl]("a struct field cannot be `priv` (only top-level declarations can): write `priv struct` to make the whole struct private")
         }
@@ -760,6 +884,10 @@ priv fn enum_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, 
         p.skip_nl()
         if p.eat_p('}') {
             break
+        }
+        if p.decl_at_col1() {
+            p.expect_p('}')
+            return fail[Decl]()
         }
         if p.is_kw(KW_PRIV) {
             return p.err[Decl]("an enum variant cannot be `priv` (only top-level declarations can): write `priv enum` to make the enum type private")
@@ -1163,6 +1291,7 @@ priv fn block(p: *Parser) -> *Block {
     // likely a `Name{...}` literal that was taken for the body
     after_name := p.hdr_name == p.i
     nerr := p.errs.len
+    open := p.i
     if !p.expect_p('{') {
         return nil
     }
@@ -1174,7 +1303,7 @@ priv fn block(p: *Parser) -> *Block {
     }
     loop {
         p.skip_nl()
-        if p.is_p('}') || p.peek() == Eof {
+        if p.is_p('}') || p.peek() == Eof || p.decl_at_col1() && p.unclosed_at(open) >= 0 {
             break
         }
         s, ok := p.stmt()
@@ -2081,6 +2210,10 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
         p.skip_nl()
         if p.eat_p('}') {
             break
+        }
+        if p.decl_at_col1() {
+            p.expect_p('}')
+            return fail[Vec[MatchArm]]()
         }
         pos := p.pos()
         pb := pat_stack.len
