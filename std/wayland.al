@@ -151,6 +151,120 @@ fn wl_display_poll(display: *WlDisplay, timeout_ms: i64) -> i64 {
     i64(wl_display_dispatch_pending(display))
 }
 
+// ---- libwayland-client.so.0 loaded at run time ----
+// The request functions, the *_add_listener, *_set_user_data, *_get_user_data, *_get_version
+// and *_destroy functions and the interface tables of this module do not use the `extern`
+// functions above: they call libwayland-client through the pointers of a WlClientLib, which
+// is loaded with dlopen on first use. A program that calls one of the `extern` functions (or
+// uses an `extern` interface table) is linked against libwayland-client as before; one that
+// only reaches the rest of the module (std.window, whose Wayland backend is built on it) is
+// not, and starts on a system without the library. Both share the one loaded library.
+struct WlClientLib {
+    display_connect: fn(*u8) -> *WlDisplay
+    display_disconnect: fn(*WlDisplay)
+    display_get_fd: fn(*WlDisplay) -> i32
+    display_flush: fn(*WlDisplay) -> i32
+    display_dispatch_pending: fn(*WlDisplay) -> i32
+    display_roundtrip: fn(*WlDisplay) -> i32
+    display_get_error: fn(*WlDisplay) -> i32
+    display_prepare_read: fn(*WlDisplay) -> i32
+    display_read_events: fn(*WlDisplay) -> i32
+    display_cancel_read: fn(*WlDisplay)
+    proxy_marshal_array_flags: fn(*u8, u32, *WlInterface, u32, u32, *u64) -> *u8
+    proxy_add_listener: fn(*u8, *u8, *u8) -> i32
+    proxy_destroy: fn(*u8)
+    proxy_set_user_data: fn(*u8, *u8)
+    proxy_get_user_data: fn(*u8) -> *u8
+    proxy_get_version: fn(*u8) -> u32
+}
+
+// (libdl.so.2 holds these before glibc 2.34, the C library itself since)
+priv extern "libdl.so.2" fn dlopen(path: *u8, flags: i32) -> *u8
+priv extern "libdl.so.2" fn dlsym(handle: *u8, name: *u8) -> *u8
+
+priv wl_client: WlClientLib
+priv wl_client_state: i64                       // 0: not tried, 1: loaded, -1: not available
+priv wl_core_tables: [WL_CORE_TABLE_COUNT]*WlInterface
+
+// A symbol of the library; nil (and *missing set) if it has none of that name.
+priv fn wl_sym(lib: *u8, name: *u8, missing: *bool) -> *u8 {
+    p := dlsym(lib, name)
+    if p == nil {
+        *missing = true
+    }
+    p
+}
+
+// libwayland-client.so.0, loaded (RTLD_NOW) on the first call; nil if it is not installed or
+// lacks a function or interface table this module uses (it needs version 1.20 or later).
+fn wl_client_lib() -> *WlClientLib {
+    if wl_client_state == 0 {
+        wl_client_state = -1
+        lib := dlopen(ptr("libwayland-client.so.0"), 2)
+        if lib == nil {
+            return nil
+        }
+        m := false
+        c := &wl_client
+        c.display_connect = cast[fn(*u8) -> *WlDisplay](wl_sym(lib, ptr("wl_display_connect"), &m))
+        c.display_disconnect = cast[fn(*WlDisplay)](wl_sym(lib, ptr("wl_display_disconnect"), &m))
+        c.display_get_fd = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_get_fd"), &m))
+        c.display_flush = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_flush"), &m))
+        c.display_dispatch_pending = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_dispatch_pending"), &m))
+        c.display_roundtrip = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_roundtrip"), &m))
+        c.display_get_error = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_get_error"), &m))
+        c.display_prepare_read = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_prepare_read"), &m))
+        c.display_read_events = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_read_events"), &m))
+        c.display_cancel_read = cast[fn(*WlDisplay)](wl_sym(lib, ptr("wl_display_cancel_read"), &m))
+        c.proxy_marshal_array_flags = cast[fn(*u8, u32, *WlInterface, u32, u32, *u64) -> *u8](wl_sym(lib, ptr("wl_proxy_marshal_array_flags"), &m))
+        c.proxy_add_listener = cast[fn(*u8, *u8, *u8) -> i32](wl_sym(lib, ptr("wl_proxy_add_listener"), &m))
+        c.proxy_destroy = cast[fn(*u8)](wl_sym(lib, ptr("wl_proxy_destroy"), &m))
+        c.proxy_set_user_data = cast[fn(*u8, *u8)](wl_sym(lib, ptr("wl_proxy_set_user_data"), &m))
+        c.proxy_get_user_data = cast[fn(*u8) -> *u8](wl_sym(lib, ptr("wl_proxy_get_user_data"), &m))
+        c.proxy_get_version = cast[fn(*u8) -> u32](wl_sym(lib, ptr("wl_proxy_get_version"), &m))
+        for i, name in WL_CORE_TABLES {
+            wl_core_tables[i] = cast[*WlInterface](wl_sym(lib, ptr(name), &m))
+        }
+        if m {
+            return nil
+        }
+        wl_client_state = 1
+    }
+    if wl_client_state > 0 { &wl_client } else { nil }
+}
+
+// The loaded library, for the functions of this module (a program that gets here has a
+// connection, so the library is there).
+priv fn wl_dl() -> *WlClientLib {
+    lib := wl_client_lib()
+    if lib == nil {
+        panic("std.wayland: libwayland-client.so.0 (1.20 or later) cannot be loaded")
+    }
+    lib
+}
+
+// libwayland-client's interface table number `index` of WL_CORE_TABLES (wl_surface_interface, ...).
+priv fn wl_core_interface(index: i64) -> *WlInterface {
+    wl_dl()
+    wl_core_tables[index]
+}
+
+// The interface table of the core protocol named `name` ("wl_compositor") inside the loaded
+// libwayland-client, for wl_registry_bind without the `extern` table (&wl_compositor_interface
+// is the same table); nil if the library cannot be loaded or the core protocol has no such
+// interface.
+fn wl_client_interface(name: str) -> *WlInterface {
+    if wl_client_lib() == nil {
+        return nil
+    }
+    for i, t in WL_CORE_TABLES {
+        if t[..t.len - len("_interface")] == name {
+            return wl_core_tables[i]
+        }
+    }
+    nil
+}
+
 // wl_fixed_t (24.8 fixed point, an i32: surface coordinates of pointer events, axis values).
 fn wl_fixed_to_double(f: i32) -> f64 { f64(f) / 256.0 }
 fn wl_fixed_from_double(d: f64) -> i32 { i32(d * 256.0) }
@@ -227,7 +341,7 @@ priv fn wl_listen(proxy: *u8, listener: *u8, count: i64, data: *u8) -> i32 {
             memcopy(ptr(slots[i * 8..]), cast[*u8](&wl_ignore), 8)
         }
     }
-    wl_proxy_add_listener(proxy, listener, data)
+    wl_dl().proxy_add_listener(proxy, listener, data)
 }
 
 // The C string for a string argument that may be null: nil for "".
@@ -322,18 +436,18 @@ const WL_DISPLAY_ERROR_IMPLEMENTATION = 3    // implementation error in composit
 const WL_DISPLAY_SYNC: u32 = 0
 const WL_DISPLAY_GET_REGISTRY: u32 = 1
 // (the events of wl_display, error and delete_id, are handled by libwayland itself)
-fn wl_display_set_user_data(wl_display: *WlDisplay, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_display), data) }
-fn wl_display_get_user_data(wl_display: *WlDisplay) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_display)) }
-fn wl_display_get_version(wl_display: *WlDisplay) -> u32 { wl_proxy_get_version(cast[*u8](wl_display)) }
+fn wl_display_set_user_data(wl_display: *WlDisplay, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_display), data) }
+fn wl_display_get_user_data(wl_display: *WlDisplay) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_display)) }
+fn wl_display_get_version(wl_display: *WlDisplay) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_display)) }
 // wl_display.sync: asynchronous roundtrip
 fn wl_display_sync(wl_display: *WlDisplay) -> *WlCallback {
     argv := [1]u64{0}
-    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_SYNC, &wl_callback_interface, wl_proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
+    cast[*WlCallback](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_SYNC, wl_core_interface(2), wl_dl().proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
 }
 // wl_display.get_registry: get global registry object
 fn wl_display_get_registry(wl_display: *WlDisplay) -> *WlRegistry {
     argv := [1]u64{0}
-    cast[*WlRegistry](wl_proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_GET_REGISTRY, &wl_registry_interface, wl_proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
+    cast[*WlRegistry](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_display), WL_DISPLAY_GET_REGISTRY, wl_core_interface(1), wl_dl().proxy_get_version(cast[*u8](wl_display)), 0, ptr(argv)))
 }
 
 // ---- wl_registry (version 1): global registry object ----
@@ -353,15 +467,15 @@ struct WlRegistryListener {
 fn wl_registry_add_listener(wl_registry: *WlRegistry, listener: *WlRegistryListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_registry), cast[*u8](listener), 2, data)
 }
-fn wl_registry_set_user_data(wl_registry: *WlRegistry, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_registry), data) }
-fn wl_registry_get_user_data(wl_registry: *WlRegistry) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_registry)) }
-fn wl_registry_get_version(wl_registry: *WlRegistry) -> u32 { wl_proxy_get_version(cast[*u8](wl_registry)) }
+fn wl_registry_set_user_data(wl_registry: *WlRegistry, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_registry), data) }
+fn wl_registry_get_user_data(wl_registry: *WlRegistry) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_registry)) }
+fn wl_registry_get_version(wl_registry: *WlRegistry) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_registry)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_registry_destroy(wl_registry: *WlRegistry) { wl_proxy_destroy(cast[*u8](wl_registry)) }
+fn wl_registry_destroy(wl_registry: *WlRegistry) { wl_dl().proxy_destroy(cast[*u8](wl_registry)) }
 // wl_registry.bind: bind an object to the display
 fn wl_registry_bind(wl_registry: *WlRegistry, name: u32, interface: *WlInterface, version: u32) -> *u8 {
     argv := [4]u64{u64(name), cast[u64](interface.name), u64(version), 0}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_registry), WL_REGISTRY_BIND, interface, version, 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_registry), WL_REGISTRY_BIND, interface, version, 0, ptr(argv))
 }
 
 // ---- wl_callback (version 1): callback object ----
@@ -377,11 +491,11 @@ struct WlCallbackListener {
 fn wl_callback_add_listener(wl_callback: *WlCallback, listener: *WlCallbackListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_callback), cast[*u8](listener), 1, data)
 }
-fn wl_callback_set_user_data(wl_callback: *WlCallback, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_callback), data) }
-fn wl_callback_get_user_data(wl_callback: *WlCallback) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_callback)) }
-fn wl_callback_get_version(wl_callback: *WlCallback) -> u32 { wl_proxy_get_version(cast[*u8](wl_callback)) }
+fn wl_callback_set_user_data(wl_callback: *WlCallback, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_callback), data) }
+fn wl_callback_get_user_data(wl_callback: *WlCallback) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_callback)) }
+fn wl_callback_get_version(wl_callback: *WlCallback) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_callback)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_callback_destroy(wl_callback: *WlCallback) { wl_proxy_destroy(cast[*u8](wl_callback)) }
+fn wl_callback_destroy(wl_callback: *WlCallback) { wl_dl().proxy_destroy(cast[*u8](wl_callback)) }
 
 // ---- wl_compositor (version 7): the compositor singleton ----
 struct WlCompositor {}
@@ -391,24 +505,24 @@ extern "libwayland-client.so.0" wl_compositor_interface: WlInterface
 const WL_COMPOSITOR_CREATE_SURFACE: u32 = 0
 const WL_COMPOSITOR_CREATE_REGION: u32 = 1
 const WL_COMPOSITOR_RELEASE: u32 = 2
-fn wl_compositor_set_user_data(wl_compositor: *WlCompositor, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_compositor), data) }
-fn wl_compositor_get_user_data(wl_compositor: *WlCompositor) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_compositor)) }
-fn wl_compositor_get_version(wl_compositor: *WlCompositor) -> u32 { wl_proxy_get_version(cast[*u8](wl_compositor)) }
+fn wl_compositor_set_user_data(wl_compositor: *WlCompositor, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_compositor), data) }
+fn wl_compositor_get_user_data(wl_compositor: *WlCompositor) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_compositor)) }
+fn wl_compositor_get_version(wl_compositor: *WlCompositor) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_compositor)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_compositor_destroy(wl_compositor: *WlCompositor) { wl_proxy_destroy(cast[*u8](wl_compositor)) }
+fn wl_compositor_destroy(wl_compositor: *WlCompositor) { wl_dl().proxy_destroy(cast[*u8](wl_compositor)) }
 // wl_compositor.create_surface: create new surface
 fn wl_compositor_create_surface(wl_compositor: *WlCompositor) -> *WlSurface {
     argv := [1]u64{0}
-    cast[*WlSurface](wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_SURFACE, &wl_surface_interface, wl_proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
+    cast[*WlSurface](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_SURFACE, wl_core_interface(13), wl_dl().proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
 }
 // wl_compositor.create_region: create new region
 fn wl_compositor_create_region(wl_compositor: *WlCompositor) -> *WlRegion {
     argv := [1]u64{0}
-    cast[*WlRegion](wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_REGION, &wl_region_interface, wl_proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
+    cast[*WlRegion](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_CREATE_REGION, wl_core_interface(19), wl_dl().proxy_get_version(cast[*u8](wl_compositor)), 0, ptr(argv)))
 }
 // wl_compositor.release (since version 7): destroy wl_compositor. Destroys the object.
 fn wl_compositor_release(wl_compositor: *WlCompositor) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_compositor)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_compositor), WL_COMPOSITOR_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_compositor)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_shm_pool (version 3): a shared memory pool ----
@@ -422,22 +536,22 @@ const WL_SHM_POOL_ERROR_INVALID_STRIDE = 1    // invalid size or stride during b
 const WL_SHM_POOL_CREATE_BUFFER: u32 = 0
 const WL_SHM_POOL_DESTROY: u32 = 1
 const WL_SHM_POOL_RESIZE: u32 = 2
-fn wl_shm_pool_set_user_data(wl_shm_pool: *WlShmPool, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_shm_pool), data) }
-fn wl_shm_pool_get_user_data(wl_shm_pool: *WlShmPool) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_shm_pool)) }
-fn wl_shm_pool_get_version(wl_shm_pool: *WlShmPool) -> u32 { wl_proxy_get_version(cast[*u8](wl_shm_pool)) }
+fn wl_shm_pool_set_user_data(wl_shm_pool: *WlShmPool, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_shm_pool), data) }
+fn wl_shm_pool_get_user_data(wl_shm_pool: *WlShmPool) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_shm_pool)) }
+fn wl_shm_pool_get_version(wl_shm_pool: *WlShmPool) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_shm_pool)) }
 // wl_shm_pool.create_buffer: create a buffer from the pool. `format`: wl_shm.format
 fn wl_shm_pool_create_buffer(wl_shm_pool: *WlShmPool, offset: i32, width: i32, height: i32, stride: i32, format: u32) -> *WlBuffer {
     argv := [6]u64{0, u64(u32(offset)), u64(u32(width)), u64(u32(height)), u64(u32(stride)), u64(format)}
-    cast[*WlBuffer](wl_proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_CREATE_BUFFER, &wl_buffer_interface, wl_proxy_get_version(cast[*u8](wl_shm_pool)), 0, ptr(argv)))
+    cast[*WlBuffer](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_CREATE_BUFFER, wl_core_interface(6), wl_dl().proxy_get_version(cast[*u8](wl_shm_pool)), 0, ptr(argv)))
 }
 // wl_shm_pool.destroy: destroy the pool. Destroys the object.
 fn wl_shm_pool_destroy(wl_shm_pool: *WlShmPool) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_shm_pool)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_shm_pool)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_shm_pool.resize: change the size of the pool mapping
 fn wl_shm_pool_resize(wl_shm_pool: *WlShmPool, size: i32) {
     argv := [1]u64{u64(u32(size))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_RESIZE, nil, wl_proxy_get_version(cast[*u8](wl_shm_pool)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shm_pool), WL_SHM_POOL_RESIZE, nil, wl_dl().proxy_get_version(cast[*u8](wl_shm_pool)), 0, ptr(argv))
 }
 
 // ---- wl_shm (version 3): shared memory support ----
@@ -609,19 +723,19 @@ struct WlShmListener {
 fn wl_shm_add_listener(wl_shm: *WlShm, listener: *WlShmListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_shm), cast[*u8](listener), 1, data)
 }
-fn wl_shm_set_user_data(wl_shm: *WlShm, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_shm), data) }
-fn wl_shm_get_user_data(wl_shm: *WlShm) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_shm)) }
-fn wl_shm_get_version(wl_shm: *WlShm) -> u32 { wl_proxy_get_version(cast[*u8](wl_shm)) }
+fn wl_shm_set_user_data(wl_shm: *WlShm, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_shm), data) }
+fn wl_shm_get_user_data(wl_shm: *WlShm) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_shm)) }
+fn wl_shm_get_version(wl_shm: *WlShm) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_shm)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_shm_destroy(wl_shm: *WlShm) { wl_proxy_destroy(cast[*u8](wl_shm)) }
+fn wl_shm_destroy(wl_shm: *WlShm) { wl_dl().proxy_destroy(cast[*u8](wl_shm)) }
 // wl_shm.create_pool: create a shm pool. `fd`: fd
 fn wl_shm_create_pool(wl_shm: *WlShm, fd: i32, size: i32) -> *WlShmPool {
     argv := [3]u64{0, u64(u32(fd)), u64(u32(size))}
-    cast[*WlShmPool](wl_proxy_marshal_array_flags(cast[*u8](wl_shm), WL_SHM_CREATE_POOL, &wl_shm_pool_interface, wl_proxy_get_version(cast[*u8](wl_shm)), 0, ptr(argv)))
+    cast[*WlShmPool](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shm), WL_SHM_CREATE_POOL, wl_core_interface(4), wl_dl().proxy_get_version(cast[*u8](wl_shm)), 0, ptr(argv)))
 }
 // wl_shm.release (since version 2): release the shm object. Destroys the object.
 fn wl_shm_release(wl_shm: *WlShm) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shm), WL_SHM_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_shm)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shm), WL_SHM_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_shm)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_buffer (version 1): content for a wl_surface ----
@@ -639,12 +753,12 @@ struct WlBufferListener {
 fn wl_buffer_add_listener(wl_buffer: *WlBuffer, listener: *WlBufferListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_buffer), cast[*u8](listener), 1, data)
 }
-fn wl_buffer_set_user_data(wl_buffer: *WlBuffer, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_buffer), data) }
-fn wl_buffer_get_user_data(wl_buffer: *WlBuffer) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_buffer)) }
-fn wl_buffer_get_version(wl_buffer: *WlBuffer) -> u32 { wl_proxy_get_version(cast[*u8](wl_buffer)) }
+fn wl_buffer_set_user_data(wl_buffer: *WlBuffer, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_buffer), data) }
+fn wl_buffer_get_user_data(wl_buffer: *WlBuffer) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_buffer)) }
+fn wl_buffer_get_version(wl_buffer: *WlBuffer) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_buffer)) }
 // wl_buffer.destroy: destroy a buffer. Destroys the object.
 fn wl_buffer_destroy(wl_buffer: *WlBuffer) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_buffer), WL_BUFFER_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_buffer)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_buffer), WL_BUFFER_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_buffer)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_data_offer (version 4): offer to transfer data ----
@@ -675,35 +789,35 @@ struct WlDataOfferListener {
 fn wl_data_offer_add_listener(wl_data_offer: *WlDataOffer, listener: *WlDataOfferListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_data_offer), cast[*u8](listener), 3, data)
 }
-fn wl_data_offer_set_user_data(wl_data_offer: *WlDataOffer, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_data_offer), data) }
-fn wl_data_offer_get_user_data(wl_data_offer: *WlDataOffer) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_data_offer)) }
-fn wl_data_offer_get_version(wl_data_offer: *WlDataOffer) -> u32 { wl_proxy_get_version(cast[*u8](wl_data_offer)) }
+fn wl_data_offer_set_user_data(wl_data_offer: *WlDataOffer, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_data_offer), data) }
+fn wl_data_offer_get_user_data(wl_data_offer: *WlDataOffer) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_data_offer)) }
+fn wl_data_offer_get_version(wl_data_offer: *WlDataOffer) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_data_offer)) }
 // wl_data_offer.accept: accept one of the offered mime types. `mime_type`: "" for none
 fn wl_data_offer_accept(wl_data_offer: *WlDataOffer, serial: u32, mime_type: str) {
     top := mark()
     argv := [2]u64{u64(serial), cast[u64](wl_cstr_or_nil(mime_type))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_ACCEPT, nil, wl_proxy_get_version(cast[*u8](wl_data_offer)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_ACCEPT, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_offer)), 0, ptr(argv))
     release(top)
 }
 // wl_data_offer.receive: request that the data is transferred. `fd`: fd
 fn wl_data_offer_receive(wl_data_offer: *WlDataOffer, mime_type: str, fd: i32) {
     top := mark()
     argv := [2]u64{cast[u64](cstr(mime_type)), u64(u32(fd))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_RECEIVE, nil, wl_proxy_get_version(cast[*u8](wl_data_offer)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_RECEIVE, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_offer)), 0, ptr(argv))
     release(top)
 }
 // wl_data_offer.destroy: destroy data offer. Destroys the object.
 fn wl_data_offer_destroy(wl_data_offer: *WlDataOffer) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_data_offer)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_offer)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_data_offer.finish (since version 3): the offer will no longer be used
 fn wl_data_offer_finish(wl_data_offer: *WlDataOffer) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_FINISH, nil, wl_proxy_get_version(cast[*u8](wl_data_offer)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_FINISH, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_offer)), 0, nil)
 }
 // wl_data_offer.set_actions (since version 3): set the available/preferred drag-and-drop actions. `dnd_actions`: wl_data_device_manager.dnd_action; `preferred_action`: wl_data_device_manager.dnd_action
 fn wl_data_offer_set_actions(wl_data_offer: *WlDataOffer, dnd_actions: u32, preferred_action: u32) {
     argv := [2]u64{u64(dnd_actions), u64(preferred_action)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_SET_ACTIONS, nil, wl_proxy_get_version(cast[*u8](wl_data_offer)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_offer), WL_DATA_OFFER_SET_ACTIONS, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_offer)), 0, ptr(argv))
 }
 
 // ---- wl_data_source (version 4): offer to transfer data ----
@@ -736,24 +850,24 @@ struct WlDataSourceListener {
 fn wl_data_source_add_listener(wl_data_source: *WlDataSource, listener: *WlDataSourceListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_data_source), cast[*u8](listener), 6, data)
 }
-fn wl_data_source_set_user_data(wl_data_source: *WlDataSource, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_data_source), data) }
-fn wl_data_source_get_user_data(wl_data_source: *WlDataSource) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_data_source)) }
-fn wl_data_source_get_version(wl_data_source: *WlDataSource) -> u32 { wl_proxy_get_version(cast[*u8](wl_data_source)) }
+fn wl_data_source_set_user_data(wl_data_source: *WlDataSource, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_data_source), data) }
+fn wl_data_source_get_user_data(wl_data_source: *WlDataSource) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_data_source)) }
+fn wl_data_source_get_version(wl_data_source: *WlDataSource) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_data_source)) }
 // wl_data_source.offer: add an offered mime type
 fn wl_data_source_offer(wl_data_source: *WlDataSource, mime_type: str) {
     top := mark()
     argv := [1]u64{cast[u64](cstr(mime_type))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_source), WL_DATA_SOURCE_OFFER, nil, wl_proxy_get_version(cast[*u8](wl_data_source)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_source), WL_DATA_SOURCE_OFFER, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_source)), 0, ptr(argv))
     release(top)
 }
 // wl_data_source.destroy: destroy the data source. Destroys the object.
 fn wl_data_source_destroy(wl_data_source: *WlDataSource) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_source), WL_DATA_SOURCE_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_data_source)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_source), WL_DATA_SOURCE_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_source)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_data_source.set_actions (since version 3): set the available drag-and-drop actions. `dnd_actions`: wl_data_device_manager.dnd_action
 fn wl_data_source_set_actions(wl_data_source: *WlDataSource, dnd_actions: u32) {
     argv := [1]u64{u64(dnd_actions)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_source), WL_DATA_SOURCE_SET_ACTIONS, nil, wl_proxy_get_version(cast[*u8](wl_data_source)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_source), WL_DATA_SOURCE_SET_ACTIONS, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_source)), 0, ptr(argv))
 }
 
 // ---- wl_data_device (version 4): data transfer device ----
@@ -786,24 +900,24 @@ struct WlDataDeviceListener {
 fn wl_data_device_add_listener(wl_data_device: *WlDataDevice, listener: *WlDataDeviceListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_data_device), cast[*u8](listener), 6, data)
 }
-fn wl_data_device_set_user_data(wl_data_device: *WlDataDevice, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_data_device), data) }
-fn wl_data_device_get_user_data(wl_data_device: *WlDataDevice) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_data_device)) }
-fn wl_data_device_get_version(wl_data_device: *WlDataDevice) -> u32 { wl_proxy_get_version(cast[*u8](wl_data_device)) }
+fn wl_data_device_set_user_data(wl_data_device: *WlDataDevice, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_data_device), data) }
+fn wl_data_device_get_user_data(wl_data_device: *WlDataDevice) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_data_device)) }
+fn wl_data_device_get_version(wl_data_device: *WlDataDevice) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_data_device)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_data_device_destroy(wl_data_device: *WlDataDevice) { wl_proxy_destroy(cast[*u8](wl_data_device)) }
+fn wl_data_device_destroy(wl_data_device: *WlDataDevice) { wl_dl().proxy_destroy(cast[*u8](wl_data_device)) }
 // wl_data_device.start_drag: start drag-and-drop operation. `source`: may be nil; `icon`: may be nil
 fn wl_data_device_start_drag(wl_data_device: *WlDataDevice, source: *WlDataSource, origin: *WlSurface, icon: *WlSurface, serial: u32) {
     argv := [4]u64{cast[u64](source), cast[u64](origin), cast[u64](icon), u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_device), WL_DATA_DEVICE_START_DRAG, nil, wl_proxy_get_version(cast[*u8](wl_data_device)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_device), WL_DATA_DEVICE_START_DRAG, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_device)), 0, ptr(argv))
 }
 // wl_data_device.set_selection: copy data to the selection. `source`: may be nil
 fn wl_data_device_set_selection(wl_data_device: *WlDataDevice, source: *WlDataSource, serial: u32) {
     argv := [2]u64{cast[u64](source), u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_device), WL_DATA_DEVICE_SET_SELECTION, nil, wl_proxy_get_version(cast[*u8](wl_data_device)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_device), WL_DATA_DEVICE_SET_SELECTION, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_device)), 0, ptr(argv))
 }
 // wl_data_device.release (since version 2): destroy data device. Destroys the object.
 fn wl_data_device_release(wl_data_device: *WlDataDevice) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_device), WL_DATA_DEVICE_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_data_device)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_device), WL_DATA_DEVICE_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_device)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_data_device_manager (version 4): data transfer interface ----
@@ -819,24 +933,24 @@ const WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK = 4     // ask action
 const WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE: u32 = 0
 const WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE: u32 = 1
 const WL_DATA_DEVICE_MANAGER_RELEASE: u32 = 2
-fn wl_data_device_manager_set_user_data(wl_data_device_manager: *WlDataDeviceManager, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_data_device_manager), data) }
-fn wl_data_device_manager_get_user_data(wl_data_device_manager: *WlDataDeviceManager) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_data_device_manager)) }
-fn wl_data_device_manager_get_version(wl_data_device_manager: *WlDataDeviceManager) -> u32 { wl_proxy_get_version(cast[*u8](wl_data_device_manager)) }
+fn wl_data_device_manager_set_user_data(wl_data_device_manager: *WlDataDeviceManager, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_data_device_manager), data) }
+fn wl_data_device_manager_get_user_data(wl_data_device_manager: *WlDataDeviceManager) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_data_device_manager)) }
+fn wl_data_device_manager_get_version(wl_data_device_manager: *WlDataDeviceManager) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_data_device_manager)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_data_device_manager_destroy(wl_data_device_manager: *WlDataDeviceManager) { wl_proxy_destroy(cast[*u8](wl_data_device_manager)) }
+fn wl_data_device_manager_destroy(wl_data_device_manager: *WlDataDeviceManager) { wl_dl().proxy_destroy(cast[*u8](wl_data_device_manager)) }
 // wl_data_device_manager.create_data_source: create a new data source
 fn wl_data_device_manager_create_data_source(wl_data_device_manager: *WlDataDeviceManager) -> *WlDataSource {
     argv := [1]u64{0}
-    cast[*WlDataSource](wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE, &wl_data_source_interface, wl_proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
+    cast[*WlDataSource](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE, wl_core_interface(8), wl_dl().proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
 }
 // wl_data_device_manager.get_data_device: create a new data device
 fn wl_data_device_manager_get_data_device(wl_data_device_manager: *WlDataDeviceManager, seat: *WlSeat) -> *WlDataDevice {
     argv := [2]u64{0, cast[u64](seat)}
-    cast[*WlDataDevice](wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE, &wl_data_device_interface, wl_proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
+    cast[*WlDataDevice](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE, wl_core_interface(9), wl_dl().proxy_get_version(cast[*u8](wl_data_device_manager)), 0, ptr(argv)))
 }
 // wl_data_device_manager.release (since version 4): destroy wl_data_device_manager. Destroys the object.
 fn wl_data_device_manager_release(wl_data_device_manager: *WlDataDeviceManager) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_data_device_manager)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_data_device_manager), WL_DATA_DEVICE_MANAGER_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_data_device_manager)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_shell (version 1): create desktop-style surfaces ----
@@ -847,15 +961,15 @@ extern "libwayland-client.so.0" wl_shell_interface: WlInterface
 const WL_SHELL_ERROR_ROLE = 0    // given wl_surface has another role
 // opcodes of the requests of wl_shell
 const WL_SHELL_GET_SHELL_SURFACE: u32 = 0
-fn wl_shell_set_user_data(wl_shell: *WlShell, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_shell), data) }
-fn wl_shell_get_user_data(wl_shell: *WlShell) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_shell)) }
-fn wl_shell_get_version(wl_shell: *WlShell) -> u32 { wl_proxy_get_version(cast[*u8](wl_shell)) }
+fn wl_shell_set_user_data(wl_shell: *WlShell, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_shell), data) }
+fn wl_shell_get_user_data(wl_shell: *WlShell) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_shell)) }
+fn wl_shell_get_version(wl_shell: *WlShell) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_shell)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_shell_destroy(wl_shell: *WlShell) { wl_proxy_destroy(cast[*u8](wl_shell)) }
+fn wl_shell_destroy(wl_shell: *WlShell) { wl_dl().proxy_destroy(cast[*u8](wl_shell)) }
 // wl_shell.get_shell_surface: create a shell surface from a surface
 fn wl_shell_get_shell_surface(wl_shell: *WlShell, surface: *WlSurface) -> *WlShellSurface {
     argv := [2]u64{0, cast[u64](surface)}
-    cast[*WlShellSurface](wl_proxy_marshal_array_flags(cast[*u8](wl_shell), WL_SHELL_GET_SHELL_SURFACE, &wl_shell_surface_interface, wl_proxy_get_version(cast[*u8](wl_shell)), 0, ptr(argv)))
+    cast[*WlShellSurface](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell), WL_SHELL_GET_SHELL_SURFACE, wl_core_interface(12), wl_dl().proxy_get_version(cast[*u8](wl_shell)), 0, ptr(argv)))
 }
 
 // ---- wl_shell_surface (version 1): desktop-style metadata interface ----
@@ -903,62 +1017,62 @@ struct WlShellSurfaceListener {
 fn wl_shell_surface_add_listener(wl_shell_surface: *WlShellSurface, listener: *WlShellSurfaceListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_shell_surface), cast[*u8](listener), 3, data)
 }
-fn wl_shell_surface_set_user_data(wl_shell_surface: *WlShellSurface, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_shell_surface), data) }
-fn wl_shell_surface_get_user_data(wl_shell_surface: *WlShellSurface) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_shell_surface)) }
-fn wl_shell_surface_get_version(wl_shell_surface: *WlShellSurface) -> u32 { wl_proxy_get_version(cast[*u8](wl_shell_surface)) }
+fn wl_shell_surface_set_user_data(wl_shell_surface: *WlShellSurface, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_shell_surface), data) }
+fn wl_shell_surface_get_user_data(wl_shell_surface: *WlShellSurface) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_shell_surface)) }
+fn wl_shell_surface_get_version(wl_shell_surface: *WlShellSurface) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_shell_surface_destroy(wl_shell_surface: *WlShellSurface) { wl_proxy_destroy(cast[*u8](wl_shell_surface)) }
+fn wl_shell_surface_destroy(wl_shell_surface: *WlShellSurface) { wl_dl().proxy_destroy(cast[*u8](wl_shell_surface)) }
 // wl_shell_surface.pong: respond to a ping event
 fn wl_shell_surface_pong(wl_shell_surface: *WlShellSurface, serial: u32) {
     argv := [1]u64{u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_PONG, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_PONG, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.move: start an interactive move
 fn wl_shell_surface_move(wl_shell_surface: *WlShellSurface, seat: *WlSeat, serial: u32) {
     argv := [2]u64{cast[u64](seat), u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_MOVE, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_MOVE, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.resize: start an interactive resize. `edges`: wl_shell_surface.resize
 fn wl_shell_surface_resize(wl_shell_surface: *WlShellSurface, seat: *WlSeat, serial: u32, edges: u32) {
     argv := [3]u64{cast[u64](seat), u64(serial), u64(edges)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_RESIZE, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_RESIZE, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.set_toplevel: make the surface a toplevel surface
 fn wl_shell_surface_set_toplevel(wl_shell_surface: *WlShellSurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_TOPLEVEL, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_TOPLEVEL, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, nil)
 }
 // wl_shell_surface.set_transient: make the surface a transient surface. `flags`: wl_shell_surface.transient
 fn wl_shell_surface_set_transient(wl_shell_surface: *WlShellSurface, parent: *WlSurface, x: i32, y: i32, flags: u32) {
     argv := [4]u64{cast[u64](parent), u64(u32(x)), u64(u32(y)), u64(flags)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_TRANSIENT, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_TRANSIENT, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.set_fullscreen: make the surface a fullscreen surface. `method`: wl_shell_surface.fullscreen_method; `output`: may be nil
 fn wl_shell_surface_set_fullscreen(wl_shell_surface: *WlShellSurface, method: u32, framerate: u32, output: *WlOutput) {
     argv := [3]u64{u64(method), u64(framerate), cast[u64](output)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_FULLSCREEN, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_FULLSCREEN, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.set_popup: make the surface a popup surface. `flags`: wl_shell_surface.transient
 fn wl_shell_surface_set_popup(wl_shell_surface: *WlShellSurface, seat: *WlSeat, serial: u32, parent: *WlSurface, x: i32, y: i32, flags: u32) {
     argv := [6]u64{cast[u64](seat), u64(serial), cast[u64](parent), u64(u32(x)), u64(u32(y)), u64(flags)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_POPUP, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_POPUP, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.set_maximized: make the surface a maximized surface. `output`: may be nil
 fn wl_shell_surface_set_maximized(wl_shell_surface: *WlShellSurface, output: *WlOutput) {
     argv := [1]u64{cast[u64](output)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_MAXIMIZED, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_MAXIMIZED, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
 }
 // wl_shell_surface.set_title: set surface title
 fn wl_shell_surface_set_title(wl_shell_surface: *WlShellSurface, title: str) {
     top := mark()
     argv := [1]u64{cast[u64](cstr(title))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_TITLE, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_TITLE, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
     release(top)
 }
 // wl_shell_surface.set_class: set surface class
 fn wl_shell_surface_set_class(wl_shell_surface: *WlShellSurface, class_: str) {
     top := mark()
     argv := [1]u64{cast[u64](cstr(class_))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_CLASS, nil, wl_proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_shell_surface), WL_SHELL_SURFACE_SET_CLASS, nil, wl_dl().proxy_get_version(cast[*u8](wl_shell_surface)), 0, ptr(argv))
     release(top)
 }
 
@@ -1001,66 +1115,66 @@ struct WlSurfaceListener {
 fn wl_surface_add_listener(wl_surface: *WlSurface, listener: *WlSurfaceListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_surface), cast[*u8](listener), 4, data)
 }
-fn wl_surface_set_user_data(wl_surface: *WlSurface, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_surface), data) }
-fn wl_surface_get_user_data(wl_surface: *WlSurface) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_surface)) }
-fn wl_surface_get_version(wl_surface: *WlSurface) -> u32 { wl_proxy_get_version(cast[*u8](wl_surface)) }
+fn wl_surface_set_user_data(wl_surface: *WlSurface, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_surface), data) }
+fn wl_surface_get_user_data(wl_surface: *WlSurface) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_surface)) }
+fn wl_surface_get_version(wl_surface: *WlSurface) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_surface)) }
 // wl_surface.destroy: delete surface. Destroys the object.
 fn wl_surface_destroy(wl_surface: *WlSurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_surface)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_surface.attach: set the surface contents. `buffer`: may be nil
 fn wl_surface_attach(wl_surface: *WlSurface, buffer: *WlBuffer, x: i32, y: i32) {
     argv := [3]u64{cast[u64](buffer), u64(u32(x)), u64(u32(y))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_ATTACH, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_ATTACH, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.damage: mark part of the surface damaged
 fn wl_surface_damage(wl_surface: *WlSurface, x: i32, y: i32, width: i32, height: i32) {
     argv := [4]u64{u64(u32(x)), u64(u32(y)), u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_DAMAGE, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_DAMAGE, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.frame: request a frame throttling hint
 fn wl_surface_frame(wl_surface: *WlSurface) -> *WlCallback {
     argv := [1]u64{0}
-    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_FRAME, &wl_callback_interface, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
+    cast[*WlCallback](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_FRAME, wl_core_interface(2), wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
 }
 // wl_surface.set_opaque_region: set opaque region. `region`: may be nil
 fn wl_surface_set_opaque_region(wl_surface: *WlSurface, region: *WlRegion) {
     argv := [1]u64{cast[u64](region)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_OPAQUE_REGION, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_OPAQUE_REGION, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.set_input_region: set input region. `region`: may be nil
 fn wl_surface_set_input_region(wl_surface: *WlSurface, region: *WlRegion) {
     argv := [1]u64{cast[u64](region)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_INPUT_REGION, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_INPUT_REGION, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.commit: commit pending surface state
 fn wl_surface_commit(wl_surface: *WlSurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_COMMIT, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_COMMIT, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, nil)
 }
 // wl_surface.set_buffer_transform (since version 2): sets the buffer transformation. `transform`: wl_output.transform
 fn wl_surface_set_buffer_transform(wl_surface: *WlSurface, transform: i32) {
     argv := [1]u64{u64(u32(transform))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_BUFFER_TRANSFORM, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_BUFFER_TRANSFORM, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.set_buffer_scale (since version 3): sets the buffer scaling factor
 fn wl_surface_set_buffer_scale(wl_surface: *WlSurface, scale: i32) {
     argv := [1]u64{u64(u32(scale))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_BUFFER_SCALE, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_SET_BUFFER_SCALE, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.damage_buffer (since version 4): mark part of the surface damaged using buffer coordinates
 fn wl_surface_damage_buffer(wl_surface: *WlSurface, x: i32, y: i32, width: i32, height: i32) {
     argv := [4]u64{u64(u32(x)), u64(u32(y)), u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_DAMAGE_BUFFER, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_DAMAGE_BUFFER, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.offset (since version 5): set the surface contents offset
 fn wl_surface_offset(wl_surface: *WlSurface, x: i32, y: i32) {
     argv := [2]u64{u64(u32(x)), u64(u32(y))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_OFFSET, nil, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_OFFSET, nil, wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv))
 }
 // wl_surface.get_release (since version 7): get a release callback
 fn wl_surface_get_release(wl_surface: *WlSurface) -> *WlCallback {
     argv := [1]u64{0}
-    cast[*WlCallback](wl_proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_GET_RELEASE, &wl_callback_interface, wl_proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
+    cast[*WlCallback](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_surface), WL_SURFACE_GET_RELEASE, wl_core_interface(2), wl_dl().proxy_get_version(cast[*u8](wl_surface)), 0, ptr(argv)))
 }
 
 // ---- wl_seat (version 11): group of input devices ----
@@ -1089,29 +1203,29 @@ struct WlSeatListener {
 fn wl_seat_add_listener(wl_seat: *WlSeat, listener: *WlSeatListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_seat), cast[*u8](listener), 2, data)
 }
-fn wl_seat_set_user_data(wl_seat: *WlSeat, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_seat), data) }
-fn wl_seat_get_user_data(wl_seat: *WlSeat) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_seat)) }
-fn wl_seat_get_version(wl_seat: *WlSeat) -> u32 { wl_proxy_get_version(cast[*u8](wl_seat)) }
+fn wl_seat_set_user_data(wl_seat: *WlSeat, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_seat), data) }
+fn wl_seat_get_user_data(wl_seat: *WlSeat) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_seat)) }
+fn wl_seat_get_version(wl_seat: *WlSeat) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_seat)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_seat_destroy(wl_seat: *WlSeat) { wl_proxy_destroy(cast[*u8](wl_seat)) }
+fn wl_seat_destroy(wl_seat: *WlSeat) { wl_dl().proxy_destroy(cast[*u8](wl_seat)) }
 // wl_seat.get_pointer: return pointer object
 fn wl_seat_get_pointer(wl_seat: *WlSeat) -> *WlPointer {
     argv := [1]u64{0}
-    cast[*WlPointer](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_POINTER, &wl_pointer_interface, wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
+    cast[*WlPointer](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_POINTER, wl_core_interface(15), wl_dl().proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
 }
 // wl_seat.get_keyboard: return keyboard object
 fn wl_seat_get_keyboard(wl_seat: *WlSeat) -> *WlKeyboard {
     argv := [1]u64{0}
-    cast[*WlKeyboard](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_KEYBOARD, &wl_keyboard_interface, wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
+    cast[*WlKeyboard](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_KEYBOARD, wl_core_interface(16), wl_dl().proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
 }
 // wl_seat.get_touch: return touch object
 fn wl_seat_get_touch(wl_seat: *WlSeat) -> *WlTouch {
     argv := [1]u64{0}
-    cast[*WlTouch](wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_TOUCH, &wl_touch_interface, wl_proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
+    cast[*WlTouch](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_GET_TOUCH, wl_core_interface(17), wl_dl().proxy_get_version(cast[*u8](wl_seat)), 0, ptr(argv)))
 }
 // wl_seat.release (since version 5): release the seat object. Destroys the object.
 fn wl_seat_release(wl_seat: *WlSeat) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_seat)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_seat), WL_SEAT_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_seat)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_pointer (version 11): pointer input device ----
@@ -1168,19 +1282,19 @@ struct WlPointerListener {
 fn wl_pointer_add_listener(wl_pointer: *WlPointer, listener: *WlPointerListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_pointer), cast[*u8](listener), 12, data)
 }
-fn wl_pointer_set_user_data(wl_pointer: *WlPointer, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_pointer), data) }
-fn wl_pointer_get_user_data(wl_pointer: *WlPointer) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_pointer)) }
-fn wl_pointer_get_version(wl_pointer: *WlPointer) -> u32 { wl_proxy_get_version(cast[*u8](wl_pointer)) }
+fn wl_pointer_set_user_data(wl_pointer: *WlPointer, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_pointer), data) }
+fn wl_pointer_get_user_data(wl_pointer: *WlPointer) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_pointer)) }
+fn wl_pointer_get_version(wl_pointer: *WlPointer) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_pointer)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_pointer_destroy(wl_pointer: *WlPointer) { wl_proxy_destroy(cast[*u8](wl_pointer)) }
+fn wl_pointer_destroy(wl_pointer: *WlPointer) { wl_dl().proxy_destroy(cast[*u8](wl_pointer)) }
 // wl_pointer.set_cursor: set the pointer surface. `surface`: may be nil
 fn wl_pointer_set_cursor(wl_pointer: *WlPointer, serial: u32, surface: *WlSurface, hotspot_x: i32, hotspot_y: i32) {
     argv := [4]u64{u64(serial), cast[u64](surface), u64(u32(hotspot_x)), u64(u32(hotspot_y))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_pointer), WL_POINTER_SET_CURSOR, nil, wl_proxy_get_version(cast[*u8](wl_pointer)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_pointer), WL_POINTER_SET_CURSOR, nil, wl_dl().proxy_get_version(cast[*u8](wl_pointer)), 0, ptr(argv))
 }
 // wl_pointer.release (since version 3): release the pointer object. Destroys the object.
 fn wl_pointer_release(wl_pointer: *WlPointer) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_pointer), WL_POINTER_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_pointer)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_pointer), WL_POINTER_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_pointer)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_keyboard (version 11): keyboard input device ----
@@ -1215,14 +1329,14 @@ struct WlKeyboardListener {
 fn wl_keyboard_add_listener(wl_keyboard: *WlKeyboard, listener: *WlKeyboardListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_keyboard), cast[*u8](listener), 6, data)
 }
-fn wl_keyboard_set_user_data(wl_keyboard: *WlKeyboard, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_keyboard), data) }
-fn wl_keyboard_get_user_data(wl_keyboard: *WlKeyboard) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_keyboard)) }
-fn wl_keyboard_get_version(wl_keyboard: *WlKeyboard) -> u32 { wl_proxy_get_version(cast[*u8](wl_keyboard)) }
+fn wl_keyboard_set_user_data(wl_keyboard: *WlKeyboard, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_keyboard), data) }
+fn wl_keyboard_get_user_data(wl_keyboard: *WlKeyboard) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_keyboard)) }
+fn wl_keyboard_get_version(wl_keyboard: *WlKeyboard) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_keyboard)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_keyboard_destroy(wl_keyboard: *WlKeyboard) { wl_proxy_destroy(cast[*u8](wl_keyboard)) }
+fn wl_keyboard_destroy(wl_keyboard: *WlKeyboard) { wl_dl().proxy_destroy(cast[*u8](wl_keyboard)) }
 // wl_keyboard.release (since version 3): release the keyboard object. Destroys the object.
 fn wl_keyboard_release(wl_keyboard: *WlKeyboard) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_keyboard), WL_KEYBOARD_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_keyboard)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_keyboard), WL_KEYBOARD_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_keyboard)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_touch (version 11): touchscreen input device ----
@@ -1252,14 +1366,14 @@ struct WlTouchListener {
 fn wl_touch_add_listener(wl_touch: *WlTouch, listener: *WlTouchListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_touch), cast[*u8](listener), 7, data)
 }
-fn wl_touch_set_user_data(wl_touch: *WlTouch, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_touch), data) }
-fn wl_touch_get_user_data(wl_touch: *WlTouch) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_touch)) }
-fn wl_touch_get_version(wl_touch: *WlTouch) -> u32 { wl_proxy_get_version(cast[*u8](wl_touch)) }
+fn wl_touch_set_user_data(wl_touch: *WlTouch, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_touch), data) }
+fn wl_touch_get_user_data(wl_touch: *WlTouch) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_touch)) }
+fn wl_touch_get_version(wl_touch: *WlTouch) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_touch)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_touch_destroy(wl_touch: *WlTouch) { wl_proxy_destroy(cast[*u8](wl_touch)) }
+fn wl_touch_destroy(wl_touch: *WlTouch) { wl_dl().proxy_destroy(cast[*u8](wl_touch)) }
 // wl_touch.release (since version 3): release the touch object. Destroys the object.
 fn wl_touch_release(wl_touch: *WlTouch) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_touch), WL_TOUCH_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_touch)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_touch), WL_TOUCH_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_touch)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_output (version 4): compositor output region ----
@@ -1306,14 +1420,14 @@ struct WlOutputListener {
 fn wl_output_add_listener(wl_output: *WlOutput, listener: *WlOutputListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](wl_output), cast[*u8](listener), 6, data)
 }
-fn wl_output_set_user_data(wl_output: *WlOutput, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_output), data) }
-fn wl_output_get_user_data(wl_output: *WlOutput) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_output)) }
-fn wl_output_get_version(wl_output: *WlOutput) -> u32 { wl_proxy_get_version(cast[*u8](wl_output)) }
+fn wl_output_set_user_data(wl_output: *WlOutput, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_output), data) }
+fn wl_output_get_user_data(wl_output: *WlOutput) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_output)) }
+fn wl_output_get_version(wl_output: *WlOutput) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_output)) }
 // Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).
-fn wl_output_destroy(wl_output: *WlOutput) { wl_proxy_destroy(cast[*u8](wl_output)) }
+fn wl_output_destroy(wl_output: *WlOutput) { wl_dl().proxy_destroy(cast[*u8](wl_output)) }
 // wl_output.release (since version 3): release the output object. Destroys the object.
 fn wl_output_release(wl_output: *WlOutput) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_output), WL_OUTPUT_RELEASE, nil, wl_proxy_get_version(cast[*u8](wl_output)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_output), WL_OUTPUT_RELEASE, nil, wl_dl().proxy_get_version(cast[*u8](wl_output)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ---- wl_region (version 7): region interface ----
@@ -1324,22 +1438,22 @@ extern "libwayland-client.so.0" wl_region_interface: WlInterface
 const WL_REGION_DESTROY: u32 = 0
 const WL_REGION_ADD: u32 = 1
 const WL_REGION_SUBTRACT: u32 = 2
-fn wl_region_set_user_data(wl_region: *WlRegion, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_region), data) }
-fn wl_region_get_user_data(wl_region: *WlRegion) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_region)) }
-fn wl_region_get_version(wl_region: *WlRegion) -> u32 { wl_proxy_get_version(cast[*u8](wl_region)) }
+fn wl_region_set_user_data(wl_region: *WlRegion, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_region), data) }
+fn wl_region_get_user_data(wl_region: *WlRegion) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_region)) }
+fn wl_region_get_version(wl_region: *WlRegion) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_region)) }
 // wl_region.destroy: destroy region. Destroys the object.
 fn wl_region_destroy(wl_region: *WlRegion) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_region), WL_REGION_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_region)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_region), WL_REGION_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_region)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_region.add: add rectangle to region
 fn wl_region_add(wl_region: *WlRegion, x: i32, y: i32, width: i32, height: i32) {
     argv := [4]u64{u64(u32(x)), u64(u32(y)), u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_region), WL_REGION_ADD, nil, wl_proxy_get_version(cast[*u8](wl_region)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_region), WL_REGION_ADD, nil, wl_dl().proxy_get_version(cast[*u8](wl_region)), 0, ptr(argv))
 }
 // wl_region.subtract: subtract rectangle from region
 fn wl_region_subtract(wl_region: *WlRegion, x: i32, y: i32, width: i32, height: i32) {
     argv := [4]u64{u64(u32(x)), u64(u32(y)), u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_region), WL_REGION_SUBTRACT, nil, wl_proxy_get_version(cast[*u8](wl_region)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_region), WL_REGION_SUBTRACT, nil, wl_dl().proxy_get_version(cast[*u8](wl_region)), 0, ptr(argv))
 }
 
 // ---- wl_subcompositor (version 1): sub-surface compositing ----
@@ -1352,17 +1466,17 @@ const WL_SUBCOMPOSITOR_ERROR_BAD_PARENT = 1     // the to-be sub-surface parent 
 // opcodes of the requests of wl_subcompositor
 const WL_SUBCOMPOSITOR_DESTROY: u32 = 0
 const WL_SUBCOMPOSITOR_GET_SUBSURFACE: u32 = 1
-fn wl_subcompositor_set_user_data(wl_subcompositor: *WlSubcompositor, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_subcompositor), data) }
-fn wl_subcompositor_get_user_data(wl_subcompositor: *WlSubcompositor) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_subcompositor)) }
-fn wl_subcompositor_get_version(wl_subcompositor: *WlSubcompositor) -> u32 { wl_proxy_get_version(cast[*u8](wl_subcompositor)) }
+fn wl_subcompositor_set_user_data(wl_subcompositor: *WlSubcompositor, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_subcompositor), data) }
+fn wl_subcompositor_get_user_data(wl_subcompositor: *WlSubcompositor) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_subcompositor)) }
+fn wl_subcompositor_get_version(wl_subcompositor: *WlSubcompositor) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_subcompositor)) }
 // wl_subcompositor.destroy: unbind from the subcompositor interface. Destroys the object.
 fn wl_subcompositor_destroy(wl_subcompositor: *WlSubcompositor) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subcompositor), WL_SUBCOMPOSITOR_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_subcompositor)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subcompositor), WL_SUBCOMPOSITOR_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_subcompositor)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_subcompositor.get_subsurface: give a surface the role sub-surface
 fn wl_subcompositor_get_subsurface(wl_subcompositor: *WlSubcompositor, surface: *WlSurface, parent: *WlSurface) -> *WlSubsurface {
     argv := [3]u64{0, cast[u64](surface), cast[u64](parent)}
-    cast[*WlSubsurface](wl_proxy_marshal_array_flags(cast[*u8](wl_subcompositor), WL_SUBCOMPOSITOR_GET_SUBSURFACE, &wl_subsurface_interface, wl_proxy_get_version(cast[*u8](wl_subcompositor)), 0, ptr(argv)))
+    cast[*WlSubsurface](wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subcompositor), WL_SUBCOMPOSITOR_GET_SUBSURFACE, wl_core_interface(21), wl_dl().proxy_get_version(cast[*u8](wl_subcompositor)), 0, ptr(argv)))
 }
 
 // ---- wl_subsurface (version 1): sub-surface interface to a wl_surface ----
@@ -1378,35 +1492,35 @@ const WL_SUBSURFACE_PLACE_ABOVE: u32 = 2
 const WL_SUBSURFACE_PLACE_BELOW: u32 = 3
 const WL_SUBSURFACE_SET_SYNC: u32 = 4
 const WL_SUBSURFACE_SET_DESYNC: u32 = 5
-fn wl_subsurface_set_user_data(wl_subsurface: *WlSubsurface, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_subsurface), data) }
-fn wl_subsurface_get_user_data(wl_subsurface: *WlSubsurface) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_subsurface)) }
-fn wl_subsurface_get_version(wl_subsurface: *WlSubsurface) -> u32 { wl_proxy_get_version(cast[*u8](wl_subsurface)) }
+fn wl_subsurface_set_user_data(wl_subsurface: *WlSubsurface, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_subsurface), data) }
+fn wl_subsurface_get_user_data(wl_subsurface: *WlSubsurface) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_subsurface)) }
+fn wl_subsurface_get_version(wl_subsurface: *WlSubsurface) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_subsurface)) }
 // wl_subsurface.destroy: remove sub-surface interface. Destroys the object.
 fn wl_subsurface_destroy(wl_subsurface: *WlSubsurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_subsurface)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_subsurface)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_subsurface.set_position: reposition the sub-surface
 fn wl_subsurface_set_position(wl_subsurface: *WlSubsurface, x: i32, y: i32) {
     argv := [2]u64{u64(u32(x)), u64(u32(y))}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_SET_POSITION, nil, wl_proxy_get_version(cast[*u8](wl_subsurface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_SET_POSITION, nil, wl_dl().proxy_get_version(cast[*u8](wl_subsurface)), 0, ptr(argv))
 }
 // wl_subsurface.place_above: restack the sub-surface
 fn wl_subsurface_place_above(wl_subsurface: *WlSubsurface, sibling: *WlSurface) {
     argv := [1]u64{cast[u64](sibling)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_PLACE_ABOVE, nil, wl_proxy_get_version(cast[*u8](wl_subsurface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_PLACE_ABOVE, nil, wl_dl().proxy_get_version(cast[*u8](wl_subsurface)), 0, ptr(argv))
 }
 // wl_subsurface.place_below: restack the sub-surface
 fn wl_subsurface_place_below(wl_subsurface: *WlSubsurface, sibling: *WlSurface) {
     argv := [1]u64{cast[u64](sibling)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_PLACE_BELOW, nil, wl_proxy_get_version(cast[*u8](wl_subsurface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_PLACE_BELOW, nil, wl_dl().proxy_get_version(cast[*u8](wl_subsurface)), 0, ptr(argv))
 }
 // wl_subsurface.set_sync: set sub-surface to synchronized mode
 fn wl_subsurface_set_sync(wl_subsurface: *WlSubsurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_SET_SYNC, nil, wl_proxy_get_version(cast[*u8](wl_subsurface)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_SET_SYNC, nil, wl_dl().proxy_get_version(cast[*u8](wl_subsurface)), 0, nil)
 }
 // wl_subsurface.set_desync: set sub-surface to desynchronized mode
 fn wl_subsurface_set_desync(wl_subsurface: *WlSubsurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_SET_DESYNC, nil, wl_proxy_get_version(cast[*u8](wl_subsurface)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_subsurface), WL_SUBSURFACE_SET_DESYNC, nil, wl_dl().proxy_get_version(cast[*u8](wl_subsurface)), 0, nil)
 }
 
 // ---- wl_fixes (version 2): wayland protocol fixes ----
@@ -1419,22 +1533,22 @@ const WL_FIXES_ERROR_INVALID_ACK_REMOVE = 0    // unknown global or the global i
 const WL_FIXES_DESTROY: u32 = 0
 const WL_FIXES_DESTROY_REGISTRY: u32 = 1
 const WL_FIXES_ACK_GLOBAL_REMOVE: u32 = 2
-fn wl_fixes_set_user_data(wl_fixes: *WlFixes, data: *u8) { wl_proxy_set_user_data(cast[*u8](wl_fixes), data) }
-fn wl_fixes_get_user_data(wl_fixes: *WlFixes) -> *u8 { wl_proxy_get_user_data(cast[*u8](wl_fixes)) }
-fn wl_fixes_get_version(wl_fixes: *WlFixes) -> u32 { wl_proxy_get_version(cast[*u8](wl_fixes)) }
+fn wl_fixes_set_user_data(wl_fixes: *WlFixes, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](wl_fixes), data) }
+fn wl_fixes_get_user_data(wl_fixes: *WlFixes) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](wl_fixes)) }
+fn wl_fixes_get_version(wl_fixes: *WlFixes) -> u32 { wl_dl().proxy_get_version(cast[*u8](wl_fixes)) }
 // wl_fixes.destroy: destroys this object. Destroys the object.
 fn wl_fixes_destroy(wl_fixes: *WlFixes) {
-    wl_proxy_marshal_array_flags(cast[*u8](wl_fixes), WL_FIXES_DESTROY, nil, wl_proxy_get_version(cast[*u8](wl_fixes)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_fixes), WL_FIXES_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](wl_fixes)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // wl_fixes.destroy_registry: destroy a wl_registry
 fn wl_fixes_destroy_registry(wl_fixes: *WlFixes, registry: *WlRegistry) {
     argv := [1]u64{cast[u64](registry)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_fixes), WL_FIXES_DESTROY_REGISTRY, nil, wl_proxy_get_version(cast[*u8](wl_fixes)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_fixes), WL_FIXES_DESTROY_REGISTRY, nil, wl_dl().proxy_get_version(cast[*u8](wl_fixes)), 0, ptr(argv))
 }
 // wl_fixes.ack_global_remove (since version 2): acknowledge global removal
 fn wl_fixes_ack_global_remove(wl_fixes: *WlFixes, registry: *WlRegistry, name: u32) {
     argv := [2]u64{cast[u64](registry), u64(name)}
-    wl_proxy_marshal_array_flags(cast[*u8](wl_fixes), WL_FIXES_ACK_GLOBAL_REMOVE, nil, wl_proxy_get_version(cast[*u8](wl_fixes)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](wl_fixes), WL_FIXES_ACK_GLOBAL_REMOVE, nil, wl_dl().proxy_get_version(cast[*u8](wl_fixes)), 0, ptr(argv))
 }
 
 // ==== protocol xdg_shell ====
@@ -1464,27 +1578,27 @@ struct XdgWmBaseListener {
 fn xdg_wm_base_add_listener(xdg_wm_base: *XdgWmBase, listener: *XdgWmBaseListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](xdg_wm_base), cast[*u8](listener), 1, data)
 }
-fn xdg_wm_base_set_user_data(xdg_wm_base: *XdgWmBase, data: *u8) { wl_proxy_set_user_data(cast[*u8](xdg_wm_base), data) }
-fn xdg_wm_base_get_user_data(xdg_wm_base: *XdgWmBase) -> *u8 { wl_proxy_get_user_data(cast[*u8](xdg_wm_base)) }
-fn xdg_wm_base_get_version(xdg_wm_base: *XdgWmBase) -> u32 { wl_proxy_get_version(cast[*u8](xdg_wm_base)) }
+fn xdg_wm_base_set_user_data(xdg_wm_base: *XdgWmBase, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](xdg_wm_base), data) }
+fn xdg_wm_base_get_user_data(xdg_wm_base: *XdgWmBase) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](xdg_wm_base)) }
+fn xdg_wm_base_get_version(xdg_wm_base: *XdgWmBase) -> u32 { wl_dl().proxy_get_version(cast[*u8](xdg_wm_base)) }
 // xdg_wm_base.destroy: destroy xdg_wm_base. Destroys the object.
 fn xdg_wm_base_destroy(xdg_wm_base: *XdgWmBase) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_DESTROY, nil, wl_proxy_get_version(cast[*u8](xdg_wm_base)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_wm_base)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // xdg_wm_base.create_positioner: create a positioner object
 fn xdg_wm_base_create_positioner(xdg_wm_base: *XdgWmBase) -> *XdgPositioner {
     argv := [1]u64{0}
-    cast[*XdgPositioner](wl_proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_CREATE_POSITIONER, xdg_positioner_interface(), wl_proxy_get_version(cast[*u8](xdg_wm_base)), 0, ptr(argv)))
+    cast[*XdgPositioner](wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_CREATE_POSITIONER, xdg_positioner_interface(), wl_dl().proxy_get_version(cast[*u8](xdg_wm_base)), 0, ptr(argv)))
 }
 // xdg_wm_base.get_xdg_surface: create a shell surface from a surface
 fn xdg_wm_base_get_xdg_surface(xdg_wm_base: *XdgWmBase, surface: *WlSurface) -> *XdgSurface {
     argv := [2]u64{0, cast[u64](surface)}
-    cast[*XdgSurface](wl_proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_GET_XDG_SURFACE, xdg_surface_interface(), wl_proxy_get_version(cast[*u8](xdg_wm_base)), 0, ptr(argv)))
+    cast[*XdgSurface](wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_GET_XDG_SURFACE, xdg_surface_interface(), wl_dl().proxy_get_version(cast[*u8](xdg_wm_base)), 0, ptr(argv)))
 }
 // xdg_wm_base.pong: respond to a ping event
 fn xdg_wm_base_pong(xdg_wm_base: *XdgWmBase, serial: u32) {
     argv := [1]u64{u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_PONG, nil, wl_proxy_get_version(cast[*u8](xdg_wm_base)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_wm_base), XDG_WM_BASE_PONG, nil, wl_dl().proxy_get_version(cast[*u8](xdg_wm_base)), 0, ptr(argv))
 }
 
 // ---- xdg_positioner (version 7): child surface positioner ----
@@ -1531,56 +1645,56 @@ const XDG_POSITIONER_SET_OFFSET: u32 = 6
 const XDG_POSITIONER_SET_REACTIVE: u32 = 7
 const XDG_POSITIONER_SET_PARENT_SIZE: u32 = 8
 const XDG_POSITIONER_SET_PARENT_CONFIGURE: u32 = 9
-fn xdg_positioner_set_user_data(xdg_positioner: *XdgPositioner, data: *u8) { wl_proxy_set_user_data(cast[*u8](xdg_positioner), data) }
-fn xdg_positioner_get_user_data(xdg_positioner: *XdgPositioner) -> *u8 { wl_proxy_get_user_data(cast[*u8](xdg_positioner)) }
-fn xdg_positioner_get_version(xdg_positioner: *XdgPositioner) -> u32 { wl_proxy_get_version(cast[*u8](xdg_positioner)) }
+fn xdg_positioner_set_user_data(xdg_positioner: *XdgPositioner, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](xdg_positioner), data) }
+fn xdg_positioner_get_user_data(xdg_positioner: *XdgPositioner) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](xdg_positioner)) }
+fn xdg_positioner_get_version(xdg_positioner: *XdgPositioner) -> u32 { wl_dl().proxy_get_version(cast[*u8](xdg_positioner)) }
 // xdg_positioner.destroy: destroy the xdg_positioner object. Destroys the object.
 fn xdg_positioner_destroy(xdg_positioner: *XdgPositioner) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_DESTROY, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // xdg_positioner.set_size: set the size of the to-be positioned rectangle
 fn xdg_positioner_set_size(xdg_positioner: *XdgPositioner, width: i32, height: i32) {
     argv := [2]u64{u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_SIZE, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_SIZE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_anchor_rect: set the anchor rectangle within the parent surface
 fn xdg_positioner_set_anchor_rect(xdg_positioner: *XdgPositioner, x: i32, y: i32, width: i32, height: i32) {
     argv := [4]u64{u64(u32(x)), u64(u32(y)), u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_ANCHOR_RECT, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_ANCHOR_RECT, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_anchor: set anchor rectangle anchor. `anchor`: xdg_positioner.anchor
 fn xdg_positioner_set_anchor(xdg_positioner: *XdgPositioner, anchor: u32) {
     argv := [1]u64{u64(anchor)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_ANCHOR, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_ANCHOR, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_gravity: set child surface gravity. `gravity`: xdg_positioner.gravity
 fn xdg_positioner_set_gravity(xdg_positioner: *XdgPositioner, gravity: u32) {
     argv := [1]u64{u64(gravity)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_GRAVITY, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_GRAVITY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_constraint_adjustment: set the adjustment to be done when constrained. `constraint_adjustment`: xdg_positioner.constraint_adjustment
 fn xdg_positioner_set_constraint_adjustment(xdg_positioner: *XdgPositioner, constraint_adjustment: u32) {
     argv := [1]u64{u64(constraint_adjustment)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_CONSTRAINT_ADJUSTMENT, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_CONSTRAINT_ADJUSTMENT, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_offset: set surface position offset
 fn xdg_positioner_set_offset(xdg_positioner: *XdgPositioner, x: i32, y: i32) {
     argv := [2]u64{u64(u32(x)), u64(u32(y))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_OFFSET, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_OFFSET, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_reactive (since version 3): continuously reconstrain the surface
 fn xdg_positioner_set_reactive(xdg_positioner: *XdgPositioner) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_REACTIVE, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_REACTIVE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, nil)
 }
 // xdg_positioner.set_parent_size (since version 3): set parent size
 fn xdg_positioner_set_parent_size(xdg_positioner: *XdgPositioner, parent_width: i32, parent_height: i32) {
     argv := [2]u64{u64(u32(parent_width)), u64(u32(parent_height))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_PARENT_SIZE, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_PARENT_SIZE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 // xdg_positioner.set_parent_configure (since version 3): set parent configure this is a response to
 fn xdg_positioner_set_parent_configure(xdg_positioner: *XdgPositioner, serial: u32) {
     argv := [1]u64{u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_PARENT_CONFIGURE, nil, wl_proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_positioner), XDG_POSITIONER_SET_PARENT_CONFIGURE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_positioner)), 0, ptr(argv))
 }
 
 // ---- xdg_surface (version 7): desktop user interface surface base interface ----
@@ -1608,32 +1722,32 @@ struct XdgSurfaceListener {
 fn xdg_surface_add_listener(xdg_surface: *XdgSurface, listener: *XdgSurfaceListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](xdg_surface), cast[*u8](listener), 1, data)
 }
-fn xdg_surface_set_user_data(xdg_surface: *XdgSurface, data: *u8) { wl_proxy_set_user_data(cast[*u8](xdg_surface), data) }
-fn xdg_surface_get_user_data(xdg_surface: *XdgSurface) -> *u8 { wl_proxy_get_user_data(cast[*u8](xdg_surface)) }
-fn xdg_surface_get_version(xdg_surface: *XdgSurface) -> u32 { wl_proxy_get_version(cast[*u8](xdg_surface)) }
+fn xdg_surface_set_user_data(xdg_surface: *XdgSurface, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](xdg_surface), data) }
+fn xdg_surface_get_user_data(xdg_surface: *XdgSurface) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](xdg_surface)) }
+fn xdg_surface_get_version(xdg_surface: *XdgSurface) -> u32 { wl_dl().proxy_get_version(cast[*u8](xdg_surface)) }
 // xdg_surface.destroy: destroy the xdg_surface. Destroys the object.
 fn xdg_surface_destroy(xdg_surface: *XdgSurface) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_DESTROY, nil, wl_proxy_get_version(cast[*u8](xdg_surface)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_surface)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // xdg_surface.get_toplevel: assign the xdg_toplevel surface role
 fn xdg_surface_get_toplevel(xdg_surface: *XdgSurface) -> *XdgToplevel {
     argv := [1]u64{0}
-    cast[*XdgToplevel](wl_proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_GET_TOPLEVEL, xdg_toplevel_interface(), wl_proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv)))
+    cast[*XdgToplevel](wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_GET_TOPLEVEL, xdg_toplevel_interface(), wl_dl().proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv)))
 }
 // xdg_surface.get_popup: assign the xdg_popup surface role. `parent`: may be nil
 fn xdg_surface_get_popup(xdg_surface: *XdgSurface, parent: *XdgSurface, positioner: *XdgPositioner) -> *XdgPopup {
     argv := [3]u64{0, cast[u64](parent), cast[u64](positioner)}
-    cast[*XdgPopup](wl_proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_GET_POPUP, xdg_popup_interface(), wl_proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv)))
+    cast[*XdgPopup](wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_GET_POPUP, xdg_popup_interface(), wl_dl().proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv)))
 }
 // xdg_surface.set_window_geometry: set the new window geometry
 fn xdg_surface_set_window_geometry(xdg_surface: *XdgSurface, x: i32, y: i32, width: i32, height: i32) {
     argv := [4]u64{u64(u32(x)), u64(u32(y)), u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_SET_WINDOW_GEOMETRY, nil, wl_proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_SET_WINDOW_GEOMETRY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv))
 }
 // xdg_surface.ack_configure: ack a configure event
 fn xdg_surface_ack_configure(xdg_surface: *XdgSurface, serial: u32) {
     argv := [1]u64{u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_ACK_CONFIGURE, nil, wl_proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_surface), XDG_SURFACE_ACK_CONFIGURE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_surface)), 0, ptr(argv))
 }
 
 // ---- xdg_toplevel (version 7): toplevel surface ----
@@ -1702,77 +1816,77 @@ struct XdgToplevelListener {
 fn xdg_toplevel_add_listener(xdg_toplevel: *XdgToplevel, listener: *XdgToplevelListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](xdg_toplevel), cast[*u8](listener), 4, data)
 }
-fn xdg_toplevel_set_user_data(xdg_toplevel: *XdgToplevel, data: *u8) { wl_proxy_set_user_data(cast[*u8](xdg_toplevel), data) }
-fn xdg_toplevel_get_user_data(xdg_toplevel: *XdgToplevel) -> *u8 { wl_proxy_get_user_data(cast[*u8](xdg_toplevel)) }
-fn xdg_toplevel_get_version(xdg_toplevel: *XdgToplevel) -> u32 { wl_proxy_get_version(cast[*u8](xdg_toplevel)) }
+fn xdg_toplevel_set_user_data(xdg_toplevel: *XdgToplevel, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](xdg_toplevel), data) }
+fn xdg_toplevel_get_user_data(xdg_toplevel: *XdgToplevel) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](xdg_toplevel)) }
+fn xdg_toplevel_get_version(xdg_toplevel: *XdgToplevel) -> u32 { wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)) }
 // xdg_toplevel.destroy: destroy the xdg_toplevel. Destroys the object.
 fn xdg_toplevel_destroy(xdg_toplevel: *XdgToplevel) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_DESTROY, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // xdg_toplevel.set_parent: set the parent of this surface. `parent`: may be nil
 fn xdg_toplevel_set_parent(xdg_toplevel: *XdgToplevel, parent: *XdgToplevel) {
     argv := [1]u64{cast[u64](parent)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_PARENT, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_PARENT, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.set_title: set surface title
 fn xdg_toplevel_set_title(xdg_toplevel: *XdgToplevel, title: str) {
     top := mark()
     argv := [1]u64{cast[u64](cstr(title))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_TITLE, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_TITLE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
     release(top)
 }
 // xdg_toplevel.set_app_id: set application ID
 fn xdg_toplevel_set_app_id(xdg_toplevel: *XdgToplevel, app_id: str) {
     top := mark()
     argv := [1]u64{cast[u64](cstr(app_id))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_APP_ID, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_APP_ID, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
     release(top)
 }
 // xdg_toplevel.show_window_menu: show the window menu
 fn xdg_toplevel_show_window_menu(xdg_toplevel: *XdgToplevel, seat: *WlSeat, serial: u32, x: i32, y: i32) {
     argv := [4]u64{cast[u64](seat), u64(serial), u64(u32(x)), u64(u32(y))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SHOW_WINDOW_MENU, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SHOW_WINDOW_MENU, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.move: start an interactive move
 fn xdg_toplevel_move(xdg_toplevel: *XdgToplevel, seat: *WlSeat, serial: u32) {
     argv := [2]u64{cast[u64](seat), u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_MOVE, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_MOVE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.resize: start an interactive resize. `edges`: xdg_toplevel.resize_edge
 fn xdg_toplevel_resize(xdg_toplevel: *XdgToplevel, seat: *WlSeat, serial: u32, edges: u32) {
     argv := [3]u64{cast[u64](seat), u64(serial), u64(edges)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_RESIZE, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_RESIZE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.set_max_size: set the maximum size
 fn xdg_toplevel_set_max_size(xdg_toplevel: *XdgToplevel, width: i32, height: i32) {
     argv := [2]u64{u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MAX_SIZE, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MAX_SIZE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.set_min_size: set the minimum size
 fn xdg_toplevel_set_min_size(xdg_toplevel: *XdgToplevel, width: i32, height: i32) {
     argv := [2]u64{u64(u32(width)), u64(u32(height))}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MIN_SIZE, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MIN_SIZE, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.set_maximized: maximize the window
 fn xdg_toplevel_set_maximized(xdg_toplevel: *XdgToplevel) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MAXIMIZED, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MAXIMIZED, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
 }
 // xdg_toplevel.unset_maximized: unmaximize the window
 fn xdg_toplevel_unset_maximized(xdg_toplevel: *XdgToplevel) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_UNSET_MAXIMIZED, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_UNSET_MAXIMIZED, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
 }
 // xdg_toplevel.set_fullscreen: set the window as fullscreen on an output. `output`: may be nil
 fn xdg_toplevel_set_fullscreen(xdg_toplevel: *XdgToplevel, output: *WlOutput) {
     argv := [1]u64{cast[u64](output)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_FULLSCREEN, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_FULLSCREEN, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, ptr(argv))
 }
 // xdg_toplevel.unset_fullscreen: unset the window as fullscreen
 fn xdg_toplevel_unset_fullscreen(xdg_toplevel: *XdgToplevel) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_UNSET_FULLSCREEN, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_UNSET_FULLSCREEN, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
 }
 // xdg_toplevel.set_minimized: set the window as minimized
 fn xdg_toplevel_set_minimized(xdg_toplevel: *XdgToplevel) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MINIMIZED, nil, wl_proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_toplevel), XDG_TOPLEVEL_SET_MINIMIZED, nil, wl_dl().proxy_get_version(cast[*u8](xdg_toplevel)), 0, nil)
 }
 
 // ---- xdg_popup (version 7): short-lived, popup surfaces for menus ----
@@ -1797,22 +1911,22 @@ struct XdgPopupListener {
 fn xdg_popup_add_listener(xdg_popup: *XdgPopup, listener: *XdgPopupListener, data: *u8) -> i32 {
     wl_listen(cast[*u8](xdg_popup), cast[*u8](listener), 3, data)
 }
-fn xdg_popup_set_user_data(xdg_popup: *XdgPopup, data: *u8) { wl_proxy_set_user_data(cast[*u8](xdg_popup), data) }
-fn xdg_popup_get_user_data(xdg_popup: *XdgPopup) -> *u8 { wl_proxy_get_user_data(cast[*u8](xdg_popup)) }
-fn xdg_popup_get_version(xdg_popup: *XdgPopup) -> u32 { wl_proxy_get_version(cast[*u8](xdg_popup)) }
+fn xdg_popup_set_user_data(xdg_popup: *XdgPopup, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](xdg_popup), data) }
+fn xdg_popup_get_user_data(xdg_popup: *XdgPopup) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](xdg_popup)) }
+fn xdg_popup_get_version(xdg_popup: *XdgPopup) -> u32 { wl_dl().proxy_get_version(cast[*u8](xdg_popup)) }
 // xdg_popup.destroy: remove xdg_popup interface. Destroys the object.
 fn xdg_popup_destroy(xdg_popup: *XdgPopup) {
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_popup), XDG_POPUP_DESTROY, nil, wl_proxy_get_version(cast[*u8](xdg_popup)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_popup), XDG_POPUP_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](xdg_popup)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // xdg_popup.grab: make the popup take an explicit grab
 fn xdg_popup_grab(xdg_popup: *XdgPopup, seat: *WlSeat, serial: u32) {
     argv := [2]u64{cast[u64](seat), u64(serial)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_popup), XDG_POPUP_GRAB, nil, wl_proxy_get_version(cast[*u8](xdg_popup)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_popup), XDG_POPUP_GRAB, nil, wl_dl().proxy_get_version(cast[*u8](xdg_popup)), 0, ptr(argv))
 }
 // xdg_popup.reposition (since version 3): recalculate the popup's location
 fn xdg_popup_reposition(xdg_popup: *XdgPopup, positioner: *XdgPositioner, token: u32) {
     argv := [2]u64{cast[u64](positioner), u64(token)}
-    wl_proxy_marshal_array_flags(cast[*u8](xdg_popup), XDG_POPUP_REPOSITION, nil, wl_proxy_get_version(cast[*u8](xdg_popup)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](xdg_popup), XDG_POPUP_REPOSITION, nil, wl_dl().proxy_get_version(cast[*u8](xdg_popup)), 0, ptr(argv))
 }
 
 // ==== protocol xdg_decoration_unstable_v1 ====
@@ -1823,17 +1937,17 @@ fn zxdg_decoration_manager_v1_interface() -> *WlInterface { wl_interface_at(5) }
 // opcodes of the requests of zxdg_decoration_manager_v1
 const ZXDG_DECORATION_MANAGER_V1_DESTROY: u32 = 0
 const ZXDG_DECORATION_MANAGER_V1_GET_TOPLEVEL_DECORATION: u32 = 1
-fn zxdg_decoration_manager_v1_set_user_data(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zxdg_decoration_manager_v1), data) }
-fn zxdg_decoration_manager_v1_get_user_data(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zxdg_decoration_manager_v1)) }
-fn zxdg_decoration_manager_v1_get_version(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1) -> u32 { wl_proxy_get_version(cast[*u8](zxdg_decoration_manager_v1)) }
+fn zxdg_decoration_manager_v1_set_user_data(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zxdg_decoration_manager_v1), data) }
+fn zxdg_decoration_manager_v1_get_user_data(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zxdg_decoration_manager_v1)) }
+fn zxdg_decoration_manager_v1_get_version(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zxdg_decoration_manager_v1)) }
 // zxdg_decoration_manager_v1.destroy: destroy the decoration manager object. Destroys the object.
 fn zxdg_decoration_manager_v1_destroy(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zxdg_decoration_manager_v1), ZXDG_DECORATION_MANAGER_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zxdg_decoration_manager_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zxdg_decoration_manager_v1), ZXDG_DECORATION_MANAGER_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zxdg_decoration_manager_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // zxdg_decoration_manager_v1.get_toplevel_decoration: create a new toplevel decoration object
 fn zxdg_decoration_manager_v1_get_toplevel_decoration(zxdg_decoration_manager_v1: *ZxdgDecorationManagerV1, toplevel: *XdgToplevel) -> *ZxdgToplevelDecorationV1 {
     argv := [2]u64{0, cast[u64](toplevel)}
-    cast[*ZxdgToplevelDecorationV1](wl_proxy_marshal_array_flags(cast[*u8](zxdg_decoration_manager_v1), ZXDG_DECORATION_MANAGER_V1_GET_TOPLEVEL_DECORATION, zxdg_toplevel_decoration_v1_interface(), wl_proxy_get_version(cast[*u8](zxdg_decoration_manager_v1)), 0, ptr(argv)))
+    cast[*ZxdgToplevelDecorationV1](wl_dl().proxy_marshal_array_flags(cast[*u8](zxdg_decoration_manager_v1), ZXDG_DECORATION_MANAGER_V1_GET_TOPLEVEL_DECORATION, zxdg_toplevel_decoration_v1_interface(), wl_dl().proxy_get_version(cast[*u8](zxdg_decoration_manager_v1)), 0, ptr(argv)))
 }
 
 // ---- zxdg_toplevel_decoration_v1 (version 2): decoration object for a toplevel surface ----
@@ -1860,21 +1974,21 @@ struct ZxdgToplevelDecorationV1Listener {
 fn zxdg_toplevel_decoration_v1_add_listener(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1, listener: *ZxdgToplevelDecorationV1Listener, data: *u8) -> i32 {
     wl_listen(cast[*u8](zxdg_toplevel_decoration_v1), cast[*u8](listener), 1, data)
 }
-fn zxdg_toplevel_decoration_v1_set_user_data(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zxdg_toplevel_decoration_v1), data) }
-fn zxdg_toplevel_decoration_v1_get_user_data(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zxdg_toplevel_decoration_v1)) }
-fn zxdg_toplevel_decoration_v1_get_version(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1) -> u32 { wl_proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)) }
+fn zxdg_toplevel_decoration_v1_set_user_data(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zxdg_toplevel_decoration_v1), data) }
+fn zxdg_toplevel_decoration_v1_get_user_data(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zxdg_toplevel_decoration_v1)) }
+fn zxdg_toplevel_decoration_v1_get_version(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)) }
 // zxdg_toplevel_decoration_v1.destroy: destroy the decoration object. Destroys the object.
 fn zxdg_toplevel_decoration_v1_destroy(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zxdg_toplevel_decoration_v1), ZXDG_TOPLEVEL_DECORATION_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zxdg_toplevel_decoration_v1), ZXDG_TOPLEVEL_DECORATION_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // zxdg_toplevel_decoration_v1.set_mode: set the decoration mode. `mode`: zxdg_toplevel_decoration_v1.mode
 fn zxdg_toplevel_decoration_v1_set_mode(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1, mode: u32) {
     argv := [1]u64{u64(mode)}
-    wl_proxy_marshal_array_flags(cast[*u8](zxdg_toplevel_decoration_v1), ZXDG_TOPLEVEL_DECORATION_V1_SET_MODE, nil, wl_proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zxdg_toplevel_decoration_v1), ZXDG_TOPLEVEL_DECORATION_V1_SET_MODE, nil, wl_dl().proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)), 0, ptr(argv))
 }
 // zxdg_toplevel_decoration_v1.unset_mode: unset the decoration mode
 fn zxdg_toplevel_decoration_v1_unset_mode(zxdg_toplevel_decoration_v1: *ZxdgToplevelDecorationV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zxdg_toplevel_decoration_v1), ZXDG_TOPLEVEL_DECORATION_V1_UNSET_MODE, nil, wl_proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)), 0, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zxdg_toplevel_decoration_v1), ZXDG_TOPLEVEL_DECORATION_V1_UNSET_MODE, nil, wl_dl().proxy_get_version(cast[*u8](zxdg_toplevel_decoration_v1)), 0, nil)
 }
 
 // ==== protocol relative_pointer_unstable_v1 ====
@@ -1885,17 +1999,17 @@ fn zwp_relative_pointer_manager_v1_interface() -> *WlInterface { wl_interface_at
 // opcodes of the requests of zwp_relative_pointer_manager_v1
 const ZWP_RELATIVE_POINTER_MANAGER_V1_DESTROY: u32 = 0
 const ZWP_RELATIVE_POINTER_MANAGER_V1_GET_RELATIVE_POINTER: u32 = 1
-fn zwp_relative_pointer_manager_v1_set_user_data(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zwp_relative_pointer_manager_v1), data) }
-fn zwp_relative_pointer_manager_v1_get_user_data(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zwp_relative_pointer_manager_v1)) }
-fn zwp_relative_pointer_manager_v1_get_version(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1) -> u32 { wl_proxy_get_version(cast[*u8](zwp_relative_pointer_manager_v1)) }
+fn zwp_relative_pointer_manager_v1_set_user_data(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zwp_relative_pointer_manager_v1), data) }
+fn zwp_relative_pointer_manager_v1_get_user_data(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zwp_relative_pointer_manager_v1)) }
+fn zwp_relative_pointer_manager_v1_get_version(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zwp_relative_pointer_manager_v1)) }
 // zwp_relative_pointer_manager_v1.destroy: destroy the relative pointer manager object. Destroys the object.
 fn zwp_relative_pointer_manager_v1_destroy(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_relative_pointer_manager_v1), ZWP_RELATIVE_POINTER_MANAGER_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zwp_relative_pointer_manager_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_relative_pointer_manager_v1), ZWP_RELATIVE_POINTER_MANAGER_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zwp_relative_pointer_manager_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // zwp_relative_pointer_manager_v1.get_relative_pointer: get a relative pointer object
 fn zwp_relative_pointer_manager_v1_get_relative_pointer(zwp_relative_pointer_manager_v1: *ZwpRelativePointerManagerV1, pointer: *WlPointer) -> *ZwpRelativePointerV1 {
     argv := [2]u64{0, cast[u64](pointer)}
-    cast[*ZwpRelativePointerV1](wl_proxy_marshal_array_flags(cast[*u8](zwp_relative_pointer_manager_v1), ZWP_RELATIVE_POINTER_MANAGER_V1_GET_RELATIVE_POINTER, zwp_relative_pointer_v1_interface(), wl_proxy_get_version(cast[*u8](zwp_relative_pointer_manager_v1)), 0, ptr(argv)))
+    cast[*ZwpRelativePointerV1](wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_relative_pointer_manager_v1), ZWP_RELATIVE_POINTER_MANAGER_V1_GET_RELATIVE_POINTER, zwp_relative_pointer_v1_interface(), wl_dl().proxy_get_version(cast[*u8](zwp_relative_pointer_manager_v1)), 0, ptr(argv)))
 }
 
 // ---- zwp_relative_pointer_v1 (version 1): relative pointer object ----
@@ -1912,12 +2026,12 @@ struct ZwpRelativePointerV1Listener {
 fn zwp_relative_pointer_v1_add_listener(zwp_relative_pointer_v1: *ZwpRelativePointerV1, listener: *ZwpRelativePointerV1Listener, data: *u8) -> i32 {
     wl_listen(cast[*u8](zwp_relative_pointer_v1), cast[*u8](listener), 1, data)
 }
-fn zwp_relative_pointer_v1_set_user_data(zwp_relative_pointer_v1: *ZwpRelativePointerV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zwp_relative_pointer_v1), data) }
-fn zwp_relative_pointer_v1_get_user_data(zwp_relative_pointer_v1: *ZwpRelativePointerV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zwp_relative_pointer_v1)) }
-fn zwp_relative_pointer_v1_get_version(zwp_relative_pointer_v1: *ZwpRelativePointerV1) -> u32 { wl_proxy_get_version(cast[*u8](zwp_relative_pointer_v1)) }
+fn zwp_relative_pointer_v1_set_user_data(zwp_relative_pointer_v1: *ZwpRelativePointerV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zwp_relative_pointer_v1), data) }
+fn zwp_relative_pointer_v1_get_user_data(zwp_relative_pointer_v1: *ZwpRelativePointerV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zwp_relative_pointer_v1)) }
+fn zwp_relative_pointer_v1_get_version(zwp_relative_pointer_v1: *ZwpRelativePointerV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zwp_relative_pointer_v1)) }
 // zwp_relative_pointer_v1.destroy: release the relative pointer object. Destroys the object.
 fn zwp_relative_pointer_v1_destroy(zwp_relative_pointer_v1: *ZwpRelativePointerV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_relative_pointer_v1), ZWP_RELATIVE_POINTER_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zwp_relative_pointer_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_relative_pointer_v1), ZWP_RELATIVE_POINTER_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zwp_relative_pointer_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 
 // ==== protocol pointer_constraints_unstable_v1 ====
@@ -1934,22 +2048,22 @@ const ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT = 2    // the pointer const
 const ZWP_POINTER_CONSTRAINTS_V1_DESTROY: u32 = 0
 const ZWP_POINTER_CONSTRAINTS_V1_LOCK_POINTER: u32 = 1
 const ZWP_POINTER_CONSTRAINTS_V1_CONFINE_POINTER: u32 = 2
-fn zwp_pointer_constraints_v1_set_user_data(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zwp_pointer_constraints_v1), data) }
-fn zwp_pointer_constraints_v1_get_user_data(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zwp_pointer_constraints_v1)) }
-fn zwp_pointer_constraints_v1_get_version(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1) -> u32 { wl_proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)) }
+fn zwp_pointer_constraints_v1_set_user_data(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zwp_pointer_constraints_v1), data) }
+fn zwp_pointer_constraints_v1_get_user_data(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zwp_pointer_constraints_v1)) }
+fn zwp_pointer_constraints_v1_get_version(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)) }
 // zwp_pointer_constraints_v1.destroy: destroy the pointer constraints manager object. Destroys the object.
 fn zwp_pointer_constraints_v1_destroy(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_pointer_constraints_v1), ZWP_POINTER_CONSTRAINTS_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_pointer_constraints_v1), ZWP_POINTER_CONSTRAINTS_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // zwp_pointer_constraints_v1.lock_pointer: lock pointer to a position. `region`: may be nil; `lifetime`: zwp_pointer_constraints_v1.lifetime
 fn zwp_pointer_constraints_v1_lock_pointer(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1, surface: *WlSurface, pointer: *WlPointer, region: *WlRegion, lifetime: u32) -> *ZwpLockedPointerV1 {
     argv := [5]u64{0, cast[u64](surface), cast[u64](pointer), cast[u64](region), u64(lifetime)}
-    cast[*ZwpLockedPointerV1](wl_proxy_marshal_array_flags(cast[*u8](zwp_pointer_constraints_v1), ZWP_POINTER_CONSTRAINTS_V1_LOCK_POINTER, zwp_locked_pointer_v1_interface(), wl_proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)), 0, ptr(argv)))
+    cast[*ZwpLockedPointerV1](wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_pointer_constraints_v1), ZWP_POINTER_CONSTRAINTS_V1_LOCK_POINTER, zwp_locked_pointer_v1_interface(), wl_dl().proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)), 0, ptr(argv)))
 }
 // zwp_pointer_constraints_v1.confine_pointer: confine pointer to a region. `region`: may be nil; `lifetime`: zwp_pointer_constraints_v1.lifetime
 fn zwp_pointer_constraints_v1_confine_pointer(zwp_pointer_constraints_v1: *ZwpPointerConstraintsV1, surface: *WlSurface, pointer: *WlPointer, region: *WlRegion, lifetime: u32) -> *ZwpConfinedPointerV1 {
     argv := [5]u64{0, cast[u64](surface), cast[u64](pointer), cast[u64](region), u64(lifetime)}
-    cast[*ZwpConfinedPointerV1](wl_proxy_marshal_array_flags(cast[*u8](zwp_pointer_constraints_v1), ZWP_POINTER_CONSTRAINTS_V1_CONFINE_POINTER, zwp_confined_pointer_v1_interface(), wl_proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)), 0, ptr(argv)))
+    cast[*ZwpConfinedPointerV1](wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_pointer_constraints_v1), ZWP_POINTER_CONSTRAINTS_V1_CONFINE_POINTER, zwp_confined_pointer_v1_interface(), wl_dl().proxy_get_version(cast[*u8](zwp_pointer_constraints_v1)), 0, ptr(argv)))
 }
 
 // ---- zwp_locked_pointer_v1 (version 1): receive relative pointer motion events ----
@@ -1970,22 +2084,22 @@ struct ZwpLockedPointerV1Listener {
 fn zwp_locked_pointer_v1_add_listener(zwp_locked_pointer_v1: *ZwpLockedPointerV1, listener: *ZwpLockedPointerV1Listener, data: *u8) -> i32 {
     wl_listen(cast[*u8](zwp_locked_pointer_v1), cast[*u8](listener), 2, data)
 }
-fn zwp_locked_pointer_v1_set_user_data(zwp_locked_pointer_v1: *ZwpLockedPointerV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zwp_locked_pointer_v1), data) }
-fn zwp_locked_pointer_v1_get_user_data(zwp_locked_pointer_v1: *ZwpLockedPointerV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zwp_locked_pointer_v1)) }
-fn zwp_locked_pointer_v1_get_version(zwp_locked_pointer_v1: *ZwpLockedPointerV1) -> u32 { wl_proxy_get_version(cast[*u8](zwp_locked_pointer_v1)) }
+fn zwp_locked_pointer_v1_set_user_data(zwp_locked_pointer_v1: *ZwpLockedPointerV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zwp_locked_pointer_v1), data) }
+fn zwp_locked_pointer_v1_get_user_data(zwp_locked_pointer_v1: *ZwpLockedPointerV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zwp_locked_pointer_v1)) }
+fn zwp_locked_pointer_v1_get_version(zwp_locked_pointer_v1: *ZwpLockedPointerV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zwp_locked_pointer_v1)) }
 // zwp_locked_pointer_v1.destroy: destroy the locked pointer object. Destroys the object.
 fn zwp_locked_pointer_v1_destroy(zwp_locked_pointer_v1: *ZwpLockedPointerV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_locked_pointer_v1), ZWP_LOCKED_POINTER_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zwp_locked_pointer_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_locked_pointer_v1), ZWP_LOCKED_POINTER_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zwp_locked_pointer_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // zwp_locked_pointer_v1.set_cursor_position_hint: set the pointer cursor position hint. `surface_x`: wl_fixed; `surface_y`: wl_fixed
 fn zwp_locked_pointer_v1_set_cursor_position_hint(zwp_locked_pointer_v1: *ZwpLockedPointerV1, surface_x: i32, surface_y: i32) {
     argv := [2]u64{u64(u32(surface_x)), u64(u32(surface_y))}
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_locked_pointer_v1), ZWP_LOCKED_POINTER_V1_SET_CURSOR_POSITION_HINT, nil, wl_proxy_get_version(cast[*u8](zwp_locked_pointer_v1)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_locked_pointer_v1), ZWP_LOCKED_POINTER_V1_SET_CURSOR_POSITION_HINT, nil, wl_dl().proxy_get_version(cast[*u8](zwp_locked_pointer_v1)), 0, ptr(argv))
 }
 // zwp_locked_pointer_v1.set_region: set a new lock region. `region`: may be nil
 fn zwp_locked_pointer_v1_set_region(zwp_locked_pointer_v1: *ZwpLockedPointerV1, region: *WlRegion) {
     argv := [1]u64{cast[u64](region)}
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_locked_pointer_v1), ZWP_LOCKED_POINTER_V1_SET_REGION, nil, wl_proxy_get_version(cast[*u8](zwp_locked_pointer_v1)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_locked_pointer_v1), ZWP_LOCKED_POINTER_V1_SET_REGION, nil, wl_dl().proxy_get_version(cast[*u8](zwp_locked_pointer_v1)), 0, ptr(argv))
 }
 
 // ---- zwp_confined_pointer_v1 (version 1): confined pointer object ----
@@ -2005,26 +2119,53 @@ struct ZwpConfinedPointerV1Listener {
 fn zwp_confined_pointer_v1_add_listener(zwp_confined_pointer_v1: *ZwpConfinedPointerV1, listener: *ZwpConfinedPointerV1Listener, data: *u8) -> i32 {
     wl_listen(cast[*u8](zwp_confined_pointer_v1), cast[*u8](listener), 2, data)
 }
-fn zwp_confined_pointer_v1_set_user_data(zwp_confined_pointer_v1: *ZwpConfinedPointerV1, data: *u8) { wl_proxy_set_user_data(cast[*u8](zwp_confined_pointer_v1), data) }
-fn zwp_confined_pointer_v1_get_user_data(zwp_confined_pointer_v1: *ZwpConfinedPointerV1) -> *u8 { wl_proxy_get_user_data(cast[*u8](zwp_confined_pointer_v1)) }
-fn zwp_confined_pointer_v1_get_version(zwp_confined_pointer_v1: *ZwpConfinedPointerV1) -> u32 { wl_proxy_get_version(cast[*u8](zwp_confined_pointer_v1)) }
+fn zwp_confined_pointer_v1_set_user_data(zwp_confined_pointer_v1: *ZwpConfinedPointerV1, data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](zwp_confined_pointer_v1), data) }
+fn zwp_confined_pointer_v1_get_user_data(zwp_confined_pointer_v1: *ZwpConfinedPointerV1) -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](zwp_confined_pointer_v1)) }
+fn zwp_confined_pointer_v1_get_version(zwp_confined_pointer_v1: *ZwpConfinedPointerV1) -> u32 { wl_dl().proxy_get_version(cast[*u8](zwp_confined_pointer_v1)) }
 // zwp_confined_pointer_v1.destroy: destroy the confined pointer object. Destroys the object.
 fn zwp_confined_pointer_v1_destroy(zwp_confined_pointer_v1: *ZwpConfinedPointerV1) {
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_confined_pointer_v1), ZWP_CONFINED_POINTER_V1_DESTROY, nil, wl_proxy_get_version(cast[*u8](zwp_confined_pointer_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_confined_pointer_v1), ZWP_CONFINED_POINTER_V1_DESTROY, nil, wl_dl().proxy_get_version(cast[*u8](zwp_confined_pointer_v1)), WL_MARSHAL_FLAG_DESTROY, nil)
 }
 // zwp_confined_pointer_v1.set_region: set a new confine region. `region`: may be nil
 fn zwp_confined_pointer_v1_set_region(zwp_confined_pointer_v1: *ZwpConfinedPointerV1, region: *WlRegion) {
     argv := [1]u64{cast[u64](region)}
-    wl_proxy_marshal_array_flags(cast[*u8](zwp_confined_pointer_v1), ZWP_CONFINED_POINTER_V1_SET_REGION, nil, wl_proxy_get_version(cast[*u8](zwp_confined_pointer_v1)), 0, ptr(argv))
+    wl_dl().proxy_marshal_array_flags(cast[*u8](zwp_confined_pointer_v1), ZWP_CONFINED_POINTER_V1_SET_REGION, nil, wl_dl().proxy_get_version(cast[*u8](zwp_confined_pointer_v1)), 0, ptr(argv))
 }
 
 // ---- interface tables ----
-// The tables of the core protocol are libwayland-client's (extern wl_surface_interface, ...).
-// For the other protocols, what wayland-scanner writes as C data (private-code): per interface
+// The tables of the core protocol are libwayland-client's (extern wl_surface_interface, ...);
+// the bindings find them with dlsym (WL_CORE_TABLES, wl_core_interface). For the other protocols,
+// what wayland-scanner writes as C data (private-code): per interface
 // its name, version and numbers of requests and events; per message (the requests, then the
 // events of each interface in turn) its name, its signature and where its argument types start
 // in WL_TYPES, which holds the interface number of every object argument (-1: none; -2, -3, ...:
 // a table of libwayland-client, see wl_library_interface).
+priv const WL_CORE_TABLE_COUNT = 23
+priv const WL_CORE_TABLES = [WL_CORE_TABLE_COUNT]str{
+    "wl_display_interface",
+    "wl_registry_interface",
+    "wl_callback_interface",
+    "wl_compositor_interface",
+    "wl_shm_pool_interface",
+    "wl_shm_interface",
+    "wl_buffer_interface",
+    "wl_data_offer_interface",
+    "wl_data_source_interface",
+    "wl_data_device_interface",
+    "wl_data_device_manager_interface",
+    "wl_shell_interface",
+    "wl_shell_surface_interface",
+    "wl_surface_interface",
+    "wl_seat_interface",
+    "wl_pointer_interface",
+    "wl_keyboard_interface",
+    "wl_touch_interface",
+    "wl_output_interface",
+    "wl_region_interface",
+    "wl_subcompositor_interface",
+    "wl_subsurface_interface",
+    "wl_fixes_interface",
+}
 priv const WL_INTERFACE_COUNT = 12
 priv const WL_MESSAGE_COUNT = 67
 priv const WL_TYPE_COUNT = 44
@@ -2118,11 +2259,11 @@ priv const WL_TYPES = [WL_TYPE_COUNT]i8{
 }
 priv fn wl_library_interface(code: i64) -> *WlInterface {
     match code {
-        -2 => &wl_surface_interface
-        -3 => &wl_seat_interface
-        -4 => &wl_output_interface
-        -5 => &wl_pointer_interface
-        -6 => &wl_region_interface
+        -2 => wl_core_interface(13)
+        -3 => wl_core_interface(14)
+        -4 => wl_core_interface(18)
+        -5 => wl_core_interface(15)
+        -6 => wl_core_interface(19)
         _ => nil
     }
 }

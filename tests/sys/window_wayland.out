@@ -1,0 +1,11 @@
+no compositor: false true
+open: true
+handles: true true true 0
+size: (320, 200) false false false
+presented: 20 size: (320, 200) cursor: false false text input: true
+fullscreen: true true (800, 600) resize events: true
+windowed: true false (320, 200) resize events: true
+closed: true false true
+resizable: true (300, 100)
+cycles: 10 descriptors left open: 0
+compositor gone: true true true false

@@ -1,0 +1,21 @@
+"" x11() wayland() | x11() - | - wayland() | x11() - | x11() wayland()
+"x11" x11() - | x11() - | x11() - | x11() - | x11() -
+"wayland" - wayland() | - wayland() | - wayland() | - wayland() | - wayland()
+":1" x11(:1) - | x11(:1) - | x11(:1) - | x11(:1) - | x11(:1) -
+"host:0.0" x11(host:0.0) - | x11(host:0.0) - | x11(host:0.0) - | x11(host:0.0) - | x11(host:0.0) -
+"al-test-not-a-display" x11(al-test-not-a-display) - | x11(al-test-not-a-display) - | x11(al-test-not-a-display) - | x11(al-test-not-a-display) - | x11(al-test-not-a-display) -
+"wayland:" x11(wayland:) - | x11(wayland:) - | x11(wayland:) - | x11(wayland:) - | x11(wayland:) -
+"wayland:wayland-1" - wayland(wayland-1) | - wayland(wayland-1) | - wayland(wayland-1) | - wayland(wayland-1) | - wayland(wayland-1)
+"wayland:/run/user/1000/wayland-0" - wayland(/run/user/1000/wayland-0) | - wayland(/run/user/1000/wayland-0) | - wayland(/run/user/1000/wayland-0) | - wayland(/run/user/1000/wayland-0) | - wayland(/run/user/1000/wayland-0)
+0 1 2 3 4 4 3 -1 -1 -1 
+EventMouseDown 1 7 -3 2 EventMouseUp 0 EventNone
+0 1 15 0 7 14
+1/0 1/0 -1/0 0/30 0/60 0/90 1/0 0/30 0/-60 -1/0 0/-60 2/0 0/-1 
+120 180 -30 0
+touchpad 50 px: 5 0
+0 0 1 1 2 2 3 11 251 
+1 0 0 0 0
+1 1 2 3 1
+1280x1=1280 640x2=1280 641x2=1282 214x3=642 1x2=2 1x1=1 
+0,0 10,21 10,21 -1,-1 -1,-2 639,1279 
+(640, 360) (800, 600) (640, 360) (800, 361)

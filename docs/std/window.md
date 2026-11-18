@@ -1,21 +1,27 @@
 # std.window: windows, events and software presentation
 
-`use std.window` opens a native window (X11 on Linux, Win32 on Windows), delivers its events,
-keeps the per-frame input state (`std.input`, included automatically) and can show an RGBA
-framebuffer without any GPU API. It also hands out the native handles needed to create a
-Vulkan surface (Linux) or a DXGI swapchain (Windows). The API and the events are the same on
-both systems; the differences are listed in [Windows](#windows).
+`use std.window` opens a native window (X11 on Linux, or on request Wayland; Win32 on Windows), delivers
+its events, keeps the per-frame input state (`std.input`, included automatically) and can show
+an RGBA framebuffer without any GPU API. It also hands out the native handles needed to create
+a Vulkan surface (Linux) or a DXGI swapchain (Windows). The API and the events are the same on
+all of them; the differences are listed in [Wayland](#wayland) and [Windows](#windows).
 
-The window system lives in the module's OS layer: `std/window_linux.al` (X11) or
-`std/window_windows.al` (Win32), which `std/window.al` includes for the target with
+The window system lives in the module's OS layer: `std/window_linux.al` (X11, and the choice
+between X11 and Wayland, whose backend is `std/window_wayland.al`) or `std/window_windows.al`
+(Win32), which `std/window.al` includes for the target with
 `when TARGET_OS == Windows { use std.window_windows } else { use std.window_linux }`.
 
 - **Linux:** a program that calls `window_open` is dynamically linked against `libX11.so.6`
-  (and libc with `libdl.so.2`); `libXi.so.6` (XInput 2) is loaded at run time when a pointer
-  is first locked, and is not required. On a Wayland session it runs through XWayland; a
-  program that wants to talk to the compositor itself uses the bindings of
-  [std.wayland](wayland.md). The helper functions that need no display (`key_from_keysym`,
-  `fit_rect`, `blit_fit`, ...) do not pull the library in.
+  (and libc with `libdl.so.2`), and against nothing else. On a Wayland session it runs
+  through XWayland, unless the experimental Wayland backend is asked for (see
+  [Choosing the window system](#choosing-the-window-system)); `libwayland-client.so.0`,
+  `libxkbcommon.so.0` and `libwayland-cursor.so.0` are then loaded at run time, so the
+  program also starts where they are not installed.
+  `libXi.so.6` (XInput 2) is loaded at run time when an X11 pointer is first locked, and is
+  not required. A program that wants to talk to the compositor itself uses the bindings of
+  [std.wayland](wayland.md) (also on the window's own `wl_display` / `wl_surface`). The
+  helper functions that need no display (`key_from_keysym`, `fit_rect`, `blit_fit`,
+  `window_systems`, ...) do not need the libraries.
 - **Windows:** the program imports `user32.dll`, `gdi32.dll`, `imm32.dll` and `kernel32.dll`
   (all part of Windows); no C run-time library.
 
@@ -34,12 +40,37 @@ if !ok { ... no display: run headless or exit ... }
 | `width`, `height: i64` | size of the drawable area in pixels; 0 means 640 x 480 |
 | `resizable: bool` | let the user resize the window (default: fixed size) |
 | `fullscreen: bool` | start fullscreen |
-| `display: str` | X display to connect to, e.g. `":1"`; empty means `$DISPLAY` (not used on Windows) |
+| `display: str` | Linux: the X display to connect to, e.g. `":1"`; empty means `$DISPLAY`; `"wayland"` / `"wayland:<socket>"` ask for the experimental Wayland backend (see below; not used on Windows) |
 
-`window_open` returns `(nil, false)` when the display cannot be reached (no X server,
-`DISPLAY` unset; on Windows: the window cannot be created); it never aborts the program for
-that. The `Window` is allocated once from the arena; no other window function allocates from
-the arena.
+`window_open` returns `(nil, false)` when the display cannot be reached (no compositor or X
+server, `DISPLAY` unset; on Windows: the window cannot be created); it never aborts the program
+for that. The `Window` is allocated once from the arena; no other window function allocates
+from the arena.
+
+### Choosing the window system
+
+**The Wayland backend is experimental and opt-in.** It has been written and type-checked, and
+its translation helpers are unit-tested, but it has **not yet been run on a real Wayland
+session** (see [Wayland](#wayland) for what is still to be checked). By default every window
+on Linux is an X11 window, exactly as before; on a Wayland session that means XWayland. The
+intent is to make Wayland the default on Wayland sessions once it has been verified.
+
+| `display` | |
+|-----------|---|
+| `""` | X11 on `$DISPLAY`. Only if no X display can be opened and `$WAYLAND_DISPLAY` is set (a Wayland session without XWayland, where the program could not run before) is Wayland tried. `$ALC_WINDOW` changes this (below) |
+| `"x11"` | only X11, on `$DISPLAY` |
+| `"wayland"` | only Wayland, on `$WAYLAND_DISPLAY` (`wayland-0` if unset) |
+| `"wayland:NAME"` | only Wayland, the socket NAME (in `$XDG_RUNTIME_DIR`, or an absolute path) |
+| anything else (`":1"`, `"host:0.0"`) | only X11, that X display (as before) |
+
+The environment variable **`ALC_WINDOW`** lets a player or tester switch an existing program
+without rebuilding it (like `ALC_CHECK_MEMORY`, it is read by the program at run time):
+`ALC_WINDOW=wayland` makes `display: ""` mean `"wayland"`, `ALC_WINDOW=x11` makes it X11 only
+(no Wayland even without an X display); other values are ignored. A display the program names
+is not changed by it. `window_systems(display, wayland_display, alc_window) -> WindowSystems`
+is that rule as a function (the arguments after the first are the values of
+`$WAYLAND_DISPLAY` and `$ALC_WINDOW`); `wayland_display(w) != nil` tells which system a window
+got.
 
 ## Functions
 
@@ -59,8 +90,10 @@ the arena.
 | `present(w, pixels: []u8, pw, ph) -> bool` | show an RGBA8 framebuffer of `pw` x `ph` pixels |
 | `mouse_in_frame(w, pw, ph) -> vec2` | mouse position in pixels of a framebuffer shown with `present` |
 | `close(w)` | destroy the window and disconnect |
-| `x11_display(w) -> *u8` | Linux: the Xlib `Display*` (nil after `close`) |
-| `x11_window(w) -> u64` | Linux: the X11 window id |
+| `x11_display(w) -> *u8` | Linux: the Xlib `Display*` (nil after `close` and for a Wayland window) |
+| `x11_window(w) -> u64` | Linux: the X11 window id (0 for a Wayland window) |
+| `wayland_display(w) -> *u8` | Linux: the `wl_display*` (nil after `close` and for an X11 window) |
+| `wayland_surface(w) -> *u8` | Linux: the `wl_surface*` of the window (nil after `close` and for an X11 window) |
 | `win32_hwnd(w) -> *u8` | Windows: the `HWND` (nil after `close`) |
 | `win32_hinstance(w) -> *u8` | Windows: the `HINSTANCE` of the window (the executable's module), for `VkWin32SurfaceCreateInfoKHR` |
 
@@ -139,7 +172,9 @@ it takes the key presses and shows candidates until a word is chosen):
   `KEY_UNKNOWN`.
 - **Linux:** only `w.text_input` changes. X11 has no such switch: the session's input method
   (XIM: compose sequences, dead keys; ibus, fcitx) is attached to the window all the time, and
-  one that is in a composing mode takes the keys of a game too.
+  one that is in a composing mode takes the keys of a game too. On Wayland the window has no
+  input method (the text-input protocol is not used): compose sequences and dead keys work
+  (xkbcommon's compose tables for `$LC_ALL` / `$LC_CTYPE` / `$LANG`), an IME does not.
 
 **Focus.** When the window loses the focus (Alt-Tab, a click elsewhere, the lock screen) every
 held key and button is released, since their releases go elsewhere (`EventUnfocus`; the
@@ -188,6 +223,14 @@ is the motion of the pointer in window pixels, with the desktop's acceleration.)
   reports fractions of counts; they accumulate, and the events carry whole counts. Without
   the XInput extension (2.0 or later) or `libXi.so.6`, the motion is the pointer's instead:
   pixels, with the desktop's acceleration.
+- **Wayland:** the pointer is locked to the surface with `zwp_pointer_constraints_v1`
+  (persistent lock) and the motion is the unaccelerated motion of `zwp_relative_pointer_v1`
+  (`dx_unaccel`, `dy_unaccel`: libinput's raw device counts; fractions accumulate). The
+  compositor activates the lock while the pointer is over the window; locked, the pointer does
+  not move, so unlocking leaves it where it was. Motion counts only while the lock is active
+  and the window has the keyboard focus. Where the compositor lacks either protocol the cursor
+  is hidden and the motion is the pointer's (pixels, accelerated), and the pointer is not held
+  in the window (Wayland has no warping).
 - **Devices that report positions** (a graphics tablet, a touch screen, remote desktop, the
   pointer of some virtual machines) have no counts. Their motion is the difference between
   two positions, in pixels of the screen (Windows: `MOUSE_MOVE_ABSOLUTE` records, scaled to
@@ -222,8 +265,10 @@ with black bars. A game can therefore render at a fixed internal resolution (say
 and let the window be any size, including fullscreen; `mouse_in_frame(w, pw, ph)` converts the
 pointer position back to framebuffer pixels.
 
-`present` converts into a window-sized buffer and draws it at 1:1: with `XPutImage` on Linux
-(C heap; returns false for a display that is not 24/32-bit true color), with GDI's
+`present` converts into a window-sized buffer and draws it at 1:1: with `XPutImage` on X11
+(C heap; returns false for a display that is not 24/32-bit true color), into `wl_shm` buffers
+(XRGB8888 in a memfd; up to three, reused as the compositor releases them; when all three are
+still held the frame is dropped and `present` returns true) on Wayland, with GDI's
 `StretchDIBits` from a top-down 32-bit DIB on Windows (process heap). The buffer is
 reallocated only when the window size changes. The cost is one pass over the window's pixels
 plus the transfer: fine for 2D and retro-style rendering, not a replacement for a GPU at 4K.
@@ -238,7 +283,11 @@ aspect-preserving rectangle) and `blit_fit(dst: []u32, dw, dh, src: []u8, sw, sh
 
 For `VK_KHR_xlib_surface`, pass `x11_display(w)` as `dpy` and `x11_window(w)` as `window` of
 `VkXlibSurfaceCreateInfoKHR` (the types match: `dpy` is a `*u8`, `window` a `u64`; enable
-`VK_KHR_surface` and `VK_KHR_xlib_surface` on the instance). Recreate the swapchain on `EventResize`; while
+`VK_KHR_surface` and `VK_KHR_xlib_surface` on the instance). For a window of the experimental
+Wayland backend (`wayland_display(w) != nil`) use `VK_KHR_wayland_surface` instead: `wayland_display(w)` is
+`VkWaylandSurfaceCreateInfoKHR.display`, `wayland_surface(w)` its `surface`. On Wayland the
+surface has no size of its own (`currentExtent` is 0xFFFFFFFF): make the swapchain `size(w)`.
+Recreate the swapchain on `EventResize`; while
 `w.minimized`, skip rendering (or present nothing) until `EventRestore`. Do not mix `present`
 with a GPU swapchain on the same window.
 
@@ -277,6 +326,24 @@ both modules.
 the display and window id of a `Window` are valid arguments for all of it (`XIconifyWindow`
 minimizes the window, for example).
 
+### Wayland helpers (Linux)
+
+| Function | |
+|----------|---|
+| `window_systems(display: str, wayland_display: str, alc_window: str) -> WindowSystems` | which systems `window_open` tries for a `WindowDesc.display` and the values of `$WAYLAND_DISPLAY` and `$ALC_WINDOW`: `x11`, `wayland` (bools; with both, Wayland only if no X display opens), `x11_name`, `wayland_name` |
+| `button_from_evdev(code: u32) -> i64` | `MOUSE_*` for an evdev button code of `wl_pointer.button` (`BTN_LEFT` 0x110 ...; `BTN_SIDE` / `BTN_BACK` are `MOUSE_X1`, `BTN_EXTRA` / `BTN_FORWARD` `MOUSE_X2`), -1 for others |
+| `event_from_wl_button(code, pressed, x, y, mods) -> Event` | the mouse event of a button (`EventNone` for buttons without a code) |
+| `mods_from_xkb(mask, shift, ctrl, alt, logo: u32) -> u8` | `MOD_*` bits for an xkb modifier mask and the indices of Shift, Control, Mod1, Mod4 in the keymap (32 or more: none) |
+| `wheel_steps(acc: *i64, v120: i64) -> i64` | whole wheel steps out of scrolling in 120ths of a step, the rest kept in `*acc` (reset when the direction changes) |
+| `wheel_v120_from_axis(value: i32) -> i64` | a continuous `wl_pointer.axis` value (touchpad, `wl_fixed_t` pixels) in 120ths of a step: 10 pixels a step |
+| `repeats_due(now_ns, down_ns, delay_ms, rate, sent) -> i64` | auto-repeats of a held key due now and not yet sent, for `wl_keyboard.repeat_info` |
+| `scale_from_outputs(scales: []i64) -> i64` | the buffer scale for a set of output scales: the largest, at least 1 |
+| `surface_size_for_pixels(pixels, scale) -> i64` | surface units that show `pixels` at a buffer scale (rounded up, at least 1) |
+| `pixels_from_wl_fixed(f: i32, scale) -> i64` | a pointer coordinate (`wl_fixed_t` surface units) in buffer pixels, rounded down |
+| `size_after_configure(conf_w, conf_h, follow, want_w, want_h, scale) -> (i64, i64)` | the surface size after an `xdg_toplevel.configure` (0: the client's choice), for a window that follows the compositor's size or keeps its own pixel size |
+
+The window's Wayland state is `w.os.wl` (a `WaylandWindow`; nil for an X11 window).
+
 ### Win32 helpers (Windows)
 
 | Function | |
@@ -284,6 +351,66 @@ minimizes the window, for example).
 | `key_from_vk(vk: u32, scan: u32, extended: bool, ch: u32) -> i64` | `KEY_*` code for a virtual key with the scan code and extended flag of its message and its unshifted character (`MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR)`) |
 | `event_from_win32_button(msg: u32, wparam: u64, x, y, mods) -> Event` | mouse press / release for `WM_LBUTTONDOWN` .. `WM_XBUTTONUP` (`EventNone` for other messages) |
 | `motion_from_raw_mouse(s: *RawMotion, r: *RawInputMouse, span_w, span_h) -> (i64, i64)` | the motion of one raw mouse record (`RAWINPUT` of `WM_INPUT`): its counts, or for `MOUSE_MOVE_ABSOLUTE` the difference to the device's last position (kept in `s`) in pixels of an area of `span_w` x `span_h` |
+
+## Wayland
+
+**Experimental, opt-in, not yet verified on a real session** (see
+[Choosing the window system](#choosing-the-window-system)). A window on Wayland is an
+`xdg_toplevel` (xdg-shell; the compositor must have `wl_compositor` version 4, `wl_shm` and
+`xdg_wm_base`, else `window_open` returns false). The same events arrive; what differs from
+X11 is listed below. Still to be checked on a real session before it can become the default:
+
+1. `tests/run.sh ./build/alc window` with weston installed (`sys/window_wayland` compares
+   against an expected output that has not been produced by a real run yet).
+2. `ALC_WINDOW=wayland alc run examples/win32_input.al` on GNOME (no decorations) and on KDE or
+   sway (server-side decorations): keys, text, dead keys and compose, auto-repeat, mouse
+   buttons, wheel and touchpad scrolling, focus, resize, fullscreen, minimizing, F3 mouse-look
+   (raw counts), hiding the cursor.
+3. A 200 % output and moving the window between outputs of different scales.
+4. `examples/starter` through `present`, and a Vulkan swapchain on `wayland_surface`.
+5. A system without `libwayland-client.so.0` or `libxkbcommon.so.0`: `display: "wayland"`
+   fails cleanly.
+
+What differs from X11:
+
+- **Pixels and scale.** `width`, `height`, `size(w)`, `EventResize` and mouse positions are
+  buffer pixels, as on X11 and Windows. The window opens at the largest scale of the outputs
+  (`wl_output.scale`) with a surface of the requested pixels divided by that scale, rounded
+  up, so its pixel size is a whole multiple of the scale (1280 x 720 at scale 2: a 640 x 360
+  surface, 1280 x 720 pixels; 1281 wide: 1282). A program that presents with `present`
+  follows later changes (`wl_surface.preferred_buffer_scale`, or the outputs the window is on):
+  a window of its own size keeps its pixel size, a maximized or fullscreen one keeps the
+  compositor's size and gets more or fewer pixels; either way `EventResize`. A window drawn
+  with a GPU swapchain keeps the scale of `window_open` (a buffer of another scale could reach
+  the compositor before the swapchain is recreated, which compositors reject); the compositor
+  scales it on other outputs. Fractional scales (125 %, 150 %) come as the integer scale above
+  them, which the compositor reduces.
+- **Decorations.** The window asks for server-side decorations (xdg-decoration) where the
+  compositor offers the protocol (KDE, wlroots compositors, ...). Where it does not (GNOME,
+  weston) the window has **no title bar or border**: it can be moved and closed with the
+  compositor's shortcuts (Super + drag, Alt+F4, the overview), and `EventClose` arrives as
+  usual. A game that needs a frame there draws its own or goes fullscreen.
+- **Minimized.** Wayland does not tell a client that it was minimized. The window counts as
+  minimized while the compositor reports the toplevel as suspended (xdg-shell version 6:
+  minimized, or otherwise not visible), with `EventMinimize` / `EventRestore`; compositors
+  without that state never minimize a window as far as the program can see.
+- **Fullscreen** is the compositor's (`xdg_toplevel.set_fullscreen` on the output it picks);
+  `w.fullscreen` follows the compositor's state, as with the window manager's on X11.
+- **Keys** are read with xkbcommon from the keymap the compositor sends: the key code from the
+  unshifted symbol of the key in the active layout, or in the first layout when the active one
+  has no code for it (W, A, S, D work while a Cyrillic layout is active, as on X11); text
+  after layout, Shift, AltGr, compose sequences and dead keys. Keys repeat on the client
+  (`wl_keyboard.repeat_info`; the seat is bound below version 10): repeats are generated by
+  `poll`, at most 4 per poll.
+- **Wheel.** Notches come as `axis_value120` (or `axis_discrete`); touchpads and other
+  continuous scrolling accumulate at 10 surface pixels per step.
+- **Pointer image.** The theme's arrow (`left_ptr`, `$XCURSOR_THEME`, `$XCURSOR_SIZE` times
+  the scale) from `libwayland-cursor.so.0`; without that library the window sets none.
+- **Text input:** no input method editor (see [Keys and text](#keys-and-text)).
+- **Connection lost** (the compositor ended or reported a protocol error): `w.closing` becomes
+  true, `present` returns false.
+- **Events during `window_open`** (the first keyboard focus, a size from the first configure)
+  are delivered by the first `poll`.
 
 ## Windows
 
@@ -503,8 +630,17 @@ that many frames, which is handy for automated smoke tests.
 ## Testing
 
 Window logic that does not need a display is covered by `tests/std/window_fit` (scaling and
-conversion, both systems) and `tests/std/window_logic` (X11 key mapping, event translation and
-the translation of XInput 2 raw motion from made-up events).
+conversion, both systems), `tests/std/window_logic` (X11 key mapping, event translation and
+the translation of XInput 2 raw motion from made-up events) and
+`tests/std/window_wayland_logic` (the choice of the window system, evdev buttons, xkb
+modifiers, wheel steps, key repeat timing, scale and configure sizes).
+`tests/sys/window_wayland` starts its own headless weston on a private socket (as
+`tests/sys/wayland` does) and opens windows there with `display: "wayland:<socket>"`: present, title,
+cursor, lock, fullscreen and back, a resizable window, open / close cycles without a leaked
+descriptor, a socket that does not exist, the compositor going away; it is skipped without
+weston, `libwayland-client.so.0` or `libxkbcommon.so.0`, and its expected output is a
+prediction that no real run has produced yet. `tests/sys/window_nodisplay` checks that an
+unusable X display fails cleanly (X11 only, as before).
 `tests/sys/window_x11` exercises a real X11 window and `tests/sys/window_x11_events` resize,
 minimize / restore, window-manager fullscreen changes and the locked pointer, with raw motion
 (a second client connection plays the user through XTEST, and the window manager) and

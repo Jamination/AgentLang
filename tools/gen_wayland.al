@@ -349,6 +349,13 @@ priv fn iface_ref(name: str) -> str {
     if library_ifaces.contains(name) { fmt("&", name, "_interface") } else { fmt(name, "_interface()") }
 }
 
+// The same inside the bindings, which load libwayland-client at run time (wl_client_lib in the
+// helpers): `wl_core_interface(13)` for the table of the core protocol found with dlsym.
+priv fn internal_ref(name: str) -> str {
+    k := index_of(library_ifaces[..], name)
+    if k >= 0 { fmt("wl_core_interface(", k, ")") } else { fmt(name, "_interface()") }
+}
+
 // The signature string of struct wl_message, as wayland-scanner writes it.
 priv fn signature(m: *Msg) -> str {
     out := vec[u8]()
@@ -442,7 +449,7 @@ priv fn request_fn(out: *Vec[str], f: *Iface, m: *Msg) {
     seen := vec_of([]str{self})
     result := ""
     new_iface := "nil"
-    version := fmt("wl_proxy_get_version(cast[*u8](", self, "))")
+    version := fmt("wl_dl().proxy_get_version(cast[*u8](", self, "))")
     strings := false
     for i in 0..m.args.len {
         a := &m.args[i]
@@ -464,7 +471,7 @@ priv fn request_fn(out: *Vec[str], f: *Iface, m: *Msg) {
                 version = "version"
             } else {
                 result = concat("*", camel(a.iface))
-                new_iface = iface_ref(a.iface)
+                new_iface = internal_ref(a.iface)
             }
             values.push("0")
             continue
@@ -498,7 +505,7 @@ priv fn request_fn(out: *Vec[str], f: *Iface, m: *Msg) {
         if result != "" { " -> " } else { "" }, result, " {"))
     if strings { out.push("    top := mark()") }
     if !values.is_empty() { out.push(fmt("    argv := [", values.len, "]u64{", join(values[..], ", "), "}")) }
-    call := fmt("wl_proxy_marshal_array_flags(cast[*u8](", self, "), ", prefix(f), "_", to_upper(m.name), ", ",
+    call := fmt("wl_dl().proxy_marshal_array_flags(cast[*u8](", self, "), ", prefix(f), "_", to_upper(m.name), ", ",
         new_iface, ", ", version, ", ", if m.destructor { "WL_MARSHAL_FLAG_DESTROY" } else { "0" }, ", ",
         if values.is_empty() { "nil" } else { "ptr(argv)" }, ")")
     typed := if result == "*u8" || result == "" { call } else { fmt("cast[", result, "](", call, ")") }
@@ -571,16 +578,16 @@ priv fn interface_decls(out: *Vec[str], f: *Iface) {
         out.push("// (the events of wl_display, error and delete_id, are handled by libwayland itself)")
     }
 
-    out.push(fmt("fn ", self, "_set_user_data(", self, ": *", ty, ", data: *u8) { wl_proxy_set_user_data(cast[*u8](", self, "), data) }"))
-    out.push(fmt("fn ", self, "_get_user_data(", self, ": *", ty, ") -> *u8 { wl_proxy_get_user_data(cast[*u8](", self, ")) }"))
-    out.push(fmt("fn ", self, "_get_version(", self, ": *", ty, ") -> u32 { wl_proxy_get_version(cast[*u8](", self, ")) }"))
+    out.push(fmt("fn ", self, "_set_user_data(", self, ": *", ty, ", data: *u8) { wl_dl().proxy_set_user_data(cast[*u8](", self, "), data) }"))
+    out.push(fmt("fn ", self, "_get_user_data(", self, ": *", ty, ") -> *u8 { wl_dl().proxy_get_user_data(cast[*u8](", self, ")) }"))
+    out.push(fmt("fn ", self, "_get_version(", self, ": *", ty, ") -> u32 { wl_dl().proxy_get_version(cast[*u8](", self, ")) }"))
     has_destroy := false
     for m in f.requests {
         if m.name == "destroy" { has_destroy = true }
     }
     if !has_destroy && !is_display {
         out.push("// Frees the client-side object; the compositor is not told (the protocol has no `destroy` request for it).")
-        out.push(fmt("fn ", self, "_destroy(", self, ": *", ty, ") { wl_proxy_destroy(cast[*u8](", self, ")) }"))
+        out.push(fmt("fn ", self, "_destroy(", self, ": *", ty, ") { wl_dl().proxy_destroy(cast[*u8](", self, ")) }"))
     }
     for i in 0..f.requests.len {
         request_fn(out, f, &f.requests[i])
@@ -635,12 +642,16 @@ priv fn tables(out: *Vec[str], all: []Iface) {
     }
     out.push(`
 // ---- interface tables ----
-// The tables of the core protocol are libwayland-client's (extern wl_surface_interface, ...).
-// For the other protocols, what wayland-scanner writes as C data (private-code): per interface
+// The tables of the core protocol are libwayland-client's (extern wl_surface_interface, ...);
+// the bindings find them with dlsym (WL_CORE_TABLES, wl_core_interface). For the other protocols, what wayland-scanner writes as C data (private-code): per interface
 // its name, version and numbers of requests and events; per message (the requests, then the
 // events of each interface in turn) its name, its signature and where its argument types start
 // in WL_TYPES, which holds the interface number of every object argument (-1: none; -2, -3, ...:
 // a table of libwayland-client, see wl_library_interface).`)
+    out.push(fmt("priv const WL_CORE_TABLE_COUNT = ", library_ifaces.len))
+    out.push("priv const WL_CORE_TABLES = [WL_CORE_TABLE_COUNT]str{")
+    for name in library_ifaces { out.push(fmt("    \"", name, "_interface\",")) }
+    out.push("}")
     out.push(fmt("priv const WL_INTERFACE_COUNT = ", interfaces.len))
     out.push(fmt("priv const WL_MESSAGE_COUNT = ", nmessages))
     out.push(fmt("priv const WL_TYPE_COUNT = ", types.len))
@@ -659,7 +670,7 @@ priv fn tables(out: *Vec[str], all: []Iface) {
     out.push("}")
     out.push("priv fn wl_library_interface(code: i64) -> *WlInterface {")
     out.push("    match code {")
-    for k, name in library { out.push(fmt("        ", -2 - k, " => &", name, "_interface")) }
+    for k, name in library { out.push(fmt("        ", -2 - k, " => ", internal_ref(name))) }
     out.push("        _ => nil")
     out.push("    }")
     out.push("}\n")
