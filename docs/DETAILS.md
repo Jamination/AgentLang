@@ -96,6 +96,14 @@ fn main() {
   `const MODE = Mode.Fast`, `const M: Mode = Fast`); `embed("file")`; names of other
   constants. A constant cannot depend on itself. The address of an `extern` function is not a
   constant.
+- The builtins `sizeof[T]()`, `offsetof[T](field)`, `std140_size[T]()` and `std430_size[T]()`
+  are untyped integer constants there (`const UV = offsetof[Vertex](uv)` can stand where a `u32`
+  is expected); in a function body they are `i64` values (`u32(offsetof[Vertex](uv))`). The
+  argument of `offsetof` names a field and is never evaluated: a field (`uv`), a field of a
+  field (`light.dir`), an element of an array field with a constant index (`lights[2]`,
+  `lights[N - 1].dir`); it does not follow pointers. A wrong name is a compile error that lists
+  the struct's fields. A program's own function of the name with one type parameter and one
+  parameter takes the call (in a constant too, where it is then not constant).
 - An annotated type must match the value (`const UNIT: Point = Point{1, 1}`).
 - An aggregate (array, struct, tuple) or vector / matrix constant is stored once in read-only
   memory. Assigning to it or to a part of it, and `&` on it or on a part of it are compile

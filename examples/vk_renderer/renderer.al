@@ -696,8 +696,8 @@ fn create_pipelines(r: *Renderer, g: *Gpu) {
 
     binding := VkVertexInputBindingDescription{0, u32(sizeof[Vertex]()), VK_VERTEX_INPUT_RATE_VERTEX}
     attributes := [2]VkVertexInputAttributeDescription{
-        VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
-        VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+        VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32_SFLOAT, u32(offsetof[Vertex](pos))},
+        VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32_SFLOAT, u32(offsetof[Vertex](uv))},
     }
     vertex_input := vk_pipeline_vertex_input_state_create_info()
     vertex_input.vertexBindingDescriptionCount = 1

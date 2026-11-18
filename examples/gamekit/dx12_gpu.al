@@ -393,9 +393,9 @@ fn sprites_new(g: *Gpu, format: i32, capacity: i64, frames: i64, width: i64, hei
         return (s, perr)
     }
     layout := [3]D3D12_INPUT_ELEMENT_DESC{
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: 0},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("TEXCOORD"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: 8},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: 16},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: u32(offsetof[SpriteVertex](pos))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("TEXCOORD"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: u32(offsetof[SpriteVertex](uv))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: u32(offsetof[SpriteVertex](color))},
     }
     desc := dx_pipeline_desc(s.root, vs, ps, format)
     desc.InputLayout = D3D12_INPUT_LAYOUT_DESC{ptr(layout), 3}

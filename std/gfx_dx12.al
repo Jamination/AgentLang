@@ -228,9 +228,9 @@ priv fn open_device(g: *Gfx, d: *Dx, desc: GfxDesc) -> str {
     if FAILED(hr) { return hresult_text("CreateRootSignature", hr) }
 
     layout := [3]D3D12_INPUT_ELEMENT_DESC{
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: 0},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("TEXCOORD"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: 8},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: 16},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: POS_AT},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("TEXCOORD"), Format: DXGI_FORMAT_R32G32_FLOAT, AlignedByteOffset: UV_AT},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: COLOR_AT},
     }
     for b in 0..2 {
         p: D3D12_GRAPHICS_PIPELINE_STATE_DESC
@@ -672,3 +672,8 @@ fn read_pixels(g: *Gfx) -> Image {
     assert g.offscreen, "read_pixels: only for gfx_offscreen (draw into a render_texture and read_texture it)"
     read_texture(g, Texture{dx(g).screen_tex, g.width, g.height})
 }
+
+// where the input layout finds the fields of a vertex
+priv const POS_AT: u32 = offsetof[GfxVertex](pos)
+priv const UV_AT: u32 = offsetof[GfxVertex](uv)
+priv const COLOR_AT: u32 = offsetof[GfxVertex](color)

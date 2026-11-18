@@ -179,7 +179,7 @@ priv fn mesh_of(v: *Vec[MeshVertex], first: i64) -> Mesh { Mesh{first, v.len - f
 // The parts shared by both kinds of renderer: pipeline, meshes, sprites. "" or what failed.
 priv fn renderer_setup(r: *Renderer) -> str {
     g := &r.g
-    assert sizeof[MeshVertex]() == 28 && sizeof[DrawConsts]() == 176, "unexpected layout of the GPU structs"
+    assert sizeof[DrawConsts]() == 176, "unexpected layout of the GPU structs"
     params: [1]D3D12_ROOT_PARAMETER
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
     params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
@@ -194,9 +194,9 @@ priv fn renderer_setup(r: *Renderer) -> str {
     ps, perr := dx_compile(MESH_SHADER, "ps_main", "ps_5_0")
     if perr != "" { return perr }
     layout := [3]D3D12_INPUT_ELEMENT_DESC{
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: 0},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("NORMAL"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: 12},
-        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: 24},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("POSITION"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: u32(offsetof[MeshVertex](pos))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("NORMAL"), Format: DXGI_FORMAT_R32G32B32_FLOAT, AlignedByteOffset: u32(offsetof[MeshVertex](normal))},
+        D3D12_INPUT_ELEMENT_DESC{SemanticName: ptr("COLOR"), Format: DXGI_FORMAT_R8G8B8A8_UNORM, AlignedByteOffset: u32(offsetof[MeshVertex](color))},
     }
     desc := dx_pipeline_desc(r.root, vs, ps, RENDER_FORMAT)
     desc.InputLayout = D3D12_INPUT_LAYOUT_DESC{ptr(layout), 3}

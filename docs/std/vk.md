@@ -91,7 +91,8 @@ current names needs it). Struct names that C defines as a second name of another
   `const UBO_SIZE = std140_size[Ubo]()` (`std430_size` for storage buffers) checks a whole
   struct at compile time and gives its size in the buffer: a field whose AL offset differs
   from the rules (`Ubo.offset` (vec3) is at offset 4 in AL and at 16 in std140 ...), or an
-  array whose stride differs (`[4]f32` under std140), is a compile error.
+  array whose stride differs (`[4]f32` under std140), is a compile error. The `offset` of a
+  vertex attribute is `u32(offsetof[Vertex](uv))`, its stride `u32(sizeof[Vertex]())`.
 - **Callbacks** (`pfnUserCallback`, allocation callbacks): an AL function with scalar/pointer
   parameters, stored with `cast[*u8](my_callback)` (see the debug messenger below).
 

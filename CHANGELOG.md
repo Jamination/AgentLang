@@ -80,6 +80,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - tests: `NAME.windows.need` lists the DLLs a Windows test program needs; one that is not in a
   directory of PATH makes the test a SKIP (`NAME.windows.why`). `tests/sys/shaderc` runs on
   Windows.
+- `offsetof[T](field) -> i64`: the offset of a field of a struct, also nested (`light.dir`) and
+  in an array with a constant index (`lights[2].dir`); a constant like `sizeof[T]()`, for input
+  layouts and vertex attributes. An unknown field is a compile error that lists the fields.
 
 ### Changed
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a

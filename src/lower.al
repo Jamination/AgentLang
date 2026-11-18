@@ -2207,6 +2207,22 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         None => return None
                     }
                 }
+                // offsetof[T](field): checked where it is declared, as std140_size
+                Index(b, targs) if args.len == 1 && targs.len == 1 && b.k == Ident("offsetof") && !self.declares_like("offsetof", 1, 1) => {
+                    env := map[str, i64]()
+                    match self.expr_type(&targs[0], &env) {
+                        Some(T_ERR) => return None
+                        Some(t) => {
+                            off, _, err := self.offset_of(t, &args[0])
+                            if len(err) != 0 {
+                                self.err(e.pos, fmt("offsetof[", self.types.name(t), "]: ", err))
+                                return Some(CV.Int(0))
+                            }
+                            return Some(CV.Int(off))
+                        }
+                        None => return None
+                    }
+                }
                 _ => {}
             }
             if args.len == 1 {
@@ -2290,6 +2306,88 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         _ => {}
     }
     return None
+}
+
+// Does the program declare a function `n` with `ntargs` type parameters and `nargs`
+// parameters? Then a call of the builtin `n` in a constant is that function's (not constant).
+fn declares_like(self: *Cx, n: str, ntargs: i64, nargs: i64) -> bool {
+    if self.scope_prelude {
+        // library code means the builtin
+        return false
+    }
+    ds, _ := self.fn_over_of(n)
+    for d in ds {
+        if self.fn_decls[d].tparams.len == ntargs && self.fn_decls[d].params.len == nargs {
+            return true
+        }
+    }
+    return false
+}
+
+// offsetof[T](path): the offset in bytes of the part `path` of the struct `t` (a field `uv`, a
+// field of a field `light.dir`, an element of an array with a constant index `lights[2].dir`),
+// with the type of that part; or the error text
+fn offset_of(self: *Cx, t: i64, path: *Expr) -> (i64, i64, str) {
+    match path.k {
+        Ident(n) => {
+            match self.types.k(t) {
+                Struct(_) => return offset_field(self, t, ast_plain(n), self.types.name(t))
+                _ => return (0, 0, fmt("`", self.types.name(t), "` is not a struct (offsetof[T](field) needs one)"))
+            }
+        }
+        Field(b, n) => {
+            off, bt, err := self.offset_of(t, b)
+            if len(err) != 0 {
+                return (0, 0, err)
+            }
+            fo, ft, ferr := offset_field(self, bt, n, ast_expr_str(b))
+            return (off + fo, ft, ferr)
+        }
+        Index(b, idx) => {
+            off, bt, err := self.offset_of(t, b)
+            if len(err) != 0 {
+                return (0, 0, err)
+            }
+            here := ast_expr_str(b)
+            match self.types.k(bt) {
+                Array(et, n) => {
+                    cv: Opt[CV] = if idx.len == 1 { self.const_eval(&idx[0]) } else { None }
+                    i := match cv {
+                        Some(Int(i)) => i
+                        _ => return (0, 0, fmt("the index of `", here, "` must be one constant integer"))
+                    }
+                    if i < 0 || i >= n {
+                        return (0, 0, fmt("index ", i, " is out of range for `", here, "` (", self.types.name(bt), ")"))
+                    }
+                    return (off + i * self.types.size_of(et), et, "")
+                }
+                _ => return (0, 0, fmt("`", here, "` is a ", self.types.name(bt), ", not an array"))
+            }
+        }
+        _ => return (0, 0, "name a field: offsetof[T](field), offsetof[T](a.b), offsetof[T](items[2].x)")
+    }
+}
+
+// the field `n` of the struct `t` (written `here` in the path): its offset and type
+priv fn offset_field(self: *Cx, t: i64, n: str, here: str) -> (i64, i64, str) {
+    match self.types.k(t) {
+        Struct(sid) => {
+            self.types.layout_struct(sid)
+            fields := self.types.structs[sid].fields
+            names := vec[str]()
+            for i, f in fields {
+                if f.0 == n {
+                    return (self.types.structs[sid].offsets[i], f.1, "")
+                }
+                names.push(f.0)
+            }
+            have := if names.is_empty() { "it has none" } else { fmt("its fields: ", join(names.items(), ", ")) }
+            return (0, 0, fmt("`", self.types.name(t), "` has no field `", n, "` (", have, ")"))
+        }
+        Ptr(_) => return (0, 0, fmt("`", here, "` is a ", self.types.name(t), ": offsetof does not follow pointers"))
+        Array(_, _) => return (0, 0, fmt("`", here, "` is a ", self.types.name(t), ": name an element (`", here, "[0].", n, "`)"))
+        _ => return (0, 0, fmt("`", here, "` is a ", self.types.name(t), ", which has no fields"))
+    }
 }
 
 // write a constant initializer into `data` at `off`
