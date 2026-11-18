@@ -1081,23 +1081,42 @@ priv fn wl_on_buffer_release(data: *u8, buffer: *WlBuffer) {
     cast[*WaylandBuffer](data).busy = false
 }
 
-// Listeners must stay in place as long as their objects: globals.
-priv wl_registry_listener := WlRegistryListener{global: wl_on_global, global_remove: wl_on_global_remove}
-priv wl_output_listener := WlOutputListener{scale: wl_on_output_scale}
-priv wl_wm_base_listener := XdgWmBaseListener{ping: wl_on_ping}
-priv wl_surface_listener := WlSurfaceListener{enter: wl_on_surface_enter, leave: wl_on_surface_leave,
-    preferred_buffer_scale: wl_on_preferred_scale}
-priv wl_xdg_surface_listener := XdgSurfaceListener{configure: wl_on_surface_configure}
-priv wl_toplevel_listener := XdgToplevelListener{configure: wl_on_toplevel_configure, close: wl_on_close}
-priv wl_seat_listener := WlSeatListener{capabilities: wl_on_seat_capabilities}
-priv wl_pointer_listener := WlPointerListener{enter: wl_on_pointer_enter, leave: wl_on_pointer_leave,
-    motion: wl_on_pointer_motion, button: wl_on_pointer_button, axis: wl_on_pointer_axis, frame: wl_on_pointer_frame,
-    axis_discrete: wl_on_axis_discrete, axis_value120: wl_on_axis_value120}
-priv wl_keyboard_listener := WlKeyboardListener{keymap: wl_on_keymap, enter: wl_on_keyboard_enter,
-    leave: wl_on_keyboard_leave, key: wl_on_key, modifiers: wl_on_modifiers, repeat_info: wl_on_repeat_info}
-priv wl_relative_listener := ZwpRelativePointerV1Listener{relative_motion: wl_on_relative_motion}
-priv wl_locked_listener := ZwpLockedPointerV1Listener{locked: wl_on_locked, unlocked: wl_on_unlocked}
-priv wl_buffer_listener := WlBufferListener{release: wl_on_buffer_release}
+// Listeners must stay in place as long as their objects: globals. They are filled by
+// wl_listeners_init (from wayland_window_open), not by initializers: a global's initializer is
+// compiled into every program that includes std.window, and with it every handler, so a
+// program that never opens a window would carry the whole backend (and --target linux-arm64,
+// which refuses this module's x86-64 system calls, could not build it).
+priv wl_registry_listener: WlRegistryListener
+priv wl_output_listener: WlOutputListener
+priv wl_wm_base_listener: XdgWmBaseListener
+priv wl_surface_listener: WlSurfaceListener
+priv wl_xdg_surface_listener: XdgSurfaceListener
+priv wl_toplevel_listener: XdgToplevelListener
+priv wl_seat_listener: WlSeatListener
+priv wl_pointer_listener: WlPointerListener
+priv wl_keyboard_listener: WlKeyboardListener
+priv wl_relative_listener: ZwpRelativePointerV1Listener
+priv wl_locked_listener: ZwpLockedPointerV1Listener
+priv wl_buffer_listener: WlBufferListener
+
+priv fn wl_listeners_init() {
+    wl_registry_listener = WlRegistryListener{global: wl_on_global, global_remove: wl_on_global_remove}
+    wl_output_listener = WlOutputListener{scale: wl_on_output_scale}
+    wl_wm_base_listener = XdgWmBaseListener{ping: wl_on_ping}
+    wl_surface_listener = WlSurfaceListener{enter: wl_on_surface_enter, leave: wl_on_surface_leave,
+        preferred_buffer_scale: wl_on_preferred_scale}
+    wl_xdg_surface_listener = XdgSurfaceListener{configure: wl_on_surface_configure}
+    wl_toplevel_listener = XdgToplevelListener{configure: wl_on_toplevel_configure, close: wl_on_close}
+    wl_seat_listener = WlSeatListener{capabilities: wl_on_seat_capabilities}
+    wl_pointer_listener = WlPointerListener{enter: wl_on_pointer_enter, leave: wl_on_pointer_leave,
+        motion: wl_on_pointer_motion, button: wl_on_pointer_button, axis: wl_on_pointer_axis, frame: wl_on_pointer_frame,
+        axis_discrete: wl_on_axis_discrete, axis_value120: wl_on_axis_value120}
+    wl_keyboard_listener = WlKeyboardListener{keymap: wl_on_keymap, enter: wl_on_keyboard_enter,
+        leave: wl_on_keyboard_leave, key: wl_on_key, modifiers: wl_on_modifiers, repeat_info: wl_on_repeat_info}
+    wl_relative_listener = ZwpRelativePointerV1Listener{relative_motion: wl_on_relative_motion}
+    wl_locked_listener = ZwpLockedPointerV1Listener{locked: wl_on_locked, unlocked: wl_on_unlocked}
+    wl_buffer_listener = WlBufferListener{release: wl_on_buffer_release}
+}
 
 // ---- shm buffers ----
 
@@ -1271,6 +1290,7 @@ fn wayland_window_open(d: WindowDesc, name: str) -> (*Window, bool) {
     if lib == nil || !wl_xkb_load() {
         return (nil, false)
     }
+    wl_listeners_init()
     top := mark()
     cname: *u8 = nil
     if name != "" {

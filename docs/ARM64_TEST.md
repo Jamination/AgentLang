@@ -20,7 +20,9 @@ problems`; the compiler for linux-arm64 built by the x86-64 compiler (stage 1), 
 under the emulator (stage 2, 187 s) and by stage 2 (stage 3, 191 s): byte-identical.
 Refused for linux-arm64 with a message (not wrong code): `-g`, `extern` C functions, and code
 of the bundled modules that make system calls by their x86-64 numbers (std.net, the gamepads
-of std.input).
+of std.input, the Wayland backend of std.window: a program that opens a window is refused with
+`module std.window_wayland makes Linux system calls ...`, before the link would refuse its
+Xlib calls; the pure helpers of std.window still build).
 The emulator was written by the same hands as the back end: a misreading of the architecture
 that both share (a flag of a compare, the extension of a load, the order of a pair) would not
 show. These are the checks only a real machine (or QEMU, which is independent) can do. Run them

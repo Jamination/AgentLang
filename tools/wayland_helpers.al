@@ -295,12 +295,16 @@ priv fn wl_interface_at(index: i64) -> *WlInterface {
 // An event handler that does nothing, whatever the arguments of the event are.
 priv fn wl_ignore_event() {}
 priv struct WlHandler { f: fn() }
-priv wl_ignore := WlHandler{f: wl_ignore_event}
+// (set by wl_listen, not by an initializer: a global's initializer is compiled into every
+// program that includes the module, and with it the module's code, which the linux-arm64
+// target refuses because of the poll system call above)
+priv wl_ignore: WlHandler
 
 // What the `*_add_listener` functions do: every nil field among the `count` handlers of
 // `listener` is set to a handler that ignores the event (libwayland would call the nil
 // pointer), then the table is registered.
 priv fn wl_listen(proxy: *u8, listener: *u8, count: i64, data: *u8) -> i32 {
+    wl_ignore.f = wl_ignore_event
     slots := mkslice[u8](listener, count * 8)
     for i in 0..count {
         unset := true
