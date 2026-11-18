@@ -2509,6 +2509,14 @@ priv fn dbg_begin(self: *Sel) {
         d.vsize[v] = u8(f.insts[v].ty.size())
     }
     d.vblk = clone(self.blk_of)
+    for v in 0..n {
+        // (constants and addresses have one value wherever they are: like the parameters,
+        // they are never stale)
+        match f.insts[v].op {
+            Const, FConst, GAddr, FAddr, Alloca => d.vblk[v] = i32(DBG_ENTRY)
+            _ => {}
+        }
+    }
     cfg := cfg_new(f)
     d.dpre = clone(cfg.pre)
     d.dpost = clone(cfg.post)

@@ -498,11 +498,15 @@ priv fn fl_step(fl: *Flow, i: *MInst, st: []i32) {
     gl := -1
     gv := -1
     if i.tgt > 0 && dbg_taggable(i.op) {
-        // a new instance of the value: older copies of it are stale
+        // a new instance of the value: older copies of it are stale (not of a constant or a
+        // parameter: DBG_ENTRY)
         gv = i64(i.tgt) - 1
-        for x in 0..fl.nl {
-            if i64(st[x]) == gv {
-                st[x] = -1
+        vb := if gv < fl.mf.dbg.vblk.len { i64(fl.mf.dbg.vblk[gv]) } else { -1 }
+        if vb != DBG_ENTRY {
+            for x in 0..fl.nl {
+                if i64(st[x]) == gv {
+                    st[x] = -1
+                }
             }
         }
         gl = fl_loc(fl, &i.a)
