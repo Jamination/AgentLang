@@ -191,6 +191,32 @@ fn main() {
         }
     }
     print("probe:", proc_off >= 0, "S_FRAMEPROC", frame, "variables", join(names.items(), " "), "inner in a block inside k's", dinner > dk && dk >= 0)
+    // the debug start after the prologue; the parameter a: S_LOCAL (a parameter) whose first
+    // range (S_DEFRANGE_REGISTER) starts at probe's first instruction
+    {
+        start := u32at(ms, proc_off + 32)
+        dstart := u32at(ms, proc_off + 20)
+        local := false
+        at_entry := false
+        seen := false
+        for r in records(ms, 4, symsize) {
+            o, k := r
+            if o <= proc_off || o >= proc_end {
+                continue
+            }
+            if k == 0x113E {
+                local = cstr_at(ms, o + 10) == "a" && u16at(ms, o + 8) & 1 == 1
+                seen = false
+            } else if local && !seen && (k == 0x1141 || k == 0x1142) {
+                seen = true
+                at_entry = k == 0x1141 && u32at(ms, o + 8) == start
+            }
+            if local && seen {
+                break
+            }
+        }
+        print("debug start after the prologue", dstart > 0, "parameter a: S_LOCAL", local, "in a register at the entry", at_entry)
+    }
     // the lines of probe: in its source lines, the file in /names
     strtab := st[11]
     lines_ok := false

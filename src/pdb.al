@@ -715,7 +715,8 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
             put32(&b, 0) // pEnd (below)
             put32(&b, 0)
             put32(&b, size)
-            put32(&b, i64(code.alloc_end))
+            // the debug start: after the prologue and the parameters' stores
+            put32(&b, if code.pro_end > 0 { i64(code.pro_end) } else { i64(code.alloc_end) })
             put32(&b, size)
             put32(&b, cv_proc(&cv, dbg_fn_orig(m, c.fid)))
             put32(&b, off)
@@ -1052,7 +1053,7 @@ priv fn pdb_vars(s: *Vec[u8], cv: *Cv, code: *Code, off: i64, proc: i64, rows: *
 
 priv fn pdb_scope(s: *Vec[u8], cv: *Cv, sc: *Vec[DbgScope], k: i64, rows: *Vec[DbgRow], code: *Code, off: i64, parent: i64, lo: i64, hi: i64) {
     for x in 0..sc[k].vars.len / 2 {
-        regrel(s, cv, code, sc[k].vars[2 * x], sc[k].vars[2 * x + 1])
+        regrel(s, cv, code, sc[k].vars[2 * x], sc[k].vars[2 * x + 1], off)
     }
     size := code.bytes.len
     for c in sc[k].kids {
@@ -1073,33 +1074,83 @@ priv fn pdb_scope(s: *Vec[u8], cv: *Cv, sc: *Vec[DbgScope], k: i64, rows: *Vec[D
     }
 }
 
-// variable k at offset `cfa_off` from the CFA, as S_REGREL32
-priv fn regrel(s: *Vec[u8], cv: *Cv, code: *Code, k: i64, cfa_off: i64) {
+// the type index of variable k (an indirect one: a reference to its type, which debuggers
+// show as the value), 0 for none
+priv fn var_type(cv: *Cv, k: i64) -> i64 {
+    v := &dbg_vars[k]
+    t := cv_type(cv, v.ty)
+    if t == 0 || !v.indirect {
+        return t
+    }
+    known, found := cv.refs.get(t)
+    if !found {
+        rb := vec[u8]()
+        put32(&rb, t)
+        put32(&rb, 0x1002C) // 64-bit, an lvalue reference, size 8
+        known = cv_add(cv, 0x1002, rb.items(), "")
+        cv.refs.set(t, known)
+    }
+    return known
+}
+
+// CV_AMD64_RAX.. of rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8..r15
+priv const CV_GPRS = [16]i64{328, 330, 331, 329, 335, 334, 332, 333, 336, 337, 338, 339, 340, 341, 342, 343}
+
+// the CodeView number of register r (0..15, xmm0..15 as 16..31)
+priv fn cv_reg(r: i64) -> i64 {
+    if r >= 16 {
+        return if r < 24 { 154 + (r - 16) } else { 252 + (r - 24) }
+    }
+    return CV_GPRS[r]
+}
+
+// variable k at offset `cfa_off` from the CFA, as S_REGREL32; one described by ranges
+// (DV_RANGES) as S_LOCAL with its ranges (S_DEFRANGE_REGISTER, S_DEFRANGE_FRAMEPOINTER_REL from
+// rsp after the prologue; constants have no such record: there the variable is not shown)
+priv fn regrel(s: *Vec[u8], cv: *Cv, code: *Code, k: i64, cfa_off: i64, off: i64) {
     above := i64(code.alloc) + 8 * i64(code.npush) + 8
-    {
-        v := &dbg_vars[k]
-        t := cv_type(cv, v.ty)
-        if t == 0 {
-            return
-        }
+    v := &dbg_vars[k]
+    t := var_type(cv, k)
+    if t == 0 {
+        return
+    }
+    if cfa_off != DV_RANGES {
         b := vec[u8]()
         put32(&b, cfa_off + above)
-        if v.indirect {
-            // (the slot holds the address: a reference to the type, which debuggers show as the
-            // value)
-            known, found := cv.refs.get(t)
-            if !found {
-                rb := vec[u8]()
-                put32(&rb, t)
-                put32(&rb, 0x1002C) // 64-bit, an lvalue reference, size 8
-                known = cv_add(cv, 0x1002, rb.items(), "")
-                cv.refs.set(t, known)
-            }
-            t = known
-        }
         put32(&b, t)
         put16(&b, 335) // CV_AMD64_RSP
         cstr_out(&b, v.name)
         record(s, 0x1111, b.items()) // S_REGREL32
+        return
+    }
+    rs := vec[DbgRange]()
+    for r in code.dranges {
+        if i64(r.var) == k && (r.kind == DL_REG || r.kind == DL_FB) {
+            rs.push(r)
+        }
+    }
+    b := vec[u8]()
+    put32(&b, t)
+    put16(&b, (if v.param { 1 } else { 0 }) | (if rs.is_empty() { 0x100 } else { 0 })) // fIsParam, fIsOptimizedOut
+    cstr_out(&b, v.name)
+    record(s, 0x113E, b.items()) // S_LOCAL
+    for r in rs {
+        // (a range is at most 0xFFFF bytes)
+        lo := i64(r.lo)
+        while lo < i64(r.hi) {
+            n := min(i64(r.hi) - lo, 0xFFFF)
+            d := vec[u8]()
+            if r.kind == DL_REG {
+                put16(&d, cv_reg(r.val))
+                put16(&d, 0)
+            } else {
+                put32(&d, r.val + above)
+            }
+            put32(&d, off + lo)
+            put16(&d, 1)
+            put16(&d, n)
+            record(s, if r.kind == DL_REG { 0x1141 } else { 0x1142 }, d.items()) // S_DEFRANGE_REGISTER, _FRAMEPOINTER_REL
+            lo += n
+        }
     }
 }

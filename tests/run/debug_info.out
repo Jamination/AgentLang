@@ -14,5 +14,7 @@ probe: line 30 returns i64 inside the unit true
 type Pair size 16 x@0 y@8
 type Shape size 32 tag@0 variants 2
 probe lines: within its source true from its start true the call in main true
+prologue_end: one true after the start true the second row true
+parameter a: a location list true in a register at the entry true
 aranges: true true
 frame: entry rsp+8 true body one rule true

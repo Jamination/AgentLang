@@ -220,6 +220,15 @@ priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
     }
     ins.len = c
     f.insts = ins
+    // -g: the values recorded for the variables (src/debug.al)
+    if f.dexp.len > 0 {
+        for e in 0..f.dexp.len {
+            x := i64(f.dexp[e].val)
+            if x >= 0 {
+                f.dexp[e].val = if x < n { m[x] } else { -1 }
+            }
+        }
+    }
     lbuf := mkslice[i32](__alloc_raw(lists * 4), lists)
     at = 0
     for b in 0..f.blocks.len {
@@ -252,6 +261,8 @@ priv fn keep_func(f: *Func) {
     keep_list(w, &f.params)
     keep_list(w, &f.rets)
     keep_list(w, &f.blocks)
+    keep_list(w, &f.dexp)
+    keep_list(w, &f.dtaint)
     m, c, total, lists := orphan_map(f)
     if len(m) > 0 {
         drop_orphans(f, m, c, total, lists)
@@ -495,7 +506,12 @@ fn opt_first(m: *Module, fid: i64, level: i64, w: *Work) {
     w.insts_main = level == 0
     sk_forget(f)
     opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
+    // -g, optimising: this first mem2reg records the values of the variables (src/debug.al)
+    if dbg_on && level > 0 {
+        f.drec = true
+    }
     opt_pass(PASS_MEM2REG, f, mem2reg_run)
+    f.drec = false
     opt_pass(PASS_DCE, f, cleanup_dce)
     if level > 0 {
         simplify_run(f)

@@ -43,7 +43,7 @@ noinline fn probe(a: i64, s: Shape) -> i64 {
 // the lines of probe (the declaration and the last line), and of its call in main
 const PROBE_FIRST = 30
 const PROBE_LAST = 41
-const MAIN_CALL = 462
+const MAIN_CALL = 469
 
 // ---------- reading the file ----------
 
@@ -311,6 +311,7 @@ priv struct Row {
     file: str
     line: i64
     end: bool
+    pe: bool // prologue_end
 }
 
 priv fn parse_lines(bin: *Bin) -> Vec[Row] {
@@ -351,13 +352,15 @@ priv fn parse_lines(bin: *Bin) -> Vec[Row] {
     addr := 0
     file := 1
     line := 1
+    pe := false
     while r.p < end {
         op := byte(&r)
         if op >= opcode_base {
             a := op - opcode_base
             addr += min_inst * (a / line_range)
             line += line_base + a % line_range
-            rows.push(Row{addr: addr, file: files[file], line: line})
+            rows.push(Row{addr: addr, file: files[file], line: line, pe: pe})
+            pe = false
             continue
         }
         match op {
@@ -375,7 +378,11 @@ priv fn parse_lines(bin: *Bin) -> Vec[Row] {
                     r.p += n - 1
                 }
             }
-            1 => rows.push(Row{addr: addr, file: files[file], line: line})
+            1 => {
+                rows.push(Row{addr: addr, file: files[file], line: line, pe: pe})
+                pe = false
+            }
+            10 => pe = true
             2 => addr += min_inst * uleb(&r)
             3 => line += sleb(&r)
             4 => file = uleb(&r)
@@ -555,6 +562,45 @@ fn main() {
         has_call = has_call || r.line == MAIN_CALL && ends_with(r.file, "debug_info.al")
     }
     print("probe lines: within its source", within, "from its start", first_at_start, "the call in main", has_call)
+    // the end of the prologue: one prologue_end row in probe, after its start, which is
+    // probe's second row (gdb takes that one)
+    pes := vec[i64]()
+    second := -1
+    nrow := 0
+    for r in rows {
+        if r.addr >= plo && r.addr < phi && !r.end {
+            nrow += 1
+            if nrow == 2 {
+                second = r.addr
+            }
+            if r.pe {
+                pes.push(r.addr)
+            }
+        }
+    }
+    print("prologue_end: one", pes.len == 1, "after the start", pes.len == 1 && pes[0] > plo, "the second row", pes.len == 1 && pes[0] == second)
+    // the parameter a: a location list whose first range starts at probe's first instruction,
+    // in a register (a debugger stopped there, before the prologue, shows it right)
+    {
+        ak := -1
+        for c in kids(&d, pk) {
+            if d.dies[c].tag == 0x05 && name_of(&d, c) == "a" {
+                ak = c
+            }
+        }
+        form, _ := d.dies[ak].forms.get(0x02)
+        at_entry := false
+        if form == 0x17 {
+            lr := Rd{b: sec(&bin, ".debug_loc")}
+            lr.p = attr(&d, ak, 0x02)
+            start := fixed(&lr, 8)
+            fixed(&lr, 8)
+            n := fixed(&lr, 2)
+            op := byte(&lr)
+            at_entry = start == plo - lo && n >= 1 && (op >= 0x50 && op <= 0x6f || op == 0x90)
+        }
+        print("parameter a: a location list", form == 0x17, "in a register at the entry", at_entry)
+    }
     // aranges: one range, the unit's
     ar := Rd{b: sec(&bin, ".debug_aranges")}
     ar.p = 16
