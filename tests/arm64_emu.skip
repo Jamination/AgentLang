@@ -36,3 +36,4 @@ run/bce_stepped starts the compiler (--emit-asm) and reads x86-64 machine code: 
 run/byref_param starts the compiler (--emit-asm) and reads x86-64 machine code: no processes in the emulator
 run/spill_dead_store starts the compiler (--emit-asm) and reads x86-64 machine code: no processes in the emulator
 run/runner_args starts the test runner (a new process)
+run/runner_eol starts the test runner (a new process)

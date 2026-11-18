@@ -93,6 +93,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   a file (`tests\run.bat -j 4 shaderc`; it used to be taken for the compiler, and every test
   failed with status 127); options may also follow the words; a compiler that does not exist
   or does not run stops the run at once with one message.
+- Test runner: an expected file (`NAME.out`, `NAME.err`) that differs only by CRLF line endings
+  or a byte order mark fails with that reason (`NAME.out has CRLF line endings: expected files
+  must use LF`) instead of "stdout differs" and a diff of lines that look the same.
 
 ## [0.4.0] - 2026-11-17
 

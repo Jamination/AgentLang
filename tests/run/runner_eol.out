@@ -1,0 +1,36 @@
+FAIL eol_bom [default]: tests/run/eol_bom.out starts with a byte order mark: expected files must not have one
+FAIL eol_bom [-O0]: tests/run/eol_bom.out starts with a byte order mark: expected files must not have one
+FAIL eol_bom [--unchecked]: tests/run/eol_bom.out starts with a byte order mark: expected files must not have one
+FAIL eol_both [default]: tests/run/eol_both.out has CRLF line endings and a byte order mark: expected files must use LF and no BOM
+FAIL eol_both [-O0]: tests/run/eol_both.out has CRLF line endings and a byte order mark: expected files must use LF and no BOM
+FAIL eol_both [--unchecked]: tests/run/eol_both.out has CRLF line endings and a byte order mark: expected files must use LF and no BOM
+FAIL eol_crlf [default]: tests/run/eol_crlf.out has CRLF line endings: expected files must use LF
+FAIL eol_crlf [-O0]: tests/run/eol_crlf.out has CRLF line endings: expected files must use LF
+FAIL eol_crlf [--unchecked]: tests/run/eol_crlf.out has CRLF line endings: expected files must use LF
+FAIL eol_diff [default]: stdout differs (tests/run/eol_diff.out also has CRLF line endings: expected files must use LF)
+1,2c1,2
+< one\r
+< three\r
+---
+> one
+> two
+FAIL eol_diff [-O0]: stdout differs (tests/run/eol_diff.out also has CRLF line endings: expected files must use LF)
+1,2c1,2
+< one\r
+< three\r
+---
+> one
+> two
+FAIL eol_diff [--unchecked]: stdout differs (tests/run/eol_diff.out also has CRLF line endings: expected files must use LF)
+1,2c1,2
+< one\r
+< three\r
+---
+> one
+> two
+FAIL eol_err [default]: tests/run/eol_err.err has CRLF line endings: expected files must use LF
+FAIL eol_err [-O0]: tests/run/eol_err.err has CRLF line endings: expected files must use LF
+FAIL eol_err [--unchecked]: tests/run/eol_err.err has CRLF line endings: expected files must use LF
+conformance: 3 passed, 15 failed
+status 1
+cleanup true

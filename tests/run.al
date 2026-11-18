@@ -52,6 +52,11 @@
 // three build modes (default, -O0, --unchecked). Output: `FAIL name: reason` with the first
 // lines of a diff or of the messages, `SKIP name: reason`, with -v also `ok   name`; then
 // `conformance: N passed, M failed, K skipped`. The exit status is 0 if nothing failed.
+// Expected files (NAME.out, NAME.err, NAME.fmt) are compared byte for byte, as they are: they
+// must use LF line endings and have no byte order mark (PowerShell's Set-Content and `>` write
+// CRLF, and a BOM or UTF-16; write them with the program's own output, e.g. from bash or cmd).
+// A NAME.out or NAME.err that differs only in that is named in the FAIL line (`NAME.out has
+// CRLF line endings: expected files must use LF`) instead of a diff of lines that look alike.
 //
 // Tests run at the same time, one thread per CPU (-j N: N threads; -j 1: one test after the
 // other), each in a directory of its own under the temporary directory; the three modes of a
@@ -424,6 +429,11 @@ priv fn lines_present(r: *Res, label: str, what: str, expected: str, got: str, q
         if len(line) == 0 || find(got, line) >= 0 {
             continue
         }
+        if ends_with(line, "\r") && find(got, line[..len(line) - 1]) >= 0 {
+            // (the lines are compared as they are written, see expected_form)
+            r.say(fmt("FAIL ", label, ": ", expected, " has CRLF line endings: expected files must use LF"))
+            return false
+        }
         r.say(fmt("FAIL ", label, ": ", what, ": ", line))
         if quote && len(got) > 0 {
             for l in lines(head(got, 5)) {
@@ -433,6 +443,48 @@ priv fn lines_present(r: *Res, label: str, what: str, expected: str, got: str, q
         ok = false
     }
     return ok
+}
+
+// The expected files are compared byte for byte. When only the form of the file `path` (its
+// text `want`) keeps it from equalling `got`, CRLF line endings or a byte order mark (as
+// PowerShell's Set-Content writes them), this says so; "" otherwise.
+priv fn expected_form(path: str, want: str, got: str) -> str {
+    w := want
+    bom := starts_with(w, "\xEF\xBB\xBF")
+    if bom {
+        w = w[3..]
+    }
+    crlf := find(w, "\r\n") >= 0
+    if crlf {
+        w = replace(w, "\r\n", "\n")
+    }
+    if (!bom && !crlf) || w != got {
+        return ""
+    }
+    if bom && crlf {
+        return fmt(path, " has CRLF line endings and a byte order mark: expected files must use LF and no BOM")
+    }
+    if crlf {
+        return fmt(path, " has CRLF line endings: expected files must use LF")
+    }
+    return fmt(path, " starts with a byte order mark: expected files must not have one")
+}
+
+// "stdout differs" with the first lines of the diff, or what is wrong with the expected file
+priv fn stdout_differs(r: *Res, label: str, path: str, want: str, got: str) {
+    form := expected_form(path, want, got)
+    if len(form) > 0 {
+        r.say(fmt("FAIL ", label, ": ", form))
+        return
+    }
+    note := ""
+    if find(want, "\r\n") >= 0 && find(got, "\r\n") < 0 {
+        note = fmt(" (", path, " also has CRLF line endings: expected files must use LF)")
+    } else if starts_with(want, "\xEF\xBB\xBF") {
+        note = fmt(" (", path, " also starts with a byte order mark: expected files must not have one)")
+    }
+    r.say(fmt("FAIL ", label, ": stdout differs", note))
+    r.show(diff(want, got, 10))
 }
 
 // a program of tests/run, tests/std or tests/sys, in its build modes
@@ -578,8 +630,7 @@ priv fn prog(j: Job, jd: str, r: *Res) {
         ok := true
         want := slurp(concat(base, ".out"))
         if got != want {
-            r.say(fmt("FAIL ", label, ": stdout differs"))
-            r.show(diff(want, got, 10))
+            stdout_differs(r, label, concat(base, ".out"), want, got)
             ok = false
         }
         if fmt(code) != exp_code {
@@ -762,8 +813,7 @@ priv fn run_job(j: Job, index: i64) -> Res {
                 got := slurp(out)
                 want := slurp(concat(base, ".out"))
                 if got != want {
-                    r.say(fmt("FAIL ", label, ": stdout differs"))
-                    r.show(diff(want, got, 10))
+                    stdout_differs(&r, label, concat(base, ".out"), want, got)
                     ok = false
                 }
                 if fmt(code) != exp_code {

@@ -76,6 +76,13 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   the run at once with one message and status 2. Output: `FAIL name: reason` with the first
   lines of a diff or of the messages, `SKIP name: reason`, and `conformance: N passed, M
   failed, K skipped` at the end; the exit status is 0 if nothing failed.
+- **Expected files** (`NAME.out`, `NAME.err`, `NAME.fmt`) are compared byte for byte, since a
+  program's exact output matters: they use LF line endings and have no byte order mark.
+  PowerShell writes neither by default (`Set-Content` and `>` give CRLF, a BOM or UTF-16):
+  write them from bash or cmd (`build\alc.exe run t.al > tests\run\t.out` in cmd), or with
+  `[IO.File]::WriteAllText(path, text)` and `\n`. A `.out` or `.err` that differs only in its line endings
+  or a BOM fails with that reason (`tests/run/t.out has CRLF line endings: expected files
+  must use LF`), not with a diff of lines that look the same.
 - **Parallel.** Each test (a program with its three build modes, a check, a driver script) is
   one job with a directory of its own under the temporary directory; the jobs are spread over
   the threads, except those of `tests/sys`: they run when the others are done, one after the
