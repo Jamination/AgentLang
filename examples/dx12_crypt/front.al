@@ -122,7 +122,7 @@ const TEST_H = 270
 enum Shot { ShotTitle, ShotPlay, ShotMenu, ShotWraith, ShotWon, ShotLost }
 
 
-priv const SHOT_NAMES = [6]str{"title", "play", "menu", "wraith", "won", "lost"}
+priv const SHOT_NAMES = [variant_count[Shot]()]str{"title", "play", "menu", "wraith", "won", "lost"}
 priv fn shot_name(s: Shot) -> str { SHOT_NAMES[i64(s)] }
 
 // The colour of a pixel, 0..1.
@@ -135,7 +135,7 @@ fn run_test(o: Options) -> i64 {
         return 77
     }
     h := headless_new(true)
-    taken: [6]bool
+    taken: [variant_count[Shot]()]bool
     wrong := 0
     for f in 0..14000 {
         headless_frame(&h)
@@ -178,9 +178,9 @@ fn run_test(o: Options) -> i64 {
     }
     headless_report(&h)
     renderer_close(r)
-    for i in 0..6 {
+    for i in 0..variant_count[Shot]() {
         if !taken[i] {
-            print("  WRONG: no picture of", SHOT_NAMES[i])
+            print("  WRONG: no picture of", shot_name(Shot(i)))
             wrong += 1
         }
     }

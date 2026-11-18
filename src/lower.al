@@ -2259,6 +2259,15 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                         return Some(CV.Float(f64(f32(i))))
                     }
                     (F32, Float(f)) => return Some(CV.Float(f64(f32(f))))
+                    (Enum(eid), Int(i)) if self.types.enums[eid].simple => {
+                        // Color(i): the variant with that number
+                        n := self.types.enums[eid].variants.len
+                        if i < 0 || i >= n {
+                            self.err(e.pos, enum_range_msg(self.types.name(t), if src_u64 && i < 0 { fmt(u64(i)) } else { fmt(i) }, n))
+                            return None
+                        }
+                        return Some(CV.Variant(t, i))
+                    }
                     _ => return None
                 }
             }
@@ -2298,6 +2307,20 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
                                 None => return None
                             }
                         }
+                        if targs.len == 1 && b.k == Ident("variant_count") && !self.declares_like("variant_count", 1, 0) {
+                            env := map[str, i64]()
+                            match self.expr_type(&targs[0], &env) {
+                                Some(T_ERR) => return None
+                                Some(t) => {
+                                    n, err := self.variant_count(t)
+                                    if len(err) != 0 {
+                                        self.err(e.pos, err)
+                                    }
+                                    return Some(CV.Int(n))
+                                }
+                                None => return None
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -2307,6 +2330,19 @@ fn const_eval(self: *Cx, e: *Expr) -> Opt[CV] {
         _ => {}
     }
     return None
+}
+
+// variant_count[E](): the number of variants of the enum `t`, or an error
+fn variant_count(self: *Cx, t: i64) -> (i64, str) {
+    match self.types.k(t) {
+        Enum(eid) => return (self.types.enums[eid].variants.len, "")
+        _ => return (0, fmt("variant_count[", self.types.name(t), "]: `", self.types.name(t), "` is not an enum"))
+    }
+}
+
+// the error of a constant conversion `Name(i)` to an enum with `n` variants
+fn enum_range_msg(name: str, i: str, n: i64) -> str {
+    return fmt("`", name, "(", i, ")`: ", name, " has ", n, " variants, numbered 0 to ", n - 1)
 }
 
 // Does the program declare a function `n` with `ntargs` type parameters and `nargs`

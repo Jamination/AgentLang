@@ -1,0 +1,5 @@
+3 Exit Floor exit 2 2
+Wall Floor Door Water Lava Exit 
+Blue Red Green On B Water
+Lava (-1 is no Kind) Door (6 is no Kind) 
+Tile{kind: Exit, lit: true} true true

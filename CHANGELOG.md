@@ -88,6 +88,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   first field whose AL offset differs from where HLSL packs it (a vector across a 16-byte
   register, an array element or struct not starting a register, a `bool`). The rules are
   checked against D3DCompile's shader reflection (`tests/sys/hlsl_cbuffer.al`).
+- An enum without data from its variant number: `Color(i)`, the reverse of `i64(c)`, for any
+  integer type; a number that is no variant's stops the program (`panic: not a variant`), or
+  the compilation when it is a constant. `variant_count[E]()`: the number of variants. Both
+  are constants where their arguments are (`[variant_count[Kind]()]str`).
 
 ### Changed
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a

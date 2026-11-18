@@ -1,0 +1,2 @@
+panic: not a variant at tests/run/enum_from_int_bad.al:5: Color(3): Color has 3 variants, numbered 0 to 2
+  at tests/run/enum_from_int_bad.al:9 in main

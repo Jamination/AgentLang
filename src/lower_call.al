@@ -746,6 +746,19 @@ priv fn conversion(self: *Fx, to: i64, args: []Expr, pos: Pos) -> Val {
         }
     }
     v := self.expr(&args[0], exp)
+    match (self.cx.types.k(to), self.cx.types.k(v.ty)) {
+        (Enum(eid), Int(_, _)) if self.cx.types.enums[eid].simple && self.is_untyped(&args[0]) => {
+            // Color(9) with a literal or untyped constant: the error at compile time
+            match self.cx.const_eval(&args[0]) {
+                Some(Int(i)) if i < 0 || i >= self.cx.types.enums[eid].variants.len => {
+                    self.err(pos, enum_range_msg(self.tyname(to), if v.ty == T_U64 && i < 0 { fmt(u64(i)) } else { fmt(i) }, self.cx.types.enums[eid].variants.len))
+                    return val_err()
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
     return self.convert(v, to, pos)
 }
 
@@ -1609,6 +1622,21 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             s := self.cx.types.size_of(t)
             v := self.iconst(I64, i64(s))
             return Some(self.sval(T_I64, v))
+        }
+        "variant_count" => {
+            if self.bad_arity(name, nargs, 0, pos) {
+                return Some(val_err())
+            }
+            t := self.one_targ(name, targs, pos)
+            if t < 0 {
+                return Some(val_err())
+            }
+            n, err := self.cx.variant_count(t)
+            if len(err) != 0 {
+                self.err(pos, err)
+                return Some(val_err())
+            }
+            return Some(self.sval(T_I64, self.iconst(I64, n)))
         }
         "offsetof" => {
             // the offset of a field: the argument names it and is not evaluated

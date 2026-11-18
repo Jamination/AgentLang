@@ -103,7 +103,7 @@ test "areas" {
   type keeps the low bits; to a wider type the *source* type decides: a signed source is
   sign-extended, an unsigned one zero-extended (`i64(u8(200))` is 200, `u64(i8(-1))` is all ones,
   `i8(200)` is -56). Float to integer truncates toward zero; NaN and values beyond `i64` give
-  0x8000000000000000 (`u64` is exact below 2^64). `i64(true)` is 1; `i64(e)`: `e`'s variant number.
+  0x8000000000000000 (`u64` is exact below 2^64). `i64(true)` is 1; `i64(e)`: `e`'s variant number, and for an enum without data `Color(i)` the reverse (no such variant: panic), `variant_count[Color]()` the number: [DETAILS.md](DETAILS.md#enum-variants).
 - **Values and references.** Structs, tuples, arrays and enums are values: assignment, argument
   passing and returning copy them. Slices and pointers refer to shared storage, so a copy of a
   struct shares what its slices (and every `str`, `Vec` and `Map` inside) refer to. See
@@ -683,7 +683,7 @@ These stop the program with exit status 1, a message on standard error (buffered
 | `nil` dereference, stack overflow (deep recursion), write to a string literal or constant | `panic: memory fault (nil dereference, stack overflow or use of released memory)` |
 | `pop` / `unwrap` on nothing | `panic: pop from an empty Vec at file:line`, `panic: unwrap of None` |
 | `last` of an empty `Vec`; `insert` / `remove` / `swap_remove` / `truncate` / `resize` out of range | `assertion failed at file:line: last of an empty Vec` (the line of the call) |
-| non-positive run-time `by` step; arena exhausted; misuse of `enter` / `leave`; a library function called wrongly (empty `sub` in `count`, base 1) | `panic: loop step must be positive at file:line`, `panic: out of memory`, `panic: leave without enter`, `panic at file:line: count: empty substring` (the line of the call), ... |
+| non-positive run-time `by` step; `Color(i)` with no such variant; arena exhausted; misuse of `enter` / `leave`; a library function called wrongly (empty `sub` in `count`, base 1) | `panic: loop step must be positive at file:line`, `panic: not a variant at file:line: Color(7): ...`, `panic: out of memory`, `panic: leave without enter`, `panic at file:line: count: empty substring` (the line of the call), ... |
 
 Signed overflow wraps; `MIN / -1` yields `MIN`. `alc build --unchecked` removes index and division checks (out-of-range behaviour is then undefined); `assert` and `panic` are kept.
 

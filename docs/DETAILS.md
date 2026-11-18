@@ -84,6 +84,17 @@ fn main() {
   are then used in the program. The library's `Opt[T]` and the program's are different types,
   and the library's helpers accept only the library's.
 - `print` shows a variant by its bare name. A payload is evaluated exactly once.
+- **Numbers.** `i64(e)` (or any integer type) is the number of `e`'s variant, counted from 0
+  in declaration order. For an enum without data the reverse is a conversion written with the
+  enum's name: `Color(i)` (also `Mode[T](i)`) takes any integer type and is the variant with
+  number `i`; a number that is no variant's stops the program (`panic: not a variant at
+  file:line: Color(7): Color has 3 variants, numbered 0 to 2`), or the compilation when `i` is
+  a literal or untyped constant. `variant_count[E]()` is the number of variants of any enum.
+  Both are constants where their arguments are: `const LAST = Kind(variant_count[Kind]() - 1)`,
+  `names: [variant_count[Kind]()]str`. All variants in order:
+  `for i in 0..variant_count[Kind]() { k := Kind(i) ... }`; a number read from a file is
+  checked first: `if n >= 0 && n < variant_count[Kind]() { kind = Kind(n) }`. A variant's name
+  as text is `fmt(k)`.
 
 ## Constants
 

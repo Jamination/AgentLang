@@ -6,7 +6,7 @@
 fn lower_mem_is_builtin(name: str) -> bool {
     // (a `priv` function named like a builtin shares the name in its file as well)
     match ast_plain(name) {
-        "len", "sizeof", "offsetof", "std140_size", "std430_size", "hlsl_cbuffer_size", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
+        "len", "sizeof", "offsetof", "variant_count", "std140_size", "std430_size", "hlsl_cbuffer_size", "cast", "mkslice", "ptr", "syscall", "sqrt", "fabs", "fmin", "fmax" => true
         "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "memcopy", "memfill", "embed", "panic" => true
         "fmt", "hash", "put", "print", "clone", "mulhi" => true
         "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence" => true
@@ -17,7 +17,7 @@ fn lower_mem_is_builtin(name: str) -> bool {
 // builtins that take type arguments: `sizeof[T]()`
 fn lower_mem_takes_targs(name: str) -> bool {
     match name {
-        "sizeof", "offsetof", "std140_size", "std430_size", "hlsl_cbuffer_size", "cast", "mkslice" => true
+        "sizeof", "offsetof", "variant_count", "std140_size", "std430_size", "hlsl_cbuffer_size", "cast", "mkslice" => true
         _ => false
     }
 }

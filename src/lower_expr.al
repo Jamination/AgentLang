@@ -1460,6 +1460,34 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
             }
             return self.sval(to, r)
         }
+        (Int(fb, fs), Enum(eid)) if self.cx.types.enums[eid].simple => {
+            // the variant with this number: Color(i), the inverse of i64(c); a number that is
+            // no variant's stops the program
+            s := self.scalar(v)
+            if fb < 64 {
+                s = self.ins(if fs { SExt } else { ZExt }, I64, vec_one(s), 0)
+            }
+            n := self.cx.types.enums[eid].variants.len
+            ok := self.ins(Ult, I8, vec_two(s, self.iconst(I64, n)), 0)
+            b_ok := self.new_block()
+            b_fail := self.new_block()
+            d := self.dead
+            self.br(ok, b_ok, b_fail)
+            self.switch_to(b_fail)
+            args := vec[Val]()
+            args.push(self.loc_str(pos))
+            args.push(self.sval(T_I64, s))
+            args.push(self.str_val(ast_plain_text(self.tyname(to))))
+            args.push(self.sval(T_I64, self.iconst(I64, n)))
+            self.call_rt("__enum_fail", vec[i64](), args, pos)
+            if !self.dead {
+                self.terminate(Trap)
+            }
+            self.switch_to(b_ok)
+            self.dead = d
+            r := self.ins(Trunc, I32, vec_one(s), 0)
+            return self.sval(to, r)
+        }
         (F32, F64) => {
             s := self.scalar(v)
             r := self.ins(FExt, T.F64, vec_one(s), 0)
@@ -1511,6 +1539,13 @@ fn convert(self: *Fx, v: Val, to: i64, pos: Pos) -> Val {
     }
     a := self.tyname(v.ty)
     b := self.tyname(to)
+    match (fk, tk) {
+        (Int(_, _), Enum(_)) => {
+            self.err(pos, fmt("cannot convert ", a, " to ", b, ": ", b, " has variants with data (only an enum without data is made from a variant number)"))
+            return val_err()
+        }
+        _ => {}
+    }
     self.err(pos, fmt("cannot convert ", a, " to ", b, " (use cast[T](x) for reinterpretation)"))
     return val_err()
 }
