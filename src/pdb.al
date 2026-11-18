@@ -1204,24 +1204,43 @@ priv fn regrel(s: *Vec[u8], cv: *Cv, code: *Code, k: i64, cfa_off: i64, off: i64
     put16(&b, (if v.param { 1 } else { 0 }) | (if rs.is_empty() { 0x100 } else { 0 })) // fIsParam, fIsOptimizedOut
     cstr_out(&b, v.name)
     record(s, 0x113E, b.items()) // S_LOCAL
-    for r in rs {
-        // (a range is at most 0xFFFF bytes)
-        lo := i64(r.lo)
-        while lo < i64(r.hi) {
-            n := min(i64(r.hi) - lo, 0xFFFF)
-            d := vec[u8]()
-            if r.kind == DL_REG {
-                put16(&d, cv_reg(r.val))
-                put16(&d, 0)
-            } else {
-                put32(&d, r.val + above)
-            }
-            put32(&d, off + lo)
-            put16(&d, 1)
-            put16(&d, n)
-            record(s, if r.kind == DL_REG { 0x1141 } else { 0x1142 }, d.items()) // S_DEFRANGE_REGISTER, _FRAMEPOINTER_REL
-            lo += n
+    // one record per place and up to 0xFFFF bytes of code, the code between its ranges as gaps
+    sort_by(rs.items(), fn(a: DbgRange, b: DbgRange) -> bool { a.kind < b.kind || a.kind == b.kind && (a.val < b.val || a.val == b.val && a.lo < b.lo) })
+    x := 0
+    while x < rs.len {
+        r := rs[x]
+        start := i64(r.lo)
+        end := i64(r.hi)
+        if end - start > 0xFFFF {
+            // (a range longer than a record: in pieces)
+            rs[x].lo = i32(start + 0xFFFF)
+            end = start + 0xFFFF
+        } else {
+            x += 1
         }
+        gaps := vec[(i64, i64)]()
+        while x < rs.len && rs[x].kind == r.kind && rs[x].val == r.val && i64(rs[x].hi) - start <= 0xFFFF {
+            if i64(rs[x].lo) > end {
+                gaps.push((end - start, i64(rs[x].lo) - end))
+            }
+            end = max(end, i64(rs[x].hi))
+            x += 1
+        }
+        d := vec[u8]()
+        if r.kind == DL_REG {
+            put16(&d, cv_reg(r.val))
+            put16(&d, 0)
+        } else {
+            put32(&d, r.val + above)
+        }
+        put32(&d, off + start)
+        put16(&d, 1)
+        put16(&d, end - start)
+        for g in gaps {
+            put16(&d, g.0)
+            put16(&d, g.1)
+        }
+        record(s, if r.kind == DL_REG { 0x1141 } else { 0x1142 }, d.items()) // S_DEFRANGE_REGISTER, _FRAMEPOINTER_REL
     }
 }
 

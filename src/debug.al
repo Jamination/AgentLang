@@ -1000,6 +1000,8 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
         }
     }
     leading := true
+    active := vec[(i64, i64, i64, i64, i64)]() // shown at the last located instruction: (variable, value, location or -1, kind, val)
+    prev_blk := -1
     j := 0
     for b in layout {
         if b < 0 || b >= nb || ins[b].len == 0 {
@@ -1025,9 +1027,25 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
             if i.loc != 0 || b != entry {
                 leading = false
             }
-            if i.op != Ret {
-                se, has := d.exp_at.get(if leading { first_loc } else { i.loc })
-                if has {
+            se, has := d.exp_at.get(if leading { first_loc } else { i.loc })
+            if i.op != Ret && i.loc == 0 && !leading {
+                // an instruction without a source location belongs to the row before it: what
+                // the instruction before showed goes on where its place still holds the value
+                // (and it immediately follows: same block, nothing in between)
+                if b != prev_blk {
+                    active.clear()
+                }
+                for a in active {
+                    k, v, l, kind, val := a
+                    if l < 0 || st[l] == i32(v) {
+                        add(&out, &last, k, at[j], end_of(at, j, size), kind, val)
+                    }
+                }
+            } else if i.op != Ret {
+                active.clear()
+            }
+            if i.op != Ret && has {
+                {
                     lo0 := at[j]
                     hi := end_of(at, j, size)
                     for e in se.0..se.1 {
@@ -1035,6 +1053,7 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
                         c, is_c := d.consts.get(v)
                         if is_c {
                             add(&out, &last, k, lo0, hi, c.0, c.1)
+                            active.push((k, v, -1, c.0, c.1))
                             continue
                         }
                         l := -1
@@ -1055,10 +1074,12 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
                             // registers the parameters arrive in)
                             lo := if j == 0 && b == entry && l < 32 && seed[l] == i32(v) && len(at) > 0 && at[0] == pro { 0 } else { lo0 }
                             add(&out, &last, k, lo, hi, fl.place[l].0, fl.place[l].1)
+                            active.push((k, v, l, fl.place[l].0, fl.place[l].1))
                         }
                     }
                 }
             }
+            prev_blk = b
             fl_step(&fl, &i, st.items())
             j += 1
         }
