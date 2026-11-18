@@ -18,6 +18,11 @@ is too slow for the 60 s limit, 16 are C-library, x86-64-only, `-g`, std.net or 
 built only, `840 passed, 0 failed, 51 skipped`; the structural check `505 executables, 0
 problems`; the compiler for linux-arm64 built by the x86-64 compiler (stage 1), by stage 1
 under the emulator (stage 2, 187 s) and by stage 2 (stage 3, 191 s): byte-identical.
+After C functions were added (2026-11-18, on the tree with the shared register allocator and the
+parallel arm64 back end): under the emulator `765 passed, 0 failed, 87 skipped` (with clang for
+the C libraries: `ALTEST_CLANG`), built only `877 passed, 0 failed, 48 skipped`, the structural
+check `574 executables, 163 C calls, 0 problems`, the three stages of the compiler again
+byte-identical (stages 2 and 3 took 370 s and 345 s under load).
 Refused for linux-arm64 with a message (not wrong code): `-g` and code of the bundled modules
 that make system calls by their x86-64 numbers (std.net, the gamepads of std.input).
 
