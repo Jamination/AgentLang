@@ -650,6 +650,8 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
     cwd := __os_current_dir()
     names := Names{}
     cv := Cv{types: &dbg_cx.types}
+    ipi := Cv{types: &dbg_cx.types} // the IPI records: LF_FUNC_ID of the inlined functions
+    ipi_of := map[i64, i64]()
     // the modules, by the files of the functions
     mods := vec[Mod]()
     mod_of := map[i64, i64]()
@@ -702,6 +704,8 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
         }
         chk_entry(&chk, &chk_of, &flist, &names, md.file, cwd)
         lines := vec[u8]()
+        inl_lines := vec[u8]() // DEBUG_S_INLINEELINES entries
+        inl_seen := map[i64, bool]()
         for ci in md.funcs {
             c := &out.funcs[ci]
             code := &c.code
@@ -735,6 +739,32 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
             record(&s, 0x1012, fp.items())
             rows := dbg_rows(m, c.fid, code)
             pdb_vars(&s, &cv, code, off, at, &rows)
+            // the functions inlined into it: S_INLINESITE ... S_INLINESITE_END, nested, with
+            // the inlinee's id (LF_FUNC_ID in IPI) and its lines (an entry of the module's
+            // DEBUG_S_INLINEELINES and binary annotations relative to its first line)
+            nodes := dbg_inlined(m, &rows, size)
+            if nodes.len > 1 {
+                fchk := map[i64, i64]()
+                for nd in nodes {
+                    for sg in nd.segs {
+                        fchk.set(sg.1, chk_entry(&chk, &chk_of, &flist, &names, sg.1, cwd))
+                    }
+                    if nd.fid >= 0 {
+                        o := dbg_fn_orig(m, nd.fid)
+                        ff := if o < dbg_fn_file.len { i64(dbg_fn_file[o]) } else { -1 }
+                        fchk.set(ff, chk_entry(&chk, &chk_of, &flist, &names, ff, cwd))
+                        id := ipi_func(&ipi, &ipi_of, &cv, m, nd.fid)
+                        if !inl_seen.has(id) {
+                            inl_seen.set(id, true)
+                            put32(&inl_lines, id)
+                            fo, _ := fchk.get(ff)
+                            put32(&inl_lines, fo)
+                            put32(&inl_lines, if o < dbg_fn_line.len { i64(dbg_fn_line[o]) } else { 0 })
+                        }
+                    }
+                }
+                inline_sites(&s, &nodes, 0, at, m, &ipi, &ipi_of, &cv, &fchk)
+            }
             set32(&s, at + 8, s.len)
             record(&s, 0x0006, nil)
             // the procedure reference and the public symbol
@@ -756,9 +786,18 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
             cstr_out(&pb, name)
             record(&syms, 0x110e, pb.items())
             contribs.push((off, size, mi))
-            // the lines: blocks of consecutive rows of one file
+            // the lines: blocks of consecutive rows of one file; inlined code has the line of
+            // its outermost call here (its own lines are in the inline sites' annotations)
             if rows.is_empty() {
                 continue
+            }
+            for ri in 0..rows.len {
+                l := rows[ri].loc
+                if l > 0 && m.locs.list[l].parent != 0 {
+                    rl := dbg_root_loc(m, l)
+                    rows[ri].file = i64(m.locs.list[rl].file)
+                    rows[ri].line = i64(m.locs.list[rl].line)
+                }
             }
             ls := vec[u8]()
             put32(&ls, off)
@@ -789,6 +828,12 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
         put32(&s, chk.len)
         s.extend(chk.items())
         s.extend(lines.items())
+        if !inl_lines.is_empty() {
+            put32(&s, 0xF6)
+            put32(&s, 4 + inl_lines.len)
+            put32(&s, 0) // CV_INLINEE_SOURCE_LINE_SIGNATURE
+            s.extend(inl_lines.items())
+        }
         c13 := s.len - sym_size
         put32(&s, 0) // global refs
         mstreams.push(s)
@@ -1023,14 +1068,13 @@ fn pdb_build(m: *Module, out: *Output, func_rva: *Vec[i64], text_rva: i64, gaddr
         }
     }
     tpi, tpi_hash := tpi_stream(&cv, 5)
-    ipi_cv := Cv{types: cv.types}
-    ipi, ipi_hash := tpi_stream(&ipi_cv, 6)
+    ipi_s, ipi_hash := tpi_stream(&ipi, 6)
     streams := vec[Vec[u8]]()
     streams.push(vec[u8]())
     streams.push(info)
     streams.push(tpi)
     streams.push(dbi)
-    streams.push(ipi)
+    streams.push(ipi_s)
     streams.push(tpi_hash)
     streams.push(ipi_hash)
     streams.push(glob)
@@ -1152,5 +1196,106 @@ priv fn regrel(s: *Vec[u8], cv: *Cv, code: *Code, k: i64, cfa_off: i64, off: i64
             record(s, if r.kind == DL_REG { 0x1141 } else { 0x1142 }, d.items()) // S_DEFRANGE_REGISTER, _FRAMEPOINTER_REL
             lo += n
         }
+    }
+}
+
+// ---------- inlined functions ----------
+
+// the IPI index of the LF_FUNC_ID of function fid (made once)
+priv fn ipi_func(ipi: *Cv, ipi_of: *Map[i64, i64], cv: *Cv, m: *Module, fid: i64) -> i64 {
+    orig := dbg_fn_orig(m, fid)
+    known, found := ipi_of.get(orig)
+    if found {
+        return known
+    }
+    b := vec[u8]()
+    put32(&b, 0) // no parent scope
+    put32(&b, cv_proc(cv, orig))
+    cstr_out(&b, dbg_fn_name(m, orig))
+    id := cv_add(ipi, 0x1601, b.items(), "") // LF_FUNC_ID
+    ipi_of.set(orig, id)
+    return id
+}
+
+// a binary annotation operand: CodeView's compressed unsigned number
+priv fn ba_num(b: *Vec[u8], x: i64) {
+    if x < 0x80 {
+        b.push(u8(x))
+    } else if x < 0x4000 {
+        b.push(u8(0x80 | (x >> 8)))
+        b.push(u8(x & 0xFF))
+    } else {
+        b.push(u8(0xC0 | ((x >> 24) & 0x1F)))
+        b.push(u8((x >> 16) & 0xFF))
+        b.push(u8((x >> 8) & 0xFF))
+        b.push(u8(x & 0xFF))
+    }
+}
+
+priv fn ba_signed(x: i64) -> i64 {
+    return if x >= 0 { x << 1 } else { ((-x) << 1) | 1 }
+}
+
+// the inline sites of the children of node n (DbgInl, see dbg_inlined), `parent`: the offset of
+// the enclosing symbol; their code offsets are from the start of the function
+priv fn inline_sites(s: *Vec[u8], nodes: *Vec[DbgInl], n: i64, parent: i64, m: *Module, ipi: *Cv, ipi_of: *Map[i64, i64], cv: *Cv, fchk: *Map[i64, i64]) {
+    for c in nodes[n].kids {
+        x := &nodes[c]
+        orig := dbg_fn_orig(m, x.fid)
+        file := if orig < dbg_fn_file.len { i64(dbg_fn_file[orig]) } else { -1 }
+        line := if orig < dbg_fn_line.len { i64(dbg_fn_line[orig]) } else { 0 }
+        // the annotations: per run of code, a row per segment (BA_OP_ChangeCodeOffsetAndLineOffset,
+        // or BA_OP_ChangeLineOffset and BA_OP_ChangeCodeOffset; BA_OP_ChangeFile), then
+        // BA_OP_ChangeCodeLength
+        a := vec[u8]()
+        code := 0
+        si := 0
+        for r in x.runs {
+            while si < x.segs.len && x.segs[si].0 < r.0 {
+                si += 1
+            }
+            while si < x.segs.len && x.segs[si].0 < r.1 {
+                off, f, l := x.segs[si]
+                si += 1
+                if f != file {
+                    fo, _ := fchk.get(f)
+                    a.push(5)
+                    ba_num(&a, fo)
+                    file = f
+                }
+                ld := ba_signed(l - line)
+                cd := off - code
+                if ld < 8 && cd <= 15 {
+                    a.push(11)
+                    ba_num(&a, (ld << 4) | cd)
+                } else {
+                    if l != line {
+                        a.push(6)
+                        ba_num(&a, ld)
+                    }
+                    a.push(3)
+                    ba_num(&a, cd)
+                }
+                line = l
+                code = off
+            }
+            a.push(4)
+            ba_num(&a, r.1 - code)
+            code = r.1
+        }
+        // (no record padding: 0 ends the annotations)
+        while (12 + a.len) % 4 != 0 {
+            a.push(0)
+        }
+        at := s.len
+        b := vec[u8]()
+        put32(&b, parent)
+        put32(&b, 0) // pEnd (below)
+        put32(&b, ipi_func(ipi, ipi_of, cv, m, x.fid))
+        b.extend(a.items())
+        record(s, 0x114D, b.items()) // S_INLINESITE
+        inline_sites(s, nodes, c, at, m, ipi, ipi_of, cv, fchk)
+        set32(s, at + 8, s.len)
+        record(s, 0x114E, nil) // S_INLINESITE_END
     }
 }

@@ -9,3 +9,4 @@ lines: true file true
 public probe: true
 type Pair: 2 members, 16 bytes true
 section headers: true
+inline sites right: true

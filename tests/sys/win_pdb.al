@@ -29,6 +29,16 @@ noinline fn probe(a: i64) -> i64 {
 const PROBE_FIRST = 18
 const PROBE_LAST = 27
 
+fn inl_leaf(x: i64) -> i64 {
+    return x * 3 + 1
+}
+
+const LEAF_LINE = 32
+
+noinline fn inl_outer(n: i64) -> i64 {
+    return inl_leaf(n) + inl_leaf(n + 1)
+}
+
 priv fn u16at(b: str, o: i64) -> i64 {
     return i64(b[o]) | i64(b[o + 1]) << 8
 }
@@ -92,6 +102,7 @@ priv fn records(s: str, at0: i64, end: i64) -> Vec[(i64, i64)] {
 
 fn main() {
     probe(1)
+    assert inl_outer(2) == 17
     exe, ok := read_file(args()[0])
     if !ok {
         exe, ok = read_file(fmt(args()[0], ".exe"))
@@ -268,4 +279,44 @@ fn main() {
     }
     print("type Pair: 2 members, 16 bytes", pair)
     print("section headers:", len(st[10]) == 40 * nsec)
+    // inlined code (optimised builds): `inl_outer` holds an S_INLINESITE whose inlinee is the
+    // LF_FUNC_ID of `inl_leaf` in IPI, with an entry in DEBUG_S_INLINEELINES and annotations
+    // that start with a code offset inside inl_outer (at -O0 nothing is inlined)
+    {
+        ipi := st[4]
+        leaf_id := -1
+        for i, r in records(ipi, 56, len(ipi)) {
+            if r.1 == 0x1601 && cstr_at(ipi, r.0 + 12) == "inl_leaf" {
+                leaf_id = 0x1000 + i
+            }
+        }
+        sites := 0
+        sites_ok := true
+        in_outer := false
+        for r in records(ms, 4, symsize) {
+            o, k := r
+            if k == 0x1110 {
+                in_outer = cstr_at(ms, o + 39) == "inl_outer"
+            }
+            if k == 0x114D && in_outer {
+                sites += 1
+                // (a ChangeCodeOffset or ChangeCodeOffsetAndLineOffset among the first annotations)
+                a := ms[o + 16..o + 2 + u16at(ms, o)]
+                sites_ok = sites_ok && u32at(ms, o + 12) == leaf_id && len(a) > 0 && (find(a, "\x03") >= 0 || find(a, "\x0b") >= 0)
+            }
+        }
+        lines_entry := false
+        o = symsize
+        while o < symsize + c13size {
+            kind := u32at(ms, o)
+            n := u32at(ms, o + 4)
+            if kind == 0xF6 {
+                for e in 0..(n - 4) / 12 {
+                    lines_entry = lines_entry || u32at(ms, o + 12 + 12 * e) == leaf_id && u32at(ms, o + 12 + 12 * e + 8) == LEAF_LINE
+                }
+            }
+            o += 8 + n
+        }
+        print("inline sites right:", sites == 0 || sites_ok && lines_entry && leaf_id >= 0)
+    }
 }

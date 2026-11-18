@@ -572,60 +572,13 @@ priv fn scope_die(d: *Dw, sc: *Vec[DbgScope], s: i64, rows: *Vec[DbgRow], at: i6
     }
 }
 
-// a function inlined into the code being described: the call it was inlined at (a location),
-// the function, its code (runs of offsets) and the functions inlined into it
-priv struct Inl {
-    call: i64
-    fid: i64
-    runs: Vec[(i64, i64)]
-    kids: Vec[i64]
-}
-
 // The functions inlined into a function at address `at` of `size` bytes, from the locations of
 // its rows: a row of inlined code has a location whose chain of calls (SrcLoc.parent) leads
 // out to a line of the function; each call of the chain is an inlined_subroutine (named like
 // the function, with the call's file and line) whose ranges are the code of all such rows.
 priv fn inlined(d: *Dw, rows: *Vec[DbgRow], at: i64, size: i64) {
-    locs := &d.m.locs.list
-    nodes := vec_one(Inl{call: 0, fid: -1})
-    key := map[(i64, i64), i64]()
-    chain := vec[(i64, i64)]()
-    for k, r in *rows {
-        if r.loc <= 0 || locs[r.loc].parent == 0 {
-            continue
-        }
-        start := r.off
-        end := if k + 1 < rows.len { rows[k + 1].off } else { size }
-        if end <= start {
-            continue
-        }
-        // the calls from the outside in: (call location, the function inlined there)
-        chain.clear()
-        l := r.loc
-        while l > 0 && locs[l].parent != 0 && chain.len < 64 {
-            chain.push((i64(locs[l].parent), i64(locs[l].func)))
-            l = i64(locs[l].parent)
-        }
-        n := 0
-        for i in chain.len - 1..=0 by -1 {
-            c, f := chain[i]
-            next, found := key.get((n, c))
-            if !found {
-                next = nodes.len
-                nodes.push(Inl{call: c, fid: f})
-                nodes[n].kids.push(next)
-                key.set((n, c), next)
-            }
-            n = next
-            runs := &nodes[n].runs
-            if !runs.is_empty() && runs[runs.len - 1].1 == start {
-                runs[runs.len - 1].1 = end
-            } else {
-                runs.push((start, end))
-            }
-        }
-    }
-    fn emit(d: *Dw, nodes: *Vec[Inl], n: i64, at: i64) {
+    nodes := dbg_inlined(d.m, rows, size)
+    fn emit(d: *Dw, nodes: *Vec[DbgInl], n: i64, at: i64) {
         for c in nodes[n].kids {
             x := &nodes[c]
             cl := &d.m.locs.list[x.call]
