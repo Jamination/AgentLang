@@ -102,6 +102,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   function after every store or call.
 - Code generation: fewer stores to spill slots; a loop that is left from the "then" side of a
   branch falls through into its own code.
+- `--target linux-arm64` compiles functions in parallel threads as the x86-64 back end does
+  (the same executable whatever the number of threads, `ALC_JOBS`): the compiler for arm64
+  builds in about 0.25 s instead of 0.45 s at `-O0` on 16 CPUs.
 
 ## [0.4.0] - 2026-11-17
 

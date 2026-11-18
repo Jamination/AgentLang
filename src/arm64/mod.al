@@ -1,7 +1,7 @@
 // The arm64 back end driver (--target linux-arm64): the reachable functions, block layout,
-// selection, allocation, encoding, and the float constant pool. Functions are compiled one
-// after the other on the compiler's thread (the x86-64 back end spreads them over worker
-// threads: compile_spread in src/x86/mod.al; the same can be done here).
+// selection, allocation, encoding, and the float constant pool. Functions are compiled by
+// several threads together as in the x86-64 driver (src/x86/mod.al, src/spread.al), with the
+// same result whatever the number of threads.
 
 struct A64Func {
     fid: i64
@@ -17,78 +17,81 @@ struct A64Output {
     code_files: Vec[i64]
 }
 
-// the functions to compile, in increasing order: the entry, the functions whose address is in
-// global data, and what these call or take the address of (from the optimised IR)
-priv fn reachable(m: *Module) -> Vec[i64] {
-    seen := vec_fill(m.funcs.len, false)
-    work := vec_of([]i64{m.entry})
-    seen[m.entry] = true
-    for gi in 0..m.globals.len {
-        for rl in m.globals[gi].relocs {
-            match rl.1 {
-                Func(f) if !seen[f] => {
-                    seen[f] = true
-                    work.push(f)
-                }
-                _ => {}
-            }
-        }
-    }
-    out := vec[i64]()
-    while !work.is_empty() {
-        fid := work.pop()
-        out.push(fid)
-        f := &m.funcs[fid]
-        for bi in 0..f.blocks.len {
-            for v in f.blocks[bi].insts {
-                i := &f.insts[v]
-                if (i.op == Call || i.op == FAddr) && !seen[i.k] {
-                    seen[i.k] = true
-                    work.push(i.k)
-                }
-            }
-        }
-    }
-    sort(out.items())
-    return out
+// the machine code of one function; its float constant relocations are indices into fconsts
+// (the module pool is assembled afterwards, in the order of the functions)
+priv struct Done {
+    code: A64Code
+    fconsts: Vec[Bits128]
+    files: []i64 // the source files of its optimised IR (inlined code included), as first met
+    ok: bool
+}
+
+priv struct Opts {
+    dump_asm: bool
+    mir: bool // ALC_DEBUG=mir
 }
 
 fn a64_compile(m: *Module, dump_asm: bool) -> A64Output {
     dbg, dbg_set := env_get("ALC_DEBUG")
-    mir := dbg_set && dbg == "mir"
+    o := Opts{dump_asm: dump_asm, mir: dbg_set && dbg == "mir"}
+    // (what the worker threads read is filled before they start)
     a_isel_init(m)
-    w := work_main()
-    for f in 0..m.funcs.len {
-        opt_finish(m, f, w)
-    }
-    fids := reachable(m)
-    // the source files of the compiled code, inlined code included (the location chains)
-    sfiles := vec[i64]()
-    seen_loc := vec_fill(m.locs.list.len, false)
-    for fid in fids {
-        f := &m.funcs[fid]
-        for bi in 0..f.blocks.len {
-            for v in f.blocks[bi].insts {
-                l := i64(f.insts[v].srcloc())
-                while l > 0 && l < m.locs.list.len && !seen_loc[l] {
-                    seen_loc[l] = true
-                    file := i64(m.locs.list[l].file)
-                    if !contains(&sfiles, file) {
-                        sfiles.push(file)
-                    }
-                    l = i64(m.locs.list[l].parent)
-                }
+    // as x86_compile: with several CPUs, worker threads compile the functions together with
+    // this one; at -O0 they also do the optimisation left to the back end, for all lowered
+    // functions, and their references give the reachable ones
+    nw, exact := spread_jobs()
+    par := nw > 1 && !dump_asm && (!dbg_set || dbg == "mem")
+    n := m.funcs.len
+    fused := par && opt_deferred() && n >= SPREAD_MIN
+    no_done: Done
+    // made[f]: the code of function f made by compile_spread (!ok: not made there)
+    made := vec_fill(n, no_done)
+    r := refs_new(n)
+    if fused {
+        lowered := vec[i64]()
+        for f in 0..n {
+            if m.funcs[f].lowered {
+                lowered.push(f)
             }
         }
+        made = compile_spread(m, lowered.items(), &o, spread_threads(nw, exact, lowered.len, SPREAD_PER_O0), &r)
     }
+    w := work_main()
+    for f in 0..n {
+        if !r.known[f] {
+            opt_finish(m, f, w)
+            refs_add(&r, m, f)
+        }
+    }
+    fids := reachable_funcs(m, &r)
+    if par && !fused && fids.len >= SPREAD_MIN {
+        made = compile_spread(m, fids.items(), &o, spread_threads(nw, exact, fids.len, SPREAD_PER), nil)
+    }
+    done := vec_fill(fids.len, no_done)
+    for i in 0..fids.len {
+        done[i] = made[fids[i]]
+        if !done[i].ok {
+            opt_finish(m, fids[i], w)
+            done[i] = compile_fn(m, fids[i], &o, w)
+        }
+    }
+    // the source files of the compiled code, and the float constant pool: every function's in
+    // the order of the functions
+    sfiles := vec[i64]()
     fpool := vec[Bits128]()
     fpool_ix := map[Bits128, i64]()
     funcs := vec[A64Func]()
     err := ""
-    for fid in fids {
-        code, fconsts := compile_fn(m, fid, w, dump_asm, mir)
-        local := vec[i64]()
-        for bits in fconsts {
+    local := vec[i64]()
+    for i in 0..fids.len {
+        d := &done[i]
+        for file in d.files {
+            if !contains(&sfiles, file) {
+                sfiles.push(file)
+            }
+        }
+        local.clear()
+        for bits in d.fconsts {
             ix, has := fpool_ix.get(bits)
             if !has {
                 fpool.push(bits)
@@ -97,17 +100,70 @@ fn a64_compile(m: *Module, dump_asm: bool) -> A64Output {
             }
             local.push(ix)
         }
-        a64_pool_fconsts(&code, local.items())
-        if len(code.err) != 0 && len(err) == 0 {
-            err = code.err
+        a64_pool_fconsts(&d.code, local.items())
+        if len(d.code.err) != 0 && len(err) == 0 {
+            err = d.code.err
         }
-        funcs.push(A64Func{fid: fid, code: code})
+        funcs.push(A64Func{fid: fids[i], code: d.code})
     }
     return A64Output{funcs: funcs, fpool: fpool, err: err, code_files: sfiles}
 }
 
-priv fn compile_fn(m: *Module, fid: i64, w: *Work, dump_asm: bool, mir: bool) -> (A64Code, Vec[Bits128]) {
+// What the threads of compile_spread share: an element of `done` or of the tables of `r` is
+// written by the thread that took the function, and read by the caller after the join.
+priv struct Spread {
+    m: *Module
+    o: *Opts
+    done: []Done // by function
+    r: *Refs     // nil: the references are known already
+}
+
+// Compiles the functions cand in nw threads (spread_run in src/spread.al), largest first,
+// optimising each first (opt_finish) and recording its references in r unless r is nil.
+// Returns the code by function (!ok: not in cand).
+priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> Vec[Done] {
+    order := spread_order(m, cand)
+    no_done: Done
+    done := vec_fill(m.funcs.len, no_done)
+    s := Spread{m: m, o: o, done: done.items(), r: r}
+    spread_run(order.items(), nw, &s, fn(s: *Spread, f: i64, w: *Work) {
+        opt_finish(s.m, f, w)
+        if s.r != nil {
+            refs_add(s.r, s.m, f)
+        }
+        s.done[f] = compile_fn(s.m, f, s.o, w)
+    })
+    return done
+}
+
+// the source files of the instructions of f (the chains of the locations of inlined code
+// included), each once, in the order first met
+priv fn code_files(m: *Module, f: *Func) -> Vec[i64] {
+    files := vec[i64]()
+    last := -1
+    for bi in 0..f.blocks.len {
+        for v in f.blocks[bi].insts {
+            l := i64(f.insts[v].srcloc())
+            if l == last {
+                continue
+            }
+            last = l
+            while l > 0 && l < m.locs.list.len {
+                file := i64(m.locs.list[l].file)
+                if !contains(&files, file) {
+                    files.push(file)
+                }
+                l = i64(m.locs.list[l].parent)
+            }
+        }
+    }
+    return files
+}
+
+// compiles function fid (optimised already) on the thread whose Work w is
+priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     f := &m.funcs[fid]
+    files := code_files(m, f)
     f.w = w
     work_begin(w)
     opt_backend_cleanup(f, fid)
@@ -121,20 +177,20 @@ priv fn compile_fn(m: *Module, fid: i64, w: *Work, dump_asm: bool, mir: bool) ->
     }
     mf := a_isel_select(f, m, rpo.items(), depths.items())
     layout := block_layout(f)
-    if mir {
+    if o.mir {
         eput(a_print(&mf, layout.items()))
     }
     ra := a_regalloc(&mf, layout.items(), w)
-    if dump_asm {
+    if o.dump_asm {
         put(a_print(&mf, layout.items()))
     }
     code := a_emit(&mf, &ra, layout.items())
     work_end(w)
-    res := (clone(code), clone(mf.fconsts))
+    d := Done{code: clone(code), fconsts: clone(mf.fconsts), files: files.items(), ok: true}
     f.insts = vec[Inst]()
     f.blocks = vec[BlockData]()
     f.w = nil
-    return res
+    return d
 }
 
 // Block order: reverse postorder that prefers the taken ("then") successor as fallthrough,
