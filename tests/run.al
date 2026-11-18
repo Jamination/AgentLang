@@ -21,7 +21,9 @@
 //                     NAME.c is a C library for the test, built before it with the C compiler
 //                     of the target (clang -O2, without frame pointers: libNAME.so, found
 //                     through LD_LIBRARY_PATH; Windows: MinGW -O2, NAME.dll next to the
-//                     program); without that compiler the test is reported as SKIP.
+//                     program; linux-arm64 under the emulator: clang --target=aarch64-linux-gnu,
+//                     freestanding, linked by ld.lld, from ALTEST_CLANG or PATH, found through
+//                     A64EMU_LIBRARY_PATH); without that compiler the test is reported as SKIP.
 //                     A program of run/, std/ or sys/ that ends with status 77 (and does not
 //                     expect it) is reported as SKIP with the first line of its standard output:
 //                     for what only the program can find out (no Direct3D 12 device under Wine).
@@ -73,7 +75,8 @@
 // fail/ and check/ use `alc check --target windows`, unit/ runs `alc test` under Wine; driver/
 // tests the Linux command line and is not run; the prerequisite checks (NAME.need) are Linux
 // ones and are not run either (NAME.windows.need is the Windows one, above). Tests that cannot run on Windows are listed with the reason in
-// tests/windows.skip.
+// tests/windows.skip; those that do not build for the x86-64 Linux target in tests/linux.skip,
+// those that do not build for linux-arm64 in tests/arm64.skip.
 // Linux, --host-wine alc.exe (with --target windows) tests a compiler built for Windows:
 // alc.exe runs under Wine and builds, checks and runs (`alc run` in the default mode,
 // `alc test`) the programs there; [path/to/alc] is not given then, only the filter.
@@ -103,6 +106,7 @@ priv struct Config {
     runner: []str           // what a built program is started with: nothing, wine, or the arm64 emulator
     exe: str                // ".exe" for Windows programs
     wcc: str                // the C compiler for Windows DLLs
+    clang: str              // linux-arm64: clang (ALTEST_CLANG, else clang in PATH) with ld.lld
     filter: str
     tmp: str                // the directory of this run's files
     env: []str              // what the programs started get changed in their environment
@@ -536,15 +540,21 @@ priv fn prog(j: Job, jd: str, r: *Res) {
             }
         }
     }
-    if cfg.can_run && file_exists(concat(base, ".c")) {
+    if cfg.can_run && file_exists(concat(base, ".c")) && len(j.no_run) == 0 {
         cc := vec[str]()
         if cfg.win {
             cc.extend([]str{cfg.wcc, "-O2", "-shared", "-o", path_join(jd, concat(name, ".dll"))})
+        } else if cfg.arm64 {
+            // (for the emulator: freestanding, no arm64 C library; its decoder knows the scalar
+            // instructions, not the vector code of the auto-vectoriser)
+            cc.extend([]str{cfg.clang, "--target=aarch64-linux-gnu", "-O2", "-fno-vectorize", "-fno-slp-vectorize",
+                "-fomit-frame-pointer", "-ffreestanding", "-nostdlib", "-fuse-ld=lld", "-shared", "-fPIC", "-o",
+                path_join(cfg.tmp, fmt("clib/lib", name, ".so"))})
         } else {
             cc.extend([]str{"clang", "-O2", "-fomit-frame-pointer", "-shared", "-fPIC", "-o",
                 path_join(cfg.tmp, fmt("clib/lib", name, ".so"))})
         }
-        if !have(cc[0]) {
+        if !have(cc[0]) && !file_exists(cc[0]) {
             r.say(fmt("SKIP ", name, ": ", cc[0], " is not installed (it builds the test's C library)"))
             r.skip += 1
             return
@@ -968,6 +978,8 @@ priv fn collect() -> []Job {
         wskip = read_list("tests/windows.skip")
     } else if cfg.arm64 {
         wskip = read_list("tests/arm64.skip")
+    } else {
+        wskip = read_list("tests/linux.skip")
     }
     emu_skip := map[str, str]()
     if cfg.arm64 && cfg.can_run {
@@ -1222,6 +1234,14 @@ fn main() -> i64 {
         cfg.env = []str{if has && len(old) > 0 { fmt("LD_LIBRARY_PATH=", clib, ":", old) } else { concat("LD_LIBRARY_PATH=", clib) }}
     }
     cfg.wcc = "x86_64-w64-mingw32-gcc"
+    cl, has_cl := env_get("ALTEST_CLANG")
+    cfg.clang = if has_cl && len(cl) > 0 { cl } else { "clang" }
+    if arm64 {
+        // (the emulator looks for the C libraries of tests/sys there)
+        clib := path_join(cfg.tmp, "clib")
+        make_dir(clib)
+        cfg.env = []str{concat("A64EMU_LIBRARY_PATH=", clib)}
+    }
     if HOST_WIN && !have(cfg.wcc) && have("gcc") {
         cfg.wcc = "gcc"
     }

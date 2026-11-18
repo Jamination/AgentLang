@@ -4,17 +4,14 @@
 API (`mtl_`), `CAMetalLayer` (`ca_`), the AppKit pieces needed to open a window and pump
 events (`ns_`), and the runtime itself (`objc_`, `sel`, the `msg_*` family).
 
-**Status: type-check only.** `alc` emits x86-64 Linux executables. A program that uses this
-module passes `alc check` (which also checks every function of the module), but
-`alc build` stops with
-
-```
-error: `NSApplicationLoad` is imported from `/System/Library/Frameworks/AppKit.framework/AppKit`, which is not a Linux library; ...
-```
-
-A macOS backend needs a Mach-O writer and an arm64 code generator (or x86-64 with the macOS
-conventions below). The module has never been executed; it has been written against Apple's
-documented selectors and enum values and is checked only by the type checker.
+**Status: builds for macOS, never run.** `alc build --target macos` (experimental, arm64)
+makes a Mach-O executable that links AppKit, QuartzCore, Metal and libobjc; for the other
+targets `alc build` stops with "`NSApplicationLoad` is imported from
+`/System/Library/Frameworks/AppKit.framework/AppKit`, which is not a Linux library". The module
+has never been executed; it has been written against Apple's documented selectors and enum
+values, and macOS executables are checked structurally only ([MACOS_TEST.md](../MACOS_TEST.md)).
+The `msg_*` functions call `objc_msgSend` as a function value, with AL's convention, which does
+not extend narrow arguments (`BOOL`) to 32 bits as Apple's convention asks.
 
 ## How it maps
 

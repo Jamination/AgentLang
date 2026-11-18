@@ -757,6 +757,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
     s.slot_of = alloca_slots(f, &s.mf)
     if dbg_on {
         dbg_slots(f, &s.mf, &s.slot_of)
+        s.dbg_begin()
     }
     // Each block is selected backwards: the terminator, then the instructions from the last
     // one, then (entry block) the parameters. Every piece appends its instructions to s.out
@@ -789,6 +790,9 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 starts.push(s.out.len)
                 d := s.vr(v)
                 s.out.push(minst_new(Mov, 8, R(d), I(f.insts[v].k)))
+                if dbg_on {
+                    s.out[s.out.len - 1].tgt = i32(v + 1)
+                }
                 continue
             }
             if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr || op == FAddr || op == Proj {
@@ -799,6 +803,9 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 s.cur_clob = s.clob[v]
                 s.inst(v)
                 s.stamp(starts.last(), f.insts[v].srcloc())
+                if dbg_on {
+                    s.dbg_tag(v, starts.last())
+                }
             }
         }
         if b == 0 {
@@ -1404,6 +1411,7 @@ priv fn params_win(self: *Sel) {
 priv fn phi_copies(self: *Sel, b: i64, s: i64) {
     // parallel copies for the phis of s along edge b -> s
     moves := vec[(i64, Opnd, u8)]()
+    msrc := vec[i64]() // (the input of each move)
     phis := vec[i64]()
     for v in self.f.blocks[s].insts {
         if self.f.insts[v].op != Phi {
@@ -1438,6 +1446,7 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
             }
         }
         moves.push((d, so, cls))
+        msrc.push(src)
     }
     // sequentialize: register sources first, respecting dependencies
     pending := vec[(i64, Opnd, u8)]()
@@ -1479,11 +1488,11 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
             }
         }
     }
-    for mv in moves {
+    for mi, mv in moves {
         d := mv.0
         s2 := mv.1
         match s2 {
-            R(r) => {}
+            R(r) => continue
             Opnd.None => self.e(Zero, 8, R(d), Opnd.None)
             M(m) => {
                 if m.kind == MK_SLOT {
@@ -1493,6 +1502,10 @@ priv fn phi_copies(self: *Sel, b: i64, s: i64) {
                 }
             }
             _ => self.e(Mov, 8, R(d), s2)
+        }
+        if dbg_on {
+            // (-g: the constant input it puts there, src/debug.al)
+            self.out[self.out.len - 1].tgt = i32(msrc[mi] + 1)
         }
     }
 }
@@ -2478,6 +2491,262 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
                 isf := self.f.insts[p].ty.is_fp()
                 self.e(if isf { MovSd } else { Mov }, 8, R(d), R(locs[k]))
             }
+        }
+    }
+}
+
+// ---------- -g: what the locations of the variables are found from (src/debug.al) ----------
+
+// the sizes, blocks and dominators of the values, the parameters' places at the entry, the
+// phis' inputs and the variables expected at each source location
+priv fn dbg_begin(self: *Sel) {
+    f := self.f
+    n := f.insts.len
+    d := &self.mf.dbg
+    d.on = true
+    d.vsize = vec_fill(n, u8(0))
+    for v in 0..n {
+        d.vsize[v] = u8(f.insts[v].ty.size())
+    }
+    d.vblk = clone(self.blk_of)
+    for v in 0..n {
+        // (constants and addresses have one value wherever they are: like the parameters,
+        // they are never stale)
+        match f.insts[v].op {
+            Const, FConst, GAddr, FAddr, Alloca => d.vblk[v] = i32(DBG_ENTRY)
+            _ => {}
+        }
+    }
+    cfg := cfg_new(f)
+    d.dpre = clone(cfg.pre)
+    d.dpost = clone(cfg.post)
+    // the parameters, as params / params_win take them
+    win := target_os == TargetWindows
+    ni := 0
+    nf := 0
+    nstack := if win { WIN_REG_ARGS } else { 0 }
+    for pi in 0..f.params.len {
+        t := f.params[pi]
+        pv := self.param_of[pi]
+        kind := DL_REG
+        at := 0
+        if win {
+            if pi < WIN_REG_ARGS {
+                at = if t.is_fp() { XMM0 + pi } else { WIN_INT_ARGS[pi] }
+            } else {
+                kind = DL_FB
+                at = nstack
+                nstack += if t.is_vec() { 2 } else { 1 }
+            }
+        } else if t.is_fp() {
+            if nf < NUM_FLOAT_ARGS {
+                at = XMM0 + nf
+                nf += 1
+            } else {
+                kind = DL_FB
+                at = nstack
+                nstack += if t.is_vec() { 2 } else { 1 }
+            }
+        } else if ni < len(INT_ARGS) {
+            at = INT_ARGS[ni]
+            ni += 1
+        } else {
+            kind = DL_FB
+            at = nstack
+            nstack += 1
+        }
+        if pv >= 0 {
+            d.seeds.push((kind, at, pv))
+            d.vblk[pv] = i32(DBG_ENTRY)
+        }
+    }
+    if f.dexp.is_empty() {
+        return
+    }
+    // the phis' inputs, by block
+    for b in 0..f.blocks.len {
+        l := vec[(i64, i64, i64)]()
+        for v in f.blocks[b].insts {
+            i := &f.insts[v]
+            if i.op != Phi {
+                continue
+            }
+            fr := i.from()
+            for k in 0..i.args.len {
+                l.push((i64(v), fr[k], i.args[k]))
+            }
+        }
+        if !l.is_empty() {
+            d.phis.set(b, l)
+        }
+    }
+    // the source locations of the instructions and their outermost location in this function;
+    // those whose code was copied by unrolling are not trusted (see src/debug.al)
+    locs := &self.m.locs.list
+    fn root(locs: *Vec[SrcLoc], l0: i32) -> i32 {
+        l := l0
+        n := 0
+        while l > 0 && i64(l) < locs.len && locs[i64(l)].parent != 0 && n < 256 {
+            l = locs[i64(l)].parent
+            n += 1
+        }
+        return l
+    }
+    root_of := map[i32, i32]()
+    tainted := map[i32, bool]()
+    for b in 0..f.blocks.len {
+        for v in f.blocks[b].insts {
+            l := f.insts[v].srcloc()
+            if l <= 0 {
+                continue
+            }
+            if !root_of.has(l) {
+                root_of.set(l, root(locs, l))
+            }
+        }
+    }
+    for l in f.dtaint {
+        tainted.set(root(locs, l), true)
+    }
+    {
+        dv, dset := env_get("ALC_DBGLOC")
+        if dset && dv == f.name {
+            eput(fmt("dexp ", f.name, ": ", f.dexp.items(), " taint ", f.dtaint.items(), "\n"))
+        }
+    }
+    // the table by location (sorted: entries of one location together)
+    ex := vec_of(f.dexp.items())
+    sort_by(ex.items(), fn(a: DbgExp, b: DbgExp) -> bool { a.loc < b.loc || a.loc == b.loc && a.var < b.var })
+    by_root := map[i32, (i64, i64)]()
+    seen_var := map[i64, bool]()
+    // (location 0: the same value everywhere, a parameter passed by reference)
+    every := vec[(i64, i64)]()
+    k := 0
+    while k < ex.len && ex[k].loc == 0 {
+        if ex[k].val >= 0 && i64(ex[k].val) < n {
+            every.push((i64(ex[k].var), i64(ex[k].val)))
+            seen_var.set(i64(ex[k].var), true)
+        }
+        k += 1
+    }
+    for r in root_of.values() {
+        if !by_root.has(r) {
+            by_root.set(r, (-1, -1))
+        }
+    }
+    while k < ex.len {
+        e := k
+        while e < ex.len && ex[e].loc == ex[k].loc {
+            e += 1
+        }
+        start := d.exp.len
+        d.exp.extend(every.items())
+        x := k
+        while x < e {
+            // (the entries of one variable: its value if they agree)
+            y := x
+            v := i64(ex[x].val)
+            while y < e && ex[y].var == ex[x].var {
+                if i64(ex[y].val) != v {
+                    v = -1
+                }
+                y += 1
+            }
+            seen_var.set(i64(ex[x].var), true)
+            var_ := i64(ex[x].var)
+            x = y
+            if v < 0 || v >= n {
+                continue
+            }
+            d.exp.push((var_, v))
+            i := &f.insts[v]
+            if i.op == Const {
+                d.consts.set(v, (DL_INT, i.k))
+            } else if i.op == FConst && i.ty == F64 {
+                d.consts.set(v, (DL_F64, i.k))
+            } else if i.op == FConst && i.ty == F32 {
+                d.consts.set(v, (DL_F32, i.k))
+            }
+        }
+        _, bad := tainted.get(ex[k].loc)
+        if d.exp.len > start && !bad {
+            by_root.set(ex[k].loc, (start, d.exp.len))
+        } else {
+            by_root.del(ex[k].loc)
+        }
+        k = e
+    }
+    // the locations with no variable of their own
+    for r in by_root.keys() {
+        se, _ := by_root.get(r)
+        _, bad := tainted.get(r)
+        if se.0 < 0 {
+            if every.is_empty() || bad {
+                by_root.del(r)
+            } else {
+                by_root.set(r, (d.exp.len, d.exp.len + every.len))
+                d.exp.extend(every.items())
+            }
+        }
+    }
+    for l in root_of.keys() {
+        r, _ := root_of.get(l)
+        se, found := by_root.get(r)
+        if found {
+            d.exp_at.set(l, se)
+        }
+    }
+    for v in seen_var.keys() {
+        d.vars.push(v)
+    }
+    sort(d.vars.items())
+}
+
+// v was selected into out[from..]: its last instruction carries it (a call: its results); a
+// parameter's store into its frame slot is marked DBG_HOME
+priv fn dbg_tag(self: *Sel, v: i64, from: i64) {
+    i := &self.f.insts[v]
+    if i.op == Store && self.cur_block == 0 && self.f.insts[i.args[1]].op == Param {
+        // (into a variable's alloca, or at a constant offset into one)
+        a := &self.f.insts[i.args[0]]
+        if !(dbg_var_of(a) >= 0 || a.op == Add && dbg_var_of(&self.f.insts[a.args[0]]) >= 0) {
+            return
+        }
+        for k in from..self.out.len {
+            o := &self.out[k]
+            if (o.op == Mov || o.op == MovSd) && !is_r(o.a) {
+                o.tgt = DBG_HOME
+            }
+        }
+        return
+    }
+    vals := vec_one(v)
+    pl, has := self.projs.get(v)
+    if has {
+        for x in pl {
+            vals.push(x.1)
+        }
+    }
+    dub := vec_fill(DU_MAX, 0)
+    du := dub.items()
+    for x in vals {
+        r := i64(self.vreg[x])
+        if r == NOREG {
+            continue
+        }
+        // the last instruction that defines r
+        k := self.out.len - 1
+        while k >= from {
+            o := &self.out[k]
+            mir_decode(&self.mf, o, du, 0)
+            h := du[0]
+            if contains(du[1..1 + (h & 255)], r) {
+                if o.a == R(r) && dbg_taggable(o.op) && o.tgt == 0 {
+                    o.tgt = i32(x + 1)
+                }
+                break
+            }
+            k -= 1
         }
     }
 }

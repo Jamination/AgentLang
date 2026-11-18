@@ -1349,7 +1349,8 @@ fn char_range(first: i64, last: i64) -> []i64 {
 
 // Rasterises the glyphs of the code points `chars` (and glyph 0) at an em size of px pixels and
 // packs them into an image `width` pixels wide and as high as needed, with 1 pixel between
-// glyphs; channels 1 (coverage) or 4 (white RGB, coverage as alpha). Returns "" or what is wrong.
+// glyphs; channels 1 (coverage) or 4 (white RGB in every pixel, coverage as alpha). Returns ""
+// or what is wrong.
 fn atlas_build(f: Font, px: f32, chars: []i64, width: i64, channels: i64) -> (Atlas, str) {
     a := Atlas{font: f, px: px, scale: font_scale(f, px), metrics: font_metrics(f, px)}
     if channels != 1 && channels != 4 {
@@ -1401,21 +1402,22 @@ fn atlas_build(f: Font, px: f32, chars: []i64, width: i64, channels: i64) -> (At
     }
     height := y + shelf + 1
     a.img = image_new(width, height, channels)
+    if channels == 4 {
+        // white everywhere, also between the glyphs: a GPU's linear filter mixes the colour of
+        // a glyph's edge with its transparent neighbours, and straight alpha would darken it
+        for i in 0..width * height {
+            a.img.pix[4 * i] = 255
+            a.img.pix[4 * i + 1] = 255
+            a.img.pix[4 * i + 2] = 255
+        }
+    }
     for k in 0..cps.len {
         b := bms[k]
         px0, py0 := pos[k]
         for yy in 0..b.img.h {
             for xx in 0..b.img.w {
-                v := b.img.pix[yy * b.img.w + xx]
                 i := ((py0 + yy) * width + px0 + xx) * channels
-                if channels == 1 {
-                    a.img.pix[i] = v
-                } else {
-                    a.img.pix[i] = 255
-                    a.img.pix[i + 1] = 255
-                    a.img.pix[i + 2] = 255
-                    a.img.pix[i + 3] = v
-                }
+                a.img.pix[i + channels - 1] = b.img.pix[yy * b.img.w + xx]
             }
         }
         c := cps[k]

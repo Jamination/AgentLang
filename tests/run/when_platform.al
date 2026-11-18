@@ -17,6 +17,7 @@ fn main() {
     match TARGET_OS {
         Linux => print(PATH_SEP == '/')
         Windows => print(PATH_SEP == '\\')
+        MacOS => print(PATH_SEP == '/')
     }
     if TARGET_OS == Windows {
         print(fmt(TARGET_OS) == "Windows")

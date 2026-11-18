@@ -1,0 +1,5 @@
+# Tests that tests/run.sh does not build for the x86-64 Linux target (also --target linux on
+# Windows): "dir/name reason".
+
+sys/c_abi passes structs by value to C, which the x86-64 Linux target does not support (pass a pointer): the test is for linux-arm64 (AAPCS64) and Windows
+fail/extern_arm64 the diagnostics of the arm64 C convention (structs by value): on x86-64 Linux every struct parameter is the error

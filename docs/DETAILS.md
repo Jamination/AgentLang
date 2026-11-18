@@ -530,8 +530,8 @@ panic: index out of bounds at main.al:12
 a debugger and profiled with symbols:
 
 - **Linux**: DWARF 4 in the ELF file (`.debug_info`, `.debug_abbrev`, `.debug_line`,
-  `.debug_str`, `.debug_aranges`, `.debug_ranges`, `.debug_frame`), for gdb, lldb, perf and
-  the like.
+  `.debug_str`, `.debug_aranges`, `.debug_ranges`, `.debug_loc`, `.debug_frame`), for gdb,
+  lldb, perf and the like.
 - **Windows**: the same DWARF in the PE file (gdb, lldb) and a PDB next to the executable
   (`game.exe` -> `game.pdb`, found through the executable's debug directory) for Visual Studio,
   WinDbg / cdb and the Windows profilers.
@@ -540,9 +540,12 @@ What is described: one compile unit for the program; every function with its add
 its file and line, its parameters and variables (with their scopes: a variable is visible from
 its declaration to the end of its block; the variable of a `for` loop and the bindings of a
 `match` arm inside their body), the types of these, the line table (a row per statement and
-expression, the line of code inlined from another function being that function's line), the
-global variables (not the thread-local ones), the functions inlined into each function
-(DWARF only) and the call frames (`.debug_frame`; the PE file also has its `.pdata`).
+expression, the line of code inlined from another function being that function's line; a row
+with `prologue_end` where the prologue and the parameters' stores end), the global variables
+(not the thread-local ones; a C variable, `extern`, in DWARF only, where its import slot
+points), the functions inlined into each function (DWARF: `inlined_subroutine`; PDB:
+`S_INLINESITE` with its lines, so gdb and cdb / Visual Studio show inlined calls as frames of
+their own) and the call frames (`.debug_frame`; the PE file also has its `.pdata`).
 
 - **`-O0 -g`**: every statement has code and its line: a breakpoint on any line stops there,
   `next` / `step` go statement by statement, and every variable lives in a frame slot of its own
@@ -553,9 +556,18 @@ global variables (not the thread-local ones), the functions inlined into each fu
   instructions, but `.rdata` gains the debug directory, which may move the sections after it
   and so change displacements). Lines are exact for every instruction (each
   keeps the location of the statement it comes from), but statements are merged, moved and
-  removed, so stepping jumps; inlined calls show as frames of their own in gdb. Variables that
-  stay in memory (their address is taken, or an aggregate that is not split up) are described;
-  the others (in registers) are not: the debugger reports them as unknown.
+  removed, so stepping jumps; inlined calls show as frames of their own. Variables that stay
+  in memory (their address is taken, or an aggregate that is not split up) are in their frame
+  slots. The others are described by location lists (DWARF `.debug_loc`; PDB `S_LOCAL` with
+  `S_DEFRANGE_REGISTER` / `S_DEFRANGE_FRAMEPOINTER_REL`): per range of code, the register or
+  spill slot that holds the variable's value, or (DWARF) its constant value; elsewhere the
+  debugger says "optimized out" / "value unavailable". The ranges are worked out on the final
+  machine code (`src/debug.al`): a variable is shown at an instruction only where the value it
+  has at that source line is known and a register or slot provably holds that value (the
+  latest one: a value from an earlier loop iteration never counts); when in doubt it is not
+  shown. Not described: variables whose storage is only promoted to registers after inlining,
+  structs split into their fields, the variables of inlined functions, and the lines of code
+  that unrolling copied.
 - **AL types** as a debugger shows them (the language of the compile unit is C, the closest a
   debugger knows): integers, `f32` / `f64` and `bool` are base types (`u8` an unsigned char, so
   a `*u8` prints as text); `str` and `[]T` are a struct `{ptr, len}` (gdb prints the text of a
@@ -565,7 +577,8 @@ global variables (not the thread-local ones), the functions inlined into each fu
   use (DWARF: a variant part, `{tag = Some, Some = {_0 = 4}}`; PDB: the tag and a union of one
   struct per variant); `Vec`, `Map` and the other library types are the structs they are. A
   parameter passed by reference (a struct on Windows) shows as its value (DWARF: a location
-  with a dereference; PDB: a reference type).
+  with a dereference; PDB: a reference type, which cdb's `dv` prints as a pointer and `dx` /
+  `??` as the value).
 - **Source files** are named as on the command line, relative to the working directory of the
   build (DWARF: the compile unit's directory; PDB: made absolute). The run-time library and the
   bundled modules are inside the compiler: their frames have lines (`<prelude>:62`), but there
@@ -574,17 +587,21 @@ global variables (not the thread-local ones), the functions inlined into each fu
   pushes, then one `sub rsp`; on Windows the probe loop of a frame of a page or more, whose
   CFA is an expression of r11), every epilogue and the entry stub of a Linux executable (the
   outermost frame). The frame base of a function is its CFA (Linux), or rsp plus the frame
-  (Windows, where gdb unwinds with `.pdata`, not with DWARF), so variables are right from the
-  end of the prologue to the start of an epilogue (stopped on the first instruction of a
-  function, before its prologue, they show garbage).
-- **Size and time.** Nothing changes without `-g`. The compiler built with `-g`: 4.6 -> 8.6 MB
-  (Linux, optimised), 4.1 -> 5.5 MB at `-O0`; for Windows 4.8 -> 7.2 MB plus a 1.2 MB PDB.
-  `-g` makes the `-O0` self-compile about 15 % slower (the variables in memory, the tables).
+  (Windows, where gdb unwinds with `.pdata`, not with DWARF), so variables in the frame are
+  right from the end of the prologue to the start of an epilogue. The parameters are right from
+  the first instruction: until the prologue has stored them they are described in the
+  registers (or stack slots) they arrive in, so a debugger that stops on a function's first
+  instruction (cdb's `bp name`, gdb's `break *name`) shows them; gdb's `break name` stops after
+  the prologue (the second line row), the PDB's debug start is the same place.
+- **Size and time.** Nothing changes without `-g`. The compiler built with `-g`: 4.9 -> 11.3 MB
+  (Linux, optimised), 4.3 -> 6.2 MB at `-O0`; for Windows 5.2 -> 10.3 MB plus a 5.9 MB PDB.
+  `-g` makes the self-compile about 30 % slower when optimising (the location analysis) and
+  about 20 % at `-O0` (the variables in memory, the tables).
 
-**Not described**: thread-local globals; C variables (`extern`); variables in registers in
-optimised code; columns; inlined functions in the PDB (their lines are there, as lines of the
-function they were inlined into; no `S_INLINESITE`). The PDB has no checksums of the source
-files, and its GUID is a hash of the code and data (the same program gives the same PDB).
+**Not described**: thread-local globals; C variables in the PDB; columns (source locations
+have none: adding them would change the stack-trace tables of builds without `-g`). The PDB's
+file checksums are the MD5 of each source file (not of the files inside the compiler), and its
+GUID is a hash of the code and data (the same program gives the same PDB).
 
 The implementation: `src/debug.al` (what lowering and the back end record), `src/dwarf.al`,
 `src/pdb.al`. Tests: `tests/run/debug_info.al` reads the DWARF of its own executable (ELF or
@@ -759,6 +776,32 @@ fn main() {
   or a struct of vectors can be handed to a GPU API as is.
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
   different scalar type (except through `u8`), as in C.
+
+**arm64 Linux** (`--target linux-arm64`, experimental): C functions are called by the Arm
+procedure call standard (AAPCS64), as GCC and Clang call them there:
+
+- `extern` functions may also take and return structs, tuples, arrays and enums with data by
+  value: a struct of one to four `f32` (or of one to four `f64`) members, nothing else, in
+  floating-point registers; any other of up to 16 bytes as its bytes in one or two integer
+  registers; a larger one as a pointer to a copy the caller makes; results the same way, a
+  larger one in memory the caller provides. When the registers run out, the argument goes to
+  the stack (it is never split between registers and the stack). A struct with a vector member,
+  an empty struct and a vector type cannot cross the C boundary. A C function that takes or
+  returns a struct cannot be used as a function value: call it directly.
+- Variadic arguments are passed like named ones (no `al`, unlike x86-64).
+- Callbacks: any AL function with scalar parameters (integers, floats, pointers, function
+  values) and a scalar result can be called by C, on any thread, as on x86-64.
+- The program is dynamically linked against `/lib/ld-linux-aarch64.so.1` (glibc's loader; on
+  musl a link of that name is needed), its threads are the C library's (`pthread_create`).
+- A stack trace ends at the first frame of C code (x86-64 continues through C frames).
+- Verified under the project's emulator against C built by clang only; see
+  [ARM64_TEST.md](ARM64_TEST.md#5-c-libraries-and-dynamic-linking).
+
+**macOS** (`--target macos`, experimental, arm64, never run): as arm64 Linux above, with
+Apple's variant of the convention (stack arguments packed, variadic arguments on the stack).
+Libraries are dylibs or frameworks by path: `extern "/usr/lib/libobjc.A.dylib" fn ...`,
+`extern "/System/Library/Frameworks/Metal.framework/Metal" fn ...`; the run-time library uses
+`/usr/lib/libSystem.B.dylib`. See [MACOS_TEST.md](MACOS_TEST.md).
 
 **Windows** (`--target windows`):
 

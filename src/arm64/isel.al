@@ -52,10 +52,16 @@ fn a_split_critical_edges(f: *Func) {
 // function is selected (the back end's threads only read it); an access is TPIDR_EL0 + 16 +
 // offset (TLS variant I: the 16-byte thread control block, then the block)
 priv tls_off: Vec[i64]
+// the import slots of C functions and variables (ExternFn.got), loaded with ADRP + LDR
+priv import_slot: Vec[bool]
 
 fn a_isel_init(m: *Module) {
     tls_off = vec_fill(m.globals.len, 0)
     layout_tls(m, &tls_off, false)
+    import_slot = vec_fill(m.globals.len, false)
+    for x in m.externs {
+        import_slot[x.got] = true
+    }
 }
 
 // a memory operand: [base + imm], [base + (idx << sh)], a frame slot + imm, an argument word
@@ -312,7 +318,13 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
         }
         GAddr => {
             r := self.gp()
-            if self.m.globals[i.k].tls {
+            if self.m.globals[i.k].tls && target_os == TargetMacOS {
+                // macOS: the block from its thread-local variable descriptor (TPIDR_EL0 is not
+                // ours there); x0 is defined by the instruction, as by a system call
+                self.out.push(ainst(Tlv, 8, 0, NOREG, NOREG))
+                self.mov(r, 0)
+                self.ei(AddI, 8, r, r, tls_off[i.k])
+            } else if self.m.globals[i.k].tls {
                 self.e(Mrs, 8, r, NOREG, NOREG)
                 self.ei(AddI, 8, r, r, 16 + tls_off[i.k])
             } else {
@@ -409,10 +421,43 @@ priv fn addr(self: *Sel, v: i64) -> AM {
 }
 
 // ---------- parameters ----------
+// macOS: a stack argument at its own size and alignment (as Apple's convention packs them, so
+// that every AL function is a C callback there too): its byte offset from `off`, which moves on
+priv fn mac_slot(t: T, off: *i64) -> (i64, u8) {
+    sz := if t.is_vec() { u8(16) } else if t.is_fp() { fsz(t) } else { sz_of(t) }
+    o := align_up(*off, i64(sz))
+    *off = o + i64(sz)
+    return (o, sz)
+}
+
 priv fn params(self: *Sel) {
     ni := 0
     nf := 0
     nstack := 0
+    if target_os == TargetMacOS {
+        off := 0
+        for pi, t in self.f.params {
+            pv := self.param_of[pi]
+            want := pv >= 0 && self.needed[pv]
+            if t.is_fp() && nf < A_NARG {
+                if want {
+                    self.fmov(self.vr(pv), A_V0 + nf)
+                }
+                nf += 1
+            } else if !t.is_fp() && ni < A_NARG {
+                if want {
+                    self.mov(self.vr(pv), ni)
+                }
+                ni += 1
+            } else {
+                o, sz := mac_slot(t, &off)
+                if want {
+                    self.mem(if t.is_fp() { FLdr } else { Ldr }, sz, self.vr(pv), AM{k: AK_INARG, base: NOREG, idx: NOREG, sh: 0, imm: o, id: 0})
+                }
+            }
+        }
+        return
+    }
     for pi, t in self.f.params {
         pv := self.param_of[pi]
         want := pv >= 0 && self.needed[pv]
@@ -913,6 +958,13 @@ priv fn inst(self: *Sel, v: i64) {
         }
         Load => {
             d := self.vr(v)
+            ai := &self.f.insts[i.args[0]]
+            if ai.op == GAddr && import_slot[ai.k] && ty == I64 {
+                li := ainst(LdrG, 8, d, NOREG, NOREG)
+                li.id = i32(ai.k)
+                self.out.push(li)
+                return
+            }
             am := self.addr(i.args[0])
             match ty {
                 F32 => self.mem(FLdr, 4, d, am)
@@ -1114,9 +1166,50 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
     nf := 0
     nstack := 0
     regs := vec[(i64, i64)]()
+    if i.op == CallInd && i.aux == CCALL_AUX {
+        // a C call laid out by the lowering (src/lower_ccall.al): k = x registers | v
+        // registers << 4 | an x8 pointer << 8, then the stack pieces
+        nx := i.k & 15
+        nv := (i.k >> 4) & 15
+        p := 0
+        if (i.k >> 8) & 1 == 1 {
+            regs.push((8, self.reg(args[0])))
+            p = 1
+        }
+        for j in 0..nx {
+            regs.push((j, self.reg(args[p + j])))
+        }
+        for j in 0..nv {
+            regs.push((A_V0 + j, self.reg(args[p + nx + j])))
+        }
+        off := 0
+        for a in args[p + nx + nv..] {
+            at := self.f.insts[a].ty
+            r := self.reg(a)
+            // (Linux: an 8-byte slot each; macOS: each at its own size and alignment)
+            sz := if at.is_fp() { fsz(at) } else { sz_of(at) }
+            off = align_up(off, if target_os == TargetMacOS { i64(sz) } else { 8 })
+            if at.is_fp() {
+                self.mem(FStr, sz, r, AM{k: AK_OUTARG, base: NOREG, idx: NOREG, sh: 0, imm: off, id: 0})
+            } else {
+                self.mem(Str, sz, r, AM{k: AK_OUTARG, base: NOREG, idx: NOREG, sh: 0, imm: off, id: 0})
+            }
+            off += if target_os == TargetMacOS { i64(sz) } else { 8 }
+        }
+        nstack = align_up(off, 8) / 8
+        args = args[..0]
+    }
+    mac_off := 0
     for a in args {
         at := self.f.insts[a].ty
         r := self.reg(a)
+        if target_os == TargetMacOS && ((at.is_fp() && nf >= A_NARG) || (!at.is_fp() && ni >= A_NARG)) {
+            // (macOS: packed, see mac_slot)
+            o, sz := mac_slot(at, &mac_off)
+            self.mem(if at.is_fp() { FStr } else { Str }, sz, r, AM{k: AK_OUTARG, base: NOREG, idx: NOREG, sh: 0, imm: o, id: 0})
+            nstack = align_up(mac_off, 8) / 8
+            continue
+        }
         if at.is_fp() {
             if nf < A_NARG {
                 regs.push((A_V0 + nf, r))

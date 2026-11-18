@@ -13,14 +13,32 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   needs an arm for it or `_`.
   `TARGET_ARCH` is now declared by the OS layer of the target instead of the prelude (nothing
   changes for programs).
+- `enum Os` has a third variant, `MacOS` (`--target macos` below): a `match` on `TARGET_OS`
+  needs an arm for it or `_`; `when TARGET_OS == Windows { ... } else { ... }` takes the else
+  branch for macOS, so check that it suits macOS (or add `else when TARGET_OS == MacOS`).
 
 ### Added
-- `--target linux-arm64` (experimental): static AArch64 Linux executables without C libraries,
-  with `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
+- `--target macos` (experimental, never run): arm64 Mach-O executables for macOS 11 and later
+  (Apple silicon), with chained fixups, an ad-hoc code signature, thread-local data through
+  dyld's descriptors, a run-time library over libSystem (`src/prelude_macos.al`), C functions
+  by Apple's variant of the Arm calling convention, and dylibs or frameworks as `extern`
+  libraries; the core library, std.image, std.font, std.asset, std.os, the mixer of std.audio
+  and std.metal build. Checked structurally only (`tests/macho/check.al`, LLVM's tools); see
+  docs/MACOS_TEST.md. Not yet: `-g`, std.net, std.input, std.window, audio devices, stack
+  traces through C frames, `--all-targets` for macOS.
+- `--target linux-arm64` (experimental): AArch64 Linux executables, with
+  `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
   (`tests/arm64/emu.al`; `tests/run.sh --target linux-arm64 --emu build/a64emu`), not yet on
-  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g`, `extern` C functions,
-  and the modules that make system calls by their x86-64 numbers (`std.net`, the gamepads of
-  `std.input`), which are refused with a message.
+  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g` and the modules that
+  make system calls by their x86-64 numbers (`std.net`, the gamepads of `std.input`), which
+  are refused with a message.
+- linux-arm64: `extern` C functions and variables. A program that uses one is dynamically
+  linked (`/lib/ld-linux-aarch64.so.1`, as GCC links them) and calls C by the Arm procedure call
+  standard (AAPCS64), including structs, tuples and arrays by value (in floating-point or
+  integer registers or by reference, as C passes them; results through x8), variadic calls and
+  callbacks; its threads are the C library's. Checked under the emulator against C compiled by
+  clang (`tests/sys/c_abi`), not yet against a real loader or C library. Stack traces end at
+  the first C frame.
 - The compiler builds for arm64 Linux (experimental, as above):
   `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`.
 - `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a
@@ -37,6 +55,19 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   glyph atlases into std.image images, and UTF-8 text layout, measuring, line wrapping and
   drawing into images. CFF outlines are rejected with an error; a malformed font is rejected,
   never read out of bounds. `examples/font_demo.al`. See docs/std/font.md.
+- `std.gfx_text`: text for std.gfx with std.font's fonts. `gfx_font(g, font, px, chars)` makes
+  a `GfxFont` (the glyphs at one pixel size as a coverage texture; `gfx_font(g, atlas,
+  filter)` from an atlas of one's own, `gfx_font_add`, `gfx_font_free`); `draw_text(g, font, x,
+  y, text, color)` draws UTF-8 text with kerning and `'\n'`, also aligned (`AlignLeft`,
+  `AlignCenter`, `AlignRight`); `draw_text_box` wraps into a rectangle as `wrap_text` does;
+  `text_size` and `line_height` measure. Pens are rounded to whole target pixels, so the GPU
+  draws what std.font's `draw_text` with the atlas draws into an image (within 1 of 255 per
+  channel on Direct3D 12 and Vulkan); `font.size` draws a font rasterised at the size it has on
+  the screen at its virtual size under `set_view`; characters outside the font's set draw as
+  its missing glyph; drawing allocates nothing. A separate module: a std.gfx program without
+  text does not grow. std.font's 4-channel atlases are now white in every pixel (alpha 0
+  between the glyphs), so a linear filter no longer darkens the glyphs' edges.
+  `examples/gfx_starter` draws its text with it in a system font. See docs/std/gfx.md#text.
 - `std.net`: TCP (connect with a time limit, non-blocking connect, listen / accept, send / recv
   with time limits, shutdown), UDP (`udp_bind`, `send_to`, `recv_from`), IPv4 and IPv6 address
   parsing and formatting, and `poll` over several sockets for game loops. Errors are Linux
@@ -70,8 +101,18 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   executables (lines, functions, parameters and variables with their scopes, types, globals,
   inlined calls, call frames), and on Windows a `.pdb` next to the executable for Visual
   Studio, WinDbg and profilers. At `-O0 -g` every statement can be stepped and every variable
-  is visible; with optimisation `-g` does not change the code (variables kept in registers are
-  not described). See [DETAILS.md](docs/DETAILS.md#debug-information).
+  is visible; with optimisation `-g` does not change the code. See
+  [DETAILS.md](docs/DETAILS.md#debug-information).
+- `-g` with optimisation: variables kept in registers and spill slots are described (location
+  lists: DWARF `.debug_loc`, PDB `S_LOCAL` with `S_DEFRANGE_*`), where the value they have at
+  that line is provably there, and "optimized out" elsewhere; parameters passed by reference
+  too.
+- `-g`: a breakpoint on a function shows its parameters right: they are described in their
+  argument registers until the prologue has stored them, the line table marks the end of the
+  prologue (`prologue_end`, and a row of its own for gdb), the PDB's debug start is there.
+- `-g`, PDB: inlined functions (`S_INLINESITE` with their lines, `LF_FUNC_ID` in IPI), so cdb
+  and Visual Studio show inlined calls as frames, as gdb does from DWARF; MD5 checksums of the
+  source files. DWARF: `extern` C variables.
 - `alc fmt`: rewrites source files in the one canonical layout, changing white space only
   (`--check` lists the files that would change, `--stdout` and `-` for filters); a file with a
   syntax error is left as it is. See [DETAILS.md](docs/DETAILS.md#alc-fmt).
@@ -89,6 +130,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   function after every store or call.
 - Code generation: fewer stores to spill slots; a loop that is left from the "then" side of a
   branch falls through into its own code.
+- `--target linux-arm64` compiles functions in parallel threads as the x86-64 back end does
+  (the same executable whatever the number of threads, `ALC_JOBS`): the compiler for arm64
+  builds in about 0.25 s instead of 0.45 s at `-O0` on 16 CPUs.
 - Test runner (`tests/run.sh`, `tests\run.bat`): one word alone is the filter unless it names
   a file (`tests\run.bat -j 4 shaderc`; it used to be taken for the compiler, and every test
   failed with status 127); options may also follow the words; a compiler that does not exist
