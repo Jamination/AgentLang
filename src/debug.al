@@ -49,6 +49,8 @@ dbg_cx: *Cx
 dbg_tests: []str
 // the file given on the command line (the name of the compile unit)
 dbg_main_file: i64
+// the text of each source file (by file number; the PDB's checksums)
+dbg_texts: Vec[str]
 // Windows: the path of the PDB as the executable names it (absolute), and its bytes (pe_link)
 dbg_pdb_path: str
 dbg_pdb: Vec[u8]
@@ -255,6 +257,12 @@ fn dbg_bind(self: *Fx, name: str, ty: i64, addr: i64) {
         self.store_raw(p, addr, I64, AK_PTR)
         v.indirect = true
         dbg_vars.push(v)
+    } else if dbg_in_params && i.op == Param {
+        // optimising: a parameter passed by reference is where its address (the parameter) points,
+        // at every location (Func.dexp location 0)
+        v.indirect = true
+        dbg_vars.push(v)
+        self.f.dexp.push(DbgExp{loc: 0, var: i32(k), val: i32(addr)})
     }
 }
 

@@ -923,19 +923,24 @@ fn dwarf_sections(m: *Module, out: *Output, func_addr: *Vec[i64], gaddr: *Vec[i6
         fn_die(&d, c.fid, &c.code, at, &rows)
         fde(&frame, at, &c.code)
     }
-    // the global variables in the image (not the thread-local ones, not C variables)
+    // the global variables in the image (not the thread-local ones); a C variable (`extern`)
+    // where its import slot points, which the dynamic loader fills
     for n in dbg_cx.globals.keys() {
         tg, _ := dbg_cx.globals.get(n)
         ty, gi := tg
-        if gi < 0 || gi >= m.globals.len || m.globals[gi].tls || dbg_cx.ext_gots.has(gi) || gaddr[gi] == 0 || !has_die(ty) {
+        if gi < 0 || gi >= m.globals.len || m.globals[gi].tls || gaddr[gi] == 0 || !has_die(ty) {
             continue
         }
+        ext := dbg_cx.ext_gots.has(gi)
         uleb(&d.info, AB_GLOBAL)
         strp(&d, ast_plain_text(n))
         tref(&d, ty)
-        uleb(&d.info, 9)
+        uleb(&d.info, if ext { 10 } else { 9 })
         d.info.push(0x03) // DW_OP_addr
         put64(&d.info, gaddr[gi])
+        if ext {
+            d.info.push(0x06) // DW_OP_deref
+        }
     }
     // the types the functions refer to, and the ones those refer to
     qi := 0

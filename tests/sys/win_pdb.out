@@ -6,6 +6,7 @@ modules: true this file's true
 probe: true S_FRAMEPROC true variables k inner p inner in a block inside k's true
 debug start after the prologue true parameter a: S_LOCAL true in a register at the entry true
 lines: true file true
+checksum of this file: MD5 true
 public probe: true
 type Pair: 2 members, 16 bytes true
 section headers: true

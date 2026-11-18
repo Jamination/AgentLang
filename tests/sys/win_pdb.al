@@ -260,6 +260,20 @@ fn main() {
         o += 8 + n
     }
     print("lines:", lines_ok, "file", file_ok)
+    // the checksum of this file: an MD5 (kind 1, 16 bytes) that is not all zeros
+    {
+        cs := false
+        e := 0
+        while e + 6 <= len(chk) {
+            name := cstr_at(strtab, 12 + u32at(chk, e))
+            size := i64(chk[e + 4])
+            if ends_with(name, "win_pdb.al") {
+                cs = size == 16 && chk[e + 5] == 1 && chk[e + 6..e + 22] != "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+            }
+            e = (e + 6 + size + 3) / 4 * 4
+        }
+        print("checksum of this file: MD5", cs)
+    }
     // the publics: probe among the S_PUB32 records
     syms := st[u16at(dbi, 20)]
     pub := false

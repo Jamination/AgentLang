@@ -2619,13 +2619,28 @@ priv fn dbg_begin(self: *Sel) {
     sort_by(ex.items(), fn(a: DbgExp, b: DbgExp) -> bool { a.loc < b.loc || a.loc == b.loc && a.var < b.var })
     by_root := map[i32, (i64, i64)]()
     seen_var := map[i64, bool]()
+    // (location 0: the same value everywhere, a parameter passed by reference)
+    every := vec[(i64, i64)]()
     k := 0
+    while k < ex.len && ex[k].loc == 0 {
+        if ex[k].val >= 0 && i64(ex[k].val) < n {
+            every.push((i64(ex[k].var), i64(ex[k].val)))
+            seen_var.set(i64(ex[k].var), true)
+        }
+        k += 1
+    }
+    for r in root_of.values() {
+        if !by_root.has(r) {
+            by_root.set(r, (-1, -1))
+        }
+    }
     while k < ex.len {
         e := k
         while e < ex.len && ex[e].loc == ex[k].loc {
             e += 1
         }
         start := d.exp.len
+        d.exp.extend(every.items())
         x := k
         while x < e {
             // (the entries of one variable: its value if they agree)
@@ -2656,8 +2671,23 @@ priv fn dbg_begin(self: *Sel) {
         _, bad := tainted.get(ex[k].loc)
         if d.exp.len > start && !bad {
             by_root.set(ex[k].loc, (start, d.exp.len))
+        } else {
+            by_root.del(ex[k].loc)
         }
         k = e
+    }
+    // the locations with no variable of their own
+    for r in by_root.keys() {
+        se, _ := by_root.get(r)
+        _, bad := tainted.get(r)
+        if se.0 < 0 {
+            if every.is_empty() || bad {
+                by_root.del(r)
+            } else {
+                by_root.set(r, (d.exp.len, d.exp.len + every.len))
+                d.exp.extend(every.items())
+            }
+        }
     }
     for l in root_of.keys() {
         r, _ := root_of.get(l)
