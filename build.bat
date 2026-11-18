@@ -9,7 +9,14 @@ rem                        build\altest
 rem   build.bat --quick    seed compiler -> build\alc.exe only (no self-check, no build\alc), and
 rem                        build\altest.exe
 rem   build.bat --reseed   after a full build, also replaces the seeds with the new compilers
+rem   build.bat --runner   only builds the test runner build\altest.exe with build\alc.exe
+rem                        (tests\run.bat does this before every run)
 rem
+rem A test run in progress keeps build\altest.exe and build\alc.exe open, and Windows writes no
+rem file of a running program. So each is built under another name and installed: one whose
+rem bytes did not change (unchanged sources) is left as it is; a changed one replaces it, and a
+rem running one is renamed away first (Windows allows that), as build\NAME.old*.exe, which a
+rem later build removes once nothing runs it.
 rem The seed is bootstrap\alc.exe, a committed build of an earlier version of this same compiler
 rem (override with ALC_SEED=path\to\alc.exe). No other tool takes part in building the compiler.
 rem build.sh is the same script for Linux; both produce byte-identical compilers.
@@ -25,8 +32,10 @@ if "%~1"=="--quick" (
   set "MODE=quick"
 ) else if "%~1"=="--reseed" (
   set "MODE=reseed"
+) else if "%~1"=="--runner" (
+  set "MODE=runner"
 ) else (
-  echo usage: build.bat [--quick ^| --reseed]
+  echo usage: build.bat [--quick ^| --reseed ^| --runner]
   exit /b 2
 )
 shift
@@ -34,6 +43,11 @@ goto args
 
 :run
 if not exist build mkdir build
+if "%MODE%"=="runner" (
+  call :runner build\altest.exe
+  if errorlevel 1 goto norunner
+  exit /b 0
+)
 if not exist "%SEED%" (
   echo build: no seed compiler at %SEED%
   exit /b 1
@@ -45,8 +59,9 @@ if errorlevel 1 (
   exit /b 1
 )
 if "%MODE%"=="quick" (
-  move /y build\alc-stage1.exe build\alc.exe >nul
-  build\alc.exe build tests/run.al -o build\altest.exe
+  call :install build\alc-stage1.exe build\alc.exe
+  if errorlevel 1 exit /b 1
+  call :runner build\altest.exe
   if errorlevel 1 goto norunner
   echo build: build\alc.exe ^(quick, not self-checked^)
   exit /b 0
@@ -77,13 +92,15 @@ if errorlevel 2 (
   echo build: FAIL: stage 2 and stage 3 differ ^(the compiler does not reproduce itself^)
   exit /b 1
 )
-copy /y build\alc-stage2.exe build\alc.exe >nul
-move /y build\alc.new build\alc >nul
-del build\alc-stage1.exe build\alc-stage2.exe build\alc-stage3.exe
+call :install build\alc-stage2.exe build\alc.exe
+if errorlevel 1 exit /b 1
+call :install build\alc.new build\alc
+if errorlevel 1 exit /b 1
+del build\alc-stage1.exe build\alc-stage3.exe
 rem the test runner (tests\run.bat starts it), built by the new compiler
-build\alc.exe build tests/run.al -o build\altest.exe
+call :runner build\altest.exe
 if errorlevel 1 goto norunner
-build\alc.exe build --target linux tests/run.al -o build\altest
+call :runner build\altest --target linux
 if errorlevel 1 goto norunner
 if "%SAME%"=="checked" (
   echo build: build\alc.exe, self-compiled, stages 2 and 3 identical; build\alc ^(Linux^)
@@ -101,3 +118,30 @@ exit /b 0
 :norunner
 echo build: FAIL: build\alc.exe does not compile the test runner tests\run.al
 exit /b 1
+
+rem the test runner %1 (build\altest.exe, build\altest), built by build\alc.exe with the options
+rem %2 %3 and installed; errorlevel 1 if it cannot be built or installed
+:runner
+build\alc.exe build %2 %3 tests/run.al -o "%~dpn1.new%~x1"
+if errorlevel 1 exit /b 1
+call :install "%~dpn1.new%~x1" "%~1"
+exit /b %errorlevel%
+
+rem moves the new file %1 to %2 as described at the top (the same bytes: %1 is removed and %2
+rem stays as it is); errorlevel 1 if %2 cannot be replaced
+:install
+del "%~dpn2.old*%~x2" >nul 2>&1
+fc /b "%~1" "%~2" >nul 2>&1
+if errorlevel 1 goto install_new
+del "%~1"
+exit /b 0
+:install_new
+move /y "%~1" "%~2" >nul 2>&1
+if not errorlevel 1 exit /b 0
+move /y "%~2" "%~dpn2.old%RANDOM%%~x2" >nul 2>&1
+move /y "%~1" "%~2" >nul
+if errorlevel 1 (
+  echo build: FAIL: cannot replace %~2 ^(the new file is %~1^)
+  exit /b 1
+)
+exit /b 0

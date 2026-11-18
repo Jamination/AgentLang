@@ -276,6 +276,11 @@ With `--target windows` the module works through kernel32.dll (`CreateProcessW`,
   a path is used as it is (also with `.exe` appended if it has no extension; a name with a
   dot in it, `tool.v2`, gets none). A file that is not an executable image fails with
   `exec format error`, a directory with `permission denied`, as on Linux.
+- **Long paths.** A program whose path is 260 units or more (as written, or once a relative
+  path is made absolute) is started through its extended-length form (`\\?\C:\...`), as the
+  file functions take such paths; the command line names it as `argv[0]` has it. The started
+  program inherits the working directory of this process, which Windows keeps under MAX_PATH
+  (258 units) unless `LongPathsEnabled` is set: that limit cannot be lifted here.
 - **Batch files** (`.bat`, `.cmd`) are not programs: starting one fails with `exec format
   error` (Windows itself would hand it to `cmd.exe`, which reads the command line by rules of
   its own: an argument could turn into a command). Run them as `[]str{"cmd", "/c", file,

@@ -7,6 +7,7 @@
 #   geometric mean of (AL time / clang -O2 time) <= 1.5 and every ratio <= 2.5
 # A test whose prerequisite is missing on this machine (GPU driver, sound library, display) is
 # reported as SKIP with its reason and does not count as a failure.
+# Run it before every commit, on the tree as it will be committed (docs/BOOTSTRAP.md, Testing).
 cd "$(dirname "$0")" || exit 2
 RUNS=${RUNS:-7}
 BENCHES="nbody spectralnorm fannkuch mandelbrot binarytrees sha256 matmul quicksort sieve hashmap"

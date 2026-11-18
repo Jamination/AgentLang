@@ -4,6 +4,7 @@ rem 3 byte-identical), the conformance tests run on this machine (tests\run.bat:
 rem built by build\alc.exe in three modes and run, `alc run`, `alc test`, diagnostics), and the
 rem same programs are built and type-checked for Linux (tests\run.bat --target linux).
 rem Prints VERIFY: PASS or VERIFY: FAIL as its last line; the exit code is 0 only for PASS.
+rem Run it before every commit, on the tree as it will be committed (docs/BOOTSTRAP.md, Testing).
 rem
 rem The full verification is verify.sh on Linux: it adds what needs clang, readelf and bash
 rem (f32 results against C, static-executable checks, the command-line tests, the benchmarks

@@ -193,6 +193,13 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   one line, as in `assert e1 == "" && e2 == ""`, are told apart), and the conversion hint
   names the right operand. `expected expression` at a closing bracket or the end of a line or
   file names the bracket that is never closed.
+- Test runner (`tests/run.sh`, `tests\run.bat`): one word alone is the filter unless it names
+  a file (`tests\run.bat -j 4 shaderc`; it used to be taken for the compiler, and every test
+  failed with status 127); options may also follow the words; a compiler that does not exist
+  or does not run stops the run at once with one message.
+- Test runner: an expected file (`NAME.out`, `NAME.err`) that differs only by CRLF line endings
+  or a byte order mark fails with that reason (`NAME.out has CRLF line endings: expected files
+  must use LF`) instead of "stdout differs" and a diff of lines that look the same.
 
 ### Fixed
 - `alc build` / `alc run` accepted a type error in a function a program does not reach of a
@@ -201,10 +208,27 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   still compiled only as far as a program reaches them, and the tests check all of them for
   every target (`tests/check/std_targets.al` now includes `std.font`, and
   `std_targets_vk.al` the Vulkan backend of `std.gfx` with `std.vk`).
-
-### Fixed
 - A global initialised from a typed integer constant (`x := K` with `const K: i32 = 7`, or a
   `u32` from `rgb8`) has the constant's type; it was taken as `i64` and rejected.
+- `build.bat --quick` (and a second `tests\run.bat`) failed while a test run was in progress,
+  which keeps `build\altest.exe` and `build\alc.exe` open: both are now built under another
+  name, left as they are when their bytes did not change, and otherwise replace the old file
+  (a running one is renamed away first). `build.bat --runner` builds only the test runner.
+- Direct3D 12 read-back: `readback_pixels` mapped `RowPitch * height` bytes of a buffer that is
+  `RowPitch * (height - 1) + width * 4` long, so `Map` failed with `E_INVALIDARG` for any width
+  whose rows are no multiple of 256 bytes (480 x 270). `gpu_readback`, `readback_pixels` and
+  `readback_free` now live in `examples/gamekit/dx12_gpu.al` (they were in the test
+  `tests/sys/dx12_offscreen.al`), map the buffer's size, and `examples/dx12_crypt` uses them.
+  (`std.gfx`'s `read_texture` was not affected: it makes its buffer `pitch * height` long.)
+- Windows: a program whose path is 260 units or more (absolute, relative, or a short relative
+  path from a deep working directory) could not be started by `run`, `run_capture`,
+  `run_capture_all`, `spawn`, `alc run` and `alc test` ("no such file or directory"), although
+  the file functions and the program search took such paths: `CreateProcessW` now gets the
+  extended-length form.
+- Windows stack traces: a frame of a DLL whose path is 260 units or more was named by the end
+  of the path cut at 260 units (a directory's name) instead of the DLL's file name; the title
+  of a GUI program's panic message box was cut the same way at 519 units. Module file names
+  are now read into a buffer that grows.
 
 ## [0.4.0] - 2026-11-17
 

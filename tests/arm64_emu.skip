@@ -35,6 +35,8 @@ std/audio_ogg_bad too slow under the emulator for the 60 s limit (138 s; its out
 run/bce_stepped starts the compiler (--emit-asm) and reads x86-64 machine code: no processes in the emulator
 run/byref_param starts the compiler (--emit-asm) and reads x86-64 machine code: no processes in the emulator
 run/spill_dead_store starts the compiler (--emit-asm) and reads x86-64 machine code: no processes in the emulator
+run/runner_args starts the test runner (a new process)
+run/runner_eol starts the test runner (a new process)
 sys/c_variadic its C library includes the C headers and calls sprintf of libc.so.6: the emulator has no arm64 C library
 sys/thread_libc calls the C library libc.so.6, which the emulator does not have
 sys/thread_ccb its C library starts a thread with pthread_create: the emulator has no arm64 C library

@@ -49,27 +49,52 @@ parallel back end hand their results over as AL values in memory: nothing is ser
 
 ```
 tests/run.sh                        # Linux: the conformance suite with build/alc
-tests/run.sh ./build/alc match      # only the tests whose name contains "match"
+tests/run.sh match                  # only the tests whose name contains "match"
+tests/run.sh ./build/alc match      # the same with the compiler named
 tests/run.sh --target windows       # the programs built for Windows, run under Wine
 tests/run.sh --target windows --host-wine build/alc.exe   # the same with the compiler for Windows under Wine
 ./verify.sh                         # Linux: everything (build, suite, results against clang, benchmarks)
 tests\run.bat                       :: Windows: the suite with build\alc.exe, no Wine
+tests\run.bat -j 4 -v shaderc       :: Windows: the tests named *shaderc*, 4 threads, ok lines too
 tests\run.bat --target linux        :: Windows: the programs built and type-checked for Linux, not run
 verify.bat                          :: Windows: build, both of the above, one line VERIFY: PASS or VERIFY: FAIL
 ```
 
+**Before every commit** run `verify.bat` (Windows) or `./verify.sh` (Linux) on the tree exactly
+as it will be committed, after the last edit, and commit only on `VERIFY: PASS`. A suite run
+from before the last change (an edit, a rebase, a merge, another commit on the branch) says
+nothing about the commit: an expected output can go stale in between, as one did. A run of
+`tests\run.bat` with a filter is for working on a change, not for committing it.
+
 The runner is an AL program, `tests/run.al` (its top lists the kinds of tests and their
 files); `build.sh` / `build.bat` build it with the new compiler as `build/altest` and
 `build/altest.exe`, and `tests/run.sh` / `tests\run.bat` only start it in the repository root
-(`run.sh` rebuilds it when `tests/run.al` is newer, `run.bat` always). It can also be started
+(`run.sh` rebuilds it when `tests/run.al` is newer, `run.bat` always, with `build.bat
+--runner`). A test run keeps the runner and the compiler open, and Windows writes no file of a
+running program: `build.bat` therefore builds each under another name and leaves the old one
+in place when the bytes are the same; a changed one replaces it, and a running one is renamed
+away first (`build\altest.old*.exe`, removed by a later build), so `build.bat --quick` and a
+second `tests\run.bat` work while tests run (`build.sh` does the same with `mv`, which Linux
+allows over a running program). It can also be started
 directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
 
 - **Options**: `-j N` threads (default: one per CPU; `-j 1` runs one test after the other),
   `-v` also prints `ok   name` for every test that passed, `--target linux|windows`,
-  `--host-wine alc.exe` (Linux), then the compiler (default `./build/alc`, Windows
-  `build/alc.exe`) and a filter. Output: `FAIL name: reason` with the first lines of a diff or
-  of the messages, `SKIP name: reason`, and `conformance: N passed, M failed, K skipped` at
-  the end; the exit status is 0 if nothing failed.
+  `--host-wine alc.exe` (Linux), and the words `[path/to/alc] [filter]`, before or after the
+  options. Two words are the compiler and the filter; one word alone is the compiler if it
+  names a file or has a directory in it (`./build/alc`, `build\alc.exe`), else the filter
+  (`tests\run.bat -j 4 shaderc`), with the default compiler (`./build/alc`, Windows
+  `build/alc.exe`). A compiler that does not exist or does not answer `alc --version` stops
+  the run at once with one message and status 2. Output: `FAIL name: reason` with the first
+  lines of a diff or of the messages, `SKIP name: reason`, and `conformance: N passed, M
+  failed, K skipped` at the end; the exit status is 0 if nothing failed.
+- **Expected files** (`NAME.out`, `NAME.err`, `NAME.fmt`) are compared byte for byte, since a
+  program's exact output matters: they use LF line endings and have no byte order mark.
+  PowerShell writes neither by default (`Set-Content` and `>` give CRLF, a BOM or UTF-16):
+  write them from bash or cmd (`build\alc.exe run t.al > tests\run\t.out` in cmd), or with
+  `[IO.File]::WriteAllText(path, text)` and `\n`. A `.out` or `.err` that differs only in its line endings
+  or a BOM fails with that reason (`tests/run/t.out has CRLF line endings: expected files
+  must use LF`), not with a diff of lines that look the same.
 - **Parallel.** Each test (a program with its three build modes, a check, a driver script) is
   one job with a directory of its own under the temporary directory; the jobs are spread over
   the threads, except those of `tests/sys`: they run when the others are done, one after the
