@@ -353,44 +353,12 @@ fn renderer_close(r: *Renderer) {
 
 // ---- reading the picture back ----------------------------------------------------------------
 
-// A copy of a 2D texture of 4-byte pixels on its way to the CPU (after tests/sys/dx12_offscreen.al).
-struct Readback {
-    buffer: *ID3D12Resource
-    width: i64
-    height: i64
-    row_pitch: i64        // bytes from one row to the next (a multiple of 256)
-    size: i64             // of the buffer: the last row is not padded
-}
-
-priv fn readback_record(g: *Gpu, list: *ID3D12GraphicsCommandList, texture: *ID3D12Resource, state: u32) -> Readback {
-    desc := texture.GetDesc()
-    footprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT
-    total: u64
-    g.device.GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nil, nil, &total)
-    rb := Readback{gpu_buffer(g, D3D12_HEAP_TYPE_READBACK, i64(total), D3D12_RESOURCE_STATE_COPY_DEST), i64(desc.Width),
-        i64(desc.Height), i64(footprint.Footprint.RowPitch), i64(total)}
-    dst := D3D12_TEXTURE_COPY_LOCATION{pResource: rb.buffer, Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}
-    *dst.u_PlacedFootprint() = footprint
-    src := D3D12_TEXTURE_COPY_LOCATION{pResource: texture, Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}
-    dx_barrier(list, texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE)
-    list.CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
-    dx_barrier(list, texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state)
-    rb
-}
+// The copy itself is the gamekit's (gpu_readback, readback_pixels in ../gamekit/dx12_gpu.al).
 
 // The pixels of a finished readback as an RGBA image (allocates), and the buffer released.
 priv fn readback_image(rb: *Readback) -> Image {
-    img := image_new(rb.width, rb.height, 4)
-    mapped: *u8
-    whole := D3D12_RANGE{0, u64(rb.size)}
-    dx_check(rb.buffer.Map(0, &whole, &mapped), "ID3D12Resource::Map (readback)")
-    rows := mkslice[u8](mapped, rb.size)
-    for y in 0..rb.height {
-        copy(img.pix[y * rb.width * 4..(y + 1) * rb.width * 4], rows[y * rb.row_pitch..y * rb.row_pitch + rb.width * 4])
-    }
-    none := D3D12_RANGE{0, 0}
-    rb.buffer.Unmap(0, &none)
-    com_release(&rb.buffer)
+    img := Image{rb.width, rb.height, 4, readback_pixels(rb)}
+    readback_free(rb)
     // the alpha of the target is whatever blending left there: a screenshot is opaque
     for i in 0..rb.width * rb.height {
         img.pix[i * 4 + 3] = 255
@@ -522,7 +490,7 @@ fn render_frame(r: *Renderer, g: *Game, alpha: f32, note: str, capture: bool) ->
 
     rb: Readback
     if capture {
-        rb = readback_record(&r.g, list, target, D3D12_RESOURCE_STATE_RENDER_TARGET)
+        rb = gpu_readback(&r.g, list, target, D3D12_RESOURCE_STATE_RENDER_TARGET)
     }
     dx_barrier(list, target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT)
     gpu_execute(&r.g, list)

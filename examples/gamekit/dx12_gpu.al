@@ -1,7 +1,7 @@
 // Direct3D 12 set-up code shared by the DX12 examples, on top of std.dx12 (Windows only): a
 // device with its queue and fence (hardware adapter, else WARP), fence waits, device removal
-// text, HLSL compilation with the compiler's messages, buffers, textures, barriers, and a sprite
-// batcher for 2D games. Example code to read, copy and change: not part of the standard library.
+// text, HLSL compilation with the compiler's messages, buffers, textures, barriers, a sprite
+// batcher for 2D games, and reading textures back (screenshots, pixel tests). Example code to read, copy and change: not part of the standard library.
 use std.dx12
 
 // ---- device ----------------------------------------------------------------------------------
@@ -528,3 +528,56 @@ fn sprites_free(s: *Sprites) {
     com_release(&s.pipeline)
     com_release(&s.root)
 }
+
+// ---- reading textures back -------------------------------------------------------------------
+// For screenshots and pixel tests: a copy of a texture into a readback buffer, recorded in a
+// command list, and its pixels once the GPU has executed the list.
+
+// A copy of a 2D texture of 4-byte pixels on its way to the CPU.
+struct Readback {
+    buffer: *ID3D12Resource
+    width: i64
+    height: i64
+    row_pitch: i64        // bytes from one row to the next in the buffer (a multiple of 256)
+    size: i64             // bytes in the buffer (GetCopyableFootprints' total): the last row is
+                          // not padded, so row_pitch * (height - 1) + width * 4
+}
+
+// Records a copy of a 2D texture of 4-byte pixels (R8G8B8A8, B8G8R8A8) into a new readback
+// buffer; the texture is in `state` before and after. Read it with readback_pixels once the GPU
+// has executed the list, then readback_free.
+fn gpu_readback(g: *Gpu, list: *ID3D12GraphicsCommandList, texture: *ID3D12Resource, state: u32) -> Readback {
+    desc := texture.GetDesc()
+    footprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT
+    total: u64
+    g.device.GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nil, nil, &total)
+    r := Readback{gpu_buffer(g, D3D12_HEAP_TYPE_READBACK, i64(total), D3D12_RESOURCE_STATE_COPY_DEST), i64(desc.Width),
+        i64(desc.Height), i64(footprint.Footprint.RowPitch), i64(total)}
+    dst := D3D12_TEXTURE_COPY_LOCATION{pResource: r.buffer, Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}
+    *dst.u_PlacedFootprint() = footprint
+    src := D3D12_TEXTURE_COPY_LOCATION{pResource: texture, Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}
+    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE) }
+    list.CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
+    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state) }
+    r
+}
+
+// The pixels of a finished readback, rows packed (width * 4 bytes each; allocates). It maps the
+// buffer's size: row_pitch * height would run past the end wherever width * 4 is not a
+// multiple of 256 (480 x 270), and Map fails with E_INVALIDARG.
+fn readback_pixels(r: *Readback) -> []u8 {
+    out := alloc[u8](r.width * r.height * 4)
+    mapped: *u8
+    whole := D3D12_RANGE{0, u64(r.size)}
+    dx_check(r.buffer.Map(0, &whole, &mapped), "ID3D12Resource::Map (readback)")
+    rows := mkslice[u8](mapped, r.size)
+    for y in 0..r.height {
+        copy(out[y * r.width * 4..(y + 1) * r.width * 4], rows[y * r.row_pitch..y * r.row_pitch + r.width * 4])
+    }
+    none := D3D12_RANGE{0, 0}
+    r.buffer.Unmap(0, &none)
+    out
+}
+
+// Releases the readback buffer.
+fn readback_free(r: *Readback) { com_release(&r.buffer) }

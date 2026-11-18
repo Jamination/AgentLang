@@ -102,6 +102,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   which keeps `build\altest.exe` and `build\alc.exe` open: both are now built under another
   name, left as they are when their bytes did not change, and otherwise replace the old file
   (a running one is renamed away first). `build.bat --runner` builds only the test runner.
+- Direct3D 12 read-back: `readback_pixels` mapped `RowPitch * height` bytes of a buffer that is
+  `RowPitch * (height - 1) + width * 4` long, so `Map` failed with `E_INVALIDARG` for any width
+  whose rows are no multiple of 256 bytes (480 x 270). `gpu_readback`, `readback_pixels` and
+  `readback_free` now live in `examples/gamekit/dx12_gpu.al` (they were in the test
+  `tests/sys/dx12_offscreen.al`), map the buffer's size, and `examples/dx12_crypt` uses them.
+  (`std.gfx`'s `read_texture` was not affected: it makes its buffer `pitch * height` long.)
 
 ## [0.4.0] - 2026-11-17
 

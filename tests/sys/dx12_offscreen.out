@@ -15,6 +15,11 @@ first device
   ok 4 52 half-transparent white over the clear colour
   ok 28 4 mirrored sprite: atlas texel (1, 0) on the left
   ok 36 4 mirrored sprite: atlas texel (0, 0) on the right
+  read back 480 x 270 row pitch 2048 buffer true
+  ok 0 0 clear colour, first pixel
+  ok 469 269 clear colour beside the square, last row
+  ok 470 260 square, its first pixel
+  ok 479 269 square, the last pixel
 WARP device
   ok 60 2 clear colour
   ok 2 30 clear colour
@@ -31,3 +36,8 @@ WARP device
   ok 4 52 half-transparent white over the clear colour
   ok 28 4 mirrored sprite: atlas texel (1, 0) on the left
   ok 36 4 mirrored sprite: atlas texel (0, 0) on the right
+  read back 480 x 270 row pitch 2048 buffer true
+  ok 0 0 clear colour, first pixel
+  ok 469 269 clear colour beside the square, last row
+  ok 470 260 square, its first pixel
+  ok 479 269 square, the last pixel

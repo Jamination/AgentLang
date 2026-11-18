@@ -3,7 +3,8 @@
 // run time by D3DCompile (one in front of the cleared depth, one behind it), draw sprites with
 // the examples' batcher (examples/gamekit/dx12_gpu.al: an atlas texture, one-colour and
 // half-transparent rectangles), copy the target to a readback buffer and check pixels at known
-// positions.
+// positions; then the same read-back of a 480 x 270 target, whose rows are no multiple of 256
+// bytes. The read-back (gpu_readback, readback_pixels) is that of examples/gamekit/dx12_gpu.al.
 //
 // Windows only. Without a Direct3D 12 device (Wine without a display: CreateDXGIFactory2 fails
 // with DXGI_ERROR_UNSUPPORTED) it says why and ends with status 77, which tests/run.sh reports
@@ -14,49 +15,6 @@ const SIZE = 64
 const CLEAR = [4]f32{0.2, 0.4, 0.6, 1.0}
 
 struct Vertex { position: vec3, color: vec4 }
-
-// A copy of a 2D texture of 4-byte pixels on its way to the CPU.
-struct Readback {
-    buffer: *ID3D12Resource
-    width: i64
-    height: i64
-    row_pitch: i64        // bytes from one row to the next in the buffer (a multiple of 256)
-}
-
-// Records a copy of a 2D texture of 4-byte pixels (R8G8B8A8, B8G8R8A8) into a new readback
-// buffer; the texture is in `state` before and after. Read it with readback_pixels once the GPU
-// has executed the list.
-fn gpu_readback(g: *Gpu, list: *ID3D12GraphicsCommandList, texture: *ID3D12Resource, state: u32) -> Readback {
-    desc := texture.GetDesc()
-    footprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT
-    total: u64
-    g.device.GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nil, nil, &total)
-    r := Readback{gpu_buffer(g, D3D12_HEAP_TYPE_READBACK, i64(total), D3D12_RESOURCE_STATE_COPY_DEST), i64(desc.Width),
-        i64(desc.Height), i64(footprint.Footprint.RowPitch)}
-    dst := D3D12_TEXTURE_COPY_LOCATION{pResource: r.buffer, Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}
-    *dst.u_PlacedFootprint() = footprint
-    src := D3D12_TEXTURE_COPY_LOCATION{pResource: texture, Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}
-    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE) }
-    list.CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
-    if state != D3D12_RESOURCE_STATE_COPY_SOURCE { dx_barrier(list, texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state) }
-    r
-}
-
-// The pixels of a finished readback, rows packed (width * 4 bytes each; allocates).
-fn readback_pixels(r: *Readback) -> []u8 {
-    out := alloc[u8](r.width * r.height * 4)
-    mapped: *u8
-    whole := D3D12_RANGE{0, u64(r.row_pitch * r.height)}
-    dx_check(r.buffer.Map(0, &whole, &mapped), "ID3D12Resource::Map (readback)")
-    for y in 0..r.height {
-        memcopy(&out[y * r.width * 4], cast[*u8](cast[i64](mapped) + y * r.row_pitch), r.width * 4)
-    }
-    none := D3D12_RANGE{0, 0}
-    r.buffer.Unmap(0, &none)
-    out
-}
-
-fn readback_free(r: *Readback) { com_release(&r.buffer) }
 
 const TRIANGLE = `
 struct V { float4 pos : SV_POSITION; float4 color : COLOR; };
@@ -192,21 +150,66 @@ fn render(g: *Gpu) -> []u8 {
     pixels
 }
 
+// A read-back of a size whose rows are no multiple of 256 bytes (480 * 4 = 1920): the buffer is
+// row_pitch * (height - 1) + width * 4 bytes, shorter than row_pitch * height, which
+// readback_pixels mapped before (Map failed with E_INVALIDARG). The target is cleared, then a
+// 10 x 10 square in its bottom-right corner, so the last pixel of the last row is checked too.
+const ODD_W = 480
+const ODD_H = 270
+
+fn read_odd(g: *Gpu) -> i64 {
+    clear := CLEAR
+    target := gpu_texture(g, ODD_W, ODD_H, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &clear)
+    heap := gpu_descriptor_heap(g, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1, false)
+    rtv := gpu_cpu_handle(g, heap, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 0)
+    g.device.CreateRenderTargetView(target, nil, rtv)
+    allocator, list := gpu_command_list(g)
+    gpu_reset(allocator, list)
+    list.ClearRenderTargetView(rtv, ptr(clear), 0, nil)
+    green := [4]f32{0.0, 1.0, 0.0, 1.0}
+    corner := D3D12_RECT{ODD_W - 10, ODD_H - 10, ODD_W, ODD_H}
+    list.ClearRenderTargetView(rtv, ptr(green), 1, &corner)
+    back := gpu_readback(g, list, target, D3D12_RESOURCE_STATE_RENDER_TARGET)
+    gpu_execute(g, list)
+    gpu_flush(g)
+    pixels := readback_pixels(&back)
+    print("  read back", ODD_W, "x", ODD_H, "row pitch", back.row_pitch, "buffer", back.size == back.row_pitch * (ODD_H - 1) + ODD_W * 4)
+    wrong := 0
+    for p in [4]Probe{
+        Probe{0, 0, [4]i64{51, 102, 153, 255}, "clear colour, first pixel"},
+        Probe{ODD_W - 11, ODD_H - 1, [4]i64{51, 102, 153, 255}, "clear colour beside the square, last row"},
+        Probe{ODD_W - 10, ODD_H - 10, [4]i64{0, 255, 0, 255}, "square, its first pixel"},
+        Probe{ODD_W - 1, ODD_H - 1, [4]i64{0, 255, 0, 255}, "square, the last pixel"},
+    } {
+        wrong += probe(pixels, ODD_W, p)
+    }
+    readback_free(&back)
+    com_release(&list)
+    com_release(&allocator)
+    com_release(&heap)
+    com_release(&target)
+    wrong
+}
+
+// Checks one probe in pixels of the given width; prints a line. 1 if the pixel is wrong.
+fn probe(pixels: []u8, width: i64, p: Probe) -> i64 {
+    i := (p.y * width + p.x) * 4
+    for c in 0..4 {
+        if abs(i64(pixels[i + c]) - p.want[c]) > 1 {
+            print("  WRONG", p.x, p.y, p.what, "want", p.want, "got", pixels[i..i + 4])
+            return 1
+        }
+    }
+    print("  ok", p.x, p.y, p.what)
+    0
+}
+
 // Checks the probes; prints one line per probe. Returns the number of wrong pixels.
 fn check(pixels: []u8) -> i64 {
     wrong := 0
     for p in PROBES {
-        i := (p.y * SIZE + p.x) * 4
-        good := true
-        for c in 0..4 {
-            if abs(i64(pixels[i + c]) - p.want[c]) > 1 { good = false }
-        }
-        if good {
-            print("  ok", p.x, p.y, p.what)
-        } else {
-            print("  WRONG", p.x, p.y, p.what, "want", p.want, "got", pixels[i..i + 4])
-            wrong += 1
-        }
+        wrong += probe(pixels, SIZE, p)
     }
     wrong
 }
@@ -231,6 +234,7 @@ fn main() -> i64 {
         eprint(fmt("device: ", g.adapter_name, if g.warp { " (WARP)" } else { "" }))
         print(if warp { "WARP device" } else { "first device" })
         wrong += check(render(&g))
+        wrong += read_odd(&g)
         gpu_close(&g)
     }
     if wrong == 0 { 0 } else { 1 }
