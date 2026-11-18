@@ -162,3 +162,9 @@ The compiler compiles its own 40,000 lines in about 0.125 s without optimisation
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
+
+## Acknowledgements
+
+This software is based in part on the work of the Independent JPEG Group: the JPEG code of
+`std.image` (`std/image_jpeg.al`) follows the algorithms of libjpeg. A program built with it
+that uses JPEG carries the same sentence in its documentation ([std/image.md](docs/std/image.md)).

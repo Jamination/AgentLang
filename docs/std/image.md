@@ -42,7 +42,8 @@ Rows from top to bottom, pixels left to right, `channels` bytes per pixel: 1 = g
 2 = grey + alpha, 3 = RGB, 4 = RGBA. `pix` can be handed to a GPU upload or to
 `window.present` as is. The other way round, a framebuffer of 4-byte pixels can be wrapped
 without copying: `Image{w: W, h: H, channels: 4, pix: fb}` (`fb` a `[]u8` of `W * H * 4` bytes), then
-`png_save("frame.png", img)` writes a screenshot.
+`png_save("frame.png", img)` writes a screenshot. Read as a `u32` (`from_bytes[u32](img.pix)`
+of a 4-channel image), a pixel is `0xAABBGGRR`: red in the lowest byte, as std.gfx colours.
 
 | Function | |
 |----------|---|
@@ -110,6 +111,12 @@ of the standard as libjpeg does; the Huffman tables are the standard's too. Colo
 downsampling, forward DCT (the accurate integer one), quantisation and the padding of partial
 MCUs are libjpeg's: the entropy-coded data is byte for byte what libjpeg-turbo writes with
 `-dct int` and the same quality and subsampling.
+
+**Acknowledgement.** The JPEG code follows the algorithms of the Independent JPEG Group's
+libjpeg (`jidctint.c`, `jfdctint.c`, `jdcolor.c`, `jccolor.c`): this software is based in part
+on the work of the Independent JPEG Group. The IJG licence asks the same sentence of a program
+distributed as an executable: a game whose executable contains std.image's JPEG code (it calls
+`jpeg_*` or `image_load` / `image_decode`) states it in its documentation or credits.
 
 ## Compression and checksums
 

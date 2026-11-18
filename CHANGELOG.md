@@ -132,6 +132,13 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   Windows.
 
 ### Changed
+- docs/AGENTS_TEMPLATE.md is platform-neutral: no absolute paths, a section per renderer
+  (std.gfx; Direct3D 12 with gamekit's `dx_compile`; Vulkan with glslc or std.shaderc).
+  docs/GAMES.md: where mouse-look goes (once per frame, not in `update`; stick look is a rate in
+  `update`), how a one-system game passes `alc check --all-targets` and keeps compiling when a
+  target is added, the colour byte order, pointers to Ogg streaming, std.font, std.net and `-g`.
+- README.md has Acknowledgements: std.image's JPEG code is based in part on the work of the
+  Independent JPEG Group; docs/std/image.md says what that asks of a game that ships it.
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a
   step computed at run time (`by s`) move out of the loop where the bound allows it, and a
   check that does not change in a loop and comes first in it is made once before the loop.

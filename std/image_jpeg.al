@@ -3,6 +3,9 @@
 // the rest of std.image. The decoder follows libjpeg's default decoding (accurate integer IDCT,
 // "fancy" triangular upsampling of 2x subsampled chroma, the same fixed-point colour
 // conversion), so its pixels agree with libjpeg-turbo's to within rounding.
+//
+// This software is based in part on the work of the Independent JPEG Group: the IDCT, forward
+// DCT and colour conversions follow libjpeg's jidctint.c, jfdctint.c, jdcolor.c and jccolor.c.
 
 // limits of the decoder (the format itself limits each dimension to 65535)
 priv const MAX_BYTES = 1 << 31
