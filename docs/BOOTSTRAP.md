@@ -60,6 +60,12 @@ tests\run.bat --target linux        :: Windows: the programs built and type-chec
 verify.bat                          :: Windows: build, both of the above, one line VERIFY: PASS or VERIFY: FAIL
 ```
 
+**Before every commit** run `verify.bat` (Windows) or `./verify.sh` (Linux) on the tree exactly
+as it will be committed, after the last edit, and commit only on `VERIFY: PASS`. A suite run
+from before the last change (an edit, a rebase, a merge, another commit on the branch) says
+nothing about the commit: an expected output can go stale in between, as one did. A run of
+`tests\run.bat` with a filter is for working on a change, not for committing it.
+
 The runner is an AL program, `tests/run.al` (its top lists the kinds of tests and their
 files); `build.sh` / `build.bat` build it with the new compiler as `build/altest` and
 `build/altest.exe`, and `tests/run.sh` / `tests\run.bat` only start it in the repository root

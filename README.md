@@ -55,7 +55,8 @@ same runner, an AL program (`tests/run.al`) that runs the tests in parallel and 
 `conformance: N passed, M failed, K skipped`. On Windows the programs run directly; the few
 tests that need a C compiler (MinGW-w64) are skipped with that reason when it is not installed.
 `verify.bat` is the whole check there (build, tests, one line `VERIFY: PASS` or `VERIFY: FAIL`);
-`./verify.sh` on Linux adds the comparisons with clang and the benchmarks. More:
+`./verify.sh` on Linux adds the comparisons with clang and the benchmarks. Run one of them
+on the tree as it will be committed before every commit. More:
 [BOOTSTRAP.md](docs/BOOTSTRAP.md#testing).
 
 ```
