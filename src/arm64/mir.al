@@ -95,6 +95,7 @@ enum AOp {
     FLdr,    // d = memory, sz 4 / 8 / 16
     FStr,    // memory = a
     AdrG,    // d = the address of global id, + imm
+    LdrG,    // d = the 8 bytes at global id (an import slot: ADRP + LDR)
     AdrF,    // d = the address of function id
     AdrS,    // d = the address of a memory operand (frame slot, incoming argument)
     FConst,  // d = float constant pool entry id (sz 4 / 8 / 16)
@@ -375,7 +376,7 @@ fn a_print(f: *AFunc, order: []i64) -> str {
             match i.op {
                 B, Bcc, Cbz, Cbnz => parts.push(fmt(".L", i.id))
                 Bl => parts.push(fmt("f", i.id))
-                AdrG => parts.push(fmt("g", i.id))
+                AdrG, LdrG => parts.push(fmt("g", i.id))
                 AdrF => parts.push(fmt("f", i.id))
                 FConst => parts.push(fmt("c", i.id))
                 _ => {}

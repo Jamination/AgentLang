@@ -15,10 +15,12 @@
 // epilogue the loads, `mov sp, x29; ldp x29, x30, [sp], #16; ret`. A function without a frame
 // keeps the return address in x30 and leaves sp alone.
 
-// relocation kinds: BL (26-bit word distance), ADRP (page of the target), ADD (its low 12 bits)
+// relocation kinds: BL (26-bit word distance), ADRP (page of the target), ADD (its low 12 bits),
+// LDR (its low 12 bits / 8)
 const AR_CALL26: u8 = 0
 const AR_ADRP: u8 = 1
 const AR_ADD12: u8 = 2
+const AR_LDR64: u8 = 3 // the low 12 bits of the target, scaled by 8, of an 8-byte LDR
 
 // relocation targets
 const AT_GLOBAL: u8 = 0
@@ -391,6 +393,12 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             self.addi(1, false, x(i.d), base, off)
         }
         AdrG => self.adr(x(i.d), AT_GLOBAL, i64(i.id), i.imm)
+        LdrG => {
+            self.reloc(AR_ADRP, AT_GLOBAL, i64(i.id), 0)
+            self.put(a64_adrp(x(i.d), 0))
+            self.reloc(AR_LDR64, AT_GLOBAL, i64(i.id), 0)
+            self.put(a64_ldst_uimm(3, 1, x(i.d), x(i.d), 0))
+        }
         AdrF => self.adr(x(i.d), AT_FUNC, i64(i.id), 0)
         FConst => {
             self.adr(16, AT_FCONST, i64(i.id), 0)

@@ -9,6 +9,7 @@ use "lower.al"
 use "lower_fn.al"
 use "lower_expr.al"
 use "lower_call.al"
+use "lower_ccall.al"
 use "lower_vec.al"
 use "lower_nested.al"
 use "lint.al"
@@ -923,6 +924,34 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
             }
             _ => {
                 decls.push(d)
+            }
+        }
+    }
+    if has_c {
+        // an OS layer with `__os_c_thread_create` / `__os_c_thread_join` (src/prelude_linux_arm64.al):
+        // a program that declares C functions makes its threads with those (the C library's),
+        // which call the layer's own as `__os_clone_thread_*`; other programs never see them
+        has_twin := false
+        for d in decls {
+            match d {
+                Fn(f) if f.name == "__os_c_thread_create" => has_twin = true
+                _ => {}
+            }
+        }
+        if has_twin {
+            for i in 0..decls.len {
+                match decls[i] {
+                    Fn(&f) => {
+                        for w in []str{"create", "join"} {
+                            if f.name == fmt("__os_thread_", w) {
+                                f.name = fmt("__os_clone_thread_", w)
+                            } else if f.name == fmt("__os_c_thread_", w) {
+                                f.name = fmt("__os_thread_", w)
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     }

@@ -2,12 +2,6 @@
 
 run/when_top a when TARGET_ARCH == X86_64 with no other branch: the program is written for x86-64 only
 fail/when_order the error it expects comes from the branch of when TARGET_ARCH == X86_64, which arm64 does not take
-sys/backtrace_c_callback calls a C library: --target linux-arm64 makes static executables only
-sys/backtrace_c_fault calls a C library: --target linux-arm64 makes static executables only
-sys/c_variadic calls a C library: --target linux-arm64 makes static executables only
-sys/thread_ccb calls a C library: --target linux-arm64 makes static executables only
-sys/thread_ccb_panic calls a C library: --target linux-arm64 makes static executables only
-sys/thread_libc calls the C library: --target linux-arm64 makes static executables only
 run/debug_info -g: debug information is not written for linux-arm64 yet (refused with a message)
 std/input reads gamepads with x86-64 system call numbers (std.input_linux): refused for linux-arm64
 std/input_gamepad_watch reads gamepads with x86-64 system call numbers (std.input_linux): refused for linux-arm64
@@ -16,3 +10,4 @@ std/net_http std.net uses x86-64 system call numbers (std.net_linux): refused fo
 std/net_ipv6 std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_tcp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_udp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
+fail/extern on arm64 extern functions may take and return structs (AAPCS64): other diagnostics

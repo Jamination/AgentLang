@@ -15,12 +15,19 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   changes for programs).
 
 ### Added
-- `--target linux-arm64` (experimental): static AArch64 Linux executables without C libraries,
-  with `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
+- `--target linux-arm64` (experimental): AArch64 Linux executables, with
+  `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
   (`tests/arm64/emu.al`; `tests/run.sh --target linux-arm64 --emu build/a64emu`), not yet on
-  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g`, `extern` C functions,
-  and the modules that make system calls by their x86-64 numbers (`std.net`, the gamepads of
-  `std.input`), which are refused with a message.
+  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g` and the modules that
+  make system calls by their x86-64 numbers (`std.net`, the gamepads of `std.input`), which
+  are refused with a message.
+- linux-arm64: `extern` C functions and variables. A program that uses one is dynamically
+  linked (`/lib/ld-linux-aarch64.so.1`, as GCC links them) and calls C by the Arm procedure call
+  standard (AAPCS64), including structs, tuples and arrays by value (in floating-point or
+  integer registers or by reference, as C passes them; results through x8), variadic calls and
+  callbacks; its threads are the C library's. Checked under the emulator against C compiled by
+  clang (`tests/sys/c_abi`), not yet against a real loader or C library. Stack traces end at
+  the first C frame.
 - The compiler builds for arm64 Linux (experimental, as above):
   `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`.
 - `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a

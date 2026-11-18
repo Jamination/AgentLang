@@ -18,9 +18,22 @@ is too slow for the 60 s limit, 16 are C-library, x86-64-only, `-g`, std.net or 
 built only, `840 passed, 0 failed, 51 skipped`; the structural check `505 executables, 0
 problems`; the compiler for linux-arm64 built by the x86-64 compiler (stage 1), by stage 1
 under the emulator (stage 2, 187 s) and by stage 2 (stage 3, 191 s): byte-identical.
-Refused for linux-arm64 with a message (not wrong code): `-g`, `extern` C functions, and code
-of the bundled modules that make system calls by their x86-64 numbers (std.net, the gamepads
-of std.input).
+Refused for linux-arm64 with a message (not wrong code): `-g` and code of the bundled modules
+that make system calls by their x86-64 numbers (std.net, the gamepads of std.input).
+
+C functions (`extern`, since 2026-11-18): a program that calls one is a dynamically linked
+executable (src/elf_arm64.al) and its C calls follow AAPCS64 (src/lower_ccall.al). No dynamic
+loader or arm64 C library exists on the machine where this was written, so what was checked
+there is: the emulator acting as the loader for libraries that clang 19 (Visual Studio's LLVM,
+`--target=aarch64-linux-gnu`, freestanding, linked by ld.lld) built from C (`tests/sys/c_abi.c`:
+every kind of argument and result in both directions, callbacks, preserved registers, the
+stack alignment, a variable of the library, variadic calls; it passes, and the same test passes
+on Windows against MinGW); the dynamic section, symbols, hash table, relocations and import
+slots of every such executable (`tests/arm64/check.al`, and `llvm-readobj` by hand); every C
+call site of `tests/sys/c_abi.al` against an independent classifier (`tests/arm64/aapcs.al`,
+itself checked against clang's placements in `tests/unit/aapcs64.al`). What never ran: the
+real `ld-linux-aarch64.so.1`, glibc or musl, `pthread_create` (threads of a dynamically linked
+program), C libraries that use thread-local data or initialisers. Section 5 below.
 The emulator was written by the same hands as the back end: a misreading of the architecture
 that both share (a flag of a compare, the extension of a load, the order of a pair) would not
 show. These are the checks only a real machine (or QEMU, which is independent) can do. Run them
@@ -84,3 +97,39 @@ on a 64-bit Arm Linux (Raspberry Pi 4/5 with a 64-bit OS, AWS Graviton, an Amper
   library reports as the arithmetic fault (`tests/run/backtrace_div.al --unchecked`). Check
   that the kernel delivers SIGTRAP for `brk` to the handler. `INT_MIN / -1` in `--unchecked`
   code faults on x86-64 and gives INT_MIN on arm64; checked code panics on both.
+
+## 5. C libraries and dynamic linking
+Nothing of this ran against a real loader or C library (see the top). In order, each step
+assuming the ones before it work:
+1. A program with one C call starts at all:
+   ```
+   extern "libc.so.6" fn getpid() -> i32
+   fn main() { print(getpid() > 0) }
+   ```
+   `readelf -lhd prog` shows PT_INTERP `/lib/ld-linux-aarch64.so.1`, PT_DYNAMIC, DT_NEEDED
+   `libc.so.6`, FLAGS BIND_NOW; `readelf -r prog` one `R_AARCH64_GLOB_DAT getpid`. A crash
+   before `main` points at the entry stub (`start_stub_dyn` in src/elf_arm64.al) or the import
+   slot (`ldd prog`, `LD_DEBUG=all ./prog`). Also on a musl system (Alpine): the interpreter
+   path differs there (`/lib/ld-musl-aarch64.so.1`), so it is expected to fail with "not found"
+   unless a link is made; note it.
+2. Thread-local data under the C library's loader: `print` (the output buffer is
+   thread-local), `alloc` (the arena): `./alc-arm64 run examples/hello.al` with an `extern`
+   added. A fault on the first output means the thread block is not at TPIDR_EL0 + 16 (glibc
+   puts the executable's block at the 16-byte TCB rounded up to PT_TLS's alignment, 16).
+3. `tests/sys/c_abi.al` against its C library built by the system's C compiler (gcc, then
+   clang): `gcc -O2 -shared -fPIC -o libc_abi.so tests/sys/c_abi.c`, then
+   `LD_LIBRARY_PATH=. ./c_abi a1 b2` must print `tests/sys/c_abi.out`, in all three build
+   modes (`-O0`, `--unchecked`). This is the full check of the calling convention in both
+   directions (structs by value, HFAs, x8 results, variadic calls, callbacks, x19-x28 and
+   d8-d15 preserved, 16-byte stack alignment at calls).
+4. The test runner: `./altest ./alc-arm64 sys/` runs the C-library tests the emulator could not:
+   sys/c_variadic (glibc's `sprintf` too), sys/thread_libc (threads of a dynamically linked
+   program: `pthread_create` looked up through the loader's r_debug, the C library's errno per
+   thread), sys/thread_ccb and thread_ccb_panic (a C library's own thread calls the program:
+   the thread block of a thread the program did not make), and the library tests of
+   tests/sys with a NAME.need (Vulkan, X11, Wayland, ALSA, shaderc: whatever the machine has).
+5. Stack traces through C frames are not implemented for arm64 (sys/backtrace_c_callback,
+   backtrace_c_fault): the trace ends at the first C frame. Check that it ends cleanly (the
+   message and the frames of the program up to the C frame, status 1, no second fault).
+6. A program that declares C functions but calls none is static: `thread_spawn` must still work
+   (clone).
