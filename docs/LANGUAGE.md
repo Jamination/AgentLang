@@ -65,8 +65,8 @@ test "areas" {
 - **Statements end at a newline** (or `;`). A newline does *not* end a statement when the line
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
   A line cannot *start* with a binary operator.
-- Keywords (not usable as names): `fn struct enum const test use priv extern inline noinline if
-  else while loop for in by return break continue assert match defer true false nil when`.
+- Keywords (not usable as names): `fn struct enum const use priv extern inline noinline if else
+  while loop for return break continue assert match defer true false nil when`; `in`, `by`, `test` only in their place (`for x in`, `by step`, `test "name"` at the top level): elsewhere they are names.
 - Integer literals: `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17`. A character literal (`'a'`,
   `'\n'`, `'\''`, `'\x41'`) is an integer literal with the byte's value: `c: u8 = 'a'`,
   `s[i] == 'a'`; `c := 'a'` is an `i64`.

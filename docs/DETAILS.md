@@ -1065,6 +1065,12 @@ pattern   = "_" | expr | [qual "."] IDENT "(" [pattern {"," pattern}] ")"
 qual      = IDENT ["[" type {"," type} "]"]
 ```
 
+`in`, `by` and `test` are keywords only where the grammar has them and ordinary names (`IDENT`)
+everywhere else: a `for` header has `in` right after its loop variables, and `by` after a
+complete range expression, which no name can continue; a declaration that starts with the
+name `test` is a variable when `:` or `:=` follows, else a test. A line may end after the
+keyword `in`, `by` or `test`: the header or declaration continues on the next line.
+
 In a literal `[_]T{...}` the length is the number of elements written (`_` is allowed as a
 length only there). In a pattern, `expr` is a constant, `Variant`, `Enum.Variant`, or (inside another pattern) a new
 name; `&` IDENT is allowed only inside another pattern.

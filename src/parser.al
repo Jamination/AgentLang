@@ -23,6 +23,8 @@ priv struct Parser {
 // (`Name{...}`, `[]T{...}`) is recorded in parser_lits; a block's `{` is not
 parser_lits_on: bool
 parser_lits: Vec[Pos]
+// and the position of every `in`, `by` and `test` that is a keyword there (ctx_kw)
+parser_kws: Vec[Pos]
 
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
     return Parser{toks: toks, errs: errs, hdr_name: -1, budget: stack_budget()}
@@ -241,6 +243,44 @@ priv fn eat_kw(p: *Parser, k: i64) -> bool {
     return true
 }
 
+priv fn is_kw_tok(t: Tk) -> bool {
+    return match t {
+        Kw(_) => true
+        _ => false
+    }
+}
+
+// The current token is the name `w`. `in`, `by` and `test` are keywords only in their place
+// (lexer_contextual): `for x in`, `for i in a..b by s`, `test "name" { }` where a declaration
+// starts; everywhere else they are ordinary names. The grammar never has a name where they
+// stand as keywords, so the two cannot be confused: after the loop variables of a `for` comes
+// `in`; after the range of a `for` header an expression is complete and no name can continue
+// it; a top-level declaration that starts with a name is a variable, `name:` or `name :=`.
+priv fn is_word(p: *Parser, w: str) -> bool {
+    return match p.peek() {
+        Id(s) => s == w
+        _ => false
+    }
+}
+
+// at `test` where a declaration starts: a test block (a variable `test: T` / `test := v` has
+// `:` or `:=` after the name)
+priv fn test_block(p: *Parser) -> bool {
+    return p.is_word("test") && !p.is_p_at(1, ':') && !p.is_p_at(1, P_DECL)
+}
+
+// `in`, `by` or `test` taken as the keyword: consumed with the end of line after it (as a
+// keyword it never ended a statement); its position is recorded for `alc fmt`
+priv fn ctx_kw(p: *Parser) {
+    if parser_lits_on {
+        parser_kws.push(p.pos())
+    }
+    p.bump()
+    if p.peek() == Nl {
+        p.bump()
+    }
+}
+
 priv fn tok_desc(p: *Parser) -> str {
     match p.peek() {
         Id(s) => fmt("identifier `", s, "`")
@@ -330,7 +370,7 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
             // where a value was expected (`x + by`), the keywords that are often meant as names
             if starts_with(msg, "expected expression") {
                 match lexer_kw_text(k) {
-                    "by", "in", "test", "use", "defer", "priv", "inline", "noinline", "extern" => { named = true }
+                    "use", "defer", "priv", "inline", "noinline", "extern" => { named = true }
                     _ => {}
                 }
             }
@@ -481,7 +521,11 @@ priv fn decl_at_col1(p: *Parser) -> bool {
         return false
     }
     return match p.peek() {
-        Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_PRIV), Kw(KW_EXTERN), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_USE), Kw(KW_TEST), Kw(KW_WHEN) => true
+        Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_PRIV), Kw(KW_EXTERN), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_USE), Kw(KW_WHEN) => true
+        Id("test") => match p.peek_at(1) {
+            Str(_) => true
+            _ => false
+        }
         _ => false
     }
 }
@@ -549,8 +593,8 @@ priv fn sync_decl(p: *Parser, from: i64, inner: bool) {
                 }
                 depth -= 1
             }
-            Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_TEST), Kw(KW_USE), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_EXTERN), Kw(KW_PRIV), Kw(KW_WHEN) if starts && (depth <= 0 || p.pos().col == 1) => return
-            Id(_) if starts && depth <= 0 => return
+            Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_USE), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_EXTERN), Kw(KW_PRIV), Kw(KW_WHEN) if starts && (depth <= 0 || p.pos().col == 1) => return
+            Id(_) if starts && (depth <= 0 || p.pos().col == 1 && p.test_block()) => return
             _ => {}
         }
         p.bump()
@@ -584,7 +628,7 @@ priv fn priv_decl(p: *Parser) -> (Decl, bool) {
     if p.is_kw(KW_PRIV) {
         return p.err[Decl]("`priv` is written once in front of a declaration")
     }
-    if p.is_kw(KW_TEST) {
+    if p.test_block() {
         p.errs.push(Diag{pos: ppos, msg: "a `test` block cannot be `priv` (nothing refers to a test by name): remove `priv`"})
         return p.decl()
     }
@@ -1016,7 +1060,8 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
     if p.is_kw(KW_CONST) || p.is_kw(KW_STRUCT) || p.is_kw(KW_ENUM) {
         return p.kw_decl(pos)
     }
-    if p.eat_kw(KW_TEST) {
+    if p.test_block() {
+        p.ctx_kw()
         name := match p.peek() {
             Str(s) => utf8_lossy(s)
             _ => return p.err[Decl]("expected test name string")
@@ -1386,7 +1431,8 @@ priv fn for_without_in(p: *Parser) -> bool {
     depth := 0
     for j in p.i..p.toks.len {
         match p.toks[j].t {
-            Kw(KW_IN) => return false
+            // (`in` after a name: `for x in`, `for match in`; a variable `in` stands elsewhere)
+            Id("in") if j > p.i && (tk_id(p.toks[j - 1].t) || is_kw_tok(p.toks[j - 1].t)) => return false
             P('('), P('[') => { depth += 1 }
             P(')'), P(']') => { depth -= 1 }
             P('{') if depth == 0 => return j > p.i
@@ -1488,6 +1534,10 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         }
         return (Fn(parser_box(f)), true)
     }
+    if p.is_word("test") && match p.peek_at(1) { Str(_) => true; _ => false } {
+        p.errs.push(Diag{pos: p.pos(), msg: "a `test` block is declared at the top level, outside the function: `test \"name\" { ... }`"})
+        return fail[SK]()
+    }
     if p.is_kw(KW_CONST) || p.is_kw(KW_STRUCT) || p.is_kw(KW_ENUM) {
         p.errs.push(Diag{pos: p.pos(), msg: "constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)"})
         return fail[SK]()
@@ -1542,9 +1592,10 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             v2 = Some(n2)
         }
-        if !p.eat_kw(KW_IN) {
+        if !p.is_word("in") {
             return p.err[SK]("expected `in`")
         }
+        p.ctx_kw()
         lo := p.header_expr()
         if lo == nil {
             return fail[SK]()
@@ -1559,7 +1610,8 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             hi = Some(h)
         }
         step: Opt[*Expr] = None
-        if p.eat_kw(KW_BY) {
+        if p.is_word("by") {
+            p.ctx_kw()
             st := p.header_expr()
             if st == nil {
                 return fail[SK]()

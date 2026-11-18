@@ -104,6 +104,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `alc check` type-checks the functions of the core modules (`math`, `rand`, `time`, `mem`)
   that the program does not reach, as it already did for the modules included with `use`
   (about 5 ms more for a small file).
+- `in`, `by` and `test` are keywords only in their place (`for x in`, `for i in a..b by s`,
+  `test "name" { }` at the top level) and ordinary names everywhere else: `bx, by` block
+  coordinates, a parameter `in`, a field `test`. Every program keeps its meaning.
 
 ### Fixed
 - `alc build` / `alc run` accepted a type error in a function a program does not reach of a
