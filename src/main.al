@@ -238,6 +238,12 @@ priv fn std_text(name: str) -> Opt[str] {
     return None
 }
 
+// the module `name` is read from ALC_STD_DIR (std_text)
+priv fn std_from_dir(name: str) -> bool {
+    dir, have_dir := env_get("ALC_STD_DIR")
+    return have_dir && file_id(path_join(dir, fmt(name, ".al"))).1
+}
+
 priv struct Args {
     cmd: str
     input: str
@@ -455,7 +461,10 @@ priv struct Sources {
     decls: Vec[Decl]
     errs: Vec[Diag]
     seen: Map[str, bool]
+    // the bundled modules the program includes, except those read from ALC_STD_DIR; the
+    // first file of the core modules (after the run-time library)
     std_files: Vec[i64]
+    n_core: i64
     wc: WhenCx
     // the files whose declarations the `when` conditions know (when_register): 0..registered
     registered: i64
@@ -539,7 +548,9 @@ priv fn use_file(self: *Sources, file: i64, path: str, pos: Pos, out: *Vec[Item]
                 key := fmt("<std/", mname, ".al>")
                 if !self.seen.has(key) {
                     self.seen.set(key, true)
-                    self.std_files.push(self.names.len)
+                    if !std_from_dir(mname) {
+                        self.std_files.push(self.names.len)
+                    }
                     out.push(Inc(self.add_text(key, mtext, None, true)))
                 }
             }
@@ -873,6 +884,7 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     src.add_text("<prelude>", prelude, None, true)
     src.add_text(fmt("<", layer_name[..len(layer_name) - 3], ">"), layer, None, true)
     // the core library is part of the language: always present, no `use` needed
+    src.n_core = src.names.len
     for name in CORE_MODULES {
         text := std_text(name).or("")
         src.seen.set(fmt("<std/", name, ".al>"), true)
@@ -978,13 +990,21 @@ priv fn typecheck(ar: *Args, src: *Sources, decls: *Vec[Decl], n_prelude: i64) -
         lib_files.push(if i < n_prelude { LIB_CORE } else if src.files[i].lib { LIB_MODULE } else { u8(0) })
     }
     cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, lib_files)
-    if ar.cmd != "check" {
-        // bundled modules are only compiled as far as the program reaches into them
+    // `alc check` type-checks every function of the program and of the bundled modules it
+    // includes, the core modules (n_core..n_prelude) too. `alc build` / `run` / `test` compile
+    // the bundled modules only as far as the program reaches into them: checking the rest
+    // would cost every build of a program that uses std.gfx or std.window 40-70% more time
+    // (at -O0; 2-4 times at -O), for errors that tests/check/std_targets*.al rule out. A
+    // module read from ALC_STD_DIR (one being written) is checked in full by every command.
+    from := n_prelude
+    if ar.cmd == "check" {
+        from = src.n_core
+    } else {
         for f in src.std_files {
             cx.lazy_files.set(f, true)
         }
     }
-    lower_fn_lower_all(&cx, "__entry", n_prelude)
+    lower_fn_lower_all(&cx, "__entry", from)
     return cx
 }
 

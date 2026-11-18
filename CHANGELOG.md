@@ -101,6 +101,17 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `alc check` (also `--all-targets`) no longer requires `fn main`, as `alc test` already did:
   one file of a program checks alone (its `use` paths are relative to itself, as when it is
   included). `alc build` / `alc run` still report a missing `main`.
+- `alc check` type-checks the functions of the core modules (`math`, `rand`, `time`, `mem`)
+  that the program does not reach, as it already did for the modules included with `use`
+  (about 5 ms more for a small file).
+
+### Fixed
+- `alc build` / `alc run` accepted a type error in a function a program does not reach of a
+  bundled module read from `ALC_STD_DIR` (a module being written) that `alc check` reported:
+  such a module is now checked in full by every command. The modules inside the compiler are
+  still compiled only as far as a program reaches them, and the tests check all of them for
+  every target (`tests/check/std_targets.al` now includes `std.font`, and
+  `std_targets_vk.al` the Vulkan backend of `std.gfx` with `std.vk`).
 
 ## [0.4.0] - 2026-11-17
 

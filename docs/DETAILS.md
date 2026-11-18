@@ -958,6 +958,13 @@ program that starts there). So `alc check part.al` type-checks one file of a pro
 with the files it includes, while the program is written file by file. Names that only the
 including file declares are unknown then: a file that includes what it uses checks alone.
 
+Every command type-checks every function of the program's own files, called or not. The
+bundled modules (`use std.name`, and the core modules every program has) are type-checked in
+full by `alc check`; `alc build` / `run` / `test` compile only what the program reaches of
+them (checking the rest would make building a program on std.gfx 40-70% slower). The
+repository's tests check every module for every target, so this never hides an error, except
+in a module being written: one read from `ALC_STD_DIR` is checked in full by every command.
+
 ## alc fmt
 
 `alc fmt` gives source files the one layout of the repository's own sources, so that two
