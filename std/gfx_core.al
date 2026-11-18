@@ -102,10 +102,13 @@ struct Gfx {
 
 // ---- 2D transforms ---------------------------------------------------------------------------
 
+// The transform that changes nothing.
 fn xform_identity() -> Xform { Xform{vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(0.0)} }
 
+// Moves every point by v.
 fn xform_translate(v: vec2) -> Xform { Xform{vec2(1.0, 0.0), vec2(0.0, 1.0), v} }
 
+// Scales x by s.x and y by s.y around the origin.
 fn xform_scale(s: vec2) -> Xform { Xform{vec2(s.x, 0.0), vec2(0.0, s.y), vec2(0.0)} }
 
 // Rotation by `angle` radians; with y pointing down (pixels) a positive angle turns clockwise.
@@ -172,6 +175,7 @@ fn set_view(g: *Gfx, vw: f32, vh: f32) -> Xform {
 // set_target reset it to the identity).
 fn set_transform(g: *Gfx, m: Xform) { g.xform = m }
 
+// How everything drawn from now on combines with the target (each frame starts with BlendAlpha).
 fn set_blend(g: *Gfx, b: Blend) {
     if b != g.blend {
         g.blend = b
@@ -193,6 +197,7 @@ fn set_scissor(g: *Gfx, x: i64, y: i64, w: i64, h: i64) {
     }
 }
 
+// Draws on the whole target again.
 fn reset_scissor(g: *Gfx) {
     if g.clip[2] >= 0 {
         g.clip = [4]i32{0, 0, -1, -1}

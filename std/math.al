@@ -1877,6 +1877,7 @@ struct Ray { origin: vec3, dir: vec3 }
 // the points p with dot(normal, p) == d; normal has unit length
 struct Plane { normal: vec3, d: f32 }
 
+// the points within `radius` of `center`
 struct Sphere { center: vec3, radius: f32 }
 
 // smallest box around both

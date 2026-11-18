@@ -57,6 +57,7 @@ __tls_id: i64
 __thread_next: i64
 
 // ---------- process ----------
+// ends the program with exit status `code` (standard output is flushed first)
 fn exit(code: i64) -> never {
     flush()
     __os_exit(code)
@@ -732,6 +733,8 @@ noinline fn __bt_print() {
 // __heap_main), so the allocation paths below never look at regions. All of these are
 // per thread: threads allocate independently, without locks. `owner` of an entered region is
 // the id + 1 of the thread that entered it (one thread at a time: see enter).
+
+// an arena of its own, for memory with one lifetime: region(), enter / leave, reset, region_free
 struct Region { cur: i64, end: i64, base: i64, hwm: i64, owner: i64 }
 
 __heap_main: Region
@@ -790,10 +793,12 @@ inline fn __add_size(a: i64, b: i64) -> i64 {
     return a + b
 }
 
+// n zeroed elements from the arena in use (they live until it is released: no free)
 fn alloc[T](n: i64) -> []T {
     return mkslice[T](__alloc(__alloc_size(n, sizeof[T]())), n)
 }
 
+// one zeroed T from the arena in use
 fn new[T]() -> *T {
     return cast[*T](__alloc(sizeof[T]()))
 }
@@ -815,6 +820,7 @@ noinline fn __mark_page() {
     }
 }
 
+// gives back everything allocated from the arena in use since mark() returned m
 fn release(m: i64) {
     // a mark taken before the first allocation (the heap is mapped lazily) means "everything"
     if m == 0 {
@@ -1069,6 +1075,7 @@ __out_len: i64
 __out_lock: i64
 __out_owner: i64
 
+// writes out what print and put have buffered for standard output (exit does it too)
 fn flush() {
     if __tls_ocap != 0 && !__threaded {
         if __tls_olen > 0 {
@@ -1098,6 +1105,7 @@ noinline fn __put_str(s: str) {
     __tls_olen += n
 }
 
+// writes one byte to standard output (buffered like put)
 fn putc(c: u8) {
     if __tls_cap_on != 0 || __tls_olen >= __tls_ocap {
         one: [1]u8
@@ -1738,6 +1746,7 @@ fn __check_digits(prec: i64, at: str) {
     }
 }
 
+// x as text with exactly `prec` digits after the decimal point (like printf "%.Nf")
 fn fmtf(x: f64, prec: i64) -> str {
     return __at_fmtf(x, prec, "?")
 }
@@ -1770,6 +1779,7 @@ fn __at_putf(x: f32, prec: i64, at: str) {
     __at_putf(f64(x), prec, at)
 }
 
+// fmtf of the f32's exact value
 fn fmtf(x: f32, prec: i64) -> str {
     return __at_fmtf(f64(x), prec, "?")
 }
@@ -1778,6 +1788,7 @@ fn __at_fmtf(x: f32, prec: i64, at: str) -> str {
     return __at_fmtf(f64(x), prec, at)
 }
 
+// fmtf of the f32's exact value, right-aligned in `width` characters
 fn fmtf(x: f32, prec: i64, width: i64) -> str {
     return __at_fmtf(f64(x), prec, width, "?")
 }
@@ -1925,30 +1936,34 @@ fn __slice_eq[T](a: []T, b: []T) -> bool {
 }
 
 // ---------- small generic helpers ----------
-// a NaN argument makes the result NaN, whatever its position (`b != b`: only a NaN)
+// the smaller of a and b; a NaN argument makes the result NaN, whatever its position (`b != b`:
+// only a NaN)
 fn min[T](a: T, b: T) -> T {
     if b < a || b != b { b } else { a }
 }
 
+// the larger of a and b; a NaN argument makes the result NaN
 fn max[T](a: T, b: T) -> T {
     if b > a || b != b { b } else { a }
 }
 
-// strings are ordered bytewise, like `cmp`
+// the string that comes first in byte order (as `cmp` orders them)
 fn min(a: str, b: str) -> str {
     if cmp(b, a) < 0 { b } else { a }
 }
 
+// the string that comes last in byte order
 fn max(a: str, b: str) -> str {
     if cmp(b, a) > 0 { b } else { a }
 }
 
+// the absolute value (abs(-0.0) is 0.0; the most negative integer of a type stays negative)
 fn abs[T](x: T) -> T {
     // `0 - x`, not `-x`: the absolute value of -0.0 is 0.0
     if x <= 0 { 0 - x } else { x }
 }
 
-// a + b and a - b of any integer type, limited to the type's range instead of wrapping
+// a + b of any integer type, limited to the type's range instead of wrapping
 fn sat_add[T](a: T, b: T) -> T {
     s := a + b
     zero: T
@@ -1962,6 +1977,8 @@ fn sat_add[T](a: T, b: T) -> T {
     if s < a { ~zero } else { s }
 }
 
+// a - b of any integer type, limited to the type's range instead of wrapping (unsigned: 0 when
+// b > a)
 fn sat_sub[T](a: T, b: T) -> T {
     d := a - b
     zero: T
@@ -1982,12 +1999,15 @@ fn __sat_limit[T](x: T, low: bool) -> T {
     if low { m } else { ~m }
 }
 
+// exchanges the values that a and b point to
 inline fn swap[T](a: *T, b: *T) {
     t := *a
     *a = *b
     *b = t
 }
 
+// copies the first min(len(dst), len(src)) elements of src into dst (they may overlap) and
+// returns that number
 inline fn copy[T](dst: []T, src: []T) -> i64 {
     n := min(len(dst), len(src))
     d := cast[i64](ptr(dst))
@@ -2005,12 +2025,14 @@ inline fn copy[T](dst: []T, src: []T) -> i64 {
     return n
 }
 
+// sets every element of a to x
 inline fn fill[T](a: []T, x: T) {
     for i in 0..len(a) {
         a[i] = x
     }
 }
 
+// the largest whole number <= x (NaN, infinities and -0.0 stay as they are)
 fn floor(x: f64) -> f64 {
     // (x == 0: keeps the sign of -0.0, as C's floor)
     if x != x || x == 0.0 || fabs(x) >= 4503599627370496.0 {
@@ -2020,6 +2042,7 @@ fn floor(x: f64) -> f64 {
     if t > x { t - 1.0 } else { t }
 }
 
+// the smallest whole number >= x (NaN, infinities and -0.0 stay as they are)
 fn ceil(x: f64) -> f64 {
     if x != x || x == 0.0 || fabs(x) >= 4503599627370496.0 {
         return x
@@ -2032,8 +2055,10 @@ fn ceil(x: f64) -> f64 {
 }
 
 // ---------- growable vector ----------
+// a growable array: vec[T](), vec_of(s) or vec_fill(n, x) make one; `v.items()` is its slice
 struct Vec[T] { buf: []T, len: i64 }
 
+// an empty Vec (it allocates on the first push)
 fn vec[T]() -> Vec[T] {
     return Vec[T]{buf: mkslice[T](__heap_cur, 0), len: 0}
 }
@@ -2053,6 +2078,7 @@ fn vec_fill[T](n: i64, x: T) -> Vec[T] {
     return Vec[T]{buf: buf, len: n}
 }
 
+// makes room for n elements in all, so that pushes up to that length do not move the elements
 fn reserve[T](v: *Vec[T], n: i64) {
     if n > len(v.buf) {
         if __check_mem == 2 {
@@ -2066,6 +2092,8 @@ fn reserve[T](v: *Vec[T], n: i64) {
     }
 }
 
+// appends x; when the Vec is full its elements move to a larger buffer (slices of the old one
+// go stale)
 fn push[T](v: *Vec[T], x: T) {
     if v.len == len(v.buf) {
         reserve(v, v.len + 1)
@@ -2077,6 +2105,8 @@ fn push[T](v: *Vec[T], x: T) {
 // A function `f` with a twin `__at_f`: the compiler turns every call `f(args)` into
 // `__at_f(args, "file:line" of the call)`, so that a failure names the caller's line. The
 // plain function is what `f` denotes as a function value.
+
+// removes and returns the last element; panics if the Vec is empty
 fn pop[T](v: *Vec[T]) -> T {
     return __at_pop(v, "?")
 }
@@ -2094,6 +2124,7 @@ fn items[T](v: *Vec[T]) -> []T {
     return v.buf[..v.len]
 }
 
+// the last element; panics if the Vec is empty
 fn last[T](v: *Vec[T]) -> T {
     return __at_last(v, "?")
 }
@@ -2109,10 +2140,12 @@ fn is_empty[T](v: *Vec[T]) -> bool {
     return v.len == 0
 }
 
+// removes every element (the capacity is kept)
 fn clear[T](v: *Vec[T]) {
     v.len = 0
 }
 
+// shrinks to n elements if it is longer (n must not be negative)
 fn truncate[T](v: *Vec[T], n: i64) {
     __at_truncate(v, n, "?")
 }
@@ -2142,6 +2175,7 @@ fn __at_resize[T](v: *Vec[T], n: i64, x: T, at: str) {
     v.len = n
 }
 
+// appends a copy of the elements of s (a str is a []u8: `b.extend("text")`)
 fn extend[T](v: *Vec[T], s: []T) {
     reserve(v, v.len + len(s))
     memcopy(cast[i64](ptr(v.buf)) + v.len * sizeof[T](), ptr(s), len(s) * sizeof[T]())
@@ -2202,14 +2236,17 @@ fn index_of[T](s: []T, x: T) -> i64 {
     return -1
 }
 
+// true if an element of s equals x
 fn contains[T](s: []T, x: T) -> bool {
     return index_of(s, x) >= 0
 }
 
+// true if an element of v equals x
 fn contains[T](v: *Vec[T], x: T) -> bool {
     return index_of(v.buf[..v.len], x) >= 0
 }
 
+// reverses the order of the elements of s in place
 fn reverse[T](s: []T) {
     i := 0
     j := len(s) - 1
@@ -2271,8 +2308,11 @@ fn retain[T, C](v: *Vec[T], ctx: C, keep: fn(C, T) -> bool) {
 // or mask (its entry was deleted: equal to no tag in the upper bits). The entry arrays hold
 // half of len(index) entries, so at least half of the slots are free. When they are full, the
 // map is compacted in place if a quarter or more are holes, and grows otherwise.
+
+// a hash map from K to V whose keys() come in the order of first insertion; map[K, V]() makes one
 struct Map[K, V] { keys: []K, vals: []V, tags: []u32, index: []u32, len: i64, used: i64 }
 
+// an empty Map (it allocates on the first set)
 fn map[K, V]() -> Map[K, V] {
     return Map[K, V]{}
 }
@@ -2367,8 +2407,9 @@ fn __map_grow[K, V](m: *Map[K, V]) {
     }
 }
 
+// stores v for k, replacing the value of a key that is present (a new key comes last in keys())
 fn set[K, V](m: *Map[K, V], k: K, v: V) {
-    tag := u32(hash(k) >> 32) | 0x8000_0000
+    tag :=u32(hash(k) >> 32) | 0x8000_0000
     slot := -1              // where a new entry goes: the first reusable slot on the way
     if len(m.index) != 0 {
         mask := u32(len(m.index) - 1)
@@ -2411,6 +2452,7 @@ fn set[K, V](m: *Map[K, V], k: K, v: V) {
     }
 }
 
+// (the value stored for k, true), or (the zero value, false) if k is missing
 fn get[K, V](m: *Map[K, V], k: K) -> (V, bool) {
     e := __map_find(m, k)
     if e < 0 {
@@ -2429,6 +2471,7 @@ fn get_or[K, V](m: *Map[K, V], k: K, default: V) -> V {
     return m.vals[e]
 }
 
+// true if a value is stored for k
 fn has[K, V](m: *Map[K, V], k: K) -> bool {
     return __map_find(m, k) >= 0
 }
@@ -2666,6 +2709,7 @@ fn sort[T](a: []T) {
     __sort_range(a, 0, len(a) - 1, depth)
 }
 
+// ascending byte order (as `cmp` orders strings)
 fn sort(a: []str) {
     sort_by(a, fn(x: str, y: str) -> bool { cmp(x, y) < 0 })
 }
@@ -2772,6 +2816,7 @@ fn sort_by[T, C](a: []T, ctx: C, less: fn(C, T, T) -> bool) {
 }
 
 // ---------- strings ----------
+// a new string: a followed by b (fmt(...) joins any number of values)
 fn concat(a: str, b: str) -> str {
     out := alloc[u8](__add_size(len(a), len(b)))
     memcopy(ptr(out), ptr(a), len(a))
@@ -2980,6 +3025,7 @@ fn trim(s: str) -> str {
     return trim_right(trim_left(s))
 }
 
+// s without white space at the start (a view)
 fn trim_left(s: str) -> str {
     lo := 0
     while lo < len(s) && is_space(s[lo]) {
@@ -2988,6 +3034,7 @@ fn trim_left(s: str) -> str {
     return s[lo..]
 }
 
+// s without white space at the end (a view)
 fn trim_right(s: str) -> str {
     hi := len(s)
     while hi > 0 && is_space(s[hi - 1]) {
@@ -3001,6 +3048,7 @@ fn trim(s: str, chars: str) -> str {
     return trim_right(trim_left(s, chars), chars)
 }
 
+// s without the bytes of `chars` at the start (a view)
 fn trim_left(s: str, chars: str) -> str {
     lo := 0
     while lo < len(s) && contains(chars, s[lo]) {
@@ -3009,6 +3057,7 @@ fn trim_left(s: str, chars: str) -> str {
     return s[lo..]
 }
 
+// s without the bytes of `chars` at the end (a view)
 fn trim_right(s: str, chars: str) -> str {
     hi := len(s)
     while hi > 0 && contains(chars, s[hi - 1]) {
@@ -3088,6 +3137,7 @@ fn fields(s: str) -> []str {
     return out
 }
 
+// the lines of s without their '\n' (views; a '\r' before it stays): "a\nb\n" gives "a", "b"
 fn lines(s: str) -> []str {
     if ends_with(s, "\n") {
         return split(s[..len(s) - 1], '\n')
@@ -3106,6 +3156,8 @@ fn cmp(a: str, b: str) -> i64 {
     return len(a) - len(b)
 }
 
+// decimal digits with an optional '+' or '-', nothing else (no spaces, no '_'); (0, false) if
+// s is not that or does not fit in an i64
 fn parse_i64(s: str) -> (i64, bool) {
     v, ok := __parse_int(s, 10, false)
     return (i64(v), ok)
@@ -3131,6 +3183,7 @@ fn parse_u64(s: str) -> (u64, bool) {
     return __parse_int(s, 10, true)
 }
 
+// a u64 in another base, as parse_i64(s, base) reads it (no '-')
 fn parse_u64(s: str, base: i64) -> (u64, bool) {
     return __at_parse_u64(s, base, "?")
 }
@@ -3720,6 +3773,7 @@ fn fmti[T](x: T, width: i64, fill: u8) -> str {
     return pad_left(s, width, fill)
 }
 
+// a copy of s with the ASCII letters a-z in upper case (other bytes as they are)
 fn to_upper(s: str) -> str {
     out := alloc[u8](len(s))
     for i, c in s {
@@ -3728,6 +3782,7 @@ fn to_upper(s: str) -> str {
     return out
 }
 
+// a copy of s with the ASCII letters A-Z in lower case (other bytes as they are)
 fn to_lower(s: str) -> str {
     out := alloc[u8](len(s))
     for i, c in s {
@@ -3777,6 +3832,7 @@ fn from_cstr(p: *u8) -> str {
 }
 
 // ---------- characters, environment, standard error ----------
+// '0'..'9' (the character classes are ASCII: a byte >= 0x80 is in none of them)
 fn is_digit(c: u8) -> bool {
     return c >= '0' && c <= '9'
 }

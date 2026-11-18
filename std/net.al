@@ -34,6 +34,7 @@ struct Addr {
     scope: i64
 }
 
+// the IPv4 address a.b.c.d with a port: ipv4(192, 168, 1, 20, 7777)
 fn ipv4(a: i64, b: i64, c: i64, d: i64, port: i64) -> Addr {
     r := Addr{port: port}
     r.ip[0] = u8(a)
@@ -43,14 +44,17 @@ fn ipv4(a: i64, b: i64, c: i64, d: i64, port: i64) -> Addr {
     r
 }
 
-// 127.0.0.1, ::1, 0.0.0.0 (every interface), :: (every interface)
+// 127.0.0.1 with a port
 fn localhost4(port: i64) -> Addr { ipv4(127, 0, 0, 1, port) }
+// 0.0.0.0 (every IPv4 interface) with a port, to listen or bind on
 fn any4(port: i64) -> Addr { ipv4(0, 0, 0, 0, port) }
+// ::1 with a port
 fn localhost6(port: i64) -> Addr {
     r := Addr{v6: true, port: port}
     r.ip[15] = 1
     r
 }
+// :: (every IPv6 interface) with a port, to listen or bind on
 fn any6(port: i64) -> Addr { Addr{v6: true, port: port} }
 
 // the same address with another port
@@ -941,6 +945,7 @@ fn resolve(host: str, port: i64) -> ([]Addr, bool) {
     return resolve(host, port, DEFAULT_RESOLVE_NS)
 }
 
+// resolve with a time limit (timeout_ns nanoseconds) instead of DEFAULT_RESOLVE_NS
 fn resolve(host: str, port: i64, timeout_ns: i64) -> ([]Addr, bool) {
     a, num := parse_addr(host)
     if num && a.port == 0 {
