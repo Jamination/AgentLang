@@ -1,0 +1,33 @@
+self true true
+copy true no error true
+absolute: written over 260 units, absolute over 260: true
+child run
+  run 3 no error
+  run_capture 3 no error child a b
+  run_capture_all 3 no error child all
+child spawn
+  spawn true no error 3
+  spawn with Launch, group false true no error 3 child launch
+  spawn with Launch, group true true no error 3 child launch
+relative: written over 260 units, absolute over 260: true
+child run
+  run 3 no error
+  run_capture 3 no error child a b
+  run_capture_all 3 no error child all
+child spawn
+  spawn true no error 3
+  spawn with Launch, group false true no error 3 child launch
+  spawn with Launch, group true true no error 3 child launch
+deep working directory true true
+copy true no error true
+short relative: written under 260 units, absolute over 260: true
+child run
+  run 3 no error
+  run_capture 3 no error child a b
+  run_capture_all 3 no error child all
+child spawn
+  spawn true no error 3
+  spawn with Launch, group false true no error 3 child launch
+  spawn with Launch, group true true no error 3 child launch
+back true
+cleanup true no error

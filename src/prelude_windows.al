@@ -1133,7 +1133,7 @@ fn __os_test(f: fn()) -> i64 {
     n := wcslen(line)
     cmd := alloc[u16](n + 1)
     memcopy(ptr(cmd), line, 2 * n)
-    h, _ := create_process(ptr(exe), ptr(cmd), handle(0), handle(1), handle(2), 0)
+    h, _ := create_process(app_path(narrow(ptr(exe), wcslen(ptr(exe)))), ptr(cmd), handle(0), handle(1), handle(2), 0)
     SetEnvironmentVariableW(name, nil)
     if h == 0 {
         return 0
@@ -1614,8 +1614,8 @@ fn __os_spawn(argv: []str, capture: i64) -> (i64, i64, i64) {
     flush()
     hout := if capture != 0 { pipe_w } else { handle(1) }
     herr := if capture == 2 { pipe_w } else { handle(2) }
-    app := wide(file)
-    verbatim(app)
+    // (the command line names the program as argv[0] has it; app_path is at the end of the file)
+    app := app_path(file)
     h, pid := create_process(app, wide(line), handle(0), hout, herr, 0)
     if capture != 0 {
         CloseHandle(pipe_w)
@@ -1741,7 +1741,7 @@ fn __os_current_dir() -> str {
 // starts the program at path with arguments argv, the standard handles and the environment
 // block env (0: this process's): its process handle, 0 if it could not be started
 fn __win_start(path: str, argv: []str, env: i64) -> i64 {
-    h, _ := create_process(wide(path), wide(command_line(path, argv)), handle(0), handle(1), handle(2), env)
+    h, _ := create_process(app_path(path), wide(command_line(path, argv)), handle(0), handle(1), handle(2), env)
     return h
 }
 
@@ -1998,8 +1998,8 @@ fn __os_spawn_files(argv: []str, sin: str, sout: str, serr: str, env: []str, gro
     pid := err
     job := 0
     if err == 0 {
-        app := wide(file)
-        verbatim(app)
+        app := app_path(file)
+        // (an extended-length path when it is long, as in __os_spawn)
         if group {
             job = CreateJobObjectW(0, 0)
         }
@@ -2060,3 +2060,19 @@ fn __os_wait_ns(pid: i64, handle: i64, ns: i64) -> i64 {
 
 // the processor of this layer (see enum Arch in prelude.al; at the end: nothing above moves)
 const TARGET_ARCH = Arch.X86_64
+
+// ---------- long program paths ----------
+// (at the end of the file: nothing above moves, so programs that start no program are built
+// the same)
+
+// The program file `file` (as locate found it) for CreateProcessW's lpApplicationName: as
+// wide_path makes paths for the file functions, an extended-length `\\?\` path when it is 248
+// units or more once absolute, which CreateProcessW takes there (the executables' manifest
+// declares long-path awareness); the command line keeps the name as the caller wrote it. The
+// working directory is not changed: a started program inherits this process's, which Windows
+// keeps under MAX_PATH unless LongPathsEnabled is set (SetCurrentDirectoryW has no
+// extended-length form).
+priv fn app_path(file: str) -> *u16 {
+    none: []u16
+    return wide_path(none, cstr(file))
+}

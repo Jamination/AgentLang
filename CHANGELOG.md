@@ -108,6 +108,11 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `readback_free` now live in `examples/gamekit/dx12_gpu.al` (they were in the test
   `tests/sys/dx12_offscreen.al`), map the buffer's size, and `examples/dx12_crypt` uses them.
   (`std.gfx`'s `read_texture` was not affected: it makes its buffer `pitch * height` long.)
+- Windows: a program whose path is 260 units or more (absolute, relative, or a short relative
+  path from a deep working directory) could not be started by `run`, `run_capture`,
+  `run_capture_all`, `spawn`, `alc run` and `alc test` ("no such file or directory"), although
+  the file functions and the program search took such paths: `CreateProcessW` now gets the
+  extended-length form.
 
 ## [0.4.0] - 2026-11-17
 
