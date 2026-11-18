@@ -1,1 +1,1 @@
-long_line.al:2:70011: error: operands have different types: i64 and str
+long_line.al:2:70011: error: operands of `+` have different types: `1` is i64, `"a"` is str

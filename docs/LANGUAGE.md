@@ -65,8 +65,8 @@ test "areas" {
 - **Statements end at a newline** (or `;`). A newline does *not* end a statement when the line
   ends in an operator, a comma or an opening bracket, or anywhere inside `( )` / `[ ]`.
   A line cannot *start* with a binary operator.
-- Keywords (not usable as names): `fn struct enum const test use priv extern inline noinline if
-  else while loop for in by return break continue assert match defer true false nil when`.
+- Keywords (not usable as names): `fn struct enum const use priv extern inline noinline if else
+  while loop for return break continue assert match defer true false nil when`; `in`, `by`, `test` only in their place (`for x in`, `by step`, `test "name"` at the top level): elsewhere they are names.
 - Integer literals: `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17`. A character literal (`'a'`,
   `'\n'`, `'\''`, `'\x41'`) is an integer literal with the byte's value: `c: u8 = 'a'`,
   `s[i] == 'a'`; `c := 'a'` is an `i64`.
@@ -845,7 +845,7 @@ fn main() {
 alc build file.al [-o out]     compile; the executable is the source path without `.al`
 alc run file.al [-- args...]   compile (writing the executable as build does) and run; exit status of the program
 alc test file.al               run each `test` block in its own process (`main` need not exist): its output, `ok   name` / `FAIL name`; status 1 if any failed
-alc check file.al              type-check only; `--all-targets`: once for every target (Linux, Windows)
+alc check file.al              type-check only; `main` need not exist (check one file of a program alone); `--all-targets`: once per target
 alc sigs file.al [-- std]      one line per declaration: `file:line: signature  // first line of its comment`; `-- std` adds the library's
 alc fmt [--check] file.al dir/ rewrite in the one canonical layout (white space only); `--check`: list files that would change
 options: -o path (build, run, test: e.g. `-o build/game` keeps executables out of the source folder)  -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  for a Windows target (the default on Windows): --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows

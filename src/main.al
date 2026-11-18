@@ -244,6 +244,12 @@ priv fn std_text(name: str) -> Opt[str] {
     return None
 }
 
+// the module `name` is read from ALC_STD_DIR (std_text)
+priv fn std_from_dir(name: str) -> bool {
+    dir, have_dir := env_get("ALC_STD_DIR")
+    return have_dir && file_id(path_join(dir, fmt(name, ".al"))).1
+}
+
 priv struct Args {
     cmd: str
     input: str
@@ -280,7 +286,7 @@ priv fn usage(why: str) -> never {
         eput(fmt(why, "\n"))
     }
     eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
-        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n",
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n",
         "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
     exit(2)
 }
@@ -465,7 +471,10 @@ priv struct Sources {
     decls: Vec[Decl]
     errs: Vec[Diag]
     seen: Map[str, bool]
+    // the bundled modules the program includes, except those read from ALC_STD_DIR; the
+    // first file of the core modules (after the run-time library)
     std_files: Vec[i64]
+    n_core: i64
     wc: WhenCx
     // the files whose declarations the `when` conditions know (when_register): 0..registered
     registered: i64
@@ -554,7 +563,9 @@ priv fn use_file(self: *Sources, file: i64, path: str, pos: Pos, out: *Vec[Item]
                 key := fmt("<std/", mname, ".al>")
                 if !self.seen.has(key) {
                     self.seen.set(key, true)
-                    self.std_files.push(self.names.len)
+                    if !std_from_dir(mname) {
+                        self.std_files.push(self.names.len)
+                    }
                     out.push(Inc(self.add_text(key, mtext, None, true)))
                 }
             }
@@ -943,6 +954,7 @@ priv fn load(ar: *Args) -> (Sources, i64) {
     src.add_text("<prelude>", prelude, None, true)
     src.add_text(fmt("<", layer_name[..len(layer_name) - 3], ">"), layer, None, true)
     // the core library is part of the language: always present, no `use` needed
+    src.n_core = src.names.len
     for name in CORE_MODULES {
         text := std_text(name).or("")
         src.seen.set(fmt("<std/", name, ".al>"), true)
@@ -955,8 +967,9 @@ priv fn load(ar: *Args) -> (Sources, i64) {
 }
 
 // The declarations to compile: tests become functions, and the entry point `__entry` is
-// generated (in the file "<entry>")
-priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
+// generated (in the file "<entry>"). `need_main`: a program without `main` is an error (not
+// for `alc test` and `alc check`, which write no program that starts at `main`).
+priv fn program(src: *Sources, n_prelude: i64, test_mode: bool, need_main: bool) -> Vec[Decl] {
     tests := vec[str]()
     main_ret := false
     has_main := false
@@ -1048,7 +1061,7 @@ priv fn program(src: *Sources, n_prelude: i64, test_mode: bool) -> Vec[Decl] {
         entry.push(" exit(__tests_done())\n}\n")
     } else if !has_main {
         // (after a syntax error main may just not have been parsed)
-        if src.errs.is_empty() {
+        if need_main && src.errs.is_empty() {
             src.errs.push(Diag{pos: Pos{file: n_prelude, line: 1, col: 1}, msg: "missing `fn main() { ... }`, the function where the program starts"})
         }
         entry.push(" exit(0)\n}\n")
@@ -1075,13 +1088,21 @@ priv fn typecheck(ar: *Args, src: *Sources, decls: *Vec[Decl], n_prelude: i64) -
         lib_files.push(if i < n_prelude { LIB_CORE } else if src.files[i].lib { LIB_MODULE } else { u8(0) })
     }
     cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, lib_files)
-    if ar.cmd != "check" {
-        // bundled modules are only compiled as far as the program reaches into them
+    // `alc check` type-checks every function of the program and of the bundled modules it
+    // includes, the core modules (n_core..n_prelude) too. `alc build` / `run` / `test` compile
+    // the bundled modules only as far as the program reaches into them: checking the rest
+    // would cost every build of a program that uses std.gfx or std.window 40-70% more time
+    // (at -O0; 2-4 times at -O), for errors that tests/check/std_targets*.al rule out. A
+    // module read from ALC_STD_DIR (one being written) is checked in full by every command.
+    from := n_prelude
+    if ar.cmd == "check" {
+        from = src.n_core
+    } else {
         for f in src.std_files {
             cx.lazy_files.set(f, true)
         }
     }
-    lower_fn_lower_all(&cx, "__entry", n_prelude)
+    lower_fn_lower_all(&cx, "__entry", from)
     return cx
 }
 
@@ -1095,7 +1116,7 @@ priv fn check_all(ar: *Args) -> i64 {
     for t, target in targets {
         target_os = target
         src, n_prelude := load(ar)
-        decls := program(&src, n_prelude, false)
+        decls := program(&src, n_prelude, false, false)
         errs := src.errs
         if errs.is_empty() {
             cx := typecheck(ar, &src, &decls, n_prelude)
@@ -1173,7 +1194,7 @@ priv fn real_main() -> i64 {
         print_sigs(&src.names, sdecls.items(), from)
         return 0
     }
-    decls := program(&src, n_prelude, test_mode)
+    decls := program(&src, n_prelude, test_mode, ar.cmd == "build" || ar.cmd == "run")
     if report(&src.names, &src.errs) {
         return 1
     }

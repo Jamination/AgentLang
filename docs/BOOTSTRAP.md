@@ -669,7 +669,9 @@ sequential, and `--emit-ir` optimises every function in the compiler before it p
 `partial`, `thread4`, `thread5`, `ifconv`, `devirt`: calls through known function values stay
 indirect, `spec`: no specialised copies; outside the optimiser `constif`: `if` on a constant
 is not decided while lowering, `deaddata`: all read-only data is linked, `backtrace`: no stack-trace table); `ALC_STD_DIR=<dir>` reads bundled modules from
-`<dir>` instead of the copies inside the compiler; `ALC_PRELUDE=<file>` reads the prelude
+`<dir>` instead of the copies inside the compiler (such a module, except a core one, is
+type-checked in full also by `alc build` / `run`, which otherwise compile only what a program
+reaches of a module); `ALC_PRELUDE=<file>` reads the prelude
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so
 `ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops;

@@ -23,6 +23,8 @@ priv struct Parser {
 // (`Name{...}`, `[]T{...}`) is recorded in parser_lits; a block's `{` is not
 parser_lits_on: bool
 parser_lits: Vec[Pos]
+// and the position of every `in`, `by` and `test` that is a keyword there (ctx_kw)
+parser_kws: Vec[Pos]
 
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
     return Parser{toks: toks, errs: errs, hdr_name: -1, budget: stack_budget()}
@@ -241,6 +243,44 @@ priv fn eat_kw(p: *Parser, k: i64) -> bool {
     return true
 }
 
+priv fn is_kw_tok(t: Tk) -> bool {
+    return match t {
+        Kw(_) => true
+        _ => false
+    }
+}
+
+// The current token is the name `w`. `in`, `by` and `test` are keywords only in their place
+// (lexer_contextual): `for x in`, `for i in a..b by s`, `test "name" { }` where a declaration
+// starts; everywhere else they are ordinary names. The grammar never has a name where they
+// stand as keywords, so the two cannot be confused: after the loop variables of a `for` comes
+// `in`; after the range of a `for` header an expression is complete and no name can continue
+// it; a top-level declaration that starts with a name is a variable, `name:` or `name :=`.
+priv fn is_word(p: *Parser, w: str) -> bool {
+    return match p.peek() {
+        Id(s) => s == w
+        _ => false
+    }
+}
+
+// at `test` where a declaration starts: a test block (a variable `test: T` / `test := v` has
+// `:` or `:=` after the name)
+priv fn test_block(p: *Parser) -> bool {
+    return p.is_word("test") && !p.is_p_at(1, ':') && !p.is_p_at(1, P_DECL)
+}
+
+// `in`, `by` or `test` taken as the keyword: consumed with the end of line after it (as a
+// keyword it never ended a statement); its position is recorded for `alc fmt`
+priv fn ctx_kw(p: *Parser) {
+    if parser_lits_on {
+        parser_kws.push(p.pos())
+    }
+    p.bump()
+    if p.peek() == Nl {
+        p.bump()
+    }
+}
+
 priv fn tok_desc(p: *Parser) -> str {
     match p.peek() {
         Id(s) => fmt("identifier `", s, "`")
@@ -330,7 +370,7 @@ priv fn err[T](p: *Parser, msg: str) -> (T, bool) {
             // where a value was expected (`x + by`), the keywords that are often meant as names
             if starts_with(msg, "expected expression") {
                 match lexer_kw_text(k) {
-                    "by", "in", "test", "use", "defer", "priv", "inline", "noinline", "extern" => { named = true }
+                    "use", "defer", "priv", "inline", "noinline", "extern" => { named = true }
                     _ => {}
                 }
             }
@@ -363,7 +403,131 @@ priv fn expect_p(p: *Parser, c: i64) -> bool {
         return true
     }
     p.err[bool](fmt("expected `", lexer_p_text(c), "`"))
+    if c == ')' || c == ']' || c == '}' {
+        p.add_note(p.unclosed_note())
+    }
     return false
+}
+
+// adds `note` to the last diagnostic: in parentheses, or after the hint it has
+priv fn add_note(p: *Parser, note: str) {
+    if len(note) == 0 || p.errs.is_empty() {
+        return
+    }
+    d := &p.errs[p.errs.len - 1]
+    if ends_with(d.msg, ")") {
+        d.msg = fmt(d.msg[..len(d.msg) - 1], "; ", note, ")")
+    } else {
+        d.msg = fmt(d.msg, " (", note, ")")
+    }
+}
+
+priv fn opener_of(t: Tk) -> i64 {
+    return match t {
+        P(')') => '('
+        P(']') => '['
+        P('}') => '{'
+        _ => 0
+    }
+}
+
+priv fn is_opener(t: Tk) -> bool {
+    return t == P('(') || t == P('[') || t == P('{')
+}
+
+// the column where the line of token j starts (its first token)
+priv fn line_indent(p: *Parser, j: i64) -> i64 {
+    k := j
+    while k > 0 && p.toks[k - 1].t != Nl && p.toks[k - 1].pos.line == p.toks[j].pos.line {
+        k -= 1
+    }
+    return i64(p.toks[k].pos.col)
+}
+
+// Where a closing bracket was expected: if the innermost bracket open before the current
+// token is never closed (by the brackets as written), the note that says where it was opened.
+// A bracket inside it that is closed by a bracket standing first on its line to the left of
+// the indentation of the line that opened it is named instead: that closing bracket was most
+// likely meant for an outer one (`P{2, "y",` then `}` under the declaration). Only after an error.
+priv fn unclosed_note(p: *Parser) -> str {
+    j := p.i - 1
+    depth := 0
+    while j >= 0 {
+        t := p.toks[j].t
+        if opener_of(t) != 0 {
+            depth += 1
+        } else if is_opener(t) {
+            if depth == 0 {
+                break
+            }
+            depth -= 1
+        }
+        j -= 1
+    }
+    if j < 0 {
+        return ""
+    }
+    blame := p.unclosed_at(j)
+    if blame < 0 {
+        return ""
+    }
+    b := p.toks[blame]
+    open := match b.t {
+        P(q) => lexer_p_text(q)
+        _ => ""
+    }
+    return fmt("the `", open, "` opened at ", b.pos.line, ":", b.pos.col, " is not closed")
+}
+
+// -1 if the opening bracket at token j is closed later by the brackets as written (a closing
+// bracket of another kind, or the end of the file: it is not). Else the bracket that most
+// likely lacks its closing one: j, or a bracket inside it closed (before the current token)
+// by a bracket that stands first on its line, left of the indentation of the line that opened it.
+priv fn unclosed_at(p: *Parser, j: i64) -> i64 {
+    stk := vec_one(j)
+    blame := -1
+    for k in j + 1..p.toks.len {
+        t := p.toks[k].t
+        if is_opener(t) {
+            stk.push(k)
+            continue
+        }
+        o := opener_of(t)
+        if o == 0 {
+            continue
+        }
+        top := stk.last()
+        if p.toks[top].t != P(o) {
+            break
+        }
+        if stk.len == 1 {
+            return -1
+        }
+        prev := p.toks[k - 1]
+        first := prev.t == Nl || prev.pos.line < p.toks[k].pos.line
+        if blame < 0 && k < p.i && first && i64(p.toks[k].pos.col) < p.line_indent(top) {
+            blame = top
+        }
+        stk.pop()
+    }
+    return if blame < 0 { j } else { blame }
+}
+
+// at a keyword in column 1 that starts a declaration (`fn`, `struct`, `const`, ...): where a
+// struct or enum body, a `match` or a block that is never closed is still open, its `}` is
+// most likely missing
+priv fn decl_at_col1(p: *Parser) -> bool {
+    if p.pos().col != 1 {
+        return false
+    }
+    return match p.peek() {
+        Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_PRIV), Kw(KW_EXTERN), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_USE), Kw(KW_WHEN) => true
+        Id("test") => match p.peek_at(1) {
+            Str(_) => true
+            _ => false
+        }
+        _ => false
+    }
 }
 
 priv fn ident(p: *Parser) -> (str, bool) {
@@ -429,8 +593,8 @@ priv fn sync_decl(p: *Parser, from: i64, inner: bool) {
                 }
                 depth -= 1
             }
-            Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_TEST), Kw(KW_USE), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_EXTERN), Kw(KW_PRIV), Kw(KW_WHEN) if starts && (depth <= 0 || p.pos().col == 1) => return
-            Id(_) if starts && depth <= 0 => return
+            Kw(KW_FN), Kw(KW_STRUCT), Kw(KW_ENUM), Kw(KW_CONST), Kw(KW_USE), Kw(KW_INLINE), Kw(KW_NOINLINE), Kw(KW_EXTERN), Kw(KW_PRIV), Kw(KW_WHEN) if starts && (depth <= 0 || p.pos().col == 1) => return
+            Id(_) if starts && (depth <= 0 || p.pos().col == 1 && p.test_block()) => return
             _ => {}
         }
         p.bump()
@@ -464,7 +628,7 @@ priv fn priv_decl(p: *Parser) -> (Decl, bool) {
     if p.is_kw(KW_PRIV) {
         return p.err[Decl]("`priv` is written once in front of a declaration")
     }
-    if p.is_kw(KW_TEST) {
+    if p.test_block() {
         p.errs.push(Diag{pos: ppos, msg: "a `test` block cannot be `priv` (nothing refers to a test by name): remove `priv`"})
         return p.decl()
     }
@@ -730,6 +894,10 @@ priv fn struct_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl
         if p.eat_p('}') {
             break
         }
+        if p.decl_at_col1() {
+            p.expect_p('}')
+            return fail[Decl]()
+        }
         if p.is_kw(KW_PRIV) {
             return p.err[Decl]("a struct field cannot be `priv` (only top-level declarations can): write `priv struct` to make the whole struct private")
         }
@@ -760,6 +928,10 @@ priv fn enum_rest(p: *Parser, name: str, tparams: Vec[str], pos: Pos) -> (Decl, 
         p.skip_nl()
         if p.eat_p('}') {
             break
+        }
+        if p.decl_at_col1() {
+            p.expect_p('}')
+            return fail[Decl]()
         }
         if p.is_kw(KW_PRIV) {
             return p.err[Decl]("an enum variant cannot be `priv` (only top-level declarations can): write `priv enum` to make the enum type private")
@@ -888,7 +1060,8 @@ priv fn decl(p: *Parser) -> (Decl, bool) {
     if p.is_kw(KW_CONST) || p.is_kw(KW_STRUCT) || p.is_kw(KW_ENUM) {
         return p.kw_decl(pos)
     }
-    if p.eat_kw(KW_TEST) {
+    if p.test_block() {
+        p.ctx_kw()
         name := match p.peek() {
             Str(s) => utf8_lossy(s)
             _ => return p.err[Decl]("expected test name string")
@@ -1163,6 +1336,7 @@ priv fn block(p: *Parser) -> *Block {
     // likely a `Name{...}` literal that was taken for the body
     after_name := p.hdr_name == p.i
     nerr := p.errs.len
+    open := p.i
     if !p.expect_p('{') {
         return nil
     }
@@ -1174,21 +1348,34 @@ priv fn block(p: *Parser) -> *Block {
     }
     loop {
         p.skip_nl()
-        if p.is_p('}') || p.peek() == Eof {
+        if p.is_p('}') || p.peek() == Eof || p.decl_at_col1() && p.unclosed_at(open) >= 0 {
             break
         }
         s, ok := p.stmt()
+        // `print(x) x = 2`: the next statement starts on the same line
+        two := false
         if ok {
             stmt_stack.push(s)
             if !p.at_end() {
                 p.err[bool]("expected end of statement")
-                p.sync_stmt()
+                // (not after a hint of its own: `switch x {`)
+                two = !ends_with(p.errs.last().msg, ")") && p.toks[p.i - 1].pos.line == p.pos().line && match p.peek() {
+                    Id(_), Int(_, _), Float(_, _), Str(_) => true
+                    Kw(k) => k != KW_ELSE
+                    _ => false
+                }
             }
-        } else {
+        }
+        // (only if what the braces hold could be the fields of a literal; not when the error
+        // already has a hint of its own)
+        lit := after_name && p.errs.len > nerr && !ends_with(p.errs[nerr].msg, ")") && p.lit_like(open)
+        if two && !lit {
+            p.add_note("two statements on one line are separated by `;`")
+        }
+        if !ok || !p.at_end() {
             p.sync_stmt()
         }
-        // (not when the error already has a hint of its own)
-        if after_name && p.errs.len > nerr && !ends_with(p.errs[nerr].msg, ")") {
+        if lit {
             p.errs[nerr].msg = fmt(p.errs[nerr].msg, " (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)")
         }
         after_name = false
@@ -1202,6 +1389,22 @@ priv fn block(p: *Parser) -> *Block {
     b.stmts = vec_of(stmt_stack[base..])
     b.end = end
     return b
+}
+
+// After an error in a block that follows a header ending in a name (`if p == Point {`): the
+// braces at token `open` hold what could be the fields of a literal (`{1, 2}`, `{x: 1}`).
+// Parsed again as a literal body; the parser's state, errors included, is left as it was.
+priv fn lit_like(p: *Parser, open: i64) -> bool {
+    saved := *p
+    nerr := p.errs.len
+    nlits := parser_lits.len
+    p.i = open + 1
+    p.no_lit = false
+    _, ok := p.lit_body()
+    *p = saved
+    p.errs.truncate(nerr)
+    parser_lits.truncate(nlits)
+    return ok
 }
 
 priv fn sync_stmt(p: *Parser) {
@@ -1228,7 +1431,8 @@ priv fn for_without_in(p: *Parser) -> bool {
     depth := 0
     for j in p.i..p.toks.len {
         match p.toks[j].t {
-            Kw(KW_IN) => return false
+            // (`in` after a name: `for x in`, `for match in`; a variable `in` stands elsewhere)
+            Id("in") if j > p.i && (tk_id(p.toks[j - 1].t) || is_kw_tok(p.toks[j - 1].t)) => return false
             P('('), P('[') => { depth += 1 }
             P(')'), P(']') => { depth -= 1 }
             P('{') if depth == 0 => return j > p.i
@@ -1330,6 +1534,10 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
         }
         return (Fn(parser_box(f)), true)
     }
+    if p.is_word("test") && match p.peek_at(1) { Str(_) => true; _ => false } {
+        p.errs.push(Diag{pos: p.pos(), msg: "a `test` block is declared at the top level, outside the function: `test \"name\" { ... }`"})
+        return fail[SK]()
+    }
     if p.is_kw(KW_CONST) || p.is_kw(KW_STRUCT) || p.is_kw(KW_ENUM) {
         p.errs.push(Diag{pos: p.pos(), msg: "constants and types (`const`, `struct`, `enum`) are declared at the top level, outside the function; inside a function there are variables (`name := value`) and nested functions (`fn name(...)`)"})
         return fail[SK]()
@@ -1384,9 +1592,10 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             }
             v2 = Some(n2)
         }
-        if !p.eat_kw(KW_IN) {
+        if !p.is_word("in") {
             return p.err[SK]("expected `in`")
         }
+        p.ctx_kw()
         lo := p.header_expr()
         if lo == nil {
             return fail[SK]()
@@ -1401,7 +1610,8 @@ priv fn stmt_k(p: *Parser) -> (SK, bool) {
             hi = Some(h)
         }
         step: Opt[*Expr] = None
-        if p.eat_kw(KW_BY) {
+        if p.is_word("by") {
+            p.ctx_kw()
             st := p.header_expr()
             if st == nil {
                 return fail[SK]()
@@ -2021,6 +2231,11 @@ priv fn primary(p: *Parser) -> *Expr {
         }
         _ => {
             p.err[bool]("expected expression")
+            // `f(a,` and then the `}` of the block: the `(` is not closed
+            match p.peek() {
+                P(')'), P(']'), P('}'), Nl, Eof => p.add_note(p.unclosed_note())
+                _ => {}
+            }
             return nil
         }
     }
@@ -2081,6 +2296,10 @@ priv fn match_arms(p: *Parser) -> (Vec[MatchArm], bool) {
         p.skip_nl()
         if p.eat_p('}') {
             break
+        }
+        if p.decl_at_col1() {
+            p.expect_p('}')
+            return fail[Vec[MatchArm]]()
         }
         pos := p.pos()
         pb := pat_stack.len

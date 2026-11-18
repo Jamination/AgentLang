@@ -160,6 +160,7 @@ priv fn scan(s: str) -> Src {
         return r
     }
     parser_lits.clear()
+    parser_kws.clear()
     parser_lits_on = true
     p := parser_new(toks, &r.errs)
     p.file()
@@ -177,6 +178,12 @@ priv fn scan(s: str) -> Src {
 
 // the items of `s`, lexed into r.toks without errors (lits: the `{` of literals by line << 32 | col)
 priv fn take_apart(s: str, r: *Src, lits: *Map[i64, bool]) {
+    // `in`, `by`, `test` where the parser took them as keywords are laid out as keywords
+    // (`by -1`, `in (a, b)`: no binary operator, no call); elsewhere they are names
+    kws := map[i64, bool]()
+    for q in parser_kws {
+        kws.set(i64(q.line) << 32 | i64(q.col), true)
+    }
     // the offset of each line's start (index: the line, from 1)
     starts := vec[i64]()
     starts.push(0)
@@ -209,7 +216,15 @@ priv fn take_apart(s: str, r: *Src, lits: *Map[i64, bool]) {
         text := s[off..e]
         nl := count(text, "\n")
         key := i64(t.pos.line) << 32 | i64(t.pos.col)
-        r.items.push(Item{tok: true, t: t.t, text: text, line: line, end_line: line + nl, col: i64(t.pos.col) - 1, lit: t.t == P('{') && lits.has(key)})
+        tk := t.t
+        if kws.has(key) {
+            tk = Kw(match text {
+                "in" => KW_IN
+                "by" => KW_BY
+                _ => KW_TEST
+            })
+        }
+        r.items.push(Item{tok: true, t: tk, text: text, line: line, end_line: line + nl, col: i64(t.pos.col) - 1, lit: t.t == P('{') && lits.has(key)})
         at = e
         line += nl
     }

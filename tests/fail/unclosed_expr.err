@@ -1,0 +1,4 @@
+unclosed_expr.al:5:1: error: expected expression, found `}` (the `(` opened at 4:14 is not closed)
+unclosed_expr.al:8:1: error: expected `]`, found `}` (the `[` opened at 7:23 is not closed)
+unclosed_expr.al:11:1: error: expected expression, found end of line (the `(` opened at 10:10 is not closed)
+unclosed_expr.al:11:1: error: expected `}`, found end of file (the `(` opened at 10:10 is not closed)

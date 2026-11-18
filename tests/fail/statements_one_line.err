@@ -1,0 +1,5 @@
+statements_one_line.al:4:40: error: expected end of statement, found identifier `x` (two statements on one line are separated by `;`)
+statements_one_line.al:7:25: error: expected end of statement, found identifier `x` (two statements on one line are separated by `;`)
+statements_one_line.al:10:24: error: expected `=`, found `}` (if this `{` was meant to start a struct literal: in the header of `if`, `while`, `for` and `match` a literal needs parentheses, `(Name{...})`)
+statements_one_line.al:15:28: error: expected end of statement, found keyword `return` (two statements on one line are separated by `;`)
+statements_one_line.al:18:12: error: expected end of statement, found identifier `b` (two statements on one line are separated by `;`)

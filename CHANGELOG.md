@@ -149,6 +149,37 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `--target linux-arm64` compiles functions in parallel threads as the x86-64 back end does
   (the same executable whatever the number of threads, `ALC_JOBS`): the compiler for arm64
   builds in about 0.25 s instead of 0.45 s at `-O0` on 16 CPUs.
+- A `{`, `(` or `[` that is never closed: the error (also at the end of the file) says where it
+  was opened, ``expected `}`, found keyword `fn` (the `{` opened at 4:6 is not closed)``. When a
+  closing bracket stands left of the indentation of the line that opened its bracket, the inner
+  bracket is named (`P{2, "y",` followed by `}` under the declaration). A declaration keyword
+  in column 1 inside a struct, enum, `match` or never-closed block ends it with that error
+  instead of being read as a field or statement.
+- Two statements on one line without `;` (`print(x) x = 2`): the error says that they are
+  separated by `;`. The hint about a struct literal in the header of `if` / `while` / `for` /
+  `match` is only given when the braces could hold the fields of a literal.
+- `alc check` (also `--all-targets`) no longer requires `fn main`, as `alc test` already did:
+  one file of a program checks alone (its `use` paths are relative to itself, as when it is
+  included). `alc build` / `alc run` still report a missing `main`.
+- `alc check` type-checks the functions of the core modules (`math`, `rand`, `time`, `mem`)
+  that the program does not reach, as it already did for the modules included with `use`
+  (about 5 ms more for a small file).
+- `in`, `by` and `test` are keywords only in their place (`for x in`, `for i in a..b by s`,
+  `test "name" { }` at the top level) and ordinary names everywhere else: `bx, by` block
+  coordinates, a parameter `in`, a field `test`. Every program keeps its meaning.
+- Operands of different types: the error names the operator and each operand,
+  ``operands of `==` have different types: `e1` is bool, `""` is str`` (two comparisons on
+  one line, as in `assert e1 == "" && e2 == ""`, are told apart), and the conversion hint
+  names the right operand. `expected expression` at a closing bracket or the end of a line or
+  file names the bracket that is never closed.
+
+### Fixed
+- `alc build` / `alc run` accepted a type error in a function a program does not reach of a
+  bundled module read from `ALC_STD_DIR` (a module being written) that `alc check` reported:
+  such a module is now checked in full by every command. The modules inside the compiler are
+  still compiled only as far as a program reaches them, and the tests check all of them for
+  every target (`tests/check/std_targets.al` now includes `std.font`, and
+  `std_targets_vk.al` the Vulkan backend of `std.gfx` with `std.vk`).
 
 ## [0.4.0] - 2026-11-17
 

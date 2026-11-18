@@ -10,7 +10,7 @@ Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
 [Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Debug information](#debug-information) · [Regions](#regions) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Files of a program](#files-of-a-program) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 
@@ -990,6 +990,24 @@ both systems, except where this section says otherwise.
   with a 1 GiB stack and compiles functions in parallel worker threads as on Linux
   (`ALC_JOBS=n` sets the number); see [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
 
+## Files of a program
+
+A program is the file given to `alc` and the files it includes with `use`, in one namespace
+(except `priv` declarations). A path in `use "path"` is relative to the file that contains it,
+so a file includes the same files whether it is given to `alc` or included by another one.
+
+`alc build` and `alc run` need `fn main()`; `alc check` and `alc test` do not (they build no
+program that starts there). So `alc check part.al` type-checks one file of a program alone,
+with the files it includes, while the program is written file by file. Names that only the
+including file declares are unknown then: a file that includes what it uses checks alone.
+
+Every command type-checks every function of the program's own files, called or not. The
+bundled modules (`use std.name`, and the core modules every program has) are type-checked in
+full by `alc check`; `alc build` / `run` / `test` compile only what the program reaches of
+them (checking the rest would make building a program on std.gfx 40-70% slower). The
+repository's tests check every module for every target, so this never hides an error, except
+in a module being written: one read from `ALC_STD_DIR` is checked in full by every command.
+
 ## alc fmt
 
 `alc fmt` gives source files the one layout of the repository's own sources, so that two
@@ -1099,6 +1117,12 @@ pattern   = "_" | expr | [qual "."] IDENT "(" [pattern {"," pattern}] ")"
           | "(" pattern "," pattern {"," pattern} ")" | "&" IDENT
 qual      = IDENT ["[" type {"," type} "]"]
 ```
+
+`in`, `by` and `test` are keywords only where the grammar has them and ordinary names (`IDENT`)
+everywhere else: a `for` header has `in` right after its loop variables, and `by` after a
+complete range expression, which no name can continue; a declaration that starts with the
+name `test` is a variable when `:` or `:=` follows, else a test. A line may end after the
+keyword `in`, `by` or `test`: the header or declaration continues on the next line.
 
 In a literal `[_]T{...}` the length is the number of elements written (`_` is allowed as a
 length only there). In a pattern, `expr` is a constant, `Variant`, `Enum.Variant`, or (inside another pattern) a new

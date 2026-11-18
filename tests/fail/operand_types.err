@@ -1,0 +1,6 @@
+operand_types.al:7:15: error: operands of `==` have different types: `e1` is bool, `""` is str
+operand_types.al:7:27: error: operands of `==` have different types: `e2` is bool, `""` is str
+operand_types.al:10:13: error: operands of `+` have different types: `x` is i32, `y * 2` is i64 (convert explicitly, e.g. `i32(y * 2)`)
+operand_types.al:12:15: error: operands of `==` have different types: `p.a` is i64, `1.5` is f32 (convert explicitly, e.g. `i64(1.5)`)
+operand_types.al:12:18: error: float literal used where i64 is expected
+operand_types.al:13:73: error: operands of `<` have different types: the left operand is i64, `x` is i32 (convert explicitly, e.g. `i64(x)`)

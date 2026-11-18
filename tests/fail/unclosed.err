@@ -1,0 +1,10 @@
+unclosed.al:9:1: error: expected `}`, found keyword `fn` (the `{` opened at 7:6 is not closed)
+unclosed.al:11:5: error: expected `)`, found identifier `y` (the `(` opened at 10:13 is not closed)
+unclosed.al:14:9: error: expected `]`, found `=` (the `[` opened at 14:6 is not closed)
+unclosed.al:19:1: error: expected `}`, found keyword `struct` (the `{` opened at 17:16 is not closed)
+unclosed.al:21:1: error: expected `}`, found keyword `fn` (the `{` opened at 19:10 is not closed)
+unclosed.al:24:1: error: expected `}`, found keyword `const` (the `{` opened at 22:8 is not closed)
+unclosed.al:30:1: error: expected `}`, found keyword `fn` (the `{` opened at 26:20 is not closed)
+unclosed.al:30:24: error: expected `)`, found identifier `b`
+unclosed.al:33:1: error: expected `)`, found `}` (the `(` opened at 32:10 is not closed)
+unclosed.al:37:1: error: expected `}`, found end of file (the `{` opened at 35:13 is not closed)

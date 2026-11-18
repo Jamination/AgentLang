@@ -79,6 +79,12 @@ const P_RANGE = 0x2E2E // ..
 const P_ELLIPSIS = 0x2E2E2E // ... (the variable arguments of an `extern` C function)
 const P_FAT_ARROW = 0x3E3D // =>
 
+// a keyword only in one place of the grammar, elsewhere an ordinary name: the lexer gives it
+// as an identifier (Id), and the parser checks the text where the keyword can stand
+fn lexer_contextual(k: i64) -> bool {
+    return k == KW_IN || k == KW_BY || k == KW_TEST
+}
+
 // the text of a keyword
 fn lexer_kw_text(k: i64) -> str {
     return KEYWORDS[k]
@@ -188,13 +194,15 @@ priv fn ident_tab_init() {
     for b in "<>.:-=&|!+*/%^" {
         byte_cls[b] = CL_P
     }
-    // keywords are symbols too (interned first, so their numbers are small)
+    // keywords are symbols too (interned first, so their numbers are small). `in`, `by` and
+    // `test` are names to the lexer: the parser takes them as keywords only in their place
+    // (`for x in`, `.. by step`, `test "name"` where a declaration starts; lexer_contextual).
     for k, w in KEYWORDS {
         id := ast_sym(w)
         if id >= kw_of_sym.len {
             kw_of_sym.resize(id + 1, -1)
         }
-        kw_of_sym[id] = k
+        kw_of_sym[id] = if lexer_contextual(k) { -1 } else { k }
     }
     ident_tab_ready = true
 }
