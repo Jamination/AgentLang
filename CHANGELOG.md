@@ -98,6 +98,9 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - Two statements on one line without `;` (`print(x) x = 2`): the error says that they are
   separated by `;`. The hint about a struct literal in the header of `if` / `while` / `for` /
   `match` is only given when the braces could hold the fields of a literal.
+- `alc check` (also `--all-targets`) no longer requires `fn main`, as `alc test` already did:
+  one file of a program checks alone (its `use` paths are relative to itself, as when it is
+  included). `alc build` / `alc run` still report a missing `main`.
 
 ## [0.4.0] - 2026-11-17
 

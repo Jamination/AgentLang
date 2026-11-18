@@ -4,12 +4,16 @@ set -u
 ALC=$1; D=$2; cd "$D" || exit 1
 fail() { echo "FAIL: $*"; exit 1; }
 printf 'fn main() { x := `abc\n' > a.al
-"$ALC" check a.al 2>err; [[ $? == 1 ]] || fail "status"
+"$ALC" build a.al 2>err; [[ $? == 1 ]] || fail "status"
 grep -q "unterminated raw string" err || fail "raw string error"
 grep -q 'missing `fn main' err && fail "missing main reported after a syntax error"
 printf 'fn f() {}\n' > b.al
-"$ALC" check b.al 2>err; grep -q "missing \`fn main" err || fail "missing main not reported"
-"$ALC" check b.al --json >out 2>err; grep -q '"line":1,"col":1,"message":"missing' out || fail "json"
+"$ALC" build b.al 2>err; grep -q "missing \`fn main" err || fail "missing main not reported"
+"$ALC" run b.al 2>err; grep -q "missing \`fn main" err || fail "missing main not reported by run"
+"$ALC" build b.al --json >out 2>err; grep -q '"line":1,"col":1,"message":"missing' out || fail "json"
+# `alc check` (also --all-targets) and `alc test` need no main: a file of a program checks alone
+"$ALC" check b.al 2>err || fail "check without main"
+"$ALC" check --all-targets b.al 2>err || fail "check --all-targets without main"
 # every driver error is JSON with --json: unreadable input, command line, output path
 "$ALC" check nosuch.al --json >out 2>err; [[ $? == 1 ]] || fail "json missing: status"
 grep -q '^\[{"file":"nosuch.al","line":0,"col":0,"message":"cannot read' out || fail "json missing file"

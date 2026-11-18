@@ -10,7 +10,7 @@ Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
 [Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Debug information](#debug-information) · [Regions](#regions) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Files of a program](#files-of-a-program) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 
@@ -946,6 +946,17 @@ both systems, except where this section says otherwise.
   use `\` and drive or UNC roots, and appear in diagnostics as written. It runs on a thread
   with a 1 GiB stack and compiles functions in parallel worker threads as on Linux
   (`ALC_JOBS=n` sets the number); see [BOOTSTRAP.md](BOOTSTRAP.md#the-compiler-on-windows).
+
+## Files of a program
+
+A program is the file given to `alc` and the files it includes with `use`, in one namespace
+(except `priv` declarations). A path in `use "path"` is relative to the file that contains it,
+so a file includes the same files whether it is given to `alc` or included by another one.
+
+`alc build` and `alc run` need `fn main()`; `alc check` and `alc test` do not (they build no
+program that starts there). So `alc check part.al` type-checks one file of a program alone,
+with the files it includes, while the program is written file by file. Names that only the
+including file declares are unknown then: a file that includes what it uses checks alone.
 
 ## alc fmt
 
