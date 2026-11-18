@@ -34,9 +34,13 @@ struct Code {
     push_end: i32
     alloc_end: i32
     // -g (src/debug.al): the epilogues, as pairs (offset of the `add rsp` or first `pop`, offset
-    // of the `ret`); the variables in the frame, as pairs (variable, offset from the CFA)
+    // of the `ret`); the variables in the frame, as pairs (variable, offset from the CFA, or
+    // DV_RANGES: see dranges); the end of the prologue (after the parameters are stored);
+    // the ranges of code where variables are found (dbg_ranges)
     epis: Vec[i32]
     dvars: Vec[i32]
+    pro_end: i32
+    dranges: Vec[DbgRange]
 }
 
 priv struct Frame {
@@ -826,7 +830,9 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
                     break
                 }
             }
+            t := i.tgt // (-g: the value the destination receives, src/debug.al)
             insts[k] = if zero { minst_new(Zero, 4, i.a, Opnd.None) } else { minst_new(Add, i.sz, i.a, add.unwrap()) }
+            insts[k].tgt = t
         }
     }
 }
@@ -957,6 +963,10 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     last_loc: i32 = 0
     push_end := 0
     alloc_end := 0
+    // -g: the offset of every instruction that is no jump, in the order of the layout (a `ret`:
+    // of its epilogue), and of the code after the prologue (src/debug.al)
+    dats := vec[i64]()
+    pro_mir := 0
     // the save slot of the k-th preserved xmm register
     fn xmm_slot(xmm_off: i64, k: i64) -> Opnd {
         m := mem_new()
@@ -1019,6 +1029,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             if win && groups.len > 0 {
                 unwind = unwind_info(&slots, &groups, enc.out.len)
             }
+            pro_mir = enc.out.len
         }
         insts := &mf.blocks[b].insts
         for x in 0..insts.len {
@@ -1032,6 +1043,9 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             if i.op == Jmp || i.op == Jcc {
                 items.push(Item{pos: enc.out.len, tgt: i64(i.tgt), cc: if i.op == Jcc { i64(i.cc) } else { -1 }, long: false})
                 continue
+            }
+            if dbg_on {
+                dats.push(i64(enc.out.len))
             }
             if i.op == Ret {
                 // epilogue
@@ -1141,6 +1155,8 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         lines[2 * li] = i32(o + pre[ki])
     }
     dvars := vec[i32]()
+    dranges := vec[DbgRange]()
+    pro_end := 0
     if dbg_on {
         ki = 0
         for ei in 0..epis.len {
@@ -1156,9 +1172,26 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             dvars.push(i32(mf.dvars[2 * k]))
             dvars.push(i32(i64(slot_off[mf.dvars[2 * k + 1]]) - above))
         }
+        // the instructions' offsets, and where the variables are
+        ki = 0
+        for j in 0..dats.len {
+            o := dats[j]
+            while ki < ni && items[ki].pos <= o {
+                ki += 1
+            }
+            dats[j] = o + pre[ki]
+        }
+        ki = 0
+        while ki < ni && items[ki].pos <= pro_mir {
+            ki += 1
+        }
+        pro_mir += pre[ki]
+        dr, pe := dbg_ranges(mf, layout.items(), dats.items(), slot_off.items(), above, pro_mir, bytes.len, &dvars)
+        dranges = dr
+        pro_end = pe
     }
     return Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind, lines: lines, alloc: size, npush: npush,
-        push_end: i32(push_end), alloc_end: i32(alloc_end), epis: epis, dvars: dvars}
+        push_end: i32(push_end), alloc_end: i32(alloc_end), epis: epis, dvars: dvars, pro_end: i32(pro_end), dranges: dranges}
 }
 
 // rewrites the float constant relocations of code from indices into the function's own list

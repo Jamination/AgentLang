@@ -83,8 +83,18 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   executables (lines, functions, parameters and variables with their scopes, types, globals,
   inlined calls, call frames), and on Windows a `.pdb` next to the executable for Visual
   Studio, WinDbg and profilers. At `-O0 -g` every statement can be stepped and every variable
-  is visible; with optimisation `-g` does not change the code (variables kept in registers are
-  not described). See [DETAILS.md](docs/DETAILS.md#debug-information).
+  is visible; with optimisation `-g` does not change the code. See
+  [DETAILS.md](docs/DETAILS.md#debug-information).
+- `-g` with optimisation: variables kept in registers and spill slots are described (location
+  lists: DWARF `.debug_loc`, PDB `S_LOCAL` with `S_DEFRANGE_*`), where the value they have at
+  that line is provably there, and "optimized out" elsewhere; parameters passed by reference
+  too.
+- `-g`: a breakpoint on a function shows its parameters right: they are described in their
+  argument registers until the prologue has stored them, the line table marks the end of the
+  prologue (`prologue_end`, and a row of its own for gdb), the PDB's debug start is there.
+- `-g`, PDB: inlined functions (`S_INLINESITE` with their lines, `LF_FUNC_ID` in IPI), so cdb
+  and Visual Studio show inlined calls as frames, as gdb does from DWARF; MD5 checksums of the
+  source files. DWARF: `extern` C variables.
 - `alc fmt`: rewrites source files in the one canonical layout, changing white space only
   (`--check` lists the files that would change, `--stdout` and `-` for filters); a file with a
   syntax error is left as it is. See [DETAILS.md](docs/DETAILS.md#alc-fmt).

@@ -672,7 +672,10 @@ is not decided while lowering, `deaddata`: all read-only data is linked, `backtr
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so
 `ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops;
-`ALC_PE_BASE=<hex>` builds a Windows executable for another preferred base (for the relocation test below).
+`ALC_PE_BASE=<hex>` builds a Windows executable for another preferred base (for the relocation test below);
+`ALC_DBGLOC=<function>` (with `-g`, optimising) prints what the variable locations of that
+function are found from (src/debug.al: the values recorded by source location, the machine
+code and the values each register and slot holds before every instruction).
 
 ## Windows target
 

@@ -261,6 +261,10 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
                 nv := f.mk(src.op, src.ty, vec[i64](), src.k)
                 f.im(nv).aux = src.aux
                 f.im(nv).set_srcloc(src.srcloc())
+                if f.dexp.len > 0 && src.srcloc() > 0 {
+                    // (-g: code of this location now runs in another iteration's copy too)
+                    f.dtaint.push(src.srcloc())
+                }
                 cur[v] = nv
             }
         }
@@ -386,6 +390,8 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
     }
     // (hphis are still the leading phis of the header: nothing above changed its list)
     f.blocks[p.header].insts = vec_of(f.blocks[p.header].insts[hphis.len..])
+    // (-g: the phis are equal to those values in the first copy only)
+    dbg_forget(f, &repl)
     f.apply_repl(&repl)
 }
 

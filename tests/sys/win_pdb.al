@@ -29,6 +29,16 @@ noinline fn probe(a: i64) -> i64 {
 const PROBE_FIRST = 18
 const PROBE_LAST = 27
 
+fn inl_leaf(x: i64) -> i64 {
+    return x * 3 + 1
+}
+
+const LEAF_LINE = 32
+
+noinline fn inl_outer(n: i64) -> i64 {
+    return inl_leaf(n) + inl_leaf(n + 1)
+}
+
 priv fn u16at(b: str, o: i64) -> i64 {
     return i64(b[o]) | i64(b[o + 1]) << 8
 }
@@ -92,6 +102,7 @@ priv fn records(s: str, at0: i64, end: i64) -> Vec[(i64, i64)] {
 
 fn main() {
     probe(1)
+    assert inl_outer(2) == 17
     exe, ok := read_file(args()[0])
     if !ok {
         exe, ok = read_file(fmt(args()[0], ".exe"))
@@ -191,6 +202,32 @@ fn main() {
         }
     }
     print("probe:", proc_off >= 0, "S_FRAMEPROC", frame, "variables", join(names.items(), " "), "inner in a block inside k's", dinner > dk && dk >= 0)
+    // the debug start after the prologue; the parameter a: S_LOCAL (a parameter) whose first
+    // range (S_DEFRANGE_REGISTER) starts at probe's first instruction
+    {
+        start := u32at(ms, proc_off + 32)
+        dstart := u32at(ms, proc_off + 20)
+        local := false
+        at_entry := false
+        seen := false
+        for r in records(ms, 4, symsize) {
+            o, k := r
+            if o <= proc_off || o >= proc_end {
+                continue
+            }
+            if k == 0x113E {
+                local = cstr_at(ms, o + 10) == "a" && u16at(ms, o + 8) & 1 == 1
+                seen = false
+            } else if local && !seen && (k == 0x1141 || k == 0x1142) {
+                seen = true
+                at_entry = k == 0x1141 && u32at(ms, o + 8) == start
+            }
+            if local && seen {
+                break
+            }
+        }
+        print("debug start after the prologue", dstart > 0, "parameter a: S_LOCAL", local, "in a register at the entry", at_entry)
+    }
     // the lines of probe: in its source lines, the file in /names
     strtab := st[11]
     lines_ok := false
@@ -223,6 +260,20 @@ fn main() {
         o += 8 + n
     }
     print("lines:", lines_ok, "file", file_ok)
+    // the checksum of this file: an MD5 (kind 1, 16 bytes) that is not all zeros
+    {
+        cs := false
+        e := 0
+        while e + 6 <= len(chk) {
+            name := cstr_at(strtab, 12 + u32at(chk, e))
+            size := i64(chk[e + 4])
+            if ends_with(name, "win_pdb.al") {
+                cs = size == 16 && chk[e + 5] == 1 && chk[e + 6..e + 22] != "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+            }
+            e = (e + 6 + size + 3) / 4 * 4
+        }
+        print("checksum of this file: MD5", cs)
+    }
     // the publics: probe among the S_PUB32 records
     syms := st[u16at(dbi, 20)]
     pub := false
@@ -242,4 +293,44 @@ fn main() {
     }
     print("type Pair: 2 members, 16 bytes", pair)
     print("section headers:", len(st[10]) == 40 * nsec)
+    // inlined code (optimised builds): `inl_outer` holds an S_INLINESITE whose inlinee is the
+    // LF_FUNC_ID of `inl_leaf` in IPI, with an entry in DEBUG_S_INLINEELINES and annotations
+    // that start with a code offset inside inl_outer (at -O0 nothing is inlined)
+    {
+        ipi := st[4]
+        leaf_id := -1
+        for i, r in records(ipi, 56, len(ipi)) {
+            if r.1 == 0x1601 && cstr_at(ipi, r.0 + 12) == "inl_leaf" {
+                leaf_id = 0x1000 + i
+            }
+        }
+        sites := 0
+        sites_ok := true
+        in_outer := false
+        for r in records(ms, 4, symsize) {
+            o, k := r
+            if k == 0x1110 {
+                in_outer = cstr_at(ms, o + 39) == "inl_outer"
+            }
+            if k == 0x114D && in_outer {
+                sites += 1
+                // (a ChangeCodeOffset or ChangeCodeOffsetAndLineOffset among the first annotations)
+                a := ms[o + 16..o + 2 + u16at(ms, o)]
+                sites_ok = sites_ok && u32at(ms, o + 12) == leaf_id && len(a) > 0 && (find(a, "\x03") >= 0 || find(a, "\x0b") >= 0)
+            }
+        }
+        lines_entry := false
+        o = symsize
+        while o < symsize + c13size {
+            kind := u32at(ms, o)
+            n := u32at(ms, o + 4)
+            if kind == 0xF6 {
+                for e in 0..(n - 4) / 12 {
+                    lines_entry = lines_entry || u32at(ms, o + 12 + 12 * e) == leaf_id && u32at(ms, o + 12 + 12 * e + 8) == LEAF_LINE
+                }
+            }
+            o += 8 + n
+        }
+        print("inline sites right:", sites == 0 || sites_ok && lines_entry && leaf_id >= 0)
+    }
 }

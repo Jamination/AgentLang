@@ -506,6 +506,11 @@ priv fn register_all(self: *Sources) {
 priv fn add_text(self: *Sources, name: str, text: str, dir: Opt[str], lib: bool) -> i64 {
     file := self.names.len
     self.names.push(name)
+    if dbg_on {
+        // (-g: the PDB's checksums of the source files)
+        dbg_texts.resize(file + 1, "")
+        dbg_texts[file] = text
+    }
     toks := lexer_lex(text, file, &self.errs)
     has_when := false
     for t in toks {

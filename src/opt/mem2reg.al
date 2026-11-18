@@ -225,6 +225,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     derived := vec[(i64, i64)]()
     accs := vec[(i64, i64, T)]()
     slots := vec[(i64, T)]()
+    dvs := vec[(i64, i64)]() // -g: (var, the variable of the debug information)
     allocas: for a in f.blocks[0].insts {
         if f.insts[a].op != Alloca || term_used[a] || !ptrs[a] {
             continue
@@ -305,6 +306,13 @@ priv fn run_once(f: *Func, first: bool) -> bool {
                 var_ty.push(slots[i].1)
             }
         }
+        // -g: a variable promoted whole (one slot at its start, of its size) is recorded
+        if f.drec {
+            k := dbg_var_of(&f.insts[a])
+            if k >= 0 && slots.len == 1 && slot_var[0] != NOV && slots[0].0 == 0 && slots[0].1.size() == size {
+                dvs.push((slot_var[0], k))
+            }
+        }
         for acc in accs {
             si := index_of(slots.items(), (acc.1, acc.2))
             if slot_var[si] != NOV {
@@ -338,6 +346,13 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     // the value of each var in the current block: cur_val[var] when cur_blk[var] == b
     cur_val := alloc[i64](nvar)
     cur_blk := vec_fill(nvar, NOV)
+    // -g: the blocks as they are before the loads and stores go (see record)
+    orig := vec[Vec[i32]]()
+    if !dvs.is_empty() {
+        for b in rpo {
+            orig.push(vec_of(f.blocks[b].insts.items()))
+        }
+    }
     for b in rpo {
         // the kept instructions are a subsequence: compacted in place
         insts := &cx.f.blocks[b].insts
@@ -362,6 +377,9 @@ priv fn run_once(f: *Func, first: bool) -> bool {
             }
         }
         insts.len = kept
+    }
+    if !dvs.is_empty() {
+        record(&cx, rpo.items(), &orig, access, &dvs, &repl)
     }
     new_phis := cx.new_phis
     // insert phis at block heads (in the order they were made), constants at the entry
@@ -399,4 +417,101 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     cleanup_trivial_phis(f)
     cleanup_dce(f)
     return true
+}
+
+// -g (src/debug.al): records in f.dexp the value each promoted variable of the debug
+// information (dvs: (var, variable)) has at the source location of every instruction, from
+// the blocks as they were (orig, in the order of rpo): the value stored last, at the start of a
+// block the one read_in found (def_in) or the one all predecessors end with. A location whose
+// instructions see different values (or no value on some path) records -1.
+priv fn record(cx: *Ctx, rpo: []i64, orig: *Vec[Vec[i32]], access: []i32, dvs: *Vec[(i64, i64)], repl: *Vec[i32]) {
+    f := cx.f
+    nb := cx.nb
+    nd := dvs.len
+    TOP := -2
+    NONE := -3
+    jof := vec_fill(cx.var_ty.len, -1)
+    for j, x in *dvs {
+        jof[x.0] = j
+    }
+    fn res(repl: *Vec[i32], v: i64) -> i64 {
+        return repl_find(repl.items(), v)
+    }
+    fn meet(a: i64, b: i64) -> i64 {
+        return if a == -2 { b } else if b == -2 || a == b { a } else { -1 }
+    }
+    // the value stored last in each block (TOP: none)
+    lastv := vec_fill(nb * nd, TOP)
+    for oi, b in rpo {
+        for v in orig[oi] {
+            var_ := i64(access[v]) - 1
+            if var_ >= 0 && f.insts[v].op == Store && jof[var_] >= 0 {
+                lastv[b * nd + jof[var_]] = res(repl, f.insts[v].args[1])
+            }
+        }
+    }
+    ent := vec_fill(nb * nd, TOP)
+    out := vec_fill(nb * nd, TOP)
+    changed := true
+    while changed {
+        changed = false
+        for oi, b in rpo {
+            for j in 0..nd {
+                e := TOP
+                d := cx.def_in.iget(dvs[j].0 * nb + b)
+                if d >= 0 {
+                    e = res(repl, d)
+                } else if oi == 0 {
+                    e = NONE
+                } else {
+                    for p in cx.preds[b] {
+                        e = meet(e, out[p * nd + j])
+                    }
+                }
+                o := if lastv[b * nd + j] != TOP { lastv[b * nd + j] } else { e }
+                if ent[b * nd + j] != e || out[b * nd + j] != o {
+                    ent[b * nd + j] = e
+                    out[b * nd + j] = o
+                    changed = true
+                }
+            }
+        }
+    }
+    // (location, variable, value) at every instruction with a location (once per run of
+    // instructions of one location with the same values)
+    recs := vec[(i64, i64, i64)]()
+    st := vec_fill(nd, NONE)
+    for oi, b in rpo {
+        for j in 0..nd {
+            st[j] = ent[b * nd + j]
+        }
+        last_l := -1
+        for v in orig[oi] {
+            i := &f.insts[v]
+            l := if i.op == Phi { 0 } else { i64(i.cap) }
+            if l > 0 && l != last_l {
+                for j in 0..nd {
+                    s := st[j]
+                    if s >= 0 || s == -1 {
+                        recs.push((l, dvs[j].1, s))
+                    }
+                }
+                last_l = l
+            }
+            var_ := i64(access[v]) - 1
+            if var_ >= 0 && i.op == Store && jof[var_] >= 0 {
+                st[jof[var_]] = res(repl, i.args[1])
+                last_l = -1
+            }
+        }
+    }
+    // each (location, variable, value) once: two values of a variable at one location stay
+    // two entries (a phi made here may turn out equal to the other value: apply_repl), which
+    // isel takes for "unknown" if they still differ
+    sort_by(recs.items(), fn(a: (i64, i64, i64), b: (i64, i64, i64)) -> bool { a.0 < b.0 || a.0 == b.0 && (a.1 < b.1 || a.1 == b.1 && a.2 < b.2) })
+    for k in 0..recs.len {
+        if k == 0 || recs[k] != recs[k - 1] {
+            f.dexp.push(DbgExp{loc: i32(recs[k].0), var: i32(recs[k].1), val: i32(recs[k].2)})
+        }
+    }
 }
