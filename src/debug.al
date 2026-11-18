@@ -142,6 +142,78 @@ fn dbg_rows(m: *Module, fid0: i64, code: *Code) -> Vec[DbgRow] {
     return rows
 }
 
+// A function inlined into the code being described: the call it was inlined at (a location),
+// the function, its code (runs of offsets, those of the functions inlined into it included),
+// the lines of that code as seen in this function (segs: (offset, file, line); in the code of
+// a function inlined into it, the line of that call) and the functions inlined into it.
+struct DbgInl {
+    call: i64
+    fid: i64
+    runs: Vec[(i64, i64)]
+    segs: Vec[(i64, i64, i64)]
+    kids: Vec[i64]
+}
+
+// The functions inlined into a function of `size` bytes, from the locations of its rows: a row
+// of inlined code has a location whose chain of calls (SrcLoc.parent) leads out to a line of
+// the function; each call of the chain is a node (nodes[0] is the function itself).
+fn dbg_inlined(m: *Module, rows: *Vec[DbgRow], size: i64) -> Vec[DbgInl] {
+    locs := &m.locs.list
+    nodes := vec_one(DbgInl{call: 0, fid: -1})
+    key := map[(i64, i64), i64]()
+    chain := vec[(i64, i64, i64)]() // (call location, the function inlined there, the location in it)
+    for k, r in *rows {
+        if r.loc <= 0 || locs[r.loc].parent == 0 {
+            continue
+        }
+        start := r.off
+        end := if k + 1 < rows.len { rows[k + 1].off } else { size }
+        if end <= start {
+            continue
+        }
+        // the calls from the outside in
+        chain.clear()
+        l := r.loc
+        while l > 0 && locs[l].parent != 0 && chain.len < 64 {
+            chain.push((i64(locs[l].parent), i64(locs[l].func), l))
+            l = i64(locs[l].parent)
+        }
+        n := 0
+        for i in chain.len - 1..=0 by -1 {
+            c, f, inner := chain[i]
+            next, found := key.get((n, c))
+            if !found {
+                next = nodes.len
+                nodes.push(DbgInl{call: c, fid: f})
+                nodes[n].kids.push(next)
+                key.set((n, c), next)
+            }
+            n = next
+            runs := &nodes[n].runs
+            if !runs.is_empty() && runs[runs.len - 1].1 == start {
+                runs[runs.len - 1].1 = end
+            } else {
+                runs.push((start, end))
+            }
+            // (the line here: of the location in this function, the call of the next one)
+            li := if i > 0 { chain[i - 1].0 } else { inner }
+            nodes[n].segs.push((start, i64(locs[li].file), i64(locs[li].line)))
+        }
+    }
+    return nodes
+}
+
+// the outermost location of the chain of calls of location l (a line of the function itself)
+fn dbg_root_loc(m: *Module, l0: i64) -> i64 {
+    l := l0
+    n := 0
+    while l > 0 && l < m.locs.list.len && m.locs.list[l].parent != 0 && n < 256 {
+        l = i64(m.locs.list[l].parent)
+        n += 1
+    }
+    return l
+}
+
 // function fid is being lowered from a declaration at `pos`
 fn dbg_function(fid: i64, pos: Pos) {
     if dbg_fn_line.len <= fid {
@@ -779,7 +851,7 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
     }
     d := &mf.dbg
     // the state at the start of block b from the ends of its predecessors
-    fn entry_state(d: *DbgMF, b: i64, entry: i64, preds: *Vec[Vec[i64]], outs: *Vec[Vec[i32]], seed: *Vec[i32], nl: i64) -> Vec[i32] {
+    fn entry_state(d: *DbgMF, b: i64, entry: i64, preds: *Vec[Vec[i64]], outs: *Vec[Vec[i32]], seed: *Vec[i32], nl: i64, rej: *Map[i64, bool], nv: i64) -> Vec[i32] {
         TOP := i32(-2)
         st := vec_fill(nl, TOP)
         if b == entry {
@@ -818,8 +890,10 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
                     e += 1
                 }
                 for x in 0..nl {
-                    if st[x] >= 0 && i64(st[x]) != p {
-                        // (a location already known to hold another value keeps it)
+                    // (where all predecessors agree on one value it is the phi's input on
+                    // every edge: the location holds the phi too, which wins; so the state
+                    // only shrinks while the analysis iterates)
+                    if rej.has((b * nl + x) * nv + p) {
                         continue
                     }
                     ok := true
@@ -855,13 +929,33 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
         }
         return st
     }
+    // The analysis is optimistic: a predecessor not yet visited agrees with everything. Two
+    // phis with the same input on the visited edges then both seem to be in a location (or
+    // a phi seems to be where its input from outside a loop is, which another value occupies);
+    // when a phi found in a location at the start of its block turns out not to be there, what
+    // it spread is stale: it is rejected for that location and the analysis starts again
+    // (each restart rejects one more).
+    rej := map[i64, bool]() // (block * nl + location) * (number of values) + phi
+    nv := i64(d.vblk.len)
     changed := true
     rounds := 0
-    while changed && rounds < 50 {
+    restarts := 0
+    while changed && rounds < 50 && restarts < 100 {
         changed = false
         rounds += 1
+        restart := false
         for b in rpo {
-            st := entry_state(d, b, entry, &preds, &outs, &seed, nl)
+            st := entry_state(d, b, entry, &preds, &outs, &seed, nl, &rej, nv)
+            old := &ins[b]
+            if old.len == nl {
+                for x in 0..nl {
+                    o := i64(old[x])
+                    if o >= 0 && o < nv && i64(st[x]) != o && i64(d.vblk[o]) == b {
+                        rej.set((b * nl + x) * nv + o, true)
+                        restart = true
+                    }
+                }
+            }
             ins[b] = clone(st)
             for i in mf.blocks[b].insts {
                 fl_step(&fl, &i, st.items())
@@ -869,6 +963,15 @@ fn dbg_ranges(mf: *MFunc, layout: []i64, at: []i64, slot_off: []i32, above: i64,
             if st.items() != outs[b].items() {
                 outs[b] = st
                 changed = true
+            }
+        }
+        if restart {
+            restarts += 1
+            rounds = 0
+            changed = true
+            for b in rpo {
+                outs[b] = vec_fill(nl, TOP)
+                ins[b] = vec[i32]()
             }
         }
     }
