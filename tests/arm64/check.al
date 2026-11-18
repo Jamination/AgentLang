@@ -21,10 +21,25 @@
 //   at the entry; a call leaves x0-x3 / v0-v3 and destroys x0-x17 and v0-v31; a system call
 //   writes x0). This catches register allocation and spill bugs that leave a value
 //   unwritten.
+// - a dynamically linked executable (C functions): PT_PHDR, PT_INTERP (/lib/ld-linux-aarch64.so.1)
+//   and PT_DYNAMIC inside the segments; the dynamic section (DT_NEEDED names in .dynstr, the
+//   tables inside the read-only segment, DT_SYMENT / DT_RELAENT 24, BIND_NOW, DT_DEBUG); every
+//   dynamic symbol undefined, global, a function or an object, named; the SysV hash table's
+//   chain count equal to the number of symbols; every relocation an R_AARCH64_GLOB_DAT of a
+//   symbol, at a distinct 8-byte aligned import slot in the writable segment; every ADRP + LDR
+//   loads one of these slots, and every slot is loaded somewhere;
+// - the C calls (a BLR of a register loaded from an import slot), for programs whose source
+//   declares the C function (`extern`, parsed here with its struct types): the argument
+//   registers that the classification of tests/arm64/aapcs.al (an independent implementation of
+//   the Arm procedure call standard) assigns, and x8 for a result in memory, are written on
+//   every path to the call (a register that still holds an argument of the calling function
+//   counts: it may be passed on). (Whether the right values are in them is what tests/sys/c_abi
+//   checks, against C compiled by clang, under the emulator.)
 //
 // Output: a line per problem, then `arm64 check: N executables, F functions, W instructions,
-// P problems`; the exit status is 0 without problems.
+// P problems` (and the number of C calls checked); the exit status is 0 without problems.
 use std.os
+use "aapcs.al"
 
 priv struct Ins {
     ok: bool
@@ -502,10 +517,185 @@ priv struct Totals {
     files: i64
     funcs: i64
     words: i64
+    ccalls: i64
+}
+
+// a C function as the program's source declares it: the C types of its named parameters, how
+// many there are, its result
+priv struct Sig {
+    args: Vec[CT]
+    nfixed: i64
+    ret: Opt[CT]
+}
+
+// what check_func needs to know about the C side of an executable
+priv struct CSide {
+    slots: Map[i64, str]      // import slot address -> symbol
+    loaded: Map[i64, bool]    // the slots some ADRP + LDR loads
+    sigs: Map[str, Sig]       // the declarations of the source (empty: an executable given as is)
+}
+
+// the C type of an AL type written in a declaration, if it has one here
+priv fn c_type(t0: str, structs: *Map[str, str], depth: i64) -> Opt[CT] {
+    t := trim(t0)
+    if depth > 8 || len(t) == 0 {
+        return None
+    }
+    match t {
+        "i8", "u8", "bool" => return Some(CT.Int(1, t == "i8"))
+        "i16", "u16" => return Some(CT.Int(2, t == "i16"))
+        "i32", "u32" => return Some(CT.Int(4, t == "i32"))
+        "i64", "u64" => return Some(CT.Int(8, t == "i64"))
+        "f32" => return Some(CT.Flt(4))
+        "f64" => return Some(CT.Flt(8))
+        _ => {}
+    }
+    if t[0] == '*' || starts_with(t, "fn(") {
+        return Some(CT.Int(8, false))
+    }
+    if t[0] == '[' {
+        e := index_of(t, ']')
+        n, ok := parse_i64(t[1..max(e, 1)])
+        if e < 0 || !ok {
+            return None
+        }
+        return match c_type(t[e + 1..], structs, depth + 1) {
+            Some(et) => Some(CT.Arr(vec_of([]CT{et}), n))
+            None => None
+        }
+    }
+    body, has := structs.get(t)
+    if !has {
+        return None
+    }
+    fs := vec[CT]()
+    for f in split_top(body) {
+        colon := index_of(f, ':')
+        if colon < 0 {
+            continue
+        }
+        match c_type(f[colon + 1..], structs, depth + 1) {
+            Some(ft) => fs.push(ft)
+            None => return None
+        }
+    }
+    return Some(CT.Rec(fs))
+}
+
+// s split at the commas outside parentheses and brackets
+priv fn split_top(s: str) -> Vec[str] {
+    out := vec[str]()
+    depth := 0
+    start := 0
+    for k in 0..len(s) {
+        c := s[k]
+        if c == '(' || c == '[' {
+            depth += 1
+        } else if c == ')' || c == ']' {
+            depth -= 1
+        } else if (c == ',' || c == '\n') && depth == 0 {
+            if len(trim(s[start..k])) > 0 {
+                out.push(trim(s[start..k]))
+            }
+            start = k + 1
+        }
+    }
+    if len(trim(s[start..])) > 0 {
+        out.push(trim(s[start..]))
+    }
+    return out
+}
+
+// the C functions the source declares (`extern LIB fn name(params) -> T`, over several lines if
+// need be), with the structs of the same file (`struct Name { a: T, b: T }` or one field a line)
+priv fn c_sigs(src: str) -> Map[str, Sig] {
+    out := map[str, Sig]()
+    text, ok := read_file(src)
+    if !ok {
+        return out
+    }
+    structs := map[str, str]()
+    p := 0
+    loop {
+        s := find(text, "struct ", p)
+        if s < 0 {
+            break
+        }
+        p = s + 7
+        if s > 0 && text[s - 1] != '\n' && text[s - 1] != ' ' {
+            continue
+        }
+        o := find(text, "{", p)
+        c := find(text, "}", p)
+        if o < 0 || c < o {
+            continue
+        }
+        structs.set(trim(text[p..o]), text[o + 1..c])
+    }
+    p = 0
+    loop {
+        s := find(text, "extern ", p)
+        if s < 0 {
+            break
+        }
+        p = s + 7
+        f := find(text, " fn ", p)
+        nl := find(text, "\n", p)
+        if f < 0 || (nl >= 0 && f > nl) {
+            continue
+        }
+        o := find(text, "(", f)
+        if o < 0 {
+            continue
+        }
+        name := trim(text[f + 4..o])
+        depth := 0
+        c := o
+        while c < len(text) {
+            if text[c] == '(' {
+                depth += 1
+            } else if text[c] == ')' {
+                depth -= 1
+                if depth == 0 {
+                    break
+                }
+            }
+            c += 1
+        }
+        if c >= len(text) {
+            break
+        }
+        sig := Sig{nfixed: 0}
+        good := true
+        for prm in split_top(text[o + 1..c]) {
+            if prm == "..." {
+                continue
+            }
+            colon := index_of(prm, ':')
+            t: Opt[CT] = if colon < 0 { None } else { c_type(prm[colon + 1..], &structs, 0) }
+            match t {
+                Some(ct) => sig.args.push(ct)
+                None => good = false
+            }
+        }
+        sig.nfixed = sig.args.len
+        e := find(text, "\n", c)
+        rest := trim(text[c + 1..if e < 0 { len(text) } else { e }])
+        if starts_with(rest, "->") {
+            match c_type(rest[2..], &structs, 0) {
+                Some(rt) => sig.ret = Some(rt)
+                None => good = false
+            }
+        }
+        if good {
+            out.set(name, sig)
+        }
+    }
+    return out
 }
 
 // checks one executable; problems go to p
-priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals) {
+priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals, sigs: Map[str, Sig]) {
     fn bad(p: *Vec[str], name: str, msg: str) {
         p.push(fmt(name, ": ", msg))
     }
@@ -527,6 +717,10 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals) {
     nload := 0
     has_tls := false
     has_stack := false
+    dyn_va := 0
+    dyn_size := 0
+    interp := ""
+    has_phdr := false
     for k in 0..phnum {
         h := phoff + 56 * k
         ty := u32_at(b, h)
@@ -535,7 +729,16 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals) {
         fsz := u64_at(b, h + 32)
         msz := u64_at(b, h + 40)
         al := u64_at(b, h + 48)
-        if ty == 1 {
+        if ty == 6 {
+            has_phdr = k == 0 && off == phoff && fsz == 56 * phnum
+        } else if ty == 3 {
+            if off + fsz <= len(b) && fsz > 0 {
+                interp = b[off..off + fsz - 1]
+            }
+        } else if ty == 2 {
+            dyn_va = va
+            dyn_size = fsz
+        } else if ty == 1 {
             nload += 1
             if al != 0x10000 || off % al != va % al || off + fsz > len(b) || fsz > msz {
                 bad(p, name, fmt("PT_LOAD ", k, ": offset ", off, ", address ", va, ", alignment ", al, ", sizes ", fsz, "/", msz))
@@ -555,6 +758,16 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals) {
     }
     if nload != 2 || !has_tls || !has_stack {
         bad(p, name, "expected two PT_LOAD segments, PT_TLS and PT_GNU_STACK")
+    }
+    cs := CSide{sigs: sigs}
+    dynamic := dyn_va != 0
+    if dynamic {
+        if !has_phdr || interp != "/lib/ld-linux-aarch64.so.1" || phnum != 7 {
+            bad(p, name, fmt("a dynamic executable needs PT_PHDR first, PT_INTERP /lib/ld-linux-aarch64.so.1 (", interp, ") and 7 program headers"))
+        }
+        check_dynamic(name, b, &segs, dyn_va, dyn_size, &cs, p)
+    } else if interp != "" || has_phdr {
+        bad(p, name, "PT_INTERP or PT_PHDR without PT_DYNAMIC")
     }
     // sections: .text and .symtab / .strtab
     text_off := -1
@@ -613,18 +826,150 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals) {
     for fn_ in funcs {
         first = min(first, fn_.addr)
     }
+    // (the stub of a dynamic program leaves the thread pointer to the loader: 3 words)
     stub := vec[Func]()
-    stub.push(Func{name: "<entry>", addr: text_addr, size: 28})
+    stub.push(Func{name: "<entry>", addr: text_addr, size: if dynamic { 12 } else { 28 }})
     for fn_ in stub.items() {
-        check_func(name, b, text_off, text_addr, fn_, &starts, &segs, in_image, p, t, true)
+        check_func(name, b, text_off, text_addr, fn_, &starts, &segs, in_image, p, t, true, &cs)
     }
     for fn_ in funcs {
-        check_func(name, b, text_off, text_addr, fn_, &starts, &segs, in_image, p, t, false)
+        check_func(name, b, text_off, text_addr, fn_, &starts, &segs, in_image, p, t, false, &cs)
+    }
+    for a in cs.slots.keys() {
+        if !cs.loaded.has(a) {
+            bad(p, name, fmt("the import slot of `", cs.slots.get_or(a, ""), "` at ", hex(u64(a), 8), " is loaded nowhere"))
+        }
+    }
+}
+
+// the dynamic section at dyn_va (dyn_size bytes) and the tables it names; the import slots go
+// to cs.slots
+priv fn check_dynamic(name: str, b: str, segs: *Vec[Seg], dyn_va: i64, dyn_size: i64, cs: *CSide, p: *Vec[str]) {
+    fn bad(p: *Vec[str], name: str, msg: str) {
+        p.push(fmt(name, ": ", msg))
+    }
+    if segs.len != 2 {
+        return
+    }
+    ro := segs[0]
+    rw := segs[1]
+    // file offsets
+    fn file_off(segs: *Vec[Seg], a: i64) -> i64 {
+        // (both segments lie at their file offset + the base address)
+        return a - segs[0].vaddr
+    }
+    in_ro := fn(ro: Seg, a: i64, n: i64) -> bool { a >= ro.vaddr && a + n <= ro.vaddr + ro.memsz }
+    if dyn_va < rw.vaddr || dyn_va + dyn_size > rw.vaddr + rw.memsz || dyn_size % 16 != 0 {
+        bad(p, name, "PT_DYNAMIC is not inside the writable segment")
+        return
+    }
+    d := file_off(segs, dyn_va)
+    tags := map[i64, i64]()
+    needed := vec[i64]()
+    k := 0
+    ended := false
+    while 16 * k < dyn_size {
+        tg := u64_at(b, d + 16 * k)
+        v := u64_at(b, d + 16 * k + 8)
+        k += 1
+        if tg == 0 {
+            ended = true
+            break
+        }
+        if tg == 1 {
+            needed.push(v)
+        } else if tags.has(tg) {
+            bad(p, name, fmt("dynamic tag ", tg, " twice"))
+        } else {
+            tags.set(tg, v)
+        }
+    }
+    if !ended {
+        bad(p, name, "the dynamic section does not end with DT_NULL")
+    }
+    for tg in []i64{4, 5, 6, 10, 11, 7, 8, 9, 30, 21} {
+        if !tags.has(tg) {
+            bad(p, name, fmt("dynamic tag ", tg, " missing"))
+            return
+        }
+    }
+    strtab := tags.get_or(5, 0)
+    strsz := tags.get_or(10, 0)
+    symtab := tags.get_or(6, 0)
+    hash := tags.get_or(4, 0)
+    rela := tags.get_or(7, 0)
+    relasz := tags.get_or(8, 0)
+    if tags.get_or(11, 0) != 24 || tags.get_or(9, 0) != 24 || tags.get_or(30, 0) & 8 == 0 || tags.has(22) {
+        bad(p, name, "DT_SYMENT / DT_RELAENT not 24, no BIND_NOW, or DT_TEXTREL")
+    }
+    if !in_ro(ro, strtab, strsz) || !in_ro(ro, symtab, 24) || !in_ro(ro, hash, 8) || !in_ro(ro, rela, relasz) || relasz % 24 != 0 {
+        bad(p, name, "a table of the dynamic section is not inside the read-only segment")
+        return
+    }
+    st := file_off(segs, strtab)
+    cstr_at := fn(b: str, at: i64, end: i64) -> str {
+        e := at
+        while e < end && b[e] != 0 {
+            e += 1
+        }
+        return b[at..e]
+    }
+    if needed.is_empty() {
+        bad(p, name, "no DT_NEEDED")
+    }
+    for n in needed {
+        if n <= 0 || n >= strsz || len(cstr_at(b, st + n, st + strsz)) == 0 {
+            bad(p, name, fmt("DT_NEEDED ", n, " is not a name in .dynstr"))
+        }
+    }
+    // the SysV hash table: nbucket, nchain (= the number of symbols)
+    ho := file_off(segs, hash)
+    nsym := u32_at(b, ho + 4)
+    if u32_at(b, ho) < 1 || !in_ro(ro, hash, 8 + 4 * (u32_at(b, ho) + nsym)) || !in_ro(ro, symtab, 24 * nsym) {
+        bad(p, name, "the hash table's sizes do not fit")
+        return
+    }
+    sy := file_off(segs, symtab)
+    for j in 0..24 {
+        if b[sy + j] != 0 {
+            bad(p, name, "dynamic symbol 0 is not null")
+            break
+        }
+    }
+    names := vec[str]()
+    names.push("")
+    for s in 1..nsym {
+        e := sy + 24 * s
+        info := i64(b[e + 4])
+        nm := if u32_at(b, e) < strsz { cstr_at(b, st + u32_at(b, e), st + strsz) } else { "" }
+        if len(nm) == 0 || info >> 4 != 1 || (info & 15 != 1 && info & 15 != 2) || u16_at(b, e + 6) != 0 || u64_at(b, e + 8) != 0 {
+            bad(p, name, fmt("dynamic symbol ", s, " (", nm, ") is not an undefined global function or object"))
+        }
+        names.push(nm)
+    }
+    ra := file_off(segs, rela)
+    for r in 0..relasz / 24 {
+        off := u64_at(b, ra + 24 * r)
+        info := u64_at(b, ra + 24 * r + 8)
+        add := u64_at(b, ra + 24 * r + 16)
+        sym := info >> 32
+        if info & 0xFFFFFFFF != 1025 || sym < 1 || sym >= nsym || add != 0 {
+            bad(p, name, fmt("relocation ", r, ": type ", info & 0xFFFFFFFF, ", symbol ", sym, ", addend ", add, " (expected R_AARCH64_GLOB_DAT of a symbol)"))
+            continue
+        }
+        if off % 8 != 0 || off < rw.vaddr || off + 8 > rw.vaddr + rw.memsz || cs.slots.has(off) {
+            bad(p, name, fmt("relocation ", r, ": the import slot ", hex(u64(off), 8), " is misaligned, outside the writable segment or used twice"))
+            continue
+        }
+        cs.slots.set(off, names[sym])
+    }
+    if cs.slots.len != nsym - 1 {
+        bad(p, name, "not every dynamic symbol has its relocation")
     }
 }
 
 priv fn check_func(name: str, b: str, text_off: i64, text_addr: i64, fn_: Func, starts: *Map[i64, bool], segs: *Vec[Seg],
-        in_image: fn(*Vec[Seg], i64) -> bool, p: *Vec[str], t: *Totals, stub: bool) {
+        in_image: fn(*Vec[Seg], i64) -> bool, p: *Vec[str], t: *Totals, stub: bool, cs: *CSide) {
     n := fn_.size / 4
     if n == 0 {
         return
@@ -684,6 +1029,14 @@ priv fn check_func(name: str, b: str, text_off: i64, text_addr: i64, fn_: Func, 
                     if !in_image(segs, a) {
                         say(p, &errs, fmt(where(name, fn_, k), ": ADRP / ADD address ", hex(u64(a), 8), " outside the image"))
                     }
+                } else if k + 1 < n && w[k + 1] & 0xFFC00000 == 0xF9400000 && (w[k + 1] >> 5) & 31 == i.rd {
+                    // ADRP + LDR (8 bytes, unsigned offset): the load of an import slot
+                    pc := fn_.addr + 4 * k
+                    a := ((pc >> 12) + i.adrp) << 12 | ((w[k + 1] >> 10) & 0xFFF) * 8
+                    if !cs.slots.has(a) {
+                        say(p, &errs, fmt(where(name, fn_, k), ": ADRP / LDR of ", hex(u64(a), 8), ", which is no import slot"))
+                    }
+                    cs.loaded.set(a, true)
                 } else {
                     say(p, &errs, fmt(where(name, fn_, k), ": ADRP without its ADD"))
                 }
@@ -790,6 +1143,40 @@ priv fn check_func(name: str, b: str, text_off: i64, text_addr: i64, fn_: Func, 
         if (i.kind == K_BL || i.kind == K_BLR) && in_sp[k] % 16 != 0 {
             say(p, &errs, fmt(where(name, fn_, k), ": a call with sp at entry ", in_sp[k], " (not a multiple of 16)"))
         }
+        if i.kind == K_BLR && cs.sigs.len > 0 {
+            // a C call: the register was loaded from an import slot (ADRP + LDR, perhaps
+            // copied with a MOV) by the instructions before it
+            r := i.rn
+            sym := ""
+            j := k - 1
+            while j >= max(k - 40, 1) && len(sym) == 0 {
+                x := &ins[j]
+                if x.du_g & (u64(1) << u64(r)) != 0 {
+                    if w[j] & 0xFFC00000 == 0xF9400000 && ins[j - 1].kind == K_ADRP && ins[j - 1].rd == r {
+                        a := (((fn_.addr + 4 * (j - 1)) >> 12) + ins[j - 1].adrp) << 12 | ((w[j] >> 10) & 0xFFF) * 8
+                        sym = cs.slots.get_or(a, "?")
+                    } else if w[j] & 0xFFE0FFE0 == 0xAA0003E0 {
+                        r = (w[j] >> 16) & 31 // mov xd, xm
+                    } else {
+                        break
+                    }
+                }
+                j -= 1
+            }
+            sig, known := cs.sigs.get(sym)
+            if known {
+                t.ccalls += 1
+                ret := sig.ret
+                locs, rl := aapcs64(sig.args.items(), sig.nfixed, ret, false)
+                ng, nf := loc_regs(locs.items(), rl)
+                mg := ng & ~in_g[k]
+                mf := nf & ~in_f[k]
+                if mg != 0 || mf != 0 {
+                    say(p, &errs, fmt(where(name, fn_, k), ": the C call of `", sym, "` (", loc_text(locs.items(), rl), ") does not write ",
+                        if mg != 0 { fmt("x", ctz(mg)) } else { fmt("v", ctz(mf)) }, " on every path"))
+                }
+            }
+        }
         if i.kind == K_RET && in_sp[k] != 0 {
             say(p, &errs, fmt(where(name, fn_, k), ": RET with sp at entry ", in_sp[k]))
         }
@@ -829,7 +1216,7 @@ fn main() -> i64 {
     }
     inputs := vec_of(a)
     if inputs.is_empty() {
-        inputs = vec_of([]str{"tests/run", "tests/std", "examples"})
+        inputs = vec_of([]str{"tests/run", "tests/std", "tests/sys", "examples"})
     }
     skip := skip_list()
     files := vec[str]()
@@ -871,10 +1258,11 @@ fn main() -> i64 {
             // an executable to check as it is
             bytes, ok := read_file(src)
             if ok {
-                check_elf(src, bytes, &probs, &t)
+                check_elf(src, bytes, &probs, &t, map[str, Sig]())
             }
             continue
         }
+        sigs := c_sigs(src)
         for mode in []str{"", "-O0"} {
             out := path_join(tmp, "prog")
             cmd := vec_of([]str{alc, "build", "--target", "linux-arm64", src, "-o", out})
@@ -891,7 +1279,7 @@ fn main() -> i64 {
                 continue
             }
             before := probs.len
-            check_elf(fmt(src, if mode == "" { "" } else { " -O0" }), bytes, &probs, &t)
+            check_elf(fmt(src, if mode == "" { "" } else { " -O0" }), bytes, &probs, &t, sigs)
             if verbose && probs.len == before {
                 print(fmt("ok   ", src, " ", mode))
             }
@@ -902,6 +1290,6 @@ fn main() -> i64 {
     for s in probs {
         print(s)
     }
-    print(fmt("arm64 check: ", t.files, " executables, ", t.funcs, " functions, ", t.words, " instructions, ", probs.len, " problems"))
+    print(fmt("arm64 check: ", t.files, " executables, ", t.funcs, " functions, ", t.words, " instructions, ", t.ccalls, " C calls, ", probs.len, " problems"))
     return if probs.is_empty() { 0 } else { 1 }
 }

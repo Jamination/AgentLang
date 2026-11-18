@@ -13,14 +13,32 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   needs an arm for it or `_`.
   `TARGET_ARCH` is now declared by the OS layer of the target instead of the prelude (nothing
   changes for programs).
+- `enum Os` has a third variant, `MacOS` (`--target macos` below): a `match` on `TARGET_OS`
+  needs an arm for it or `_`; `when TARGET_OS == Windows { ... } else { ... }` takes the else
+  branch for macOS, so check that it suits macOS (or add `else when TARGET_OS == MacOS`).
 
 ### Added
-- `--target linux-arm64` (experimental): static AArch64 Linux executables without C libraries,
-  with `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
+- `--target macos` (experimental, never run): arm64 Mach-O executables for macOS 11 and later
+  (Apple silicon), with chained fixups, an ad-hoc code signature, thread-local data through
+  dyld's descriptors, a run-time library over libSystem (`src/prelude_macos.al`), C functions
+  by Apple's variant of the Arm calling convention, and dylibs or frameworks as `extern`
+  libraries; the core library, std.image, std.font, std.asset, std.os, the mixer of std.audio
+  and std.metal build. Checked structurally only (`tests/macho/check.al`, LLVM's tools); see
+  docs/MACOS_TEST.md. Not yet: `-g`, std.net, std.input, std.window, audio devices, stack
+  traces through C frames, `--all-targets` for macOS.
+- `--target linux-arm64` (experimental): AArch64 Linux executables, with
+  `TARGET_ARCH == Arm64`. Verified only under the project's own emulator
   (`tests/arm64/emu.al`; `tests/run.sh --target linux-arm64 --emu build/a64emu`), not yet on
-  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g`, `extern` C functions,
-  and the modules that make system calls by their x86-64 numbers (`std.net`, the gamepads of
-  `std.input`), which are refused with a message.
+  arm64 hardware: see docs/ARM64_TEST.md. Not available there yet: `-g` and the modules that
+  make system calls by their x86-64 numbers (`std.net`, the gamepads of `std.input`), which
+  are refused with a message.
+- linux-arm64: `extern` C functions and variables. A program that uses one is dynamically
+  linked (`/lib/ld-linux-aarch64.so.1`, as GCC links them) and calls C by the Arm procedure call
+  standard (AAPCS64), including structs, tuples and arrays by value (in floating-point or
+  integer registers or by reference, as C passes them; results through x8), variadic calls and
+  callbacks; its threads are the C library's. Checked under the emulator against C compiled by
+  clang (`tests/sys/c_abi`), not yet against a real loader or C library. Stack traces end at
+  the first C frame.
 - The compiler builds for arm64 Linux (experimental, as above):
   `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`.
 - `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a

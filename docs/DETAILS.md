@@ -777,6 +777,32 @@ fn main() {
 - Typed memory: the optimizer assumes a location written as one scalar type is not read as a
   different scalar type (except through `u8`), as in C.
 
+**arm64 Linux** (`--target linux-arm64`, experimental): C functions are called by the Arm
+procedure call standard (AAPCS64), as GCC and Clang call them there:
+
+- `extern` functions may also take and return structs, tuples, arrays and enums with data by
+  value: a struct of one to four `f32` (or of one to four `f64`) members, nothing else, in
+  floating-point registers; any other of up to 16 bytes as its bytes in one or two integer
+  registers; a larger one as a pointer to a copy the caller makes; results the same way, a
+  larger one in memory the caller provides. When the registers run out, the argument goes to
+  the stack (it is never split between registers and the stack). A struct with a vector member,
+  an empty struct and a vector type cannot cross the C boundary. A C function that takes or
+  returns a struct cannot be used as a function value: call it directly.
+- Variadic arguments are passed like named ones (no `al`, unlike x86-64).
+- Callbacks: any AL function with scalar parameters (integers, floats, pointers, function
+  values) and a scalar result can be called by C, on any thread, as on x86-64.
+- The program is dynamically linked against `/lib/ld-linux-aarch64.so.1` (glibc's loader; on
+  musl a link of that name is needed), its threads are the C library's (`pthread_create`).
+- A stack trace ends at the first frame of C code (x86-64 continues through C frames).
+- Verified under the project's emulator against C built by clang only; see
+  [ARM64_TEST.md](ARM64_TEST.md#5-c-libraries-and-dynamic-linking).
+
+**macOS** (`--target macos`, experimental, arm64, never run): as arm64 Linux above, with
+Apple's variant of the convention (stack arguments packed, variadic arguments on the stack).
+Libraries are dylibs or frameworks by path: `extern "/usr/lib/libobjc.A.dylib" fn ...`,
+`extern "/System/Library/Frameworks/Metal.framework/Metal" fn ...`; the run-time library uses
+`/usr/lib/libSystem.B.dylib`. See [MACOS_TEST.md](MACOS_TEST.md).
+
 **Windows** (`--target windows`):
 
 - `alc build --target windows f.al` writes `f.exe` (`f.test.exe` for `alc test`), a Windows x86-64

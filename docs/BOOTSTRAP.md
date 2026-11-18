@@ -177,7 +177,7 @@ executables before and after); the conventions below describe the result.
 | `src/host_linux.al`, `host_windows.al` | the compiler's host (the functions listed at the top of `base.al`: running programs, the big stack, the CPU count): included by `base.al` with `when TARGET_OS == ...` |
 | `src/lexer.al`, `parser.al`, `ast.al` | front end |
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
-| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions) |
+| `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions), `lower_ccall.al` (calls of C functions on arm64: AAPCS64) |
 | `src/lint.al` | checks on the AST that need types: field writes to a struct copy that is never read |
 | `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
@@ -780,8 +780,9 @@ the conformance suite with it).
 
 ## arm64 target
 
-`--target linux-arm64` makes a static AArch64 Linux executable (no C libraries). The front end
-and the optimiser are the same as for x86-64 (`target_os` is Linux); the differences are:
+`--target linux-arm64` makes an AArch64 Linux executable: static, or dynamically linked when
+it calls C functions. The front end and the optimiser are the same as for x86-64 (`target_os`
+is Linux); the differences are:
 
 - **Back end** (`src/arm64/`): `mir.al` (three-address machine IR; x16, x17, x18, x29, x30
   and v31 are reserved), `isel.al` (selection from the SSA IR, one plain selection per
@@ -796,14 +797,87 @@ and the optimiser are the same as for x86-64 (`target_os` is Linux); the differe
   functions).
 - **Calling convention**: AAPCS64 for AL functions: x0-x7 / v0-v7, results in x0-x3 / v0-v3,
   further arguments in 8-byte stack words (a vector in two, as on x86-64).
-- **Linking** (`src/elf_arm64.al`): segments aligned to 64 KiB; an entry stub puts the main
-  thread's TLS block (variant I: TPIDR_EL0, a 16-byte TCB, then the block) below the initial
-  stack. Run-time library layer: `src/prelude_linux_arm64.al` (the generic system call table).
-  `TARGET_ARCH` is declared by each OS layer (at its end).
+  For scalars this is the C convention too, so any AL function with scalar parameters is a C
+  callback as it is (x19-x28 and d8-d15 preserved, sp 16-byte aligned at calls, x18 untouched).
+- **C calls** (`src/lower_ccall.al`): a call of an `extern` function is laid out by the lowering,
+  where the C types are known, by the rules of AAPCS64 (integers, floats, structs by value:
+  HFAs in v registers, composites of up to 16 bytes in x registers, larger ones by reference,
+  "no register left" moving the argument and everything after it of its class to the stack;
+  results in x0/x1, v0-v3 or memory whose address goes in x8; narrow integers extended to 32
+  bits). It makes `CallInd` with aux `CCALL_AUX` (3) and k = number of x registers | number of v
+  registers << 4 | an x8 pointer << 8, the arguments in that order, then the stack pieces (one
+  8-byte slot each); `call` in `src/arm64/isel.al` only places them (fixed registers in the
+  instruction's `xuses`, as for any call; x8 is a clobbered register the allocator knows). The
+  optimiser leaves calls with aux != 0 alone (no inlining, devirtualisation, specialisation). A
+  C function that takes or returns a struct cannot be a function value (a call through one has
+  the AL convention). The import slot is loaded with ADRP + LDR (`LdrG`, relocation
+  `AR_LDR64`).
+- **Linking** (`src/elf_arm64.al`): segments aligned to 64 KiB; the entry stub of a static
+  program puts the main thread's TLS block (variant I: TPIDR_EL0, a 16-byte TCB, then the block)
+  below the initial stack. A program that reaches a C function is dynamically linked as on
+  x86-64 (ET_EXEC at 0x400000, PT_INTERP `/lib/ld-linux-aarch64.so.1`, DT_NEEDED, undefined
+  dynamic symbols, a SysV hash table, one `R_AARCH64_GLOB_DAT` per import slot, BIND_NOW, no
+  PLT, DT_DEBUG; sections `.interp`, `.dynstr`, `.dynsym`, `.hash`, `.rela.dyn`, `.dynamic`);
+  its entry stub only calls `__entry`: the C library's loader owns TPIDR_EL0 and gives every
+  thread the executable's block at TPIDR_EL0 + 16 (glibc and musl place it there for a PT_TLS
+  aligned to 16), which is what the code addresses. Run-time library layer:
+  `src/prelude_linux_arm64.al` (the generic system call table). Its thread functions for a
+  program that declares C functions (`__os_c_thread_create` / `__os_c_thread_join`: the C
+  library's `pthread_create`, found through r_debug and DT_GNU_HASH as on x86-64) replace
+  `__os_thread_create` / `__os_thread_join` by name in `program` (src/main.al), which renames
+  the clone-based ones to `__os_clone_thread_*`: other programs never refer to them, so static
+  programs are built exactly as before (an `if` on a constant would still have changed the
+  numbering of functions at -O0 and the inlining of `__thread_main`). Stack traces stop at the
+  first C frame (no CFI unwinder for arm64 yet). `TARGET_ARCH` is declared by each OS layer
+  (at its end).
 - **The compiler for arm64**: `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`
   (`HOST_ARM64` in `src/base.al` selects `src/host_linux_arm64.al`).
 - **Tests**: `tests/unit/arm64_enc.al` (the encoder against known encodings),
   `tests/arm64/check.al` (structural check of the executables: decoding, branches, stack
-  pointer, registers read before written), `tests/arm64/emu.al` (a user-mode emulator; the
+  pointer, registers read before written; the dynamic section, symbols, relocations and import
+  slots; the argument registers of every C call of a program whose source declares the C
+  function, by the independent classifier `tests/arm64/aapcs.al`, which `tests/unit/aapcs64.al`
+  checks against clang's placements), `tests/arm64/emu.al` (a user-mode emulator; the
   runner takes `--target linux-arm64 --emu build/a64emu.exe`, `tests/arm64_emu.skip` lists
-  what it cannot run). What only real hardware can check: `docs/ARM64_TEST.md`.
+  what it cannot run). The emulator is also the dynamic loader of such programs (the libraries
+  of DT_NEEDED from `A64EMU_LIBRARY_PATH` / `LD_LIBRARY_PATH`, their relocations, the main
+  thread's block as glibc makes it, r_debug); the runner builds the C library of a
+  `tests/sys/NAME.c` with clang for it (`--target=aarch64-linux-gnu`, freestanding, ld.lld:
+  `clang` in PATH or `ALTEST_CLANG`), so `tests/sys/c_abi` runs AL code against C that clang
+  compiled, in both directions. What only real hardware can check: `docs/ARM64_TEST.md`.
+
+## macOS target
+
+`--target macos` (experimental, never run) sets `target_os` to `TargetMacOS` and `target_arch`
+to arm64: the arm64 back end with these differences.
+
+- **Linking** (`src/macho.al`): a PIE Mach-O for macOS 11+ in 16 KiB pages: `__PAGEZERO`,
+  `__TEXT` (`__text`: an entry stub that dyld calls as `main`, passing argv on to `__entry`;
+  `__const`), `__DATA_CONST` (`__got`, the import slots; the read-only globals that hold
+  addresses), `__DATA` (`__data`, `__thread_vars`, `__thread_bss`, `__bss`), `__LINKEDIT`
+  (chained fixups in format `DYLD_CHAINED_PTR_64`, the exports trie, symbols, the indirect
+  symbols of `__got`, the code signature). Load commands as ld64 writes them (LC_MAIN,
+  LC_LOAD_DYLINKER, LC_LOAD_DYLIB per library (libSystem first), LC_BUILD_VERSION 11.0,
+  LC_UUID from the SHA-256 of the file, LC_CODE_SIGNATURE: an ad-hoc, linker-signed
+  CodeDirectory over 4 KiB pages, hashed by `src/sha256.al`). Its output is the same for any
+  `ALC_JOBS`; the signature's identifier is the output's file name.
+- **Thread-local data**: the block of the calling thread is the result of the program's one
+  thread-local variable descriptor (`Tlv` in src/arm64: `adrp`/`add x0`, `ldr x16, [x0]`,
+  `blr x16`, modelled as an instruction that defines x0, as a system call does: the thunk keeps
+  every other register but x16, x17, x30, which the allocator never uses). Decision: TLV
+  descriptors rather than a pthread key. dyld allocates the block of every thread on its first
+  use, also of threads that C libraries start (whose callbacks run AL code that allocates); a
+  key would need a check and a slow path at every access for such threads, or reading Apple's
+  private TSD slots directly (as Go does). TPIDR_EL0, which the Linux layer owns, is not the
+  program's on Darwin. Cost: a call per access of a function's first thread-local global in a
+  block, where Linux has `mrs`.
+- **Calling convention**: Apple's variant for C calls (src/lower_ccall.al: stack arguments packed
+  at their size, variadic arguments all on the stack) and for AL functions too (`mac_slot` in
+  src/arm64/isel.al), so that AL functions stay C callbacks. Not done: narrow results of AL
+  functions are not extended to 32 bits (Apple's callers expect it).
+- **Run-time library**: `src/prelude_macos.al` over libSystem (`extern`s: macOS has no stable
+  system call interface); error numbers mapped to Linux ones; locks with `__ulock_wait` /
+  `__ulock_wake`; threads with pthreads; processes with fork / execve. `TARGET_OS == MacOS`.
+- **Tests**: `tests/macho/check.al` (structural, also on a file made by ld64.lld),
+  `tests/unit/aapcs64.al` (Apple's rows), llvm-objdump by hand. What only a Mac can check:
+  `docs/MACOS_TEST.md`.
