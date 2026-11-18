@@ -126,6 +126,7 @@ priv const STD_MODULES = [_](str, str){
     ("gfx_dx12", embed("../std/gfx_dx12.al")),
     ("gfx_vk", embed("../std/gfx_vk.al")),
     ("gfx_shaders", embed("../std/gfx_shaders.al")),
+    ("gfx_text", embed("../std/gfx_text.al")),
 }
 
 // modules that are loaded into every program
