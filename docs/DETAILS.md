@@ -1000,12 +1000,21 @@ alc fmt game.al src/            rewrite the files in place (a directory: every .
 alc fmt --check src/            change nothing; print the files that would change, status 1 if any
 alc fmt --stdout game.al        print the result instead of writing it
 alc fmt - < game.al             standard input to standard output (for editors and filters)
+alc fmt --check --json src/     diagnostics as one JSON array on standard output (as alc check --json)
 ```
 
 The status is 0 when everything was formatted (`--check`: nothing would change), 1 when a file
 would change (`--check`) or has an error, 2 for a usage error. A file with a syntax error is not
 changed: its diagnostics are printed as `alc check` prints them, and the other files are still
-formatted (`--stdout` / `-` print such a file as it is).
+formatted (`--stdout` / `-` print such a file as it is). With `--json` (not with `--stdout` or
+`-`) the diagnostics of all files are one array, nothing when there are none; with `--check` a
+file that would change is an entry too, at its first line that would change, instead of its name.
+
+**Leaving a file alone.** A comment `// alc fmt: off` (alone on its line or after code; more text
+may follow it) leaves its line and every line after it as written; the lines above it are
+formatted. Put it on the first line to keep the whole file, for a test whose layout is what it
+tests (trailing spaces, columns in expected diagnostics). There is no `on`: move such code to the
+end of the file or into a file of its own.
 
 **What it changes: white space only.** Tokens stay as written and on their lines: no line is
 joined or broken, so a newline that ends a statement can never move (see [Grammar](#grammar)),
@@ -1039,7 +1048,8 @@ left as it is with an `internal error of alc fmt` diagnostic. The test `fmt/tree
 `tests/run.al` formats copies of every `.al` file of the repository, checks that the result does
 not change again, that the compiler built from the formatted sources reproduces itself and
 compiles `src/main.al` to the same executable, and that scrambling the layout of every file
-(indentation, spaces, blank lines, line ends) formats back to the same text.
+(indentation, spaces, blank lines, line ends) formats back to the same text. A file marked
+`alc fmt: off` must keep the marked lines byte for byte and is not scrambled.
 
 ## Grammar
 

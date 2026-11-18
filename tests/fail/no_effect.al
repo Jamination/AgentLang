@@ -1,7 +1,7 @@
 // statements whose value is unused and that have no effect
 struct P { x: i64 }
 fn f() -> i64 { 1 }
-fn main() {
+fn main() { // alc fmt: off: the lines and columns below are the test
     x := 5
     t := (1, 2)
     p := P{3}

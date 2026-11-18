@@ -81,6 +81,10 @@ fn describe(it: Item) -> str {
 
 Mix them freely: a fat `Entity` whose `brain` field is a tagged union of AI states.
 
+A colour such as `color: u32` is RGBA8 with red in the lowest byte: as a literal it reads
+`0xAABBGGRR` (`0xFF0000FF` is opaque red, `0xFFFFFFFF` white), what std.gfx and std.math's
+`color_u32` use.
+
 Store entities in a `Pool[Entity]` and keep `Handle`s, never pointers or indices, across
 frames: a handle to a removed entity simply stops resolving (`get` returns nil), even when its
 slot has been reused.
@@ -202,8 +206,9 @@ show as its missing glyph; `gfx_font_add` adds characters between frames.
   layers through the debug-utils messenger. Vsync is the present mode: FIFO by default, MAILBOX
   for low latency where offered. The same bindings build for Linux and Windows; only the
   surface extension and its create-info differ (`when TARGET_OS == Windows`).
-- **Direct3D 12**: [std/dx12.md](std/dx12.md): HLSL compiled at run time with `D3DCompile`, a
-  swap chain on `win32_hwnd(w)`.
+- **Direct3D 12** (Windows): [std/dx12.md](std/dx12.md): HLSL compiled at run time with
+  `D3DCompile` (`dx_compile` of `examples/gamekit/dx12_gpu.al`), a swap chain on `win32_hwnd(w)`;
+  `examples/dx12_crypt` is a 3D game on it (meshes, depth, lighting, mouse-look).
 - **The examples are reference code, not a library**: read them, copy what helps, change it.
   `examples/vk_triangle.al` and `examples/dx12_triangle.al` are complete minimal programs;
   `examples/vk_renderer/` uses most of what an engine needs from Vulkan (1.3 features, textures,
@@ -230,13 +235,24 @@ show as its missing glyph; `gfx_font_add` adds characters between frames.
   (XInput 2 raw motion) and Windows (raw input). Multiply it by the player's sensitivity
   setting, not by the frame time. Unlock for menus; while the window is not focused the
   pointer is free by itself ([std/window.md](std/window.md#mouse-look)).
+- Where mouse-look goes: `mouse_delta` is the motion of the whole frame, and a frame runs 0..n
+  fixed steps. Apply it once per frame where edges are read (`yaw -= d.x * sens` before the
+  `for` over the steps), not in `update`, which would drop it in a frame of 0 steps and apply
+  it n times in a frame of n. A stick's look is a rate: `yaw -= stick.x * turn_speed * dt`
+  inside `update`, like movement (both in `examples/dx12_crypt/logic.al`).
 - Keys are for playing, `EventText` for typing: call `set_text_input(w, true)` only while the
   player types a name or a chat line (it lets the IME in on Windows).
 - `std.gfx`, `std.vk`, `std.dx12`: see [Rendering](#rendering).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
-  Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device.
-- `std.image`, `std.asset`: loading; keep file access in a load phase, not in `update`. Saves
-  and settings go in `data_dir(app)` / `config_dir(app)` (per user, per system).
+  Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device. Sounds
+  are WAV or Ogg Vorbis (`ogg_load`); music is streamed: `ogg_open_file` + `play_stream`
+  decode as it plays ([std/audio.md](std/audio.md)).
+- `std.image`, `std.asset`: loading (PNG, BMP, JPEG); keep file access in a load phase, not in
+  `update`. Saves and settings go in `data_dir(app)` / `config_dir(app)` (per user, per system).
+- `std.font`: TrueType fonts, glyph atlases, layout; on std.gfx through `std.gfx_text`
+  ([Rendering](#rendering)).
+- `std.net`: TCP and UDP (non-blocking with `poll` for a game loop), names, HTTP GET / POST
+  ([std/net.md](std/net.md)).
 
 A program that never opens a window or a device (a test run, a server, a tool) uses none of
 the system libraries and is a static executable.
@@ -268,6 +284,26 @@ fn update(g: *Game, inp: *Input, dt: f32) {
 Only the taken branch of a `when` is type-checked, so `alc check --all-targets game.al`
 checks the game for Linux and Windows at once.
 
+**A game for one system** (Direct3D 12 on Windows, std.wayland on Linux) still passes
+`alc check --all-targets` (and the AL repository's all-targets check of `examples/`): only a
+`when` includes its front end, and the other targets get stubs of what the portable code calls,
+so logic and the headless run stay checked everywhere ([examples/dx12_crypt/game.al](../examples/dx12_crypt/game.al)):
+
+```
+when TARGET_OS == Windows {
+    use "front.al"                          // window, GPU, sound device
+} else {
+    fn run_window(o: Options) { panic("the window needs Windows (Direct3D 12): use --headless") }
+}
+```
+
+In the AL repository, a program that is nothing but platform code (`examples/dx12_triangle.al`)
+is listed in `tests/one_target` with the reason instead. Targets are added over time
+(`enum Os { Linux, Windows, MacOS }`, `enum Arch { X86_64, Arm64 }`): end a `when` chain in an
+`else` that holds the stubs or the portable code, not in `else when TARGET_OS == Linux { ... }`
+(a new target would take no branch and miss the declarations), and give a `match` on
+`TARGET_OS` or `TARGET_ARCH` a `_` arm.
+
 ## Windows
 
 **Building and shipping.** `alc build --target windows --gui game.al -o game.exe` makes one
@@ -276,8 +312,10 @@ d3d12, dxgi, d3dcompiler_47; xinput1_4 is loaded only if a gamepad is opened). `
 console window when started from Explorer; started from a terminal it still prints there, and a
 panic also shows a message box ([DETAILS.md](DETAILS.md#windows)). Build assets into the
 executable with `embed("file.png")` + `image_decode`: the working directory of a program started
-from Explorer or a shortcut is not its own folder. Build from Linux; test under Wine
-(`tests/run.sh --target windows`) and then on Windows.
+from Explorer or a shortcut is not its own folder. Build on Windows, or from Linux (test under
+Wine, then on Windows). For debugging and profiling, `-g` writes a `.pdb` next to the
+executable (Visual Studio, WinDbg, profilers; DWARF for gdb and perf on Linux:
+[DETAILS.md](DETAILS.md#debug-information)).
 
 For a release, give the executable its icon and its description:
 
@@ -298,13 +336,16 @@ paths, UTF-8 for the `A` functions of Windows. `alc` does not sign executables: 
 one gets the SmartScreen warning the first time it is started.
 
 **Which modules work where.** Pure AL, the same results everywhere: the core library, std.input
-(events, `ActionMap`), the std.audio mixer, std.image, std.time's `FixedStep` / `Timer`.
+(events, `ActionMap`), the std.audio mixer and its WAV / Ogg decoders, std.image, std.font,
+std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
-(WASAPI), std.gfx (Direct3D 12 on Windows, Vulkan on Linux), std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
+(WASAPI), std.gfx and std.gfx_text (Direct3D 12 on Windows, Vulkan on Linux), std.net, std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
 std.shaderc (`libshaderc_shared.so.1`, or `shaderc_shared.dll` of the Vulkan SDK on Windows).
-Windows only: std.dx12. Linux only: std.x11, std.wayland, std.alsa.
+Windows only: std.dx12. Linux only: std.x11, std.wayland, std.alsa. The arm64 targets are
+experimental: `--target linux-arm64` has run only under an emulator ([ARM64_TEST.md](ARM64_TEST.md)),
+`--target macos` never ([MACOS_TEST.md](MACOS_TEST.md)).
 
-**Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout):
+**Structure of a Direct3D 12 game** (examples/dx12_starter, examples/dx12_breakout, examples/dx12_crypt):
 
 ```
 logic.al     state, rules, menus, the fixed step; events for sounds     (portable)

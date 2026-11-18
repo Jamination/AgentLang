@@ -810,8 +810,58 @@ priv fn sigs_extern(ext: Opt[str], named: bool) -> str {
     }
 }
 
-// `alc sigs`: one line per declaration, for a quick overview of a file
+// the text of the file named `name` in `alc sigs` (its comments are not kept): a bundled
+// module, the run-time library (as `load` reads it), a file of the program; "" if unknown
+priv fn sigs_text(name: str) -> str {
+    if starts_with(name, "<std/") {
+        return std_text(name[5..len(name) - 4]).or("")
+    }
+    if !starts_with(name, "<prelude") {
+        if starts_with(name, "<") {
+            return ""
+        }
+        t, err := read_to_string(name)
+        return if len(err) == 0 { t } else { "" }
+    }
+    file := fmt(name[1..len(name) - 1], ".al")
+    pre_path, pre_set := env_get("ALC_PRELUDE")
+    if pre_set {
+        p := if file == "prelude.al" { pre_path } else { path_join(path_parent(pre_path).or("."), file) }
+        t, err := read_to_string(p)
+        return if len(err) == 0 { t } else { "" }
+    }
+    return match file {
+        "prelude.al" => PRELUDE
+        "prelude_linux.al" => PRELUDE_LINUX
+        "prelude_windows.al" => PRELUDE_WINDOWS
+        "prelude_linux_arm64.al" => PRELUDE_LINUX_ARM64
+        "prelude_macos.al" => PRELUDE_MACOS
+        _ => ""
+    }
+}
+
+// the first line of the comment that leads the declaration on `line` (the comment lines right
+// above it, after a heading such as `// ---- paths ----`), else the comment after it on its
+// line; "" if neither
+priv fn sigs_doc(cl: *Map[i64, str], line: i64) -> str {
+    top := line
+    while cl.has(top - 1) {
+        top -= 1
+    }
+    for l in top..line {
+        c := trim(trim_left(cl.get_or(l, ""), "/"))
+        if len(c) > 0 && !(starts_with(c, "---") || starts_with(c, "===")) {
+            return c
+        }
+    }
+    return trim(trim_left(cl.get_or(-line, ""), "/"))
+}
+
+// `alc sigs`: one line per declaration, for a quick overview of a file; the first line of its
+// leading comment follows after `  // `
 priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
+    // the comments of the files seen so far
+    comments := map[i64, Map[i64, str]]()
     for d in decls {
         pos, text := match d {
             Fn(f) => (f.pos, fmt(sigs_priv(f.name), sigs_extern(f.ext, f.ext_const), ast_sig_str(&f)))
@@ -838,7 +888,12 @@ priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
         if pos.file < from_file {
             continue
         }
-        print(fmt(file_name(names, pos.file), ":", pos.line, ": ", ast_plain_text(text)))
+        if !comments.has(pos.file) {
+            comments.set(pos.file, comment_lines(sigs_text(file_name(names, pos.file))))
+        }
+        cl := comments.get_or(pos.file, map[i64, str]())
+        doc := sigs_doc(&cl, i64(pos.line))
+        print(fmt(file_name(names, pos.file), ":", pos.line, ": ", ast_plain_text(text), if len(doc) == 0 { "" } else { concat("  // ", doc) }))
     }
 }
 
@@ -1083,6 +1138,7 @@ priv fn check_all(ar: *Args) -> i64 {
 
 priv fn real_main() -> i64 {
     if len(args()) >= 2 && args()[1] == "fmt" {
+        json = contains(args()[2..], "--json")
         return fmt_main(args()[2..], report)
     }
     ar := parse_args()

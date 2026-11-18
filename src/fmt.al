@@ -17,6 +17,7 @@
 //     before a line that starts with a closing one, at the start or end of the file
 //   - no trailing white space, one line end after the last line; the line ends of the file
 //     (LF, or CRLF if its first line ends so) except inside raw strings, which stay as they are
+// From a comment `// alc fmt: off` on, the lines stay as written (tests of layout itself).
 // A file with a syntax error is not changed. Before a result is used it is checked: lexed
 // again it must give the same tokens (newlines that end statements included) and the same
 // comments, and formatting it again must not change it.
@@ -39,6 +40,16 @@ priv struct Src {
     items: Vec[Item]
     toks: Vec[Token]
     errs: Vec[Diag]
+    text: str
+    starts: Vec[i64]        // the offset of each line's start (index: the line, from 1)
+    off_line: i64           // the line of the first `// alc fmt: off` (0: none)
+}
+
+// a comment `// alc fmt: off` (more text may follow, not a letter or digit right after it): the
+// formatter leaves its line and the rest of the file as written
+priv fn fmt_off(c: str) -> bool {
+    m := "// alc fmt: off"
+    return starts_with(c, m) && (len(c) == len(m) || !(is_alnum(c[len(m)]) || c[len(m)] == '_'))
 }
 
 // an open bracket: its byte, the indentation of the line that opened it (without the extra
@@ -160,6 +171,12 @@ priv fn scan(s: str) -> Src {
     for q in parser_lits {
         lits.set(i64(q.line) << 32 | i64(q.col), true)
     }
+    take_apart(s, &r, &lits)
+    return r
+}
+
+// the items of `s`, lexed into r.toks without errors (lits: the `{` of literals by line << 32 | col)
+priv fn take_apart(s: str, r: *Src, lits: *Map[i64, bool]) {
     // the offset of each line's start (index: the line, from 1)
     starts := vec[i64]()
     starts.push(0)
@@ -185,7 +202,7 @@ priv fn scan(s: str) -> Src {
         line = gap(s, at, off, line, &starts, &r.items)
         if line != i64(t.pos.line) {
             r.internal(i64(t.pos.line), "the text before this token")
-            return r
+            return
         }
         to := if k + 1 < real.len { offset(&starts, real[k + 1]) } else { len(s) }
         e := tok_end(s, off, to)
@@ -199,7 +216,35 @@ priv fn scan(s: str) -> Src {
     if gap(s, at, len(s), line, &starts, &r.items) < 0 {
         r.internal(line, "the text after the last token")
     }
-    return r
+    r.text = s
+    r.starts = starts
+    for it in r.items {
+        if !it.tok && fmt_off(it.text) {
+            r.off_line = it.line
+            break
+        }
+    }
+}
+
+// The comments of `s` by line, for the leading comments of declarations (`alc sigs`): a
+// comment alone on its line under its line, one after code under minus its line. Empty if `s`
+// does not lex.
+fn comment_lines(s: str) -> Map[i64, str] {
+    m := map[i64, str]()
+    r := Src{}
+    r.toks = lexer_lex(s, 0, &r.errs)
+    if !r.errs.is_empty() {
+        return m
+    }
+    lits := map[i64, bool]()
+    take_apart(s, &r, &lits)
+    for i, it in r.items {
+        if !it.tok {
+            alone := i == 0 || r.items[i - 1].end_line < it.line
+            m.set(if alone { it.line } else { -it.line }, it.text)
+        }
+    }
+    return m
 }
 
 // the output of `layout`
@@ -295,6 +340,11 @@ priv fn layout(sc: *Src, crlf: bool, bom: bool) -> str {
                 o.add(eol)
                 o.line_start = o.b.len
             }
+        }
+        if sc.off_line > 0 && end >= sc.off_line {
+            // `// alc fmt: off`: from the start of this line on, the text as written
+            o.add(sc.text[sc.starts[first.line]..])
+            return o.b.items()
         }
         prev_end := last_end
         last_end = end
@@ -481,19 +531,36 @@ priv fn walk(dir: str, out: *Vec[str]) {
     }
 }
 
-priv const FMT_USAGE = "usage: alc fmt [--check | --stdout] <file.al | directory | -> ...\n  rewrites the files in place in the canonical layout (directories: every .al file in them)\n  --check   change nothing; list the files that would change (exit status 1 if any)\n  --stdout  write the result to standard output instead of the file\n  -         read standard input, write standard output\n"
+priv const FMT_USAGE = "usage: alc fmt [--check | --stdout] [--json] <file.al | directory | -> ...\n  rewrites the files in place in the canonical layout (directories: every .al file in them)\n  --check   change nothing; list the files that would change (exit status 1 if any)\n  --stdout  write the result to standard output instead of the file\n  --json    diagnostics as one JSON array on standard output, as `alc check --json`; with\n            --check also one entry per file that would change, at its first changed line\n  -         read standard input, write standard output\nA comment `// alc fmt: off` leaves its line and the rest of the file as written.\n"
 
-// `alc fmt ARGS`. `report` prints the diagnostics of files named by `names` (main.al), and
-// tells whether there were any.
+// the first line where a and b differ (from 1)
+priv fn first_diff_line(a: str, b: str) -> i64 {
+    line := 1
+    for i in 0..min(len(a), len(b)) {
+        if a[i] != b[i] {
+            return line
+        }
+        if a[i] == '\n' {
+            line += 1
+        }
+    }
+    return line
+}
+
+// `alc fmt ARGS`. `report` prints the diagnostics of files named by `names` (main.al; as JSON
+// if main.al saw --json), and tells whether there were any.
 fn fmt_main(argv: []str, report: fn(*Vec[str], *Vec[Diag]) -> bool) -> i64 {
     check := false
     to_stdout := false
+    as_json := false
     paths := vec[str]()
     for a in argv {
         if a == "--check" {
             check = true
         } else if a == "--stdout" {
             to_stdout = true
+        } else if a == "--json" {
+            as_json = true
         } else if a == "-" || !starts_with(a, "-") {
             paths.push(a)
         } else {
@@ -501,10 +568,13 @@ fn fmt_main(argv: []str, report: fn(*Vec[str], *Vec[Diag]) -> bool) -> i64 {
             return 2
         }
     }
-    if paths.len == 0 || (check && to_stdout) {
+    if paths.len == 0 || (check && to_stdout) || (as_json && (to_stdout || contains(&paths, "-"))) {
         eput(FMT_USAGE)
         return 2
     }
+    // --json: the diagnostics of all files (file: an index into all_names), printed at the end
+    all_names := vec[str]()
+    all_errs := vec[Diag]()
     files := vec[str]()
     for p in paths {
         if p != "-" && is_dir(p) {
@@ -515,26 +585,47 @@ fn fmt_main(argv: []str, report: fn(*Vec[str], *Vec[Diag]) -> bool) -> i64 {
     }
     status := 0
     for f in files {
+        names := vec_one(if f == "-" { "<stdin>" } else { f })
+        // an error of this file without a position (as JSON: line 0)
+        problem := ""
         text := ""
         if f == "-" {
             text = read_all(0)
         } else {
             t, ok := read_file(f)
             if !ok {
-                eput(fmt("error: cannot read `", f, "`: ", os_error(io_error()), "\n"))
-                status = 1
-                continue
+                problem = fmt("cannot read `", f, "`: ", os_error(io_error()))
             }
             text = t
         }
-        names := vec_one(if f == "-" { "<stdin>" } else { f })
-        if find(text, "\x00") >= 0 {
-            eput(fmt("error: `", names[0], "` is not a source file (it contains NUL bytes)\n"))
+        if len(problem) == 0 && find(text, "\x00") >= 0 {
+            problem = fmt("`", names[0], "` is not a source file (it contains NUL bytes)")
+        }
+        if len(problem) != 0 {
             status = 1
+            if as_json {
+                all_errs.push(Diag{pos: Pos{file: all_names.len, line: 0, col: 0}, msg: problem})
+                all_names.push(names[0])
+            } else {
+                eput(fmt("error: ", problem, "\n"))
+            }
             continue
         }
         out, errs := fmt_source(text)
-        if report(&names, &errs) {
+        if as_json {
+            if errs.is_empty() && out != text && check {
+                errs.push(Diag{pos: Pos{file: 0, line: i32(first_diff_line(text, out)), col: 1}, msg: "not in the canonical layout (`alc fmt` changes this line first)"})
+            }
+            for d in errs {
+                d.pos.file = all_names.len
+                all_errs.push(d)
+            }
+            all_names.push(names[0])
+            if !errs.is_empty() {
+                status = 1
+                continue
+            }
+        } else if report(&names, &errs) {
             status = 1
             if f == "-" || to_stdout {
                 put(text)
@@ -543,15 +634,21 @@ fn fmt_main(argv: []str, report: fn(*Vec[str], *Vec[Diag]) -> bool) -> i64 {
         }
         if f == "-" || to_stdout {
             put(out)
-        } else if out != text {
-            if check {
-                print(f)
-                status = 1
-            } else if !write_file(f, out) {
-                eput(fmt("error: cannot write `", f, "`: ", os_error(io_error()), "\n"))
-                status = 1
+        } else if out != text && !check && !write_file(f, out) {
+            problem = fmt("cannot write `", f, "`: ", os_error(io_error()))
+            status = 1
+            if as_json {
+                all_errs.push(Diag{pos: Pos{file: all_names.len - 1, line: 0, col: 0}, msg: problem})
+            } else {
+                eput(fmt("error: ", problem, "\n"))
             }
+        } else if out != text && check {
+            print(f)
+            status = 1
         }
+    }
+    if as_json {
+        report(&all_names, &all_errs)
     }
     return status
 }

@@ -116,6 +116,15 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 - `alc fmt`: rewrites source files in the one canonical layout, changing white space only
   (`--check` lists the files that would change, `--stdout` and `-` for filters); a file with a
   syntax error is left as it is. See [DETAILS.md](docs/DETAILS.md#alc-fmt).
+- `alc fmt`: a comment `// alc fmt: off` leaves its line and the rest of the file as written
+  (the four tests whose layout is what they test carry it); `--json` prints the diagnostics of
+  all files as one array, as `alc check --json` does, and with `--check` one entry per file
+  that would change, at its first changed line.
+- `alc sigs` shows the first line of each declaration's leading comment after the signature
+  (`fn range(r: *Rng, lo: i64, hi: i64) -> i64  // unbiased uniform integer in [lo, hi); ...`);
+  a heading such as `// ---- paths ----` is skipped, and a declaration without a leading
+  comment shows the comment after it on its line. About 50 functions of the core library and
+  the modules got a first comment line where they had none or one about internals.
 - `examples/dx12_crypt`: a first-person maze with Direct3D 12 (meshes, depth buffer, lighting,
   mouse-look, gamepad, a scripted headless mode and offscreen pixel tests).
 - tests: `NAME.windows.need` lists the DLLs a Windows test program needs; one that is not in a
@@ -123,6 +132,13 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   Windows.
 
 ### Changed
+- docs/AGENTS_TEMPLATE.md is platform-neutral: no absolute paths, a section per renderer
+  (std.gfx; Direct3D 12 with gamekit's `dx_compile`; Vulkan with glslc or std.shaderc).
+  docs/GAMES.md: where mouse-look goes (once per frame, not in `update`; stick look is a rate in
+  `update`), how a one-system game passes `alc check --all-targets` and keeps compiling when a
+  target is added, the colour byte order, pointers to Ogg streaming, std.font, std.net and `-g`.
+- README.md has Acknowledgements: std.image's JPEG code is based in part on the work of the
+  Independent JPEG Group; docs/std/image.md says what that asks of a game that ships it.
 - Faster loops: the bounds checks of inclusive ranges (`for i in a..=b`) and of ranges with a
   step computed at run time (`by s`) move out of the loop where the bound allows it, and a
   check that does not change in a loop and comes first in it is made once before the loop.

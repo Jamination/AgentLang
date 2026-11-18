@@ -1,5 +1,5 @@
 // `t.0.1` is (t.0).1: after `.` a number is a field, not a float literal
-fn main() {
+fn main() { // alc fmt: off: `t.0 .0` (with the space) is part of the test
     t := ((1, (2, 3)), 4.5)
     t.0.1.0 = 20
     print(t.0.1, t.0.1.1, t.1, t.0 .0)   // (20, 3) 3 4.5 1

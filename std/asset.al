@@ -261,10 +261,12 @@ fn path_stem(p: str) -> str {
 //            base directory specification asks; ~ is $HOME)
 //   Windows: %APPDATA%/app for both, or %USERPROFILE%/AppData/Roaming/app without APPDATA
 when TARGET_OS == Windows {
+    // the per-user directory for the data of `app` (saves), created if missing: (path, ok)
     fn data_dir(app: str) -> (str, bool) {
         return __asset_user_dir(__asset_appdata(), app)
     }
 
+    // the per-user directory for the settings of `app`, created if missing: (path, ok)
     fn config_dir(app: str) -> (str, bool) {
         return __asset_user_dir(__asset_appdata(), app)
     }
@@ -281,10 +283,12 @@ when TARGET_OS == Windows {
         return ""
     }
 } else {
+    // the per-user directory for the data of `app` (saves), created if missing: (path, ok)
     fn data_dir(app: str) -> (str, bool) {
         return __asset_user_dir(__asset_xdg("XDG_DATA_HOME", ".local/share"), app)
     }
 
+    // the per-user directory for the settings of `app`, created if missing: (path, ok)
     fn config_dir(app: str) -> (str, bool) {
         return __asset_user_dir(__asset_xdg("XDG_CONFIG_HOME", ".config"), app)
     }

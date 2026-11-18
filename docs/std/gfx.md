@@ -32,7 +32,7 @@ fn main() {
         angle += 0.02
         if g.begin_frame(0xFF201810) {                  // false while minimized: skip the frame
             g.set_view(320.0, 180.0)                     // draw in 320 x 180, letterboxed
-            g.rect(vec4(0.0, 0.0, 320.0, 180.0), 0xFF402010)
+            g.rect(vec4(0.0, 0.0, 320.0, 180.0), 0xFF402010)   // 0xAABBGGRR: dark blue
             g.sprite(ship, vec4(0.0, 0.0, f32(ship.w), f32(ship.h)), vec2(160.0, 90.0),
                 vec2(32.0), angle, vec2(16.0), 0xFFFFFFFF)   // turned about its centre
             g.line(vec2(10.0, 170.0), vec2(310.0, 170.0), 2.0, 0xFF00FF00)

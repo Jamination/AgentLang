@@ -1,0 +1,15 @@
+// a comment `// alc fmt: off` leaves its line and the rest of the file as written
+fn  f( x:i64 )->i64 {
+  return x+1
+}
+
+
+
+fn main() { // alc fmt: off: the layout below is what a test checks
+      print(f( 1 ))
+  y := f(2) +
+  3
+
+
+    print( y )
+}

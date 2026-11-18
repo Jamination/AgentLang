@@ -116,7 +116,8 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
   file with a syntax error), and `fmt/tree` (`tests/fmt/tree/check.al`), which formats copies of
   every `.al` file of the repository, builds the compiler from the formatted sources and
   formats scrambled layouts back (about 20 s; `check ALC DIR ROUNDS SEED` runs more rounds of
-  scrambling). It runs where the compiler's target is the machine (not under Wine).
+  scrambling). It runs where the compiler's target is the machine (not under Wine). Tests whose
+  layout is the point carry `// alc fmt: off`; fmt/tree checks that those lines stay as they are.
 - `tests/winabi/run.sh`, `tests/winaudio/run.sh` (Wine, MinGW, PipeWire) and the fuzzers in
   `tests/gen/` (Python) are Linux tools as before.
 
@@ -179,7 +180,7 @@ executables before and after); the conventions below describe the result.
 | `src/priv.al` | file-private declarations: renames them right after a file is parsed |
 | `src/types.al`, `lower*.al` | type checking fused with lowering to SSA IR: `lower.al` (declarations, instantiation), `lower_fn.al`, `lower_expr.al`, `lower_call.al`, `lower_vec.al` (vector / matrix types), `lower_mem.al` (builtin names shared with declared functions, `Vec` indexing, `clone`), `lower_nested.al` (nested functions), `lower_ccall.al` (calls of C functions on arm64: AAPCS64) |
 | `src/lint.al` | checks on the AST that need types: field writes to a struct copy that is never read |
-| `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses) |
+| `src/fmt.al` | `alc fmt` ([DETAILS.md](DETAILS.md#alc-fmt)): white space between the tokens of the lexer, comments from the gaps between them; the parser marks the `{` of literals (`parser_lits`, recorded only while `alc fmt` parses). `comment_lines` gives `alc sigs` the comments of a file the same way |
 | `src/ir.al` | IR, dominators, loops, printer, verifier |
 | `src/opt/*.al` | optimiser passes; `mod.al` is the pipeline |
 | `src/spread.al` | what the two back-end drivers share: the reachable functions (`Refs`), the number of threads and the parallel compile of functions (`spread_run`) |

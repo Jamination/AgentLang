@@ -74,8 +74,8 @@ verify.bat                          :: Windows: build.bat, the tests, VERIFY: PA
 | `alc run file.al` | build and run |
 | `alc test file.al` | run the file's `test` blocks |
 | `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
-| `alc sigs file.al` | list declarations (`-- std` adds the standard library) |
-| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`) |
+| `alc sigs file.al` | list declarations with the first line of their comments (`-- std` adds the standard library) |
+| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`, `--json`; `// alc fmt: off`) |
 | `alc --version` | the compiler's version and default target |
 
 ## Versions
@@ -162,3 +162,9 @@ The compiler compiles its own 40,000 lines in about 0.125 s without optimisation
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
+
+## Acknowledgements
+
+This software is based in part on the work of the Independent JPEG Group: the JPEG code of
+`std.image` (`std/image_jpeg.al`) follows the algorithms of libjpeg. A program built with it
+that uses JPEG carries the same sentence in its documentation ([std/image.md](docs/std/image.md)).
