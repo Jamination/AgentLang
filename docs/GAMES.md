@@ -161,9 +161,9 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 
 ## Rendering
 
-For 2D, the standard library has a renderer: [std.gfx](std/gfx.md) (sprites, shapes,
-coverage textures for text, blending, a camera transform, scissor, render textures; batched;
-Direct3D 12 on Windows, Vulkan on Linux, chosen by the target). Below it are the bindings,
+For 2D, the standard library has a renderer: [std.gfx](std/gfx.md) (sprites, shapes, text,
+blending, a camera transform, scissor, render textures; batched; Direct3D 12 on Windows,
+Vulkan on Linux, chosen by the target). Below it are the bindings,
 `std.vk` (Vulkan) and `std.dx12` (Direct3D 12, Windows), on top of the platform layer
 (`std.window` with the native handles a GPU surface needs, `std.input`, `std.audio`,
 `std.time`); with them, device set-up, swap chain, pipelines, buffers and drawing are the
@@ -184,6 +184,17 @@ game's own code, shaped by what the game needs.
   one window, sRGB or HDR output, MSAA, or control over memory and synchronization. Start
   from `examples/vk_renderer` or `examples/gamekit/dx12_gpu.al`. The two do not mix in one
   program's frame: std.gfx owns its device and swap chain.
+
+**Text** on std.gfx is `use std.gfx_text` with a TrueType font of [std.font](std/font.md):
+`font, _ := gfx_font(g, f, 16.0, char_range(32, 126))` at load time, `g.draw_text(font, x, y,
+fmt("Score ", score), color)` every frame (alignment, `draw_text_box` wraps into a rectangle,
+`text_size` measures). Drawing allocates nothing, so it sits in the frame's scratch memory
+with the `fmt` that builds the string; making a font allocates its atlas, so do that outside
+it. A font is rasterised at one pixel size: in a virtual resolution, make it at the size the
+text has on the screen (virtual size times the view's scale, anew when the window's size
+changes) and set `font.size` to the virtual size, or it is magnified and soft
+([std/gfx.md](std/gfx.md#text), `examples/gfx_starter`). Characters outside the font's set
+show as its missing glyph; `gfx_font_add` adds characters between frames.
 
 - **Vulkan**: [std/vk.md](std/vk.md) has the workflow: shaders compiled to SPIR-V with `glslc`
   ahead of time and built into the executable with `embed("shader.vert.spv")` (or at run time
