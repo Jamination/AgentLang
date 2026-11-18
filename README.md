@@ -74,8 +74,8 @@ verify.bat                          :: Windows: build.bat, the tests, VERIFY: PA
 | `alc run file.al` | build and run |
 | `alc test file.al` | run the file's `test` blocks |
 | `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
-| `alc sigs file.al` | list declarations (`-- std` adds the standard library) |
-| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`) |
+| `alc sigs file.al` | list declarations with the first line of their comments (`-- std` adds the standard library) |
+| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`, `--json`; `// alc fmt: off`) |
 | `alc --version` | the compiler's version and default target |
 
 ## Versions

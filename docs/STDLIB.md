@@ -1,8 +1,9 @@
 # AL standard library
 
 Everything here ships inside the compiler: there is nothing to install and no search path.
-`alc sigs file.al -- std` lists every declaration that a program can see (internal helpers that
-are `priv` do not appear: a program may reuse their names).
+`alc sigs file.al -- std` lists every declaration that a program can see, each with the first
+line of its comment (internal helpers that are `priv` do not appear: a program may reuse their
+names). Ranges and edge cases are in the pages below.
 
 ## Always available (no `use`)
 

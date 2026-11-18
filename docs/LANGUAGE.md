@@ -844,10 +844,10 @@ fn main() {
 ```
 alc build file.al [-o out]     compile; the executable is the source path without `.al`
 alc run file.al [-- args...]   compile (writing the executable as build does) and run; exit status of the program
-alc test file.al               compile and run all `test` blocks, each in its own process (`main` is not run and need not exist);
-                               per test its output, then `ok   name` / `FAIL name`; status 1 if any failed; the test runner is written to `file.test`
+alc test file.al               run each `test` block in its own process (`main` need not exist): its output, `ok   name` / `FAIL name`; status 1 if any failed
 alc check file.al              type-check only; `--all-targets`: once for every target (Linux, Windows)
-alc sigs file.al [-- std]      one line per declaration: `file:line: signature`; `-- std` adds the library's
+alc sigs file.al [-- std]      one line per declaration: `file:line: signature  // first line of its comment`; `-- std` adds the library's
+alc fmt [--check] file.al dir/ rewrite in the one canonical layout (white space only); `--check`: list files that would change
 options: -o path (build, run, test: e.g. `-o build/game` keeps executables out of the source folder)  -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  for a Windows target (the default on Windows): --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows
 ```
 

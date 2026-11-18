@@ -4,6 +4,7 @@
 //   check ALC DIR [ROUNDS [SEED]]
 // 1. `alc fmt` on a copy of the tree: no internal error; a file with a syntax error is left
 //    byte for byte as it was (and reported).
+//    A file with a comment `// alc fmt: off` keeps the lines from it on as they are.
 // 2. idempotent: `alc fmt --check` on the result lists no file.
 // 3. meaning: every formatted file has the same lines as the original apart from white space
 //    and blank lines (the formatter also compares the tokens itself), and the compiler built
@@ -12,7 +13,8 @@
 // 4. fuzz: ROUNDS times (default 1, from SEED, default 1) the layout of the original files is
 //    scrambled (indentation, spaces next to brackets and commas, trailing spaces, blank lines,
 //    CRLF line ends) where that cannot change a token; formatting the scrambled tree must give
-//    the formatted files of 1 (with CRLF where the scrambled file has it).
+//    the formatted files of 1 (with CRLF where the scrambled file has it). Files marked
+//    `alc fmt: off` are not scrambled.
 // The exit status is 0 if everything holds; failures are listed on standard output.
 use std.os
 
@@ -115,6 +117,20 @@ priv fn same_lines(a: str, b: str) -> bool {
         j += 1
     }
 }
+// The text of t from the line of its comment `// alc fmt: off` on, which formatting must leave
+// as it is ("" if it has none; the marker stands at the start of a line or after a space)
+priv fn off_part(t: str) -> str {
+    m := concat("// alc fmt", ": off")      // (not the marker itself in this file)
+    k := find(t, m)
+    while k > 0 && t[k - 1] != ' ' && t[k - 1] != '\t' && t[k - 1] != '\n' {
+        k = find(t, m, k + 1)
+    }
+    if k < 0 {
+        return ""
+    }
+    return t[rfind(t[..k], "\n") + 1..]
+}
+
 // `alc fmt` on the trees under base; its standard error
 priv fn fmt_tree(alc: str, base: str, tmp: str) -> str {
     argv := vec_of([]str{alc, "fmt"})
@@ -264,6 +280,7 @@ fn main() -> i64 {
     bad := error_files(errs, tree)
     formatted := map[str, str]()
     changed := 0
+    marked := 0
     for f in files {
         t := slurp(fmt(tree, "/", f))
         o := orig.get_or(f, "")
@@ -277,12 +294,20 @@ fn main() -> i64 {
         if t != o {
             changed += 1
         }
+        // a file marked `// alc fmt: off` keeps the marked part as it is
+        off := off_part(o)
+        if len(off) > 0 {
+            marked += 1
+            if !ends_with(t, off) {
+                fail(fmt(f, ": formatting changed the lines after its `alc fmt: off`"))
+            }
+        }
         // 3. the same lines apart from white space
         if !same_lines(o, t) {
             fail(fmt(f, ": formatting changed more than white space"))
         }
     }
-    print(fmt("fmt/tree: ", files.len, " files, ", bad.len, " with syntax errors (left as they are), ", changed, " changed by alc fmt"))
+    print(fmt("fmt/tree: ", files.len, " files, ", bad.len, " with syntax errors (left as they are), ", marked, " marked `alc fmt: off`, ", changed, " changed by alc fmt"))
 
     // 2. idempotent
     argv := vec_of([]str{alc, "fmt", "--check"})
@@ -327,7 +352,7 @@ fn main() -> i64 {
         n := 0
         for f in files {
             o := orig.get_or(f, "")
-            if !formatted.has(f) || has(o, "\r") {
+            if !formatted.has(f) || has(o, "\r") || len(off_part(o)) > 0 {
                 continue
             }
             s := scramble(o, &r)
@@ -347,7 +372,7 @@ fn main() -> i64 {
         differ := 0
         for f in files {
             o := orig.get_or(f, "")
-            if !formatted.has(f) || has(o, "\r") {
+            if !formatted.has(f) || has(o, "\r") || len(off_part(o)) > 0 {
                 continue
             }
             want := formatted.get_or(f, "")
