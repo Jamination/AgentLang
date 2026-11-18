@@ -4,6 +4,8 @@
 # build/altest when that is missing or older than its source (./build.sh builds it too), and
 # starts it in the repository root.
 # Usage: tests/run.sh [-j N] [-v] [--target linux|windows [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
+# One word alone is the filter unless it names a file: tests/run.sh match. The arguments go to
+# the runner unchanged.
 # On Windows: tests\run.bat.
 cd "$(dirname "$0")/.." || exit 2
 if [[ ! -x build/altest || tests/run.al -nt build/altest ]]; then

@@ -59,9 +59,10 @@ tests that need a C compiler (MinGW-w64) are skipped with that reason when it is
 [BOOTSTRAP.md](docs/BOOTSTRAP.md#testing).
 
 ```
-tests/run.sh                        # Linux: all tests;  tests/run.sh ./build/alc match: those named *match*
+tests/run.sh                        # Linux: all tests;  tests/run.sh match: those named *match*
 tests/run.sh --target windows       # Linux: the programs built for Windows, run under Wine
 tests\run.bat                       :: Windows: all tests that apply to Windows
+tests\run.bat -j 4 shaderc          :: Windows: those named *shaderc*, on 4 threads
 verify.bat                          :: Windows: build.bat, the tests, VERIFY: PASS
 ```
 

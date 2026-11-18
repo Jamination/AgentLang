@@ -1,0 +1,9 @@
+filter, no default compiler: 2 true 1 true
+compiler and filter: 0 true
+options after: 0 true
+missing compiler: 2 true true true
+not a program: 2 true true
+not a program, alone: 2 true
+too many: 2 true
+unknown option: 2 true
+cleanup true

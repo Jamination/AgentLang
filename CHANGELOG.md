@@ -89,6 +89,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   function after every store or call.
 - Code generation: fewer stores to spill slots; a loop that is left from the "then" side of a
   branch falls through into its own code.
+- Test runner (`tests/run.sh`, `tests\run.bat`): one word alone is the filter unless it names
+  a file (`tests\run.bat -j 4 shaderc`; it used to be taken for the compiler, and every test
+  failed with status 127); options may also follow the words; a compiler that does not exist
+  or does not run stops the run at once with one message.
 
 ## [0.4.0] - 2026-11-17
 

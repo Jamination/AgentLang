@@ -1,7 +1,12 @@
 // Conformance test runner, for Linux and Windows. tests/run.sh and tests\run.bat build it
 // (build/altest, build\altest.exe) and start it from the repository root.
 // Usage: altest [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe]] [path/to/alc] [filter]
-// tests/run/NAME.al   must compile and print NAME.out (exit code from NAME.code, default 0;
+// Options may stand anywhere. With two words they are the compiler and the filter (only the
+// tests whose name contains it run); one word alone is the compiler if it names a file or has
+// a directory in it (`build/alc`), else the filter (`tests\run.bat -j 4 shaderc`), run with
+// the default compiler (./build/alc, Windows build/alc.exe). A compiler that does not exist or
+// does not answer `alc --version` stops the run at once with one message (status 2).
+// tests/run/NAME.al  must compile and print NAME.out (exit code from NAME.code, default 0;
 //                     every line of NAME.err must appear in stderr; arguments from NAME.args,
 //                     default `a1 b2`; standard input from NAME.in, then without arguments)
 // tests/std/NAME.al   the same, for the standard library (static, libc-free programs)
@@ -72,7 +77,7 @@
 // Windows, --target linux: the programs are built for Linux (three modes) and checked, not run.
 use std.os
 
-priv const USAGE = "usage: tests/run.sh [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe] [--emu path/to/a64emu]] [path/to/alc] [filter]"
+priv const USAGE = "usage: tests/run.sh (Windows: tests\\run.bat) [-j N] [-v] [--target linux|windows|linux-arm64 [--host-wine path/to/alc.exe] [--emu path/to/a64emu]] [path/to/alc] [filter]\n  one word alone is the filter unless it names a file: tests/run.sh match, tests/run.sh ./build/alc match"
 
 when TARGET_OS == Windows {
     priv const HOST_WIN = true
@@ -873,6 +878,38 @@ priv fn usage() -> never {
     exit(2)
 }
 
+// whether a word of the command line is the compiler rather than the filter: a file (Windows:
+// also with ".exe" added), or anything with a directory in it (no test's name has one)
+priv fn names_program(w: str) -> bool {
+    if contains(w, '/') || (HOST_WIN && contains(w, '\\')) {
+        return true
+    }
+    return (file_exists(w) && !is_dir(w)) || (HOST_WIN && file_exists(concat(w, ".exe")))
+}
+
+// why the compiler `alc` cannot be used ("" if it can): it must exist and, if `start`, run
+// `alc --version`
+priv fn compiler_problem(alc: str, start: bool) -> str {
+    if !file_exists(alc) && !(HOST_WIN && file_exists(concat(alc, ".exe"))) {
+        return fmt("the compiler ", alc, " does not exist")
+    }
+    if is_dir(alc) {
+        return fmt("the compiler ", alc, " is a directory")
+    }
+    if !start {
+        return ""
+    }
+    out, st := run_capture_all([]str{alc, "--version"})
+    if st < 0 {
+        return fmt("the compiler ", alc, " cannot be started: ", error_text(io_error()))
+    }
+    if st != 0 || !starts_with(out, "alc ") {
+        return fmt(alc, " is not the compiler: `", alc, " --version` ended with status ", st, " and printed ",
+            if len(out) == 0 { "nothing" } else { fmt("\"", trim_right(head(out, 1), "\n"), "\"") })
+    }
+    return ""
+}
+
 // the jobs of this run, in the order their lines are printed
 priv fn collect() -> []Job {
     jobs := vec[Job]()
@@ -1006,6 +1043,8 @@ fn main() -> i64 {
     emu := ""
     host_exe := ""
     threads := cpu_count()
+    // (options may stand before or after the compiler and the filter)
+    pos := vec[str]()
     i := 0
     while i < len(a) {
         if a[i] == "-v" {
@@ -1014,7 +1053,13 @@ fn main() -> i64 {
             continue
         }
         if a[i] != "--target" && a[i] != "--host-wine" && a[i] != "-j" && a[i] != "--emu" {
-            break
+            if len(a[i]) > 1 && a[i][0] == '-' {
+                print(fmt("tests/run: unknown option ", a[i]))
+                usage()
+            }
+            pos.push(a[i])
+            i += 1
+            continue
         }
         if i + 1 >= len(a) || len(a[i + 1]) == 0 {
             usage()
@@ -1039,7 +1084,7 @@ fn main() -> i64 {
         }
         i += 2
     }
-    a = a[i..]
+    a = pos.items()
     if len(host_exe) > 0 && (!win || HOST_WIN) {
         usage()
     }
@@ -1060,11 +1105,39 @@ fn main() -> i64 {
     if win != HOST_WIN || win || arm64 {
         cfg.target = []str{"--target", if win { "windows" } else if arm64 { "linux-arm64" } else { "linux" }}
     }
+    // [path/to/alc] [filter]: a word alone is the compiler if it names a file (or a path), else
+    // the filter, run with the default compiler
+    if len(a) > (if len(host_exe) > 0 { 1 } else { 2 }) {
+        print("tests/run: too many arguments (at most a compiler and one filter)")
+        usage()
+    }
     if len(host_exe) > 0 {
         cfg.alc = []str{"wine", host_exe}
     } else {
-        cfg.alc = []str{if len(a) > 0 && len(a[0]) > 0 { a[0] } else if HOST_WIN { "build/alc.exe" } else { "./build/alc" }}
-        a = a[min(1, len(a))..]
+        default_alc := if HOST_WIN { "build/alc.exe" } else { "./build/alc" }
+        alc := default_alc
+        if len(a) == 2 || (len(a) == 1 && names_program(a[0])) {
+            alc = a[0]
+            a = a[1..]
+        } else if len(a) == 1 && !file_exists(default_alc) {
+            print(fmt("tests/run: ", a[0], " is not a file, so it is the filter, but the default compiler ", default_alc,
+                " does not exist (", if HOST_WIN { "build.bat" } else { "./build.sh" }, " builds it)"))
+            return 2
+        }
+        if HOST_WIN && path_ext(alc) == "" && file_exists(concat(alc, ".exe")) {
+            alc = concat(alc, ".exe")           // (build\alc is the compiler for Linux)
+        }
+        if !contains(alc, '/') && !(HOST_WIN && contains(alc, '\\')) {
+            alc = concat("./", alc)             // (a name alone would be looked up in PATH)
+        }
+        cfg.alc = []str{alc}
+    }
+    // (a compiler that does not run would fail every test, one by one)
+    bad := compiler_problem(if len(host_exe) > 0 { host_exe } else { cfg.alc[0] }, len(host_exe) == 0)
+    if len(bad) > 0 {
+        print(fmt("tests/run: ", bad))
+        print(USAGE)
+        return 2
     }
     cfg.alc_abs = if HOST_WIN { cfg.alc[0] } else { absolute(cfg.alc[0]) }
     if len(a) > 0 {

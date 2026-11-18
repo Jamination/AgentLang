@@ -3,6 +3,8 @@ rem Conformance test runner on Windows. The runner itself is the AL program test
 rem top describes the tests, the options and the targets); this script builds it with
 rem build\alc.exe as build\altest.exe and starts it in the repository root.
 rem Usage: tests\run.bat [-j N] [-v] [--target windows|linux] [path\to\alc.exe] [filter]
+rem One word alone is the filter unless it names a file: tests\run.bat -j 4 shaderc. The
+rem arguments go to the runner unchanged.
 rem On Linux: tests/run.sh.
 setlocal
 cd /d "%~dp0.."

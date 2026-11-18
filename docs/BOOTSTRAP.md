@@ -49,11 +49,13 @@ parallel back end hand their results over as AL values in memory: nothing is ser
 
 ```
 tests/run.sh                        # Linux: the conformance suite with build/alc
-tests/run.sh ./build/alc match      # only the tests whose name contains "match"
+tests/run.sh match                  # only the tests whose name contains "match"
+tests/run.sh ./build/alc match      # the same with the compiler named
 tests/run.sh --target windows       # the programs built for Windows, run under Wine
 tests/run.sh --target windows --host-wine build/alc.exe   # the same with the compiler for Windows under Wine
 ./verify.sh                         # Linux: everything (build, suite, results against clang, benchmarks)
 tests\run.bat                       :: Windows: the suite with build\alc.exe, no Wine
+tests\run.bat -j 4 -v shaderc       :: Windows: the tests named *shaderc*, 4 threads, ok lines too
 tests\run.bat --target linux        :: Windows: the programs built and type-checked for Linux, not run
 verify.bat                          :: Windows: build, both of the above, one line VERIFY: PASS or VERIFY: FAIL
 ```
@@ -66,10 +68,14 @@ directly from there: `build/alc run tests/run.al -- -v ./build/alc match`.
 
 - **Options**: `-j N` threads (default: one per CPU; `-j 1` runs one test after the other),
   `-v` also prints `ok   name` for every test that passed, `--target linux|windows`,
-  `--host-wine alc.exe` (Linux), then the compiler (default `./build/alc`, Windows
-  `build/alc.exe`) and a filter. Output: `FAIL name: reason` with the first lines of a diff or
-  of the messages, `SKIP name: reason`, and `conformance: N passed, M failed, K skipped` at
-  the end; the exit status is 0 if nothing failed.
+  `--host-wine alc.exe` (Linux), and the words `[path/to/alc] [filter]`, before or after the
+  options. Two words are the compiler and the filter; one word alone is the compiler if it
+  names a file or has a directory in it (`./build/alc`, `build\alc.exe`), else the filter
+  (`tests\run.bat -j 4 shaderc`), with the default compiler (`./build/alc`, Windows
+  `build/alc.exe`). A compiler that does not exist or does not answer `alc --version` stops
+  the run at once with one message and status 2. Output: `FAIL name: reason` with the first
+  lines of a diff or of the messages, `SKIP name: reason`, and `conformance: N passed, M
+  failed, K skipped` at the end; the exit status is 0 if nothing failed.
 - **Parallel.** Each test (a program with its three build modes, a check, a driver script) is
   one job with a directory of its own under the temporary directory; the jobs are spread over
   the threads, except those of `tests/sys`: they run when the others are done, one after the
