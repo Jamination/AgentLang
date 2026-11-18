@@ -125,6 +125,15 @@ fn helpers() {
         r: i64 = wl_display_poll(zero[*WlDisplay](), zero[i64]())
         keep(&r)
     }
+    total += sizeof[WlClientLib]()
+    {
+        r: *WlClientLib = wl_client_lib()
+        keep(&r)
+    }
+    {
+        r: *WlInterface = wl_client_interface(zero[str]())
+        keep(&r)
+    }
     {
         r: f64 = wl_fixed_to_double(zero[i32]())
         keep(&r)

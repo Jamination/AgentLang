@@ -24,7 +24,9 @@ the C libraries: `ALTEST_CLANG`), built only `877 passed, 0 failed, 48 skipped`,
 check `574 executables, 163 C calls, 0 problems`, the three stages of the compiler again
 byte-identical (stages 2 and 3 took 370 s and 345 s under load).
 Refused for linux-arm64 with a message (not wrong code): `-g` and code of the bundled modules
-that make system calls by their x86-64 numbers (std.net, the gamepads of std.input).
+that make system calls by their x86-64 numbers (std.net, the gamepads of std.input, the Wayland
+backend of std.window: a program that opens a window is refused with `module std.window_wayland
+makes Linux system calls ...`; the pure helpers of std.window still build).
 
 C functions (`extern`, since 2026-11-18): a program that calls one is a dynamically linked
 executable (src/elf_arm64.al) and its C calls follow AAPCS64 (src/lower_ccall.al). No dynamic

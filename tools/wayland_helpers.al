@@ -123,6 +123,120 @@ fn wl_display_poll(display: *WlDisplay, timeout_ms: i64) -> i64 {
     i64(wl_display_dispatch_pending(display))
 }
 
+// ---- libwayland-client.so.0 loaded at run time ----
+// The request functions, the *_add_listener, *_set_user_data, *_get_user_data, *_get_version
+// and *_destroy functions and the interface tables of this module do not use the `extern`
+// functions above: they call libwayland-client through the pointers of a WlClientLib, which
+// is loaded with dlopen on first use. A program that calls one of the `extern` functions (or
+// uses an `extern` interface table) is linked against libwayland-client as before; one that
+// only reaches the rest of the module (std.window, whose Wayland backend is built on it) is
+// not, and starts on a system without the library. Both share the one loaded library.
+struct WlClientLib {
+    display_connect: fn(*u8) -> *WlDisplay
+    display_disconnect: fn(*WlDisplay)
+    display_get_fd: fn(*WlDisplay) -> i32
+    display_flush: fn(*WlDisplay) -> i32
+    display_dispatch_pending: fn(*WlDisplay) -> i32
+    display_roundtrip: fn(*WlDisplay) -> i32
+    display_get_error: fn(*WlDisplay) -> i32
+    display_prepare_read: fn(*WlDisplay) -> i32
+    display_read_events: fn(*WlDisplay) -> i32
+    display_cancel_read: fn(*WlDisplay)
+    proxy_marshal_array_flags: fn(*u8, u32, *WlInterface, u32, u32, *u64) -> *u8
+    proxy_add_listener: fn(*u8, *u8, *u8) -> i32
+    proxy_destroy: fn(*u8)
+    proxy_set_user_data: fn(*u8, *u8)
+    proxy_get_user_data: fn(*u8) -> *u8
+    proxy_get_version: fn(*u8) -> u32
+}
+
+// (libdl.so.2 holds these before glibc 2.34, the C library itself since)
+priv extern "libdl.so.2" fn dlopen(path: *u8, flags: i32) -> *u8
+priv extern "libdl.so.2" fn dlsym(handle: *u8, name: *u8) -> *u8
+
+priv wl_client: WlClientLib
+priv wl_client_state: i64                       // 0: not tried, 1: loaded, -1: not available
+priv wl_core_tables: [WL_CORE_TABLE_COUNT]*WlInterface
+
+// A symbol of the library; nil (and *missing set) if it has none of that name.
+priv fn wl_sym(lib: *u8, name: *u8, missing: *bool) -> *u8 {
+    p := dlsym(lib, name)
+    if p == nil {
+        *missing = true
+    }
+    p
+}
+
+// libwayland-client.so.0, loaded (RTLD_NOW) on the first call; nil if it is not installed or
+// lacks a function or interface table this module uses (it needs version 1.20 or later).
+fn wl_client_lib() -> *WlClientLib {
+    if wl_client_state == 0 {
+        wl_client_state = -1
+        lib := dlopen(ptr("libwayland-client.so.0"), 2)
+        if lib == nil {
+            return nil
+        }
+        m := false
+        c := &wl_client
+        c.display_connect = cast[fn(*u8) -> *WlDisplay](wl_sym(lib, ptr("wl_display_connect"), &m))
+        c.display_disconnect = cast[fn(*WlDisplay)](wl_sym(lib, ptr("wl_display_disconnect"), &m))
+        c.display_get_fd = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_get_fd"), &m))
+        c.display_flush = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_flush"), &m))
+        c.display_dispatch_pending = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_dispatch_pending"), &m))
+        c.display_roundtrip = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_roundtrip"), &m))
+        c.display_get_error = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_get_error"), &m))
+        c.display_prepare_read = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_prepare_read"), &m))
+        c.display_read_events = cast[fn(*WlDisplay) -> i32](wl_sym(lib, ptr("wl_display_read_events"), &m))
+        c.display_cancel_read = cast[fn(*WlDisplay)](wl_sym(lib, ptr("wl_display_cancel_read"), &m))
+        c.proxy_marshal_array_flags = cast[fn(*u8, u32, *WlInterface, u32, u32, *u64) -> *u8](wl_sym(lib, ptr("wl_proxy_marshal_array_flags"), &m))
+        c.proxy_add_listener = cast[fn(*u8, *u8, *u8) -> i32](wl_sym(lib, ptr("wl_proxy_add_listener"), &m))
+        c.proxy_destroy = cast[fn(*u8)](wl_sym(lib, ptr("wl_proxy_destroy"), &m))
+        c.proxy_set_user_data = cast[fn(*u8, *u8)](wl_sym(lib, ptr("wl_proxy_set_user_data"), &m))
+        c.proxy_get_user_data = cast[fn(*u8) -> *u8](wl_sym(lib, ptr("wl_proxy_get_user_data"), &m))
+        c.proxy_get_version = cast[fn(*u8) -> u32](wl_sym(lib, ptr("wl_proxy_get_version"), &m))
+        for i, name in WL_CORE_TABLES {
+            wl_core_tables[i] = cast[*WlInterface](wl_sym(lib, ptr(name), &m))
+        }
+        if m {
+            return nil
+        }
+        wl_client_state = 1
+    }
+    if wl_client_state > 0 { &wl_client } else { nil }
+}
+
+// The loaded library, for the functions of this module (a program that gets here has a
+// connection, so the library is there).
+priv fn wl_dl() -> *WlClientLib {
+    lib := wl_client_lib()
+    if lib == nil {
+        panic("std.wayland: libwayland-client.so.0 (1.20 or later) cannot be loaded")
+    }
+    lib
+}
+
+// libwayland-client's interface table number `index` of WL_CORE_TABLES (wl_surface_interface, ...).
+priv fn wl_core_interface(index: i64) -> *WlInterface {
+    wl_dl()
+    wl_core_tables[index]
+}
+
+// The interface table of the core protocol named `name` ("wl_compositor") inside the loaded
+// libwayland-client, for wl_registry_bind without the `extern` table (&wl_compositor_interface
+// is the same table); nil if the library cannot be loaded or the core protocol has no such
+// interface.
+fn wl_client_interface(name: str) -> *WlInterface {
+    if wl_client_lib() == nil {
+        return nil
+    }
+    for i, t in WL_CORE_TABLES {
+        if t[..t.len - len("_interface")] == name {
+            return wl_core_tables[i]
+        }
+    }
+    nil
+}
+
 // wl_fixed_t (24.8 fixed point, an i32: surface coordinates of pointer events, axis values).
 fn wl_fixed_to_double(f: i32) -> f64 { f64(f) / 256.0 }
 fn wl_fixed_from_double(d: f64) -> i32 { i32(d * 256.0) }
@@ -181,12 +295,16 @@ priv fn wl_interface_at(index: i64) -> *WlInterface {
 // An event handler that does nothing, whatever the arguments of the event are.
 priv fn wl_ignore_event() {}
 priv struct WlHandler { f: fn() }
-priv wl_ignore := WlHandler{f: wl_ignore_event}
+// (set by wl_listen, not by an initializer: a global's initializer is compiled into every
+// program that includes the module, and with it the module's code, which the linux-arm64
+// target refuses because of the poll system call above)
+priv wl_ignore: WlHandler
 
 // What the `*_add_listener` functions do: every nil field among the `count` handlers of
 // `listener` is set to a handler that ignores the event (libwayland would call the nil
 // pointer), then the table is registered.
 priv fn wl_listen(proxy: *u8, listener: *u8, count: i64, data: *u8) -> i32 {
+    wl_ignore.f = wl_ignore_event
     slots := mkslice[u8](listener, count * 8)
     for i in 0..count {
         unset := true
@@ -199,7 +317,7 @@ priv fn wl_listen(proxy: *u8, listener: *u8, count: i64, data: *u8) -> i32 {
             memcopy(ptr(slots[i * 8..]), cast[*u8](&wl_ignore), 8)
         }
     }
-    wl_proxy_add_listener(proxy, listener, data)
+    wl_dl().proxy_add_listener(proxy, listener, data)
 }
 
 // The C string for a string argument that may be null: nil for "".

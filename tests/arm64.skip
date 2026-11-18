@@ -11,3 +11,4 @@ std/net_ipv6 std.net uses x86-64 system call numbers (std.net_linux): refused fo
 std/net_tcp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_udp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 fail/extern on arm64 extern functions may take and return structs (AAPCS64): other diagnostics
+std/window_wayland_logic the Wayland helpers of std.window live in std.window_wayland, which makes x86-64 system calls (memfd, mmap, poll): refused for linux-arm64

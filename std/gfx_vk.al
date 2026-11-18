@@ -1,6 +1,7 @@
 // std.gfx on Vulkan 1.3: the backend `use std.gfx` picks on Linux (an X11 window of std.window,
-// VK_KHR_xlib_surface); on Windows a program gets it with `use std.gfx_vk` instead of
-// `use std.gfx` (VK_KHR_win32_surface). Derived from examples/vk_renderer: dynamic rendering
+// VK_KHR_xlib_surface; a window of its experimental Wayland backend, VK_KHR_wayland_surface,
+// never run on a real compositor yet: docs/std/gfx.md); on Windows a program gets it with
+// `use std.gfx_vk` instead of `use std.gfx` (VK_KHR_win32_surface). Derived from examples/vk_renderer: dynamic rendering
 // and synchronization2, two frames in flight, a swapchain recreated when the window's size or
 // g.vsync changes (FIFO with vsync; MAILBOX, else IMMEDIATE without), one descriptor set per
 // texture (a combined image sampler), push constants for the view, one pipeline per blend mode
@@ -14,6 +15,7 @@ use std.vk
 priv const FRAMES = 2
 priv const MAX_IMAGES = 8
 priv const FOREVER: u64 = 0xFFFF_FFFF_FFFF_FFFF
+priv const WAYLAND_ACQUIRE_NS: u64 = 100_000_000
 priv const TEX_FORMAT: i32 = VK_FORMAT_R8G8B8A8_UNORM
 priv const VALIDATION_LAYER = "VK_LAYER_KHRONOS_validation"
 
@@ -133,8 +135,36 @@ priv fn has_device_extension(physical: *u8, name: str) -> bool {
     false
 }
 
+// The instance extension for a window's surface: VK_KHR_win32_surface on Windows; on Linux
+// VK_KHR_wayland_surface for a window of std.window's Wayland backend, else VK_KHR_xlib_surface.
+fn __gfx_vk_surface_extension(windows: bool, wayland: bool) -> str {
+    if windows {
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+    } else if wayland {
+        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME
+    } else {
+        VK_KHR_XLIB_SURFACE_EXTENSION_NAME
+    }
+}
+
+// The swapchain extent for a surface whose current extent is `cur`. A surface without a size
+// of its own (0xFFFFFFFF: Wayland) gets the window's size in pixels (`win_w` x `win_h`; on
+// Wayland the surface size times the buffer scale `scale`), within the surface's limits and a
+// whole multiple of the scale (the compositor rejects a buffer that is not), unless the limits
+// leave none. Other surfaces (X11, Win32) get their current extent unchanged.
+fn __gfx_vk_extent(cur: VkExtent2D, lo: VkExtent2D, hi: VkExtent2D, win_w: i64, win_h: i64, scale: i64) -> VkExtent2D {
+    if cur.width != 0xFFFFFFFF { return cur }
+    VkExtent2D{u32(extent_side(win_w, lo.width, hi.width, scale)), u32(extent_side(win_h, lo.height, hi.height, scale))}
+}
+
+priv fn extent_side(pixels: i64, lo: u32, hi: u32, scale: i64) -> i64 {
+    e := clamp(pixels, i64(lo), i64(hi))
+    if scale > 1 && e - e % scale >= max(i64(lo), 1) { e - e % scale } else { e }
+}
+
 when TARGET_OS == Windows {
-    priv const SURFACE_EXTENSION = VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+    priv fn on_wayland(w: *Window) -> bool { false }
+    priv fn buffer_scale(w: *Window) -> i64 { 1 }
     priv fn create_surface(v: *Vk, w: *Window) -> i32 {
         info := vk_win32_surface_create_info_khr()
         info.hinstance = win32_hinstance(w)
@@ -142,8 +172,23 @@ when TARGET_OS == Windows {
         vkCreateWin32SurfaceKHR(v.instance, &info, nil, &v.surface)
     }
 } else {
-    priv const SURFACE_EXTENSION = VK_KHR_XLIB_SURFACE_EXTENSION_NAME
+    priv fn on_wayland(w: *Window) -> bool { wayland_display(w) != nil }
+    // the buffer scale std.window set on the surface in window_open (it keeps it for a window
+    // that never calls `present`): the swapchain is that many pixels per surface unit
+    priv fn buffer_scale(w: *Window) -> i64 { if w.os.wl == nil { 1 } else { max(w.os.wl.scale, 1) } }
     priv fn create_surface(v: *Vk, w: *Window) -> i32 {
+        if on_wayland(w) {
+            // through vkGetInstanceProcAddr, not an import of libvulkan.so.1: the executable is
+            // bound at load time (BIND_NOW), and a loader built without Wayland would then stop
+            // every std.gfx program from starting, X11 ones too
+            p := vkGetInstanceProcAddr(v.instance, ptr("vkCreateWaylandSurfaceKHR"))
+            if p == nil { return VK_ERROR_EXTENSION_NOT_PRESENT }
+            create := cast[fn(*u8, *VkWaylandSurfaceCreateInfoKHR, *VkAllocationCallbacks, *u64) -> i32](p)
+            info := vk_wayland_surface_create_info_khr()
+            info.display = wayland_display(w)
+            info.surface = wayland_surface(w)
+            return create(v.instance, &info, nil, &v.surface)
+        }
         info := vk_xlib_surface_create_info_khr()
         info.dpy = x11_display(w)
         info.window = x11_window(w)
@@ -359,7 +404,7 @@ priv fn make_pipelines(v: *Vk, format: i32) -> [2]u64 {
 priv fn open_device(g: *Gfx, v: *Vk, w: *Window, desc: GfxDesc) -> str {
     exts := vec[str]()
     if w != nil {
-        for e in []str{VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION} {
+        for e in []str{VK_KHR_SURFACE_EXTENSION_NAME, __gfx_vk_surface_extension(TARGET_OS == Windows, on_wayland(w))} {
             if !has_instance_extension(e) { return fmt("the Vulkan instance extension ", e, " is not available") }
             exts.push(e)
         }
@@ -555,11 +600,7 @@ priv fn build_swapchain(g: *Gfx, v: *Vk) -> bool {
     }
     check(r, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
     ww, wh := v.win.size()
-    extent := caps.currentExtent
-    if extent.width == 0xFFFFFFFF {
-        extent.width = u32(clamp(ww, i64(caps.minImageExtent.width), i64(caps.maxImageExtent.width)))
-        extent.height = u32(clamp(wh, i64(caps.minImageExtent.height), i64(caps.maxImageExtent.height)))
-    }
+    extent := __gfx_vk_extent(caps.currentExtent, caps.minImageExtent, caps.maxImageExtent, ww, wh, buffer_scale(v.win))
     if extent.width == 0 || extent.height == 0 { return false }
     if v.sc_format == 0 {
         n: u32
@@ -735,7 +776,12 @@ fn begin_frame(g: *Gfx, clear: u32) -> bool {
     }
     check(r, "vkWaitForFences")
     if v.win != nil {
-        r = vkAcquireNextImageKHR(v.device, v.swapchain, FOREVER, v.acquired[slot], 0, &v.image_index)
+        // (on Wayland at most WAYLAND_ACQUIRE_NS: an image comes back when the compositor
+        // releases its buffer, which one that stopped showing the window may not do soon; the
+        // frame is then skipped and the program goes on polling)
+        r = vkAcquireNextImageKHR(v.device, v.swapchain, if on_wayland(v.win) { WAYLAND_ACQUIRE_NS } else { FOREVER },
+            v.acquired[slot], 0, &v.image_index)
+        if r == VK_TIMEOUT || r == VK_NOT_READY { return false }
         if r == VK_ERROR_OUT_OF_DATE_KHR {
             v.rebuild = true
             return false

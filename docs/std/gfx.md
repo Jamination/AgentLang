@@ -9,7 +9,8 @@ consecutive draws with the same texture and state become one draw call.
 
 One API, a backend per target that the program never names: **Direct3D 12** on Windows
 (`std/gfx_dx12.al`, derived from `examples/gamekit/dx12_gpu.al`), **Vulkan 1.3** on Linux
-(`std/gfx_vk.al`, derived from `examples/vk_renderer`; an X11 window). The shaders are compiled
+(`std/gfx_vk.al`, derived from `examples/vk_renderer`; an X11 window, or a window of std.window's
+experimental Wayland backend: see [Wayland](#wayland)). The shaders are compiled
 ahead of time and built into the module (`std/gfx_shaders.al`): running needs no shader
 compiler, and the Direct3D build does not load `d3dcompiler_47.dll`. A program that wants
 Vulkan on Windows writes `use std.gfx_vk` instead of `use std.gfx` (the tests do, to compare
@@ -278,6 +279,94 @@ Regenerating the shaders (Windows, needs `glslc` of the Vulkan SDK; D3DCompile c
 Windows): `build\alc.exe run tools/gen_gfx_shaders.al`, then rebuild `alc`. The output is
 byte-identical when nothing changed.
 
+## Wayland
+
+**Experimental, never run on a compositor.** Everything in this section was written and
+reasoned about on a Windows machine; the Linux code is type-checked and built, the pure helpers
+are unit-tested, nothing Wayland has been executed. The window side is
+[std.window's Wayland backend](window.md#wayland), which is itself unverified and used only on
+request (`WindowDesc.display` `"wayland"`, `ALC_WINDOW=wayland`, or no X display and
+`$WAYLAND_DISPLAY` set).
+
+What the Vulkan backend does for a window with `wayland_display(w) != nil`:
+
+- **Surface.** It enables `VK_KHR_wayland_surface` instead of `VK_KHR_xlib_surface`
+  (`__gfx_vk_surface_extension`) and creates the surface from `wayland_display(w)` and
+  `wayland_surface(w)`. `vkCreateWaylandSurfaceKHR` is looked up with `vkGetInstanceProcAddr`,
+  not imported from `libvulkan.so.1`: AL executables are bound at load time, and an import
+  would stop every std.gfx program from starting under a loader built without Wayland. A
+  program on X11 imports exactly what it imported before (the same libraries, `DT_NEEDED`
+  `libX11.so.6`, `libasound.so.2`, `libc.so.6`, `libdl.so.2`, `libvulkan.so.1` for
+  `examples/gfx_starter`, and the same symbols; nothing of libwayland, which std.window loads
+  with `dlopen` only when a Wayland window is opened).
+- **Size and scale.** A Wayland surface has no size of its own (`currentExtent` is
+  0xFFFFFFFF): the swapchain is `size(w)`, the window's pixels, which std.window keeps at the
+  surface size times the buffer scale it set on the surface in `window_open`
+  (`__gfx_vk_extent`; within the surface's limits and a whole multiple of the scale, which the
+  compositor requires of a buffer). std.window keeps that scale for a window that never calls
+  `present`, so the scale the surface was told and the buffers the swapchain commits agree; on
+  an output of another scale the compositor scales the picture. Do not call `present` on a
+  window that std.gfx draws into (it would let the scale change under the swapchain).
+  `g.width`, `g.height` are pixels, as on X11 and Windows.
+- **Resize.** Wayland never reports the swapchain out of date when the window is resized; the
+  window's configure events change `size(w)` in `poll` (std.window acknowledges them there),
+  and `begin_frame` compares the size with the swapchain's every frame and recreates it, as it
+  does on X11. Poll before `begin_frame`, as in the example above: the first commit after the
+  acknowledgement is then a buffer of the new size.
+- **Mapping.** `window_open` waits for the first configure (a bounded number of roundtrips) and
+  maps the window with a black buffer; the first presented frame replaces it. Neither
+  `window_open` nor `gfx_open` waits for a frame callback, so `window_open` then `gfx_open`
+  cannot block on the compositor.
+- **Hidden windows.** `w.minimized` follows the `suspended` state of xdg-shell 6 (minimized or
+  otherwise not visible), and `begin_frame` then skips the frame as for a minimized window. On
+  Wayland `vkAcquireNextImageKHR` waits at most 100 ms (an image comes back only when the
+  compositor releases its buffer); after that the frame is skipped (`begin_frame` returns
+  false) and the program goes on polling. A FIFO present (`vsync`) is paced by the compositor:
+  drivers (Mesa) wait for the frame callback of the previous frame, and a compositor that stops
+  sending frame callbacks for a hidden window without reporting it `suspended` can make
+  `end_frame` (or the next `begin_frame`) wait until the window is shown again. The program
+  then pauses (no events are polled) and continues when it is visible: not a deadlock, but
+  unverified; `g.vsync = false` (MAILBOX, which does not tear on Wayland) avoids the wait.
+- **Order.** `gfx_close(g)` before `w.close()`: the Vulkan surface must go before the
+  `wl_surface` and the connection.
+- **Connection lost** (the compositor ended): `w.closing` becomes true; what the driver
+  returns for the surface then (`VK_ERROR_SURFACE_LOST_KHR`, which sets `g.lost`, or another
+  error, which panics) has not been seen.
+
+Checklist for a real session (GNOME, KDE Plasma and sway; each step names what to look at):
+
+1. With weston installed (and lavapipe, `mesa-vulkan-drivers`, for the software fallback):
+   `tests/run.sh ./build/alc gfx_wayland`. `sys/gfx_wayland` starts a headless weston and
+   compares its output with `gfx_wayland.out`, which is a prediction; its standard error says
+   which device was used and why another failed. Also `tests/run.sh ./build/alc window` (the
+   window side, `sys/window_wayland`).
+2. `ALC_WINDOW=wayland alc run examples/gfx_starter/game.al` on each compositor, and once with
+   `WAYLAND_DEBUG=1 ... 2>&1 | grep -E 'set_buffer_scale|attach|ack_configure|error'`: the
+   window appears (black, then the game), the game runs at the display's rate; `attach`
+   follows each `ack_configure`, no protocol error. With a `GfxDesc{debug: true}` program
+   (`tests/sys/gfx_window_vk.al` built for Linux under `ALC_WINDOW=wayland`): no validation
+   message.
+3. Resize by dragging the border (KDE, sway floating) and by tiling (sway), maximize,
+   fullscreen and back: the picture is never stretched or cut, `g.width` / `g.height` equal
+   `w.size()` after each change, no `xdg_surface` / `xdg_toplevel` protocol error (in
+   particular for maximized and fullscreen, where the compositor may check the buffer size).
+4. Minimize (GNOME, KDE), move the window to another workspace (sway), cover it fully: the
+   program keeps running or pauses only while hidden (print a counter once a second to see
+   which), never stays blocked after the window is shown again; with `vsync` on and off.
+   Note which compositors send `suspended` (`WAYLAND_DEBUG=1`: `xdg_toplevel.configure` with
+   state 9).
+5. A 200 % output (GNOME / KDE scale 2): `g.width` is twice the surface width, the picture is
+   sharp; move the window to a 100 % output: the compositor scales it, no protocol error, no
+   swapchain rebuild loop; fractional 125 % / 150 % (the integer scale above, reduced by the
+   compositor).
+6. X11 unchanged: the same programs without `ALC_WINDOW` on an X11 session and under XWayland
+   behave as before; `readelf -d` of `examples/gfx_starter` lists no libwayland, `nm -D` no
+   `vkCreateWaylandSurfaceKHR`.
+7. A Vulkan driver or loader without `VK_KHR_wayland_surface`, and a system without
+   `libwayland-client.so.0`: `gfx_open` / `window_open` fail with a message, no crash.
+8. Kill the compositor under a running program (weston): the program ends or reports
+   `g.lost` / `w.closing`; record what the driver returned.
+
 ## Tests
 
 - `tests/unit/gfx_batch.al`: the batcher and the transforms without a GPU (draw merging,
@@ -307,6 +396,13 @@ byte-identical when nothing changed.
 - `tests/sys/gfx_window.al`, `gfx_window_vk.al`: a window, frames with and without vsync,
   fullscreen and back with the swap chain following (Windows; on Linux they would need an X
   display). `tests/sys/gfx_starter.al`: the example for 60 frames.
+- `tests/unit/gfx_vk_surface.al`: the surface extension for Win32, X11 and Wayland windows and
+  the swapchain extent (a surface with a size of its own, the window's pixels at scales 1 to
+  3, limits that cut a size that is a multiple of the scale).
+- `tests/sys/gfx_wayland.al`: a window of the Wayland backend on a headless weston, the frames
+  of `gfx_window` (Linux, needs weston; its expected output is a prediction, never produced
+  by a run).
 
-Not verified: the Vulkan backend on Linux (X11 surface) has only been type-checked and built
-(`alc check --target linux`), not run; device loss has not been provoked.
+Not verified: the Vulkan backend on Linux (X11 and Wayland surfaces) has only been
+type-checked and built (`alc check --target linux`), not run; device loss has not been
+provoked.

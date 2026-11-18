@@ -7,6 +7,9 @@ run/lib_stdout_errors Linux system calls (fork, dup2, fcntl O_NONBLOCK) and /dev
 std/asset_cloexec Linux close-on-exec of descriptors, seen through a FIFO and /proc/<pid>/fdinfo
 std/os the Linux half of the std.os tests: /bin/sh, signals a program sends itself, chmod, `#!` scripts (the portable half: std/os_files, std/os_run, std/os_spawn)
 std/window_logic the X11 translation helpers of std.window (key_from_keysym, XEvent accessors) exist only on Linux
+std/window_wayland_logic the Wayland helpers of std.window (window_systems, button_from_evdev, ...) exist only on Linux
+sys/window_wayland needs a Wayland compositor (weston) and std.window's Linux layer
+sys/gfx_wayland needs a Wayland compositor (weston) and std.window's Linux layer (std.gfx's Vulkan backend on a Wayland surface)
 sys/window_nodisplay an X11 display name (WindowDesc.display) means nothing on Windows
 sys/window_x11 needs an X server (AL_TEST_DISPLAY)
 sys/window_x11_events needs an X server (AL_TEST_DISPLAY) and calls Xlib itself
