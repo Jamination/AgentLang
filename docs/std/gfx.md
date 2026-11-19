@@ -46,8 +46,13 @@ fn main() {
 }
 ```
 
-[examples/gfx_starter](../../examples/gfx_starter/game.al) is a complete game on it: the
-Direct3D 12 starter without its 700 lines of device, swap chain and batcher code, and portable.
+[examples/gfx_starter](../../examples/gfx_starter/game.al) is a complete game on it (a
+procedural sprite atlas, additive particles, bloom and frosted panels from render textures).
+More in `examples/`: `gfx_fireworks` (particles, a bloom chain, a mirrored reflection),
+`gfx_lights` (shadow-casting lights; light times albedo from alpha and additive blending),
+`gfx_parallax` (pixel art in a virtual resolution), `gfx_lowpoly` (a 3D landscape from
+`triangle`), `gfx_flow` (render-texture feedback). Each takes `--shot file.png` to draw a
+frame offscreen.
 
 ## Conventions
 

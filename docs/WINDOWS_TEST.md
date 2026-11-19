@@ -101,7 +101,7 @@ What Wine cannot prove:
 ## 3. Window and input (`std.window`, `std.input`)
 Use `examples\starter\game.al` and `examples\win32_input.al` (prints every event).
 1. Starter game: window 960x540, picture correct; arrows/WASD move, Space fires, Escape quits;
-   `game.exe --headless` prints `frame e846fd27f05bc404`.
+   `game.exe --headless` prints `frame c68cefcf6d917669`.
 2. Dragging the title bar and resizing the frame: the game keeps animating.
 3. Alt+Space menu open: the game keeps running; Alt alone and F10 do not freeze it; Alt+F4
    closes.

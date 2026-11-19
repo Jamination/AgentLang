@@ -2,9 +2,10 @@
 
 This is the shape the standard library is built to support. The complete example is
 [examples/starter](../examples/starter) (`logic.al`, the game, about 220 lines; `game.al`, a
-minimal front end on the software framebuffer: a playable shooter that also runs headless and
-prints a checksum, which is how it is tested). [examples/dx12_starter](../examples/dx12_starter)
-is the same game drawn with the GPU.
+front end on the software framebuffer, with its procedural art, blits and effects in `art.al`,
+`blit.al`, `fx.al` and `text.al`: a playable shooter that also runs headless and prints a
+checksum, which is how it is tested). [examples/dx12_starter](../examples/dx12_starter) and
+[examples/gfx_starter](../examples/gfx_starter) are the same game drawn with the GPU.
 
 ## The frame
 
@@ -178,9 +179,10 @@ game's own code, shaped by what the game needs.
 - **std.gfx** for a 2D game whose picture is textured quads, shapes and text in painter's
   order: tiles, sprites, particles (additive), a HUD in a virtual resolution, a minimap or a
   transition in a render texture. It is about 20 lines of game code from window to a frame
-  ([examples/gfx_starter](../examples/gfx_starter/game.al) next to
-  [examples/dx12_starter](../examples/dx12_starter), which carries ~700 lines of Direct3D 12 for
-  the same picture), runs on Linux and Windows unchanged, needs no shader compiler, allocates
+  ([examples/gfx_starter](../examples/gfx_starter/game.al): sprites from one atlas, additive
+  particles, bloom from render textures; [examples/dx12_starter](../examples/dx12_starter)
+  carries ~780 lines of Direct3D 12 in `render.al` for its HDR version of the game), runs on
+  Linux and Windows unchanged, needs no shader compiler, allocates
   nothing per frame (frames sit inside `frame_begin()` / `frame_end()`), and has
   `gfx_offscreen` + `read_pixels` for pixel tests of the game's own drawing.
 - **The bindings** when the game needs what std.gfx leaves out: 3D, depth buffers, its own
@@ -208,14 +210,17 @@ show as its missing glyph; `gfx_font_add` adds characters between frames.
   surface extension and its create-info differ (`when TARGET_OS == Windows`).
 - **Direct3D 12** (Windows): [std/dx12.md](std/dx12.md): HLSL compiled at run time with
   `D3DCompile` (`dx_compile` of `examples/gamekit/dx12_gpu.al`), a swap chain on `win32_hwnd(w)`;
-  `examples/dx12_crypt` is a 3D game on it (meshes, depth, lighting, mouse-look).
+  `examples/dx12_crypt` is a 3D game on it (meshes, depth, normal-mapped materials, per-pixel
+  lights with shadows, MSAA, an HDR post-process chain, mouse-look).
 - **The examples are reference code, not a library**: read them, copy what helps, change it.
   `examples/vk_triangle.al` and `examples/dx12_triangle.al` are complete minimal programs;
   `examples/vk_renderer/` uses most of what an engine needs from Vulkan (1.3 features, textures,
   depth, compute, frames in flight, swapchain recreation, validation);
   `examples/gamekit/dx12_gpu.al` (device with WARP fallback, fences, shader compilation, a
   sprite batcher) and `screen.al` (frames in flight, a virtual resolution letterboxed into the
-  window, resizing) are what the two DX12 games draw with.
+  window, resizing) are the smallest sprite renderer; the DX12 games take the device, shader
+  and read-back code from `dx12_gpu.al` and each have their own `render.al` (an HDR target,
+  premultiplied sprites, bloom, a tone curve).
 - `present` of std.window shows a CPU pixel buffer in the window (`blit_fit` scales one into
   it): the way to display pixels computed on the CPU, for tools, debugging views and simple
   programs such as `examples/starter/game.al`.
@@ -351,17 +356,19 @@ experimental: `--target linux-arm64` has run only under an emulator ([ARM64_TEST
 logic.al     state, rules, menus, the fixed step; events for sounds     (portable)
 sound.al     sounds generated at start-up, events -> mixer voices          (portable)
 headless.al  scripted input, N frames, checksums of state and mix          (portable)
-game.al      window, GPU, sound device, drawing; `--headless` runs headless.al (Windows)
+game.al      window, GPU, sound device, the frame; `--headless` runs headless.al (Windows)
+render.al    the Direct3D 12 renderer; with it the art, the effects and the frame's layout
+             (art.al / sheet.al / materials.al, fx.al, scene.al / draw.al, hud.al): they only read the game   (Windows)
 ```
 
 The frame: `w.poll()`; `if !inp.focused { pause }`; menu and command edges read once
 (`handle_input`); `for k in 0..steps.advance(clock.tick()) { update(...) }`; play the events on
 the mixer; `audio_pump(dev, mixer)`; draw and `Present` (vsync paces the loop).
-[examples/gamekit](../examples/gamekit) has the parts both games share, as example code:
+[examples/gamekit](../examples/gamekit) has shared parts, as example code:
 `dx12_gpu.al` (device, fences, shaders, a sprite batcher), `screen.al` (a swap chain on the
 std.window window, two frames in flight, a fixed virtual resolution letterboxed into any window
-size or fullscreen, resizing while the window is dragged), `font.al` (a 5 x 7 bitmap font baked
-into the atlas), `synth.al` (tones, noise, sweeps and music rendered through a mixer),
+size or fullscreen, resizing while the window is dragged), `font.al` (a 5 x 7 bitmap font to bake
+into an atlas), `synth.al` (tones, noise, sweeps and music rendered through a mixer),
 `options.al`. A lost sound device (`dev.lost`) is shown and recovers by itself; a removed
 GPU ends the game with a panic that names the reason. The headless run is the regression test:
 `tests/std/dx12_*_sim` prints the same checksums on Linux as `tests/sys/dx12_*` on Windows.

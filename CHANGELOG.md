@@ -165,6 +165,19 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   windows are unchanged. The checklist is in docs/std/gfx.md (Wayland).
 
 ### Changed
+- The graphics examples are redrawn. New on std.gfx: `examples/gfx_fireworks`, `gfx_lights`,
+  `gfx_parallax`, `gfx_lowpoly` and `gfx_flow`. `examples/starter`, `dx12_starter`,
+  `gfx_starter` and `dx12_breakout` have procedural art, particles and effects kept outside
+  the game state (the rules and their checksums are unchanged; the frame hash of
+  `starter/game.al --headless` is new); the two Direct3D 12 games have their own HDR renderer
+  with bloom instead of gamekit's batcher. Each takes `--shot file.png` to draw a frame
+  without a window. `examples/dx12_crypt` has procedural normal-mapped materials, per-pixel
+  lights with maze shadows and ambient occlusion, 4x MSAA and an HDR chain with bloom and tone
+  mapping (`--still file.png`); its rules, saves and checksums are unchanged. `examples/starter` and the three Direct3D 12 games draw their text
+  in a TrueType font of the system (std.font, baked into their atlas at start-up) instead of
+  the 5 x 7 bitmap font; `examples/gfx_lowpoly` supersamples its 3D (`--aa 1|2|3`), and
+  `dx12_crypt` has an HDR-aware MSAA resolve and an FXAA pass. Every example has `--record`,
+  which writes raw frames (and the games' sound as a WAV) for a video encoder.
 - docs/AGENTS_TEMPLATE.md is platform-neutral: no absolute paths, a section per renderer
   (std.gfx; Direct3D 12 with gamekit's `dx_compile`; Vulkan with glslc or std.shaderc).
   docs/GAMES.md: where mouse-look goes (once per frame, not in `update`; stick look is a rate in

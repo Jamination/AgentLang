@@ -1,5 +1,6 @@
 // Crypt's platform shell (Windows): the window loop with GPU, sound device, gamepad and save
-// file, and the test run that draws the scripted game offscreen and checks pixels.
+// file, the test run that draws the scripted game offscreen and checks pixels, and --still,
+// one frame of the scripted run drawn offscreen into a PNG.
 use std.window
 use std.audio
 use std.image
@@ -7,6 +8,7 @@ use "logic.al"
 use "sound.al"
 use "save.al"
 use "headless.al"
+use "record.al"
 use "render.al"
 
 fn run_window(o: Options) {
@@ -15,7 +17,7 @@ fn run_window(o: Options) {
     if !ok {
         panic("cannot open a window")
     }
-    r, err := renderer_window(w, o.warp)
+    r, err := renderer_window(w, o.warp, o.debug)
     if err != "" {
         panic(err)
     }
@@ -107,6 +109,9 @@ fn run_window(o: Options) {
     }
     print("best", g.best, "frames", frames, "memory growth after frame 100", growth, "fps", fmtf(clock.fps, 1), "resizes", r.resizes, "sound underruns",
         if dev == nil { 0 } else { dev.underruns }, "adapter", r.g.adapter_name)
+    if o.debug {
+        print("debug layer messages", r.messages)
+    }
     audio_close(dev)
     gamepad_watch_close(&watch)
     renderer_close(r)
@@ -128,8 +133,86 @@ priv fn shot_name(s: Shot) -> str { SHOT_NAMES[i64(s)] }
 // The colour of a pixel, 0..1.
 priv fn pixel(img: Image, x: i64, y: i64) -> vec4 { img.get(x, y) }
 
+// --still FILE: the scripted run without window or sound for --frames N frames (default 120),
+// then that frame drawn offscreen (--size W H, default 1280 x 720) and saved as a PNG. Nothing
+// depends on a window or its focus, so it works while other windows come and go.
+fn run_still(o: Options) -> i64 {
+    r, err := renderer_offscreen(o.still_w, o.still_h, o.warp, o.debug)
+    if err != "" {
+        eprint(err)
+        return 1
+    }
+    h := headless_new(false)
+    frames := if o.frames >= 0 { o.frames } else { 120 }
+    for f in 0..frames {
+        headless_frame(&h)
+    }
+    img, rerr := render_frame(r, &h.g, 0.5, "", true)
+    if rerr != "" {
+        eprint(rerr)
+        return 1
+    }
+    g := &h.g
+    print("still:", o.still_file, img.w, "x", img.h, png_save(o.still_file, img), "frame", frames, mode_name(g.mode),
+        "at", fmtf(g.pos.x, 2), fmtf(g.pos.y, 2), "gems", g.got, "adapter", r.g.adapter_name)
+    if o.debug {
+        print("debug layer messages", r.messages)
+    }
+    renderer_close(r)
+    0
+}
+
+// --record FILE: the video's game (record.al) drawn offscreen frame by frame and read back. AL
+// writes whole files only, so the raw frames go out in chunks of 30 (FILE.000, FILE.001, ...);
+// the sound, mixed in step with the frames, goes to FILE.wav. The grain is lighter than on the
+// screen: it costs a video encoder many bits in the dark.
+fn run_record(o: Options) -> i64 {
+    r, err := renderer_offscreen(o.still_w, o.still_h, o.warp, o.debug)
+    if err != "" {
+        eprint(err)
+        return 1
+    }
+    r.grain = 0.012
+    rec := recording_new()
+    frames := if o.frames >= 0 { o.frames } else { 1230 }
+    chunk := 30
+    size := o.still_w * o.still_h * 4
+    buf := alloc[u8](chunk * size)
+    held := 0
+    parts := 0
+    for f in 0..frames {
+        recording_frame(&rec)
+        m := mark()
+        img, rerr := render_frame(r, &rec.g, 0.5, "", true)
+        if rerr != "" {
+            eprint(rerr)
+            return 1
+        }
+        copy(buf[held * size..(held + 1) * size], img.pix)
+        release(m)
+        held += 1
+        if held == chunk || f == frames - 1 {
+            name := fmt(o.record_file, ".", fmti(parts, 3, '0'))
+            if !write_file(name, buf[..held * size]) {
+                eprint(fmt("cannot write ", name))
+                return 1
+            }
+            parts += 1
+            held = 0
+        }
+    }
+    wav_ok := write_file(fmt(o.record_file, ".wav"), recording_wav(&rec))
+    print("record:", frames, "frames of", o.still_w, "x", o.still_h, "in", parts, "chunks", fmt(o.record_file, ".000 ..."), "sound", wav_ok,
+        "final mode", mode_name(rec.g.mode), "gems", rec.g.got)
+    if o.debug {
+        print("debug layer messages", r.messages)
+    }
+    renderer_close(r)
+    0
+}
+
 fn run_test(o: Options) -> i64 {
-    r, err := renderer_offscreen(TEST_W, TEST_H, true)
+    r, err := renderer_offscreen(TEST_W, TEST_H, true, o.debug)
     if err != "" {
         print(err)                         // the first line: tests/run.al shows it with SKIP
         return 77
@@ -216,14 +299,14 @@ priv fn wraith(c: vec4) -> bool { c.b > c.r + 0.08 && c.b > c.g + 0.08 }
 const PROBES = [_]Probe{
     Probe{ShotTitle, 100, 40, 380, 100, 1500, yellow, "the title in large yellow letters"},
     Probe{ShotTitle, 40, 195, 440, 235, 300, grey, "the help lines in grey"},
-    Probe{ShotPlay, 8, 8, 110, 24, 150, yellow, "GEMS 0/6 at the top left"},
-    Probe{ShotPlay, 8, 28, 48, 38, 250, red, "three hearts"},
+    Probe{ShotPlay, 8, 8, 110, 24, 110, yellow, "GEMS 0/6 at the top left"},
+    Probe{ShotPlay, 8, 28, 48, 38, 170, red, "three hearts"},
     Probe{ShotPlay, 236, 131, 245, 140, 10, bright, "the crosshair"},
     Probe{ShotPlay, 160, 80, 320, 190, 10000, lit, "lantern-lit walls in front"},
     Probe{ShotPlay, 120, 0, 330, 25, 4000, dark, "the dark ceiling"},
     Probe{ShotPlay, 418, 208, 474, 264, 300, stone, "the walls on the map"},
-    Probe{ShotMenu, 180, 38, 300, 62, 400, white, "PAUSED"},
-    Probe{ShotMenu, 140, 145, 240, 160, 100, yellow, "the selected menu line"},
+    Probe{ShotMenu, 250, 98, 320, 126, 300, white, "PAUSED"},
+    Probe{ShotMenu, 140, 145, 240, 163, 100, yellow, "the selected menu line"},
     Probe{ShotWraith, 120, 40, 360, 240, 6000, wraith, "a wraith in front of the player"},
     Probe{ShotWon, 100, 65, 380, 100, 1500, green, "YOU ESCAPED"},
     Probe{ShotLost, 160, 65, 320, 100, 1000, red, "CAUGHT"},

@@ -1,175 +1,124 @@
-// Breakout with Direct3D 12 and WASAPI (Windows): a title screen, a pause menu with volume
-// settings, a fixed-step simulation that pauses when the window loses the focus, a window of
-// any size and fullscreen with the picture letterboxed, and keyboard or gamepad.
+// Breakout with Direct3D 12 and WASAPI (Windows), in neon: a title screen, a pause menu with
+// volume settings, a fixed-step simulation that pauses when the window loses the focus, a
+// window of any size and fullscreen with the picture letterboxed, and keyboard or gamepad.
+// Glass bricks that shatter, sparks, a glowing ball with a trail, screen shake, bloom.
 //
 //   alc build --target windows --gui examples/dx12_breakout/game.al     then run game.exe
 //   game.exe --headless           no window, GPU or sound device: prints checksums (headless.al)
+//   game.exe --shot FILE.png --frames N [--shot-idle F]
+//                                 no window or sound: the scripted player of the headless run
+//                                 plays N frames (from frame F on it only launches the ball, so
+//                                 the game ends), then the last frame is drawn offscreen at
+//                                 1280 x 720 and saved as a PNG
+//   game.exe --record FILE.rgba [--frames N]
+//                                 no window or sound device: the video run of record.al (title,
+//                                 then a bot playing a nearly cleared wall to the end; N frames,
+//                                 default 1290 at 60 fps) drawn offscreen at 1280 x 720; every
+//                                 frame's RGBA pixels (top row first) one after another in FILE,
+//                                 and the sound mixed in step as FILE with .wav for .rgba
+//                                 (16-bit stereo, 48 kHz). About 3.7 MB a frame
+//   --d3d-debug                   the Direct3D debug layer, its messages on standard error
 //
 // Arrows / A D / D-pad / left stick move, Space / Up / pad A launches, Escape / P / pad Start
 // pauses (the menu: arrows or D-pad, Enter or A; Escape or B goes back), F11 or Alt+Enter
 // toggles fullscreen, Escape on the title screen quits. More options: gamekit/options.al.
 //
 // The parts: logic.al (the game: rules, menus, the fixed step), sound.al (generated sounds),
-// headless.al (the scripted run), this file (window, GPU, sound device, drawing), and
-// ../gamekit (the Direct3D 12 screen, the bitmap font, the synthesizer). The sprites are
-// tiles.png (made by make_tiles.al), built into the executable with embed.
+// headless.al (the scripted run), record.al (the video run), fx.al (effects made from the
+// game's events), draw.al (what a frame shows), render.al (Direct3D 12: background, sprites,
+// bloom), this file (window, sound device, the loop), and ../gamekit (device set-up, options,
+// synthesizer). The sprites are tiles.png (made by make_tiles.al, laid out by sheet.al), built
+// into the executable with embed.
+use std.os
 use std.window
 use std.audio
 use std.image
 use "logic.al"
 use "sound.al"
 use "headless.al"
-use "../gamekit/screen.al"
 use "../gamekit/options.al"
+use "render.al"
+use "fx.al"
+use "draw.al"
+use "record.al"
 
 const TILES_PNG = embed("tiles.png")
-const TILES_Y = FONT_ATLAS_H             // the tiles' place in the atlas, below the font
+const SHOT_W = 1280
+const SHOT_H = 720
 
-const WHITE: u32 = 0xFFFFFFFF
-const YELLOW = rgb8(255, 224, 64)
-const GREY = rgb8(160, 160, 160)
-const BACKGROUND = rgb8(16, 24, 40)
-const WALL = rgb8(96, 104, 112)
-
-// The atlas: the font, and below it the tiles decoded from the PNG.
-fn make_atlas() -> (Image, Font) {
+// The sprite sheet with the letters of a system font added below the sprites, its alpha
+// premultiplied (render.al blends so).
+fn load_sheet() -> Image {
     tiles, ok := image_decode(TILES_PNG)
     if !ok {
         panic("tiles.png cannot be decoded")
     }
-    tiles = convert(tiles, 4)
-    img := image_new(FONT_ATLAS_W, FONT_ATLAS_H + tiles.h, 4)
-    font := font_bake(&img, 0, 0)
-    blit(&img, tiles, 0, TILES_Y)
-    (img, font)
+    img := image_new(SHEET_W, LETTERS_H, 4)
+    blit(&img, convert(tiles, 4), 0, 0)
+    letters_build(&img, LETTERS_Y)
+    premultiply_alpha(&img)
+    img
 }
 
-// ---- drawing: reads the game, never changes it ------------------------------------------
-
-fn render(sc: *Screen, font: Font, g: *Game, alpha: f32, note: str) -> str {
-    s := sc.screen_begin(BACKGROUND)
-    draw_field(s, g, alpha)
-    draw_hud(s, font, g)
-    cx := f32(VIEW_W) / 2.0
-    blink := fmod(g.time, 1.0) < 0.6
-    match g.mode {
-        Title => {
-            s.sprite_rect(0.0, 0.0, f32(VIEW_W), f32(VIEW_H), 0x99000000)
-            draw_text_centered(s, font, cx, 34.0, 4.0, "BREAKOUT", YELLOW)
-            if blink {
-                draw_text_centered(s, font, cx, 90.0, 1.0, "PRESS ENTER OR A TO PLAY", WHITE)
-            }
-            if g.best > 0 {
-                draw_text_centered(s, font, cx, 108.0, 1.0, fmt("BEST ", g.best), GREY)
-            }
-            draw_text_centered(s, font, cx, 140.0, 1.0, "ARROWS / STICK MOVE    SPACE / A LAUNCH", GREY)
-            draw_text_centered(s, font, cx, 150.0, 1.0, "ESC / START PAUSE    F11 FULLSCREEN", GREY)
-            draw_text_centered(s, font, cx, 164.0, 1.0, "ESC: QUIT", GREY)
-        }
-        Playing => {
-            if g.banner > 0.0 {
-                draw_text_centered(s, font, cx, 104.0, 2.0, fmt("LEVEL ", g.level), WHITE)
-            } else if g.stuck && blink {
-                draw_text_centered(s, font, cx, 120.0, 1.0, "SPACE OR A TO LAUNCH", GREY)
-            }
-        }
-        Paused => draw_menu(s, font, g)
-        GameOver => {
-            s.sprite_rect(0.0, 0.0, f32(VIEW_W), f32(VIEW_H), 0x99000000)
-            draw_text_centered(s, font, cx, 50.0, 3.0, "GAME OVER", 0xFF5050F0)
-            draw_text_centered(s, font, cx, 90.0, 1.0, fmt("SCORE ", g.score, "    BEST ", g.best), WHITE)
-            if blink {
-                draw_text_centered(s, font, cx, 120.0, 1.0, "PRESS ENTER OR A", WHITE)
-            }
-        }
-    }
-    if note != "" {
-        draw_text(s, font, 2.0, f32(VIEW_H) - 9.0, 1.0, note, 0xFF60C0FF)
-    }
-    sc.screen_end()
+// The options of this front end that gamekit/options.al does not know.
+struct Extra {
+    shot: str            // "": no screenshot run
+    idle: i64            // the frame from which the screenshot run's player only launches; -1: never
+    debug: bool          // --d3d-debug
+    record: str          // "": no video run
 }
 
-fn draw_field(s: *Sprites, g: *Game, alpha: f32) {
-    s.sprite_rect(FIELD_L - 6.0, FIELD_T - 6.0, FIELD_R - FIELD_L + 12.0, 6.0, WALL)
-    s.sprite_rect(FIELD_L - 6.0, FIELD_T, 6.0, f32(VIEW_H) - FIELD_T, WALL)
-    s.sprite_rect(FIELD_R, FIELD_T, 6.0, f32(VIEW_H) - FIELD_T, WALL)
-    layout := LEVELS[(max(g.level, 1) - 1) % len(LEVELS)]
-    for i in 0..ROWS * COLS {
-        hp := g.bricks[i]
-        if hp == 0 {
-            continue
-        }
-        r := brick_rect(i)
-        full := i64(layout[i / COLS][i % COLS] - '0')
-        // armoured while it has 3 hit points, cracked once hit
-        sx: f32 = if hp >= 3 { 24.0 } else { 0.0 }
-        sy: f32 = if i64(hp) < full && hp < 3 { 8.0 } else { 0.0 }
-        s.sprite(r.x, r.y, r.z, r.w, sx, f32(TILES_Y) + sy, BRICK_W, BRICK_H, row_color(i / COLS))
-    }
-    for i in 0..g.sparks.len {
-        if g.sparks.is_live(i) {
-            p := &g.sparks.items[i]
-            a := u32(clamp(p.life * 2.0, 0.0, 1.0) * 255.0)
-            s.sprite_rect(p.pos.x - 1.0, p.pos.y - 1.0, 2.0, 2.0, (p.color & 0xFFFFFF) | (a << 24))
-        }
-    }
-    if g.mode == Title {
-        return
-    }
-    x := lerp(g.paddle_prev, g.paddle, alpha)
-    s.sprite(x - PADDLE_W / 2.0, PADDLE_Y, PADDLE_W, PADDLE_H, 0.0, f32(TILES_Y) + 16.0, PADDLE_W, PADDLE_H, WHITE)
-    b := if g.mode == Playing { lerp(g.ball_prev, g.ball, alpha) } else { g.ball }
-    s.sprite(b.x - BALL_R, b.y - BALL_R, 2.0 * BALL_R, 2.0 * BALL_R, 40.0, f32(TILES_Y) + 16.0, 6.0, 6.0, WHITE)
-}
-
-fn draw_hud(s: *Sprites, font: Font, g: *Game) {
-    if g.mode == Title {
-        return
-    }
-    draw_text(s, font, FIELD_L, 3.0, 1.0, fmt("SCORE ", fmti(g.score, 5, '0')), WHITE)
-    draw_text_centered(s, font, f32(VIEW_W) / 2.0, 3.0, 1.0, fmt("LEVEL ", g.level), GREY)
-    for k in 0..g.lives {
-        s.sprite(FIELD_R - 6.0 - f32(k) * 9.0, 3.0, 6.0, 6.0, 40.0, f32(TILES_Y) + 16.0, 6.0, 6.0, WHITE)
-    }
-}
-
-fn draw_menu(s: *Sprites, font: Font, g: *Game) {
-    s.sprite_rect(0.0, 0.0, f32(VIEW_W), f32(VIEW_H), 0xAA000000)
-    cx := f32(VIEW_W) / 2.0
-    draw_text_centered(s, font, cx, 30.0, 2.0, "PAUSED", WHITE)
-    labels := [MENU_ITEMS]str{"RESUME", "MUSIC", "SOUND", "FULLSCREEN", "QUIT TO TITLE"}
-    for i, label in labels {
-        y := 62.0 + f32(i) * 16.0
-        color := if i == g.menu { YELLOW } else { WHITE }
-        if i == g.menu {
-            draw_text(s, font, 90.0, y, 1.0, ">", YELLOW)
-        }
-        draw_text(s, font, 100.0, y, 1.0, label, color)
-        level := if i == MENU_MUSIC { g.settings.music } else if i == MENU_SOUND { g.settings.sound } else { -1 }
-        if level >= 0 {
-            for k in 0..VOLUME_STEPS {
-                on := k < level
-                s.sprite_rect(170.0 + f32(k) * 6.0, y, 4.0, 7.0, if on { color } else { 0xFF404040 })
+// Takes this file's options out of the command line; the rest is for parse_options.
+fn split_options(a: []str) -> ([]str, Extra, str) {
+    x := Extra{idle: -1}
+    rest := vec[str]()
+    k := 0
+    while k < len(a) {
+        s := a[k]
+        if s == "--shot" && k + 1 < len(a) {
+            x.shot = a[k + 1]
+            k += 1
+        } else if s == "--shot-idle" && k + 1 < len(a) {
+            n, ok := parse_i64(a[k + 1])
+            if !ok {
+                return (rest.items(), x, fmt("--shot-idle: not a number: ", a[k + 1]))
             }
+            x.idle = n
+            k += 1
+        } else if s == "--record" && k + 1 < len(a) {
+            x.record = a[k + 1]
+            k += 1
+        } else if s == "--d3d-debug" {
+            x.debug = true
+        } else {
+            rest.push(s)
         }
+        k += 1
     }
-    draw_text_centered(s, font, cx, 150.0, 1.0, "LEFT / RIGHT CHANGE    ESC / B BACK", GREY)
+    (rest.items(), x, "")
+}
+
+// One picture: the look, the background, the sprites, bloom and composite.
+fn render(r: *Renderer, fx: *Fx, g: *Game, alpha: f32, note: str, capture: bool) -> (Image, str) {
+    look := make_look(g, fx)
+    b := render_begin(r, &look)
+    draw_frame(b, g, fx, alpha, note)
+    render_end(r, &look, capture)
 }
 
 // ---- the platform shell ------------------------------------------------------------------
 
-fn run_window(o: GameOptions) {
+fn run_window(o: GameOptions, x: Extra) {
     w, ok := window_open(WindowDesc{title: "AL breakout (Direct3D 12)", width: VIEW_W * 3, height: VIEW_H * 3,
         resizable: true, fullscreen: o.fullscreen})
     if !ok {
         panic("cannot open a window")
     }
-    atlas, font := make_atlas()
-    sc, err := screen_open(w, VIEW_W, VIEW_H, atlas, 2048, o.warp)
+    r, err := renderer_window(w, VIEW_W, VIEW_H, load_sheet(), o.warp, x.debug)
     if err != "" {
         panic(err)
     }
-    sc.vsync = o.vsync
+    r.vsync = o.vsync
     snd := breakout_sound()
     // no sound device is not an error: the audio calls then do nothing
     dev, opened := audio_open(o.audio, AUDIO_RATE, 2, 60)
@@ -179,10 +128,12 @@ fn run_window(o: GameOptions) {
     pad := &w.input.pad
     gamepad_open(pad, 0)
     g := game_new(u64(time_ns()))
+    fx := fx_new(u64(time_ns()))
     clock := frame_clock()
     steps := fixed_step(HZ)
     frames := 0
     pad_retry: f64 = 0.0
+    settled: i64 = 0                     // memory in use after frame 100: it must stay the same
     while !w.should_close() && frames != o.frames {
         // input: the only place the outside world enters
         w.poll()
@@ -209,35 +160,189 @@ fn run_window(o: GameOptions) {
             w.closing = true
         }
         // simulation: fixed steps (update itself does nothing while paused)
-        for k in 0..steps.advance(clock.tick()) {
+        dt := clock.tick()
+        for k in 0..steps.advance(dt) {
             update(&g, inp, f32(steps.step))
         }
+        // the effects read the frame's events before the sound plays (and forgets) them
+        alpha := steps.alpha()
+        fx_frame(fx, &g, f32(fmin(dt, 0.1)), ball_at(&g, alpha))
         // output: sound first (Present waits for the display), then the picture
         play_events(&snd, &g)
         audio_pump(dev, snd.mixer)
+        frame_begin()
         note := if dev != nil && dev.lost { "SOUND DEVICE LOST, RECONNECTING" } else { "" }
-        rerr := render(sc, font, &g, steps.alpha(), note)
+        _, rerr := render(r, fx, &g, alpha, note, false)
         if rerr != "" {
             panic(rerr)
         }
+        frame_end()
         frames += 1
+        if frames == 100 {
+            settled = mem_used()
+        }
     }
-    print("best", max(g.best, g.score), "frames", frames, "resizes", sc.resizes, "sound underruns",
+    print("best", max(g.best, g.score), "frames", frames, "resizes", r.resizes, "sound underruns",
         if dev == nil { 0 } else { dev.underruns })
+    growth := if frames > 100 { mem_used() - settled } else { 0 }
+    print("fps", fmtf(clock.fps, 1), "memory growth after frame 100", growth, "adapter", r.g.adapter_name,
+        "debug messages", r.messages)
     audio_close(dev)
-    screen_close(sc)
+    renderer_close(r)
     w.close()
 }
 
-fn main() {
-    o, err := parse_options(args())
+// ---- screenshots ---------------------------------------------------------------------------
+
+priv fn tap(inp: *Input, k: i64) {
+    inp.feed(Event{kind: EventKeyDown, key: k})
+    inp.feed(Event{kind: EventKeyUp, key: k})
+}
+
+// The scripted player of the screenshot run after --shot-idle: it lets go of the keys and only
+// launches the ball, so the balls are lost and the game ends.
+priv fn idle_player(g: *Game, inp: *Input, f: i64) {
+    for k in [_]i64{KEY_LEFT, KEY_RIGHT} {
+        if inp.key_down(k) {
+            inp.feed(Event{kind: EventKeyUp, key: k})
+        }
+    }
+    gamepad_event(&inp.pad, 2, u8(PAD_AXIS_LX), 0)
+    if g.stuck && f % 60 == 0 {
+        tap(inp, KEY_SPACE)
+    }
+}
+
+// The headless run's game, driven as there, then its last frame drawn offscreen and saved.
+fn run_shot(o: GameOptions, x: Extra) -> i64 {
+    r, err := renderer_offscreen(SHOT_W, SHOT_H, VIEW_W, VIEW_H, load_sheet(), o.warp, x.debug)
     if err != "" {
         eprint(err)
-        exit(2)
+        return 1
+    }
+    g := game_new(11)
+    fx := fx_new(5)
+    inp: Input
+    inp.focused = true
+    frames := if o.frames > 0 { o.frames } else { 600 }
+    for f in 0..frames {
+        inp.begin_frame()
+        if x.idle < 0 || f < x.idle {
+            breakout_script(&g, &inp, f)
+        } else {
+            idle_player(&g, &inp, f)
+        }
+        if !inp.focused {
+            lose_focus(&g)
+        }
+        handle_input(&g, &inp)
+        g.want_fullscreen = false
+        g.want_quit = false
+        for k in 0..2 {
+            update(&g, &inp, 1.0 / f32(HZ))
+        }
+        fx_frame(fx, &g, 1.0 / 60.0, ball_at(&g, 1.0))
+        g.events.clear()
+    }
+    img, rerr := render(r, fx, &g, 1.0, "", true)
+    if rerr != "" {
+        eprint(rerr)
+        renderer_close(r)
+        return 1
+    }
+    mode := match g.mode { Title => "title"; Playing => "playing"; Paused => "paused"; GameOver => "over" }
+    saved := png_save(x.shot, img)
+    print("shot", x.shot, img.w, "x", img.h, "frames", frames, "mode", mode, "level", g.level, "score", g.score,
+        "lives", g.lives, "saved", saved, "adapter", r.g.adapter_name)
+    renderer_close(r)
+    if saved && r.messages == 0 { 0 } else { 1 }
+}
+
+// ---- the video -----------------------------------------------------------------------------
+
+const RECORD_CHUNK = 30              // frames per piece: AL writes whole files, cmd joins them
+
+// record.al's video run drawn offscreen, the frames into x.record, the sound beside it.
+fn run_record(o: GameOptions, x: Extra) -> i64 {
+    r, err := renderer_offscreen(SHOT_W, SHOT_H, VIEW_W, VIEW_H, load_sheet(), o.warp, x.debug)
+    if err != "" {
+        eprint(err)
+        return 1
+    }
+    v := video_new()
+    fx := fx_new(5)
+    snd := breakout_sound()
+    frames := if o.frames > 0 { o.frames } else { 1290 }
+    size := SHOT_W * SHOT_H * 4
+    chunk := alloc[u8](RECORD_CHUNK * size)
+    sound := vec[i16]()
+    sound.reserve(frames * VIDEO_MIX * 2)
+    mix := alloc[i16](VIDEO_MIX * 2)
+    parts := vec[str]()
+    n := 0
+    for f in 0..frames {
+        video_frame(&v, fx)
+        play_events(&snd, &v.g)                      // the frame's sounds (and forgets the events)
+        snd.mixer.mix_i16(mix, VIDEO_MIX)
+        sound.extend(mix)
+        m := mark()
+        img, rerr := render(r, fx, &v.g, 1.0, "", true)
+        if rerr != "" {
+            eprint(rerr)
+            renderer_close(r)
+            return 1
+        }
+        copy(chunk[n * size..(n + 1) * size], img.pix)
+        release(m)
+        n += 1
+        if n == RECORD_CHUNK || f == frames - 1 {
+            part := fmt(x.record, ".", fmti(len(parts), 3, '0'))
+            if !write_file(part, chunk[..n * size]) {
+                eprint(fmt("cannot write ", part))
+                return 1
+            }
+            parts.push(replace(part, "/", "\\"))
+            n = 0
+        }
+    }
+    renderer_close(r)
+    wav := if ends_with(x.record, ".rgba") { fmt(x.record[..len(x.record) - 5], ".wav") } else { fmt(x.record, ".wav") }
+    if !write_file(wav, wav_bytes(sound.items(), AUDIO_RATE)) {
+        eprint(fmt("cannot write ", wav))
+        return 1
+    }
+    // the pieces into one file, then away
+    out := replace(x.record, "/", "\\")
+    joined := run([]str{"cmd", "/c", "copy", "/b", "/y", join(parts.items(), "+"), out})
+    for p in parts {
+        run([]str{"cmd", "/c", "del", p})
+    }
+    print("record", x.record, "frames", frames, "wav", wav, "wall cleared at frame", v.cleared, "level", v.g.level,
+        "score", v.g.score, "lives", v.g.lives, "join status", joined, "debug messages", r.messages)
+    if joined == 0 { 0 } else { 1 }
+}
+
+fn main() -> i64 {
+    rest, x, xerr := split_options(args())
+    if xerr != "" {
+        eprint(xerr)
+        return 2
+    }
+    o, err := parse_options(rest)
+    if err != "" {
+        eprint(err)
+        return 2
     }
     if o.headless {
         breakout_headless(o.frames)
-        return
+        return 0
     }
-    run_window(o)
+    if x.shot != "" {
+        return run_shot(o, x)
+    }
+    if x.record != "" {
+        return run_record(o, x)
+    }
+    run_window(o, x)
+    0
 }
