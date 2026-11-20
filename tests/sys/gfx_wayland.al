@@ -4,10 +4,12 @@
 // naming that socket in WindowDesc.display. The frames of data/gfx_window.al: with vsync and
 // without, fullscreen and back (the swapchain follows the window's configure), then the
 // renderer is closed before the window. The validation layer is on where it is installed.
-// Headless weston composites in software and may offer no buffer path a GPU driver can
-// present to (linux-dmabuf): the first device is tried, then the software one (lavapipe,
-// which presents through wl_shm). NOTE: the expected output is a prediction; this test has
-// never been run (see tests/sys/gfx_wayland.why and docs/std/gfx.md, "Wayland").
+// Weston is started with its GL renderer, which offers linux-dmabuf, the buffer path a GPU
+// driver presents through (NVIDIA has no other); where that compositor does not come up (no
+// GPU render node), weston composites in software (pixman, no linux-dmabuf). In either the
+// first device is tried, then the software one (lavapipe, which presents through wl_shm).
+// First passed on NVIDIA (driver Vulkan 1.4, weston 15, GL renderer) with no validation
+// message; see docs/std/gfx.md, "Wayland".
 use std.gfx
 use std.os
 use "data/gfx_window.al"
@@ -69,16 +71,33 @@ fn main() -> i64 {
     }
     socket := fmt("al-gfx-wl-test-", process_id())
     path := path_join(runtime, socket)
-    weston, started := spawn([]str{"env", "-u", "WAYLAND_DISPLAY", "-u", "DISPLAY", "timeout", "-k", "5", "60",
-        "weston", "--backend=headless", fmt("--socket=", socket), "--width=800", "--height=600", "--no-config",
-        "--log=/dev/null"})
-    if !started {
-        print("cannot start weston:", error_text(io_error()))
-        return 1
+    weston: Process
+    up := false
+    for renderer in []str{"--renderer=gl", ""} {
+        args := []str{"env", "-u", "WAYLAND_DISPLAY", "-u", "DISPLAY", "timeout", "-k", "5", "60",
+            "weston", "--backend=headless", fmt("--socket=", socket), "--width=800", "--height=600", "--no-config",
+            "--log=/dev/null", renderer}
+        p, started := spawn(if renderer != "" { args } else { args[..len(args) - 1] })
+        if !started {
+            print("cannot start weston:", error_text(io_error()))
+            return 1
+        }
+        weston = p
+        for i in 0..250 {
+            if file_exists(path) { break }
+            _, ended := try_wait(weston)
+            if ended { break }
+            sleep_ns(20_000_000)
+        }
+        if file_exists(path) {
+            up = true
+            break
+        }
+        stop(weston)
     }
-    for i in 0..500 {
-        if file_exists(path) { break }
-        sleep_ns(20_000_000)
+    if !up {
+        print("weston did not start")
+        return 1
     }
     wl_name := concat("wayland:", socket)
     status := 1

@@ -286,9 +286,11 @@ byte-identical when nothing changed.
 
 ## Wayland
 
-**Experimental, never run on a compositor.** Everything in this section was written and
-reasoned about on a Windows machine; the Linux code is type-checked and built, the pure helpers
-are unit-tested, nothing Wayland has been executed. The window side is
+**Experimental, run on a headless compositor only.** Everything in this section was written
+and reasoned about on a Windows machine. `tests/sys/gfx_wayland` has since passed on Linux
+(NVIDIA, driver Vulkan 1.4, headless weston 15 with its GL renderer, no validation message):
+frames with and without vsync, fullscreen and back. No desktop compositor (GNOME, KDE, sway,
+Hyprland) has been tried yet. The window side is
 [std.window's Wayland backend](window.md#wayland), which is itself unverified and used only on
 request (`WindowDesc.display` `"wayland"`, `ALC_WINDOW=wayland`, or no X display and
 `$WAYLAND_DISPLAY` set).
@@ -341,9 +343,10 @@ What the Vulkan backend does for a window with `wayland_display(w) != nil`:
 Checklist for a real session (GNOME, KDE Plasma and sway; each step names what to look at):
 
 1. With weston installed (and lavapipe, `mesa-vulkan-drivers`, for the software fallback):
-   `tests/run.sh ./build/alc gfx_wayland`. `sys/gfx_wayland` starts a headless weston and
-   compares its output with `gfx_wayland.out`, which is a prediction; its standard error says
-   which device was used and why another failed. Also `tests/run.sh ./build/alc window` (the
+   `tests/run.sh ./build/alc gfx_wayland`. `sys/gfx_wayland` starts a headless weston (GL
+   renderer, else pixman) and compares its output with `gfx_wayland.out`; its standard error
+   says which device was used and why another failed. (Passed on NVIDIA with the GL renderer;
+   with pixman, NVIDIA has no buffer path to present through and only lavapipe can pass.) Also `tests/run.sh ./build/alc window` (the
    window side, `sys/window_wayland`).
 2. `ALC_WINDOW=wayland alc run examples/gfx_starter/game.al` on each compositor, and once with
    `WAYLAND_DEBUG=1 ... 2>&1 | grep -E 'set_buffer_scale|attach|ack_configure|error'`: the
@@ -405,8 +408,7 @@ Checklist for a real session (GNOME, KDE Plasma and sway; each step names what t
   the swapchain extent (a surface with a size of its own, the window's pixels at scales 1 to
   3, limits that cut a size that is a multiple of the scale).
 - `tests/sys/gfx_wayland.al`: a window of the Wayland backend on a headless weston, the frames
-  of `gfx_window` (Linux, needs weston; its expected output is a prediction, never produced
-  by a run).
+  of `gfx_window` (Linux, needs weston).
 
 Not verified: the Vulkan backend on Linux (X11 and Wayland surfaces) has only been
 type-checked and built (`alc check --target linux`), not run; device loss has not been

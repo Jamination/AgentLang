@@ -640,8 +640,8 @@ modifiers, wheel steps, key repeat timing, scale and configure sizes).
 `tests/sys/wayland` does) and opens windows there with `display: "wayland:<socket>"`: present, title,
 cursor, lock, fullscreen and back, a resizable window, open / close cycles without a leaked
 descriptor, a socket that does not exist, the compositor going away; it is skipped without
-weston, `libwayland-client.so.0` or `libxkbcommon.so.0`, and its expected output is a
-prediction that no real run has produced yet. `tests/sys/window_nodisplay` checks that an
+weston, `libwayland-client.so.0` or `libxkbcommon.so.0`. It has passed on Linux against
+headless weston 15; no desktop compositor has been tried yet. `tests/sys/window_nodisplay` checks that an
 unusable X display fails cleanly (X11 only, as before).
 `tests/sys/window_x11` exercises a real X11 window and `tests/sys/window_x11_events` resize,
 minimize / restore, window-manager fullscreen changes and the locked pointer, with raw motion

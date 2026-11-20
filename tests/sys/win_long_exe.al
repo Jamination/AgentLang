@@ -8,6 +8,8 @@ use std.os
 
 extern "kernel32.dll" fn SetCurrentDirectoryA(path: *u8) -> i32
 extern "kernel32.dll" fn GetModuleFileNameA(module: i64, buf: *u8, n: u32) -> u32
+extern "kernel32.dll" fn GetModuleHandleA(name: *u8) -> i64
+extern "kernel32.dll" fn GetProcAddress(module: i64, name: *u8) -> i64
 
 fn why() -> str { error_text(io_error()) }
 
@@ -43,6 +45,12 @@ fn start_all(what: str, exe: str, out: str) {
 }
 
 fn main() -> i64 {
+    // Wine (11.22) starts no program whose path is 260 units or more, in any form (as written
+    // or extended-length): only Windows itself can run this test
+    if GetProcAddress(GetModuleHandleA(cstr("ntdll.dll")), cstr("wine_get_version")) != 0 {
+        print("Wine starts no program whose path is over MAX_PATH: runs on Windows (tests\\run.bat)")
+        exit(77)
+    }
     a := args()
     if len(a) > 1 && a[1] == "child" {
         return child(a[2..])

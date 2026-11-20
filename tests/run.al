@@ -545,10 +545,12 @@ priv fn prog(j: Job, jd: str, r: *Res) {
         if cfg.win {
             cc.extend([]str{cfg.wcc, "-O2", "-shared", "-o", path_join(jd, concat(name, ".dll"))})
         } else if cfg.arm64 {
-            // (for the emulator: freestanding, no arm64 C library; its decoder knows the scalar
-            // instructions, not the vector code of the auto-vectoriser)
+            // (for the emulator: freestanding, no arm64 C library, so no stack protector, which
+            // some distributions' clang turns on by default and which needs __stack_chk_guard;
+            // its decoder knows the scalar instructions, not the vector code of the auto-vectoriser)
             cc.extend([]str{cfg.clang, "--target=aarch64-linux-gnu", "-O2", "-fno-vectorize", "-fno-slp-vectorize",
-                "-fomit-frame-pointer", "-ffreestanding", "-nostdlib", "-fuse-ld=lld", "-shared", "-fPIC", "-o",
+                "-fomit-frame-pointer", "-ffreestanding", "-fno-stack-protector", "-nostdlib", "-fuse-ld=lld", "-shared",
+                "-fPIC", "-o",
                 path_join(cfg.tmp, fmt("clib/lib", name, ".so"))})
         } else {
             cc.extend([]str{"clang", "-O2", "-fomit-frame-pointer", "-shared", "-fPIC", "-o",

@@ -336,7 +336,9 @@ fn run_window(o: GameOptions) {
     }
     g, err := gfx_open(w, GfxDesc{software: o.warp})
     if err != "" {
-        panic(err)
+        print("no device for std.gfx:", err)        // status 77, as the other examples (a SKIP in the tests)
+        w.close()
+        exit(77)
     }
     g.vsync = o.vsync
     lk := look_new(g)

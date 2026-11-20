@@ -159,7 +159,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `VK_KHR_wayland_surface`; integer buffer scales; xdg-shell, server-side decorations where
   offered, xkbcommon keys and text, relative pointer and pointer lock. The checklist for a real
   session is in docs/std/window.md (Wayland).
-- `std.gfx` on a Wayland window of std.window (experimental, never run on a compositor yet):
+- `std.gfx` on a Wayland window of std.window (experimental; passed on headless weston with
+  NVIDIA, not yet tried on a desktop compositor):
   the Vulkan backend creates a `VK_KHR_wayland_surface` surface, makes the swapchain the
   window's pixel size (surface size times buffer scale) and follows its configure events; X11
   windows are unchanged. The checklist is in docs/std/gfx.md (Wayland).

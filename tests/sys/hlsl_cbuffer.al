@@ -191,7 +191,16 @@ fn reflect(c: Case) -> (i64, Vec[i64], Vec[str], str) {
     (i64(bd.Size), offsets, names, "")
 }
 
+extern "kernel32.dll" fn GetModuleHandleA(name: *u8) -> i64
+extern "kernel32.dll" fn GetProcAddress(module: i64, name: *u8) -> i64
+
 fn main() -> i64 {
+    // Wine's D3DReflect (vkd3d-shader, Wine 11.22) places doubles in a cbuffer unlike Windows'
+    // D3DCompile (`float f; double d;`: d at 4, not 8): the rules are Windows'
+    if GetProcAddress(GetModuleHandleA(cstr("ntdll.dll")), cstr("wine_get_version")) != 0 {
+        print("Wine's shader reflection packs doubles unlike D3DCompile: runs on Windows (tests\\run.bat)")
+        return 77
+    }
     bad := 0
     for c in cases() {
         size, offsets, names, err := reflect(c)

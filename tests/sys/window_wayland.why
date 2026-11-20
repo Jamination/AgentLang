@@ -1,1 +1,1 @@
-weston (the test starts its own headless compositor), a writable XDG_RUNTIME_DIR, libwayland-client.so.0 or libxkbcommon.so.0 is missing. Note: window_wayland.out is the PREDICTED output of the experimental Wayland backend; it has never been produced by a real run
+weston (the test starts its own headless compositor), a writable XDG_RUNTIME_DIR, libwayland-client.so.0 or libxkbcommon.so.0 is missing.

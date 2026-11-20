@@ -20,8 +20,8 @@ env -u ALC_PRELUDE "$ALC" build --target linux prog.al -o lin || fail "--target 
 env -u ALC_WINE "$ALC" run --target windows prog.al 2>err; [[ $? == 1 ]] || fail "run without Wine: status"
 grep -q "cannot run here (ALC_WINE=1" err || fail "run without Wine: message"
 [[ -f prog.exe ]] || fail "run builds the executable"
-"$ALC" build --target macos prog.al 2>err; [[ $? == 2 ]] || fail "unknown target: status"
-grep -q "unknown target macos" err || fail "unknown target: message"
+"$ALC" build --target plan9 prog.al 2>err; [[ $? == 2 ]] || fail "unknown target: status"
+grep -q "unknown target plan9" err || fail "unknown target: message"
 "$ALC" build prog.al --target 2>err; [[ $? == 2 ]] || fail "missing target: status"
 printf 'extern "libc.so.6" fn getpid() -> i32\nfn main() -> i64 { i64(getpid()) }\n' > lin.al
 "$ALC" build --target windows lin.al 2>err; [[ $? == 1 ]] || fail "Linux library: status"

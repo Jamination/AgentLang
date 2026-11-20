@@ -31,20 +31,22 @@ if [[ -n "$others" ]]; then echo "FAIL: non-AL files in src/:"; echo "$others"; 
 if ls Cargo.toml >/dev/null 2>&1; then echo "FAIL: Cargo.toml is still present"; fail=1; fi
 # the compiler calls no C function, so it is itself a static executable
 if readelf -l $ALC 2>&1 | grep -qE "INTERP|DYNAMIC"; then echo "FAIL: the compiler is not a static executable"; fail=1; fi
-# (the run-time library and its OS layers, which are compiled into programs, not into the
-# compiler; src/host_windows.al, which only the compiler for Windows includes)
-if grep -nE '^(priv )?extern ' src/*.al src/*/*.al | grep -vE '^src/(prelude(_linux|_windows)?|host_windows)\.al'; then echo "FAIL: the compiler declares C functions"; fail=1; fi
+# (the run-time library and its OS layers (prelude_macos binds libSystem), which are compiled
+# into programs, not into the compiler; src/host_windows.al, which only the compiler for Windows includes)
+if grep -nE '^(priv )?extern ' src/*.al src/*/*.al | grep -vE '^src/(prelude(_linux|_windows|_macos)?|host_windows)\.al'; then echo "FAIL: the compiler declares C functions"; fail=1; fi
 # the same compiler for Windows (build.sh builds it; a reachable `syscall` would fail it)
 [[ $(head -c 2 build/alc.exe 2>/dev/null) == MZ ]] || { echo "FAIL: build/alc.exe (the compiler for Windows) was not built"; fail=1; }
 # processes are only started through src/host_linux.al (the compiler's host on Linux, used by
 # src/base.al) and the OS layers of the run-time library: run_program (for `alc run` /
 # `alc test`, which start the program that was just built) and with_stack (the compiler
 # restarting itself on Linux); the parallel back end's worker threads are the run-time
-# library's (clone in src/prelude_linux.al)
-spawns=$(grep -nE 'syscall\((57|58|59|56|322),' src/*.al src/*/*.al | grep -v '^src/host_linux.al' | grep -vE '^src/prelude(_linux|_windows)?\.al')
+# library's (clone in src/prelude_linux.al); src/prelude_linux_arm64.al is an OS layer too, and
+# its numbers are arm64's (56 openat, 57 close, 59 pipe2), not these
+spawns=$(grep -nE 'syscall\((57|58|59|56|322),' src/*.al src/*/*.al | grep -v '^src/host_linux.al' | grep -vE '^src/prelude(_linux|_windows|_linux_arm64)?\.al')
 if [[ -n "$spawns" ]]; then echo "FAIL: compiler sources start processes:"; echo "$spawns"; fail=1; fi
 if [[ $(grep -c 'run_program(' src/main.al) != 1 ]]; then echo "FAIL: expected exactly one run_program call in src/main.al"; fail=1; fi
-if grep -nEi '"(cc|gcc|clang|ld|as|llc|lld|nasm|rustc|cargo)"' src/*.al src/*/*.al; then echo "FAIL: external tool referenced"; fail=1; fi
+# (src/arm64/mir.al prints condition codes as "cc" in its IR dumps)
+if grep -nEi '"(cc|gcc|clang|ld|as|llc|lld|nasm|rustc|cargo)"' src/*.al src/*/*.al | grep -vF 'fmt("cc", i.cc)'; then echo "FAIL: external tool referenced"; fail=1; fi
 
 echo "== conformance tests (language, standard library, system, bindings) =="
 tests/run.sh $ALC | tee tmp_verify_conf.txt
