@@ -289,8 +289,7 @@ Wayland backend (`wayland_display(w) != nil`) use `VK_KHR_wayland_surface` inste
 surface has no size of its own (`currentExtent` is 0xFFFFFFFF): make the swapchain `size(w)`.
 Recreate the swapchain on `EventResize`; while
 `w.minimized`, skip rendering (or present nothing) until `EventRestore`. Do not mix `present`
-with a GPU swapchain on the same window. [std.gfx](gfx.md#wayland) does all of this for a
-Wayland window (also unverified on a real session).
+with a GPU swapchain on the same window.
 
 **Vertical sync** is not a window setting: choose it with the swapchain's present mode in
 Vulkan ([std.vk](vk.md#windows-and-swapchains): `VK_PRESENT_MODE_FIFO_KHR` waits for the
@@ -368,8 +367,7 @@ X11 is listed below. Still to be checked on a real session before it can become 
    buttons, wheel and touchpad scrolling, focus, resize, fullscreen, minimizing, F3 mouse-look
    (raw counts), hiding the cursor.
 3. A 200 % output and moving the window between outputs of different scales.
-4. `examples/starter` through `present`, and a Vulkan swapchain on `wayland_surface` (std.gfx:
-   the checklist in [gfx.md](gfx.md#wayland)).
+4. `examples/starter` through `present`, and a Vulkan swapchain on `wayland_surface`.
 5. A system without `libwayland-client.so.0` or `libxkbcommon.so.0`: `display: "wayland"`
    fails cleanly.
 

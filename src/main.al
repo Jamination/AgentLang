@@ -127,12 +127,6 @@ priv const STD_MODULES = [_](str, str){
     ("net", embed("../std/net.al")),
     ("net_linux", embed("../std/net_linux.al")),
     ("net_windows", embed("../std/net_windows.al")),
-    ("gfx", embed("../std/gfx.al")),
-    ("gfx_core", embed("../std/gfx_core.al")),
-    ("gfx_dx12", embed("../std/gfx_dx12.al")),
-    ("gfx_vk", embed("../std/gfx_vk.al")),
-    ("gfx_shaders", embed("../std/gfx_shaders.al")),
-    ("gfx_text", embed("../std/gfx_text.al")),
 }
 
 // modules that are loaded into every program
@@ -1092,8 +1086,8 @@ priv fn typecheck(ar: *Args, src: *Sources, decls: *Vec[Decl], n_prelude: i64) -
     // `alc check` type-checks every function of the program and of the bundled modules it
     // includes, the core modules (n_core..n_prelude) too. `alc build` / `run` / `test` compile
     // the bundled modules only as far as the program reaches into them: checking the rest
-    // would cost every build of a program that uses std.gfx or std.window 40-70% more time
-    // (at -O0; 2-4 times at -O), for errors that tests/check/std_targets*.al rule out. A
+    // would cost every build of a program that uses std.window 40-70% more time
+    // (at -O0; 2-4 times at -O), for errors that tests/check/std_targets.al rule out. A
     // module read from ALC_STD_DIR (one being written) is checked in full by every command.
     from := n_prelude
     if ar.cmd == "check" {

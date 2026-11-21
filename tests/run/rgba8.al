@@ -1,5 +1,5 @@
 // rgba8 / rgb8: a u32 colour from bytes, red in the lowest byte (a literal reads 0xAABBGGRR),
-// the byte order of color_u32, std.gfx and an RGBA8 image; constants where the bytes are
+// the byte order of color_u32 and an RGBA8 image; constants where the bytes are
 // (the mistakes are tests/fail/rgba8.al)
 const WALL = rgb8(120, 90, 60)                 // brown: 0xFF3C5A78 (0xFF785A3C is a blue)
 const GLASS: u32 = rgba8(200, 220, 255, 128)

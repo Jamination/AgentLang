@@ -1,2 +1,0 @@
-# a Windows program: run only by tests/run.sh --target windows
-exit 1

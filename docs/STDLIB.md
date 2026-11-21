@@ -27,8 +27,6 @@ names). Ranges and edge cases are in the pages below.
 | `std.font` | TrueType fonts, glyph rasterisation, atlases, text layout and drawing | nothing | [std/font.md](std/font.md) |
 | `std.input` | per-frame key / mouse / gamepad state, action maps | nothing (Windows: `xinput1_4.dll` or `xinput9_1_0.dll`, loaded when a gamepad is opened) | [std/input.md](std/input.md) |
 | `std.window` | windows, events, software presentation, native handles for GPU surfaces; on Linux X11, and an experimental Wayland backend used only on request (`WindowDesc.display` `"wayland"`, `ALC_WINDOW=wayland`, or no X display and `$WAYLAND_DISPLAY` set) | `libX11.so.6`, `libdl.so.2` (`libXi.so.6` if installed, for mouse-look; Wayland: `libwayland-client.so.0`, `libxkbcommon.so.0`, `libwayland-cursor.so.0` loaded at run time); Windows: `user32.dll`, `gdi32.dll`, `imm32.dll` | [std/window.md](std/window.md) |
-| `std.gfx` | 2D renderer: textures (also one-channel coverage), batched sprites, rectangles, lines, triangles, alpha / additive blending, transform and camera, scissor, render textures, offscreen rendering and readback; Direct3D 12 on Windows, Vulkan on Linux (X11 windows; Wayland windows of std.window's experimental backend, not yet run on a compositor), shaders built in | `d3d12.dll`, `dxgi.dll` (Windows); `libvulkan.so.1`, `libX11.so.6` (Linux) | [std/gfx.md](std/gfx.md) |
-| `std.gfx_text` | text for `std.gfx` from `std.font`: a font's glyphs at one size as a texture (`GfxFont`), UTF-8 text drawn with kerning, alignment and wrapping into a box, measuring; nothing allocated per frame | as `std.gfx` (it uses whichever backend the program has) | [std/gfx.md](std/gfx.md#text) |
 | `std.audio` | WAV, Ogg Vorbis (whole files or streamed), software mixer, sound device output | `libasound.so.2`; Windows: `ole32.dll` (WASAPI) (device only) | [std/audio.md](std/audio.md) |
 | `std.wayland` | Wayland client bindings: libwayland-client, core / xdg-shell / xdg-decoration protocols, xkbcommon, cursor themes | `libdl.so.2`: the generated functions load `libwayland-client.so.0` at run time (`wl_client_lib()`, `wl_client_interface(name)`); linked against it (+ `libxkbcommon.so.0`, `libwayland-cursor.so.0`) only when its `extern` functions are called | [std/wayland.md](std/wayland.md) |
 | `std.vk` | Vulkan 1.0-1.3 bindings generated from `vk.xml`, with the surface (X11, xcb, Wayland, Win32), swapchain, debug-utils, layer-settings and memory budget / priority extensions; only C-header glue added (sType constructors, union constructors, version macros, `vk_result_name`) | `libvulkan.so.1`, `vulkan-1.dll` | [std/vk.md](std/vk.md) |
@@ -44,7 +42,7 @@ For example a game that uses `std.audio` only to mix into a buffer stays static.
 
 Built with `--target windows` ([DETAILS.md](DETAILS.md#windows)), the core library and
 `std.asset`, `std.os`, `std.net`, `std.image`, `std.font`, `std.input`, `std.window`,
-`std.gfx` (Direct3D 12 there), `std.audio` (its device through WASAPI) and `std.vk` (through
+`std.audio` (its device through WASAPI) and `std.vk` (through
 `vulkan-1.dll`) work the same on Windows (the differences are in their pages); `std.libc`
 binds `msvcrt.dll` there and `std.shaderc` the `shaderc_shared.dll` of the Vulkan SDK.
 `std.wayland`, `std.x11` and `std.alsa`
@@ -52,8 +50,8 @@ use Linux interfaces: `use` of one of them is a compile error that names the mod
 target. `std.dx12` is the other way round:
 Windows only (a Linux build stops at its Windows DLLs).
 
-For 2D games, `std.gfx` is a renderer with one API on both systems. Below it, `std.vk` and
-`std.dx12` are bindings only: with them the renderer (device set-up, pipelines, sprite or mesh
+There is no renderer in the library: `std.vk` and `std.dx12` are bindings only, and
+`present` of std.window shows a CPU pixel buffer; with them the renderer (device set-up, pipelines, sprite or mesh
 drawing) is the program's own code. The examples (`examples/gamekit/dx12_gpu.al`,
 `examples/vk_renderer`) are reference code, not a library.
 

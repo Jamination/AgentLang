@@ -1,5 +1,5 @@
-// The HUD text of the software starter (game.al): a TrueType font of the system (the list and
-// the fallback of examples/gfx_starter), rasterised by std.font at the sizes it is drawn at, in
+// The HUD text of the software starter (game.al): a TrueType font of the system (a list of
+// common paths, with a fallback), rasterised by std.font at the sizes it is drawn at, in
 // styles prepared once at start-up: every printable ASCII glyph filled with a vertical gradient,
 // given a soft dark outline and a drop shadow, and optionally a coloured glow. Drawing is then
 // one blit per glyph with kerned, whole-pixel pen positions.

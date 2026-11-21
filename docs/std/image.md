@@ -43,7 +43,7 @@ Rows from top to bottom, pixels left to right, `channels` bytes per pixel: 1 = g
 `window.present` as is. The other way round, a framebuffer of 4-byte pixels can be wrapped
 without copying: `Image{w: W, h: H, channels: 4, pix: fb}` (`fb` a `[]u8` of `W * H * 4` bytes), then
 `png_save("frame.png", img)` writes a screenshot. Read as a `u32` (`from_bytes[u32](img.pix)`
-of a 4-channel image), a pixel is `0xAABBGGRR`: red in the lowest byte, as std.gfx colours.
+of a 4-channel image), a pixel is `0xAABBGGRR`: red in the lowest byte.
 
 | Function | |
 |----------|---|

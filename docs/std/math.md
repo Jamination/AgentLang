@@ -159,7 +159,7 @@ ease_out_elastic ease_out_bounce ease_out_back`. All map 0 to 0 and 1 to 1.
 (`f32` or `vec3`), `color_u32(vec4) -> u32` and `color_vec4(u32)`.
 
 A colour as a `u32` is RGBA8 with **red in the lowest byte**: the bytes R, G, B, A in memory,
-the order of an RGBA framebuffer, an std.image pixel and std.gfx's colours. Written as a
+the order of an RGBA framebuffer, and an std.image pixel. Written as a
 literal it therefore reads `0xAABBGGRR`: `0xFF3C5A78` is the brown R 0x78, G 0x5A, B 0x3C, and
 `0xFF785A3C` a blue. Build colours from bytes instead:
 

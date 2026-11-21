@@ -117,9 +117,7 @@ struct Atlas { font: Font, px: f32, scale: f32, metrics: FontMetrics, img: Image
 | `char_range(first, last) -> []i64` | the code points `first..=last`: `char_range(32, 126)` is printable ASCII |
 | `atlas_glyph(a, cp) -> AtlasGlyph` | the glyph of a code point, or `a.missing` |
 
-With [std.gfx](gfx.md#text), `use std.gfx_text` does all of this: `gfx_font(g, f, px, chars)`
-and `g.draw_text(font, x, y, text, colour)` (alignment, wrapping, `text_size`), drawing
-exactly what `draw_text(&img, atlas, ...)` below draws into an image. Another GPU renderer
+A GPU renderer draws exactly what `draw_text(&img, atlas, ...)` below draws into an image: it
 uploads `a.img.pix`, then for each `GlyphPos` of `layout_text(a.font, a.px, text)` draws the
 quad of `atlas_glyph(a, p.cp)` at `(x + p.x + g.xoff, y + p.y + g.yoff)`, `g.w` x `g.h`
 pixels, with texture coordinates `(g.u0, g.v0)`-`(g.u1, g.v1)`, the pen position rounded to

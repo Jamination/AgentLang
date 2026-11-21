@@ -1027,7 +1027,7 @@ including file declares are unknown then: a file that includes what it uses chec
 Every command type-checks every function of the program's own files, called or not. The
 bundled modules (`use std.name`, and the core modules every program has) are type-checked in
 full by `alc check`; `alc build` / `run` / `test` compile only what the program reaches of
-them (checking the rest would make building a program on std.gfx 40-70% slower). The
+them (checking the rest would make building a program on std.window 40-70% slower). The
 repository's tests check every module for every target, so this never hides an error, except
 in a module being written: one read from `ALC_STD_DIR` is checked in full by every command.
 

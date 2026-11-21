@@ -1,1 +1,0 @@
-weston (the test starts its own headless compositor), a writable XDG_RUNTIME_DIR, libwayland-client.so.0, libxkbcommon.so.0 or libvulkan.so.1 is missing.

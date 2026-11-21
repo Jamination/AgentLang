@@ -1,4 +1,0 @@
-ok   the surface extension
-ok   a surface with a size of its own keeps it (X11, Win32)
-ok   a surface without a size: the window's pixels
-ok   the limits never give a buffer that is not a multiple of the scale, unless nothing else fits

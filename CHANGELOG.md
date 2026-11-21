@@ -9,6 +9,12 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 ## [Unreleased]
 
 ### Breaking
+- **std.gfx and std.gfx_text are removed** (with `std.gfx_core`, `std.gfx_dx12`, `std.gfx_vk`,
+  `std.gfx_shaders`, docs/std/gfx.md, the `examples/gfx_*` programs and their tests): a shared
+  2D renderer took control of the picture away from the game. A game draws with its own code on
+  `std.vk` / `std.dx12` (reference: `examples/vk_renderer`, `examples/gamekit/dx12_gpu.al`) or
+  into a pixel buffer shown with `present`. Text stays in std.font (atlases, `layout_text`,
+  `wrap_text`, `text_size`, `draw_text` into images).
 - `enum Arch` has a second variant, `Arm64` (the new target below): a `match` on `TARGET_ARCH`
   needs an arm for it or `_`.
   `TARGET_ARCH` is now declared by the OS layer of the target instead of the prelude (nothing

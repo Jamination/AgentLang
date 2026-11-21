@@ -1,9 +1,0 @@
-ok   a glyph quad per visible character, at the rounded pen position with kerning
-ok   measuring agrees with std.font
-ok   wrapping into a box: lines below the box are not drawn
-ok   alignment: lines end at x, or are centred on it, or in the box
-ok   characters not in the atlas draw the missing glyph with its advance
-ok   a font drawn at another size than its raster size
-ok   pens are rounded to whole pixels of the target
-ok   drawing allocates nothing
-ok   adding characters, freeing, errors

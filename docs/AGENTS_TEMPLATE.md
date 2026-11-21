@@ -25,10 +25,6 @@ Fine print: `docs/DETAILS.md`. Library overview: `docs/STDLIB.md`.
 
 ## Rendering: keep the section that applies, delete the others
 
-**std.gfx (2D, Linux and Windows).** `docs/std/gfx.md`: sprites, shapes, render textures, a
-virtual resolution; text with `std.gfx_text` (`gfx_font` from a TrueType font, `draw_text`).
-Reference: `examples/gfx_starter/`. No shaders, no GPU code of the game's own.
-
 **Direct3D 12 (Windows).** `docs/std/dx12.md`. Reference code (to learn from and copy; not a
 library): `examples/gamekit/dx12_gpu.al` (device with WARP fallback, fences, shaders, a sprite
 batcher), `examples/dx12_breakout/` (2D), `examples/dx12_crypt/` (3D, mouse-look).
@@ -47,8 +43,8 @@ batcher), `examples/dx12_breakout/` (2D), `examples/dx12_crypt/` (3D, mouse-look
 
 ## Rules
 
-- **Write your own game code.** The standard library has a 2D renderer (std.gfx) but no engine,
-  scene graph or 3D renderer, on purpose. Copying ideas from the examples is fine.
+- **Write your own game code.** The standard library has no renderer, engine or scene
+  graph, on purpose: the game owns its drawing. Copying ideas from the examples is fine.
 - **Memory bugs:** when something crashes a few frames after the real mistake, run with
   `ALC_CHECK_MEMORY=1`: it stops at the use of memory released by `frame_end()` / `release()`.
 - **A headless mode** (`--headless`): scripted input, a fixed number of frames, no window, no

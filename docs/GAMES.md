@@ -4,8 +4,8 @@ This is the shape the standard library is built to support. The complete example
 [examples/starter](../examples/starter) (`logic.al`, the game, about 220 lines; `game.al`, a
 front end on the software framebuffer, with its procedural art, blits and effects in `art.al`,
 `blit.al`, `fx.al` and `text.al`: a playable shooter that also runs headless and prints a
-checksum, which is how it is tested). [examples/dx12_starter](../examples/dx12_starter) and
-[examples/gfx_starter](../examples/gfx_starter) are the same game drawn with the GPU.
+checksum, which is how it is tested). [examples/dx12_starter](../examples/dx12_starter) is
+the same game drawn with the GPU.
 
 ## The frame
 
@@ -83,7 +83,7 @@ fn describe(it: Item) -> str {
 Mix them freely: a fat `Entity` whose `brain` field is a tagged union of AI states.
 
 A colour such as `color: u32` is RGBA8 with red in the lowest byte: as a literal it reads
-`0xAABBGGRR` (`0xFF0000FF` is opaque red, `0xFFFFFFFF` white), what std.gfx and std.math's
+`0xAABBGGRR` (`0xFF0000FF` is opaque red, `0xFFFFFFFF` white), what std.math's
 `color_u32` use.
 
 Store entities in a `Pool[Entity]` and keep `Handle`s, never pointers or indices, across
@@ -166,41 +166,12 @@ Overloading keeps names short and uniform across types (`update(p: *Player)`,
 
 ## Rendering
 
-For 2D, the standard library has a renderer: [std.gfx](std/gfx.md) (sprites, shapes, text,
-blending, a camera transform, scissor, render textures; batched; Direct3D 12 on Windows,
-Vulkan on Linux, chosen by the target). Below it are the bindings,
+The standard library has no renderer: drawing is the game's own code. It has the bindings,
 `std.vk` (Vulkan) and `std.dx12` (Direct3D 12, Windows), on top of the platform layer
 (`std.window` with the native handles a GPU surface needs, `std.input`, `std.audio`,
 `std.time`); with them, device set-up, swap chain, pipelines, buffers and drawing are the
-game's own code, shaped by what the game needs.
-
-**std.gfx or the bindings?**
-
-- **std.gfx** for a 2D game whose picture is textured quads, shapes and text in painter's
-  order: tiles, sprites, particles (additive), a HUD in a virtual resolution, a minimap or a
-  transition in a render texture. It is about 20 lines of game code from window to a frame
-  ([examples/gfx_starter](../examples/gfx_starter/game.al): sprites from one atlas, additive
-  particles, bloom from render textures; [examples/dx12_starter](../examples/dx12_starter)
-  carries ~780 lines of Direct3D 12 in `render.al` for its HDR version of the game), runs on
-  Linux and Windows unchanged, needs no shader compiler, allocates
-  nothing per frame (frames sit inside `frame_begin()` / `frame_end()`), and has
-  `gfx_offscreen` + `read_pixels` for pixel tests of the game's own drawing.
-- **The bindings** when the game needs what std.gfx leaves out: 3D, depth buffers, its own
-  shaders (lighting, distortion, palette effects), mipmaps, instancing or compute, more than
-  one window, sRGB or HDR output, MSAA, or control over memory and synchronization. Start
-  from `examples/vk_renderer` or `examples/gamekit/dx12_gpu.al`. The two do not mix in one
-  program's frame: std.gfx owns its device and swap chain.
-
-**Text** on std.gfx is `use std.gfx_text` with a TrueType font of [std.font](std/font.md):
-`font, _ := gfx_font(g, f, 16.0, char_range(32, 126))` at load time, `g.draw_text(font, x, y,
-fmt("Score ", score), color)` every frame (alignment, `draw_text_box` wraps into a rectangle,
-`text_size` measures). Drawing allocates nothing, so it sits in the frame's scratch memory
-with the `fmt` that builds the string; making a font allocates its atlas, so do that outside
-it. A font is rasterised at one pixel size: in a virtual resolution, make it at the size the
-text has on the screen (virtual size times the view's scale, anew when the window's size
-changes) and set `font.size` to the virtual size, or it is magnified and soft
-([std/gfx.md](std/gfx.md#text), `examples/gfx_starter`). Characters outside the font's set
-show as its missing glyph; `gfx_font_add` adds characters between frames.
+game's own code, shaped by what the game needs. Text is [std.font](std/font.md): glyph atlases
+and layout, drawn by the game's renderer.
 
 - **Vulkan**: [std/vk.md](std/vk.md) has the workflow: shaders compiled to SPIR-V with `glslc`
   ahead of time and built into the executable with `embed("shader.vert.spv")` (or at run time
@@ -247,15 +218,14 @@ show as its missing glyph; `gfx_font_add` adds characters between frames.
   inside `update`, like movement (both in `examples/dx12_crypt/logic.al`).
 - Keys are for playing, `EventText` for typing: call `set_text_input(w, true)` only while the
   player types a name or a chat line (it lets the IME in on Windows).
-- `std.gfx`, `std.vk`, `std.dx12`: see [Rendering](#rendering).
+- `std.vk`, `std.dx12`: see [Rendering](#rendering).
 - `std.audio`: mix in the game loop with `audio_pump(dev, &mixer)` once per frame (ALSA on
   Linux, WASAPI on Windows); the mixer is pure code and can be tested without a device. Sounds
   are WAV or Ogg Vorbis (`ogg_load`); music is streamed: `ogg_open_file` + `play_stream`
   decode as it plays ([std/audio.md](std/audio.md)).
 - `std.image`, `std.asset`: loading (PNG, BMP, JPEG); keep file access in a load phase, not in
   `update`. Saves and settings go in `data_dir(app)` / `config_dir(app)` (per user, per system).
-- `std.font`: TrueType fonts, glyph atlases, layout; on std.gfx through `std.gfx_text`
-  ([Rendering](#rendering)).
+- `std.font`: TrueType fonts, glyph atlases, layout ([std/font.md](std/font.md)).
 - `std.net`: TCP and UDP (non-blocking with `poll` for a game loop), names, HTTP GET / POST
   ([std/net.md](std/net.md)).
 
@@ -344,7 +314,7 @@ one gets the SmartScreen warning the first time it is started.
 (events, `ActionMap`), the std.audio mixer and its WAV / Ogg decoders, std.image, std.font,
 std.time's `FixedStep` / `Timer`.
 Both systems with a per-OS layer: std.window, gamepads (XInput on Windows), std.audio devices
-(WASAPI), std.gfx and std.gfx_text (Direct3D 12 on Windows, Vulkan on Linux), std.net, std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
+(WASAPI), std.net, std.vk (the Vulkan loader of each system; the surface differs: see [std/vk.md](std/vk.md#windows-swapchains-and-vsync)),
 std.shaderc (`libshaderc_shared.so.1`, or `shaderc_shared.dll` of the Vulkan SDK on Windows).
 Windows only: std.dx12. Linux only: std.x11, std.wayland, std.alsa. The arm64 targets are
 experimental: `--target linux-arm64` has run only under an emulator ([ARM64_TEST.md](ARM64_TEST.md)),

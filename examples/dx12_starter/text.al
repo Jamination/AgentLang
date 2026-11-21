@@ -1,5 +1,5 @@
-// The starter's text: a TrueType font of the system (the list and the fallback of
-// examples/gfx_starter), its printable ASCII glyphs baked at start-up into art.al's atlas as a
+// The starter's text: a TrueType font of the system (a list of common paths, with a
+// fallback), its printable ASCII glyphs baked at start-up into art.al's atlas as a
 // signed distance field, and kerned layout. A distance field stays sharp at any size: the
 // sprite shader of render.al cuts it at the glyph's edge with a one-pixel smooth step wherever
 // it lands (mode SDF_TEXT), or turns the distance outside into a soft halo (mode SDF_HALO, the

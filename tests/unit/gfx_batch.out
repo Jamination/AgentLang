@@ -1,9 +1,0 @@
-ok   transform identity, order and inverse
-ok   camera
-ok   fit_view letterboxes
-ok   sprites of one texture and shapes share a draw
-ok   state changes start a new draw
-ok   sprite vertices: rectangles, mirroring, rotation, transform
-ok   render targets and clears are commands
-ok   what does not fit is dropped and counted
-ok   textures: ids are reused, all slots can be used
