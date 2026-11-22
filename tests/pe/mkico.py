@@ -73,7 +73,18 @@ def png(n):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     raw = b"".join(b"\0" + b"".join(bytes(c) for c in row) for row in render(n))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 6, 0, 0, 0)) +
-            chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+            chunk(b"IDAT", stored_zlib(raw)) + chunk(b"IEND", b""))
+
+
+def stored_zlib(data):
+    """a zlib stream of stored (uncompressed) deflate blocks: the same bytes with every zlib
+    build (zlib.compress differs between zlib and zlib-ng, and the tests check a CRC of it)"""
+    out = b"\x78\x01"
+    for i in range(0, len(data), 65535):
+        block = data[i:i + 65535]
+        last = 1 if i + 65535 >= len(data) else 0
+        out += struct.pack("<BHH", last, len(block), len(block) ^ 0xFFFF) + block
+    return out + struct.pack(">I", zlib.adler32(data))
 
 
 def main():

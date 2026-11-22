@@ -65,7 +65,7 @@ cat > want <<'EOF'
 icon 1: 1128 bytes, bitmap 16x16 32 bits, crc 979cd72d
 icon 2: 4264 bytes, bitmap 32x32 32 bits, crc 1d04585c
 icon 3: 9640 bytes, bitmap 48x48 32 bits, crc 909c8edb
-icon 4: 4720 bytes, png 256x256, crc 6a18ea9a
+icon 4: 262488 bytes, png 256x256, crc ef37e61d
 group-icon 1: 4 image(s)
   16x16 32 bits -> icon 1
   32x32 32 bits -> icon 2
