@@ -406,6 +406,9 @@ priv struct Sel {
     term_at: Vec[i32]
     // an Add whose carry flag a Carry of the same block takes: the add -> the Carry
     carry_of: Map[i64, i64]
+    // the GAddr the last MK_GLOBAL operand of addr_term came from (see rip_legal)
+    gaddr_v: i64
+    loop_calls: Vec[u8] // per loop: 0 not known yet, 1 no call, 2 a call (gaddr_kept)
 }
 
 // ---------- frame slots of allocas ----------
@@ -703,6 +706,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         param_of: vec_fill(f.params.len, -1),
         loops: loops,
         tls_reg: NOREG,
+        gaddr_v: -1,
     }
     nb := f.blocks.len
     if target_os == TargetWindows {
@@ -795,6 +799,12 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 if dbg_on {
                     s.out[s.out.len - 1].tgt = i32(v + 1)
                 }
+                continue
+            }
+            if op == GAddr && s.needed[v] {
+                // a global's address kept in a register for the loops after it (gaddr_kept)
+                starts.push(s.out.len)
+                s.out.push(minst_new(Mov, 8, R(s.vr(v)), Opnd.GAddr(f.insts[v].k, 0)))
                 continue
             }
             if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr || op == FAddr || op == Proj {
@@ -919,7 +929,7 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
         self.e(Lea, 8, R(r), M(Mem{base: i32(r), idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(i.k)}))
         return r
     }
-    if i.op == GAddr {
+    if i.op == GAddr && !self.gaddr_kept(v) {
         r := new_vreg(&self.mf, 0)
         self.e(Mov, 8, R(r), Opnd.GAddr(i.k, 0))
         return r
@@ -945,6 +955,49 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
     }
     self.needed[v] = true
     return self.vr(v)
+}
+
+// is the address of the (not thread-local) global v kept in a register from its definition
+// on instead of being made where it is used? When it is used in a loop that v is outside of
+// and that makes no call (but on paths that end in a trap): one `lea` before the loop instead
+// of one at every use in it. (Across calls the register would be spilled and reloaded, which
+// costs more than the `lea`.)
+priv fn gaddr_kept(self: *Sel, v: i64) -> bool {
+    db := i64(self.blk_of[v])
+    cb := i64(self.cur_block)
+    if db == cb || db < 0 || cb >= self.loops.loop_of.len {
+        return false
+    }
+    // the outermost loop around cb that is not around db
+    li := i64(self.loops.loop_of[cb])
+    outer := -1
+    while li >= 0 && !contains(&self.loops, li, db) {
+        outer = li
+        li = self.loops.loops[li].parent.or(-1)
+    }
+    if outer < 0 {
+        return false
+    }
+    if self.loop_calls.len != self.loops.loops.len {
+        self.loop_calls = vec_fill(self.loops.loops.len, u8(0))
+    }
+    if self.loop_calls[outer] == 0 {
+        st: u8 = 1
+        for b in self.loops.loops[outer].blocks {
+            match self.f.blocks[b].term {
+                Trap => continue
+                _ => {}
+            }
+            for u in self.f.blocks[b].insts {
+                o := self.f.insts[u].op
+                if o == Call || o == CallInd || o == Syscall {
+                    st = 2
+                }
+            }
+        }
+        self.loop_calls[outer] = st
+    }
+    return self.loop_calls[outer] == 1
 }
 
 // register or 32-bit immediate
@@ -1034,6 +1087,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
         if !self.m.globals[i.k].tls {
             m.kind = MK_GLOBAL
             m.id = i32(i.k)
+            self.gaddr_v = v
             return
         }
         if target_os == TargetWindows {
@@ -1292,6 +1346,26 @@ priv fn addr(self: *Sel, v: i64) -> Mem {
 // or index register: next to one, the global's address goes to a register first
 priv fn rip_legal(self: *Sel, m: *Mem) {
     if m.kind != MK_GLOBAL || target_os != TargetWindows || (m.base == NOREG && m.idx == NOREG) {
+        return
+    }
+    g := self.gaddr_v
+    if g >= 0 && g < self.f.insts.len && self.f.insts[g].op == GAddr && self.f.insts[g].k == i64(m.id) &&
+        self.gaddr_kept(g) && fits_i32(i64(m.disp)) {
+        // the address kept in a register from before the loop, the offset stays
+        t := self.reg(g)
+        if m.idx == NOREG {
+            m.idx = m.base
+            m.scale = 1
+            m.base = i32(t)
+        } else if m.base == NOREG {
+            m.base = i32(t)
+        } else {
+            u := new_vreg(&self.mf, 0)
+            self.e(Lea, 8, R(u), M(Mem{base: i32(t), idx: m.base, scale: 1, disp: 0, kind: MK_NORMAL, id: 0}))
+            m.base = i32(u)
+        }
+        m.kind = MK_NORMAL
+        m.id = 0
         return
     }
     t := new_vreg(&self.mf, 0)
