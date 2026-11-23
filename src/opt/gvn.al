@@ -270,6 +270,7 @@ fn gvn_run(f: *Func) -> bool {
     known := Vec[u8]{buf: alloc[u8](f.insts.len), len: f.insts.len}
     changed := false
     def_block := vec[i32]() // the block of every instruction, made when first needed
+    implied_on := opt_enabled("gvnimply")
     bool_consts := [2]i64{NOV, NOV}
     // the walk over the dominator tree: (b, -1, ..) enters block b; (-1, mark, c, old) leaves
     // a block: entries above `mark` go, known[c] (if c is not NOV) is old again
@@ -336,7 +337,7 @@ fn gvn_run(f: *Func) -> bool {
                 repl[v] = i32(w)
                 changed = true
             } else {
-                if f.insts[v].op.is_icmp() {
+                if f.insts[v].op.is_icmp() && implied_on {
                     // a comparison a dominating branch decides in another form, or one whose
                     // phi operand is decided on every way into its block: its uses (which this
                     // block dominates) see the constant
