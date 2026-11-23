@@ -1063,7 +1063,8 @@ priv fn pred_counts(f: *Func) -> []i64 {
 }
 
 // the steps that may change something, as bits: 1 merge, 2 forward, 4 thread4, 8 thread5,
-// 16 ifconv (what may_merge .. may_ifconv tell, in one pass over the blocks)
+// 16 ifconv, 32 thread6 (what may_merge .. may_ifconv, may_thread6 tell, in one pass over the
+// blocks)
 priv fn cfg_candidates(f: *Func) -> i64 {
     cnt := pred_counts(f)
     n := f.blocks.len
@@ -1081,6 +1082,9 @@ priv fn cfg_candidates(f: *Func) -> i64 {
             Br(_, t, e) if t != e => {
                 if bits & 16 == 0 && (may_side(f, t) || may_side(f, e)) {
                     bits |= 16
+                }
+                if bits & 32 == 0 && may_thread6_at(f, b) {
+                    bits |= 32
                 }
                 c, _, _ := phi_branch(f, b)
                 if bits & 12 != 12 && c != NOV {
@@ -1217,6 +1221,296 @@ priv fn may_side(f: *Func, x: i64) -> bool {
     return arm_cost(f, x) <= IFC_ARM_MAX
 }
 
+// step 5b: at most this many instructions (besides phis) are copied for an edge, and at most
+// this many edges are threaded in one run of simplify_cfg
+const THREAD6_DUP = 6
+const THREAD6_ROUNDS = 200
+
+// step 5b: block b (not the entry) ends in a two-way branch on a phi of b or on a compare of
+// phis of b and constants, and holds besides its phis only a few instructions that may be copied
+priv fn thread6_block(f: *Func, b: i64) -> bool {
+    c, t, e := match f.blocks[b].term {
+        Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
+        _ => return false
+    }
+    binsts := &f.blocks[b].insts
+    n := 0
+    has_c := false
+    for v in binsts {
+        i := &f.insts[v]
+        if i64(v) == c {
+            has_c = true
+        }
+        if i.op == Phi {
+            continue
+        }
+        n += 1
+        if n > THREAD6_DUP || !(i.op == Load || (i.op.is_pure() && i.op != Alloca)) {
+            return false
+        }
+    }
+    if !has_c {
+        return false
+    }
+    ci := &f.insts[c]
+    if ci.op == Phi {
+        return true
+    }
+    if !ci.op.is_icmp() {
+        return false
+    }
+    phis := 0
+    for a in ci.args {
+        ai := &f.insts[a]
+        if ai.op == Phi && contains(binsts, i32(a)) {
+            phis += 1
+        } else if ai.op != Const {
+            return false
+        }
+    }
+    return phis > 0
+}
+
+// a cheap test that step 5b may find something at block b: its branch is of the kind and some
+// phi it depends on has a constant input
+priv fn may_thread6_at(f: *Func, b: i64) -> bool {
+    if b == 0 || !thread6_block(f, b) {
+        return false
+    }
+    c := match f.blocks[b].term {
+        Br(c1, _, _) => c1
+        _ => return false
+    }
+    ci := &f.insts[c]
+    if ci.op == Phi {
+        for a in ci.args {
+            if f.insts[a].op == Const {
+                return true
+            }
+        }
+        return false
+    }
+    for a in ci.args {
+        if f.insts[a].op == Phi {
+            for x in f.insts[a].args {
+                if f.insts[x].op == Const {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+priv fn may_thread6(f: *Func) -> bool {
+    for b in 1..f.blocks.len {
+        if may_thread6_at(f, b) {
+            return true
+        }
+    }
+    return false
+}
+
+// the value of b's branch condition c when b is entered from p, if that edge decides it
+priv fn edge_value(f: *Func, b: i64, c: i64, p: i64) -> Opt[i64] {
+    fn input(f: *Func, b: i64, a: i64, p: i64) -> i64 {
+        if f.insts[a].op == Phi && contains(&f.blocks[b].insts, i32(a)) {
+            return f.insts[a].phi_input(p)
+        }
+        return a
+    }
+    ci := f.insts[c]
+    if ci.op == Phi {
+        x := ci.phi_input(p)
+        if x == NOV {
+            return None
+        }
+        return f.is_const(x)
+    }
+    x := input(f, b, ci.args[0], p)
+    y := input(f, b, ci.args[1], p)
+    if x == NOV || y == NOV {
+        return None
+    }
+    kx := match f.is_const(x) {
+        Some(k) => k
+        None => return None
+    }
+    ky := match f.is_const(y) {
+        Some(k) => k
+        None => return None
+    }
+    m := mask(i64(f.insts[ci.args[0]].ty.bits()))
+    ux := u64(kx) & m
+    uy := u64(ky) & m
+    r := match ci.op {
+        Eq => ux == uy
+        Ne => ux != uy
+        Slt => kx < ky
+        Sle => kx <= ky
+        Sgt => kx > ky
+        Sge => kx >= ky
+        Ult => ux < uy
+        Ule => ux <= uy
+        Ugt => ux > uy
+        _ => ux >= uy
+    }
+    return Some(if r { 1 } else { 0 })
+}
+
+// step 5b: the edge p -> b goes to a new block that holds copies of b's instructions (b's phis
+// read as their inputs from p) and jumps to target; the uses of b's values elsewhere read the
+// value that reaches them (new phis where b's and the copies' values meet)
+priv fn thread_dup(f: *Func, b: i64, p: i64, target: i64) {
+    nold := f.insts.len
+    def_block := f.block_of()
+    binsts := clone(f.blocks[b].insts)
+    m := vec_fill(nold, NOV)
+    n := f.new_block()
+    for v in binsts {
+        i := f.insts[v]
+        if i.op == Phi {
+            m[v] = i.phi_input(p)
+            continue
+        }
+        args := vec[i64]()
+        for a in i.args {
+            args.push(if m[a] != NOV { m[a] } else { a })
+        }
+        nv := f.push(n, i.op, i.ty, args, i.k)
+        f.insts[nv].aux = i.aux
+        f.insts[nv].cap = i.cap
+        m[v] = nv
+    }
+    f.blocks[n].term = Jmp(target)
+    for v in f.blocks[target].insts {
+        if f.insts[v].op != Phi {
+            break
+        }
+        x := f.insts[v].phi_input(b)
+        f.im(i64(v)).phi_add(if x < nold && m[x] != NOV { m[x] } else { x }, n)
+    }
+    f.retarget(p, b, n)
+    for v in binsts {
+        if f.insts[v].op != Phi {
+            break
+        }
+        k := index_of(f.insts[v].from(), p)
+        if k >= 0 {
+            f.im(i64(v)).phi_remove(k)
+        }
+    }
+    // the uses of b's values outside b and n: (block, instruction or NOV for the terminator,
+    // operand index, the block the value must reach the end of: a phi's input block, else the
+    // using block, which then has no definition of its own)
+    sites := vec[(i64, i64, i64, i64)]()
+    for bb in 0..f.blocks.len {
+        if bb == b || bb == n {
+            continue
+        }
+        for v in f.blocks[bb].insts {
+            i := &f.insts[v]
+            for ai in 0..i.args.len {
+                a := i.args[ai]
+                if a < nold && i64(def_block[a]) == b {
+                    sites.push((bb, i64(v), ai, if i.op == Phi { i.from()[ai] } else { bb }))
+                }
+            }
+        }
+        ta := term_args(&f.blocks[bb].term)
+        for ai in 0..len(ta) {
+            a := ta[ai]
+            if a < nold && i64(def_block[a]) == b {
+                sites.push((bb, NOV, ai, bb))
+            }
+        }
+    }
+    if sites.is_empty() {
+        return
+    }
+    preds := cfg_preds(f)
+    // the value of x reaching the end of block blk: memo per block, phis made on demand
+    // (pending: phis whose inputs are still to be filled)
+    memo := vec_fill(f.blocks.len, NOV)
+    pending := vec[(i64, i64)]()
+    fn read(f: *Func, x: i64, xn: i64, b: i64, n: i64, blk0: i64, preds: *Vec[Vec[i64]], memo: *Vec[i64], pending: *Vec[(i64, i64)]) -> i64 {
+        chain := vec[i64]()
+        blk := blk0
+        val := x
+        loop {
+            if blk == b {
+                val = x
+                break
+            }
+            if blk == n {
+                val = xn
+                break
+            }
+            if memo[blk] != NOV {
+                val = memo[blk]
+                break
+            }
+            ps := &preds[blk]
+            if ps.len == 1 {
+                chain.push(blk)
+                blk = ps[0]
+                continue
+            }
+            if ps.len == 0 {
+                // (not reached from the entry without passing b or n)
+                val = x
+                break
+            }
+            ph := f.mk_phi(f.insts[x].ty, ps.len)
+            f.blocks[blk].insts.insert(0, i32(ph))
+            memo[blk] = ph
+            pending.push((blk, ph))
+            val = ph
+            break
+        }
+        for cb in chain {
+            memo[cb] = val
+        }
+        return val
+    }
+    // one value at a time
+    vals := vec[i64]()
+    for s in sites {
+        bb, v, ai, _ := s
+        a := if v == NOV { term_args(&f.blocks[bb].term)[ai] } else { f.insts[v].args[ai] }
+        if !contains(&vals, a) {
+            vals.push(a)
+        }
+    }
+    for x in vals {
+        xn := m[x]
+        fill(memo.items(), NOV)
+        pending.clear()
+        for s in sites {
+            bb, v, ai, at := s
+            cur := if v == NOV { term_args(&f.blocks[bb].term)[ai] } else { f.insts[v].args[ai] }
+            if cur != x {
+                continue
+            }
+            r := read(f, x, xn, b, n, at, &preds, &memo, &pending)
+            if v == NOV {
+                term_args(&f.blocks[bb].term)[ai] = r
+            } else {
+                f.insts[v].args[ai] = r
+            }
+        }
+        pi := 0
+        while pi < pending.len {
+            blk, ph := pending[pi]
+            pi += 1
+            for q in preds[blk] {
+                r := read(f, x, xn, b, n, q, &preds, &memo, &pending)
+                f.im(ph).phi_add(r, q)
+            }
+        }
+    }
+}
+
 // if-conversion budgets: the cost of one arm, of both arms with the selects they need, and the
 // number of selects (see arm_cost)
 const IFC_ARM_MAX = 4
@@ -1325,6 +1619,18 @@ priv fn same_value(f: *Func, x: i64, y: i64, depth: i64, loads: *i64) -> i64 {
 // the value of `c ? vt : ve` (type ty), added at the end of block b: a select, or something
 // cheaper that computes the same
 priv fn ifc_select(f: *Func, b: i64, c: i64, vt: i64, ve: i64, ty: T) -> i64 {
+    // an arm that is itself a select on c or on its negation takes the side c decides
+    ti := f.insts[vt]
+    if ti.op == Select && (ti.args[0] == c || is_not(f, ti.args[0], c)) {
+        return ifc_select(f, b, c, if ti.args[0] == c { ti.args[1] } else { ti.args[2] }, ve, ty)
+    }
+    ei := f.insts[ve]
+    if ei.op == Select && (ei.args[0] == c || is_not(f, ei.args[0], c)) {
+        return ifc_select(f, b, c, vt, if ei.args[0] == c { ei.args[2] } else { ei.args[1] }, ty)
+    }
+    if vt == ve {
+        return vt
+    }
     ci := f.insts[c]
     if ty == F64 || ty == F32 {
         // x86 minsd / maxsd semantics (FMin(a, b) = a < b ? a : b, FMax(a, b) = a > b ? a : b,
@@ -1371,6 +1677,23 @@ priv fn ifc_select(f: *Func, b: i64, c: i64, vt: i64, ve: i64, ty: T) -> i64 {
     }
     if !ty.is_int() || ci.ty != I8 {
         return f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0)
+    }
+    // booleans: && and || of flags (one side a constant)
+    kt0 := f.is_const(vt)
+    ke0 := f.is_const(ve)
+    if ty == I8 && is_some(kt0) != is_some(ke0) && is_bool(f, vt, 3) && is_bool(f, ve, 3) {
+        if ke0 == Some(0) {
+            return f.push(b, And, I8, vec_two(c, vt), 0)
+        }
+        if kt0 == Some(1) {
+            return f.push(b, Or, I8, vec_two(c, ve), 0)
+        }
+        if kt0 == Some(0) {
+            return f.push(b, And, I8, vec_two(ifc_not(f, b, c), ve), 0)
+        }
+        if ke0 == Some(1) {
+            return f.push(b, Or, I8, vec_two(ifc_not(f, b, c), vt), 0)
+        }
     }
     // x op y on one side and x on the other: x op (c ? y : 0), which keeps the select off a
     // loop-carried x (and turns into arithmetic on the flag when y is a constant)
@@ -1452,6 +1775,95 @@ priv fn is_fzero(f: *Func, v: i64) -> bool {
         return i.k & 0x7FFF_FFFF == 0
     }
     return i.ty == F64 && i.k & 0x7FFF_FFFF_FFFF_FFFF == 0
+}
+
+// v is 0 or 1 (an i8 compare, a constant 0 or 1, or and / or / xor / select of such)
+priv fn is_bool(f: *Func, v: i64, depth: i64) -> bool {
+    i := &f.insts[v]
+    if i.ty != I8 {
+        return false
+    }
+    if i.op.is_cmp() {
+        return true
+    }
+    if i.op == Const {
+        return i.k == 0 || i.k == 1
+    }
+    if depth == 0 {
+        return false
+    }
+    if i.op == And || i.op == Or || i.op == Xor {
+        return is_bool(f, i.args[0], depth - 1) && is_bool(f, i.args[1], depth - 1)
+    }
+    if i.op == Select {
+        return is_bool(f, i.args[1], depth - 1) && is_bool(f, i.args[2], depth - 1)
+    }
+    return false
+}
+
+// x is the negation of the boolean c (both 0 or 1)
+priv fn is_not(f: *Func, x: i64, c: i64) -> bool {
+    xi := &f.insts[x]
+    ci := &f.insts[c]
+    if xi.ty != I8 || ci.ty != I8 {
+        return false
+    }
+    if xi.op == Xor && ((xi.args[0] == c && f.is_const(xi.args[1]) == Some(1)) || (xi.args[1] == c && f.is_const(xi.args[0]) == Some(1))) {
+        return true
+    }
+    if xi.op == Sub && xi.args[1] == c && f.is_const(xi.args[0]) == Some(1) {
+        return true
+    }
+    if xi.op == Eq && ((xi.args[0] == c && f.is_const(xi.args[1]) == Some(0)) || (xi.args[1] == c && f.is_const(xi.args[0]) == Some(0))) {
+        return true
+    }
+    if ci.op.is_icmp() && xi.op == ci.op.negate_icmp() && xi.args[0] == ci.args[0] && xi.args[1] == ci.args[1] {
+        return true
+    }
+    return is_not_side(f, c, x)
+}
+
+// (is_not with the roles exchanged, without recursing further)
+priv fn is_not_side(f: *Func, x: i64, c: i64) -> bool {
+    xi := &f.insts[x]
+    if xi.op == Xor && ((xi.args[0] == c && f.is_const(xi.args[1]) == Some(1)) || (xi.args[1] == c && f.is_const(xi.args[0]) == Some(1))) {
+        return true
+    }
+    if xi.op == Sub && xi.args[1] == c && f.is_const(xi.args[0]) == Some(1) {
+        return true
+    }
+    return xi.op == Eq && ((xi.args[0] == c && f.is_const(xi.args[1]) == Some(0)) || (xi.args[1] == c && f.is_const(xi.args[0]) == Some(0)))
+}
+
+// arm x multiplies (more than a lea or shift does) a phi that the join's phi ph feeds back
+// into: converting would put the multiply and the select on a loop-carried chain that a
+// predicted branch keeps shorter
+priv fn ifc_recurrence(f: *Func, x: i64, ph: i64) -> bool {
+    for v in f.blocks[x].insts {
+        i := &f.insts[v]
+        if i.op != Mul {
+            continue
+        }
+        k := match f.is_const(i.args[1]) {
+            Some(k1) => k1
+            None => 0
+        }
+        if k == 3 || k == 5 || k == 9 || (k > 0 && is_pow2(u64(k))) {
+            continue
+        }
+        for a in i.args {
+            ai := &f.insts[a]
+            if ai.op != Phi {
+                continue
+            }
+            for w in ai.args {
+                if w == ph || (f.insts[w].op != Phi && contains(f.insts[w].args, ph)) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
 }
 
 // the negation of the boolean c (0 or 1), added to block b
@@ -1951,6 +2363,61 @@ priv fn simplify_cfg(f: *Func) -> bool {
         changed = true
         scanned = false
     }
+    // 5b. an edge that decides the branch of a small block (a phi with a constant input from
+    //     that edge, or a compare of such phis and constants) goes past it: the block's other
+    //     instructions are copied onto the edge, and the values the block defines meet their
+    //     copies in new phis (the general case of steps 4 and 5)
+    guard_thread6 := 0
+    loop {
+        guard_thread6 += 1
+        if !opt_enabled("thread6") || guard_thread6 > THREAD6_ROUNDS {
+            break
+        }
+        if scanned {
+            if cand & 32 == 0 {
+                break
+            }
+        } else if !may_thread6(f) {
+            break
+        }
+        scratch_reset(f.w)
+        cfg := cfg_new(f)
+        did := false
+        blocks6: for b in cfg.rpo {
+            if b == 0 || !thread6_block(f, b) {
+                continue
+            }
+            c, t, e := match f.blocks[b].term {
+                Br(c1, t1, e1) => (c1, t1, e1)
+                _ => continue
+            }
+            // not into a loop through its header (that would make a second entry)
+            for p in cfg.preds[b] {
+                if cfg.dom(b, p) {
+                    continue blocks6
+                }
+            }
+            for p in cfg.preds[b] {
+                match f.blocks[p].term {
+                    Br(_, x, y) if x == b && y == b => continue
+                    _ => {}
+                }
+                k := match edge_value(f, b, c, p) {
+                    Some(k1) => k1
+                    None => continue
+                }
+                thread_dup(f, b, p, if k != 0 { t } else { e })
+                did = true
+                break blocks6
+            }
+        }
+        if !did {
+            break
+        }
+        cleanup_prune_unreachable(f)
+        changed = true
+        scanned = false
+    }
     // 6. if-conversion: tiny side-effect-free arms become selects (conditional moves)
     loop {
         if !opt_enabled("ifconv") {
@@ -2001,6 +2468,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     vt := i.args[kt]
                     ve := i.args[ke]
                     if vt != ve {
+                        if (from_t != b && ifc_recurrence(f, from_t, ph)) || (from_e != b && ifc_recurrence(f, from_e, ph)) {
+                            ok = false
+                        }
                         if i.ty == F64 || i.ty == F32 {
                             // a compare and a blend (or one min / max)
                             cost += 2
