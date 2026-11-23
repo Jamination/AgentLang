@@ -1005,9 +1005,6 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
     if i.op != Add || i.ty != I64 {
         return false
     }
-    if self.uses[v] <= 1 || self.addr_only[v] {
-        return true
-    }
     // x + const never lengthens live ranges
     fn leafy(op: Op) -> bool {
         match op {
@@ -1015,7 +1012,20 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
             _ => false
         }
     }
-    return leafy(self.f.insts[i.args[0]].op) || leafy(self.f.insts[i.args[1]].op)
+    is_leafy := leafy(self.f.insts[i.args[0]].op) || leafy(self.f.insts[i.args[1]].op)
+    // a sum computed before the loop of the access stays in its register: folded, it would be
+    // redone on every iteration (with a `lea` when the address has no room for its registers)
+    // (blocks made after the loops were found, by splitting edges, are not known to them)
+    db := i64(self.blk_of[v])
+    cb := i64(self.cur_block)
+    nl := self.loops.loop_of.len
+    if !is_leafy && db >= 0 && db < nl && cb >= 0 && cb < nl && self.loops.depth(db) < self.loops.depth(cb) {
+        return false
+    }
+    if self.uses[v] <= 1 || self.addr_only[v] {
+        return true
+    }
+    return is_leafy
 }
 
 // `mem`: the address is the operand of one memory access (every value on the way to v has one
