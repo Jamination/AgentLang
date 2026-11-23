@@ -418,14 +418,12 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
 priv const RT_MAX_SIZE = 40 // instructions and terminators of the loop
 priv const RT_TARGET = 64   // roughly the size of the unrolled body
 
-// the number of copies for a loop body of `size` with `nred` reductions (1: do not unroll); a
-// tiny body with at most one reduction gets 8 (8 partial results still fit in registers)
-priv fn rt_factor(size: i64, nred: i64) -> i64 {
+// the number of copies for a loop body of `size` (1: do not unroll). (8 copies of a tiny body
+// measured slower than 4 where the loop shares the registers with much else: bytesum, whose
+// 8 partial sums spilled.)
+priv fn rt_factor(size: i64) -> i64 {
     if size > RT_MAX_SIZE {
         return 1
-    }
-    if size <= 10 && nred <= 1 {
-        return 8
     }
     if size * 4 <= RT_TARGET {
         return 4
@@ -467,7 +465,7 @@ priv fn rt_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def
             None => {}
         }
     }
-    u := rt_factor(size, reds.len)
+    u := rt_factor(size)
     match loop_const_trip(f, &cl) {
         Some(t) => {
             while u > 2 && t < 2 * u {
