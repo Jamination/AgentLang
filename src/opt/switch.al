@@ -5,7 +5,10 @@
 //   enum tags and `if x == a {..} else if x == b {..}` become) becomes one Switch
 //   (switch_form; at least SW_MIN_KEYS keys);
 // - two range tests of one value against constants that together test an interval
-//   (`c >= lo && c <= hi`, `c < lo || c > hi`) become one unsigned compare (switch_range).
+//   (`c >= lo && c <= hi`, `c < lo || c > hi`) become one unsigned compare (switch_range);
+// - a block that only branches again on a condition its predecessor already decided is
+//   skipped (thread_known): `match` on a pointer to an enum tests for nil before every tag
+//   test, and once those tests are gone the tag tests form a Switch.
 // The back ends choose how a Switch is compiled (x86/isel.al, arm64/isel.al: jump table,
 // bit tests, binary search).
 
@@ -18,6 +21,9 @@ fn switch_simplify(f: *Func) -> bool {
         if f.is_switch(b) && switch_fold(f, b) {
             changed = true
         }
+    }
+    if opt_enabled("threadknown") && thread_known(f) {
+        changed = true
     }
     if opt_enabled("ranges") && switch_ranges(f) {
         changed = true
@@ -427,8 +433,9 @@ priv fn switch_range(f: *Func, p: i64, preds: *Vec[Vec[i64]], dead: *Vec[bool]) 
 // How the back ends compile a Switch with these cases (keys ascending, targets, default):
 // SW_BITS: x - lo is checked against the span, then one bit test of a 64-bit mask per target
 // (a span below 64, at most 3 targets besides the default, enough keys); SW_TABLE: x - lo is
-// checked against the span, then a jump table (at least 4 keys that fill at least 40 % of a
-// span below 2^16); SW_CHAIN: a compare per key.
+// checked against the span, then a jump table (at least 4 keys that fill at least 10 % of a
+// span below 2^16: the density LLVM accepts when not optimising for size); SW_CHAIN: a
+// compare per key.
 const SW_CHAIN = 0
 const SW_BITS = 1
 const SW_TABLE = 2
@@ -454,7 +461,7 @@ fn switch_leaf_kind(ks: []i64, ts: []i64, d: i64) -> i64 {
     if span < 64 && ntargets <= 3 && n >= 3 && n >= 2 * ntargets + 1 {
         return SW_BITS
     }
-    if n >= 4 && span < 0xFFFF && u64(n) * 100 >= 40 * (span + 1) {
+    if n >= 4 && span < 0xFFFF && u64(n) * 100 >= 10 * (span + 1) {
         return SW_TABLE
     }
     return SW_CHAIN
@@ -563,4 +570,93 @@ priv fn lower_range(f: *Func, blk: i64, x: i64, ks: []i64, ts: []i64, d: i64, le
     f.blocks[blk].term = Br(c, left, right)
     lower_range(f, left, x, ks[..mid], ts[..mid], d, leaves, edges)
     lower_range(f, right, x, ks[mid..], ts[mid..], d, leaves, edges)
+}
+
+// ---------- conditions decided before ----------
+// The value of condition c on the edge p -> b: 2 true, 1 false, 0 unknown. p branches on c,
+// or a block above p (through blocks with one predecessor, none of them `touched`: preds is
+// stale for those) does and p is on one side of it.
+priv fn known_on_edge(f: *Func, preds: *Vec[Vec[i64]], touched: *Vec[bool], p: i64, b: i64, c: i64) -> u8 {
+    q := b
+    r := p
+    for depth in 0..8 {
+        match f.blocks[r].term {
+            Br(c1, x, y) if c1 == c && x != y => {
+                if q == x {
+                    return 2
+                }
+                if q == y {
+                    return 1
+                }
+                return 0
+            }
+            _ => {}
+        }
+        if touched[r] || preds[r].len != 1 || r == 0 {
+            return 0
+        }
+        q = r
+        r = preds[r][0]
+    }
+    return 0
+}
+
+// A block b (not a loop header) that holds nothing and branches on c: a predecessor where c is
+// known goes straight to the target c chooses. (Only edges that are not back edges move, so
+// the loops stay as they were.)
+priv fn thread_known(f: *Func) -> bool {
+    rpo, preds := f.rpo_preds()
+    n := f.blocks.len
+    ridx := vec_fill(n, -1)
+    for i, b in rpo {
+        ridx[b] = i
+    }
+    touched := vec_fill(n, false)
+    changed := false
+    for b in rpo {
+        if b == 0 || touched[b] || !f.blocks[b].insts.is_empty() {
+            continue
+        }
+        c, t, e := match f.blocks[b].term {
+            Br(c1, t1, e1) if t1 != e1 && t1 != b && e1 != b => (c1, t1, e1)
+            _ => continue
+        }
+        header := false
+        for p in preds[b] {
+            if ridx[p] >= ridx[b] {
+                header = true
+            }
+        }
+        if header {
+            continue
+        }
+        for p in preds[b] {
+            if !f.has_succ(p, b) {
+                continue
+            }
+            k := known_on_edge(f, &preds, &touched, p, b, c)
+            if k == 0 {
+                continue
+            }
+            tgt := if k == 2 { t } else { e }
+            // (p reaching tgt already would need two inputs in its phis)
+            if f.has_succ(p, tgt) {
+                continue
+            }
+            for ii in 0..f.blocks[tgt].insts.len {
+                v := f.blocks[tgt].insts[ii]
+                if f.insts[v].op != Phi {
+                    break
+                }
+                val := f.insts[v].phi_input(b)
+                if val != NOV {
+                    f.im(i64(v)).phi_add(val, p)
+                }
+            }
+            f.retarget(p, b, tgt)
+            touched[tgt] = true
+            changed = true
+        }
+    }
+    return changed
 }
