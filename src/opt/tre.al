@@ -330,3 +330,98 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     }
     return true
 }
+
+// ---------- sibling calls (for the back ends) ----------
+// The call of block b that the back end may make a jump to the callee after the epilogue, and
+// the arguments it passes (without an indirect call's target); (-1, nil) if none. It is the
+// block's last instruction (but for its projections), and the block returns exactly its results
+// (by its own `ret`, or the `ret` of a join that holds only phis); the callee is an AL function
+// (an indirect call with the AL convention, not a C function from its import slot: the traces
+// through C code show the AL frame that called it), and the function has no locals in its frame
+// (whose address the callee could hold: also the copies of aggregates passed or returned by
+// address). Not at -O0 or with -g, where every frame of the calls stays in backtraces and
+// debuggers. The back end checks that the arguments fit in registers.
+fn tre_sibling_call(m: *Module, f: *Func, b: i64) -> (i64, []i64) {
+    none: (i64, []i64) = (-1, nil)
+    if dbg_on || opt_deferred() {
+        return none
+    }
+    vals := match f.blocks[b].term {
+        Ret(vs) => vs
+        Jmp(j) => {
+            rv := match f.blocks[j].term {
+                Ret(vs) => clone(vs)
+                _ => return none
+            }
+            for x in f.blocks[j].insts {
+                if f.insts[x].op != Phi {
+                    return none
+                }
+            }
+            for k in 0..rv.len {
+                if f.insts[rv[k]].op == Phi && contains(f.blocks[j].insts.items(), i32(rv[k])) {
+                    rv[k] = f.insts[rv[k]].phi_input(b)
+                }
+            }
+            rv
+        }
+        _ => return none
+    }
+    ins := &f.blocks[b].insts
+    k := ins.len - 1
+    while k >= 0 && f.insts[ins[k]].op == Proj {
+        k -= 1
+    }
+    if k < 0 {
+        return none
+    }
+    v := i64(ins[k])
+    i := &f.insts[v]
+    args := i.args
+    nrets := 0
+    if i.op == Call {
+        g := &m.funcs[i.k]
+        if g.ext != None {
+            return none
+        }
+        nrets = g.rets.len
+    } else if i.op == CallInd && i.aux == 0 {
+        t := &f.insts[i.args[0]]
+        if t.op == Load && f.insts[t.args[0]].op == GAddr && starts_with(m.globals[f.insts[t.args[0]].k].name, "got.") {
+            return none
+        }
+        args = args[1..]
+        nrets = if i.ty == Void { 0 } else { 1 }
+    } else {
+        return none
+    }
+    for x in ins[k + 1..] {
+        if f.insts[x].args[0] != v {
+            return none
+        }
+    }
+    // the results, in the order the callee returns them
+    if i.ty != Void {
+        if !(nrets == 1 && vals.len == 1 && vals[0] == v) {
+            return none
+        }
+    } else {
+        if vals.len != nrets {
+            return none
+        }
+        for j in 0..nrets {
+            x := &f.insts[vals[j]]
+            if x.op != Proj || x.args[0] != v || x.k != j {
+                return none
+            }
+        }
+    }
+    for bi in 0..f.blocks.len {
+        for x in f.blocks[bi].insts {
+            if f.insts[x].op == Alloca {
+                return none
+            }
+        }
+    }
+    return (v, args)
+}

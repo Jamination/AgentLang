@@ -1617,6 +1617,11 @@ priv fn term(self: *Sel, b: i64) {
     tm := self.f.blocks[b].term
     match tm {
         Jmp(t) => {
+            if self.tail_call_of(b) >= 0 {
+                // (the join's `ret` is not reached from here)
+                self.mf.blocks[b].succs = vec[i64]()
+                return
+            }
             self.phi_copies(b, t)
             self.jmp(t)
         }
@@ -1653,6 +1658,10 @@ priv fn term(self: *Sel, b: i64) {
             }
         }
         Ret(vals) => {
+            if self.tail_call_of(b) >= 0 {
+                // (the call jumps to the callee, which returns for this function)
+                return
+            }
             ni := 0
             nf := 0
             used := vec[i64]()
@@ -2329,6 +2338,36 @@ priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
     return false
 }
 
+// ---------- sibling calls ----------
+// The call of block b that becomes a jump to the callee after the epilogue (tre_sibling_call),
+// or -1: every argument goes in a register (the callee's stack arguments would not fit in the
+// caller's incoming area).
+priv fn tail_call_of(self: *Sel, b: i64) -> i64 {
+    v, args := tre_sibling_call(self.m, self.f, b)
+    if v < 0 {
+        return -1
+    }
+    ni := 0
+    nf := 0
+    for a in args {
+        at := self.f.insts[a].ty
+        if target_os == TargetWindows {
+            if at.is_vec() {
+                return -1
+            }
+            ni += 1
+        } else if at.is_fp() {
+            nf += 1
+        } else {
+            ni += 1
+        }
+    }
+    if target_os == TargetWindows && ni > WIN_REG_ARGS || ni > len(INT_ARGS) || nf > NUM_FLOAT_ARGS {
+        return -1
+    }
+    return v
+}
+
 priv fn call(self: *Sel, v: i64, i: *Inst) {
     // a stack argument word: a 32-bit immediate or a register
     fn stack_src(s: *Sel, a: i64) -> Opnd {
@@ -2426,6 +2465,21 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
         // C calling convention: al = number of vector registers used (for variadic callees)
         self.e(Mov, 4, R(RAX), I(nf))
         used.push(RAX)
+    }
+    if self.tail_call_of(i64(self.blk_of[v])) == v {
+        // a sibling call: the epilogue, then a jump (through rax: no argument register, and
+        // not restored by the epilogue)
+        j := match tr {
+            Some(r) => {
+                self.e(Mov, 8, R(RAX), R(r))
+                used.push(RAX)
+                self.mf.mir_with_uses(MOp.TailJmp, 0, Opnd.None, used.items())
+            }
+            None => self.mf.mir_with_uses(MOp.TailJmp, 0, Opnd.None, used.items())
+        }
+        j.tgt = if i.op == Call { i32(i.k) } else { -1 }
+        self.out.push(j)
+        return
     }
     match tr {
         Some(r) => {

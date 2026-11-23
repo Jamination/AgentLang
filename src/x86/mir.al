@@ -165,6 +165,9 @@ enum MOp {
     Xadd,    // lock xadd
     Cmpxchg, // lock cmpxchg: compares with rax, which receives the old value
     Mfence,
+    // a sibling call: the epilogue, then a jump to function tgt (tgt -1: to the address in
+    // rax); reads its fixed registers like `ret`
+    TailJmp,
 }
 
 const CC_B: u8 = 2
@@ -201,7 +204,7 @@ fn minst_new(op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
 
 // does the instruction keep a list of fixed registers in MFunc.xuses?
 fn has_xuses(op: MOp) -> bool {
-    return op == Call || op == CallInd || op == Ret || op == Syscall
+    return op == Call || op == CallInd || op == Ret || op == Syscall || op == TailJmp
 }
 
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
@@ -403,7 +406,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
             q = du_opnd(&i.a, du, q)
             q += copy(du[q..], mf.fixed_uses(i))
         }
-        Ret => {
+        Ret, TailJmp => {
             q += copy(du[q..], mf.fixed_uses(i))
         }
         Syscall => {
@@ -650,6 +653,9 @@ fn mir_print_mfunc(f: *MFunc) -> str {
                 }
                 Call => {
                     line = fmt(line, "f", i.tgt)
+                }
+                TailJmp => {
+                    line = if i.tgt >= 0 { fmt(line, "f", i.tgt) } else { concat(line, "rax") }
                 }
                 _ => {}
             }

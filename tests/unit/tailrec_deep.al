@@ -37,3 +37,19 @@ test "no result" {
     mark(DEEP, &c)
     assert c == DEEP
 }
+
+// sibling calls: the back end jumps to a callee in tail position (not inlined: noinline, or
+// through a function value)
+noinline fn ping(n: i64, k: i64) -> i64 { if n == 0 { k } else { pong(n - 1, k + 1) } }
+noinline fn pong(n: i64, k: i64) -> i64 { if n == 0 { -k } else { ping(n - 1, k) } }
+noinline fn fping(n: i64, x: f64) -> f64 { if n == 0 { x } else { fpong(n - 1, x + 1.0) } }
+noinline fn fpong(n: i64, x: f64) -> f64 { if n == 0 { -x } else { fping(n - 1, x) } }
+step: fn(i64) -> i64
+noinline fn via(n: i64) -> i64 { if n == 0 { 7 } else { step(n - 1) } }
+
+test "sibling calls" {
+    assert ping(DEEP, 0) == DEEP / 2
+    assert fping(DEEP + 1, 0.0) == -f64(DEEP / 2 + 1)
+    step = via
+    assert via(DEEP) == 7
+}
