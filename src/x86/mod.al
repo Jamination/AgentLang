@@ -69,9 +69,12 @@ priv struct Opts {
 }
 
 fn x86_compile(m: *Module, dump_asm: bool) -> Output {
-    _, align_set := env_get("ALC_ALIGN")
+    align, align_set := env_get("ALC_ALIGN")
     dbg, dbg_set := env_get("ALC_DEBUG")
-    o := Opts{dump_asm: dump_asm, align: align_set, mir: dbg_set && dbg == "mir"}
+    o := Opts{dump_asm: dump_asm, align: !align_set || align != "0", mir: dbg_set && dbg == "mir"}
+    // the padding of loops (loop_pads in emit.al); ALC_ALIGN=0: none, ALC_ALIGN=1: the
+    // alignment of every innermost loop header to 16 that was there before
+    emit_align_mode(if !align_set { 2 } else if align == "0" { 0 } else if align == "1" { 1 } else { 2 })
     // (what the worker threads read is filled before they start: opt_optimize has filled the
     // optimiser's tables)
     if target_os == TargetWindows {
@@ -173,9 +176,9 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
         sink_steps(&mf)
     }
     layout := block_layout(f, depths.items())
-    // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
-    // benchmark suite the padding executed on every loop entry cost more than it gained.
-    // (loops is empty without a cycle)
+    // the headers of the innermost loops, for the padding of loops (emit.al; ALC_ALIGN=1: their
+    // alignment to 16, which on the benchmark suite cost more than it gained). (loops is empty
+    // without a cycle)
     if o.align {
         inner: for li in 0..loops.loops.len {
             for oi in 0..loops.loops.len {
