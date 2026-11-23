@@ -1,0 +1,6 @@
+find checks: 94464 wrong: 0
+== cmp hash wrong: 0
+254 1 2 -1
+hash collisions: 0
+bytes wrong: 0 37 -1 true
+-1 0 4000000 2
