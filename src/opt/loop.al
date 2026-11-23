@@ -767,13 +767,194 @@ fn loop_each_innermost(f: *Func, try: fn(*Func, *Cfg, *Loops, i64, []bool, []i32
     return changed
 }
 
+// ---------- entry conditions ----------
+
+// a and b are the same value: one instruction, or equal constants of one type
+priv fn loop_same(f: *Func, a: i64, b: i64) -> bool {
+    if a == b {
+        return true
+    }
+    x := &f.insts[a]
+    y := &f.insts[b]
+    return x.op == Const && y.op == Const && x.ty == y.ty && x.k == y.k
+}
+
+// Is `a op b` (an integer comparison) known to hold whenever block `pre` runs? Constants are
+// compared; otherwise a block on the only way to `pre` (through blocks with one predecessor)
+// branches on that comparison, written either way round, or on its negation to the other arm.
+fn loop_known_at(f: *Func, cfg: *Cfg, pre: i64, op: Op, a: i64, b: i64) -> bool {
+    match (f.is_const(a), f.is_const(b)) {
+        (Some(x), Some(y)) => {
+            return simplify_fold_icmp(op, f.insts[a].ty, x, y) == Some(true)
+        }
+        _ => {}
+    }
+    blk := pre
+    for depth in 0..16 {
+        if cfg.preds[blk].len != 1 {
+            return false
+        }
+        p := cfg.preds[blk][0]
+        match f.blocks[p].term {
+            Br(c, t, e) if t != e => {
+                ci := &f.insts[c]
+                if ci.op.is_icmp() && ci.args.len == 2 {
+                    // the comparison that holds on the way to blk
+                    o := if t == blk { ci.op } else { ci.op.negate_icmp() }
+                    if o == op && loop_same(f, ci.args[0], a) && loop_same(f, ci.args[1], b) {
+                        return true
+                    }
+                    if o.swap_cmp() == op && loop_same(f, ci.args[1], a) && loop_same(f, ci.args[0], b) {
+                        return true
+                    }
+                }
+            }
+            _ => {}
+        }
+        blk = p
+    }
+    return false
+}
+
+// ---------- loop deletion ----------
+// A counted loop that certainly ends (loop_trip_known), has no effect (pure instructions only:
+// no loads, stores, calls or divisions) and whose values nothing after it uses is not run.
+priv fn delete_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block: []i32) -> bool {
+    cl := match loop_counted(f, cfg, loops, li, in_loop, def_block) {
+        Some(c) => c
+        None => return false
+    }
+    if !loop_trip_known(&cl) || !loop_single_exit(f, &cl, in_loop) {
+        return false
+    }
+    for b in cl.blocks {
+        for v in f.blocks[b].insts {
+            o := f.insts[v].op
+            if o != Phi && !o.is_pure() {
+                return false
+            }
+        }
+    }
+    if loop_used_outside(f, in_loop, def_block).len > 0 {
+        return false
+    }
+    f.blocks[cl.pre].term = Jmp(cl.exit)
+    f.phi_pred_replace(cl.exit, cl.latch, cl.pre)
+    cleanup_prune_unreachable(f)
+    return true
+}
+
+// ---------- stepped exit tests ----------
+// A loop with a constant step s > 1 (`for i in a..b by s`) is lowered so that its counter
+// cannot wrap: it goes on while `cur < end && end - cur >u s` (`cur <= end && end - cur >=u s`
+// for `..=`), cur the counter, next = cur + s. When the loop is entered only with
+// `start < end` (`<=`), the first comparison holds on every iteration: the next value is
+// taken only when it is below end. The test becomes `cur < end - s` (`<=`) when end - s
+// cannot wrap (a signed counter starting at a constant at least MIN + s), else
+// `end - cur >u s` alone. True if a test changed.
+fn loop_stepped_exits(f: *Func) -> bool {
+    cfg, loops := cfg_loops(f)
+    if loops.loops.is_empty() {
+        return false
+    }
+    def_block := f.block_of()
+    changed := false
+    for li in 0..loops.loops.len {
+        l := &loops.loops[li]
+        h := l.header
+        if l.latches.len != 1 {
+            continue
+        }
+        latch := l.latches[0]
+        outside := licm_outside_preds(&cfg, &loops, li, h)
+        if outside.len != 1 {
+            continue
+        }
+        pre := outside[0]
+        c, t, e := match f.blocks[latch].term {
+            Br(c0, t0, e0) => (c0, t0, e0)
+            _ => continue
+        }
+        if t != h || e == h || f.insts[c].op != And {
+            continue
+        }
+        a0 := f.insts[c].args[0]
+        a1 := f.insts[c].args[1]
+        first, room := if f.insts[a0].op == Ugt || f.insts[a0].op == Uge { (a1, a0) } else { (a0, a1) }
+        ri := &f.insts[room]
+        fi := &f.insts[first]
+        if ri.op != Ugt && ri.op != Uge || !fi.op.is_icmp() {
+            continue
+        }
+        incl := ri.op == Uge
+        dist := &f.insts[ri.args[0]]
+        s := ri.args[1]
+        sk := match f.is_const(s) {
+            Some(k) => k
+            None => continue
+        }
+        if dist.op != Sub || sk <= 0 {
+            continue
+        }
+        end := dist.args[0]
+        cur := dist.args[1]
+        pi := &f.insts[cur]
+        if pi.op != Phi || pi.args.len != 2 || !contains(&f.blocks[h].insts, i32(cur)) {
+            continue
+        }
+        start := pi.phi_input(pre)
+        next := pi.phi_input(latch)
+        if start == NOV || next == NOV {
+            continue
+        }
+        ni := &f.insts[next]
+        if ni.op != Add || ni.args[0] != cur || ni.args[1] != s {
+            continue
+        }
+        op := fi.op
+        ok := if incl { op == Sle || op == Ule } else { op == Slt || op == Ult }
+        if !ok || fi.args[0] != cur || !loop_same(f, fi.args[1], end) {
+            continue
+        }
+        eb := def_block[end]
+        if eb != NOV && loops.contains(li, i64(eb)) || !loop_known_at(f, &cfg, pre, op, start, end) {
+            continue
+        }
+        ty := pi.ty
+        signed := op == Slt || op == Sle
+        sm := match f.is_const(start) {
+            Some(k) => signed && ty == I64 && sk < 1 << 40 && k >= -9223372036854775807 + sk
+            None => false
+        }
+        if sm {
+            lim := f.push(pre, Sub, ty, vec_of([]i64{end, s}), 0)
+            nc := f.push(latch, op, I8, vec_of([]i64{cur, lim}), 0)
+            f.blocks[latch].term = Br(nc, t, e)
+        } else {
+            f.blocks[latch].term = Br(room, t, e)
+        }
+        changed = true
+    }
+    return changed
+}
+
 // The loop passes that run after bounds-check hoisting (local_opt in src/opt/mod.al): loop
-// idioms, then runtime unrolling. True if one changed the function (it may have changed in
-// any way: the change counter moves on, see opt_pass).
+// deletion, stepped exit tests, loop idioms, induction variables (src/opt/lsr.al), then runtime
+// unrolling. True if one changed the
+// function (it may have changed in any way: the change counter moves on, see opt_pass).
 fn loop_opts(f: *Func) -> bool {
     made := licm_preheaders_made(f)
     ch := false
+    if opt_enabled("ldelete") && loop_each_innermost(f, delete_try) {
+        ch = true
+    }
+    if opt_enabled("stepexit") && loop_stepped_exits(f) {
+        ch = true
+    }
     if opt_enabled("idiom") && idiom_run(f) {
+        ch = true
+    }
+    if opt_enabled("lsr") && lsr_run(f) {
         ch = true
     }
     if opt_enabled("rtunroll") && unroll_runtime(f) {
