@@ -1,0 +1,4 @@
+ok   accumulator through a join
+ok   local of a check's failure path
+ok   mutual recursion
+ok   no result
