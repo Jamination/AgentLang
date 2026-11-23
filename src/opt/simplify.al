@@ -281,6 +281,28 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             bits := i64(ty.bits())
             k := cb.or(0)
             hk := is_some(cb)
+            // a shift or rotation count is taken modulo bits: (n & m) with m's low bits all
+            // set is n, (n + c) with c a multiple of bits is n, (c - n) is (0 - n)
+            if !hk && (op == Shl || op == LShr || op == AShr || op == Rotl || op == Rotr) {
+                bi := &self.f.insts[b]
+                bt := bi.ty
+                if bi.op == And && self.c(bi.args[1]).or(0) & (bits - 1) == bits - 1 {
+                    self.set(v, op, vec_of([]i64{a, bi.args[0]}), 0)
+                    return None
+                }
+                if bi.op == Add && is_some(self.c(bi.args[1])) && self.c(bi.args[1]).or(1) & (bits - 1) == 0 {
+                    self.set(v, op, vec_of([]i64{a, bi.args[0]}), 0)
+                    return None
+                }
+                if bi.op == Sub && is_some(self.c(bi.args[0])) && self.c(bi.args[0]).or(0) != 0 &&
+                    self.c(bi.args[0]).or(1) & (bits - 1) == 0 {
+                    n := bi.args[1]
+                    z := self.konst(bt, 0)
+                    neg := self.mk(Sub, bt, vec_of([]i64{z, n}))
+                    self.set(v, op, vec_of([]i64{a, neg}), 0)
+                    return None
+                }
+            }
             if hk {
                 is_shift := op == Shl || op == LShr || op == AShr || op == Rotl || op == Rotr
                 if k == 0 && (op == Add || op == Sub || op == Or || op == Xor || is_shift) {
@@ -377,6 +399,13 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                     return None
                 }
             }
+            // x & m where m keeps every bit x can have (u32(byte) & 0xFF): x
+            if hk && op == And && k > 0 {
+                ub := self.ubits(a, 6)
+                if ub < 63 && u64(k) & mask(ub) == mask(ub) {
+                    return Some(a)
+                }
+            }
             if a == b {
                 if op == Sub || op == Xor {
                     self.set_const(v, 0)
@@ -385,6 +414,10 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 if op == And || op == Or {
                     return Some(a)
                 }
+            }
+            // the last step of a byte swap by a ladder of masked shifts (a rotation by half)
+            if hk && (op == Rotl || op == Rotr) && self.match_bytes(v, ty) {
+                return None
             }
             // (x op c1) op c2 for associative ops
             if hk {
@@ -473,12 +506,16 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             }
             // rotate idioms: (x >>> n) | (x << (bits - n))
             if op == Or || op == Xor || op == Add {
-                match self.match_rotate(a, b, ty) {
+                match self.match_rotate(a, b, ty, op == Or) {
                     Some((rop, x, n)) => {
                         self.set(v, rop, vec_of([]i64{x, n}), 0)
                         return None
                     }
                     None => {}
+                }
+                // byte swaps by shifts and masks, values put together from loaded bytes
+                if self.match_bytes(v, ty) {
+                    return None
                 }
             }
             // x + (0 - y) => x - y
@@ -593,6 +630,13 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 self.set_const(v, 1)
                 return None
             }
+            // the sign of a value whose top bit is known to be 0: x >= 0 (x > -1) is true,
+            // x < 0 (x <= -1) is false
+            if ((k == 0 && (op == Sge || op == Slt)) || (k == -1 && (op == Sgt || op == Sle))) &&
+                self.ubits(a, 6) < i64(at.bits()) {
+                self.set_const(v, i64(op == Sge || op == Sgt))
+                return None
+            }
             // (x + c1) == c2  =>  x == c2 - c1
             if (op == Eq || op == Ne) && ai.op == Add {
                 match self.c(ai.args[1]) {
@@ -604,6 +648,21 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                         return None
                     }
                     None => {}
+                }
+            }
+            // ((x >>> s) & 1) == 0  =>  (x & (1 << s)) == 0 (a test of x with a constant)
+            if (op == Eq || op == Ne) && k == 0 && ai.op == And && self.c(ai.args[1]) == Some(1) {
+                si := &self.f.insts[ai.args[0]]
+                sk := if si.op == LShr || si.op == AShr { self.c(si.args[1]).or(-1) } else { -1 }
+                bits := i64(at.bits())
+                if sk >= 0 && sk & (bits - 1) < 31 {
+                    x := si.args[0]
+                    bk := i64(1) << (sk & (bits - 1))
+                    zk := b
+                    mk := self.konst(at, bk)
+                    m := self.mk(And, at, vec_of([]i64{x, mk}))
+                    self.set(v, op, vec_of([]i64{m, zk}), 0)
+                    return None
                 }
             }
             return None
@@ -637,6 +696,9 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                     return None
                 }
                 None => {}
+            }
+            if op == ZExt && self.set_carry(v, a, ty) {
+                return None
             }
             ai := &self.f.insts[a]
             if (op == SExt && ai.op == SExt) || (op == ZExt && ai.op == ZExt) {
@@ -705,6 +767,28 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             match self.c(c) {
                 Some(k) => return Some(if k != 0 { a } else { b })
                 None => {}
+            }
+            if self.c(a) == Some(1) && self.c(b) == Some(0) && self.set_carry(v, c, ty) {
+                return None
+            }
+            return None
+        }
+        Carry => {
+            s := inst.args[0]
+            a := inst.args[1]
+            match (self.c(s), self.c(a)) {
+                (Some(x), Some(y)) => {
+                    self.set_const(v, i64(unwrap(simplify_fold_icmp(Ult, ty, x, y))))
+                    return None
+                }
+                (_, Some(0)) => {
+                    self.set_const(v, 0)
+                    return None
+                }
+                _ => {}
+            }
+            if s == a {
+                self.set_const(v, 0)
             }
             return None
         }
@@ -887,7 +971,9 @@ priv fn range_cmp(self: *Ctx, op: Op, a: i64, at: T, k: i64) -> Opt[bool] {
     }
 }
 
-priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
+// `var_ok`: the combining op is Or. With a variable count n that is 0 modulo bits both
+// shifts give x: x | x is the rotation, but x ^ x and x + x are not
+priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T, var_ok: bool) -> Opt[(Op, i64, i64)] {
     // m is (bits - n) for a constant multiple of bits
     fn is_complement(s: *Ctx, bits: i64, m: i64, n: i64) -> bool {
         mi := &s.f.insts[m]
@@ -925,6 +1011,9 @@ priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
         _ => {}
     }
     // variable amounts: (x >>> n) | (x << (bits - n))  or  (x << n) | (x >>> (bits - n))
+    if !var_ok {
+        return None
+    }
     if is_complement(self, bits, nl, nr) {
         return Some((Rotr, x, nr))
     }
@@ -932,6 +1021,292 @@ priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
         return Some((Rotl, x, nl))
     }
     return None
+}
+
+// v (of type ty) is 1 if the compare c holds, else 0: when c is s <u a (or a >u s) with
+// s = a + x, v becomes Carry(s, a), the carry out of that addition. True if rewritten.
+priv fn set_carry(self: *Ctx, v: i64, c: i64, ty: T) -> bool {
+    ci := &self.f.insts[c]
+    s, a := match ci.op {
+        Ult => (ci.args[0], ci.args[1])
+        Ugt => (ci.args[1], ci.args[0])
+        _ => return false
+    }
+    si := &self.f.insts[s]
+    if si.op != Add || si.ty != ty || (ty != I32 && ty != I64) || (si.args[0] != a && si.args[1] != a) {
+        return false
+    }
+    self.set(v, Carry, vec_of([]i64{s, a}), 0)
+    return true
+}
+
+// ---------- byte swaps and combined byte loads ----------
+// The provenance of the bits of an integer value built with shifts by constants, masks,
+// zero-extensions and the disjoint or (|, or ^ and + where no bit is set on both sides) of
+// such values: for each bit j, l * 64 + b when it is bit b of leaf l (one of at most 8
+// values the expression starts from), -1 when it is known to be 0. `budget` limits the
+// number of instructions looked at.
+priv fn prov(self: *Ctx, v: i64, depth: i64, budget: *i64, leaves: *Vec[i64], out: *[64]i16) -> bool {
+    i := &self.f.insts[v]
+    w := i64(i.ty.bits())
+    if !i.ty.is_int() || *budget <= 0 {
+        return false
+    }
+    *budget -= 1
+    for j in 0..64 {
+        out[j] = -1
+    }
+    op := i.op
+    if depth > 0 {
+        match op {
+            Const => return i.k == 0
+            Or, Xor, Add => {
+                q: [64]i16
+                if !self.prov(i.args[0], depth - 1, budget, leaves, out) ||
+                    !self.prov(i.args[1], depth - 1, budget, leaves, &q) {
+                    return false
+                }
+                for j in 0..w {
+                    if q[j] >= 0 {
+                        if out[j] >= 0 {
+                            return false
+                        }
+                        out[j] = q[j]
+                    }
+                }
+                return true
+            }
+            And, Shl, LShr if is_some(self.c(i.args[1])) => {
+                k := self.c(i.args[1]).or(0)
+                q: [64]i16
+                if !self.prov(i.args[0], depth - 1, budget, leaves, &q) {
+                    return false
+                }
+                s := k & (w - 1)
+                for j in 0..w {
+                    out[j] = match op {
+                        And => if (u64(k) >> u64(j)) & 1 != 0 { q[j] } else { -1 }
+                        Shl => if j >= s { q[j - s] } else { -1 }
+                        _ => if j + s < w { q[j + s] } else { -1 }
+                    }
+                }
+                return true
+            }
+            ZExt, Trunc => {
+                src := i.args[0]
+                sw := i64(self.f.insts[src].ty.bits())
+                q: [64]i16
+                if !self.prov(src, depth - 1, budget, leaves, &q) {
+                    return false
+                }
+                for j in 0..min(w, sw) {
+                    out[j] = q[j]
+                }
+                return true
+            }
+            Bswap => {
+                q: [64]i16
+                if !self.prov(i.args[0], depth - 1, budget, leaves, &q) {
+                    return false
+                }
+                for j in 0..w {
+                    out[j] = q[(w / 8 - 1 - j / 8) * 8 + j % 8]
+                }
+                return true
+            }
+            Rotl, Rotr if is_some(self.c(i.args[1])) => {
+                q: [64]i16
+                if !self.prov(i.args[0], depth - 1, budget, leaves, &q) {
+                    return false
+                }
+                s := self.c(i.args[1]).or(0) & (w - 1)
+                for j in 0..w {
+                    out[j] = if op == Rotr { q[(j + s) & (w - 1)] } else { q[(j - s) & (w - 1)] }
+                }
+                return true
+            }
+            _ => {}
+        }
+    }
+    // a leaf
+    li := -1
+    for k in 0..leaves.len {
+        if leaves[k] == v {
+            li = k
+        }
+    }
+    if li < 0 {
+        if leaves.len >= 8 {
+            return false
+        }
+        leaves.push(v)
+        li = leaves.len - 1
+    }
+    for j in 0..w {
+        out[j] = i16(li * 64 + j)
+    }
+    return true
+}
+
+// The byte swap or the wide load that the bits of v (an Or, Xor or Add of type ty) are, if
+// they are one: all bytes of the low 2, 4 or 8 bytes of a value in reverse order (above them
+// zeros), or bytes loaded from consecutive addresses (little-endian: one load; big-endian: a
+// load and a byte swap). Rewrites v and returns true.
+priv fn match_bytes(self: *Ctx, v: i64, ty: T) -> bool {
+    w := i64(ty.bits())
+    i := &self.f.insts[v]
+    // cheap filter: both operands are shifts, masks, extensions or such combinations
+    fn part(op: Op) -> bool {
+        match op {
+            Shl, LShr, And, Or, Xor, Add, ZExt, Bswap, Rotl, Rotr => true
+            _ => false
+        }
+    }
+    rot := i.op == Rotl || i.op == Rotr
+    if w < 16 || !part(self.op(i.args[0])) || !(rot || part(self.op(i.args[1]))) {
+        return false
+    }
+    leaves := vec[i64]()
+    pos: [64]i16
+    budget := 48
+    if !self.prov(v, 16, &budget, &leaves, &pos) {
+        return false
+    }
+    // n: the number of low bytes that are not all zeros
+    n := 0
+    for j in 0..w {
+        if pos[j] >= 0 {
+            n = j / 8 + 1
+        }
+    }
+    nb := if n <= 2 { 2 } else if n <= 4 { 4 } else { 8 }
+    if n < 2 || nb > w / 8 {
+        return false
+    }
+    nt := match nb {
+        2 => T.I16
+        4 => T.I32
+        _ => T.I64
+    }
+    // a byte swap of the low nb bytes of the one leaf
+    if leaves.len == 1 {
+        x := leaves[0]
+        xt := self.f.insts[x].ty
+        if i64(xt.bits()) < nb * 8 {
+            return false
+        }
+        for j in 0..nb * 8 {
+            if i64(pos[j]) != (nb - 1 - j / 8) * 8 + j % 8 {
+                return false
+            }
+        }
+        src := x
+        if xt != nt {
+            src = self.mk(Trunc, nt, vec_of([]i64{x}))
+        }
+        if nt == ty {
+            self.set(v, Bswap, vec_of([]i64{src}), 0)
+        } else {
+            bs := self.mk(Bswap, nt, vec_of([]i64{src}))
+            self.set(v, ZExt, vec_of([]i64{bs}), 0)
+        }
+        return true
+    }
+    // loads: every byte j is a whole byte of a leaf load, at address base + off(j)
+    base := -1
+    class: i32 = 0
+    offs: [8]i64
+    for j in 0..nb {
+        p := i64(pos[8 * j])
+        if p < 0 {
+            return false
+        }
+        l := p / 64
+        b := p % 64
+        if b % 8 != 0 {
+            return false
+        }
+        for t in 1..8 {
+            if i64(pos[8 * j + t]) != p + t {
+                return false
+            }
+        }
+        li := &self.f.insts[leaves[l]]
+        if li.op != Load {
+            return false
+        }
+        a := li.args[0]
+        o := 0
+        ai := &self.f.insts[a]
+        if ai.op == Add && is_some(self.c(ai.args[1])) {
+            o = self.c(ai.args[1]).or(0)
+            a = ai.args[0]
+        }
+        if j == 0 {
+            base = a
+            class = li.aux
+        } else if a != base || li.aux != class {
+            return false
+        }
+        offs[j] = o + b / 8
+    }
+    little := true
+    big := true
+    for j in 0..nb {
+        if offs[j] != offs[0] + j {
+            little = false
+        }
+        if offs[j] != offs[0] - j {
+            big = false
+        }
+    }
+    if !little && !big {
+        return false
+    }
+    // the loads are in this block with no store or call between them and v
+    found := 0
+    k := self.new_insts.len - 1
+    while found < leaves.len {
+        if k < 0 || self.new_insts.len - k > 256 {
+            return false
+        }
+        u := i64(self.new_insts[k])
+        o := self.op(u)
+        if o == Store || o.clobbers() {
+            return false
+        }
+        if contains(&leaves, u) {
+            found += 1
+        }
+        k -= 1
+    }
+    // the address of the lowest byte
+    lo := if little { 0 } else { nb - 1 }
+    lp := i64(pos[8 * lo])
+    ll := &self.f.insts[leaves[lp / 64]]
+    addr := ll.args[0]
+    if lp % 64 != 0 {
+        // (a byte inside a wider leaf load: its address plus that byte's offset)
+        ok := self.konst(I64, (lp % 64) / 8)
+        addr = self.mk(Add, I64, vec_of([]i64{addr, ok}))
+    }
+    if nt == ty && little {
+        self.set(v, Load, vec_of([]i64{addr}), 0)
+        self.f.im(v).aux = class
+        return true
+    }
+    ld := self.mk(Load, nt, vec_of([]i64{addr}))
+    self.f.im(ld).aux = class
+    if nt == ty {
+        self.set(v, Bswap, vec_of([]i64{ld}), 0)
+        return true
+    }
+    x := ld
+    if big {
+        x = self.mk(Bswap, nt, vec_of([]i64{ld}))
+    }
+    self.set(v, ZExt, vec_of([]i64{x}), 0)
+    return true
 }
 
 // unsigned division by a constant (Hacker's Delight, magicu)
