@@ -482,7 +482,8 @@ fn switch_leaf_kind(ks: []i64, ts: []i64, d: i64) -> i64 {
 
 // Before instruction selection: a Switch that is not one jump table or one set of bit tests
 // becomes a binary search (x < key) down to such Switches and short chains of equality tests
-// (as two-way branches, which the back ends compile well). True if it changed something.
+// (as two-way branches, which the back ends compile well); without `leaves` every Switch
+// becomes branches only (for a back end without jump tables). True if it changed something.
 fn switch_lower(f: *Func, leaves: bool) -> bool {
     changed := false
     nb := f.blocks.len
@@ -499,20 +500,19 @@ fn switch_lower(f: *Func, leaves: bool) -> bool {
         // the blocks that now go to each target (for its phis)
         edges := vec[(i64, i64)]()
         lower_range(f, b, x, ks.items(), ts.items(), d, leaves, &edges)
-        targets := sw_cases(&tab).1
-        targets.push(d)
-        fixed := vec[i64]()
-        for s in targets {
-            if contains(&fixed, s) {
-                continue
+        // the new predecessors of each target, in the order of the edges (the edges of one
+        // block are pushed together)
+        new_preds := map[i64, Vec[i64]]()
+        for e in edges {
+            ps, _ := new_preds.get(e.0)
+            if ps.len == 0 || ps.last() != e.1 {
+                ps.push(e.1)
+                new_preds.set(e.0, ps)
             }
-            fixed.push(s)
-            ps := vec[i64]()
-            for e in edges {
-                if e.0 == s && !contains(&ps, e.1) {
-                    ps.push(e.1)
-                }
-            }
+        }
+        for j in 1..1 + tab[0] {
+            s := tab[j]
+            ps, _ := new_preds.get(s)
             for ii in 0..f.blocks[s].insts.len {
                 v := f.blocks[s].insts[ii]
                 if f.insts[v].op != Phi {
@@ -614,9 +614,9 @@ priv fn known_on_edge(f: *Func, preds: *Vec[Vec[i64]], touched: *Vec[bool], p: i
     return 0
 }
 
-// A block b (not a loop header) that holds nothing and branches on c: a predecessor where c is
-// known goes straight to the target c chooses. (Only edges that are not back edges move, so
-// the loops stay as they were.)
+// A block b (neither a loop header nor a latch) that holds nothing and branches on c: a
+// predecessor where c is known goes straight to the target c chooses. (No back edge moves and
+// a latch keeps its test: the loops stay as they were, for the unroller as well.)
 priv fn thread_known(f: *Func) -> bool {
     rpo, preds := f.rpo_preds()
     n := f.blocks.len
@@ -640,7 +640,7 @@ priv fn thread_known(f: *Func) -> bool {
                 header = true
             }
         }
-        if header {
+        if header || ridx[t] <= ridx[b] || ridx[e] <= ridx[b] {
             continue
         }
         for p in preds[b] {
