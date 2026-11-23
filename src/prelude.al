@@ -1813,12 +1813,149 @@ fn __str_eq(a: str, b: str) -> bool {
     if n != len(b) {
         return false
     }
+    if n >= 8 {
+        return __mem_eq(cast[i64](ptr(a)), cast[i64](ptr(b)), n)
+    }
     for i in 0..n {
         if a[i] != b[i] {
             return false
         }
     }
     return true
+}
+
+// ---------- bytes, a word at a time ----------
+// These read 8 bytes per step with u64 loads (unaligned: fine on x86-64 and arm64; both are
+// little-endian, so the byte at the lowest address is the low byte of a word), and never
+// outside the bytes they are given. The loads are u64 reads of memory that may have been
+// written as another type (a byte view of typed data): the functions that do them are not
+// inlined, so that no such load can be moved across a store in the caller.
+
+inline fn __ld64(p: i64) -> u64 {
+    return *cast[*u64](p)
+}
+
+inline fn __ld32(p: i64) -> u64 {
+    return u64(*cast[*u32](p))
+}
+
+inline fn __ld8(p: i64) -> u64 {
+    return u64(*cast[*u8](p))
+}
+
+// bit 7 of each byte is set where that byte of v is zero, all other bits are clear (exact:
+// no carry crosses a byte)
+inline fn __zero_bytes(v: u64) -> u64 {
+    return ~(((v & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F) | v) & 0x8080808080808080
+}
+
+// the byte number (0..7) of the lowest byte of a non-zero mask
+inline fn __low_byte(z: u64) -> i64 {
+    return i64(ctz(z)) >> 3
+}
+
+// the n bytes at a equal the n bytes at b (inlined only into the functions below)
+inline fn __mem_eq_k(a: i64, b: i64, n: i64) -> bool {
+    if n >= 8 {
+        i := 0
+        while i + 16 < n {
+            if ((__ld64(a + i) ^ __ld64(b + i)) | (__ld64(a + i + 8) ^ __ld64(b + i + 8))) != 0 {
+                return false
+            }
+            i += 16
+        }
+        if i + 8 < n {
+            if __ld64(a + i) != __ld64(b + i) {
+                return false
+            }
+        }
+        // the last 8 bytes (they may overlap bytes already compared)
+        return __ld64(a + n - 8) == __ld64(b + n - 8)
+    }
+    if n >= 4 {
+        return __ld32(a) == __ld32(b) && __ld32(a + n - 4) == __ld32(b + n - 4)
+    }
+    for i in 0..n {
+        if __ld8(a + i) != __ld8(b + i) {
+            return false
+        }
+    }
+    return true
+}
+
+noinline fn __mem_eq(a: i64, b: i64, n: i64) -> bool {
+    return __mem_eq_k(a, b, n)
+}
+
+// the first position where the n bytes at a and b differ, or n
+noinline fn __mem_diff(a: i64, b: i64, n: i64) -> i64 {
+    i := 0
+    while i + 8 <= n {
+        x := __ld64(a + i) ^ __ld64(b + i)
+        if x != 0 {
+            return i + __low_byte(x)
+        }
+        i += 8
+    }
+    if i < n && n >= 8 {
+        // the last 8 bytes; those before i are equal
+        x := __ld64(a + n - 8) ^ __ld64(b + n - 8)
+        return if x != 0 { n - 8 + __low_byte(x) } else { n }
+    }
+    while i < n {
+        if __ld8(a + i) != __ld8(b + i) {
+            return i
+        }
+        i += 1
+    }
+    return n
+}
+
+// the position of the first byte c among the n bytes at p, or -1
+noinline fn __mem_chr(p: i64, n: i64, c: u8) -> i64 {
+    if n < 8 {
+        for i in 0..n {
+            if __ld8(p + i) == u64(c) {
+                return i
+            }
+        }
+        return -1
+    }
+    pat := u64(c) * 0x0101010101010101
+    i := 0
+    while i + 8 <= n {
+        z := __zero_bytes(__ld64(p + i) ^ pat)
+        if z != 0 {
+            return i + __low_byte(z)
+        }
+        i += 8
+    }
+    if i < n {
+        // the last 8 bytes; none of those before i is c
+        z := __zero_bytes(__ld64(p + n - 8) ^ pat)
+        if z != 0 {
+            return n - 8 + __low_byte(z)
+        }
+    }
+    return -1
+}
+
+// how many of the n bytes at p are c
+noinline fn __mem_count(p: i64, n: i64, c: u8) -> i64 {
+    pat := u64(c) * 0x0101010101010101
+    k := 0
+    i := 0
+    while i + 8 <= n {
+        k += i64(popcnt(__zero_bytes(__ld64(p + i) ^ pat)))
+        i += 8
+    }
+    while i < n {
+        if __ld8(p + i) == u64(c) {
+            k += 1
+        }
+        i += 1
+    }
+    return k
 }
 
 // ---------- tests ----------
@@ -1903,10 +2040,30 @@ fn __hash_u64(x: u64) -> u64 {
     return x ^ (x >> 33)
 }
 
-fn __hash_str(s: str) -> u64 {
-    h: u64 = 0xcbf29ce484222325
-    for c in s {
-        h = (h ^ u64(c)) * 0x100000001b3
+// 8 bytes per step (see "bytes, a word at a time"): the words of s in order, the last one
+// partial, each multiplied into the state, then __hash_u64
+noinline fn __hash_str(s: str) -> u64 {
+    n := len(s)
+    p := cast[i64](ptr(s))
+    h: u64 = 0xcbf29ce484222325 ^ u64(n)
+    i := 0
+    while i + 8 <= n {
+        h = (h ^ __ld64(p + i)) * 0x9E3779B97F4A7C15
+        h ^= h >> 32
+        i += 8
+    }
+    r := n - i
+    if r > 0 {
+        // the r < 8 remaining bytes as a little-endian number, read without going past the end
+        w: u64 = 0
+        if n >= 8 {
+            w = __ld64(p + n - 8) >> u64(64 - 8 * r)
+        } else if r >= 4 {
+            w = __ld32(p) | (__ld32(p + r - 4) << u64(8 * (r - 4)))
+        } else {
+            w = __ld8(p) | (__ld8(p + (r >> 1)) << u64(8 * (r >> 1))) | (__ld8(p + r - 1) << u64(8 * (r - 1)))
+        }
+        h = (h ^ w) * 0x9E3779B97F4A7C15
     }
     return __hash_u64(h)
 }
@@ -2027,8 +2184,54 @@ inline fn copy[T](dst: []T, src: []T) -> i64 {
 
 // sets every element of a to x
 inline fn fill[T](a: []T, x: T) {
-    for i in 0..len(a) {
+    n := len(a)
+    if sizeof[T]() == 1 {
+        memfill(ptr(a), *cast[*u8](&x), n)
+        return
+    }
+    // (a memory fill starts slowly: worth it from some 64 bytes on)
+    if n * sizeof[T]() >= 64 {
+        b := __uniform_byte(x)
+        if b >= 0 {
+            memfill(ptr(a), u8(b), n * sizeof[T]())
+            return
+        }
+        if n * sizeof[T]() >= 512 {
+            __fill_doubling(a, x)
+            return
+        }
+    }
+    for i in 0..n {
         a[i] = x
+    }
+}
+
+// the byte that every byte of x is (zero of any type, a fill of 0xFF ...), or -1
+fn __uniform_byte[T](x: T) -> i64 {
+    p := cast[*u8](&x)
+    b := p[0]
+    for i in 1..sizeof[T]() {
+        if p[i] != b {
+            return -1
+        }
+    }
+    return i64(b)
+}
+
+// fill of a long slice: a few elements, then copies of what is already filled, doubling in
+// length (memory copies of separate ranges)
+noinline fn __fill_doubling[T](a: []T, x: T) {
+    n := len(a)
+    k := min(n, 8)
+    for i in 0..k {
+        a[i] = x
+    }
+    sz := sizeof[T]()
+    p := cast[i64](ptr(a))
+    while k < n {
+        c := min(k, n - k)
+        memcopy(p + k * sz, p, c * sz)
+        k += c
     }
 }
 
@@ -2095,9 +2298,20 @@ fn reserve[T](v: *Vec[T], n: i64) {
 // appends x; when the Vec is full its elements move to a larger buffer (slices of the old one
 // go stale)
 fn push[T](v: *Vec[T], x: T) {
-    if v.len == len(v.buf) {
-        reserve(v, v.len + 1)
+    // the common case small enough to inline: room in the buffer (the unsigned compare also
+    // sends a negative length to the checked path)
+    n := v.len
+    if u64(n) < u64(len(v.buf)) {
+        *cast[*T](cast[i64](ptr(v.buf)) + n * sizeof[T]()) = x
+        v.len = n + 1
+        return
     }
+    __push_grow(v, x)
+}
+
+// push into a full Vec: out of line
+noinline fn __push_grow[T](v: *Vec[T], x: T) {
+    reserve(v, v.len + 1)
     v.buf[v.len] = x
     v.len += 1
 }
@@ -2112,6 +2326,16 @@ fn pop[T](v: *Vec[T]) -> T {
 }
 
 fn __at_pop[T](v: *Vec[T], at: str) -> T {
+    n := v.len - 1
+    if u64(n) < u64(len(v.buf)) {
+        v.len = n
+        return *cast[*T](cast[i64](ptr(v.buf)) + n * sizeof[T]())
+    }
+    return __pop_slow(v, at)
+}
+
+// pop from an empty (or inconsistent) Vec: the checks, out of line
+noinline fn __pop_slow[T](v: *Vec[T], at: str) -> T {
     if v.len == 0 {
         __die("panic: pop from an empty Vec at ", at, "")
     }
@@ -2169,17 +2393,38 @@ fn __at_resize[T](v: *Vec[T], n: i64, x: T, at: str) {
         __assert_fail(at, "Vec resize to a negative length")
     }
     reserve(v, n)
-    for i in v.len..n {
-        v.buf[i] = x
+    if n > v.len {
+        fill(v.buf[v.len..n], x)
     }
     v.len = n
 }
 
 // appends a copy of the elements of s (a str is a []u8: `b.extend("text")`)
 fn extend[T](v: *Vec[T], s: []T) {
-    reserve(v, v.len + len(s))
-    memcopy(cast[i64](ptr(v.buf)) + v.len * sizeof[T](), ptr(s), len(s) * sizeof[T]())
-    v.len += len(s)
+    n := v.len
+    k := len(s)
+    if k > len(v.buf) - n {
+        // (growth out of line)
+        __extend_grow(v, k)
+    }
+    __copy_short(cast[i64](ptr(v.buf)) + n * sizeof[T](), cast[i64](ptr(s)), k * sizeof[T]())
+    v.len = n + k
+}
+
+noinline fn __extend_grow[T](v: *Vec[T], k: i64) {
+    reserve(v, __add_size(v.len, k))
+}
+
+// copies n bytes from s to d (ranges that do not overlap): a few bytes one by one, since a
+// memory copy takes a while to start
+inline fn __copy_short(d: i64, s: i64, n: i64) {
+    if n <= 16 {
+        for i in 0..n {
+            *cast[*u8](d + i) = *cast[*u8](s + i)
+        }
+    } else {
+        memcopy(d, s, n)
+    }
 }
 
 // inserts x before position i
@@ -2228,6 +2473,10 @@ fn __at_swap_remove[T](v: *Vec[T], i: i64, at: str) -> T {
 
 // position of the first element equal to x, or -1
 fn index_of[T](s: []T, x: T) -> i64 {
+    if sizeof[T]() == 1 && len(s) >= 16 {
+        // bytes (u8, i8, bool): equal values are equal bytes
+        return __mem_chr(cast[i64](ptr(s)), len(s), *cast[*u8](&x))
+    }
     for i, y in s {
         if y == x {
             return i
@@ -2327,7 +2576,8 @@ fn __map_find[K, V](m: *Map[K, V], k: K) -> i64 {
     tag := u32(hash(k) >> 32) | 0x8000_0000
     i := tag & mask
     loop {
-        s := m.index[i]
+        // (i <= mask < len(m.index): an unchecked read)
+        s := *cast[*u32](cast[i64](ptr(m.index)) + i64(i) * 4)
         if s == 0 {
             return -1
         }
@@ -2415,7 +2665,8 @@ fn set[K, V](m: *Map[K, V], k: K, v: V) {
         mask := u32(len(m.index) - 1)
         i := tag & mask
         loop {
-            s := m.index[i]
+            // (i <= mask < len(m.index): an unchecked read)
+            s := *cast[*u32](cast[i64](ptr(m.index)) + i64(i) * 4)
             if s == 0 {
                 if slot < 0 {
                     slot = i64(i)
@@ -2486,7 +2737,8 @@ fn del[K, V](m: *Map[K, V], k: K) -> bool {
     tag := u32(hash(k) >> 32) | 0x8000_0000
     i := tag & mask
     loop {
-        s := m.index[i]
+        // (i <= mask < len(m.index): an unchecked read)
+        s := *cast[*u32](cast[i64](ptr(m.index)) + i64(i) * 4)
         if s == 0 {
             return false
         }
@@ -2825,26 +3077,60 @@ fn concat(a: str, b: str) -> str {
 }
 
 // index of the first occurrence of sub in s, or -1
-// (a plain scan; when it may have compared too many bytes in vain, as with "aaa...ab" in
-// "aaaa...", the rest of s is searched in linear time: __kmp_find)
 fn find(s: str, sub: str) -> i64 {
     n := len(s)
     m := len(sub)
     if m == 0 {
         return 0
     }
-    c := sub[0]
+    if m > n {
+        return -1
+    }
+    if m == 1 {
+        return __mem_chr(cast[i64](ptr(s)), n, sub[0])
+    }
+    return __find_words(s, sub)
+}
+
+// find for 2 <= len(sub) <= len(s): the positions whose first and last byte match those of
+// sub, 8 positions per step (see "bytes, a word at a time"), then a comparison of the bytes
+// between; when it may have compared too many bytes in vain, as with "aaa...aba" in
+// "aaaa...", the rest of s is searched in linear time: __kmp_find
+noinline fn __find_words(s: str, sub: str) -> i64 {
+    n := len(s)
+    m := len(sub)
+    p := cast[i64](ptr(s))
+    q := cast[i64](ptr(sub))
+    c0 := sub[0]
+    c1 := sub[m - 1]
+    first := u64(c0) * 0x0101010101010101
+    last := u64(c1) * 0x0101010101010101
     work := 0
     i := 0
-    while i + m <= n {
-        if s[i] == c {
-            if s[i..i + m] == sub {
-                return i
+    while i + m + 7 <= n {
+        z := __zero_bytes(__ld64(p + i) ^ first) & __zero_bytes(__ld64(p + i + m - 1) ^ last)
+        while z != 0 {
+            k := i + __low_byte(z)
+            if __mem_eq_k(p + k + 1, q + 1, m - 2) {
+                return k
             }
             // (at most m bytes compared)
             work += m
+            if work > 8 * k + 1024 {
+                return __kmp_find(s, sub, k + 1, false)
+            }
+            z &= z - 1
+        }
+        i += 8
+    }
+    while i + m <= n {
+        if s[i] == c0 && s[i + m - 1] == c1 {
+            if __mem_eq_k(p + i + 1, q + 1, m - 2) {
+                return i
+            }
+            work += m
             if work > 8 * i + 1024 {
-                return __kmp_find(s, sub, i, false)
+                return __kmp_find(s, sub, i + 1, false)
             }
         }
         i += 1
@@ -3000,9 +3286,16 @@ fn repeat(s: str, n: i64) -> str {
     if n <= 0 || len(s) == 0 {
         return ""
     }
-    out := alloc[u8](__alloc_size(n, len(s)))
-    for i in 0..n {
-        memcopy(cast[i64](ptr(out)) + i * len(s), ptr(s), len(s))
+    total := __alloc_size(n, len(s))
+    out := alloc[u8](total)
+    // one copy of s, then copies of what is written, doubling in length
+    p := cast[i64](ptr(out))
+    memcopy(p, ptr(s), len(s))
+    k := len(s)
+    while k < total {
+        c := min(k, total - k)
+        memcopy(p + k, p, c)
+        k += c
     }
     return out
 }
@@ -3068,23 +3361,16 @@ fn trim_right(s: str, chars: str) -> str {
 
 // pieces of s between occurrences of sep (views into s, no copying)
 fn split(s: str, sep: u8) -> []str {
-    n := 1
-    for c in s {
-        if c == sep {
-            n += 1
-        }
-    }
+    p := cast[i64](ptr(s))
+    n := __mem_count(p, len(s), sep) + 1
     out := alloc[str](n)
-    k := 0
     start := 0
-    for i in 0..len(s) {
-        if s[i] == sep {
-            out[k] = s[start..i]
-            k += 1
-            start = i + 1
-        }
+    for k in 0..n - 1 {
+        i := start + __mem_chr(p + start, len(s) - start, sep)
+        out[k] = s[start..i]
+        start = i + 1
     }
-    out[k] = s[start..]
+    out[n - 1] = s[start..]
     return out
 }
 
@@ -3148,10 +3434,9 @@ fn lines(s: str) -> []str {
 // lexicographic comparison: negative, zero or positive
 fn cmp(a: str, b: str) -> i64 {
     n := min(len(a), len(b))
-    for i in 0..n {
-        if a[i] != b[i] {
-            return i64(a[i]) - i64(b[i])
-        }
+    i := __mem_diff(cast[i64](ptr(a)), cast[i64](ptr(b)), n)
+    if i < n {
+        return i64(a[i]) - i64(b[i])
     }
     return len(a) - len(b)
 }
@@ -3804,10 +4089,10 @@ fn join(parts: []str, sep: str) -> str {
     k := 0
     for i, p in parts {
         if i > 0 {
-            memcopy(cast[i64](ptr(out)) + k, ptr(sep), len(sep))
+            __copy_short(cast[i64](ptr(out)) + k, cast[i64](ptr(sep)), len(sep))
             k += len(sep)
         }
-        memcopy(cast[i64](ptr(out)) + k, ptr(p), len(p))
+        __copy_short(cast[i64](ptr(out)) + k, cast[i64](ptr(p)), len(p))
         k += len(p)
     }
     return out
