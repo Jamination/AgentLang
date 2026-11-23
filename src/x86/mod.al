@@ -169,6 +169,9 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     }
     opt_trace("isel", f)
     mf := isel_select(f, m, rpo.items(), loops, depths.items(), aliases.items())
+    if opt_enabled("sinkstep") {
+        sink_steps(&mf)
+    }
     layout := block_layout(f, depths.items())
     // optional (ALC_ALIGN=1): align the entry of innermost loops. Off by default: on the
     // benchmark suite the padding executed on every loop entry cost more than it gained.
@@ -237,6 +240,127 @@ priv fn compile_spread(m: *Module, cand: []i64, o: *Opts, nw: i64, r: *Refs) -> 
         s.done[f] = compile_fn(s.m, f, s.o, w)
     })
     return done
+}
+
+// In a loop block, moves the step of a value that is only live out (`lea d, [x + k]`, or `mov
+// d, x ; add d, k`, which becomes such a lea) to the end of the block, past the reads of x and
+// the compare (lea leaves the flags alone): x then dies before d is born and the two share a
+// register, so the back edge copies nothing. The typical case is an inclusive or descending
+// range loop, whose compare reads the old induction value:
+//     lea rax, [rcx-1] ; cmp rcx, r9 ; jcc     (then `mov rcx, rax` on the back edge)
+//  -> cmp rcx, r9 ; lea rcx, [rcx-1] ; jcc
+// ALC_DISABLE=sinkstep turns it off.
+priv fn sink_steps(mf: *MFunc) {
+    du := vec_fill(DU_MAX, 0)
+    // does instruction i read / write register r?
+    fn touches(mf: *MFunc, i: *MInst, du: []i64, r: i64, defs: bool) -> bool {
+        mir_decode(mf, i, du, 0)
+        nd := du[0] & 255
+        nu := (du[0] >> 8) & 255
+        lo := if defs { 1 } else { 1 + nd }
+        hi := if defs { 1 + nd } else { 1 + nd + nu }
+        for j in lo..hi {
+            if du[j] == r {
+                return true
+            }
+        }
+        return defs && du[0] & (DU_CALL << 16) != 0 && r < VREG0
+    }
+    for b in 0..mf.blocks.len {
+        if mf.blocks[b].depth == 0 {
+            continue
+        }
+        insts := &mf.blocks[b].insts
+        // the jumps at the end
+        e := insts.len
+        while e > 0 && (insts[e - 1].op == Jmp || insts[e - 1].op == Jcc) {
+            e -= 1
+        }
+        if e == insts.len || insts[insts.len - 1].op != Jmp && insts[insts.len - 1].op != Jcc {
+            continue
+        }
+        k := e - 1
+        while k >= 0 {
+            // the step as d = x + disp (and the index of its first instruction)
+            i := insts[k]
+            d := -1
+            m := mem_new()
+            first := k
+            sz := i.sz
+            match (i.op, &i.a, &i.b) {
+                (Lea, R(r), M(mm)) if mm.kind == MK_NORMAL && r >= VREG0 && (i.sz == 4 || i.sz == 8) => {
+                    d = r
+                    m = mm
+                }
+                (Add, R(r), I(c)), (Sub, R(r), I(c)) if r >= VREG0 && (i.sz == 4 || i.sz == 8) && k > 0 && fits_i32(c) && c != -2147483648 => {
+                    p := &insts[k - 1]
+                    match (p.op, &p.a, &p.b) {
+                        (Mov, R(pd), R(x)) if p.sz == 8 && pd == r && x >= VREG0 && x != r => {
+                            // (nothing may read the flags of the add: an overflow check)
+                            flags_read := false
+                            for j in k + 1..insts.len {
+                                if reads_flags(insts[j].op) {
+                                    flags_read = true
+                                    break
+                                }
+                                if sets_flags(insts[j].op) {
+                                    break
+                                }
+                            }
+                            if !flags_read {
+                                d = r
+                                m.base = i32(x)
+                                m.disp = i32(if i.op == Add { c } else { -c })
+                                first = k - 1
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+            ok := d >= 0 && (m.base == NOREG || i64(m.base) >= VREG0) && (m.idx == NOREG || i64(m.idx) >= VREG0) && i64(m.base) != d && i64(m.idx) != d
+            if !ok {
+                k -= 1
+                continue
+            }
+            // to the end of the block, unless an instruction on the way reads d (or writes d,
+            // x or the index); worth it only if something on the way reads x or the index
+            t := k + 1
+            reads := false
+            while t < e {
+                n := &insts[t]
+                if touches(mf, n, du.items(), d, false) {
+                    break
+                }
+                if touches(mf, n, du.items(), d, true) || (m.base != NOREG && touches(mf, n, du.items(), i64(m.base), true)) || (m.idx != NOREG && touches(mf, n, du.items(), i64(m.idx), true)) {
+                    t = -1
+                    break
+                }
+                if (m.base != NOREG && touches(mf, n, du.items(), i64(m.base), false)) || (m.idx != NOREG && touches(mf, n, du.items(), i64(m.idx), false)) {
+                    reads = true
+                }
+                t += 1
+            }
+            // (only to the end: moved down to a use in the block, as before an `add; cmp` of
+            // the new value, it was measured slower on smallint)
+            if t != e || !reads {
+                k = first - 1
+                continue
+            }
+            // between `first` and t: drop the step, put the lea before instruction t
+            li := minst_new(Lea, sz, R(d), M(m))
+            li.tgt = i.tgt
+            li.loc = i.loc
+            insts.insert(t, li)
+            insts.remove(k)
+            if first != k {
+                insts.remove(first)
+                e -= 1
+            }
+            k = first - 1
+        }
+    }
 }
 
 // is there an edge between reachable blocks that goes back in the reverse postorder (or a

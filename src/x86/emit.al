@@ -690,7 +690,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
     }
 }
 
-priv fn sets_flags(op: MOp) -> bool {
+fn sets_flags(op: MOp) -> bool {
     match op {
         Add, Sub, And, Or, Xor, Cmp, Test, Imul, Imul3, Neg, Shl, Shr, Sar, Rol, Ror, Idiv, Div,
             Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap, Xadd, Cmpxchg => true
@@ -698,7 +698,7 @@ priv fn sets_flags(op: MOp) -> bool {
     }
 }
 
-priv fn reads_flags(op: MOp) -> bool {
+fn reads_flags(op: MOp) -> bool {
     match op {
         Jcc, Setcc, Cmov => true
         _ => false

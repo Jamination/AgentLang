@@ -1707,7 +1707,9 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     wide := ty == I32 || ty == I64
     if commutative && wide && !self.can_fold_load(b) && self.can_fold_load(a) {
         swap(&a, &b)
-    } else if commutative && !self.can_fold_load(b) && !is_some(self.f.is_const(a)) && self.uses[a] > 1 && self.uses[b] == 1 && !is_some(self.f.is_const(b)) {
+    } else if commutative && self.phi_fed(b, v) && !self.phi_fed(a, v) {
+        swap(&a, &b)
+    } else if commutative && !self.phi_fed(a, v) && !self.can_fold_load(b) && !is_some(self.f.is_const(a)) && self.uses[a] > 1 && self.uses[b] == 1 && !is_some(self.f.is_const(b)) {
         swap(&a, &b)
     }
     d := self.vr(v)
@@ -1721,7 +1723,9 @@ priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     i := &self.f.insts[v]
     a := i.args[0]
     b := i.args[1]
-    if commutative && !self.can_fold_load(b) && (self.f.insts[a].op == FConst || self.can_fold_load(a) || (self.uses[a] > 1 && self.uses[b] == 1 && self.f.insts[b].op != FConst)) {
+    if commutative && self.phi_fed(b, v) && !self.phi_fed(a, v) {
+        swap(&a, &b)
+    } else if commutative && !self.phi_fed(a, v) && !self.can_fold_load(b) && (self.f.insts[a].op == FConst || self.can_fold_load(a) || (self.uses[a] > 1 && self.uses[b] == 1 && self.f.insts[b].op != FConst)) {
         swap(&a, &b)
     }
     d := self.vr(v)
@@ -1768,7 +1772,12 @@ priv fn inst(self: *Sel, v: i64) {
     ty := i.ty
     match i.op {
         Add => {
-            if ty == I64 {
+            a0 := i.args[0]
+            b0 := i.args[1]
+            if ty == I64 && (self.phi_fed(a0, v) && self.can_fold_load(b0) || self.phi_fed(b0, v) && self.can_fold_load(a0)) {
+                // s += [mem] on a reduction: the load folds into the add on the phi's register
+                self.binop(v, MOp.Add, true)
+            } else if ty == I64 {
                 m := mem_new()
                 self.addr_term(i.args[0], &m, 1, false)
                 self.addr_term(i.args[1], &m, 1, false)
@@ -1787,7 +1796,13 @@ priv fn inst(self: *Sel, v: i64) {
                     ra := i64(m.base)
                     rb := i64(m.idx)
                     direct := i64(self.vreg[a]) == ra && i64(self.vreg[b]) == rb
-                    if direct && self.dies_here(a) {
+                    if direct && self.phi_fed(a, v) {
+                        self.e(Mov, 8, R(d), R(ra))
+                        self.e(MOp.Add, 8, R(d), R(rb))
+                    } else if direct && self.phi_fed(b, v) {
+                        self.e(Mov, 8, R(d), R(rb))
+                        self.e(MOp.Add, 8, R(d), R(ra))
+                    } else if direct && self.dies_here(a) {
                         self.e(Mov, 8, R(d), R(ra))
                         self.e(MOp.Add, 8, R(d), R(rb))
                     } else if direct && self.dies_here(b) {
@@ -2317,6 +2332,21 @@ priv fn inst(self: *Sel, v: i64) {
 // that use, so a two-address instruction can reuse its register
 priv fn dies_here(self: *Sel, v: i64) -> bool {
     return self.uses[v] == 1 && self.blk_of[v] == self.cur_block && self.f.insts[v].op != Phi
+}
+
+// p is a phi used only by v, which is one of its incoming values (a reduction `s = s + x`): a
+// two-address result written over p's register leaves no copy on the back edge
+priv fn phi_fed(self: *Sel, p: i64, v: i64) -> bool {
+    pi := &self.f.insts[p]
+    if pi.op != Phi || self.uses[p] != 1 {
+        return false
+    }
+    for a in pi.args {
+        if a == v {
+            return true
+        }
+    }
+    return false
 }
 
 priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
