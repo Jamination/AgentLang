@@ -117,12 +117,160 @@ priv fn known_set(known: *Vec[u8], c: i64, s: u8) {
     known[c] = s
 }
 
+// ---------- comparisons implied by known conditions ----------
+// the known value (0 unknown, 1 false, 2 true) of comparison `op a b`, from an equal, negated
+// or swapped comparison in scope
+priv fn cmp_in_scope(t: *Table, f: *Func, known: *Vec[u8], op: Op, a: i64, b: i64) -> u8 {
+    for form in 0..4 {
+        o := op
+        x := a
+        y := b
+        if form & 1 != 0 {
+            o = o.negate_icmp()
+        }
+        if form & 2 != 0 {
+            o = o.swap_cmp()
+            x, y = (b, a)
+        }
+        probe := Inst{op: o, ty: I8, args: []i64{x, y}, k: 0, aux: 0, cap: 0}
+        h := key_hash(&probe)
+        e := t.head[h & (len(t.head) - 1)]
+        while e >= 0 {
+            w := i64(t.ent[e])
+            if same_key(&probe, &f.insts[w]) {
+                kn := known_at(known, w)
+                if kn != 0 {
+                    return if form & 1 != 0 { 3 - kn } else { kn }
+                }
+                break
+            }
+            e = t.next[e]
+        }
+    }
+    return 0
+}
+
+// the value of comparison `op x y` decided by the branch into `blk` from `p` or by a branch
+// above p that p can only be reached through (`x` and `y` are compared by value: equal
+// constants are the same); 0 if unknown
+priv fn cmp_on_edge(f: *Func, cfg: *Cfg, p: i64, blk: i64, op: Op, x: i64, y: i64) -> u8 {
+    fn same_val(f: *Func, a: i64, b: i64) -> bool {
+        if a == b {
+            return true
+        }
+        match (f.is_const(a), f.is_const(b)) {
+            (Some(i), Some(j)) => i == j && f.insts[a].ty == f.insts[b].ty
+            _ => false
+        }
+    }
+    match (f.is_const(x), f.is_const(y)) {
+        (Some(i), Some(j)) => {
+            return match simplify_fold_icmp(op, f.insts[x].ty, i, j) {
+                Some(r) => if r { u8(2) } else { u8(1) }
+                None => u8(0)
+            }
+        }
+        _ => {}
+    }
+    to := blk
+    from := p
+    for depth in 0..8 {
+        match f.blocks[from].term {
+            Br(c, t, e) if t != e && (t == to || e == to) => {
+                ci := &f.insts[c]
+                if ci.op.is_icmp() && ci.args.len == 2 {
+                    // the branch's condition is true on the way to `to` exactly when `taken`
+                    taken := t == to
+                    for form in 0..4 {
+                        o := ci.op
+                        a := ci.args[0]
+                        b := ci.args[1]
+                        if form & 1 != 0 {
+                            o = o.negate_icmp()
+                        }
+                        if form & 2 != 0 {
+                            o = o.swap_cmp()
+                            a, b = (b, a)
+                        }
+                        if o == op && same_val(f, a, x) && same_val(f, b, y) {
+                            r := taken != (form & 1 != 0)
+                            return if r { u8(2) } else { u8(1) }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if cfg.preds[from].len != 1 {
+            return 0
+        }
+        to = from
+        from = cfg.preds[from][0]
+    }
+    return 0
+}
+
+// the known value of comparison v (see the call in gvn_run)
+priv fn implied_cmp(t: *Table, f: *Func, cfg: *Cfg, known: *Vec[u8], def_block: *Vec[i32], v: i64) -> u8 {
+    i := &f.insts[v]
+    if i.args.len != 2 {
+        return 0
+    }
+    op := i.op
+    a := i.args[0]
+    b := i.args[1]
+    kv := cmp_in_scope(t, f, known, op, a, b)
+    if kv != 0 {
+        return kv
+    }
+    // `phi op y`: decided on each way into the phi's block (y defined above that block)
+    if f.insts[a].op != Phi && f.insts[b].op == Phi {
+        op = op.swap_cmp()
+        a, b = (b, a)
+    }
+    pi := &f.insts[a]
+    if pi.op != Phi || f.insts[b].op == Phi || pi.args.len == 0 || pi.args.len > 8 {
+        return 0
+    }
+    if def_block.len == 0 {
+        *def_block = f.block_of()
+    }
+    if a >= def_block.len || def_block[a] == NOV {
+        return 0
+    }
+    blk := i64(def_block[a])
+    if cfg.rpo_idx[blk] == NOV || cfg.preds[blk].len != pi.args.len {
+        return 0
+    }
+    // y must be defined above blk: its value is then the same on the way in as in blk
+    if !is_some(f.is_const(b)) && (b >= def_block.len || def_block[b] == NOV || i64(def_block[b]) == blk || !cfg.dom(i64(def_block[b]), blk)) {
+        return 0
+    }
+    fr := pi.from()
+    res := u8(0)
+    for k in 0..pi.args.len {
+        x := pi.args[k]
+        if x == a {
+            // the phi keeps its value on this way in
+            continue
+        }
+        r := cmp_on_edge(f, cfg, fr[k], blk, op, x, b)
+        if r == 0 || (res != 0 && r != res) {
+            return 0
+        }
+        res = r
+    }
+    return res
+}
+
 fn gvn_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     repl := vec_fill(f.insts.len, i32(NOV))
     table := table_new(f.insts.len)
     known := Vec[u8]{buf: alloc[u8](f.insts.len), len: f.insts.len}
     changed := false
+    def_block := vec[i32]() // the block of every instruction, made when first needed
+    implied_on := opt_enabled("gvnimply")
     bool_consts := [2]i64{NOV, NOV}
     // the walk over the dominator tree: (b, -1, ..) enters block b; (-1, mark, c, old) leaves
     // a block: entries above `mark` go, known[c] (if c is not NOV) is old again
@@ -189,6 +337,15 @@ fn gvn_run(f: *Func) -> bool {
                 repl[v] = i32(w)
                 changed = true
             } else {
+                if f.insts[v].op.is_icmp() && implied_on {
+                    // a comparison a dominating branch decides in another form, or one whose
+                    // phi operand is decided on every way into its block: its uses (which this
+                    // block dominates) see the constant
+                    kv := implied_cmp(&table, f, &cfg, &known, &def_block, i64(v))
+                    if kv != 0 {
+                        known_set(&known, i64(v), kv)
+                    }
+                }
                 add(&table, i64(v), h)
                 insts[kept] = v
                 kept += 1
