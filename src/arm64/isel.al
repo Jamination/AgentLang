@@ -1095,6 +1095,15 @@ priv fn inst(self: *Sel, v: i64) {
             self.mem(AdrS, 8, self.vr(v), AM{k: AK_INARG, base: NOREG, idx: NOREG, sh: 0, imm: 0, id: -1})
             self.mf.save_all = true
         }
+        Carry => {
+            // 1 if s <u a: cmp s, a; cset d, lo
+            x := self.reg(i.args[0])
+            y := self.reg(i.args[1])
+            self.e(CmpR, osz(ty), NOREG, x, y)
+            ci := ainst(Cset, 4, self.vr(v), NOREG, NOREG)
+            ci.cc = u8(A64_LO)
+            self.out.push(ci)
+        }
         Bswap => {
             d := self.vr(v)
             s := self.reg(i.args[0])

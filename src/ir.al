@@ -137,6 +137,9 @@ enum Op {
     Popcnt,
     Ctz,
     Clz,
+    // args = [s, a]: 1 if s <u a, else 0 (in ty, the type of s and a). With s = a + x it is
+    // the carry out of that addition, which the back end takes from the add's flags
+    Carry,
     RaAddr, // the address of the slot that holds the function's return address (`__ra_addr()`)
     // a sequentially consistent atomic operation, k = ATOMIC_*: load [addr], store / swap /
     // add [addr, val], cas [addr, expected, new] (all but store yield the old value; ty: the

@@ -404,6 +404,8 @@ priv struct Sel {
     tls_reg: i64
     tls_uses: Vec[i32]
     term_at: Vec[i32]
+    // an Add whose carry flag a Carry of the same block takes: the add -> the Carry
+    carry_of: Map[i64, i64]
 }
 
 // ---------- frame slots of allocas ----------
@@ -1744,7 +1746,7 @@ priv fn zext_free(self: *Sel, v: i64) -> bool {
             Some(k) => k & 31 != 0
             None => false
         }
-        Add, Sub, Mul, And, Or, Xor, Load, ZExt, SDiv, UDiv, SRem, URem, Bswap => true
+        Add, Sub, Mul, And, Or, Xor, Load, ZExt, SDiv, UDiv, SRem, URem, Bswap, Carry => true
         _ => false
     }
 }
@@ -1768,6 +1770,26 @@ priv fn inst(self: *Sel, v: i64) {
     ty := i.ty
     match i.op {
         Add => {
+            cv, fused := self.carry_of.get(v)
+            if fused {
+                // s = a + x with the carry out of it: zero c; mov s, a; add s, x; setc c
+                a := i.args[0]
+                x := i.args[1]
+                if a != self.f.insts[cv].args[1] {
+                    swap(&a, &x)
+                }
+                dc := self.vr(cv)
+                d := self.vr(v)
+                ar := self.reg(a)
+                xo := self.rmi_mem(x, ty)
+                self.e(Zero, 4, R(dc), Opnd.None)
+                self.e(Mov, 8, R(d), R(ar))
+                self.e(MOp.Add, osz(ty), R(d), xo)
+                sc := minst_new(Setcc, 1, R(dc), Opnd.None)
+                sc.cc = CC_B
+                self.out.push(sc)
+                return
+            }
             if ty == I64 {
                 m := mem_new()
                 self.addr_term(i.args[0], &m, 1, false)
@@ -2256,6 +2278,29 @@ priv fn inst(self: *Sel, v: i64) {
             d := self.vr(v)
             self.e(Lea, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: -1}))
             self.mf.save_all = true
+        }
+        Carry => {
+            s := i.args[0]
+            a := i.args[1]
+            si := &self.f.insts[s]
+            _, taken := self.carry_of.get(s)
+            if si.op == Add && si.ty == ty && (si.args[0] == a || si.args[1] == a) && self.blk_of[s] == self.cur_block && !taken {
+                // the add (earlier in this block, selected later) sets the result from its
+                // carry flag
+                self.carry_of.set(s, v)
+                self.needed[s] = true
+                self.vr(s)
+                self.vr(v)
+                return
+            }
+            d := self.vr(v)
+            rs := self.reg(s)
+            ao := self.rmi(a)
+            self.e(Zero, 4, R(d), Opnd.None)
+            self.e(Cmp, osz(ty), R(rs), ao)
+            sc := minst_new(Setcc, 1, R(d), Opnd.None)
+            sc.cc = CC_B
+            self.out.push(sc)
         }
         Bswap, Popcnt, Ctz, Clz => {
             d := self.vr(v)
