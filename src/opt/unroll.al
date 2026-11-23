@@ -466,6 +466,14 @@ priv fn rt_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def
         }
     }
     u := rt_factor(size)
+    // at most 8 partial results in all (a loop unrolled by hand into 4 sums already has
+    // its own: 16 would spill)
+    while u > 1 && u * reds.len > 8 {
+        u /= 2
+    }
+    if u < 2 {
+        return false
+    }
     match loop_const_trip(f, &cl) {
         Some(t) => {
             while u > 2 && t < 2 * u {

@@ -359,8 +359,14 @@ priv fn rebase_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool,
     return true
 }
 
-// Widening, strength reduction and address re-basing in every innermost counted loop; true if
-// anything changed.
+// Address re-basing is off: measured with the other loop passes on (2026-11-23, interleaved
+// best of 7), it gained 4% on mem/rows but lost 2-12% on fp/lu, vec/colsum, vec/blur and
+// mem/dp (the extra base registers; the isel change that keeps invariant address sums out of
+// loops already took most of its gain). Kept for a later pass that weighs register pressure.
+priv const LSR_REBASE = false
+
+// Widening and strength reduction (and address re-basing if LSR_REBASE) in every innermost
+// counted loop; true if anything changed.
 fn lsr_run(f: *Func) -> bool {
     ch := false
     if opt_enabled("widen") && loop_each_innermost(f, widen_try) {
@@ -369,7 +375,7 @@ fn lsr_run(f: *Func) -> bool {
     if opt_enabled("sr") && loop_each_innermost(f, reduce_try) {
         ch = true
     }
-    if opt_enabled("rebase") && loop_each_innermost(f, rebase_try) {
+    if LSR_REBASE && opt_enabled("rebase") && loop_each_innermost(f, rebase_try) {
         ch = true
     }
     return ch

@@ -693,8 +693,8 @@ sequential, and `--emit-ir` optimises every function in the compiler before it p
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
 `partial`, `thread4`, `thread5`, `ifconv`, `devirt`: calls through known function values stay
 indirect, `spec`: no specialised copies; the loop passes of `src/opt/loop.al`: `ldelete`,
-`stepexit`, `idiom` (fill / copy loops to MemSet / MemCpy), `lsr` (or its parts `widen`, `sr`,
-`rebase`), `rtunroll` (runtime unrolling), and LICM's `promote`; outside the optimiser `constif`: `if` on a constant
+`stepexit`, `idiom` (fill / copy loops to MemSet / MemCpy), `lsr` (or its parts `widen`, `sr`;
+`rebase` is off in the source), `rtunroll` (runtime unrolling), and LICM's `promote`; outside the optimiser `constif`: `if` on a constant
 is not decided while lowering, `deaddata`: all read-only data is linked, `backtrace`: no stack-trace table); `ALC_STD_DIR=<dir>` reads bundled modules from
 `<dir>` instead of the copies inside the compiler (such a module, except a core one, is
 type-checked in full also by `alc build` / `run`, which otherwise compile only what a program
