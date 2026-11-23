@@ -651,6 +651,11 @@ priv fn term(self: *Sel, b: i64) {
     tm := self.f.blocks[b].term
     match tm {
         Jmp(t) => {
+            if self.tail_call_of(b) >= 0 {
+                // (the join's `ret` is not reached from here)
+                self.mf.blocks[b].succs = vec[i64]()
+                return
+            }
             self.phi_copies(b, t)
             self.branch(B, 0, t)
         }
@@ -661,6 +666,10 @@ priv fn term(self: *Sel, b: i64) {
             self.branch(B, 0, e)
         }
         Ret(vals) => {
+            if self.tail_call_of(b) >= 0 {
+                // (the call branches to the callee, which returns for this function)
+                return
+            }
             ni := 0
             nf := 0
             srcs := vec[(i64, i64)]()
@@ -1155,6 +1164,27 @@ priv fn inst(self: *Sel, v: i64) {
 
 // the arguments in x0-x7 and v0-v7, the rest in stack words (a vector in two); the results in
 // x0-x3 and v0-v3
+// ---------- sibling calls ----------
+// The call of block b that becomes a branch to the callee after the epilogue
+// (tre_sibling_call), or -1: every argument goes in a register (the callee's stack arguments
+// would not fit in the caller's incoming area).
+priv fn tail_call_of(self: *Sel, b: i64) -> i64 {
+    v, args := tre_sibling_call(self.m, self.f, b)
+    if v < 0 {
+        return -1
+    }
+    ni := 0
+    nf := 0
+    for a in args {
+        if self.f.insts[a].ty.is_fp() {
+            nf += 1
+        } else {
+            ni += 1
+        }
+    }
+    return if ni <= A_NARG && nf <= A_NARG { v } else { -1 }
+}
+
 priv fn call(self: *Sel, v: i64, i: *Inst) {
     self.mf.has_calls = true
     args := i.args
@@ -1238,6 +1268,18 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
             self.mov(rm.0, rm.1)
         }
         used.push(rm.0)
+    }
+    if self.tail_call_of(i64(self.blk_of[v])) == v {
+        // a sibling call: the epilogue, then a branch (indirect: through x9, no argument
+        // register and not restored by the epilogue)
+        if i.op == CallInd {
+            self.mov(9, target)
+            used.push(9)
+        }
+        ci := self.mf.a_with_uses(TailB, used.items())
+        ci.id = if i.op == Call { i32(i.k) } else { -1 }
+        self.out.push(ci)
+        return
     }
     if i.op == CallInd {
         ci := self.mf.a_with_uses(Blr, used.items())
