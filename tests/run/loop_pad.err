@@ -1,0 +1,4 @@
+assertion failed at tests/run/loop_pad.al:55: element 3 is over the limit
+  at tests/run/loop_pad.al:55 in check_all
+  at tests/run/loop_pad.al:64 in run
+  at tests/run/loop_pad.al:81 in main

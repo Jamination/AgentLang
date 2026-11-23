@@ -145,12 +145,12 @@ fn bt_attach(m: *Module, out: *Output, cx: *Cx, tests: []str) {
     funcs := vec[u8]()
     data := vec[u8]()
     pairs := vec[u8]()
-    start := 0 // as layout_text places the functions: each at a multiple of 16
+    start := 0 // as layout_text places the functions (func_place)
     for c in out.funcs {
         code := &c.code
         // (a specialised copy shows as the function it copies)
         fid := if m.funcs[c.fid].copy_of >= 0 { m.funcs[c.fid].copy_of } else { c.fid }
-        start = align_up(start, 16)
+        start = func_place(start, code.align64)
         put32(&funcs, start)
         put32(&funcs, code.bytes.len)
         put32(&funcs, scope(&b, fid, fn_file[fid]))

@@ -611,7 +611,7 @@ priv fn fl_step(fl: *Flow, i: *MInst, st: []i32) {
         }
     }
     if h & (DU_CALL << 16) != 0 {
-        for r in CALL_CLOBBER {
+        for r in call_clobber() {
             st[r] = -1
         }
     }
