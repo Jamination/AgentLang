@@ -82,4 +82,69 @@ fn main() {
     }
     b.extend("xyz")
     print(len(b), b[99], b[102], b.pop(), b.pop(), len(b))
+
+    // extend (short copies byte by byte, long ones as a memory copy; growth out of line), join,
+    // repeat (doubling copies) and resize with fill, against element-by-element references
+    bad := 0
+    src := alloc[u8](64)
+    for i in 0..64 {
+        src[i] = u8(i * 7 + 1)
+    }
+    for start in 0..4 {
+        e := vec[u8]()
+        r := vec[u8]()
+        for k in 0..41 {
+            e.extend(src[start..start + k])
+            for x in src[start..start + k] {
+                r.push(x)
+            }
+        }
+        if e.items() != r.items() {
+            bad += 1
+        }
+    }
+    f := vec[f64]()
+    for k in 0..30 {
+        f.extend([]f64{f64(k), -0.0, 0.5}[..k % 4])
+    }
+    for t in 1..6 {
+        for n in 0..41 {
+            s := src[1..1 + t]
+            want := vec[u8]()
+            for _ in 0..n {
+                want.extend(s)
+            }
+            if repeat(s, n) != want.items() {
+                bad += 1
+            }
+            parts := alloc[str](n)
+            for i in 0..n {
+                parts[i] = src[i % 5..i % 5 + i % 19]
+            }
+            j := join(parts, s)
+            ref := vec[u8]()
+            for i in 0..n {
+                if i > 0 {
+                    ref.extend(s)
+                }
+                ref.extend(parts[i])
+            }
+            if j != ref.items() {
+                bad += 1
+            }
+        }
+    }
+    g := vec[i32]()
+    gr := vec[i32]()
+    for n in ([]i64{3, 1, 40, 40, 100, 7, 1000}) {
+        g.resize(n, i32(n))
+        gr.truncate(n)
+        while gr.len < n {
+            gr.push(i32(n))
+        }
+        if g.items() != gr.items() {
+            bad += 1
+        }
+    }
+    print("extend join repeat resize wrong:", bad, len(f), f[..6], len(repeat("ab", 1000)), g[999])
 }

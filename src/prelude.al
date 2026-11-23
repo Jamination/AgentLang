@@ -2393,17 +2393,38 @@ fn __at_resize[T](v: *Vec[T], n: i64, x: T, at: str) {
         __assert_fail(at, "Vec resize to a negative length")
     }
     reserve(v, n)
-    for i in v.len..n {
-        v.buf[i] = x
+    if n > v.len {
+        fill(v.buf[v.len..n], x)
     }
     v.len = n
 }
 
 // appends a copy of the elements of s (a str is a []u8: `b.extend("text")`)
 fn extend[T](v: *Vec[T], s: []T) {
-    reserve(v, v.len + len(s))
-    memcopy(cast[i64](ptr(v.buf)) + v.len * sizeof[T](), ptr(s), len(s) * sizeof[T]())
-    v.len += len(s)
+    n := v.len
+    k := len(s)
+    if k > len(v.buf) - n {
+        // (growth out of line)
+        __extend_grow(v, k)
+    }
+    __copy_short(cast[i64](ptr(v.buf)) + n * sizeof[T](), cast[i64](ptr(s)), k * sizeof[T]())
+    v.len = n + k
+}
+
+noinline fn __extend_grow[T](v: *Vec[T], k: i64) {
+    reserve(v, __add_size(v.len, k))
+}
+
+// copies n bytes from s to d (ranges that do not overlap): a few bytes one by one, since a
+// memory copy takes a while to start
+inline fn __copy_short(d: i64, s: i64, n: i64) {
+    if n <= 16 {
+        for i in 0..n {
+            *cast[*u8](d + i) = *cast[*u8](s + i)
+        }
+    } else {
+        memcopy(d, s, n)
+    }
 }
 
 // inserts x before position i
@@ -2555,7 +2576,8 @@ fn __map_find[K, V](m: *Map[K, V], k: K) -> i64 {
     tag := u32(hash(k) >> 32) | 0x8000_0000
     i := tag & mask
     loop {
-        s := m.index[i]
+        // (i <= mask < len(m.index): an unchecked read)
+        s := *cast[*u32](cast[i64](ptr(m.index)) + i64(i) * 4)
         if s == 0 {
             return -1
         }
@@ -2643,7 +2665,8 @@ fn set[K, V](m: *Map[K, V], k: K, v: V) {
         mask := u32(len(m.index) - 1)
         i := tag & mask
         loop {
-            s := m.index[i]
+            // (i <= mask < len(m.index): an unchecked read)
+            s := *cast[*u32](cast[i64](ptr(m.index)) + i64(i) * 4)
             if s == 0 {
                 if slot < 0 {
                     slot = i64(i)
@@ -2714,7 +2737,8 @@ fn del[K, V](m: *Map[K, V], k: K) -> bool {
     tag := u32(hash(k) >> 32) | 0x8000_0000
     i := tag & mask
     loop {
-        s := m.index[i]
+        // (i <= mask < len(m.index): an unchecked read)
+        s := *cast[*u32](cast[i64](ptr(m.index)) + i64(i) * 4)
         if s == 0 {
             return false
         }
@@ -3262,9 +3286,16 @@ fn repeat(s: str, n: i64) -> str {
     if n <= 0 || len(s) == 0 {
         return ""
     }
-    out := alloc[u8](__alloc_size(n, len(s)))
-    for i in 0..n {
-        memcopy(cast[i64](ptr(out)) + i * len(s), ptr(s), len(s))
+    total := __alloc_size(n, len(s))
+    out := alloc[u8](total)
+    // one copy of s, then copies of what is written, doubling in length
+    p := cast[i64](ptr(out))
+    memcopy(p, ptr(s), len(s))
+    k := len(s)
+    while k < total {
+        c := min(k, total - k)
+        memcopy(p + k, p, c)
+        k += c
     }
     return out
 }
@@ -4058,10 +4089,10 @@ fn join(parts: []str, sep: str) -> str {
     k := 0
     for i, p in parts {
         if i > 0 {
-            memcopy(cast[i64](ptr(out)) + k, ptr(sep), len(sep))
+            __copy_short(cast[i64](ptr(out)) + k, cast[i64](ptr(sep)), len(sep))
             k += len(sep)
         }
-        memcopy(cast[i64](ptr(out)) + k, ptr(p), len(p))
+        __copy_short(cast[i64](ptr(out)) + k, cast[i64](ptr(p)), len(p))
         k += len(p)
     }
     return out
