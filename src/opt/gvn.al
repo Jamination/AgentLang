@@ -117,6 +117,17 @@ priv fn known_set(known: *Vec[u8], c: i64, s: u8) {
     known[c] = s
 }
 
+priv fn eqv_at(eqv: *Vec[i32], v: i64) -> i64 {
+    return if v < eqv.len && eqv[v] >= 0 { i64(eqv[v]) } else { NOV }
+}
+
+priv fn eqv_set(eqv: *Vec[i32], v: i64, x: i64) {
+    if v >= eqv.len {
+        eqv.resize(v + 1, i32(NOV))
+    }
+    eqv[v] = i32(x)
+}
+
 fn gvn_run(f: *Func) -> bool {
     cfg := cfg_new(f)
     repl := vec_fill(f.insts.len, i32(NOV))
@@ -124,11 +135,22 @@ fn gvn_run(f: *Func) -> bool {
     known := Vec[u8]{buf: alloc[u8](f.insts.len), len: f.insts.len}
     changed := false
     bool_consts := [2]i64{NOV, NOV}
+    // eqv[v]: the fact (index in facts: the key of a Switch case and the constant made for it,
+    // or NOV) that v is equal to in the current block, or NOV; the constants made go to the
+    // top of the entry block
+    eqv := vec[i32]()
+    facts := vec[(i64, i64)]()
+    consts := vec[i32]()
     // the walk over the dominator tree: (b, -1, ..) enters block b; (-1, mark, c, old) leaves
     // a block: entries above `mark` go, known[c] (if c is not NOV) is old again
     stack := vec_of([](i64, i64, i64, u8){(0, -1, NOV, u8(0))})
     while !stack.is_empty() {
         b, top, fact_c, fact_v := stack.pop()
+        if b == -2 {
+            // leaves the blocks where value `top` was known: its old constant again
+            eqv_set(&eqv, top, fact_c)
+            continue
+        }
         if b < 0 {
             pop_to(&table, top)
             if fact_c != NOV {
@@ -148,6 +170,16 @@ fn gvn_run(f: *Func) -> bool {
                     fact_old = known_at(&known, c)
                     known_set(&known, c, if t == b { u8(2) } else { u8(1) })
                 }
+                Switch(c0, tab) => {
+                    // the only case that goes to b: the value is its key here
+                    c := repl_find(repl.items(), c0)
+                    k := sw_only_key(&tab, b)
+                    if k.0 && f.insts[c].op != Const {
+                        stack.push((-2, c, eqv_at(&eqv, c), u8(0)))
+                        facts.push((k.1, NOV))
+                        eqv_set(&eqv, c, facts.len - 1)
+                    }
+                }
                 _ => {}
             }
         }
@@ -160,6 +192,16 @@ fn gvn_run(f: *Func) -> bool {
             for ai in 0..f.insts[v].args.len {
                 a := f.insts[v].args[ai]
                 r := repl_find(repl.items(), a)
+                ev := eqv_at(&eqv, r)
+                if ev != NOV {
+                    if facts[ev].1 == NOV {
+                        facts[ev].1 = f.mk(Const, f.insts[r].ty, vec[i64](), facts[ev].0)
+                        repl.push(NOV)
+                        consts.push(i32(facts[ev].1))
+                    }
+                    r = facts[ev].1
+                    changed = true
+                }
                 // a condition decided by a dominating branch is a constant here
                 kn := known_at(&known, r)
                 if kn != 0 {
@@ -204,6 +246,13 @@ fn gvn_run(f: *Func) -> bool {
                     changed = true
                 }
             }
+            Switch(c0, tab) => {
+                ev := eqv_at(&eqv, repl_find(repl.items(), c0))
+                if ev != NOV {
+                    f.blocks[b].term = Jmp(sw_target_of(&tab, facts[ev].0))
+                    changed = true
+                }
+            }
             _ => {}
         }
         stack.push((-1, mark, fact, fact_old))
@@ -217,6 +266,7 @@ fn gvn_run(f: *Func) -> bool {
             extra.push(i32(c))
         }
     }
+    extra.extend(consts.items())
     if !extra.is_empty() {
         // after the entry block's phis there are none: block 0 has no predecessors
         e := extra

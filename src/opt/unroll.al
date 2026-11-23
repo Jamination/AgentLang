@@ -300,6 +300,12 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
             f.blocks[nb].term = match src_term {
                 Jmp(t) => Jmp(bmap.get_or(t, t))
                 Br(c, t, e) => Br(look(&cur, c, n0, def_block, in_loop), bmap.get_or(t, t), bmap.get_or(e, e))
+                Switch(c, tab) => {
+                    for j in 1..1 + tab[0] {
+                        tab[j] = bmap.get_or(tab[j], tab[j])
+                    }
+                    Switch(look(&cur, c, n0, def_block, in_loop), tab)
+                }
                 _ => src_term
             }
         }
@@ -348,6 +354,11 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
             }
             match f.blocks[b].term {
                 Br(&c, _, _) => {
+                    if loop_def(*c, n0, def_block, in_loop) {
+                        *c = last_m[*c]
+                    }
+                }
+                Switch(&c, _) => {
                     if loop_def(*c, n0, def_block, in_loop) {
                         *c = last_m[*c]
                     }

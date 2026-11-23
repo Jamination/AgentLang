@@ -1058,6 +1058,9 @@ priv fn pred_counts(f: *Func) -> []i64 {
         if k > 1 {
             cnt[s1] += 1
         }
+        for i in 0..if k == 0 { f.nsucc(b) } else { 0 } {
+            cnt[f.succ_at(b, i)] += 1
+        }
     }
     return cnt
 }
@@ -1252,6 +1255,10 @@ priv fn simplify_cfg(f: *Func) -> bool {
             _ => {}
         }
     }
+    // (Switch terminators: src/opt/switch.al)
+    if switch_simplify(f) {
+        changed = true
+    }
     if cleanup_prune_unreachable(f) {
         changed = true
     }
@@ -1311,9 +1318,8 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 f.blocks[b].term = st
                 dead[s] = true
                 // successors of s now come from b
-                nsucc, s0, s1 := f.succ_pair(b)
-                for si in 0..nsucc {
-                    f.phi_pred_replace(if si == 0 { s0 } else { s1 }, s, b)
+                for si in 0..f.nsucc(b) {
+                    f.phi_pred_replace(f.succ_at(b, si), s, b)
                 }
                 merged = true
             }
@@ -1365,6 +1371,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 if t_has_phi {
                     match f.blocks[p].term {
                         Br(_, a, b2) if a == t || b2 == t => continue
+                        Switch(_, _) if f.has_succ(p, t) => continue
                         _ => {}
                     }
                 }
@@ -1688,6 +1695,9 @@ priv fn simplify_cfg(f: *Func) -> bool {
                 side_t := cfg.dom(t, bb)
                 match f.blocks[bb].term {
                     Br(&cc, _, _) => {
+                        *cc = fix(*cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e)
+                    }
+                    Switch(&cc, _) => {
                         *cc = fix(*cc, &def_block, b, &binsts, side_t, &repl_t, &repl_e)
                     }
                     Ret(vs) => {

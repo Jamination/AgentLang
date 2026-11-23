@@ -255,6 +255,109 @@ enum Term {
     Br(i64, i64, i64),
     Ret(Vec[i64]),
     Trap,
+    // multi-way branch on an integer value: Switch(v, tab), see sw_new
+    Switch(i64, Vec[i64]),
+}
+
+// ---------- Switch tables ----------
+// tab[0] = n, the number of targets; tab[1..1 + n] = the targets, all different (tab[1]: the
+// default); then one pair (key, index of its target in the targets) per case, keys ascending
+// and different, canonical for the type of the value (ir_canon). The table belongs to its
+// terminator (the passes write through it): a copy of a terminator copies it.
+fn sw_ntargets(tab: *Vec[i64]) -> i64 {
+    return tab[0]
+}
+
+fn sw_default(tab: *Vec[i64]) -> i64 {
+    return tab[1]
+}
+
+fn sw_ncases(tab: *Vec[i64]) -> i64 {
+    return (tab.len - 1 - tab[0]) / 2
+}
+
+fn sw_key(tab: *Vec[i64], i: i64) -> i64 {
+    return tab[1 + tab[0] + 2 * i]
+}
+
+// the target of case i
+fn sw_case_target(tab: *Vec[i64], i: i64) -> i64 {
+    return tab[1 + tab[1 + tab[0] + 2 * i + 1]]
+}
+
+// the target of key k
+fn sw_target_of(tab: *Vec[i64], k: i64) -> i64 {
+    lo := 0
+    hi := sw_ncases(tab)
+    while lo < hi {
+        mid := (lo + hi) / 2
+        x := sw_key(tab, mid)
+        if x == k {
+            return sw_case_target(tab, mid)
+        }
+        if x < k {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    return sw_default(tab)
+}
+
+// (true, k) if k is the only key that goes to block b and b is not the default
+fn sw_only_key(tab: *Vec[i64], b: i64) -> (bool, i64) {
+    if sw_default(tab) == b {
+        return (false, 0)
+    }
+    found := false
+    k := 0
+    for i in 0..sw_ncases(tab) {
+        if sw_case_target(tab, i) == b {
+            if found {
+                return (false, 0)
+            }
+            found = true
+            k = sw_key(tab, i)
+        }
+    }
+    return (found, k)
+}
+
+// a table: keys[i] goes to targets[i], other values to dflt (keys different, any order)
+fn sw_new(dflt: i64, keys: []i64, targets: []i64) -> Vec[i64] {
+    n := len(keys)
+    order := vec_fill(n, 0)
+    for i in 0..n {
+        order[i] = i
+    }
+    sort_by(order.items(), keys, fn(keys: []i64, a: i64, b: i64) -> bool { keys[a] < keys[b] })
+    ts := vec_one(dflt)
+    for i in 0..n {
+        if index_of(ts.items(), targets[i]) < 0 {
+            ts.push(targets[i])
+        }
+    }
+    tab := vec[i64]()
+    tab.reserve(1 + ts.len + 2 * n)
+    tab.push(ts.len)
+    tab.extend(ts.items())
+    for i in order {
+        tab.push(keys[i])
+        tab.push(index_of(ts.items(), targets[i]))
+    }
+    return tab
+}
+
+// the cases of a table as (keys, targets)
+fn sw_cases(tab: *Vec[i64]) -> (Vec[i64], Vec[i64]) {
+    n := sw_ncases(tab)
+    ks := vec_fill(n, 0)
+    ts := vec_fill(n, 0)
+    for i in 0..n {
+        ks[i] = sw_key(tab, i)
+        ts[i] = sw_case_target(tab, i)
+    }
+    return (ks, ts)
 }
 
 struct BlockData {
@@ -539,6 +642,43 @@ fn succ_pair(self: *Func, b: i64) -> (i64, i64, i64) {
     }
 }
 
+// the number of (different) successors of block b, also for a Switch; succ_at gives them
+fn nsucc(self: *Func, b: i64) -> i64 {
+    match self.blocks[b].term {
+        Jmp(_) => return 1
+        Br(_, t, e) => return if t == e { 1 } else { 2 }
+        Switch(_, tab) => return tab[0]
+        _ => return 0
+    }
+}
+
+fn succ_at(self: *Func, b: i64, i: i64) -> i64 {
+    match self.blocks[b].term {
+        Jmp(t) => return t
+        Br(_, t, e) => return if i == 0 { t } else { e }
+        Switch(_, tab) => return tab[1 + i]
+        _ => return 0
+    }
+}
+
+// is s a successor of block b
+fn has_succ(self: *Func, b: i64, s: i64) -> bool {
+    match self.blocks[b].term {
+        Jmp(t) => return t == s
+        Br(_, t, e) => return t == s || e == s
+        Switch(_, tab) => return index_of(tab[1..1 + tab[0]], s) >= 0
+        _ => return false
+    }
+}
+
+// does block b end in a Switch
+fn is_switch(self: *Func, b: i64) -> bool {
+    match self.blocks[b].term {
+        Switch(_, _) => return true
+        _ => return false
+    }
+}
+
 fn new_block(self: *Func) -> i64 {
     // block and instruction numbers are kept in i32 tables (NOV, as an i32, is -1); the
     // dominator tree numbers (Cfg.pre, post) go up to twice the number of blocks
@@ -665,8 +805,44 @@ fn retarget(self: *Func, p: i64, old: i64, cur: i64) {
                 *y = cur
             }
         }
+        Switch(_, &tab) => sw_retarget(tab, old, cur)
         _ => {}
     }
+}
+
+// a Switch table's target old becomes cur (merged with cur if that is a target already)
+fn sw_retarget(tab: *Vec[i64], old: i64, cur: i64) {
+    n := tab[0]
+    j := index_of(tab[1..1 + n], old)
+    if j < 0 || old == cur {
+        return
+    }
+    k := index_of(tab[1..1 + n], cur)
+    if k < 0 {
+        tab[1 + j] = cur
+        return
+    }
+    // the lower index stays (index 0 is the default), the higher one is dropped: its cases go
+    // to the lower one, the indices above it move down
+    lo := min(j, k)
+    hi := max(j, k)
+    tab[1 + lo] = cur
+    for i in 0..sw_ncases(tab) {
+        x := 1 + n + 2 * i + 1
+        t := tab[x]
+        if t == hi {
+            t = lo
+        }
+        if t > hi {
+            t -= 1
+        }
+        tab[x] = t
+    }
+    for i in 1 + hi..tab.len - 1 {
+        tab[i] = tab[i + 1]
+    }
+    tab.len -= 1
+    tab[0] = n - 1
 }
 
 fn push(self: *Func, b: i64, op: Op, ty: T, args: Vec[i64], k: i64) -> i64 {
@@ -702,6 +878,7 @@ fn succs(self: *Func, b: i64) -> Vec[i64] {
     match self.blocks[b].term {
         Jmp(t) => vec_one(t)
         Br(_, t, f) => if t == f { vec_one(t) } else { vec_two(t, f) }
+        Switch(_, tab) => vec_of(tab[1..1 + tab[0]])
         _ => vec[i64]()
     }
 }
@@ -784,6 +961,15 @@ priv fn memo_valid(f: *Func) -> *Memo {
                     x |= e + 1
                 }
             }
+            Switch(_, tab) => {
+                // a hash of the targets in order, negative (the others are not)
+                h: u64 = u64(tab[0])
+                for i in 1..1 + tab[0] {
+                    h = (h ^ u64(tab[i])) * 0x9E3779B97F4A7C15
+                    h ^= h >> 29
+                }
+                x = i64(h | (1 << 63))
+            }
             _ => {}
         }
         if m.sig[b] != x {
@@ -865,6 +1051,11 @@ priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
         if k > 1 {
             cnt[s1] += 1
         }
+        if k == 0 && self.is_switch(b) {
+            for i in 0..self.nsucc(b) {
+                cnt[self.succ_at(b, i)] += 1
+            }
+        }
     }
     p := lists_sized(&cnt)
     for b in 0..n {
@@ -874,6 +1065,11 @@ priv fn preds_compute(self: *Func) -> Vec[Vec[i64]] {
         }
         if k > 1 {
             add(&p[s1], b)
+        }
+        if k == 0 && self.is_switch(b) {
+            for i in 0..self.nsucc(b) {
+                add(&p[self.succ_at(b, i)], b)
+            }
         }
     }
     return p
@@ -897,9 +1093,15 @@ fn rpo_compute(self: *Func) -> Vec[i64] {
         b := i64(sb[sp - 1])
         i := i64(si[sp - 1])
         cnt, s0, s1 := self.succ_pair(b)
+        sw := cnt == 0 && self.is_switch(b)
+        if sw {
+            cnt = self.nsucc(b)
+        }
         if i < cnt {
             s := s0
-            if i == 1 {
+            if sw {
+                s = self.succ_at(b, i)
+            } else if i == 1 {
                 s = s1
             }
             si[sp - 1] = i32(i + 1)
@@ -922,6 +1124,7 @@ fn rpo_compute(self: *Func) -> Vec[i64] {
 fn term_args(t: *Term) -> []i64 {
     match t {
         Br(&c, _, _) => return mkslice[i64](cast[*i64](c), 1)
+        Switch(&c, _) => return mkslice[i64](cast[*i64](c), 1)
         Ret(vs) => return vs.items()
         _ => return nil
     }
@@ -938,6 +1141,9 @@ fn use_counts(self: *Func) -> Vec[i32] {
         }
         match b.term {
             Br(v, _, _) => {
+                c[v] += 1
+            }
+            Switch(v, _) => {
                 c[v] += 1
             }
             Ret(vs) => {
@@ -989,6 +1195,11 @@ fn apply_repl(self: *Func, map: *Vec[i32]) {
         }
         match self.blocks[bi].term {
             Br(&c, _, _) => {
+                if map[*c] != NOV {
+                    *c = apply_repl_find(map, *c)
+                }
+            }
+            Switch(&c, _) => {
                 if map[*c] != NOV {
                     *c = apply_repl_find(map, *c)
                 }
@@ -1075,6 +1286,11 @@ priv fn rpo_preds_of(f: *Func, rpo: Vec[i64]) -> Vec[Vec[i64]] {
         if k > 1 {
             cnt[s1] += 1
         }
+        if k == 0 && f.is_switch(b) {
+            for i in 0..f.nsucc(b) {
+                cnt[f.succ_at(b, i)] += 1
+            }
+        }
     }
     preds := lists_sized(&cnt)
     for b in rpo {
@@ -1084,6 +1300,11 @@ priv fn rpo_preds_of(f: *Func, rpo: Vec[i64]) -> Vec[Vec[i64]] {
         }
         if k > 1 {
             add(&preds[s1], b)
+        }
+        if k == 0 && f.is_switch(b) {
+            for i in 0..f.nsucc(b) {
+                add(&preds[f.succ_at(b, i)], b)
+            }
         }
     }
     return preds
@@ -1469,6 +1690,13 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
             Trap => {
                 s.push("  trap\n")
             }
+            Switch(c, tab) => {
+                s.push(fmt("  switch %", c, " ["))
+                for i in 0..sw_ncases(&tab) {
+                    s.push(fmt(if i > 0 { ", " } else { "" }, sw_key(&tab, i), ": b", sw_case_target(&tab, i)))
+                }
+                s.push(fmt("] b", sw_default(&tab), "\n"))
+            }
         }
     }
     s.push("}\n")
@@ -1545,6 +1773,31 @@ fn ir_verify(f: *Func) -> str {
         }
         if blk.term == Term.None {
             return fmt("b", b, " has no terminator")
+        }
+        match blk.term {
+            Switch(c, tab) => {
+                n := tab[0]
+                if n < 1 || tab.len < 1 + n || (tab.len - 1 - n) % 2 != 0 {
+                    return fmt("switch of b", b, " has a malformed table")
+                }
+                for i in 0..n {
+                    if index_of(tab[1..1 + i], tab[1 + i]) >= 0 {
+                        return fmt("switch of b", b, " has target b", tab[1 + i], " twice")
+                    }
+                }
+                ty := f.insts[c].ty
+                for i in 0..sw_ncases(&tab) {
+                    k := sw_key(&tab, i)
+                    ti := tab[1 + n + 2 * i + 1]
+                    if ti < 0 || ti >= n || ir_canon(ty, k) != k || i > 0 && sw_key(&tab, i - 1) >= k {
+                        return fmt("switch of b", b, ": bad case ", i)
+                    }
+                }
+                if !ty.is_int() {
+                    return fmt("switch of b", b, " on a value of type ", ty.name())
+                }
+            }
+            _ => {}
         }
     }
     return ""

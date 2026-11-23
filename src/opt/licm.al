@@ -155,6 +155,11 @@ fn licm_run(f: *Func) -> bool {
             }
             ns, s0, s1 := f.succ_pair(b)
             leaves := ns > 0 && !in_loop[s0] || ns > 1 && !in_loop[s1]
+            for j in 0..if ns == 0 { f.nsucc(b) } else { 0 } {
+                if !in_loop[f.succ_at(b, j)] {
+                    leaves = true
+                }
+            }
             if !leaves {
                 match f.blocks[b].term {
                     Ret(_), Trap => leaves = true

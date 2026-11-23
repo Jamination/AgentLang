@@ -157,6 +157,11 @@ priv fn orphan_map(f: *Func) -> ([]i32, i64, i64, i64) {
                     return (nil, 0, 0, 0)
                 }
             }
+            Switch(c, _) => {
+                if m[c] < 0 {
+                    return (nil, 0, 0, 0)
+                }
+            }
             Ret(vs) => {
                 for x in vs {
                     if m[x] < 0 {
@@ -241,6 +246,7 @@ priv fn drop_orphans(f: *Func, m: []i32, c: i64, total: i64, lists: i64) {
         at += nl
         match blk.term {
             Br(&x, _, _) => *x = i64(m[*x])
+            Switch(x, tab) => blk.term = Switch(i64(m[x]), vec_of(tab.items()))
             Ret(vs) => {
                 nvs := vec_fill(vs.len, 0)
                 for k in 0..vs.len {
@@ -277,6 +283,7 @@ priv fn keep_func(f: *Func) {
         keep_list(w, &blk.insts)
         match blk.term {
             Ret(&vs) => keep_list(w, vs)
+            Switch(_, &tab) => keep_list(w, tab)
             _ => {}
         }
     }

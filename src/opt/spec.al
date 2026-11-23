@@ -109,6 +109,7 @@ priv fn spec_copy(m: *Module, gid: i64, j: i64, k: i64) -> Func {
         blk.insts = vec_of(blk.insts.items())
         match blk.term {
             Ret(vs) => blk.term = Ret(vec_of(vs.items()))
+            Switch(c, tab) => blk.term = Switch(c, vec_of(tab.items()))
             _ => {}
         }
     }
