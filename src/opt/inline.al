@@ -323,6 +323,7 @@ const INL_LEAF_BONUS = 10  // a callee that calls nothing (but its failure paths
 const INL_HOT_PERCENT = 50 // a call in a loop: the limit grows by half (a callee with other
 const INL_HOT_MAX = 20     // call sites: by at most 20, every copy costs)
 const INL_COLD_LIMIT = 8   // in a block that only leads to a trap (a panic's message, ...)
+const INL_BONUS_CALLER = 1000 // no bonus in a caller this large already (inline_cost)
 
 // facts about a callee, by its id in `info`: bit 0, it calls nothing outside its trap blocks;
 // bit 1 + k, parameter k (k < 62), or one arithmetic step from it, is compared or branched on
@@ -504,7 +505,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     } else {
                         pol.small
                     }
-                    if size > limit || cold[b] {
+                    if size > limit && caller_size <= INL_BONUS_CALLER || cold[b] {
                         limit = site_limit(f, i, gf, g, limit, call_counts[g] == 1 && !addr_taken[g], hot[b], cold[b], &info)
                     }
                     if size <= limit {
