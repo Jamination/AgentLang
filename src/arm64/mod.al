@@ -167,7 +167,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     f.w = w
     work_begin(w)
     opt_backend_cleanup(f, fid)
-    switch_lower(f, false)
+    switch_lower(f, true)
     a_split_critical_edges(f)
     rpo := f.rpo()
     cfg := cfg_new(f)

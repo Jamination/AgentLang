@@ -70,6 +70,7 @@ priv struct Enc {
     words: Vec[u32]
     relocs: Vec[A64Reloc]
     fixes: Vec[Fix]
+    jfix: Vec[(i64, i64)] // the ADR of a jump table: (word index, table)
     fr: *Fr
     mf: *AFunc
     err: str
@@ -435,6 +436,15 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             }
         }
         Brk => self.put(a64_brk(0))
+        JmpTab => {
+            // adr x16, table (a_emit places the table); ldrsw x17, [x16, n, lsl #2];
+            // add x16, x16, x17; br x16
+            self.jfix.push((self.words.len, i64(i.id)))
+            self.put(0)
+            self.put(a64_ldst_reg(2, 2, 17, 16, x(i.n), true))
+            self.put(a64_add_reg(1, false, false, 16, 16, 17, A64_LSL, 0))
+            self.put(a64_br(0, 16))
+        }
         DivTrap => {
             self.put(a64_cbz(s, true, x(i.n), 2))
             self.put(a64_brk(1))
@@ -691,6 +701,19 @@ fn a_emit(mf: *AFunc, alloc: *AAlloc, layout: []i64) -> A64Code {
             _ => a64_cbz(f.sf, false, f.reg, d)
         }
         e.words[f.at] = word
+    }
+    // the jump tables after the code: an entry is the offset in bytes of its block from the
+    // table (position-independent, no relocation)
+    tpos := vec_fill(mf.jtabs.len, 0)
+    for t in 0..mf.jtabs.len {
+        tpos[t] = e.words.len
+        for blk in mf.jtabs[t] {
+            assert bpos[blk] >= 0, "arm64 emit: a jump table entry for a block that is not laid out"
+            e.words.push(u32(u64(4 * (bpos[blk] - tpos[t])) & 0xFFFF_FFFF))
+        }
+    }
+    for jf in e.jfix {
+        e.words[jf.0] = a64_adr(16, 4 * (tpos[jf.1] - jf.0))
     }
     bytes := vec[u8]()
     bytes.reserve(4 * e.words.len)

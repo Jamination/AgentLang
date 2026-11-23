@@ -141,6 +141,7 @@ enum AOp {
     Cnt,     // d = the number of one bits of n (sz 8: all 64)
     MemCopy, // copies a bytes from m to n, forwards; n, m and a are changed
     MemFill, // fills a bytes at n with the byte m; n and a are changed
+    JmpTab,  // to the block of entry n (in range) of jump table id (AFunc.jtabs, after the code)
 }
 
 // 48 bytes
@@ -179,6 +180,7 @@ struct AFunc {
     has_calls: bool
     save_all: bool
     xuses: Vec[i64]
+    jtabs: Vec[Vec[i64]] // the jump tables: the block of each entry
 }
 
 fn a_new_vreg(self: *AFunc, class: u8) -> i64 {
@@ -245,7 +247,7 @@ fn a_decode(mf: *AFunc, i: *AInst, du: []i64, p: i64) -> i64 {
     nd := 0
     match i.op {
         Str, FStr, Stlr => {}
-        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, DivTrap, Dmb, MemCopy, MemFill => {}
+        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, DivTrap, Dmb, MemCopy, MemFill, JmpTab => {}
         _ => {
             q2 := put(du, q, i.d)
             nd = q2 - q
