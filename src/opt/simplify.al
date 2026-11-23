@@ -1214,15 +1214,253 @@ priv fn may_side(f: *Func, x: i64) -> bool {
         Jmp(_) => {}
         _ => return false
     }
-    real := 0
+    return arm_cost(f, x) <= IFC_ARM_MAX
+}
+
+// if-conversion budgets: the cost of one arm, of both arms with the selects they need, and the
+// number of selects (see arm_cost)
+const IFC_ARM_MAX = 4
+const IFC_TOTAL_MAX = 8
+const IFC_SELECTS_MAX = 3
+
+// the cost of executing block x unconditionally (about one per cheap operation, more for the
+// slower ones), or IFC_ARM_MAX + 1 if it holds something that must not be speculated (a
+// trap, a side effect, a memory access) or that is too slow
+priv fn arm_cost(f: *Func, x: i64) -> i64 {
+    cost := 0
     for v in f.blocks[x].insts {
-        match f.insts[v].op {
+        i := &f.insts[v]
+        match i.op {
             Const, FConst, GAddr, FAddr => {}
-            Add, Sub, And, Or, Xor, Shl, LShr, AShr, SExt, ZExt, Trunc => real += 1
-            _ => return false
+            Add, Sub, And, Or, Xor, Shl, LShr, AShr, SExt, ZExt, Trunc => cost += 1
+            Eq, Ne, Slt, Sle, Sgt, Sge, Ult, Ule, Ugt, Uge => cost += 1
+            Mul => {
+                // (by 3, 5, 9 or a power of two: one lea or shift)
+                k := match f.is_const(i.args[1]) {
+                    Some(k1) => k1
+                    None => 0
+                }
+                cost += if k == 3 || k == 5 || k == 9 || (k > 0 && is_pow2(u64(k))) { 1 } else { 2 }
+            }
+            // a select left by an earlier conversion (float: a compare and a blend of three operations)
+            Select => cost += if i.ty.is_int() { 1 } else { 3 }
+            FNeg, FAbs, FMin, FMax, FEq, FNe, FLt, FLe, FGt, FGe => {
+                if i.ty.is_vec() || f.insts[i.args[0]].ty.is_vec() {
+                    return IFC_ARM_MAX + 1
+                }
+                cost += 1
+            }
+            FAdd, FSub, FMul => {
+                if i.ty.is_vec() {
+                    return IFC_ARM_MAX + 1
+                }
+                cost += 1
+            }
+            // (only where both arms store to one address, and loads only for that address: see
+            // arm_store and same_value)
+            Store, Load => cost += 1
+            _ => return IFC_ARM_MAX + 1
         }
     }
-    return real <= 2
+    return cost
+}
+
+// the only store of block x: NOV if there is none, -1 if there are several
+priv fn arm_store(f: *Func, x: i64) -> i64 {
+    st := NOV
+    for v in f.blocks[x].insts {
+        if f.insts[v].op == Store {
+            if st != NOV {
+                return -1
+            }
+            st = i64(v)
+        }
+    }
+    return st
+}
+
+// the number of loads in block x
+priv fn arm_loads(f: *Func, x: i64) -> i64 {
+    n := 0
+    for v in f.blocks[x].insts {
+        if f.insts[v].op == Load {
+            n += 1
+        }
+    }
+    return n
+}
+
+// x and y compute the same value (the same instruction, or the same pure operation of such
+// values, depth levels deep): the number of those operations, or -1 if they differ. Two loads
+// of the same address count as the same (*loads: how many such pairs): the caller makes sure
+// that they read the same memory.
+priv fn same_value(f: *Func, x: i64, y: i64, depth: i64, loads: *i64) -> i64 {
+    if x == y {
+        return 0
+    }
+    xi := &f.insts[x]
+    yi := &f.insts[y]
+    if depth == 0 || xi.op != yi.op || xi.ty != yi.ty || xi.k != yi.k || xi.aux != yi.aux || xi.args.len != yi.args.len {
+        return -1
+    }
+    if xi.op == Const || xi.op == FConst || xi.op == GAddr || xi.op == FAddr {
+        return 0
+    }
+    if xi.op == Load {
+        *loads += 1
+    } else if !xi.op.is_pure() || xi.op == Alloca {
+        return -1
+    }
+    n := 1
+    for k in 0..xi.args.len {
+        d := same_value(f, xi.args[k], yi.args[k], depth - 1, loads)
+        if d < 0 {
+            return -1
+        }
+        n += d
+    }
+    return n
+}
+
+// the value of `c ? vt : ve` (type ty), added at the end of block b: a select, or something
+// cheaper that computes the same
+priv fn ifc_select(f: *Func, b: i64, c: i64, vt: i64, ve: i64, ty: T) -> i64 {
+    ci := f.insts[c]
+    if ty == F64 || ty == F32 {
+        // x86 minsd / maxsd semantics (FMin(a, b) = a < b ? a : b, FMax(a, b) = a > b ? a : b,
+        // the second operand when unordered): only the exact source shapes, so NaN and -0.0
+        // come out as written
+        if (ci.op == FLt || ci.op == FGt) && f.insts[ci.args[0]].ty == ty {
+            x := ci.args[0]
+            y := ci.args[1]
+            if vt == x && ve == y {
+                // x < y ? x : y  /  x > y ? x : y
+                return f.push(b, if ci.op == FLt { FMin } else { FMax }, ty, vec_two(x, y), 0)
+            }
+            if vt == y && ve == x {
+                // x < y ? y : x = y > x ? y : x  /  x > y ? y : x = y < x ? y : x
+                return f.push(b, if ci.op == FLt { FMax } else { FMin }, ty, vec_two(y, x), 0)
+            }
+            // x against zero choosing between x and -x: x < 0 exactly when -x > x (both
+            // false for NaN and for either zero), x > 0 exactly when x > -x
+            neg_cond := false
+            pos_cond := false
+            if is_fzero(f, y) {
+                neg_cond = ci.op == FLt
+                pos_cond = ci.op == FGt
+            } else if is_fzero(f, x) {
+                // 0 < y: y > 0, 0 > y: y < 0
+                neg_cond = ci.op == FGt
+                pos_cond = ci.op == FLt
+                x = y
+            }
+            if neg_cond || pos_cond {
+                ti := f.insts[vt]
+                ei := f.insts[ve]
+                if ve == x && ti.op == FNeg && ti.args[0] == x {
+                    // x < 0 ? -x : x = max(-x, x)  /  x > 0 ? -x : x = min(-x, x)
+                    return f.push(b, if neg_cond { FMax } else { FMin }, ty, vec_two(vt, x), 0)
+                }
+                if vt == x && ei.op == FNeg && ei.args[0] == x {
+                    // x < 0 ? x : -x = min(x, -x)  /  x > 0 ? x : -x = max(x, -x)
+                    return f.push(b, if neg_cond { FMin } else { FMax }, ty, vec_two(x, ve), 0)
+                }
+            }
+        }
+        return f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0)
+    }
+    if !ty.is_int() || ci.ty != I8 {
+        return f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0)
+    }
+    // x op y on one side and x on the other: x op (c ? y : 0), which keeps the select off a
+    // loop-carried x (and turns into arithmetic on the flag when y is a constant)
+    for side in 0..2 {
+        p := if side == 0 { vt } else { ve }
+        q := if side == 0 { ve } else { vt }
+        pi := f.insts[p]
+        if pi.ty != ty || !(pi.op == Add || pi.op == Sub || pi.op == Or || pi.op == Xor) {
+            continue
+        }
+        y := NOV
+        if pi.args[0] == q {
+            y = pi.args[1]
+        } else if pi.args[1] == q && pi.op != Sub {
+            y = pi.args[0]
+        }
+        if y == NOV {
+            continue
+        }
+        // the condition under which y applies
+        cy := if side == 0 { c } else { ifc_not(f, b, c) }
+        zero := f.push(b, Const, ty, vec[i64](), 0)
+        s := ifc_select(f, b, cy, y, zero, ty)
+        return f.push(b, pi.op, ty, vec_two(q, s), 0)
+    }
+    kt := f.is_const(vt)
+    ke := f.is_const(ve)
+    if is_some(kt) && is_some(ke) {
+        a := unwrap(kt)
+        e := unwrap(ke)
+        if a == e {
+            return vt
+        }
+        if a >= -0x40000000 && a <= 0x40000000 && e >= -0x40000000 && e <= 0x40000000 {
+            // e + (c ? d : 0) with d = a - e: the flag zero-extended, shifted or negated
+            cc := c
+            d := a - e
+            if d < 0 && e == 0 && d != -1 {
+                // (c ? -n : 0): (!c ? n : 0) - n would need two constants; keep the select
+                return f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0)
+            }
+            neg := false
+            if d < 0 {
+                neg = true
+                d = 0 - d
+            }
+            if is_pow2(u64(d)) && d <= 8 {
+                z := cc
+                if ty != I8 {
+                    z = f.push(b, ZExt, ty, vec_one(cc), 0)
+                }
+                sh := 0
+                while (1 << sh) < d {
+                    sh += 1
+                }
+                if sh > 0 {
+                    z = f.push(b, Shl, ty, vec_two(z, f.push(b, Const, ty, vec[i64](), sh)), 0)
+                }
+                if neg {
+                    return f.push(b, Sub, ty, vec_two(f.push(b, Const, ty, vec[i64](), e), z), 0)
+                }
+                if e == 0 {
+                    return z
+                }
+                return f.push(b, Add, ty, vec_two(z, f.push(b, Const, ty, vec[i64](), e)), 0)
+            }
+        }
+    }
+    return f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0)
+}
+
+// v is the float constant 0.0 or -0.0
+priv fn is_fzero(f: *Func, v: i64) -> bool {
+    i := &f.insts[v]
+    if i.op != FConst {
+        return false
+    }
+    if i.ty == F32 {
+        return i.k & 0x7FFF_FFFF == 0
+    }
+    return i.ty == F64 && i.k & 0x7FFF_FFFF_FFFF_FFFF == 0
+}
+
+// the negation of the boolean c (0 or 1), added to block b
+priv fn ifc_not(f: *Func, b: i64, c: i64) -> i64 {
+    ci := f.insts[c]
+    if ci.op.is_icmp() {
+        return f.push(b, ci.op.negate_icmp(), I8, vec_two(ci.args[0], ci.args[1]), 0)
+    }
+    return f.push(b, Xor, I8, vec_two(c, f.push(b, Const, I8, vec[i64](), 1)), 0)
 }
 
 priv fn simplify_cfg(f: *Func) -> bool {
@@ -1754,6 +1992,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
             pairs := vec[(i64, i64, i64)]()
             ok := true
             selects := 0
+            cost := 0
             for ph in phis {
                 i := f.insts[ph]
                 kt := index_of(i.from(), from_t)
@@ -1762,8 +2001,13 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     vt := i.args[kt]
                     ve := i.args[ke]
                     if vt != ve {
-                        if !i.ty.is_int() {
+                        if i.ty == F64 || i.ty == F32 {
+                            // a compare and a blend (or one min / max)
+                            cost += 2
+                        } else if !i.ty.is_int() {
                             ok = false
+                        } else {
+                            cost += 1
                         }
                         selects += 1
                     }
@@ -1772,7 +2016,47 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     ok = false
                 }
             }
-            if !ok || selects == 0 || selects > 2 {
+            // a store in an arm: each arm stores once to the same address, and the store sinks
+            // below the join with the value selected (anything else stays a branch)
+            st_t := if from_t != b { arm_store(f, from_t) } else { NOV }
+            st_e := if from_e != b { arm_store(f, from_e) } else { NOV }
+            if st_t != NOV || st_e != NOV {
+                if st_t == NOV || st_e == NOV || st_t < 0 || st_e < 0 {
+                    continue
+                }
+                si := f.insts[st_t]
+                se := f.insts[st_e]
+                // loads in the arms only where both compute the address with them: each path
+                // ran one of the two, before its store, from the same memory
+                nloads := 0
+                dup := same_value(f, si.args[0], se.args[0], 4, &nloads)
+                if !ok || si.ty != se.ty || si.aux != se.aux || dup < 0 || arm_loads(f, from_t) != nloads || arm_loads(f, from_e) != nloads {
+                    continue
+                }
+                if si.args[1] != se.args[1] {
+                    if si.ty == F64 || si.ty == F32 {
+                        cost += 2
+                    } else if !si.ty.is_int() {
+                        continue
+                    } else {
+                        cost += 1
+                    }
+                    selects += 1
+                }
+                // one store and one address remain
+                cost -= 1 + dup
+            } else if (from_t != b && arm_loads(f, from_t) != 0) || (from_e != b && arm_loads(f, from_e) != 0) {
+                continue
+            }
+            if !ok || selects == 0 || selects > IFC_SELECTS_MAX {
+                continue
+            }
+            for x in [2]i64{from_t, from_e} {
+                if x != b {
+                    cost += arm_cost(f, x)
+                }
+            }
+            if cost > IFC_TOTAL_MAX {
                 continue
             }
             // hoist both arms into b and merge the values with selects
@@ -1786,7 +2070,7 @@ priv fn simplify_cfg(f: *Func) -> bool {
             for pr in pairs {
                 ph, vt, ve := pr
                 ty := f.insts[ph].ty
-                nv := if vt != ve { f.push(b, Select, ty, vec_of([]i64{c, vt, ve}), 0) } else { vt }
+                nv := if vt != ve { ifc_select(f, b, c, vt, ve, ty) } else { vt }
                 i := f.im(ph)
                 k := 0
                 while k < i.args.len {
@@ -1798,6 +2082,25 @@ priv fn simplify_cfg(f: *Func) -> bool {
                     }
                 }
                 i.phi_add(nv, b)
+            }
+            if st_t != NOV {
+                // the two stores become one after the selects
+                bl := &f.blocks[b].insts
+                k := 0
+                while k < bl.len {
+                    if i64(bl[k]) == st_t || i64(bl[k]) == st_e {
+                        bl.remove(k)
+                    } else {
+                        k += 1
+                    }
+                }
+                si := f.insts[st_t]
+                vt := si.args[1]
+                ve := f.insts[st_e].args[1]
+                val := if vt != ve { ifc_select(f, b, c, vt, ve, si.ty) } else { vt }
+                ns := f.push(b, Store, si.ty, vec_two(si.args[0], val), 0)
+                f.insts[ns].aux = si.aux
+                f.insts[ns].cap = si.cap
             }
             f.blocks[b].term = Jmp(j)
             // keep going: the stale `preds` only over-count (a join loses its arms and gains b),
