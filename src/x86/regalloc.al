@@ -11,9 +11,12 @@ fn regalloc_windows() {
     gpr_order = [15]i64{0, 1, 2, 8, 9, 10, 11, 3, 5, 12, 13, 14, 15, 6, 7}
 }
 
-// the general-purpose and the xmm registers that a call clobbers, as bit masks
+// the general-purpose and the xmm registers that a call clobbers, as bit masks (call_clobber;
+// Windows: rsi, rdi and xmm6-xmm15 are preserved)
 priv const CLOBBER_GPR: u64 = 0xFC7
 priv const CLOBBER_XMM: u64 = 0xFFFF0000
+priv const WIN_CLOBBER_GPR: u64 = 0xF07
+priv const WIN_CLOBBER_XMM: u64 = 0x3F0000
 
 struct Alloc {
     used_callee_saved: Vec[i64]
@@ -52,10 +55,13 @@ inline fn ra_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
 }
 
 inline fn ra_call_clobber(mf: *MFunc) -> []i64 {
-    return CALL_CLOBBER[..]
+    return call_clobber()
 }
 
 inline fn ra_clobber_mask(mf: *MFunc, cls: u8) -> u64 {
+    if target_os == TargetWindows {
+        return if cls == 0 { WIN_CLOBBER_GPR } else { WIN_CLOBBER_XMM }
+    }
     return if cls == 0 { CLOBBER_GPR } else { CLOBBER_XMM }
 }
 
@@ -285,7 +291,7 @@ fn ra_spill_forward(mf: *MFunc, order: []i64, first_spill: i64) {
                     ra_st_drop_reg(&st, du[j])
                 }
                 if h & (DU_CALL << 16) != 0 {
-                    for r in CALL_CLOBBER {
+                    for r in call_clobber() {
                         ra_st_drop_reg(&st, r)
                     }
                 }

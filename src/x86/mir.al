@@ -22,9 +22,9 @@ const NUM_FLOAT_ARGS = 8
 const WIN_INT_ARGS = [4]i64{RCX, RDX, R8, R9}
 const WIN_REG_ARGS = 4
 
-// rbx, rbp, r12-r15; Windows: rsi and rdi too (and xmm6-xmm15, see mir_xmm_saved). Calls are
-// still taken to clobber rsi, rdi and every xmm register on Windows (CALL_CLOBBER): a callee
-// that preserves them is never relied on, the function only saves them for its own caller.
+// rbx, rbp, r12-r15; Windows: rsi and rdi too (and xmm6-xmm15, see mir_xmm_saved). Every
+// function saves the ones it writes, and a call on Windows leaves them alone (call_clobber):
+// AL code, C code and the system all follow the Microsoft x64 convention there.
 fn mir_callee_saved(r: i64) -> bool {
     match r {
         3, 5, 12, 13, 14, 15 => true
@@ -274,7 +274,7 @@ priv fn fixed_uses(self: *MFunc, i: *MInst) -> []i64 {
 // ---------- registers defined and used by an instruction ----------
 // mir_decode writes the registers that instruction `i` defines and uses (including implicit
 // ones) to du[p..]: du[p] = nd | nu << 8 | flags << 16, then nd defs and nu uses. With
-// DU_CALL the instruction also defines the CALL_CLOBBER registers (after the nd listed
+// DU_CALL the instruction also defines the call_clobber() registers (after the nd listed
 // ones); with DU_COPY it is a copy (is_copy) and du[p + 1] / du[p + 2] are its dst / src.
 // The caller makes room for DU_MAX entries. Returns the position after the entry.
 const DU_CALL = 1
@@ -282,6 +282,13 @@ const DU_COPY = 2
 const DU_MAX = 24
 
 const CALL_CLOBBER = [25]i64{RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
+// Windows: rsi, rdi and xmm6-xmm15 survive a call
+const WIN_CALL_CLOBBER = [13]i64{RAX, RCX, RDX, R8, R9, R10, R11, 16, 17, 18, 19, 20, 21}
+
+// the machine registers a call clobbers (and defines: its results are among them)
+fn call_clobber() -> []i64 {
+    return if target_os == TargetWindows { WIN_CALL_CLOBBER[..] } else { CALL_CLOBBER[..] }
+}
 
 priv fn du_mem(m: *Mem, du: []i64, q0: i64) -> i64 {
     q := q0

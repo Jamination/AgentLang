@@ -2482,6 +2482,8 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
                     ni2 += 1
                 }
             }
+            // (Windows: a call defines only the registers it clobbers, see call_clobber)
+            assert target_os != TargetWindows || ni2 < 4 && nf2 < 7, "isel: results in registers a Windows call preserves"
             for kp in by_idx {
                 k, p := kp
                 if !self.needed[p] {
