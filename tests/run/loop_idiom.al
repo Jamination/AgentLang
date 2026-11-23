@@ -264,4 +264,24 @@ fn main() {
     iota(a, 1000)
     print("iota", sum8(a))
     print("fill last", fill_last(a, 700), sum8(a))
+    // inclusive ranges (the test on the counter itself)
+    for r in [](i64, i64){(0, 999), (5, 4), (10, 10), (100, 227), (100, 228), (3, 500)} {
+        lo, hi := r
+        iota(a, 1000)
+        zero_incl(a, lo, hi)
+        copy_incl(b, a, lo, hi)
+        print("incl", lo, hi, sum8(a), sum8(b))
+    }
+}
+
+noinline fn zero_incl(a: []u8, lo: i64, hi: i64) {
+    for i in lo..=hi {
+        a[i] = 0
+    }
+}
+
+noinline fn copy_incl(dst: []u8, src: []u8, lo: i64, hi: i64) {
+    for i in lo..=hi {
+        dst[i] = src[i]
+    }
 }

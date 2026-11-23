@@ -280,4 +280,48 @@ fn main() {
         print("scatter", n, sa[0], sa[29], sa[58], sa[63])
     }
     print("collatz", collatz_steps(l, 0), collatz_steps(l, 1), collatz_steps(l, 7), collatz_steps(l, 100))
+    // inclusive ranges (the test on the counter itself), up and down, and whole ranges of a
+    // narrow counter (the trip count does not fit in its type)
+    for n in trips {
+        if n < 100 {
+            print("incl", n, sum_incl(l, 0, n - 1), sum_incl(l, 3, n), sum_incl(l, n, 2), knap(l, n, 3))
+        }
+    }
+    print("u8 range", sum_u8_range(0, 255), sum_u8_range(250, 255), sum_u8_range(7, 3), sum_u8_range(255, 255))
+    print("i8 range", sum_i8_range(-128, 127), sum_i8_range(-3, -3), sum_i8_range(120, 127))
+}
+
+noinline fn sum_incl(a: []i64, lo: i64, hi: i64) -> i64 {
+    s := 0
+    for j in lo..=hi {
+        s += a[j] ^ j
+    }
+    s
+}
+
+noinline fn knap(best: []i64, cap: i64, wk: i64) -> i64 {
+    t := 0
+    for w in cap..=wk by -1 {
+        cand := best[w - wk] + 5
+        if cand < best[w] {
+            t += cand - w
+        }
+    }
+    t
+}
+
+noinline fn sum_u8_range(lo: u8, hi: u8) -> u64 {
+    s: u64 = 0
+    for i in lo..=hi {
+        s = s * 3 + u64(i)
+    }
+    s
+}
+
+noinline fn sum_i8_range(lo: i8, hi: i8) -> i64 {
+    s := 0
+    for i in lo..=hi {
+        s += i64(i) * i64(i)
+    }
+    s
 }

@@ -40,7 +40,7 @@ priv fn widen_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, 
         Some(c) => c
         None => return false
     }
-    if cl.ty == I64 || !cl.ty.is_int() {
+    if cl.ty == I64 || !cl.ty.is_int() || cl.cur {
         return false
     }
     ext := lsr_ext_op(&cl)
@@ -58,7 +58,7 @@ priv fn widen_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, 
         }
     }
     // (entered only with start < end: the counter stays between them and never wraps)
-    if exts.is_empty() || !loop_known_at(f, cfg, cl.pre, cl.cmp, cl.start, cl.end) {
+    if exts.is_empty() || !loop_known_at(f, cfg, cl.pre, loop_entry_op(&cl), cl.start, cl.end) {
         return false
     }
     // only when the narrow counter then dies: nothing but its increment, the exit test and
@@ -169,7 +169,7 @@ priv fn reduce_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool,
         }
     }
     // (an extended counter: entered only with start < end, so that it never wraps)
-    if found == NOV || x != cl.iv && !loop_known_at(f, cfg, cl.pre, cl.cmp, cl.start, cl.end) {
+    if found == NOV || x != cl.iv && !loop_known_at(f, cfg, cl.pre, loop_entry_op(&cl), cl.start, cl.end) {
         return false
     }
     pre := cl.pre

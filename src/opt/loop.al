@@ -37,9 +37,14 @@ struct CLoop {
     step: i64        // a constant, not 0
     start: i64       // the counter's input from the preheader
     end: i64         // loop-invariant
-    cmp: Op          // the loop goes on while cmp(next, end) (normalised: back on true, next first)
+    cmp: Op          // the loop goes on while cmp(next, end) (cmp(iv, end) if cur; normalised:
+                     // back on true, the counter first)
     ty: T            // the counter's type
     blocks: Vec[i64] // the loop's blocks in reverse postorder (header first)
+    // the test is on the counter itself, cmp(iv, end) (an inclusive range `a..=b` is lowered
+    // so: `cur < end`, the next value taken only below end, which cannot wrap); next is then
+    // still iv + step, the counter's input from the latch
+    cur: bool
 }
 
 // v is not defined in the loop whose blocks in_loop marks (def_block: the block of every
@@ -116,6 +121,16 @@ fn loop_counted(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
         op = op.negate_icmp()
     }
     next := a
+    cur := false
+    ai := &f.insts[a]
+    if ai.op == Phi && i64(def_block[a]) == h && ai.args.len == 2 {
+        // a test on the counter itself: its next value is its input from the latch
+        next = ai.phi_input(latch)
+        if next == NOV || f.insts[next].op != Add || f.insts[next].args[0] != a {
+            return None
+        }
+        cur = true
+    }
     ni := &f.insts[next]
     if ni.op != Add || def_block[next] == NOV || !in_loop[def_block[next]] {
         return None
@@ -142,7 +157,7 @@ fn loop_counted(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
     for k in 0..bl.len {
         bl[k] = cfg.rpo[bl[k]]
     }
-    return Some(CLoop{li: li, header: h, latch: latch, pre: pre, exit: exit_b, cond: c, back_true: back_true, iv: iv, next: next, step: step, start: start, end: b, cmp: op, ty: pi.ty, blocks: bl})
+    return Some(CLoop{li: li, header: h, latch: latch, pre: pre, exit: exit_b, cond: c, back_true: back_true, iv: iv, next: next, step: step, start: start, end: b, cmp: op, ty: pi.ty, blocks: bl, cur: cur})
 }
 
 // Can the loop be left only through its latch (to cl.exit) or into a check's failure block
@@ -245,7 +260,7 @@ fn loop_used_outside(f: *Func, in_loop: []bool, def_block: []i32) -> Vec[i64] {
 }
 
 // The number of iterations is known at compile time (start and end constants): Some(trip),
-// for step +-1 only (other loops: None)
+// for loop_trip_known loops only (other loops: None)
 fn loop_const_trip(f: *Func, cl: *CLoop) -> Opt[i64] {
     if !loop_trip_known(cl) {
         return None
@@ -258,14 +273,17 @@ fn loop_const_trip(f: *Func, cl: *CLoop) -> Opt[i64] {
         Some(k) => k
         None => return None
     }
-    match simplify_fold_icmp(cl.cmp, cl.ty, s, e) {
+    match simplify_fold_icmp(loop_entry_op(cl), cl.ty, s, e) {
         Some(true) => {}
         Some(false) => return Some(1)
         None => return None
     }
     d := if cl.step > 0 { u64(e) - u64(s) } else { u64(s) - u64(e) }
+    if cl.cur {
+        d += 1
+    }
     d = d & loop_mask(cl.ty)
-    if d >= u64(1) << 62 {
+    if d >= u64(1) << 62 || d == 0 {
         return None
     }
     return Some(i64(d))
@@ -277,28 +295,55 @@ priv fn loop_mask(ty: T) -> u64 {
 }
 
 // Is the trip count of the loop computable by loop_trip_count? Loops counting by 1 up to
-// `end` (exclusive, signed or unsigned, or `!=`) or by -1 down to it (exclusive).
+// `end` (exclusive, signed or unsigned, or `!=`) or by -1 down to it (exclusive), and the
+// same with the test on the counter itself (cl.cur: `<` and `>` only, end included).
 fn loop_trip_known(cl: *CLoop) -> bool {
+    if cl.cur {
+        return cl.step == 1 && (cl.cmp == Slt || cl.cmp == Ult) || cl.step == -1 && (cl.cmp == Sgt || cl.cmp == Ugt)
+    }
     return cl.step == 1 && (cl.cmp == Slt || cl.cmp == Ult || cl.cmp == Ne) || cl.step == -1 && (cl.cmp == Sgt || cl.cmp == Ugt || cl.cmp == Ne)
 }
 
+// The comparison of start and end that holds when the loop is entered normally (by the test
+// before it): `start cmp end`, or for a test on the counter itself (cl.cur) the same with end
+// included (`<=` for `<`). Under it the counter stays between start and end and does not
+// wrap; loop_trip_count is the number of iterations.
+fn loop_entry_op(cl: *CLoop) -> Op {
+    if !cl.cur {
+        return cl.cmp
+    }
+    return match cl.cmp {
+        Slt => Sle
+        Ult => Ule
+        Sgt => Sge
+        Ugt => Uge
+        _ => cl.cmp
+    }
+}
+
 // Appends to block b the condition under which loop_trip_count is the number of iterations
-// (an i8 0 / 1): `start cmp end` for a counter that must not wrap around (signed or
-// unsigned `<` / `>`), `start != end` for `!=`. When it is false the loop runs once (the body
-// is entered whenever the preheader is reached; for `!=` with start == end it would run
-// 2^bits times). Only for loop_trip_known loops.
+// (an i8 0 / 1): `start op end` (loop_entry_op) for a counter that must not wrap around
+// (signed or unsigned `<` / `>`), `start != end` for `!=`. When it is false the loop runs
+// once (the body is entered whenever the preheader is reached; for `!=` with start == end it
+// would run 2^bits times). Only for loop_trip_known loops.
 fn loop_trip_guard(f: *Func, cl: *CLoop, b: i64) -> i64 {
-    return f.push(b, cl.cmp, I8, vec_of([]i64{cl.start, cl.end}), 0)
+    return f.push(b, loop_entry_op(cl), I8, vec_of([]i64{cl.start, cl.end}), 0)
 }
 
 // Appends to block b the number of iterations of the loop (when loop_trip_guard holds), an
-// unsigned number of the counter's type: end - start counting up, start - end counting down.
-// Only for loop_trip_known loops.
+// unsigned number of the counter's type: end - start counting up, start - end counting down
+// (plus 1 for a test on the counter itself: 0 then stands for 2^bits). Only for
+// loop_trip_known loops.
 fn loop_trip_count(f: *Func, cl: *CLoop, b: i64) -> i64 {
-    if cl.step > 0 {
-        return f.push(b, Sub, cl.ty, vec_of([]i64{cl.end, cl.start}), 0)
+    d := if cl.step > 0 {
+        f.push(b, Sub, cl.ty, vec_of([]i64{cl.end, cl.start}), 0)
+    } else {
+        f.push(b, Sub, cl.ty, vec_of([]i64{cl.start, cl.end}), 0)
     }
-    return f.push(b, Sub, cl.ty, vec_of([]i64{cl.start, cl.end}), 0)
+    if cl.cur {
+        d = f.push(b, Add, cl.ty, vec_of([]i64{d, loop_const(f, b, cl.ty, 1)}), 0)
+    }
+    return d
 }
 
 // a constant of type ty in block b (appended)
