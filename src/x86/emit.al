@@ -43,6 +43,7 @@ struct Code {
     dvars: Vec[i32]
     pro_end: i32
     dranges: Vec[DbgRange]
+    align64: bool // the padding of its loops (loop_pads) assumes the function starts at a multiple of 64
 }
 
 priv struct Frame {
@@ -722,7 +723,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
     }
 }
 
-priv fn sets_flags(op: MOp) -> bool {
+fn sets_flags(op: MOp) -> bool {
     match op {
         Add, Sub, And, Or, Xor, Cmp, Test, Imul, Imul3, Neg, Shl, Shr, Sar, Rol, Ror, Idiv, Div,
             Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap, Xadd, Cmpxchg, Bt => true
@@ -730,7 +731,7 @@ priv fn sets_flags(op: MOp) -> bool {
     }
 }
 
-priv fn reads_flags(op: MOp) -> bool {
+fn reads_flags(op: MOp) -> bool {
     match op {
         Jcc, Setcc, Cmov => true
         _ => false
@@ -883,18 +884,24 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
     }
 }
 
-// a jump or the alignment of a block, at position `pos` of the encoded buffer
+// a jump or padding, at position `pos` of the encoded buffer
 priv struct Item {
     pos: i64
-    tgt: i64 // jump target block, or -1: alignment to 16
+    tgt: i64 // jump target block, or -1: padding
     cc: i64  // condition code, or -1: unconditional
     long: bool
+    // padding: -2 alignment to 16 (ALC_ALIGN=1); -1 a place for the padding of a loop, unused
+    // (0 bytes); else the loop header block it moves (loop_pads), by `pad` bytes
+    hdr: i64
+    pad: i64
+    free: bool // nothing falls through to it: its padding is never executed
+    lend: i64  // (hdr >= 0) the item of the loop's last back edge
 }
 
 // size of item k at offset o
 priv fn item_size(it: *Item, o: i64) -> i64 {
     if it.tgt < 0 {
-        return align_pad(o, 16)
+        return if it.hdr == -2 { align_pad(o, 16) } else if it.hdr >= 0 { it.pad } else { 0 }
     }
     if !it.long {
         return 2
@@ -1020,9 +1027,19 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         m.disp = i32(xmm_off + 16 * k)
         M(m)
     }
-    for b in layout {
-        if mf.blocks[b].align {
-            items.push(Item{pos: enc.out.len, tgt: -1, cc: -1, long: false})
+    padi := vec_fill(mf.blocks.len, -1) // the padding place in front of each block, or -1
+    for li, b in layout {
+        if align_mode == 1 && mf.blocks[b].align {
+            items.push(Item{pos: enc.out.len, tgt: -1, cc: -1, long: false, hdr: -2})
+        } else if align_mode == 2 && b != entry {
+            // a place for padding: in front of a loop header, and wherever nothing falls
+            // through (after a jmp, ret or ud2)
+            pi := &mf.blocks[layout[li - 1]].insts
+            free := pi.len > 0 && (pi[pi.len - 1].op == Jmp || pi[pi.len - 1].op == Ret || pi[pi.len - 1].op == Ud2)
+            if free || mf.blocks[b].align {
+                padi[b] = items.len
+                items.push(Item{pos: enc.out.len, tgt: -1, cc: -1, long: false, hdr: -1, free: free})
+            }
         }
         bpos[b] = enc.out.len
         bitem[b] = items.len
@@ -1123,9 +1140,11 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             }
         }
     }
-    // relaxation: pre[k] = the bytes the items before item k add
+    // relaxation: pre[k] = the bytes the items before item k add (the padding of loops is
+    // taken at its largest, 63 bytes, until the jumps are settled: it can only shrink)
     ni := items.len
     pre := vec_fill(ni + 1, 0)
+    align64 := align_mode == 2 && loop_pads(mf, layout.items(), &items, bpos.items(), bitem.items(), padi.items())
     loop {
         add := 0
         for k in 0..ni {
@@ -1148,6 +1167,30 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         if !changed {
             break
         }
+    }
+    if align64 {
+        // the padding each loop needs, in order (the items between a padding and its loop
+        // are jumps of settled size and unused places), then the offsets again
+        add := 0
+        for k in 0..ni {
+            pre[k] = add
+            it := &items[k]
+            if it.tgt < 0 && it.hdr >= 0 {
+                h := it.hdr
+                between := 0
+                for j in k + 1..bitem[h] {
+                    between += item_size(&items[j], 0)
+                }
+                at := bpos[h] + add + between
+                size := items[it.lend].pos - bpos[h]
+                for j in bitem[h]..=it.lend {
+                    size += item_size(&items[j], 0)
+                }
+                it.pad = loop_pad(at, size)
+            }
+            add += item_size(it, it.pos + add)
+        }
+        pre[ni] = add
     }
     bytes := vec[u8]()
     bytes.reserve(enc.out.len + pre[ni])
@@ -1176,7 +1219,20 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         it := &items[k]
         o := bytes.len
         if it.tgt < 0 {
-            nops(&bytes, align_pad(o, 16))
+            if it.hdr == -2 {
+                nops(&bytes, align_pad(o, 16))
+            } else if it.hdr >= 0 && it.pad > 0 {
+                if it.free || it.pad <= 15 {
+                    nops(&bytes, it.pad)
+                } else {
+                    // executed: a jump over it
+                    bytes.push(0xEB)
+                    bytes.push(u8(it.pad - 2))
+                    for _ in 2..it.pad {
+                        bytes.push(0xCC)
+                    }
+                }
+            }
             continue
         }
         t := bpos[it.tgt] + pre[bitem[it.tgt]]
@@ -1265,7 +1321,80 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
         pro_end = pe
     }
     return Code{bytes: bytes, relocs: relocs, err: err, unwind: unwind, lines: lines, alloc: size, npush: npush,
-        push_end: i32(push_end), alloc_end: i32(alloc_end), epis: epis, dvars: dvars, pro_end: i32(pro_end), dranges: dranges}
+        push_end: i32(push_end), alloc_end: i32(alloc_end), epis: epis, dvars: dvars, pro_end: i32(pro_end), dranges: dranges,
+        align64: align64}
+}
+
+// 0: no padding of loops; 1 (ALC_ALIGN=1): every innermost loop header aligned to 16 (padding
+// executed on entry, up to 10 bytes); 2 (the default): loop_pads
+priv align_mode := 2
+
+fn emit_align_mode(k: i64) {
+    align_mode = k
+}
+
+// Padding that keeps small innermost loops (the blocks marked `align`) from straddling a cache
+// line: a loop of at most 32 bytes from its header to the end of its last back edge must not
+// cross a 32-byte boundary, one of at most 64 bytes no 64-byte boundary (a loop of a few
+// instructions split over two lines ran at about half speed: saxpy, daxpy, dot_u32). The
+// padding goes to the last place before the header where nothing falls through, so that it is
+// never executed; without one, in front of the header, where it is executed on every entry
+// (16 bytes or more as a jump over it). Each loop's place is after the previous loop's end.
+// Marks the places used (Item.hdr, lend; pad 63 for now: the relaxation of the jumps takes
+// the largest padding) and returns whether there is one: the function then starts at a
+// multiple of 64 (Code.align64), which the offsets are counted from.
+priv fn loop_pads(mf: *MFunc, layout: []i64, items: *Vec[Item], bpos: []i64, bitem: []i64, padi: []i64) -> bool {
+    any := false
+    floor := 0 // places before it belong to an earlier loop
+    for b in layout {
+        if !mf.blocks[b].align || padi[b] < 0 {
+            continue
+        }
+        // the last back edge, and the smallest size the loop can have
+        lend := -1
+        for k in bitem[b]..items.len {
+            if items[k].tgt == b {
+                lend = k
+            }
+        }
+        if lend < 0 || padi[b] < floor {
+            continue
+        }
+        njumps := 0
+        for k in bitem[b]..=lend {
+            if items[k].tgt >= 0 {
+                njumps += 1
+            }
+        }
+        if items[lend].pos - bpos[b] + 2 * njumps > 64 {
+            continue
+        }
+        spot := padi[b]
+        for k in padi[b]..=floor by -1 {
+            if items[k].tgt < 0 && items[k].free {
+                spot = k
+                break
+            }
+        }
+        items[spot].hdr = b
+        items[spot].lend = lend
+        items[spot].pad = 63
+        floor = lend + 1
+        any = true
+    }
+    return any
+}
+
+// the padding that keeps a loop of `size` bytes at offset `at` inside one 32-byte block (at
+// most 32 bytes) or 64-byte line
+priv fn loop_pad(at: i64, size: i64) -> i64 {
+    if size <= 32 && at % 32 + size > 32 {
+        return 32 - at % 32
+    }
+    if size <= 64 && at % 64 + size > 64 {
+        return 64 - at % 64
+    }
+    return 0
 }
 
 // rewrites the float constant relocations of code from indices into the function's own list

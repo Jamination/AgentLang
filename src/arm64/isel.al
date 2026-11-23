@@ -898,6 +898,21 @@ priv fn inst(self: *Sel, v: i64) {
                 Some(k) if k > 0 && k & (k - 1) == 0 => {
                     self.ei(LslI, osz(ty), d, self.reg(a), i64(ctz(u64(k))))
                 }
+                Some(k) if k > 2 && k < 0x4000_0000 && (k - 1) & (k - 2) == 0 => {
+                    // a * (2^n + 1): add d, a, a, lsl n
+                    x := self.reg(a)
+                    ai := ainst(AddR, osz(ty), d, x, x)
+                    ai.k = A64_LSL
+                    ai.sh = u8(ctz(u64(k - 1)))
+                    self.out.push(ai)
+                }
+                Some(k) if k > 2 && k < 0x4000_0000 && (k + 1) & k == 0 => {
+                    // a * (2^n - 1): (a << n) - a
+                    x := self.reg(a)
+                    t := self.gp()
+                    self.ei(LslI, osz(ty), t, x, i64(ctz(u64(k + 1))))
+                    self.e(SubR, osz(ty), d, t, x)
+                }
                 _ => self.e(Mul, osz(ty), d, self.reg(a), self.reg(b))
             }
         }
@@ -1170,6 +1185,15 @@ priv fn inst(self: *Sel, v: i64) {
             // the address of the saved link register (the frame record, see emit.al)
             self.mem(AdrS, 8, self.vr(v), AM{k: AK_INARG, base: NOREG, idx: NOREG, sh: 0, imm: 0, id: -1})
             self.mf.save_all = true
+        }
+        Carry => {
+            // 1 if s <u a: cmp s, a; cset d, lo
+            x := self.reg(i.args[0])
+            y := self.reg(i.args[1])
+            self.e(CmpR, osz(ty), NOREG, x, y)
+            ci := ainst(Cset, 4, self.vr(v), NOREG, NOREG)
+            ci.cc = u8(A64_LO)
+            self.out.push(ci)
         }
         Bswap => {
             d := self.vr(v)

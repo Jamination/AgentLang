@@ -421,6 +421,11 @@ priv struct Sel {
     tls_reg: i64
     tls_uses: Vec[i32]
     term_at: Vec[i32]
+    // an Add whose carry flag a Carry of the same block takes: the add -> the Carry
+    carry_of: Map[i64, i64]
+    // the GAddr the last MK_GLOBAL operand of addr_term came from (see rip_legal)
+    gaddr_v: i64
+    loop_calls: Vec[u8] // per loop: 0 not known yet, 1 no call, 2 a call (gaddr_kept)
 }
 
 // ---------- frame slots of allocas ----------
@@ -718,6 +723,7 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
         param_of: vec_fill(f.params.len, -1),
         loops: loops,
         tls_reg: NOREG,
+        gaddr_v: -1,
     }
     nb := f.blocks.len
     if target_os == TargetWindows {
@@ -810,6 +816,12 @@ fn isel_select(f: *Func, m: *Module, rpo: []i64, loops: Loops, depths: []i64, al
                 if dbg_on {
                     s.out[s.out.len - 1].tgt = i32(v + 1)
                 }
+                continue
+            }
+            if op == GAddr && s.needed[v] {
+                // a global's address kept in a register for the loops after it (gaddr_kept)
+                starts.push(s.out.len)
+                s.out.push(minst_new(Mov, 8, R(s.vr(v)), Opnd.GAddr(f.insts[v].k, 0)))
                 continue
             }
             if op == Phi || op == Param || op == Alloca || op == Const || op == FConst || op == GAddr || op == FAddr || op == Proj {
@@ -911,7 +923,8 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
             self.e(Zero, 8, R(r), Opnd.None)
         } else {
             m := self.fconst(Bits128{lo: u64(i.k), hi: 0})
-            self.e(MovSd, 8, R(r), M(m))
+            // (movss for an f32: the 4 bytes of the constant)
+            self.e(MovSd, if i.ty == F32 { 4 } else { 8 }, R(r), M(m))
         }
         return r
     }
@@ -933,7 +946,7 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
         self.e(Lea, 8, R(r), M(Mem{base: i32(r), idx: NOREG, scale: 1, disp: 0, kind: MK_GLOBAL, id: i32(i.k)}))
         return r
     }
-    if i.op == GAddr {
+    if i.op == GAddr && !self.gaddr_kept(v) {
         r := new_vreg(&self.mf, 0)
         self.e(Mov, 8, R(r), Opnd.GAddr(i.k, 0))
         return r
@@ -959,6 +972,49 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
     }
     self.needed[v] = true
     return self.vr(v)
+}
+
+// is the address of the (not thread-local) global v kept in a register from its definition
+// on instead of being made where it is used? When it is used in a loop that v is outside of
+// and that makes no call (but on paths that end in a trap): one `lea` before the loop instead
+// of one at every use in it. (Across calls the register would be spilled and reloaded, which
+// costs more than the `lea`.)
+priv fn gaddr_kept(self: *Sel, v: i64) -> bool {
+    db := i64(self.blk_of[v])
+    cb := i64(self.cur_block)
+    if db == cb || db < 0 || cb >= self.loops.loop_of.len {
+        return false
+    }
+    // the outermost loop around cb that is not around db
+    li := i64(self.loops.loop_of[cb])
+    outer := -1
+    while li >= 0 && !contains(&self.loops, li, db) {
+        outer = li
+        li = self.loops.loops[li].parent.or(-1)
+    }
+    if outer < 0 {
+        return false
+    }
+    if self.loop_calls.len != self.loops.loops.len {
+        self.loop_calls = vec_fill(self.loops.loops.len, u8(0))
+    }
+    if self.loop_calls[outer] == 0 {
+        st: u8 = 1
+        for b in self.loops.loops[outer].blocks {
+            match self.f.blocks[b].term {
+                Trap => continue
+                _ => {}
+            }
+            for u in self.f.blocks[b].insts {
+                o := self.f.insts[u].op
+                if o == Call || o == CallInd || o == Syscall {
+                    st = 2
+                }
+            }
+        }
+        self.loop_calls[outer] = st
+    }
+    return self.loop_calls[outer] == 1
 }
 
 // register or 32-bit immediate
@@ -1048,6 +1104,7 @@ priv fn addr_term(self: *Sel, v: i64, m: *Mem, depth: i64, mem: bool) {
         if !self.m.globals[i.k].tls {
             m.kind = MK_GLOBAL
             m.id = i32(i.k)
+            self.gaddr_v = v
             return
         }
         if target_os == TargetWindows {
@@ -1306,6 +1363,26 @@ priv fn addr(self: *Sel, v: i64) -> Mem {
 // or index register: next to one, the global's address goes to a register first
 priv fn rip_legal(self: *Sel, m: *Mem) {
     if m.kind != MK_GLOBAL || target_os != TargetWindows || (m.base == NOREG && m.idx == NOREG) {
+        return
+    }
+    g := self.gaddr_v
+    if g >= 0 && g < self.f.insts.len && self.f.insts[g].op == GAddr && self.f.insts[g].k == i64(m.id) &&
+        self.gaddr_kept(g) && fits_i32(i64(m.disp)) {
+        // the address kept in a register from before the loop, the offset stays
+        t := self.reg(g)
+        if m.idx == NOREG {
+            m.idx = m.base
+            m.scale = 1
+            m.base = i32(t)
+        } else if m.base == NOREG {
+            m.base = i32(t)
+        } else {
+            u := new_vreg(&self.mf, 0)
+            self.e(Lea, 8, R(u), M(Mem{base: i32(t), idx: m.base, scale: 1, disp: 0, kind: MK_NORMAL, id: 0}))
+            m.base = i32(u)
+        }
+        m.kind = MK_NORMAL
+        m.id = 0
         return
     }
     t := new_vreg(&self.mf, 0)
@@ -1823,15 +1900,31 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     b := i.args[1]
     ty := i.ty
     sz := osz(ty)
-    wide := ty == I32 || ty == I64
+    // a narrow load folds into an operation of its own width (the bits above it in the
+    // register are not part of a narrow value): `add r8, byte [m]`
+    narrow := (ty == I8 || ty == I16) && mop != Imul
+    wide := ty == I32 || ty == I64 || narrow
     if commutative && wide && !self.can_fold_load(b) && self.can_fold_load(a) {
         swap(&a, &b)
-    } else if commutative && !self.can_fold_load(b) && !is_some(self.f.is_const(a)) && self.uses[a] > 1 && self.uses[b] == 1 && !is_some(self.f.is_const(b)) {
+    } else if commutative && self.phi_fed(b, v) && !self.phi_fed(a, v) {
+        swap(&a, &b)
+    } else if commutative && !self.phi_fed(a, v) && !self.can_fold_load(b) && !is_some(self.f.is_const(a)) && self.uses[a] > 1 && self.uses[b] == 1 && !is_some(self.f.is_const(b)) {
         swap(&a, &b)
     }
     d := self.vr(v)
     ar := self.reg(a)
-    bo := self.rmi_mem(b, ty)
+    bo: Opnd = Opnd.None
+    m_narrow: Opt[Mem] = None
+    if narrow && self.f.insts[b].ty == ty {
+        m_narrow = self.load_mem(b)
+    }
+    match m_narrow {
+        Some(m) => {
+            bo = M(m)
+            sz = sz_of(ty)
+        }
+        None => bo = self.rmi_mem(b, ty)
+    }
     self.e(Mov, 8, R(d), R(ar))
     self.e(mop, sz, R(d), bo)
 }
@@ -1840,7 +1933,9 @@ priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     i := &self.f.insts[v]
     a := i.args[0]
     b := i.args[1]
-    if commutative && !self.can_fold_load(b) && (self.f.insts[a].op == FConst || self.can_fold_load(a) || (self.uses[a] > 1 && self.uses[b] == 1 && self.f.insts[b].op != FConst)) {
+    if commutative && self.phi_fed(b, v) && !self.phi_fed(a, v) {
+        swap(&a, &b)
+    } else if commutative && !self.phi_fed(a, v) && !self.can_fold_load(b) && (self.f.insts[a].op == FConst || self.can_fold_load(a) || (self.uses[a] > 1 && self.uses[b] == 1 && self.f.insts[b].op != FConst)) {
         swap(&a, &b)
     }
     d := self.vr(v)
@@ -1943,7 +2038,7 @@ priv fn zext_free(self: *Sel, v: i64) -> bool {
             Some(k) => k & 31 != 0
             None => false
         }
-        Add, Sub, Mul, And, Or, Xor, Load, ZExt, SDiv, UDiv, SRem, URem, Bswap => true
+        Add, Sub, Mul, And, Or, Xor, Load, ZExt, SDiv, UDiv, SRem, URem, Bswap, Carry => true
         _ => false
     }
 }
@@ -1967,7 +2062,32 @@ priv fn inst(self: *Sel, v: i64) {
     ty := i.ty
     match i.op {
         Add => {
-            if ty == I64 {
+            cv, fused := self.carry_of.get(v)
+            if fused {
+                // s = a + x with the carry out of it: zero c; mov s, a; add s, x; setc c
+                a := i.args[0]
+                x := i.args[1]
+                if a != self.f.insts[cv].args[1] {
+                    swap(&a, &x)
+                }
+                dc := self.vr(cv)
+                d := self.vr(v)
+                ar := self.reg(a)
+                xo := self.rmi_mem(x, ty)
+                self.e(Zero, 4, R(dc), Opnd.None)
+                self.e(Mov, 8, R(d), R(ar))
+                self.e(MOp.Add, osz(ty), R(d), xo)
+                sc := minst_new(Setcc, 1, R(dc), Opnd.None)
+                sc.cc = CC_B
+                self.out.push(sc)
+                return
+            }
+            a0 := i.args[0]
+            b0 := i.args[1]
+            if ty == I64 && (self.phi_fed(a0, v) && self.can_fold_load(b0) || self.phi_fed(b0, v) && self.can_fold_load(a0)) {
+                // s += [mem] on a reduction: the load folds into the add on the phi's register
+                self.binop(v, MOp.Add, true)
+            } else if ty == I64 {
                 m := mem_new()
                 self.addr_term(i.args[0], &m, 1, false)
                 self.addr_term(i.args[1], &m, 1, false)
@@ -1986,13 +2106,10 @@ priv fn inst(self: *Sel, v: i64) {
                     ra := i64(m.base)
                     rb := i64(m.idx)
                     direct := i64(self.vreg[a]) == ra && i64(self.vreg[b]) == rb
-                    // an accumulator (a phi used only here) first: d can take its register
-                    acc_a := self.f.insts[a].op == Phi && self.uses[a] == 1
-                    acc_b := self.f.insts[b].op == Phi && self.uses[b] == 1
-                    if direct && acc_a {
+                    if direct && self.phi_fed(a, v) {
                         self.e(Mov, 8, R(d), R(ra))
                         self.e(MOp.Add, 8, R(d), R(rb))
-                    } else if direct && acc_b {
+                    } else if direct && self.phi_fed(b, v) {
                         self.e(Mov, 8, R(d), R(rb))
                         self.e(MOp.Add, 8, R(d), R(ra))
                     } else if direct && self.dies_here(a) {
@@ -2476,6 +2593,29 @@ priv fn inst(self: *Sel, v: i64) {
             self.e(Lea, 8, R(d), M(Mem{base: NOREG, idx: NOREG, scale: 1, disp: 0, kind: MK_INARG, id: -1}))
             self.mf.save_all = true
         }
+        Carry => {
+            s := i.args[0]
+            a := i.args[1]
+            si := &self.f.insts[s]
+            _, taken := self.carry_of.get(s)
+            if si.op == Add && si.ty == ty && (si.args[0] == a || si.args[1] == a) && self.blk_of[s] == self.cur_block && !taken {
+                // the add (earlier in this block, selected later) sets the result from its
+                // carry flag
+                self.carry_of.set(s, v)
+                self.needed[s] = true
+                self.vr(s)
+                self.vr(v)
+                return
+            }
+            d := self.vr(v)
+            rs := self.reg(s)
+            ao := self.rmi(a)
+            self.e(Zero, 4, R(d), Opnd.None)
+            self.e(Cmp, osz(ty), R(rs), ao)
+            sc := minst_new(Setcc, 1, R(d), Opnd.None)
+            sc.cc = CC_B
+            self.out.push(sc)
+        }
         Bswap, Popcnt, Ctz, Clz => {
             d := self.vr(v)
             sz := osz(ty)
@@ -2536,6 +2676,21 @@ priv fn inst(self: *Sel, v: i64) {
 // that use, so a two-address instruction can reuse its register
 priv fn dies_here(self: *Sel, v: i64) -> bool {
     return self.uses[v] == 1 && self.blk_of[v] == self.cur_block && self.f.insts[v].op != Phi
+}
+
+// p is a phi used only by v, which is one of its incoming values (a reduction `s = s + x`): a
+// two-address result written over p's register leaves no copy on the back edge
+priv fn phi_fed(self: *Sel, p: i64, v: i64) -> bool {
+    pi := &self.f.insts[p]
+    if pi.op != Phi || self.uses[p] != 1 {
+        return false
+    }
+    for a in pi.args {
+        if a == v {
+            return true
+        }
+    }
+    return false
 }
 
 priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
@@ -2746,6 +2901,8 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
                     ni2 += 1
                 }
             }
+            // (Windows: a call defines only the registers it clobbers, see call_clobber)
+            assert target_os != TargetWindows || ni2 < 4 && nf2 < 7, "isel: results in registers a Windows call preserves"
             for kp in by_idx {
                 k, p := kp
                 if !self.needed[p] {

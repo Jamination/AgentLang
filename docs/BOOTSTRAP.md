@@ -693,13 +693,13 @@ sequential, and `--emit-ir` optimises every function in the compiler before it p
 `ALC_DISABLE=pass,...` (`unroll`, `bce`, `licm`, `gvn`, `loadelim`, `checkmerge`, `tre`,
 `partial`, `thread4`, `thread5`, `ifconv`, `devirt`: calls through known function values stay
 indirect, `spec`: no specialised copies; outside the optimiser `constif`: `if` on a constant
-is not decided while lowering, `deaddata`: all read-only data is linked, `backtrace`: no stack-trace table); `ALC_STD_DIR=<dir>` reads bundled modules from
+is not decided while lowering, `deaddata`: all read-only data is linked, `backtrace`: no stack-trace table, `sinkstep`: the x86 back end leaves the step of an induction variable before the loop's compare); `ALC_STD_DIR=<dir>` reads bundled modules from
 `<dir>` instead of the copies inside the compiler (such a module, except a core one, is
 type-checked in full also by `alc build` / `run`, which otherwise compile only what a program
 reaches of a module); `ALC_PRELUDE=<file>` reads the prelude
 from `<file>` and the OS layer from `prelude_linux.al` / `prelude_windows.al` next to it (no
 layer if there is none: the file is then the whole run-time library), so
-`ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=1` aligns inner loops;
+`ALC_PRELUDE=src/prelude.al` tests library changes without a rebuild; `ALC_ALIGN=0` turns off the padding that keeps small innermost x86 loops inside one 32- or 64-byte block (`loop_pads` in `src/x86/emit.al`), `ALC_ALIGN=1` aligns every innermost loop to 16 instead;
 `ALC_PE_BASE=<hex>` builds a Windows executable for another preferred base (for the relocation test below);
 `ALC_DBGLOC=<function>` (with `-g`, optimising) prints what the variable locations of that
 function are found from (src/debug.al: the values recorded by source location, the machine

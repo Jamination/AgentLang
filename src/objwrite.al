@@ -72,13 +72,25 @@ fn used_externs(m: *Module, out: *Output) -> Vec[i64] {
 // Appends the code of the functions to text (each at a multiple of 16, the gaps filled with
 // int3), whose first byte is at address addr; records where each function is.
 fn layout_text(text: *Vec[u8], out: *Output, addr: i64, func_off: *Vec[i64], func_addr: *Vec[i64]) {
+    first := -1
     for ci in 0..out.funcs.len {
         c := &out.funcs[ci]
-        text.resize(align_up(text.len, 16), 0xCC)
+        if first < 0 {
+            text.resize(align_up(text.len, 16), 0xCC)
+            first = text.len
+        }
+        text.resize(first + func_place(text.len - first, c.code.align64), 0xCC)
         func_off[c.fid] = text.len
         func_addr[c.fid] = addr + text.len
         text.extend(c.code.bytes.items())
     }
+}
+
+// where layout_text places a function after code that ends `end` bytes after the start of the
+// first function: at a multiple of 16, or of 64 for one whose loops are padded for that
+// (x86/emit.al, loop_pads; src/backtrace.al counts the same way)
+fn func_place(end: i64, align64: bool) -> i64 {
+    return align_up(end, if align64 { 64 } else { 16 })
 }
 
 // The read-only data at address addr: the float constant pool, then the live read-only
