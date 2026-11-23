@@ -559,6 +559,14 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                 Some(k1) => k1
                 None => return None
             }
+            // a comparison the range of a decides (`x & 63 <u 64`, `zext(u8) <u 256`)
+            match self.range_cmp(op, a, at, k) {
+                Some(r) => {
+                    self.set_const(v, i64(r))
+                    return None
+                }
+                None => {}
+            }
             ai := &self.f.insts[a]
             if (op == Eq || op == Ne) && at == I8 && ai.op.is_cmp() {
                 truth := (op == Ne) == (k == 0)
@@ -759,6 +767,124 @@ priv fn ubits(self: *Ctx, v: i64, depth: i64) -> i64 {
         _ => tb
     }
     return min(r, tb)
+}
+
+// ---------- value ranges for comparisons with constants ----------
+// An upper bound on v read as an unsigned number of the width of its type. Every rule holds
+// in wrapping arithmetic: a sum or product counts only when it cannot pass the top of the type.
+priv fn umax(self: *Ctx, v: i64, depth: i64) -> u64 {
+    i := &self.f.insts[v]
+    if !i.ty.is_int() {
+        return ~u64(0)
+    }
+    tb := i64(i.ty.bits())
+    m := mask(tb)
+    if depth == 0 {
+        return m
+    }
+    r: u64 = m
+    match i.op {
+        Const => r = u64(i.k) & m
+        And => r = min(self.umax(i.args[0], depth - 1), self.umax(i.args[1], depth - 1))
+        Or, Xor => {
+            // below the next power of two of the larger one
+            x := max(self.umax(i.args[0], depth - 1), self.umax(i.args[1], depth - 1))
+            r = if x == 0 { u64(0) } else { mask(64 - i64(clz(x))) }
+        }
+        LShr => match self.c(i.args[1]) {
+            Some(k) => r = self.umax(i.args[0], depth - 1) >> u64(k & (tb - 1))
+            None => {}
+        }
+        Shl => match self.c(i.args[1]) {
+            Some(k) => {
+                s := k & (tb - 1)
+                x := self.umax(i.args[0], depth - 1)
+                if x <= m >> u64(s) {
+                    r = x << u64(s)
+                }
+            }
+            None => {}
+        }
+        ZExt => r = self.umax(i.args[0], depth - 1) & mask(i64(self.f.insts[i.args[0]].ty.bits()))
+        URem => match self.c(i.args[1]) {
+            Some(k) if u64(k) & m != 0 => r = min(self.umax(i.args[0], depth - 1), (u64(k) & m) - 1)
+            _ => {}
+        }
+        UDiv => match self.c(i.args[1]) {
+            Some(k) if u64(k) & m != 0 => r = self.umax(i.args[0], depth - 1) / (u64(k) & m)
+            _ => {}
+        }
+        Add => {
+            x := self.umax(i.args[0], depth - 1)
+            y := self.umax(i.args[1], depth - 1)
+            if x <= m - y {
+                r = x + y
+            }
+        }
+        Mul => {
+            x := self.umax(i.args[0], depth - 1)
+            y := self.umax(i.args[1], depth - 1)
+            if x == 0 || y <= m / x {
+                r = x * y
+            }
+        }
+        Select => r = max(self.umax(i.args[1], depth - 1), self.umax(i.args[2], depth - 1))
+        Phi => {
+            if i.args.len <= 8 {
+                r = 0
+                for a in i.args {
+                    if a != v {
+                        r = max(r, self.umax(a, depth - 1))
+                    }
+                }
+            }
+        }
+        Popcnt => r = u64(tb)
+        _ => {
+            if i.op.is_cmp() {
+                r = 1
+            }
+        }
+    }
+    return min(r, m)
+}
+
+// The value of `a op k` (k a constant) when the range of a decides it
+priv fn range_cmp(self: *Ctx, op: Op, a: i64, at: T, k: i64) -> Opt[bool] {
+    if !at.is_int() {
+        return None
+    }
+    signed := op == Slt || op == Sle || op == Sgt || op == Sge
+    if !signed && op != Ult && op != Ule && op != Ugt && op != Uge {
+        return None
+    }
+    tb := i64(at.bits())
+    m := mask(tb)
+    hi := self.umax(a, 6)
+    if hi == m {
+        return None
+    }
+    if signed {
+        // a is not negative when its bound is below the sign bit; then a lies in 0..=hi
+        if hi > m >> 1 {
+            return None
+        }
+        // (k is sign-extended)
+        sh := i64(hi)
+        return match op {
+            Slt => if k > sh { Some(true) } else if k <= 0 { Some(false) } else { None }
+            Sle => if k >= sh { Some(true) } else if k < 0 { Some(false) } else { None }
+            Sgt => if k >= sh { Some(false) } else if k < 0 { Some(true) } else { None }
+            _ => if k > sh { Some(false) } else if k <= 0 { Some(true) } else { None }
+        }
+    }
+    uk := u64(k) & m
+    return match op {
+        Ult => if hi < uk { Some(true) } else { None }
+        Ule => if hi <= uk { Some(true) } else { None }
+        Ugt => if hi <= uk { Some(false) } else { None }
+        _ => if hi < uk { Some(false) } else { None }
+    }
 }
 
 priv fn match_rotate(self: *Ctx, a: i64, b: i64, ty: T) -> Opt[(Op, i64, i64)] {
