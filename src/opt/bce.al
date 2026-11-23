@@ -773,6 +773,10 @@ priv fn eliminate(f: *Func) -> bool {
 
 fn bce_run(f: *Func) -> bool {
     changed := false
+    if opt_enabled("bcerange") && rg_run(f) {
+        changed = true
+        cleanup_prune_unreachable(f)
+    }
     if eliminate(f) {
         changed = true
         cleanup_prune_unreachable(f)
@@ -846,6 +850,932 @@ fn bce_run(f: *Func) -> bool {
                 changed = true
             }
             loops.mark_blocks(li, in_loop.items(), false)
+        }
+    }
+    return changed
+}
+
+// ---------- checks decided by dominating conditions ----------
+// A bounds check `idx <u len` holds when 0 <= idx < len (signed), which the conditions of the
+// branches that lead to it often show: `while i < n && s[i] != 0` (n the length), `while i + 4
+// <= n` with s[i], s[i + 1], ... A small range analysis over the dominator tree answers three
+// questions about a value x at a place in the function (a block, or the way from a block into
+// another): a lower bound, an upper bound, and a bound c with x - y <= c for another value y.
+// Every value is read as the signed number it holds; `x + k` is x plus k only where the bounds
+// of x show that the sum does not wrap. Its sources are
+// - the conditions of the branches into the blocks that dominate the place (also checks that
+//   passed: a check is a branch to a trap block);
+// - the definitions (constants, sums with constants, masks, zero extensions, shifts, remainders);
+// - the phis of loops, by induction: a bound that holds for the inputs from outside the loop and
+//   that the inputs along the back edges keep, assuming it for the phi itself;
+// - lengths: the second operand of a bounds check (`idx <u len`) is the length of a sequence of
+//   `len` elements in memory, at least 0 and below 2^62 (no object is larger; other lengths
+//   only come from what is not checked: `mkslice`, a `Vec` length set by hand).
+// A check is removed when its condition is proven with the check itself left out (so no proof
+// leans on what it proves), one at a time (each later proof sees only the checks still there).
+// A run of checks `x + k1 <u len`, `x + k2 <u len`, ... with nothing but checks and plain
+// instructions between them becomes one check of the largest index at the place of the first:
+// the others pass with it when x + min k >= 0. (That a check fails earlier is not observable,
+// as in hoisting and checkmerge: only which failing access is reported can differ.)
+
+priv fn rg_min() -> i64 {
+    return -9223372036854775807 - 1
+}
+
+priv fn rg_max() -> i64 {
+    return 9223372036854775807
+}
+
+// the largest length (see above)
+priv fn rg_len_max() -> i64 {
+    return 1 << 62
+}
+
+// a true comparison `a op b`, op one of Slt Sle Ult Ule Eq Ne
+priv struct RgFact {
+    op: Op
+    a: i64
+    b: i64
+}
+
+priv struct Rg {
+    f: *Func
+    cfg: Cfg
+    def_block: Vec[i32]
+    nb: i64
+    // the operands that are lengths of bounds checks
+    is_len: Vec[bool]
+    // facts by place: places 0..nb are blocks, nb + j the way edges[j] = (from, to)
+    edges: Vec[(i64, i64)]
+    facts: Vec[Vec[RgFact]]
+    fgen: Vec[i64]
+    gen: i64
+    budget: i64
+    // the bounds assumed for phis while their induction is checked: (phi, kind, y, bound);
+    // kind 0: phi >= bound, 1: phi <= bound, 2: phi - y <= bound
+    asm: Vec[(i64, i64, i64, i64)]
+    // the length of the check being proven (NOV: none)
+    ctx_y: i64
+    // how deep the questions go
+    depth: i64
+    // the answers so far: (kind and place, x, y, the assumptions) -> (depth, bound); kind 0
+    // lower bound, 1 upper bound, 2 x - y; emptied when the facts change
+    cache: Map[(i64, i64, i64, i64), (i64, i64)]
+}
+
+// the key of an answer under the current assumptions
+priv fn rg_key(self: *Rg, kind: i64, x: i64, y: i64, pos: i64) -> (i64, i64, i64, i64) {
+    sig: u64 = 0
+    for a in self.asm {
+        sig = (sig ^ u64(a.0)) * 0x9E3779B97F4A7C15
+        sig = (sig ^ u64(a.1 + 4 * a.2)) * 0x9E3779B97F4A7C15
+        sig = (sig ^ u64(a.3)) * 0x9E3779B97F4A7C15
+    }
+    return (kind + 4 * pos, x, y, i64(sig))
+}
+
+// a remembered answer found at least as deep as d
+priv fn rg_cached(self: *Rg, key: (i64, i64, i64, i64), d: i64) -> Opt[i64] {
+    dv, found := self.cache.get(key)
+    if found && dv.0 >= d {
+        return Some(dv.1)
+    }
+    return None
+}
+
+// a + b, or None when it wraps
+priv fn rg_add(a: i64, b: i64) -> Opt[i64] {
+    if (b > 0 && a > rg_max() - b) || (b < 0 && a < rg_min() - b) {
+        return None
+    }
+    return Some(a + b)
+}
+
+priv fn rg_const(self: *Rg, v: i64) -> Opt[i64] {
+    i := &self.f.insts[v]
+    if i.op == Const && i.ty == I64 {
+        return Some(i.k)
+    }
+    return None
+}
+
+// x = y + k with k a constant (also y - k): (y, k)
+priv fn rg_split(self: *Rg, x: i64) -> Opt[(i64, i64)] {
+    i := &self.f.insts[x]
+    if i.ty != I64 || i.args.len != 2 {
+        return None
+    }
+    if i.op == Add {
+        match self.rg_const(i.args[1]) {
+            Some(k) => return Some((i.args[0], k))
+            None => {}
+        }
+        match self.rg_const(i.args[0]) {
+            Some(k) => return Some((i.args[1], k))
+            None => {}
+        }
+    }
+    if i.op == Sub {
+        match self.rg_const(i.args[1]) {
+            Some(k) if k != rg_min() => return Some((i.args[0], -k))
+            _ => {}
+        }
+    }
+    return None
+}
+
+priv fn rg_block_of(self: *Rg, v: i64) -> i64 {
+    if v >= self.def_block.len || self.def_block[v] == NOV {
+        return -1
+    }
+    return i64(self.def_block[v])
+}
+
+// the place of the way from p into b
+priv fn rg_edge(self: *Rg, p: i64, b: i64) -> i64 {
+    for j in 0..self.edges.len {
+        if self.edges[j] == (p, b) {
+            return self.nb + j
+        }
+    }
+    self.edges.push((p, b))
+    self.facts.push(vec[RgFact]())
+    self.fgen.push(-1)
+    return self.nb + self.edges.len - 1
+}
+
+// the fact the branch of block p gives on its way into block b
+priv fn rg_edge_fact(self: *Rg, p: i64, b: i64, out: *Vec[RgFact]) {
+    c, t, e := match self.f.blocks[p].term {
+        Br(c0, t0, e0) if t0 != e0 && (t0 == b || e0 == b) => (c0, t0, e0)
+        _ => return
+    }
+    ci := &self.f.insts[c]
+    if !ci.op.is_icmp() || ci.args.len != 2 || self.f.insts[ci.args[0]].ty != I64 {
+        return
+    }
+    o := if t == b { ci.op } else { ci.op.negate_icmp() }
+    x := ci.args[0]
+    y := ci.args[1]
+    match o {
+        Sgt => out.push(RgFact{op: Slt, a: y, b: x})
+        Sge => out.push(RgFact{op: Sle, a: y, b: x})
+        Ugt => out.push(RgFact{op: Ult, a: y, b: x})
+        Uge => out.push(RgFact{op: Ule, a: y, b: x})
+        _ => out.push(RgFact{op: o, a: x, b: y})
+    }
+}
+
+// the facts that hold at place `pos`
+priv fn rg_facts(self: *Rg, pos: i64) -> Vec[RgFact] {
+    if self.fgen[pos] == self.gen {
+        return self.facts[pos]
+    }
+    out := vec[RgFact]()
+    b := pos
+    if pos >= self.nb {
+        p, to := self.edges[pos - self.nb]
+        self.rg_edge_fact(p, to, &out)
+        b = p
+    }
+    // up the dominator tree: the branch into every block with one predecessor
+    for depth in 0..64 {
+        if b == 0 || out.len >= 40 {
+            break
+        }
+        if self.cfg.preds[b].len == 1 {
+            self.rg_edge_fact(self.cfg.preds[b][0], b, &out)
+        }
+        if self.cfg.idom[b] == NOV {
+            break
+        }
+        b = i64(self.cfg.idom[b])
+    }
+    self.facts[pos] = out
+    self.fgen[pos] = self.gen
+    return out
+}
+
+// is v at least 0 (at pos)?
+priv fn rg_nonneg(self: *Rg, v: i64, pos: i64, d: i64) -> bool {
+    return self.is_len[v] || self.rg_lo(v, pos, d) >= 0
+}
+
+// rg_lo_raw, rg_hi_raw and rg_ub_raw, each answer remembered
+priv fn rg_lo(self: *Rg, x: i64, pos: i64, d: i64) -> i64 {
+    if self.f.insts[x].op == Const || d <= 0 {
+        return self.rg_lo_raw(x, pos, d)
+    }
+    key := self.rg_key(0, x, NOV, pos)
+    match self.rg_cached(key, d) {
+        Some(r) => return r
+        None => {}
+    }
+    r := self.rg_lo_raw(x, pos, d)
+    self.cache.set(key, (d, r))
+    return r
+}
+
+priv fn rg_hi(self: *Rg, x: i64, pos: i64, d: i64) -> i64 {
+    if self.f.insts[x].op == Const || d <= 0 {
+        return self.rg_hi_raw(x, pos, d)
+    }
+    key := self.rg_key(1, x, NOV, pos)
+    match self.rg_cached(key, d) {
+        Some(r) => return r
+        None => {}
+    }
+    r := self.rg_hi_raw(x, pos, d)
+    self.cache.set(key, (d, r))
+    return r
+}
+
+priv fn rg_ub(self: *Rg, x: i64, y: i64, pos: i64, d: i64) -> i64 {
+    if x == y || d <= 0 {
+        return self.rg_ub_raw(x, y, pos, d)
+    }
+    key := self.rg_key(2, x, y, pos)
+    match self.rg_cached(key, d) {
+        Some(r) => return r
+        None => {}
+    }
+    r := self.rg_ub_raw(x, y, pos, d)
+    self.cache.set(key, (d, r))
+    return r
+}
+
+// a lower bound of x at pos (rg_min(): none known)
+priv fn rg_lo_raw(self: *Rg, x: i64, pos: i64, d: i64) -> i64 {
+    i := &self.f.insts[x]
+    if i.ty != I64 {
+        return rg_min()
+    }
+    if i.op == Const {
+        return i.k
+    }
+    if d <= 0 || self.budget <= 0 {
+        return if self.is_len[x] { 0 } else { rg_min() }
+    }
+    self.budget -= 1
+    r := rg_min()
+    args := i.args
+    match i.op {
+        ZExt => r = 0
+        And => {
+            if self.rg_nonneg(args[0], pos, d - 1) || self.rg_nonneg(args[1], pos, d - 1) {
+                r = 0
+            }
+        }
+        LShr => match self.rg_const(args[1]) {
+            Some(k) if k & 63 != 0 => r = 0
+            _ => {}
+        }
+        URem => match self.rg_const(args[1]) {
+            Some(k) if k > 0 => r = 0
+            _ => {}
+        }
+        UDiv => match self.rg_const(args[1]) {
+            Some(k) if k > 1 || k < 0 => r = 0
+            _ => {}
+        }
+        SRem => match self.rg_const(args[1]) {
+            Some(k) if k != 0 && k != rg_min() => {
+                r = if self.rg_nonneg(args[0], pos, d - 1) { 0 } else { -(abs(k) - 1) }
+            }
+            _ => {}
+        }
+        Add, Sub => {
+            match self.rg_split(x) {
+                Some((y, k)) => {
+                    // y + k does not wrap when y <= max - k (k > 0); k < 0 only lowers it
+                    ly := self.rg_lo(y, pos, d - 1)
+                    ok := if k > 0 { self.rg_hi(y, pos, d - 1) <= rg_max() - k } else { true }
+                    if ok {
+                        match rg_add(ly, k) {
+                            Some(s) => r = s
+                            None => {}
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        Select => r = min(self.rg_lo(args[1], pos, d - 1), self.rg_lo(args[2], pos, d - 1))
+        Phi => r = self.rg_phi(x, 0, NOV, d)
+        _ => {}
+    }
+    if self.is_len[x] {
+        r = max(r, 0)
+    }
+    for a in self.asm {
+        if a.0 == x && a.1 == 0 {
+            r = max(r, a.3)
+        }
+    }
+    for fa in self.rg_facts(pos) {
+        if fa.b == x {
+            match fa.op {
+                Slt => r = max(r, sat_add(self.rg_lo(fa.a, pos, d - 1), 1))
+                Sle, Eq => r = max(r, self.rg_lo(fa.a, pos, d - 1))
+                _ => {}
+            }
+        } else if fa.a == x {
+            match fa.op {
+                Eq => r = max(r, self.rg_lo(fa.b, pos, d - 1))
+                Ult, Ule => {
+                    if self.rg_nonneg(fa.b, pos, d - 1) {
+                        r = max(r, 0)
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    return r
+}
+
+// an upper bound of x at pos (rg_max(): none known)
+priv fn rg_hi_raw(self: *Rg, x: i64, pos: i64, d: i64) -> i64 {
+    i := &self.f.insts[x]
+    if i.ty != I64 {
+        return rg_max()
+    }
+    if i.op == Const {
+        return i.k
+    }
+    if d <= 0 || self.budget <= 0 {
+        return if self.is_len[x] { rg_len_max() } else { rg_max() }
+    }
+    self.budget -= 1
+    r := rg_max()
+    args := i.args
+    match i.op {
+        ZExt => {
+            bits := self.f.insts[args[0]].ty.bits()
+            if bits < 63 {
+                r = (1 << bits) - 1
+            }
+        }
+        And => {
+            for a in args {
+                if self.rg_nonneg(a, pos, d - 1) {
+                    r = min(r, self.rg_hi(a, pos, d - 1))
+                }
+            }
+        }
+        LShr => match self.rg_const(args[1]) {
+            Some(k) if k & 63 != 0 => {
+                s := k & 63
+                r = if self.rg_nonneg(args[0], pos, d - 1) { self.rg_hi(args[0], pos, d - 1) >> s } else { rg_max() >> (s - 1) }
+            }
+            _ => {}
+        }
+        URem => match self.rg_const(args[1]) {
+            Some(k) if k > 0 => r = k - 1
+            _ => {}
+        }
+        SRem => match self.rg_const(args[1]) {
+            Some(k) if k != 0 && k != rg_min() => r = abs(k) - 1
+            _ => {}
+        }
+        Add, Sub => {
+            match self.rg_split(x) {
+                Some((y, k)) => {
+                    // y + k does not wrap when y >= min - k (k < 0); k > 0 only raises it
+                    hy := self.rg_hi(y, pos, d - 1)
+                    ok := if k < 0 { self.rg_lo(y, pos, d - 1) >= rg_min() - k } else { true }
+                    if ok {
+                        match rg_add(hy, k) {
+                            Some(s) => r = s
+                            None => {}
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        Select => r = max(self.rg_hi(args[1], pos, d - 1), self.rg_hi(args[2], pos, d - 1))
+        Phi => {
+            // below the length of the check being proven, or by an induction of its own
+            if self.ctx_y != NOV {
+                u := self.rg_phi(x, 2, self.ctx_y, d)
+                if u != rg_max() {
+                    r = sat_add(self.rg_hi(self.ctx_y, pos, d - 1), u)
+                }
+            }
+            if r == rg_max() {
+                r = self.rg_phi(x, 1, NOV, d)
+            }
+        }
+        _ => {}
+    }
+    if self.is_len[x] {
+        r = min(r, rg_len_max())
+    }
+    for ai in 0..self.asm.len {
+        a := self.asm[ai]
+        if a.0 == x && a.1 == 1 {
+            r = min(r, a.3)
+        }
+        if a.0 == x && a.1 == 2 {
+            // x - y <= c
+            r = min(r, sat_add(self.rg_hi(a.2, pos, d - 1), a.3))
+        }
+    }
+    for fa in self.rg_facts(pos) {
+        // the fact bounds z from above by bz
+        z := NOV
+        bz := rg_max()
+        z_nonneg := false
+        match fa.op {
+            Slt => {
+                z = fa.a
+                bz = sat_sub(self.rg_hi(fa.b, pos, d - 1), 1)
+            }
+            Sle => {
+                z = fa.a
+                bz = self.rg_hi(fa.b, pos, d - 1)
+            }
+            Eq => {
+                z = if fa.b == x { fa.b } else { fa.a }
+                bz = self.rg_hi(if fa.b == x { fa.a } else { fa.b }, pos, d - 1)
+            }
+            Ult, Ule => {
+                if self.rg_nonneg(fa.b, pos, d - 1) {
+                    z = fa.a
+                    hb := self.rg_hi(fa.b, pos, d - 1)
+                    bz = if fa.op == Ult { hb - 1 } else { hb }
+                    z_nonneg = true
+                }
+            }
+            _ => {}
+        }
+        if z == NOV || bz == rg_max() {
+            continue
+        }
+        if z == x {
+            r = min(r, bz)
+            continue
+        }
+        // a fact on z = x + k bounds x = z - k when that does not wrap
+        match self.rg_split(z) {
+            Some((y, k)) if y == x => {
+                ok := if k > 0 { z_nonneg || self.rg_lo(z, pos, d - 1) >= rg_min() + k } else { bz <= rg_max() + k }
+                if ok {
+                    r = min(r, bz - k)
+                }
+            }
+            _ => {}
+        }
+    }
+    return r
+}
+
+// a bound c with x - y <= c at pos (rg_max(): none known)
+priv fn rg_ub_raw(self: *Rg, x: i64, y: i64, pos: i64, d: i64) -> i64 {
+    if x == y {
+        return 0
+    }
+    match self.rg_const(y) {
+        Some(ky) => {
+            if ky == rg_min() {
+                return rg_max()
+            }
+            return match rg_add(self.rg_hi(x, pos, d), -ky) {
+                Some(s) => s
+                None => rg_max()
+            }
+        }
+        None => {}
+    }
+    if d <= 0 || self.budget <= 0 {
+        return rg_max()
+    }
+    self.budget -= 1
+    r := rg_max()
+    match self.rg_const(x) {
+        Some(kx) => {
+            ly := self.rg_lo(y, pos, d - 1)
+            if ly != rg_min() {
+                match rg_add(kx, -ly) {
+                    Some(s) => r = s
+                    None => {}
+                }
+            }
+            return r
+        }
+        None => {}
+    }
+    // x = z + k (not wrapping): x - y = (z - y) + k
+    match self.rg_split(x) {
+        Some((z, k)) => {
+            ok := if k > 0 { self.rg_hi(z, pos, d - 1) <= rg_max() - k } else { self.rg_lo(z, pos, d - 1) >= rg_min() - k }
+            if ok {
+                u := self.rg_ub(z, y, pos, d - 1)
+                if u != rg_max() {
+                    r = min(r, sat_add(u, k))
+                }
+            }
+        }
+        None => {}
+    }
+    // y = z + k (not wrapping): x - y = (x - z) - k
+    match self.rg_split(y) {
+        Some((z, k)) => {
+            ok := if k > 0 { self.rg_hi(z, pos, d - 1) <= rg_max() - k } else { self.rg_lo(z, pos, d - 1) >= rg_min() - k }
+            if ok {
+                u := self.rg_ub(x, z, pos, d - 1)
+                if u != rg_max() {
+                    r = min(r, sat_sub(u, k))
+                }
+            }
+        }
+        None => {}
+    }
+    if self.f.insts[x].op == Phi {
+        r = min(r, self.rg_phi(x, 2, y, d))
+    }
+    for a in self.asm {
+        if a.0 == x && a.1 == 2 && a.2 == y {
+            r = min(r, a.3)
+        }
+    }
+    for fa in self.rg_facts(pos) {
+        // up to two relations (a, b, c): a - b <= c
+        rels := [2](i64, i64, i64){(NOV, NOV, 0), (NOV, NOV, 0)}
+        unsigned := false
+        match fa.op {
+            Slt => rels[0] = (fa.a, fa.b, -1)
+            Sle => rels[0] = (fa.a, fa.b, 0)
+            Eq => {
+                rels[0] = (fa.a, fa.b, 0)
+                rels[1] = (fa.b, fa.a, 0)
+            }
+            Ult, Ule => {
+                // with b >= 0, a <u b is 0 <= a < b
+                if self.rg_nonneg(fa.b, pos, d - 1) {
+                    rels[0] = (fa.a, fa.b, if fa.op == Ult { -1 } else { 0 })
+                    unsigned = true
+                }
+            }
+            _ => {}
+        }
+        for ri in 0..2 {
+            a, b, c := rels[ri]
+            if a == NOV {
+                continue
+            }
+            k := 0
+            if a != x {
+                // a = x + k: x = a - k when that does not wrap
+                match self.rg_split(a) {
+                    Some((z, k1)) if z == x => {
+                        ok := if k1 > 0 { unsigned || self.rg_lo(a, pos, d - 1) >= rg_min() + k1 } else { self.rg_hi(a, pos, d - 1) <= rg_max() + k1 }
+                        if !ok {
+                            continue
+                        }
+                        k = k1
+                    }
+                    _ => continue
+                }
+            }
+            // x - y = (a - b) - k + (b - y)
+            u := if b == y { 0 } else { self.rg_ub(b, y, pos, d - 1) }
+            if u != rg_max() {
+                r = min(r, sat_add(sat_sub(c, k), u))
+            }
+        }
+    }
+    return r
+}
+
+// a bound of loop phi x, of kind `kind` (0: lower, 1: upper, 2: x - y <= c), by induction over
+// the ways into its block: the weakest bound of the inputs from outside the loop, if the inputs
+// along the back edges keep it while it is assumed for x (widened up to twice). A lower bound
+// and a bound against the length of the check being proven (`ctx_y`) are shown together: each
+// may need the other (`i + 4` does not wrap because i <= n - 4, and i >= 0 holds).
+priv fn rg_phi(self: *Rg, x: i64, kind: i64, y: i64, d: i64) -> i64 {
+    none := if kind == 0 { rg_min() } else { rg_max() }
+    for a in self.asm {
+        if a.0 == x && a.1 == kind && a.2 == y {
+            // inside its own induction: the assumption answers (the callers look at it)
+            return none
+        }
+    }
+    h := self.rg_block_of(x)
+    if h < 0 || d <= 0 {
+        return none
+    }
+    n := self.f.insts[x].args.len
+    if n == 0 || n > 8 || self.cfg.preds[h].len != n {
+        return none
+    }
+    // y must keep its value in the loop: defined above the phi's block
+    fn above(s: *Rg, y: i64, h: i64) -> bool {
+        if is_some(s.rg_const(y)) {
+            return true
+        }
+        yb := s.rg_block_of(y)
+        return yb >= 0 && yb != h && s.cfg.dom(yb, h)
+    }
+    if kind == 2 && !above(self, y, h) {
+        return none
+    }
+    // the components shown together: (kind, y, alive)
+    comps := vec[(i64, i64, bool)]()
+    comps.push((kind, y, true))
+    if kind == 0 && self.ctx_y != NOV && above(self, self.ctx_y, h) {
+        comps.push((2, self.ctx_y, true))
+    } else if kind == 2 && y == self.ctx_y {
+        comps.push((0, NOV, true))
+    }
+    ins := vec[i64]()
+    frs := vec[i64]()
+    for k in 0..n {
+        ins.push(self.f.insts[x].args[k])
+        frs.push(self.f.insts[x].from()[k])
+    }
+    fn bound(s: *Rg, kind: i64, v: i64, y: i64, pos: i64, d: i64) -> i64 {
+        return match kind {
+            0 => s.rg_lo(v, pos, d)
+            1 => s.rg_hi(v, pos, d)
+            _ => s.rg_ub(v, y, pos, d)
+        }
+    }
+    fn nothing(kind: i64) -> i64 {
+        return if kind == 0 { rg_min() } else { rg_max() }
+    }
+    // a is a weaker bound than b
+    fn worse(kind: i64, a: i64, b: i64) -> bool {
+        return if kind == 0 { a < b } else { a > b }
+    }
+    cands := vec[i64]()
+    any_back := false
+    for ci in 0..comps.len {
+        ck, cy, _ := comps[ci]
+        cand := if ck == 0 { rg_max() } else { rg_min() }
+        for k in 0..n {
+            p := frs[k]
+            if self.cfg.dom(h, p) {
+                any_back = true
+                continue
+            }
+            b := bound(self, ck, ins[k], cy, self.rg_edge(p, h), d - 1)
+            if worse(ck, b, cand) {
+                cand = b
+            }
+        }
+        if cand == nothing(ck) || cand == (if ck == 0 { rg_max() } else { rg_min() }) {
+            // nothing known, or no way in from outside the loop
+            if ci == 0 {
+                return none
+            }
+            comps[ci] = (ck, cy, false)
+        }
+        cands.push(cand)
+    }
+    if !any_back {
+        return cands[0]
+    }
+    for round in 0..4 {
+        mark := self.asm.len
+        for ci in 0..comps.len {
+            ck, cy, alive := comps[ci]
+            if alive {
+                self.asm.push((x, ck, cy, cands[ci]))
+            }
+        }
+        held := true
+        weak := vec_of(cands.items())
+        for ci in 0..comps.len {
+            ck, cy, alive := comps[ci]
+            if !alive {
+                continue
+            }
+            for k in 0..n {
+                p := frs[k]
+                if !self.cfg.dom(h, p) || ins[k] == x {
+                    continue
+                }
+                b := bound(self, ck, ins[k], cy, self.rg_edge(p, h), d - 1)
+                if worse(ck, b, weak[ci]) {
+                    weak[ci] = b
+                    held = false
+                }
+            }
+        }
+        self.asm.len = mark
+        if held {
+            return cands[0]
+        }
+        if round == 3 {
+            break
+        }
+        // widen; a component with no bound left is given up (the others are shown again
+        // without it)
+        for ci in 0..comps.len {
+            ck, cy, alive := comps[ci]
+            if !alive {
+                continue
+            }
+            if weak[ci] == nothing(ck) || round >= 1 && weak[ci] != cands[ci] {
+                if ci == 0 {
+                    return none
+                }
+                comps[ci] = (ck, cy, false)
+            }
+            cands[ci] = weak[ci]
+        }
+    }
+    return none
+}
+
+// the facts are found again (a terminator changed)
+priv fn rg_forget(self: *Rg) {
+    self.gen += 1
+    self.cache.clear()
+}
+
+// is `idx <u len` true at block b (whose own branch is not counted)?
+priv fn rg_proves(self: *Rg, idx: i64, ln: i64, b: i64) -> bool {
+    self.ctx_y = ln
+    self.cache.clear()
+    self.budget = 6000
+    ok := self.rg_lo(idx, b, self.depth) >= 0
+    if ok {
+        self.budget = 6000
+        ok = self.rg_ub(idx, ln, b, self.depth) <= -1
+    }
+    self.ctx_y = NOV
+    return ok
+}
+
+// (index, length) of a bounds check condition
+priv fn rg_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
+    ci := &f.insts[c]
+    idx, ln := match ci.op {
+        Ult => (ci.args[0], ci.args[1])
+        Ugt => (ci.args[1], ci.args[0])
+        _ => return None
+    }
+    if f.insts[idx].ty != I64 || f.insts[ln].ty != I64 {
+        return None
+    }
+    return Some((idx, ln))
+}
+
+// a new instruction in block b
+priv fn rg_push(self: *Rg, b: i64, op: Op, args: Vec[i64], k: i64) -> i64 {
+    ty := if op.is_cmp() { I8 } else { I64 }
+    v := self.f.push(b, op, ty, args, k)
+    self.def_block.resize(self.f.insts.len, i32(NOV))
+    self.is_len.resize(self.f.insts.len, false)
+    self.def_block[v] = i32(b)
+    return v
+}
+
+// merges the run of checks `x + k <u len` that starts at block b (see above)
+priv fn rg_merge(self: *Rg, b: i64) -> bool {
+    f := self.f
+    c, ok, trap := match f.blocks[b].term {
+        Br(c0, t0, e0) if t0 != e0 => (c0, t0, e0)
+        _ => return false
+    }
+    idx, ln := match rg_check(f, c) {
+        Some(x) => x
+        None => return false
+    }
+    lim := 1 << 40
+    x, k0 := self.rg_split(idx).or((idx, 0))
+    if k0 < -lim || k0 > lim {
+        return false
+    }
+    kmax := k0
+    kmin := k0
+    removed := vec[(i64, i64, i64, i64)]() // block, cond, ok, trap
+    cur := ok
+    steps := 0
+    walk: loop {
+        steps += 1
+        if steps > 64 || self.cfg.preds[cur].len != 1 || cur == b {
+            break
+        }
+        for v in f.blocks[cur].insts {
+            o := f.insts[v].op
+            if o == Call || o == CallInd || o == Syscall || o == Atomic || o == Phi {
+                break walk
+            }
+        }
+        match f.blocks[cur].term {
+            Jmp(t) => cur = t
+            Br(c2, t2, e2) => {
+                if t2 == e2 || !opt_is_check_trap(f, e2) {
+                    break
+                }
+                match rg_check(f, c2) {
+                    Some((idx2, ln2)) if ln2 == ln => {
+                        x2, k2 := self.rg_split(idx2).or((idx2, 0))
+                        if x2 == x && k2 >= -lim && k2 <= lim {
+                            kmax = max(kmax, k2)
+                            kmin = min(kmin, k2)
+                            removed.push((cur, c2, t2, e2))
+                            f.blocks[cur].term = Jmp(t2)
+                        }
+                    }
+                    _ => {}
+                }
+                cur = t2
+            }
+            _ => break
+        }
+    }
+    if removed.is_empty() {
+        return false
+    }
+    // the strongest check goes first; its index is made again here
+    if kmax > k0 {
+        kc := self.rg_push(b, Const, vec[i64](), kmax)
+        ix := self.rg_push(b, Add, vec_of([]i64{x, kc}), 0)
+        nc := self.rg_push(b, Ult, vec_of([]i64{ix, ln}), 0)
+        f.blocks[b].term = Br(nc, ok, trap)
+    }
+    self.rg_forget()
+    // in the changed function: x + kmin >= 0 at b (then no x + k wraps as an unsigned number,
+    // and every one is at most x + kmax)
+    self.budget = 6000
+    self.ctx_y = ln
+    self.cache.clear()
+    lo_ok := self.rg_lo(x, b, self.depth) >= -kmin
+    self.ctx_y = NOV
+    if lo_ok {
+        return true
+    }
+    // undo (the instructions made stay unused)
+    f.blocks[b].term = Br(c, ok, trap)
+    for r in removed {
+        f.blocks[r.0].term = Br(r.1, r.2, r.3)
+    }
+    self.rg_forget()
+    return false
+}
+
+priv fn rg_run(f: *Func) -> bool {
+    any := false
+    for b in 0..f.blocks.len {
+        match f.blocks[b].term {
+            Br(c, t, e) if t != e && is_trap_block(f, e) && is_some(rg_check(f, c)) => {
+                any = true
+                break
+            }
+            _ => {}
+        }
+    }
+    if !any {
+        return false
+    }
+    nb := f.blocks.len
+    s := Rg{f: f, cfg: cfg_new(f), def_block: f.block_of(), nb: nb, is_len: vec_fill(f.insts.len, false), edges: vec[(i64, i64)](), facts: vec_fill(nb, vec[RgFact]()), fgen: vec_fill(nb, i64(-1)), gen: 0, budget: 0, asm: vec[(i64, i64, i64, i64)](), ctx_y: NOV, depth: 12, cache: map[(i64, i64, i64, i64), (i64, i64)]()}
+    checks := vec[i64]()
+    for b in s.cfg.rpo {
+        match f.blocks[b].term {
+            Br(c, t, e) if t != e && opt_is_check_trap(f, e) => {
+                match rg_check(f, c) {
+                    Some((_, ln)) => {
+                        s.is_len[ln] = true
+                        checks.push(b)
+                    }
+                    None => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    if checks.is_empty() {
+        return false
+    }
+    changed := false
+    for b in checks {
+        if s.rg_merge(b) {
+            changed = true
+        }
+    }
+    for b in checks {
+        c, ok, trap := match f.blocks[b].term {
+            Br(c0, t0, e0) if t0 != e0 => (c0, t0, e0)
+            _ => continue
+        }
+        idx, ln := match rg_check(f, c) {
+            Some(x) => x
+            None => continue
+        }
+        // proven without the check itself
+        f.blocks[b].term = Jmp(ok)
+        s.rg_forget()
+        if s.rg_proves(idx, ln, b) {
+            changed = true
+        } else {
+            f.blocks[b].term = Br(c, ok, trap)
+            s.rg_forget()
         }
     }
     return changed
