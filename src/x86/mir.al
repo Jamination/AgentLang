@@ -140,6 +140,9 @@ enum MOp {
     Ucomisd,
     Xorpd,
     Andpd,
+    Andnpd, // a = ~a & b
+    Orpd,
+    Cmpsd, // cmpsd / cmpss (sz 8 / 4): a = all ones if the predicate tgt holds for a, b, else 0
     // SSE operations above take sz 8 (scalar double), 4 (scalar single) or 16 (packed single)
     Minsd,
     Maxsd,
@@ -347,7 +350,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
                 _ => {}
             }
         }
-        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Cmov, Shl, Shr, Sar, Rol, Ror => {
+        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Andnpd, Orpd, Cmpsd, Cmov, Shl, Shr, Sar, Rol, Ror => {
             match &i.a {
                 R(r) => {
                     du[q] = r
@@ -632,7 +635,7 @@ fn mir_print_mfunc(f: *MFunc) -> str {
                 _ => i.sz
             }
             bs := if has_xuses(i.op) { "" } else { opnd_str(i.b, bsz) }
-            c := if i.op == Imul3 || i.op == Shufps { fmt(i.tgt) } else { "" }
+            c := if i.op == Imul3 || i.op == Shufps || i.op == Cmpsd { fmt(i.tgt) } else { "" }
             parts := vec[str]()
             if len(a) != 0 {
                 parts.push(a)

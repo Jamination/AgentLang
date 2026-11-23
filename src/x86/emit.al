@@ -595,10 +595,18 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             rm := e.rm(&i.b)
             e.op(false, 0, false, 0x0F14, u8(d & 15), &rm, false)
         }
-        Ucomisd, Xorpd, Andpd => {
+        Cmpsd => {
+            d := reg_of(&i.a)
+            rm := e.rm(&i.b)
+            e.op(false, fp_pfx(sz), false, 0x0FC2, u8(d & 15), &rm, false)
+            e.imm(i64(i.tgt), 1)
+        }
+        Ucomisd, Xorpd, Andpd, Andnpd, Orpd => {
             o: i64 = match i.op {
                 Ucomisd => 0x0F2E
                 Xorpd => 0x0F57
+                Andnpd => 0x0F55
+                Orpd => 0x0F56
                 _ => 0x0F54
             }
             d := reg_of(&i.a)
