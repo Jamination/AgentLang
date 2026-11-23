@@ -312,6 +312,117 @@ fn inline_devirt_all(m: *Module, fid: i64) -> bool {
     return any
 }
 
+// ---------- the benefit of inlining at a call site ----------
+// The size limit of a callee (base: by its hint and its number of call sites) grows with what
+// inlining it lets the passes after it do at this site, and shrinks where the call is cold.
+const INL_AGG_BONUS = 10   // an argument that is a local of the caller (an aggregate passed or
+                           // returned by address: scalarised once inlined), up to 3
+const INL_CMP_CONST = 40   // a constant argument the callee compares (a loop bound, a branch)
+const INL_CONST = 5        // another constant argument
+const INL_LEAF_BONUS = 10  // a callee that calls nothing (but its failure paths)
+const INL_HOT_PERCENT = 50 // a call in a loop: the limit grows by half (a callee with other
+const INL_HOT_MAX = 20     // call sites: by at most 20, every copy costs)
+const INL_COLD_LIMIT = 8   // in a block that only leads to a trap (a panic's message, ...)
+
+// facts about a callee, by its id in `info`: bit 0, it calls nothing outside its trap blocks;
+// bit 1 + k, parameter k (k < 62), or one arithmetic step from it, is compared or branched on
+priv fn callee_info(g: *Func, gid: i64, info: *Map[i64, i64]) -> i64 {
+    x, has := info.get(gid)
+    if has {
+        return x
+    }
+    pk := vec_fill(g.insts.len, i32(-1))
+    leaf := true
+    bits := 0
+    for b in g.rpo_compute() {
+        trap := is_trap_block(g, b)
+        for v in g.blocks[b].insts {
+            i := &g.insts[v]
+            if i.op == Param {
+                pk[v] = i32(i.k)
+            } else if i.op == CallInd || (i.op == Call && !trap) {
+                leaf = false
+            } else if i.op.is_cmp() {
+                for a in i.args {
+                    if pk[a] >= 0 && pk[a] < 62 {
+                        bits |= 1 << (i64(pk[a]) + 1)
+                    }
+                }
+            } else if i.op == Add || i.op == Sub || i.op == Mul || i.op == Shl || i.op == SExt || i.op == ZExt || i.op == Trunc {
+                for a in i.args {
+                    if pk[a] >= 0 {
+                        pk[v] = pk[a]
+                    }
+                }
+            }
+        }
+        match g.blocks[b].term {
+            Br(c, _, _) => {
+                if pk[c] >= 0 && pk[c] < 62 {
+                    bits |= 1 << (i64(pk[c]) + 1)
+                }
+            }
+            _ => {}
+        }
+    }
+    x = bits | if leaf { 1 } else { 0 }
+    info.set(gid, x)
+    return x
+}
+
+// the size limit of callee g at call i of f (base: the limit by its hint and call sites; hot:
+// the call is in a loop; cold: in a block that only leads to a trap)
+priv fn site_limit(f: *Func, i: *Inst, g: *Func, gid: i64, base: i64, single: bool, hot: bool, cold: bool, info: *Map[i64, i64]) -> i64 {
+    if g.inl > 0 {
+        // (the hint decides)
+        return base
+    }
+    if cold {
+        return min(base, INL_COLD_LIMIT)
+    }
+    gi := callee_info(g, gid, info)
+    lim := base
+    aggs := 0
+    for k in 0..i.args.len {
+        op := f.insts[i.args[k]].op
+        if op == Alloca {
+            aggs += 1
+        } else if op == Const || op == FConst {
+            lim += if k < 61 && (gi >> (k + 1)) & 1 != 0 { INL_CMP_CONST } else { INL_CONST }
+        }
+    }
+    lim += min(aggs, 3) * INL_AGG_BONUS
+    if gi & 1 != 0 {
+        lim += INL_LEAF_BONUS
+    }
+    if hot {
+        hb := lim * INL_HOT_PERCENT / 100
+        lim += if single { hb } else { min(hb, INL_HOT_MAX) }
+    }
+    return lim
+}
+
+// the blocks that only lead to a trap
+priv fn cold_blocks(f: *Func, rpo: *Vec[i64]) -> Vec[bool] {
+    cold := vec_fill(f.blocks.len, false)
+    for ri in rpo.len - 1..=0 by -1 {
+        b := rpo[ri]
+        if f.blocks[b].term == Trap {
+            cold[b] = true
+            continue
+        }
+        ss := f.succs(b)
+        all := ss.len > 0
+        for s in ss {
+            if !cold[s] {
+                all = false
+            }
+        }
+        cold[b] = all
+    }
+    return cold
+}
+
 // inline eligible calls in function `fid`; `done[g]` marks callees that are final;
 // `costs[g]` is inline_cost(g) once known (-1 before: a final function does not change).
 // Returns whether a call was inlined, and whether an indirect call was made direct.
@@ -334,6 +445,20 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
     // the reverse postorder of f, kept up to date (see rpo_after_inline) or made anew
     frpo := vec[i64]()
     fresh := true
+    // by block: in a loop, cold (a block the inliner adds takes those of the call's block)
+    hot := vec[bool]()
+    cold := vec[bool]()
+    {
+        f := &m.funcs[fid]
+        _, loops := cfg_loops(f)
+        hot = vec_fill(f.blocks.len, false)
+        for b in 0..f.blocks.len {
+            hot[b] = b < loops.loop_of.len && loops.loop_of[b] >= 0
+        }
+        rpo := f.rpo()
+        cold = cold_blocks(f, &rpo)
+    }
+    info := map[i64, i64]()
     while budget > 0 && caller_size <= pol.max_caller {
         // find the next inlinable call
         found: Opt[(i64, i64, i64)] = None
@@ -379,6 +504,9 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     } else {
                         pol.small
                     }
+                    if size > limit || cold[b] {
+                        limit = site_limit(f, i, gf, g, limit, call_counts[g] == 1 && !addr_taken[g], hot[b], cold[b], &info)
+                    }
                     if size <= limit {
                         found = Some((b, i64(v), g))
                         start = ri
@@ -393,6 +521,8 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                 returns := false
                 nb0 := m.funcs[fid].blocks.len
                 caller_size += inline_call(&m.funcs[fid], b, call, &m.funcs[g], &repl, &returns, &m.locs)
+                hot.resize(m.funcs[fid].blocks.len, hot[b])
+                cold.resize(m.funcs[fid].blocks.len, cold[b])
                 if !returns {
                     // the blocks after the call became unreachable through it: they may now
                     // be reached later, before the call's block
