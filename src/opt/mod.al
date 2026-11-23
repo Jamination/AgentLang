@@ -464,6 +464,14 @@ priv fn local_opt(f: *Func, level: i64) {
         opt_pass(PASS_LICM, f, licm_run)
         simplify_run(f)
     }
+    // loop transformations that want the checks out of the loops (src/opt/loop.al)
+    if loop_opts(f) {
+        for it in 0..3 {
+            if !one_round(f) {
+                break
+            }
+        }
+    }
     opt_pass(PASS_DCE, f, cleanup_dce)
     opt_trace("end-local-opt", f)
 }
