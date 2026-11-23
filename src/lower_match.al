@@ -1329,6 +1329,63 @@ priv fn arm_body(self: *Fx, m: *MatchSt, arm: *MatchArm, a: *ArmSt) {
     self.jmp(m.bj)
 }
 
+// The leading arms of a match whose patterns only compare the key (the scalar or the tag)
+// with constants: one Switch in `block` (its terminator until then is a jump along the chain
+// of the blocks where the tests would have been), with the block where the first other test
+// goes (or the code for no match) as its default. src/opt/switch.al and the back ends take it
+// from there.
+priv struct SwRun {
+    open: bool
+    block: i64
+    keys: Vec[i64]
+    tgts: Vec[i64]
+}
+
+// the test of pattern rp as a case of the Switch: false if it is not one
+priv fn switch_arm(self: *Fx, sw: *SwRun, rp: *RPat, key: i64, ok_b: i64, fail_b: i64) -> bool {
+    k := 0
+    if rp.k == RP_CONST && rp.ty != T_STR && !self.cx.types.is_float(rp.ty) {
+        pv := self.pat_const_val(rp, true)
+        p := self.scalar(pv)
+        match self.f.is_const(p) {
+            Some(x) => k = x
+            None => {
+                // (not folded to a constant: the test of pat_test, after the Switch)
+                switch_close(self, sw, key)
+                eq := self.ins(Op.Eq, I8, vec_two(key, p), 0)
+                self.br(eq, ok_b, fail_b)
+                return true
+            }
+        }
+    } else if rp.k == RP_VARIANT && !subs_refutable(rp) {
+        c := self.tag_const(rp.vi)
+        match self.f.is_const(c) {
+            Some(x) => k = x
+            None => return false
+        }
+    } else {
+        return false
+    }
+    // (a key tested before never gets here: the first arm keeps it)
+    if !sw.keys.contains(k) {
+        sw.keys.push(k)
+        sw.tgts.push(ok_b)
+    }
+    self.jmp(fail_b)
+    return true
+}
+
+// ends the Switch of the leading arms (the current block is its default)
+priv fn switch_close(self: *Fx, sw: *SwRun, key: i64) {
+    if !sw.open {
+        return
+    }
+    sw.open = false
+    if sw.keys.len > 0 {
+        self.f.blocks[sw.block].term = Switch(key, sw_new(self.cur, sw.keys.items(), sw.tgts.items()))
+    }
+}
+
 // ---------- match ----------
 fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i64], pos: Pos) -> Val {
     sv := self.expr(sc, None)
@@ -1412,6 +1469,8 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
     // the unguarded patterns so far with the line of their arm; the arms that wait for a type
     prior := vec[(*RPat, i64)]()
     deferred := vec[(i64, ArmSt)]()
+    // the leading arms that test the key against constants become one Switch
+    sw := SwRun{open: key != NOV && sv.ty != T_BOOL && !self.cx.types.is_float(sv.ty), block: self.cur}
     for ai in 0..len(arms) {
         arm := &arms[ai]
         body_b := self.new_block()
@@ -1501,13 +1560,17 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
                 *row = *rp
                 rows.push(vec_one(row))
             }
-            if use_slots {
+            if sw.open && !guarded && !use_slots && switch_arm(self, &sw, rp, key, body_b, fail_b) {
+                // (the test is a case of the Switch)
+            } else if use_slots {
+                switch_close(self, &sw, key)
                 bind_b := self.new_block()
                 self.pat_test(rp, part, false, key, true, bind_b, fail_b)
                 self.switch_to(bind_b)
                 self.pat_bind(rp, part, false, &slots, true)
                 self.jmp(body_b)
             } else {
+                switch_close(self, &sw, key)
                 self.pat_test(rp, part, false, key, true, body_b, fail_b)
             }
             if !last {
@@ -1527,6 +1590,7 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
         }
         self.switch_to(next_b)
     }
+    switch_close(self, &sw, key)
     if deferred.len != 0 {
         cur := self.cur
         for i in 0..deferred.len {

@@ -230,10 +230,20 @@ priv fn switch_form(f: *Func, p: i64, preds: *Vec[Vec[i64]], dead: *Vec[bool]) -
         }
     }
     chain := vec[i64]()
+    key_set := map[i64, bool]()
+    for k in keys {
+        key_set.set(k, true)
+    }
+    src_of := map[i64, i64]()
+    for si in 0..f.nsucc(p) {
+        src_of.set(f.succ_at(p, si), p)
+    }
     last := p
     loop {
         nb := next
-        if nb == 0 || nb == p || dead[nb] || preds[nb].len != 1 || preds[nb][0] != last || contains(&chain, nb) {
+        // (the chain is a path: a block of it, reached only from the one before, never
+        // comes again)
+        if nb == 0 || nb == p || dead[nb] || preds[nb].len != 1 || preds[nb][0] != last {
             break
         }
         nkeys := vec[i64]()
@@ -261,25 +271,28 @@ priv fn switch_form(f: *Func, p: i64, preds: *Vec[Vec[i64]], dead: *Vec[bool]) -
             _ => break
         }
         // the phis of the blocks nb goes to must take the same value from nb as from the
-        // blocks of the chain that go there too (they all become p)
+        // blocks of the chain that go there too (they all become p; src_of: one of them)
         agree := true
         for si in 0..f.nsucc(nb) {
             s := f.succ_at(nb, si)
-            if !phis_agree(f, s, nb, p) && f.has_succ(p, s) {
+            q, has := src_of.get(s)
+            if has && !phis_agree(f, s, nb, q) {
                 agree = false
-            }
-            for q in chain {
-                if f.has_succ(q, s) && !phis_agree(f, s, nb, q) {
-                    agree = false
-                }
             }
         }
         if !agree {
             break
         }
+        for si in 0..f.nsucc(nb) {
+            s := f.succ_at(nb, si)
+            if !src_of.has(s) {
+                src_of.set(s, nb)
+            }
+        }
         for i in 0..nkeys.len {
             // (a key tested before never gets here)
-            if !contains(&keys, nkeys[i]) {
+            if !key_set.has(nkeys[i]) {
+                key_set.set(nkeys[i], true)
                 keys.push(nkeys[i])
                 tgts.push(ntgts[i])
             }
