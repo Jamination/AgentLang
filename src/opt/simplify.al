@@ -415,6 +415,10 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                     return Some(a)
                 }
             }
+            // the last step of a byte swap by a ladder of masked shifts (a rotation by half)
+            if hk && (op == Rotl || op == Rotr) && self.match_bytes(v, ty) {
+                return None
+            }
             // (x op c1) op c2 for associative ops
             if hk {
                 k2 := k
@@ -989,6 +993,17 @@ priv fn prov(self: *Ctx, v: i64, depth: i64, budget: *i64, leaves: *Vec[i64], ou
                 }
                 return true
             }
+            Rotl, Rotr if is_some(self.c(i.args[1])) => {
+                q: [64]i16
+                if !self.prov(i.args[0], depth - 1, budget, leaves, &q) {
+                    return false
+                }
+                s := self.c(i.args[1]).or(0) & (w - 1)
+                for j in 0..w {
+                    out[j] = if op == Rotr { q[(j + s) & (w - 1)] } else { q[(j - s) & (w - 1)] }
+                }
+                return true
+            }
             _ => {}
         }
     }
@@ -1022,11 +1037,12 @@ priv fn match_bytes(self: *Ctx, v: i64, ty: T) -> bool {
     // cheap filter: both operands are shifts, masks, extensions or such combinations
     fn part(op: Op) -> bool {
         match op {
-            Shl, LShr, And, Or, Xor, Add, ZExt, Bswap => true
+            Shl, LShr, And, Or, Xor, Add, ZExt, Bswap, Rotl, Rotr => true
             _ => false
         }
     }
-    if w < 16 || !part(self.op(i.args[0])) || !part(self.op(i.args[1])) {
+    rot := i.op == Rotl || i.op == Rotr
+    if w < 16 || !part(self.op(i.args[0])) || !(rot || part(self.op(i.args[1]))) {
         return false
     }
     leaves := vec[i64]()

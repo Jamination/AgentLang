@@ -39,6 +39,27 @@ noinline fn bswap32in64(x: u64) -> u64 {
 }
 noinline fn bswap16in32(x: u32) -> u32 { ((x >> 8) & 0xFF) | ((x << 8) & 0xFF00) }
 noinline fn bswap16(x: u16) -> u16 { (x >> 8) | (x << 8) }
+// byte swaps by ladders of swaps (the last step is a rotation by half), and a near miss
+noinline fn bs_ladder64(v: u64) -> u64 {
+    x := ((v >> 8) & 0x00FF00FF00FF00FF) | ((v & 0x00FF00FF00FF00FF) << 8)
+    x = ((x >> 16) & 0x0000FFFF0000FFFF) | ((x & 0x0000FFFF0000FFFF) << 16)
+    (x >> 32) | (x << 32)
+}
+noinline fn bs_ladder32(v: u32) -> u32 {
+    x := ((v >> 8) & 0x00FF00FF) | ((v & 0x00FF00FF) << 8)
+    (x >> 16) | (x << 16)
+}
+noinline fn miss_ladder(v: u32) -> u32 {
+    x := ((v >> 8) & 0x00FF00FF) | ((v & 0x00FF00FF) << 8)
+    (x >> 8) | (x << 24)
+}
+// bit reversal: three swap steps, then the bytes
+noinline fn rev64(v: u64) -> u64 {
+    x := ((v >> 1) & 0x5555555555555555) | ((v & 0x5555555555555555) << 1)
+    x = ((x >> 2) & 0x3333333333333333) | ((x & 0x3333333333333333) << 2)
+    x = ((x >> 4) & 0x0F0F0F0F0F0F0F0F) | ((x & 0x0F0F0F0F0F0F0F0F) << 4)
+    bswap64(x)
+}
 // near misses: one mask off by a bit, a shift off by one byte, an overlap
 noinline fn miss_bs1(x: u32) -> u32 { (x >> 24) | ((x >> 8) & 0xFE00) | ((x << 8) & 0xFF0000) | (x << 24) }
 noinline fn miss_bs2(x: u32) -> u32 { (x >> 24) | ((x >> 8) & 0xFF00) | ((x << 16) & 0xFF0000) | (x << 24) }
@@ -91,6 +112,7 @@ fn main() {
         }
         put(bswap64(x), " ", bswap64x(x), " ", bswap32(u32(x)), " ", bswap32in64(x), " ", bswap16in32(u32(x)), " ", bswap16(u16(x)), "\n")
         put(miss_bs1(u32(x)), " ", miss_bs2(u32(x)), " ", miss_bs3(u32(x)), "\n")
+        put(bs_ladder64(x), " ", bs_ladder32(u32(x)), " ", miss_ladder(u32(x)), " ", rev64(x), "\n")
         put(tofloat(x), " ", nonneg(x), " ", neg(x), " ", neg0(x), " ", neg32(u32(x)), "\n")
     }
     p := []u8{0x01, 0x82, 0x03, 0xF4, 0x05, 0x06, 0xA7, 0x08, 0xFF, 0x0A}
