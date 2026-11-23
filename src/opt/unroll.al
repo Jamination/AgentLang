@@ -483,57 +483,24 @@ priv fn rt_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def
     return true
 }
 
-// the value v has after the unrolled loop (see rt_apply): a reduction's combined result, or
-// the last copy's value
-priv fn rt_final(v: i64, reds: *Vec[Reduction], totals: *Vec[i64], lastm: *IMap) -> i64 {
-    for k in 0..reds.len {
-        if reds[k].back == v {
-            return totals[k]
-        }
-    }
-    return loop_map_val(lastm, v)
-}
-
+// the main loop of the frame (loop_remainder_begin) as u copies of the body
 priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *Vec[i64], in_loop: []bool, def_block: []i32) {
-    nb0 := f.blocks.len
     h := cl.header
     lt := cl.latch
-    pre := cl.pre
-    ty := cl.ty
-    hphis := header_phis(f, h)
-    // (start, back) of each header phi, before anything changes
-    starts := vec[i64]()
-    backs := vec[i64]()
-    for ph in hphis {
-        starts.push(f.insts[ph].phi_input(pre))
-        backs.push(f.insts[ph].phi_input(lt))
-    }
-    // the remainder: a copy of the whole loop
-    rv := imap_new(64)
-    rb := loop_clone_blocks(f, cl.blocks.items(), &rv)
-    rh := rb.iget(h)
-    rl := rb.iget(lt)
-    // the tests in the preheader and in a block after it, chk (two branches rather than an
-    // `and` of the conditions: the first is often known and folds away)
-    g := loop_trip_guard(f, cl, pre)
-    tc := loop_trip_count(f, cl, pre)
-    chk := f.new_block()
-    big := f.push(chk, Uge, I8, vec_of([]i64{tc, loop_const(f, chk, ty, u)}), 0)
-    m := f.push(pre, And, ty, vec_of([]i64{tc, loop_const(f, pre, ty, -u)}), 0)
-    ue := f.push(pre, if cl.step > 0 { Add } else { Sub }, ty, vec_of([]i64{cl.start, m}), 0)
-    rem := f.push(pre, And, ty, vec_of([]i64{tc, loop_const(f, pre, ty, u - 1)}), 0)
-    has_rem := f.push(pre, Ne, I8, vec_of([]i64{rem, loop_const(f, pre, ty, 0)}), 0)
-    // the partial results of the reductions: accs[r * u + k] for copy k (k = 0: the phi)
+    rem := loop_remainder_begin(f, cl, u)
+    hphis := &rem.hphis
+    // the partial results of the reductions: accs[r * u + k] for copy k (k = 0: the phi),
+    // starting from inits[r * u + k]
     accs := vec[i64]()
     inits := vec[i64]()
     for r in 0..reds.len {
         rp := reds[r].phi
-        st := starts[index_of(hphis.items(), rp)]
+        st := rem.starts[index_of(hphis.items(), rp)]
         accs.push(rp)
         inits.push(st)
         for k in 1..u {
             accs.push(f.mk_phi(f.insts[rp].ty, 2))
-            inits.push(loop_red_init(f, pre, &reds[r], st))
+            inits.push(loop_red_init(f, cl.pre, &reds[r], st))
         }
     }
     // copies 1..u-1, each after the previous one
@@ -548,7 +515,7 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
             if ri >= 0 {
                 vm.iset(ph, accs[ri * u + k])
             } else {
-                vm.iset(ph, loop_map_val(&maps[k - 1], backs[pi]))
+                vm.iset(ph, loop_map_val(&maps[k - 1], rem.backs[pi]))
             }
         }
         bm := loop_clone_blocks(f, cl.blocks.items(), &vm)
@@ -559,17 +526,14 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
     ll := prev_latch
     lastm := &maps[u - 1]
     // the last copy goes back to the header until the counter reaches ue
-    c2 := f.push(ll, Ne, I8, vec_of([]i64{loop_map_val(lastm, cl.next), ue}), 0)
+    c2 := f.push(ll, Ne, I8, vec_of([]i64{loop_map_val(lastm, cl.next), rem.ue}), 0)
     f.im(c2).aux = LOOP_NO_UNROLL
-    mid := f.new_block()
-    rpre := f.new_block()
-    x := f.new_block()
-    f.blocks[ll].term = Br(c2, h, mid)
+    f.blocks[ll].term = Br(c2, h, rem.mid)
     // the header phis: the back edge comes from the last copy
     for pi in 0..hphis.len {
         ph := hphis[pi]
         ri := red_index(reds, ph)
-        nb := if ri >= 0 { backs[pi] } else { loop_map_val(lastm, backs[pi]) }
+        nb := if ri >= 0 { rem.backs[pi] } else { loop_map_val(lastm, rem.backs[pi]) }
         i := f.im(ph)
         ifrom := i.from()
         for k in 0..ifrom.len {
@@ -583,7 +547,7 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
     for r in 0..reds.len {
         for k in 1..u {
             a := accs[r * u + k]
-            f.im(a).phi_set([]i64{inits[r * u + k], loop_map_val(&maps[k], reds[r].back)}, []i64{chk, ll})
+            f.im(a).phi_set([]i64{inits[r * u + k], loop_map_val(&maps[k], reds[r].back)}, []i64{rem.chk, ll})
             newphis.push(i32(a))
         }
     }
@@ -591,8 +555,15 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
         newphis.extend(f.blocks[h].insts.items())
         f.blocks[h].insts = newphis
     }
-    // mid: combine the partial results (pairwise), then the remainder if there is one
-    totals := vec[i64]()
+    // the values after the main loop: the last copy's, or for a reduction the partial results
+    // combined (pairwise) in mid
+    fin := imap_new(outside.len + hphis.len)
+    for pi in 0..hphis.len {
+        fin.iset(rem.backs[pi], loop_map_val(lastm, rem.backs[pi]))
+    }
+    for v in outside {
+        fin.iset(v, loop_map_val(lastm, v))
+    }
     for r in 0..reds.len {
         vals := vec[i64]()
         for k in 0..u {
@@ -601,91 +572,16 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
         while vals.len > 1 {
             nv := vec[i64]()
             for k in 0..vals.len / 2 {
-                nv.push(loop_red_combine(f, mid, &reds[r], vals[2 * k], vals[2 * k + 1]))
+                nv.push(loop_red_combine(f, rem.mid, &reds[r], vals[2 * k], vals[2 * k + 1]))
             }
             if vals.len % 2 == 1 {
                 nv.push(vals[vals.len - 1])
             }
             vals = nv
         }
-        totals.push(vals[0])
+        fin.iset(reds[r].back, vals[0])
     }
-    f.blocks[mid].term = Br(has_rem, rpre, x)
-    // rpre: where the remainder starts from
-    for pi in 0..hphis.len {
-        ph := hphis[pi]
-        fin := rt_final(backs[pi], reds, &totals, lastm)
-        if loop_invariant(backs[pi], in_loop, def_block) {
-            fin = backs[pi]
-        }
-        sp := f.mk_phi_of(f.insts[ph].ty, []i64{starts[pi], starts[pi], fin}, []i64{pre, chk, mid})
-        f.blocks[rpre].insts.push(i32(sp))
-        rph := rv.iget(ph)
-        ri := f.im(rph)
-        rfrom := ri.from()
-        for k in 0..rfrom.len {
-            if rfrom[k] == pre {
-                rfrom[k] = rpre
-                ri.args[k] = sp
-            }
-        }
-    }
-    f.blocks[rpre].term = Jmp(rh)
-    f.blocks[pre].term = Br(g, chk, rpre)
-    f.blocks[chk].term = Br(big, h, rpre)
-    f.phi_pred_replace(h, pre, chk)
-    // the remainder leaves through x
-    f.retarget(rl, cl.exit, x)
-    rc := rv.iget(cl.cond)
-    f.im(rc).aux = f.insts[rc].aux | LOOP_NO_UNROLL
-    // x: the values used after the loop
-    xmap := imap_new(outside.len)
-    for v in outside {
-        xp := f.mk_phi_of(f.insts[v].ty, []i64{loop_map_val(&rv, v), rt_final(v, reds, &totals, lastm)}, []i64{rl, mid})
-        f.blocks[x].insts.push(i32(xp))
-        xmap.iset(v, xp)
-    }
-    f.blocks[x].term = Jmp(cl.exit)
-    f.phi_pred_replace(cl.exit, lt, x)
-    // uses after the loop see x's phis
-    if outside.len > 0 {
-        for b in 0..nb0 {
-            if in_loop[b] {
-                continue
-            }
-            for v in f.blocks[b].insts {
-                args := f.insts[v].args
-                for ai in 0..args.len {
-                    if loop_defined(args[ai], in_loop, def_block) {
-                        args[ai] = loop_map_val(&xmap, args[ai])
-                    }
-                }
-            }
-            match f.blocks[b].term {
-                Br(&c, _, _) => {
-                    if loop_defined(*c, in_loop, def_block) {
-                        *c = loop_map_val(&xmap, *c)
-                    }
-                }
-                Ret(vs) => {
-                    for k in 0..vs.len {
-                        if loop_defined(vs[k], in_loop, def_block) {
-                            vs[k] = loop_map_val(&xmap, vs[k])
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        // (-g: the variables that had those values are not shown after the loop)
-        if f.dexp.len > 0 {
-            forget := vec_fill(f.insts.len, i32(NOV))
-            for v in outside {
-                forget[v] = i32(xmap.iget(v))
-            }
-            dbg_forget(f, &forget)
-        }
-    }
+    loop_remainder_end(f, cl, &rem, &fin, outside.items(), in_loop, def_block)
 }
 
 // Runtime unrolling of every qualifying loop (see above); true if a loop was unrolled.

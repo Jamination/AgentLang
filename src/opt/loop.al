@@ -494,6 +494,168 @@ inline fn loop_map_blk(bmap: *IMap, b: i64) -> i64 {
     return if x >= 0 { x } else { b }
 }
 
+// ---------- a main loop and a remainder loop ----------
+// The frame that runtime unrolling fills in (and that a vectorizer can): counted loop cl
+// (loop_trip_known, loop_exits_simple) becomes a main loop that runs whole groups of u
+// iterations and, after it, a copy of the original loop that runs the rest:
+//
+//     pre:   g = start cmp end (loop_trip_guard), tc, ue = start +- (tc & -u),
+//            has_rem = (tc & (u-1)) != 0;  br g chk rpre
+//     chk:   br tc >=u u header rpre
+//     header..: the main loop (the caller's: it steps the counter by u and its last latch
+//            branches back to the header while the counter is not ue, else to mid)
+//     mid:   (the caller's instructions: partial results combined);  br has_rem rpre x
+//     rpre:  phis: each header phi's start value (from pre and chk) or its value after the
+//            main loop (from mid);  jmp rh
+//     rh..rl: the remainder, a copy of the original loop (marked LOOP_NO_UNROLL); rl -> x
+//     x:     phis of the values used after the loop (from rl or mid);  jmp exit
+//
+// loop_remainder_begin builds everything but the main loop's latch and mid's contents;
+// loop_remainder_end, once the caller knows the value each loop value has after the main
+// loop, fills in rpre, x and the uses after the loop. Between the two the main loop's header
+// phis still have their inputs from chk (the start values) and from the original latch.
+struct Remainder {
+    u: i64
+    chk: i64
+    mid: i64
+    rpre: i64
+    x: i64
+    rh: i64          // the remainder's header
+    rl: i64          // the remainder's latch
+    rv: IMap         // the loop's values -> their copies in the remainder
+    ue: i64          // the counter's value where the main loop stops (in pre)
+    has_rem: i64     // an i8 in pre: there are iterations left for the remainder
+    hphis: Vec[i64]  // the header phis of the loop
+    starts: Vec[i64] // their inputs from the preheader
+    backs: Vec[i64]  // their inputs from the original latch
+    nb0: i64         // the number of blocks before
+}
+
+fn loop_remainder_begin(f: *Func, cl: *CLoop, u: i64) -> Remainder {
+    nb0 := f.blocks.len
+    h := cl.header
+    pre := cl.pre
+    ty := cl.ty
+    hphis := vec[i64]()
+    starts := vec[i64]()
+    backs := vec[i64]()
+    for v in f.blocks[h].insts {
+        if f.insts[v].op != Phi {
+            break
+        }
+        hphis.push(i64(v))
+        starts.push(f.insts[v].phi_input(pre))
+        backs.push(f.insts[v].phi_input(cl.latch))
+    }
+    rv := imap_new(64)
+    rb := loop_clone_blocks(f, cl.blocks.items(), &rv)
+    rh := rb.iget(h)
+    rl := rb.iget(cl.latch)
+    // the tests in the preheader and in a block after it (two branches rather than an `and`
+    // of the conditions: the first is often known and folds away)
+    g := loop_trip_guard(f, cl, pre)
+    tc := loop_trip_count(f, cl, pre)
+    chk := f.new_block()
+    big := f.push(chk, Uge, I8, vec_of([]i64{tc, loop_const(f, chk, ty, u)}), 0)
+    m := f.push(pre, And, ty, vec_of([]i64{tc, loop_const(f, pre, ty, -u)}), 0)
+    ue := f.push(pre, if cl.step > 0 { Add } else { Sub }, ty, vec_of([]i64{cl.start, m}), 0)
+    rem := f.push(pre, And, ty, vec_of([]i64{tc, loop_const(f, pre, ty, u - 1)}), 0)
+    has_rem := f.push(pre, Ne, I8, vec_of([]i64{rem, loop_const(f, pre, ty, 0)}), 0)
+    mid := f.new_block()
+    rpre := f.new_block()
+    x := f.new_block()
+    f.blocks[pre].term = Br(g, chk, rpre)
+    f.blocks[chk].term = Br(big, h, rpre)
+    f.phi_pred_replace(h, pre, chk)
+    f.blocks[rpre].term = Jmp(rh)
+    f.blocks[x].term = Jmp(cl.exit)
+    f.retarget(rl, cl.exit, x)
+    rc := rv.iget(cl.cond)
+    f.im(rc).aux = f.insts[rc].aux | LOOP_NO_UNROLL
+    return Remainder{u: u, chk: chk, mid: mid, rpre: rpre, x: x, rh: rh, rl: rl, rv: rv, ue: ue, has_rem: has_rem, hphis: hphis, starts: starts, backs: backs, nb0: nb0}
+}
+
+// the value v has after the main loop: fin's entry, else v itself (a value from outside)
+priv fn rem_final(fin: *IMap, v: i64, in_loop: []bool, def_block: []i32) -> i64 {
+    x := fin.iget(v)
+    if x >= 0 {
+        return x
+    }
+    assert !loop_defined(v, in_loop, def_block), "loop: no value after the main loop"
+    return v
+}
+
+// Completes the frame of loop_remainder_begin: `fin` maps the loop's values to the values they
+// have in mid after the main loop (every header phi's back-edge input and every value of
+// `outside`, loop_used_outside, that is defined in the loop). in_loop and def_block describe
+// the original loop as before loop_remainder_begin.
+fn loop_remainder_end(f: *Func, cl: *CLoop, rem: *Remainder, fin: *IMap, outside: []i64, in_loop: []bool, def_block: []i32) {
+    f.blocks[rem.mid].term = Br(rem.has_rem, rem.rpre, rem.x)
+    // rpre: where the remainder starts from
+    for pi in 0..rem.hphis.len {
+        ph := rem.hphis[pi]
+        st := rem.starts[pi]
+        sp := f.mk_phi_of(f.insts[ph].ty, []i64{st, st, rem_final(fin, rem.backs[pi], in_loop, def_block)}, []i64{cl.pre, rem.chk, rem.mid})
+        f.blocks[rem.rpre].insts.push(i32(sp))
+        ri := f.im(rem.rv.iget(ph))
+        rfrom := ri.from()
+        for k in 0..rfrom.len {
+            if rfrom[k] == cl.pre {
+                rfrom[k] = rem.rpre
+                ri.args[k] = sp
+            }
+        }
+    }
+    // x: the values used after the loop
+    xmap := imap_new(len(outside))
+    for v in outside {
+        xp := f.mk_phi_of(f.insts[v].ty, []i64{loop_map_val(&rem.rv, v), rem_final(fin, v, in_loop, def_block)}, []i64{rem.rl, rem.mid})
+        f.blocks[rem.x].insts.push(i32(xp))
+        xmap.iset(v, xp)
+    }
+    f.phi_pred_replace(cl.exit, cl.latch, rem.x)
+    if len(outside) == 0 {
+        return
+    }
+    // uses after the loop see x's phis (only the latch leaves to them: loop_exits_simple)
+    for b in 0..rem.nb0 {
+        if in_loop[b] {
+            continue
+        }
+        for v in f.blocks[b].insts {
+            args := f.insts[v].args
+            for ai in 0..args.len {
+                if loop_defined(args[ai], in_loop, def_block) {
+                    args[ai] = loop_map_val(&xmap, args[ai])
+                }
+            }
+        }
+        match f.blocks[b].term {
+            Br(&c, _, _) => {
+                if loop_defined(*c, in_loop, def_block) {
+                    *c = loop_map_val(&xmap, *c)
+                }
+            }
+            Ret(vs) => {
+                for k in 0..vs.len {
+                    if loop_defined(vs[k], in_loop, def_block) {
+                        vs[k] = loop_map_val(&xmap, vs[k])
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // (-g: the variables that had those values are not shown after the loop)
+    if f.dexp.len > 0 {
+        forget := vec_fill(f.insts.len, i32(NOV))
+        for v in outside {
+            forget[v] = i32(xmap.iget(v))
+        }
+        dbg_forget(f, &forget)
+    }
+}
+
 // ---------- edges ----------
 
 // Puts a new empty block on the edge from -> to (both arms of a branch to `to` included) and
