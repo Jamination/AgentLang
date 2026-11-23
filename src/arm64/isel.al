@@ -822,6 +822,21 @@ priv fn inst(self: *Sel, v: i64) {
                 Some(k) if k > 0 && k & (k - 1) == 0 => {
                     self.ei(LslI, osz(ty), d, self.reg(a), i64(ctz(u64(k))))
                 }
+                Some(k) if k > 2 && k < 0x4000_0000 && (k - 1) & (k - 2) == 0 => {
+                    // a * (2^n + 1): add d, a, a, lsl n
+                    x := self.reg(a)
+                    ai := ainst(AddR, osz(ty), d, x, x)
+                    ai.k = A64_LSL
+                    ai.sh = u8(ctz(u64(k - 1)))
+                    self.out.push(ai)
+                }
+                Some(k) if k > 2 && k < 0x4000_0000 && (k + 1) & k == 0 => {
+                    // a * (2^n - 1): (a << n) - a
+                    x := self.reg(a)
+                    t := self.gp()
+                    self.ei(LslI, osz(ty), t, x, i64(ctz(u64(k + 1))))
+                    self.e(SubR, osz(ty), d, t, x)
+                }
                 _ => self.e(Mul, osz(ty), d, self.reg(a), self.reg(b))
             }
         }

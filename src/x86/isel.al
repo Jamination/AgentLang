@@ -896,7 +896,8 @@ priv fn reg(self: *Sel, v: i64) -> i64 {
             self.e(Zero, 8, R(r), Opnd.None)
         } else {
             m := self.fconst(Bits128{lo: u64(i.k), hi: 0})
-            self.e(MovSd, 8, R(r), M(m))
+            // (movss for an f32: the 4 bytes of the constant)
+            self.e(MovSd, if i.ty == F32 { 4 } else { 8 }, R(r), M(m))
         }
         return r
     }
@@ -1321,6 +1322,10 @@ priv fn lea_factor(k: i64) -> (i64, i64) {
     return (0, 0)
 }
 
+priv fn is_pow2_i(x: i64) -> bool {
+    return x > 0 && x & (x - 1) == 0
+}
+
 // d = x * c (c = 3, 5, 9) with a `lea` of operation size sz
 priv fn lea_times(self: *Sel, d: i64, x: i64, c: i64, sz: u8) {
     m := mem_new()
@@ -1706,7 +1711,10 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     b := i.args[1]
     ty := i.ty
     sz := osz(ty)
-    wide := ty == I32 || ty == I64
+    // a narrow load folds into an operation of its own width (the bits above it in the
+    // register are not part of a narrow value): `add r8, byte [m]`
+    narrow := (ty == I8 || ty == I16) && mop != Imul
+    wide := ty == I32 || ty == I64 || narrow
     if commutative && wide && !self.can_fold_load(b) && self.can_fold_load(a) {
         swap(&a, &b)
     } else if commutative && !self.can_fold_load(b) && !is_some(self.f.is_const(a)) && self.uses[a] > 1 && self.uses[b] == 1 && !is_some(self.f.is_const(b)) {
@@ -1714,7 +1722,18 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     }
     d := self.vr(v)
     ar := self.reg(a)
-    bo := self.rmi_mem(b, ty)
+    bo: Opnd = Opnd.None
+    m_narrow: Opt[Mem] = None
+    if narrow && self.f.insts[b].ty == ty {
+        m_narrow = self.load_mem(b)
+    }
+    match m_narrow {
+        Some(m) => {
+            bo = M(m)
+            sz = sz_of(ty)
+        }
+        None => bo = self.rmi_mem(b, ty)
+    }
     self.e(Mov, 8, R(d), R(ar))
     self.e(mop, sz, R(d), bo)
 }
@@ -1845,13 +1864,31 @@ priv fn inst(self: *Sel, v: i64) {
                 swap(&a, &b)
             }
             d := self.vr(v)
-            c, s := lea_factor(self.f.is_const(b).or(0))
+            kb := self.f.is_const(b).or(0)
+            c, s := lea_factor(kb)
+            // k = 2^n + 1 or 2^n - 1 (17, 33, 7, 15, 31, ...)
+            n := 0
+            plus := false
+            if c == 0 && kb > 2 && kb < 0x4000_0000 {
+                if is_pow2_i(kb - 1) {
+                    n = i64(ctz(u64(kb - 1)))
+                    plus = true
+                } else if is_pow2_i(kb + 1) {
+                    n = i64(ctz(u64(kb + 1)))
+                }
+            }
             if c != 0 {
                 // a * (c << s), c = 3, 5, 9: lea and shl (latency 2) instead of imul (3)
                 self.lea_times(d, self.reg(a), c, osz(ty))
                 if s != 0 {
                     self.e(MOp.Shl, osz(ty), R(d), I(s))
                 }
+            } else if n != 0 {
+                // a * (2^n +- 1): shl and add or sub (latency 2) instead of imul (3)
+                ar := self.reg(a)
+                self.e(Mov, 8, R(d), R(ar))
+                self.e(MOp.Shl, osz(ty), R(d), I(n))
+                self.e(if plus { MOp.Add } else { MOp.Sub }, osz(ty), R(d), R(ar))
             } else {
                 match self.f.is_const(b) {
                     Some(k) if fits_i32(k) => {
