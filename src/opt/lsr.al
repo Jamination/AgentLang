@@ -2,8 +2,8 @@
 //
 // - widening: a narrow counter (`for i in 0..n` with n: i32) whose sign (zero) extension the
 //   body uses gets a 64-bit twin that counts along; the extensions become the twin, and the
-//   exit test compares the twin, so the narrow counter usually dies (no `movsxd` per
-//   iteration);
+//   exit test compares the twin, so the narrow counter dies (no `movsxd` per iteration;
+//   done only when nothing else uses the narrow counter, two counters would cost more);
 // - strength reduction: `ext(iv) * m` with m loop-invariant but not a constant (a strided
 //   index `a[i * m + j]`) becomes a phi that adds m every iteration (no `imul` per iteration);
 // - address re-basing: the address of a load or store that is affine in the counter with a
@@ -60,6 +60,26 @@ priv fn widen_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, 
     // (entered only with start < end: the counter stays between them and never wraps)
     if exts.is_empty() || !loop_known_at(f, cfg, cl.pre, cl.cmp, cl.start, cl.end) {
         return false
+    }
+    // only when the narrow counter then dies: nothing but its increment, the exit test and
+    // the extensions use it (two counters would cost more than the extensions)
+    for b in 0..f.blocks.len {
+        for v in f.blocks[b].insts {
+            i := &f.insts[v]
+            for a in i.args {
+                if a == cl.iv && i64(v) != cl.next && !contains(&exts, i64(v)) {
+                    return false
+                }
+                if a == cl.next && i64(v) != cl.iv && i64(v) != cl.cond && !contains(&exts, i64(v)) {
+                    return false
+                }
+            }
+        }
+        for a in term_args(&f.blocks[b].term) {
+            if a == cl.iv || a == cl.next {
+                return false
+            }
+        }
     }
     pre := cl.pre
     h := cl.header

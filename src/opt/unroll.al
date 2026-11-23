@@ -418,10 +418,14 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
 priv const RT_MAX_SIZE = 40 // instructions and terminators of the loop
 priv const RT_TARGET = 64   // roughly the size of the unrolled body
 
-// the number of copies for a loop body of `size` (1: do not unroll)
-priv fn rt_factor(size: i64) -> i64 {
+// the number of copies for a loop body of `size` with `nred` reductions (1: do not unroll); a
+// tiny body with at most one reduction gets 8 (8 partial results still fit in registers)
+priv fn rt_factor(size: i64, nred: i64) -> i64 {
     if size > RT_MAX_SIZE {
         return 1
+    }
+    if size <= 10 && nred <= 1 {
+        return 8
     }
     if size * 4 <= RT_TARGET {
         return 4
@@ -451,17 +455,9 @@ priv fn rt_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def
     if loop_has_call(f, &cl) || !loop_exits_simple(f, &cl, in_loop, def_block) {
         return false
     }
-    u := rt_factor(loop_size(f, &cl))
-    if u < 2 {
+    size := loop_size(f, &cl)
+    if size > RT_MAX_SIZE {
         return false
-    }
-    match loop_const_trip(f, &cl) {
-        Some(t) => {
-            if t < 2 * u {
-                return false
-            }
-        }
-        None => {}
     }
     outside := loop_used_outside(f, in_loop, def_block)
     reds := vec[Reduction]()
@@ -470,6 +466,18 @@ priv fn rt_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def
             Some(r) => reds.push(r)
             None => {}
         }
+    }
+    u := rt_factor(size, reds.len)
+    match loop_const_trip(f, &cl) {
+        Some(t) => {
+            while u > 2 && t < 2 * u {
+                u /= 2
+            }
+            if t < 2 * u {
+                return false
+            }
+        }
+        None => {}
     }
     rt_apply(f, &cl, u, &reds, &outside, in_loop, def_block)
     return true
