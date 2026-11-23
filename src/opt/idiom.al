@@ -128,30 +128,31 @@ priv fn idiom_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, 
             None => return false
         }
     }
-    // the preheader decides
+    // the preheader decides whether the loop runs normally, then a block after it (chk)
+    // whether the bulk operation is the faster one and correct
     pre := cl.pre
     g := loop_trip_guard(f, &cl, pre)
-    tc := loop_trip_count(f, &cl, pre)
+    chk := f.new_block()
+    tc := loop_trip_count(f, &cl, chk)
     if cl.ty != I64 {
-        tc = f.push(pre, ZExt, I64, vec_of([]i64{tc}), 0)
+        tc = f.push(chk, ZExt, I64, vec_of([]i64{tc}), 0)
     }
-    nbytes := if size == 1 { tc } else { f.push(pre, Mul, I64, vec_of([]i64{tc, loop_const(f, pre, I64, size)}), 0) }
-    big := f.push(pre, Uge, I8, vec_of([]i64{nbytes, loop_const(f, pre, I64, IDIOM_MIN_BYTES)}), 0)
-    ok := f.push(pre, And, I8, vec_of([]i64{g, big}), 0)
-    dst := loop_expr_at(f, &cl, pre, addr, cl.start, in_loop, def_block)
+    nbytes := if size == 1 { tc } else { f.push(chk, Mul, I64, vec_of([]i64{tc, loop_const(f, chk, I64, size)}), 0) }
+    ok := f.push(chk, Uge, I8, vec_of([]i64{nbytes, loop_const(f, chk, I64, IDIOM_MIN_BYTES)}), 0)
+    dst := loop_expr_at(f, &cl, chk, addr, cl.start, in_loop, def_block)
     bulk := f.new_block()
     if ld != NOV {
-        src := loop_expr_at(f, &cl, pre, laddr, cl.start, in_loop, def_block)
+        src := loop_expr_at(f, &cl, chk, laddr, cl.start, in_loop, def_block)
         // the ranges [dst, dst + n) and [src, src + n) are apart
-        d1 := f.push(pre, Sub, I64, vec_of([]i64{dst, src}), 0)
-        d2 := f.push(pre, Sub, I64, vec_of([]i64{src, dst}), 0)
-        a1 := f.push(pre, Uge, I8, vec_of([]i64{d1, nbytes}), 0)
-        a2 := f.push(pre, Uge, I8, vec_of([]i64{d2, nbytes}), 0)
-        apart := f.push(pre, And, I8, vec_of([]i64{a1, a2}), 0)
-        ok = f.push(pre, And, I8, vec_of([]i64{ok, apart}), 0)
+        d1 := f.push(chk, Sub, I64, vec_of([]i64{dst, src}), 0)
+        d2 := f.push(chk, Sub, I64, vec_of([]i64{src, dst}), 0)
+        a1 := f.push(chk, Uge, I8, vec_of([]i64{d1, nbytes}), 0)
+        a2 := f.push(chk, Uge, I8, vec_of([]i64{d2, nbytes}), 0)
+        apart := f.push(chk, And, I8, vec_of([]i64{a1, a2}), 0)
+        ok = f.push(chk, And, I8, vec_of([]i64{ok, apart}), 0)
         f.push(bulk, MemCpy, Void, vec_of([]i64{dst, src, nbytes}), 0)
     } else {
-        byte := if fill >= 0 { fill } else { loop_const(f, pre, I8, -1 - fill) }
+        byte := if fill >= 0 { fill } else { loop_const(f, chk, I8, -1 - fill) }
         f.push(bulk, MemSet, Void, vec_of([]i64{dst, byte, nbytes}), 0)
     }
     f.blocks[bulk].term = Jmp(cl.exit)
@@ -166,7 +167,8 @@ priv fn idiom_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, 
     }
     np := f.new_block()
     f.blocks[np].term = Jmp(h)
-    f.blocks[pre].term = Br(ok, bulk, np)
+    f.blocks[pre].term = Br(g, chk, np)
+    f.blocks[chk].term = Br(ok, bulk, np)
     f.phi_pred_replace(h, pre, np)
     // (the slow path is short or rare: not unrolled either)
     f.im(cl.cond).aux = f.insts[cl.cond].aux | LOOP_NO_IDIOM | LOOP_NO_UNROLL

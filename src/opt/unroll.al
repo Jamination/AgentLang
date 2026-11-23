@@ -505,11 +505,12 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
     rb := loop_clone_blocks(f, cl.blocks.items(), &rv)
     rh := rb.iget(h)
     rl := rb.iget(lt)
-    // the test in the preheader
+    // the tests in the preheader and in a block after it, chk (two branches rather than an
+    // `and` of the conditions: the first is often known and folds away)
     g := loop_trip_guard(f, cl, pre)
     tc := loop_trip_count(f, cl, pre)
-    big := f.push(pre, Uge, I8, vec_of([]i64{tc, loop_const(f, pre, ty, u)}), 0)
-    ok := f.push(pre, And, I8, vec_of([]i64{g, big}), 0)
+    chk := f.new_block()
+    big := f.push(chk, Uge, I8, vec_of([]i64{tc, loop_const(f, chk, ty, u)}), 0)
     m := f.push(pre, And, ty, vec_of([]i64{tc, loop_const(f, pre, ty, -u)}), 0)
     ue := f.push(pre, if cl.step > 0 { Add } else { Sub }, ty, vec_of([]i64{cl.start, m}), 0)
     rem := f.push(pre, And, ty, vec_of([]i64{tc, loop_const(f, pre, ty, u - 1)}), 0)
@@ -574,7 +575,7 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
     for r in 0..reds.len {
         for k in 1..u {
             a := accs[r * u + k]
-            f.im(a).phi_set([]i64{inits[r * u + k], loop_map_val(&maps[k], reds[r].back)}, []i64{pre, ll})
+            f.im(a).phi_set([]i64{inits[r * u + k], loop_map_val(&maps[k], reds[r].back)}, []i64{chk, ll})
             newphis.push(i32(a))
         }
     }
@@ -609,7 +610,7 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
         if loop_invariant(backs[pi], in_loop, def_block) {
             fin = backs[pi]
         }
-        sp := f.mk_phi_of(f.insts[ph].ty, []i64{starts[pi], fin}, []i64{pre, mid})
+        sp := f.mk_phi_of(f.insts[ph].ty, []i64{starts[pi], starts[pi], fin}, []i64{pre, chk, mid})
         f.blocks[rpre].insts.push(i32(sp))
         rph := rv.iget(ph)
         ri := f.im(rph)
@@ -622,7 +623,9 @@ priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *
         }
     }
     f.blocks[rpre].term = Jmp(rh)
-    f.blocks[pre].term = Br(ok, h, rpre)
+    f.blocks[pre].term = Br(g, chk, rpre)
+    f.blocks[chk].term = Br(big, h, rpre)
+    f.phi_pred_replace(h, pre, chk)
     // the remainder leaves through x
     f.retarget(rl, cl.exit, x)
     rc := rv.iget(cl.cond)
