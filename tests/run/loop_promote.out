@@ -1,0 +1,22 @@
+count_up 0 10 10
+count_up 1 10 10
+count_up 2 11 11
+count_up 3 13 13
+count_up 4 16 16
+count_up 5 20 20
+count_up 7 31 31
+count_up 8 38 38
+count_up 9 46 46
+count_up 100 4960 4960
+count_if 30
+wrap_u8 35
+field 23 2475 0 30 24
+global_slot 14757 0 0
+two_ptrs 46 110
+two_ptrs same 101
+read_other 550 111 110 585 121
+until 4 120 -1 181
+with_call 21 6
+nested 70 35
+maybe_store 77
+maybe_store 12345
