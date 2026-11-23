@@ -642,11 +642,6 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
                     None => {}
                 }
             }
-            // (x - y) == 0 and (x ^ y) == 0  =>  x == y
-            if (op == Eq || op == Ne) && k == 0 && (ai.op == Sub || ai.op == Xor) {
-                self.set(v, op, vec_of(ai.args), 0)
-                return None
-            }
             // ((x >>> s) & 1) == 0  =>  (x & (1 << s)) == 0 (a test of x with a constant)
             if (op == Eq || op == Ne) && k == 0 && ai.op == And && self.c(ai.args[1]) == Some(1) {
                 si := &self.f.insts[ai.args[0]]
