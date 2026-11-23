@@ -1634,6 +1634,11 @@ priv fn term(self: *Sel, b: i64) {
     tm := self.f.blocks[b].term
     match tm {
         Jmp(t) => {
+            if self.tail_call_of(b) >= 0 {
+                // (the join's `ret` is not reached from here)
+                self.mf.blocks[b].succs = vec[i64]()
+                return
+            }
             self.phi_copies(b, t)
             self.jmp(t)
         }
@@ -1670,6 +1675,10 @@ priv fn term(self: *Sel, b: i64) {
             }
         }
         Ret(vals) => {
+            if self.tail_call_of(b) >= 0 {
+                // (the call jumps to the callee, which returns for this function)
+                return
+            }
             ni := 0
             nf := 0
             used := vec[i64]()
@@ -1842,6 +1851,86 @@ priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     self.e(mop, sz, R(d), bo)
 }
 
+// a float select without a branch (SSE2): a mask of all ones or all zeros from the condition,
+// then (mask & a) | (~mask & b), shorter forms for a constant 0.0 or a negation on one side
+priv fn fselect(self: *Sel, v: i64) {
+    i := &self.f.insts[v]
+    ty := i.ty
+    c := i.args[0]
+    a := i.args[1]
+    b := i.args[2]
+    // the size of the bitwise operations: andpd / andps
+    lsz: u8 = if ty == F64 { 8 } else { 16 }
+    m := new_vreg(&self.mf, 1)
+    ci := &self.f.insts[c]
+    if (ci.op == FLt || ci.op == FLe || ci.op == FGt || ci.op == FGe || ci.op == FEq || ci.op == FNe) && self.f.insts[ci.args[0]].ty == ty {
+        // cmpsd predicates: 0 eq, 1 lt, 2 le, 4 neq (true when unordered); lt / le are false
+        // when unordered, as FLt .. FGe are
+        x := ci.args[0]
+        y := ci.args[1]
+        if ci.op == FGt || ci.op == FGe {
+            swap(&x, &y)
+        }
+        pred := match ci.op {
+            FEq => 0
+            FNe => 4
+            FLt, FGt => 1
+            _ => 2
+        }
+        xr := self.reg(x)
+        yo := self.xm(y)
+        self.e(MovSd, 8, R(m), R(xr))
+        mi := minst_new(Cmpsd, fsz(ty), R(m), yo)
+        mi.tgt = i32(pred)
+        self.out.push(mi)
+    } else {
+        // the boolean in a general register: 0 - c is the mask
+        r := self.reg(c)
+        g := new_vreg(&self.mf, 0)
+        zi := minst_new(Movzx, 1, R(g), R(r))
+        zi.sz2 = 4
+        self.out.push(zi)
+        self.e(Neg, 8, R(g), Opnd.None)
+        self.e(MovqToX, 8, R(m), R(g))
+    }
+    d := self.vr(v)
+    ai := &self.f.insts[a]
+    bi := &self.f.insts[b]
+    // an operand of the bitwise operations: a constant from the (16-byte aligned) pool, else a
+    // register (a folded load could be unaligned)
+    fn lop(s: *Sel, x: i64) -> Opnd {
+        xi := &s.f.insts[x]
+        if xi.op == FConst && xi.k != 0 {
+            return M(s.fconst(Bits128{lo: u64(xi.k), hi: 0}))
+        }
+        return R(s.reg(x))
+    }
+    if (bi.op == FNeg && bi.args[0] == a) || (ai.op == FNeg && ai.args[0] == b) {
+        // c ? x : -x = x ^ (~mask & sign), c ? -x : x = x ^ (mask & sign)
+        x := if bi.op == FNeg && bi.args[0] == a { a } else { b }
+        sign: Bits128
+        if ty == F64 {
+            sign = Bits128{lo: 0x8000_0000_0000_0000, hi: 0}
+        } else {
+            sign = Bits128{lo: 0x8000_0000_8000_0000, hi: 0x8000_0000_8000_0000}
+        }
+        sm := self.fconst(sign)
+        self.e(if x == a { Andnpd } else { Andpd }, lsz, R(m), M(sm))
+        self.e(Xorpd, lsz, R(m), R(self.reg(x)))
+    } else if bi.op == FConst && bi.k == 0 {
+        self.e(Andpd, lsz, R(m), lop(self, a))
+    } else if ai.op == FConst && ai.k == 0 {
+        self.e(Andnpd, lsz, R(m), lop(self, b))
+    } else {
+        t := new_vreg(&self.mf, 1)
+        self.e(MovSd, 8, R(t), R(m))
+        self.e(Andpd, lsz, R(t), lop(self, a))
+        self.e(Andnpd, lsz, R(m), lop(self, b))
+        self.e(Orpd, lsz, R(m), R(t))
+    }
+    self.e(MovSd, 8, R(d), R(m))
+}
+
 priv fn zext_free(self: *Sel, v: i64) -> bool {
     i := &self.f.insts[v]
     if i.ty != I32 {
@@ -1897,7 +1986,16 @@ priv fn inst(self: *Sel, v: i64) {
                     ra := i64(m.base)
                     rb := i64(m.idx)
                     direct := i64(self.vreg[a]) == ra && i64(self.vreg[b]) == rb
-                    if direct && self.dies_here(a) {
+                    // an accumulator (a phi used only here) first: d can take its register
+                    acc_a := self.f.insts[a].op == Phi && self.uses[a] == 1
+                    acc_b := self.f.insts[b].op == Phi && self.uses[b] == 1
+                    if direct && acc_a {
+                        self.e(Mov, 8, R(d), R(ra))
+                        self.e(MOp.Add, 8, R(d), R(rb))
+                    } else if direct && acc_b {
+                        self.e(Mov, 8, R(d), R(rb))
+                        self.e(MOp.Add, 8, R(d), R(ra))
+                    } else if direct && self.dies_here(a) {
                         self.e(Mov, 8, R(d), R(ra))
                         self.e(MOp.Add, 8, R(d), R(rb))
                     } else if direct && self.dies_here(b) {
@@ -2089,6 +2187,16 @@ priv fn inst(self: *Sel, v: i64) {
             mi.sz2 = if ty == I64 { 8 } else { 4 }
             self.out.push(mi)
         }
+        ZExt if self.uses[i.args[0]] == 1 && self.f.insts[i.args[0]].op.is_cmp() && self.f.insts[i.args[0]].op != FEq && self.f.insts[i.args[0]].op != FNe => {
+            // a flag as a number: xor d, d; cmp; setcc d (no movzx, no partial register; the
+            // setcc names d as operand b too, so that d stays live from the xor on)
+            d := self.vr(v)
+            self.e(Zero, 4, R(d), Opnd.None)
+            cc, _ := self.cmp_flags(i.args[0])
+            s := minst_new(Setcc, 1, R(d), R(d))
+            s.cc = cc
+            self.out.push(s)
+        }
         ZExt => {
             d := self.vr(v)
             src := i.args[0]
@@ -2160,6 +2268,7 @@ priv fn inst(self: *Sel, v: i64) {
             s := self.reg(i.args[0])
             self.e(MovqToR, fsz(self.f.insts[i.args[0]].ty), R(d), R(s))
         }
+        Select if ty == F64 || ty == F32 => self.fselect(v)
         Select => {
             d := self.vr(v)
             c := i.args[0]
@@ -2439,6 +2548,36 @@ priv fn uses_of_reg_single(self: *Sel, i: *Inst, base: i64) -> bool {
     return false
 }
 
+// ---------- sibling calls ----------
+// The call of block b that becomes a jump to the callee after the epilogue (tre_sibling_call),
+// or -1: every argument goes in a register (the callee's stack arguments would not fit in the
+// caller's incoming area).
+priv fn tail_call_of(self: *Sel, b: i64) -> i64 {
+    v, args := tre_sibling_call(self.m, self.f, b)
+    if v < 0 {
+        return -1
+    }
+    ni := 0
+    nf := 0
+    for a in args {
+        at := self.f.insts[a].ty
+        if target_os == TargetWindows {
+            if at.is_vec() {
+                return -1
+            }
+            ni += 1
+        } else if at.is_fp() {
+            nf += 1
+        } else {
+            ni += 1
+        }
+    }
+    if target_os == TargetWindows && ni > WIN_REG_ARGS || ni > len(INT_ARGS) || nf > NUM_FLOAT_ARGS {
+        return -1
+    }
+    return v
+}
+
 priv fn call(self: *Sel, v: i64, i: *Inst) {
     // a stack argument word: a 32-bit immediate or a register
     fn stack_src(s: *Sel, a: i64) -> Opnd {
@@ -2536,6 +2675,21 @@ priv fn call(self: *Sel, v: i64, i: *Inst) {
         // C calling convention: al = number of vector registers used (for variadic callees)
         self.e(Mov, 4, R(RAX), I(nf))
         used.push(RAX)
+    }
+    if self.tail_call_of(i64(self.blk_of[v])) == v {
+        // a sibling call: the epilogue, then a jump (through rax: no argument register, and
+        // not restored by the epilogue)
+        j := match tr {
+            Some(r) => {
+                self.e(Mov, 8, R(RAX), R(r))
+                used.push(RAX)
+                self.mf.mir_with_uses(MOp.TailJmp, 0, Opnd.None, used.items())
+            }
+            None => self.mf.mir_with_uses(MOp.TailJmp, 0, Opnd.None, used.items())
+        }
+        j.tgt = if i.op == Call { i32(i.k) } else { -1 }
+        self.out.push(j)
+        return
     }
     match tr {
         Some(r) => {

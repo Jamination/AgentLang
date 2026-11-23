@@ -143,6 +143,9 @@ enum MOp {
     Ucomisd,
     Xorpd,
     Andpd,
+    Andnpd, // a = ~a & b
+    Orpd,
+    Cmpsd, // cmpsd / cmpss (sz 8 / 4): a = all ones if the predicate tgt holds for a, b, else 0
     // SSE operations above take sz 8 (scalar double), 4 (scalar single) or 16 (packed single)
     Minsd,
     Maxsd,
@@ -168,6 +171,9 @@ enum MOp {
     Xadd,    // lock xadd
     Cmpxchg, // lock cmpxchg: compares with rax, which receives the old value
     Mfence,
+    // a sibling call: the epilogue, then a jump to function tgt (tgt -1: to the address in
+    // rax); reads its fixed registers like `ret`
+    TailJmp,
     // switches (isel switch_term): bt a, b (a register, b the bit number: CF = bit b of a);
     // jmp a (a register; tgt = the jump table in MFunc.jtabs whose blocks it goes to)
     Bt,
@@ -208,7 +214,7 @@ fn minst_new(op: MOp, sz: u8, a: Opnd, b: Opnd) -> MInst {
 
 // does the instruction keep a list of fixed registers in MFunc.xuses?
 fn has_xuses(op: MOp) -> bool {
-    return op == Call || op == CallInd || op == Ret || op == Syscall
+    return op == Call || op == CallInd || op == Ret || op == Syscall || op == TailJmp
 }
 
 // a full register-to-register copy that the allocator may coalesce: (dst, src, true)
@@ -357,7 +363,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
                 _ => {}
             }
         }
-        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Cmov, Shl, Shr, Sar, Rol, Ror => {
+        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Andnpd, Orpd, Cmpsd, Cmov, Shl, Shr, Sar, Rol, Ror => {
             match &i.a {
                 R(r) => {
                     du[q] = r
@@ -414,7 +420,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
             q = du_opnd(&i.a, du, q)
             q += copy(du[q..], mf.fixed_uses(i))
         }
-        Ret => {
+        Ret, TailJmp => {
             q += copy(du[q..], mf.fixed_uses(i))
         }
         Syscall => {
@@ -643,7 +649,7 @@ fn mir_print_mfunc(f: *MFunc) -> str {
                 _ => i.sz
             }
             bs := if has_xuses(i.op) { "" } else { opnd_str(i.b, bsz) }
-            c := if i.op == Imul3 || i.op == Shufps { fmt(i.tgt) } else { "" }
+            c := if i.op == Imul3 || i.op == Shufps || i.op == Cmpsd { fmt(i.tgt) } else { "" }
             parts := vec[str]()
             if len(a) != 0 {
                 parts.push(a)
@@ -661,6 +667,9 @@ fn mir_print_mfunc(f: *MFunc) -> str {
                 }
                 Call => {
                     line = fmt(line, "f", i.tgt)
+                }
+                TailJmp => {
+                    line = if i.tgt >= 0 { fmt(line, "f", i.tgt) } else { concat(line, "rax") }
                 }
                 _ => {}
             }

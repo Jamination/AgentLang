@@ -527,6 +527,17 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             e.op(false, 0, false, 0xFF, 2, &rm, false)
         }
         Ret => e.b1(0xC3)
+        TailJmp => {
+            if i.tgt >= 0 {
+                e.b1(0xE9)
+                e.reloc32(Rel32Func(i64(i.tgt)), 0)
+            } else {
+                // rex.w jmp rax (the form the Windows unwinder knows in an epilogue)
+                e.b1(0x48)
+                e.b1(0xFF)
+                e.b1(0xE0)
+            }
+        }
         Syscall => {
             e.b1(0x0F)
             e.b1(0x05)
@@ -598,10 +609,18 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             rm := e.rm(&i.b)
             e.op(false, 0, false, 0x0F14, u8(d & 15), &rm, false)
         }
-        Ucomisd, Xorpd, Andpd => {
+        Cmpsd => {
+            d := reg_of(&i.a)
+            rm := e.rm(&i.b)
+            e.op(false, fp_pfx(sz), false, 0x0FC2, u8(d & 15), &rm, false)
+            e.imm(i64(i.tgt), 1)
+        }
+        Ucomisd, Xorpd, Andpd, Andnpd, Orpd => {
             o: i64 = match i.op {
                 Ucomisd => 0x0F2E
                 Xorpd => 0x0F57
+                Andnpd => 0x0F55
+                Orpd => 0x0F56
                 _ => 0x0F54
             }
             d := reg_of(&i.a)
@@ -1074,7 +1093,7 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             if dbg_on {
                 dats.push(i64(enc.out.len))
             }
-            if i.op == Ret {
+            if i.op == Ret || i.op == TailJmp {
                 // epilogue
                 for k, r in alloc.used_xmm_saved {
                     li := minst_new(MovSd, 16, R(r), xmm_slot(xmm_off, k))

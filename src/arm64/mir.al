@@ -109,6 +109,7 @@ enum AOp {
     Bl,      // call of function id; fixed argument registers in xuses (imm: start, sh: count)
     Blr,     // call of n
     Ret,     // fixed result registers in xuses
+    TailB,   // sibling call: the epilogue, then a branch to function id (-1: to x9); xuses as Bl
     Svc,     // system call: x8 and x0-x5 in xuses, result in x0; cc 1: clone of a thread
     Brk,     // trap
     DivTrap, // traps (BRK #1, SIGTRAP) if n is 0: the division fault of x86-64, also unchecked (sz 4 / 8)
@@ -247,7 +248,7 @@ fn a_decode(mf: *AFunc, i: *AInst, du: []i64, p: i64) -> i64 {
     nd := 0
     match i.op {
         Str, FStr, Stlr => {}
-        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, Svc, Brk, DivTrap, Dmb, MemCopy, MemFill, JmpTab => {}
+        CmpR, CmpI, TstI, Fcmp, B, Bcc, Cbz, Cbnz, Bl, Blr, Ret, TailB, Svc, Brk, DivTrap, Dmb, MemCopy, MemFill, JmpTab => {}
         _ => {
             q2 := put(du, q, i.d)
             nd = q2 - q
@@ -260,7 +261,7 @@ fn a_decode(mf: *AFunc, i: *AInst, du: []i64, p: i64) -> i64 {
             q = put(du, q, i.n)
             q += copy(du[q..], mf.a_fixed_uses(i))
         }
-        Ret => q += copy(du[q..], mf.a_fixed_uses(i))
+        Ret, TailB => q += copy(du[q..], mf.a_fixed_uses(i))
         Svc => {
             // x0 is the result (and the first argument)
             du[q] = 0
@@ -380,6 +381,7 @@ fn a_print(f: *AFunc, order: []i64) -> str {
             match i.op {
                 B, Bcc, Cbz, Cbnz => parts.push(fmt(".L", i.id))
                 Bl => parts.push(fmt("f", i.id))
+                TailB => parts.push(if i.id >= 0 { fmt("f", i.id) } else { "x9" })
                 AdrG, LdrG => parts.push(fmt("g", i.id))
                 AdrF => parts.push(fmt("f", i.id))
                 FConst => parts.push(fmt("c", i.id))

@@ -684,6 +684,12 @@ fn opt_func(m: *Module, fid: i64, st: *OptState) {
             sk_forget(f)
             opt_trace("after-inline", f)
             local_opt(f, st.level)
+            // mutual recursion the inliner collapsed is now a self tail call
+            if opt_enabled("tre") && tre_run(f, fid) {
+                sk_forget(f)
+                opt_trace("after-tre2", f)
+                local_opt(f, st.level)
+            }
         }
         // the indirect calls of known targets the passes after inlining exposed (or the
         // inliner did not reach) become direct; the addresses of the functions such calls

@@ -425,6 +425,15 @@ priv fn enc_inst(self: *Enc, i: *AInst, alloc: *AAlloc) {
             self.epilogue(alloc)
             self.put(a64_br(2, 30))
         }
+        TailB => {
+            self.epilogue(alloc)
+            if i.id >= 0 {
+                self.reloc(AR_CALL26, AT_FUNC, i64(i.id), 0)
+                self.put(a64_b(false, 0))
+            } else {
+                self.put(a64_br(0, 9))
+            }
+        }
         Svc => {
             self.put(a64_svc(0))
             if i.cc == 1 {

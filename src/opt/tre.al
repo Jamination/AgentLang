@@ -18,25 +18,134 @@ priv fn identity(op: Op) -> Opt[i64] {
     }
 }
 
+// The values block b returns: those of its own `ret`, or of a `ret` reached through jumps to
+// blocks that hold only phis (the join of an if expression), looked up through those phis;
+// also the block b jumps to (-1 for its own `ret`). False if neither.
+priv fn ret_through(f: *Func, b: i64) -> (Vec[i64], i64, bool) {
+    fail := (vec[i64](), -1, false)
+    chain := vec_one(b)
+    for depth in 0..4 {
+        cur := chain.last()
+        match f.blocks[cur].term {
+            Ret(vs) => {
+                if chain.len == 1 {
+                    return (clone(vs), -1, true)
+                }
+                rv := clone(vs)
+                for k in 0..rv.len {
+                    v := rv[k]
+                    for i in chain.len - 1..=1 by -1 {
+                        if f.insts[v].op == Phi && contains(f.blocks[chain[i]].insts.items(), i32(v)) {
+                            v = f.insts[v].phi_input(chain[i - 1])
+                            if v == NOV {
+                                return fail
+                            }
+                        }
+                    }
+                    rv[k] = v
+                }
+                return (rv, chain[1], true)
+            }
+            Jmp(t) => {
+                if contains(&chain, t) {
+                    return fail
+                }
+                for v in f.blocks[t].insts {
+                    if f.insts[v].op != Phi {
+                        return fail
+                    }
+                }
+                chain.push(t)
+            }
+            _ => return fail
+        }
+    }
+    return fail
+}
+
+// Can a local be shared between the iterations of the loop? Only when the function touches it
+// in a block from which no tail call is reached (that iteration is the last, the earlier ones
+// never saw it), such as the failure path of a check.
+priv fn allocas_private(f: *Func, sites: *Vec[Site]) -> bool {
+    has := false
+    for v in f.blocks[0].insts {
+        if f.insts[v].op == Alloca {
+            has = true
+        }
+    }
+    if !has {
+        return true
+    }
+    // the blocks that reach a tail call
+    preds := f.preds()
+    reach := vec_fill(f.blocks.len, false)
+    work := vec[i64]()
+    for s in sites.items() {
+        if !reach[s.block] {
+            reach[s.block] = true
+            work.push(s.block)
+        }
+    }
+    while !work.is_empty() {
+        b := work.pop()
+        for p in preds[b] {
+            if !reach[p] {
+                reach[p] = true
+                work.push(p)
+            }
+        }
+    }
+    for b in 0..f.blocks.len {
+        if !reach[b] {
+            continue
+        }
+        for v in f.blocks[b].insts {
+            for a in f.insts[v].args {
+                if f.insts[a].op == Alloca {
+                    return false
+                }
+            }
+        }
+        match f.blocks[b].term {
+            Ret(vs) => {
+                for a in vs {
+                    if f.insts[a].op == Alloca {
+                        return false
+                    }
+                }
+            }
+            Br(c, _, _) => {
+                if f.insts[c].op == Alloca {
+                    return false
+                }
+            }
+            Switch(c, _) => {
+                if f.insts[c].op == Alloca {
+                    return false
+                }
+            }
+            _ => {}
+        }
+    }
+    return true
+}
+
 fn tre_run(f: *Func, fid: i64) -> bool {
     if f.rets.len > 1 {
         return false
     }
-    // locals whose address is observable would be shared between iterations
-    for v in f.blocks[0].insts {
-        if f.insts[v].op == Alloca {
-            return false
-        }
-    }
     uses := f.use_counts()
     rpo := f.rpo()
     sites := vec[Site]()
+    // the join block a site returns through (parallel to sites; -1: its own `ret`)
+    joins := vec[i64]()
     acc_op: Opt[Op] = None
     for b in rpo {
-        rv := match f.blocks[b].term {
-            Ret(vs) => clone(vs)
-            _ => continue
+        rv, join, ok := ret_through(f, b)
+        if !ok {
+            continue
         }
+        nsites := sites.len
         insts := &f.blocks[b].insts
         if insts.is_empty() {
             continue
@@ -47,6 +156,7 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         // plain tail call: [call; ret call] or [call; ret] for no result
         if li.op == Call && li.k == fid && ((rv.is_empty() && f.rets.is_empty()) || (rv.len == 1 && rv[0] == last_v && uses[last_v] == 1)) {
             sites.push(Site{block: b, call: last_v, acc: None})
+            joins.push(join)
             continue
         }
         // accumulator form: [call; r = op(x, call); ret r] with the call right before
@@ -63,9 +173,32 @@ fn tre_run(f: *Func, fid: i64) -> bool {
                 }
             }
         }
+        if sites.len > nsites {
+            joins.push(join)
+        }
     }
     if sites.is_empty() {
         return false
+    }
+    // locals whose address is observable would be shared between iterations
+    if !allocas_private(f, &sites) {
+        return false
+    }
+    // a site that returns through a join returns by itself now (its inputs leave the join's phis)
+    for si in 0..sites.len {
+        j := joins[si]
+        if j < 0 {
+            continue
+        }
+        b := sites[si].block
+        rv, _, _ := ret_through(f, b)
+        for v in f.blocks[j].insts {
+            k := index_of(f.insts[v].from(), b)
+            if k >= 0 {
+                f.im(i64(v)).phi_remove(k)
+            }
+        }
+        f.blocks[b].term = Ret(rv)
     }
     // all sites must agree: with an accumulator, plain tail calls are fine too (acc unchanged)
     ret_ty := if f.rets.is_empty() { Void } else { f.rets[0] }
@@ -79,6 +212,9 @@ fn tre_run(f: *Func, fid: i64) -> bool {
     for v in entry_insts {
         if f.insts[v].op == Param {
             params.push(i64(v))
+            keep.push(v)
+        } else if f.insts[v].op == Alloca {
+            // (locals stay in the entry block)
             keep.push(v)
         } else {
             moved.push(v)
@@ -198,4 +334,99 @@ fn tre_run(f: *Func, fid: i64) -> bool {
         _ => {}
     }
     return true
+}
+
+// ---------- sibling calls (for the back ends) ----------
+// The call of block b that the back end may make a jump to the callee after the epilogue, and
+// the arguments it passes (without an indirect call's target); (-1, nil) if none. It is the
+// block's last instruction (but for its projections), and the block returns exactly its results
+// (by its own `ret`, or the `ret` of a join that holds only phis); the callee is an AL function
+// (an indirect call with the AL convention, not a C function from its import slot: the traces
+// through C code show the AL frame that called it), and the function has no locals in its frame
+// (whose address the callee could hold: also the copies of aggregates passed or returned by
+// address). Not at -O0 or with -g, where every frame of the calls stays in backtraces and
+// debuggers. The back end checks that the arguments fit in registers.
+fn tre_sibling_call(m: *Module, f: *Func, b: i64) -> (i64, []i64) {
+    none: (i64, []i64) = (-1, nil)
+    if dbg_on || opt_deferred() {
+        return none
+    }
+    vals := match f.blocks[b].term {
+        Ret(vs) => vs
+        Jmp(j) => {
+            rv := match f.blocks[j].term {
+                Ret(vs) => clone(vs)
+                _ => return none
+            }
+            for x in f.blocks[j].insts {
+                if f.insts[x].op != Phi {
+                    return none
+                }
+            }
+            for k in 0..rv.len {
+                if f.insts[rv[k]].op == Phi && contains(f.blocks[j].insts.items(), i32(rv[k])) {
+                    rv[k] = f.insts[rv[k]].phi_input(b)
+                }
+            }
+            rv
+        }
+        _ => return none
+    }
+    ins := &f.blocks[b].insts
+    k := ins.len - 1
+    while k >= 0 && f.insts[ins[k]].op == Proj {
+        k -= 1
+    }
+    if k < 0 {
+        return none
+    }
+    v := i64(ins[k])
+    i := &f.insts[v]
+    args := i.args
+    nrets := 0
+    if i.op == Call {
+        g := &m.funcs[i.k]
+        if g.ext != None {
+            return none
+        }
+        nrets = g.rets.len
+    } else if i.op == CallInd && i.aux == 0 {
+        t := &f.insts[i.args[0]]
+        if t.op == Load && f.insts[t.args[0]].op == GAddr && starts_with(m.globals[f.insts[t.args[0]].k].name, "got.") {
+            return none
+        }
+        args = args[1..]
+        nrets = if i.ty == Void { 0 } else { 1 }
+    } else {
+        return none
+    }
+    for x in ins[k + 1..] {
+        if f.insts[x].args[0] != v {
+            return none
+        }
+    }
+    // the results, in the order the callee returns them
+    if i.ty != Void {
+        if !(nrets == 1 && vals.len == 1 && vals[0] == v) {
+            return none
+        }
+    } else {
+        if vals.len != nrets {
+            return none
+        }
+        for j in 0..nrets {
+            x := &f.insts[vals[j]]
+            if x.op != Proj || x.args[0] != v || x.k != j {
+                return none
+            }
+        }
+    }
+    for bi in 0..f.blocks.len {
+        for x in f.blocks[bi].insts {
+            if f.insts[x].op == Alloca {
+                return none
+            }
+        }
+    }
+    return (v, args)
 }
