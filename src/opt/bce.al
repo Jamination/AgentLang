@@ -1600,10 +1600,10 @@ priv fn rg_forget(self: *Rg) {
 priv fn rg_proves(self: *Rg, idx: i64, ln: i64, b: i64) -> bool {
     self.ctx_y = ln
     self.cache.clear()
-    self.budget = 6000
+    self.budget = RG_BUDGET
     ok := self.rg_lo(idx, b, self.depth) >= 0
     if ok {
-        self.budget = 6000
+        self.budget = RG_BUDGET
         ok = self.rg_ub(idx, ln, b, self.depth) <= -1
     }
     self.ctx_y = NOV
@@ -1702,7 +1702,7 @@ priv fn rg_merge(self: *Rg, b: i64) -> bool {
     self.rg_forget()
     // in the changed function: x + kmin >= 0 at b (then no x + k wraps as an unsigned number,
     // and every one is at most x + kmax)
-    self.budget = 6000
+    self.budget = RG_BUDGET
     self.ctx_y = ln
     self.cache.clear()
     lo_ok := self.rg_lo(x, b, self.depth) >= -kmin
@@ -1718,6 +1718,11 @@ priv fn rg_merge(self: *Rg, b: i64) -> bool {
     self.rg_forget()
     return false
 }
+
+// the steps one range query may take (a query that runs out proves nothing). 6000 removed no
+// more checks than 1500 on bench/ and bench/wide and cost a sixth of the compiler's own
+// optimised compile time; 400 loses the scan loops of bench/wide/str/bytescan
+priv const RG_BUDGET: i64 = 1500
 
 priv fn rg_run(f: *Func) -> bool {
     any := false

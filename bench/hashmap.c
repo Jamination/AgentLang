@@ -83,6 +83,6 @@ int main(void) {
             sum += v;
         }
     }
-    printf("%lu %lu %lu\n", (unsigned long)m.len, (unsigned long)hits, (unsigned long)sum);
+    printf("%llu %llu %llu\n", (unsigned long long)m.len, (unsigned long long)hits, (unsigned long long)sum);
     return 0;
 }
