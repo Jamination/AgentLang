@@ -1082,9 +1082,13 @@ fn ra_allocate[F, I](mf: *F, order: []i64, w: *Work) -> RaResult {
             g.degree[r] = 0xFFFFFFFF / 2
         }
         mwl1 := build(&g, order, &dec, vcls.items(), &lo_off, &lo)
+        remat := remat_defs(mf, order, &dec, n)
         for v in 0..mf.vclass.len {
             if unspillable[v] {
                 g.cost[npre + v] = 1e30
+            } else if remat[npre + v] >= 0 {
+                // spilled, it costs a repetition of its definition at each use, no memory
+                g.cost[npre + v] *= 0.5
             }
         }
         spilled := vec[i64]()
@@ -1131,6 +1135,9 @@ fn ra_allocate[F, I](mf: *F, order: []i64, w: *Work) -> RaResult {
             for r in 0..slots.len {
                 if slots[r] >= 0 {
                     colors[r] = -1
+                } else if slots[r] == -2 {
+                    colors[r] = -1
+                    slots[r] = -1
                 }
             }
             return RaResult{used: used, assign: RaAssign{reg: colors, slot: slots}}
@@ -1138,8 +1145,57 @@ fn ra_allocate[F, I](mf: *F, order: []i64, w: *Work) -> RaResult {
         if round > 40 {
             panic(fmt("register allocation did not converge in `", mf.name, "`"))
         }
-        spill[F, I](mf, order, &dec, spilled.items(), &unspillable, &slots)
+        spill[F, I](mf, order, &dec, spilled.items(), &unspillable, &slots, remat.items())
     }
+}
+
+// ---------- rematerialization ----------
+// A virtual register with one definition that the target can repeat anywhere (ra_remat: a
+// constant, the address of a global or function: no operands, no flags) is not spilled to a
+// slot: its definition is repeated, into a new register, before each use and dropped where it
+// was. remat[r]: the number (in `order`, as in Dec) of that definition, or -1.
+// (ALC_DISABLE=remat)
+priv remat_read: bool
+priv remat_on: bool
+
+priv fn remat_defs[F](mf: *F, order: []i64, dec: *Dec, n: i64) -> Vec[i64] {
+    if !remat_read {
+        remat_on = opt_enabled("remat")
+        remat_read = true
+    }
+    at := vec_fill(n, -1)
+    if !remat_on {
+        return at
+    }
+    npre := ra_npre(mf)
+    ndef := vec_fill(n, 0)
+    blk := vec_fill(n, 0)
+    du := dec.du.items()
+    for oi in 0..len(order) {
+        for k in dec.binst[oi]..dec.binst[oi + 1] {
+            p := dec.ipos[k]
+            h := du[p]
+            for j in p + 1..p + 1 + (h & 255) {
+                r := du[j]
+                if r >= npre {
+                    ndef[r] += 1
+                    at[r] = k
+                    blk[r] = oi
+                }
+            }
+        }
+    }
+    for r in npre..n {
+        if ndef[r] != 1 {
+            at[r] = -1
+            continue
+        }
+        oi := blk[r]
+        if !ra_remat(mf, &mf.blocks[order[oi]].insts[at[r] - dec.binst[oi]], r) {
+            at[r] = -1
+        }
+    }
+    return at
 }
 
 // rewrites the virtual registers to their colours (in place; copies that became `mov r, r`
@@ -1183,13 +1239,29 @@ priv fn rewrite[F](mf: *F, order: []i64, dec: *Dec, colors: []i64) -> u64 {
 // rewrites the instructions that use or define a spilled register: a direct access to the
 // slot where the target has one (ra_spill_direct), else a fresh unspillable register loaded
 // before / stored after; records the slots in `slots` (by node)
-priv fn spill[F, I](mf: *F, order: []i64, dec: *Dec, spilled: []i64, unspillable: *Vec[bool], slots: *Vec[i64]) {
+priv fn spill[F, I](mf: *F, order: []i64, dec: *Dec, spilled: []i64, unspillable: *Vec[bool], slots: *Vec[i64], remat: []i64) {
     slot_of := vec_fill(ra_npre(mf) + mf.vclass.len, -1)
+    // the definitions to repeat (a copy, taken before any block changes), by node
+    rdef := vec[I]()
+    ridx := vec_fill(slot_of.len, -1)
     for v in spilled {
+        k := if v < len(remat) { remat[v] } else { -1 }
+        if k >= 0 {
+            oi := 0
+            while dec.binst[oi + 1] <= k {
+                oi += 1
+            }
+            ridx[v] = rdef.len
+            rdef.push(mf.blocks[order[oi]].insts[k - dec.binst[oi]])
+            // (no slot: marked spilled for the walk below)
+            slot_of[v] = -2
+            continue
+        }
         slot_of[v] = ra_spill_slot(mf, v)
     }
     slots.resize(slot_of.len, -1)
     for v in spilled {
+        // (-2: rematerialized, in no register and no slot for its whole life)
         slots[v] = slot_of[v]
     }
     du := dec.du.items()
@@ -1204,7 +1276,7 @@ priv fn spill[F, I](mf: *F, order: []i64, dec: *Dec, spilled: []i64, unspillable
             p := dec.ipos[k]
             h := du[p]
             for j in p + 1..p + 1 + (h & 255) + ((h >> 8) & 255) {
-                if slot_of[du[j]] >= 0 {
+                if slot_of[du[j]] != -1 {
                     any = true
                     break scan
                 }
@@ -1226,7 +1298,7 @@ priv fn spill[F, I](mf: *F, order: []i64, dec: *Dec, spilled: []i64, unspillable
             nt := 0
             for j in p + 1..e {
                 r := du[j]
-                if slot_of[r] < 0 {
+                if slot_of[r] == -1 {
                     continue
                 }
                 y := 0
@@ -1250,11 +1322,26 @@ priv fn spill[F, I](mf: *F, order: []i64, dec: *Dec, spilled: []i64, unspillable
             }
             i := insts[x]
             after.clear()
+            drop := false
             for ti in 0..nt {
                 v := touched[ti]
                 slot := slot_of[v]
                 is_def := contains(du[p + 1..q], v)
                 is_use := contains(du[q..e], v)
+                if ridx[v] >= 0 {
+                    if is_def {
+                        // the definition itself (it defines v alone: see ra_remat)
+                        drop = true
+                        continue
+                    }
+                    t := ra_new_vreg(mf, ra_class(mf, v))
+                    unspillable.push(true)
+                    ra_replace_reg(&i, v, t)
+                    d := rdef[ridx[v]]
+                    ra_replace_reg(&d, v, t)
+                    out.push(d)
+                    continue
+                }
                 if ra_spill_direct(mf, &i, v, slot, is_def, is_use, nt, slot_of.items()) {
                     continue
                 }
@@ -1269,7 +1356,9 @@ priv fn spill[F, I](mf: *F, order: []i64, dec: *Dec, spilled: []i64, unspillable
                     after.push(ra_spill_store(mf, cls, t, slot))
                 }
             }
-            out.push(i)
+            if !drop {
+                out.push(i)
+            }
             out.extend(after.items())
         }
         mf.blocks[b].insts = out

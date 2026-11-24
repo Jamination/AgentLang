@@ -111,6 +111,12 @@ inline fn ra_spill_store(mf: *AFunc, cls: u8, r: i64, slot: i64) -> AInst {
     return spill_mem(if cls == 1 { FStr } else { Str }, cls, r, slot)
 }
 
+// i, the one definition of v, may be repeated before each use instead of a spill (src/
+// regalloc.al, "rematerialization"): a constant or the address of a global or function
+inline fn ra_remat(mf: *AFunc, i: *AInst, v: i64) -> bool {
+    return (i.op == MovI || i.op == AdrG || i.op == AdrF) && i64(i.d) == v
+}
+
 // a copy with one spilled side (the only spilled register it touches) becomes the load or
 // the store itself
 fn ra_spill_direct(mf: *AFunc, i: *AInst, v: i64, slot: i64, is_def: bool, is_use: bool, nt: i64, slot_of: []i64) -> bool {
