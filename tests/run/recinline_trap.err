@@ -1,0 +1,1 @@
+panic: index out of bounds at tests/run/recinline_trap.al:5

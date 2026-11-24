@@ -1366,7 +1366,10 @@ priv fn loop_pads(mf: *MFunc, layout: []i64, items: *Vec[Item], bpos: []i64, bit
                 njumps += 1
             }
         }
-        if items[lend].pos - bpos[b] + 2 * njumps > 64 {
+        // (a larger loop is only kept from starting near the end of a line: see
+        // loop_pad)
+        big := items[lend].pos - bpos[b] + 2 * njumps > 64
+        if big && !align_big {
             continue
         }
         spot := padi[b]
@@ -1374,6 +1377,29 @@ priv fn loop_pads(mf: *MFunc, layout: []i64, items: *Vec[Item], bpos: []i64, bit
             if items[k].tgt < 0 && items[k].free {
                 spot = k
                 break
+            }
+        }
+        // padding that would be executed on every entry is not worth it for a loop that makes
+        // calls (call/fib's loop of the recursion: a few rounds per entry, and a jump over the
+        // padding on each; ALC_DISABLE=alignbig pads it as before). (A larger loop's padding is
+        // a few bytes; the calls of the failure exits of checks do not count.)
+        if !items[spot].free && align_big && !big {
+            calls := false
+            for blk in layout {
+                if bpos[blk] >= bpos[b] && bpos[blk] <= items[lend].pos {
+                    ins := &mf.blocks[blk].insts
+                    if ins.len > 0 && ins[ins.len - 1].op == Ud2 {
+                        continue
+                    }
+                    for mi in ins {
+                        if mi.op == Call || mi.op == CallInd {
+                            calls = true
+                        }
+                    }
+                }
+            }
+            if calls {
+                continue
             }
         }
         items[spot].hdr = b
@@ -1394,7 +1420,21 @@ priv fn loop_pad(at: i64, size: i64) -> i64 {
     if size <= 64 && at % 64 + size > 64 {
         return 64 - at % 64
     }
+    // a larger loop whose header starts in the last bytes of a 64-byte line: every back edge
+    // (in an interpreter's dispatch loop, every handler) jumps to an instruction that the first
+    // fetch from there barely reaches or that straddles the line; it moves to the next line
+    // (int/interp ran 1.5 times as long with its header at offset 63 of a line)
+    if size > 64 && at % 64 >= 56 {
+        return 64 - at % 64
+    }
     return 0
+}
+
+// ALC_DISABLE=alignbig: loops larger than 64 bytes are not padded
+priv align_big := true
+
+fn emit_align_big(on: bool) {
+    align_big = on
 }
 
 // rewrites the float constant relocations of code from indices into the function's own list

@@ -75,6 +75,7 @@ fn x86_compile(m: *Module, dump_asm: bool) -> Output {
     // the padding of loops (loop_pads in emit.al); ALC_ALIGN=0: none, ALC_ALIGN=1: the
     // alignment of every innermost loop header to 16 that was there before
     emit_align_mode(if !align_set { 2 } else if align == "0" { 0 } else if align == "1" { 1 } else { 2 })
+    emit_align_big(opt_enabled("alignbig"))
     // (what the worker threads read is filled before they start: opt_optimize has filled the
     // optimiser's tables)
     if target_os == TargetWindows {
