@@ -457,8 +457,12 @@ priv fn vec_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
             if esc.len == 0 {
                 esc = alias_escaped_allocas(f)
             }
+            // (distinct objects only: not the classes of the element types, since memory seen
+            // as two types through `cast` overlaps, and here the order of the accesses changes)
             ma := alias_memref(f, a.v)
             mb := alias_memref(f, b.v)
+            ma.class = 0
+            mb.class = 0
             if !alias_may_alias(&ma, &mb, esc.items()) {
                 continue
             }
