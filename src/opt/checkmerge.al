@@ -79,6 +79,9 @@ fn checkmerge_run(f: *Func) -> bool {
     if opt_enabled("checkor") && checkmerge_or(f) {
         changed = true
     }
+    if opt_enabled("checkarms") && checkmerge_arms(f) {
+        changed = true
+    }
     if changed {
         cleanup_prune_unreachable(f)
     }
@@ -176,6 +179,67 @@ priv fn checkmerge_or(f: *Func) -> bool {
             nc := f.push(b, Ult, I8, vec_of([]i64{acc, kc}), 0)
             f.blocks[b].term = Br(nc, ok, trap)
         }
+    }
+    return changed
+}
+
+// Both arms of a two-way branch begin with the same check (merge sort's `tmp[k] = a[j]` /
+// `tmp[k] = a[i]`):
+//   b: br c, t, e     t: x = i <u n; br x, t2, trap1     e: y = i <u n; br y, e2, trap2
+// becomes one check ahead of the branch, which then goes straight to t2 / e2:
+//   b: x = i <u n; br x, n, trap1     n: br c, t2, e2
+// (the failure reported is the first arm's; as for the merges above, only which failing access
+// is reported can differ). The arms' bodies are then alike enough for store sinking and
+// if-conversion.
+priv fn checkmerge_arms(f: *Func) -> bool {
+    preds := cfg_preds(f)
+    // the check an arm consists of: (condition, next block, trap block)
+    fn arm(f: *Func, preds: *Vec[Vec[i64]], x: i64) -> Opt[(i64, i64, i64)] {
+        if x == 0 || preds[x].len != 1 || f.blocks[x].insts.len != 1 {
+            return None
+        }
+        return match f.blocks[x].term {
+            Br(c, t, e) if i64(f.blocks[x].insts[0]) == c && t != e && t != x && f.insts[c].op.is_icmp() && opt_is_check_trap(f, e) => {
+                if f.blocks[e].insts.len > 0 && f.insts[f.blocks[e].insts[0]].op == Phi {
+                    return None
+                }
+                Some((c, t, e))
+            }
+            _ => None
+        }
+    }
+    changed := false
+    nb := f.blocks.len
+    for b in 0..nb {
+        c, t, e := match f.blocks[b].term {
+            Br(c0, t0, e0) if t0 != e0 && t0 != b && e0 != b => (c0, t0, e0)
+            _ => continue
+        }
+        x, t2, trap := match arm(f, &preds, t) {
+            Some(a) => a
+            None => continue
+        }
+        y, e2, _ := match arm(f, &preds, e) {
+            Some(a) => a
+            None => continue
+        }
+        xi := &f.insts[x]
+        yi := &f.insts[y]
+        if xi.op != yi.op || xi.args[0] != yi.args[0] || xi.args[1] != yi.args[1] || t2 == e2 || t2 == t || e2 == e {
+            continue
+        }
+        n := f.new_block()
+        f.blocks[t].insts.clear()
+        f.blocks[b].insts.push(i32(x))
+        f.blocks[n].term = Br(c, t2, e2)
+        f.blocks[b].term = Br(x, n, trap)
+        f.phi_pred_replace(t2, t, n)
+        f.phi_pred_replace(e2, e, n)
+        // (t and e have no predecessor left)
+        f.blocks[t].term = Term.None
+        f.blocks[e].term = Term.None
+        f.blocks[e].insts.clear()
+        changed = true
     }
     return changed
 }
