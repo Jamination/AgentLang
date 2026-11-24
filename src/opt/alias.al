@@ -293,11 +293,129 @@ struct MemRef {
     size: i32,
     class: i32, // Inst.aux
     ptr: i32, // the address value itself
+    lin: Lin, // the address as a linear form (see alias_lin)
 }
 
 fn alias_memref(f: *Func, v: i64) -> MemRef {
     i := &f.insts[v]
-    return MemRef{addr: decompose(f, i.args[0]), size: i32(i.ty.size()), class: i.aux, ptr: i32(i.args[0])}
+    return MemRef{addr: decompose(f, i.args[0]), size: i32(i.ty.size()), class: i.aux, ptr: i32(i.args[0]), lin: alias_lin(f, i.args[0])}
+}
+
+// ---------- addresses as linear forms ----------
+// An address computed by adds, subtracts and multiplications or shifts by constants is
+// sum(k[t] * v[t]) + c over at most LIN_MAX values v (in increasing order, no k zero), modulo
+// 2^64 like the arithmetic that computes it. Two addresses with the same terms differ by
+// exactly the difference of their constants: equal constants mean the same address, constants
+// at least an access size apart mean disjoint bytes (`d[i * w + j]` and `d[i * w + j - 1]`
+// even when the two are computed separately). (ALC_DISABLE=linaddr)
+const LIN_MAX = 4
+
+struct Lin {
+    n: i32, // the number of terms; -1: not a linear form
+    v: [4]i32,
+    k: [4]i64,
+    c: i64,
+}
+
+priv lin_read: bool
+priv lin_on: bool
+
+fn alias_lin(f: *Func, addr: i64) -> Lin {
+    if !lin_read {
+        lin_on = opt_enabled("linaddr")
+        lin_read = true
+    }
+    l := Lin{n: 0}
+    if !lin_on || !lin_add(f, &l, addr, 1, 0) {
+        l.n = -1
+    }
+    return l
+}
+
+// l += k * (value v); false if the form gets too large
+priv fn lin_add(f: *Func, l: *Lin, v: i64, k: i64, depth: i64) -> bool {
+    if k == 0 {
+        return true
+    }
+    i := &f.insts[v]
+    if depth < 12 {
+        match i.op {
+            Const => {
+                l.c += k * i.k
+                return true
+            }
+            Add => return lin_add(f, l, i.args[0], k, depth + 1) && lin_add(f, l, i.args[1], k, depth + 1)
+            Sub => return lin_add(f, l, i.args[0], k, depth + 1) && lin_add(f, l, i.args[1], 0 - k, depth + 1)
+            Shl => {
+                match f.is_const(i.args[1]) {
+                    Some(s) if s >= 0 && s < 63 => return lin_add(f, l, i.args[0], k * (1 << s), depth + 1)
+                    _ => {}
+                }
+            }
+            Mul => {
+                match f.is_const(i.args[1]) {
+                    Some(m) => return lin_add(f, l, i.args[0], k * m, depth + 1)
+                    None => {}
+                }
+                match f.is_const(i.args[0]) {
+                    Some(m) => return lin_add(f, l, i.args[1], k * m, depth + 1)
+                    None => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    if i.ty != I64 {
+        // (a narrower value wraps at another width)
+        return false
+    }
+    // a term: merged, the values kept in order
+    n := i64(l.n)
+    vv := i32(v)
+    for t in 0..n {
+        if l.v[t] == vv {
+            l.k[t] += k
+            if l.k[t] == 0 {
+                for u in t..n - 1 {
+                    l.v[u] = l.v[u + 1]
+                    l.k[u] = l.k[u + 1]
+                }
+                l.n -= 1
+            }
+            return true
+        }
+    }
+    if n == LIN_MAX {
+        return false
+    }
+    at := n
+    while at > 0 && l.v[at - 1] > vv {
+        l.v[at] = l.v[at - 1]
+        l.k[at] = l.k[at - 1]
+        at -= 1
+    }
+    l.v[at] = vv
+    l.k[at] = k
+    l.n += 1
+    return true
+}
+
+// l += k * v as a linear form; false if it does not fit
+fn alias_lin_add(f: *Func, l: *Lin, v: i64, k: i64) -> bool {
+    return l.n >= 0 && lin_add(f, l, v, k, 0)
+}
+
+// the same terms (then the addresses differ by b.c - a.c)
+fn lin_same_terms(a: *Lin, b: *Lin) -> bool {
+    if a.n < 0 || a.n != b.n {
+        return false
+    }
+    for t in 0..i64(a.n) {
+        if a.v[t] != b.v[t] || a.k[t] != b.k[t] {
+            return false
+        }
+    }
+    return true
 }
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
@@ -321,6 +439,13 @@ fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
             _ => {}
         }
     }
+    if lin_same_terms(&a.lin, &b.lin) {
+        // b's address is a's plus d (modulo 2^64): the bytes overlap if -b.size < d < a.size
+        d := b.lin.c - a.lin.c
+        if d <= 0 - i64(b.size) || d >= i64(a.size) {
+            return false
+        }
+    }
     return types_may_alias_class(i64(a.class), i64(b.class))
 }
 
@@ -328,5 +453,8 @@ fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
     if a.size != b.size {
         return false
     }
-    return (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && off_some_eq(a.addr.off, b.addr.off))
+    if (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && off_some_eq(a.addr.off, b.addr.off)) {
+        return true
+    }
+    return lin_same_terms(&a.lin, &b.lin) && a.lin.c == b.lin.c
 }
