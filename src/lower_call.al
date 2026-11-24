@@ -1814,6 +1814,15 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             // function that uses it must not be inlined)
             return Some(self.sval(T_I64, self.ins(RaAddr, I64, vec[i64](), 0)))
         }
+        "__fresh" if self.cx.scope_prelude && nargs == 1 => {
+            // (library only: the allocator's result, an object of its own, see Op.Fresh)
+            v := self.expr(&args[0], Some(T_I64))
+            v = self.coerce(v, T_I64, args[0].pos)
+            if v.ty == T_ERR {
+                return Some(val_err())
+            }
+            return Some(self.sval(T_I64, self.ins(Fresh, I64, vec_one(self.scalar(v)), 0)))
+        }
         "__clone" if self.cx.scope_prelude && nargs == 5 => {
             // (library only: clone(flags, stack, ptid, ctid, tls) of a thread whose new stack
             // holds its argument and its function, which the child calls: see emit.al)

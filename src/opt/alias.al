@@ -1,9 +1,45 @@
-// Simple alias analysis: identified objects (allocas, globals), constant offsets, type-based classes.
+// Simple alias analysis: identified objects (allocas, globals, fresh allocations), constant
+// offsets, type-based classes.
+//
+// Fresh allocations. `Fresh(p)` (Op.Fresh, made by __alloc_raw, see the prelude) is the address
+// of memory the allocator has just handed out: memory no object that is live at that moment
+// occupies. Memory is never handed out again while its object is live (release, reset and a
+// Vec's growth give memory back only together with its objects; using an object after that is
+// an error of the program, which ALC_CHECK_MEMORY reports), so two objects that are live at
+// the same time are disjoint, even when the same address belonged to another object earlier.
+// An answer "no alias" between an access q and the accesses p, p' through one pointer value
+// (p before q, p' after it, or p moved across q) is used to keep a fact about p's location
+// across q. The object of p and p' is live at both of them (else the program is wrong), so it
+// is live at q too (an object's life is one interval); the object of q is live at q: they are
+// different objects live at the same time, hence disjoint, when
+//  - q and p go through two different Fresh values: two distinct allocations (each a single
+//    instance wherever the IR compares them: no pass carries a fact across a redefinition of
+//    a value it names), or
+//  - one goes through a Fresh value and the other through a parameter of the function: the
+//    parameter's object was made before the function began, so before the allocation.
+// Addresses derived from a base stay inside its object (the rule the Alloca and Global cases
+// rely on too); a pointer made from an integer that is no address of a live object (say a
+// mark) is not a pointer to any object. A fresh object is neither a stack slot nor a global.
 
 priv enum Base {
     Alloca(i64),
     Global(i64),
     Unknown(i64),
+    Fresh(i64),
+    // an Unknown address that is a parameter, perhaps plus scaled indices (param_rooted)
+    Arg(i64),
+}
+
+// (ALC_DISABLE=fresh: Fresh values are not identified objects)
+priv fresh_read: bool
+priv fresh_on: bool
+
+priv inline fn fresh_enabled() -> bool {
+    if !fresh_read {
+        fresh_on = opt_enabled("fresh")
+        fresh_read = true
+    }
+    return fresh_on
 }
 
 struct Addr {
@@ -47,6 +83,9 @@ priv fn decompose(f: *Func, addr: i64) -> Addr {
         if i.op == GAddr {
             return Addr{base: Global(i.k), off: off}
         }
+        if i.op == Fresh && fresh_enabled() {
+            return Addr{base: Base.Fresh(v), off: off}
+        }
         if i.op == Add && depth < 32 {
             depth += 1
             a := i.args[0]
@@ -77,8 +116,37 @@ priv fn decompose(f: *Func, addr: i64) -> Addr {
                 None => {}
             }
         }
+        if param_rooted(f, v, 0) {
+            return Addr{base: Arg(v), off: off}
+        }
         return Addr{base: Unknown(v), off: off}
     }
+}
+
+// v is a parameter of the function, or one plus scaled indices (`p + (i << 3)`, `p + i * 24`):
+// an address in the object a parameter points to (the scaled terms cannot be the pointer)
+priv fn param_rooted(f: *Func, v: i64, depth: i64) -> bool {
+    i := &f.insts[v]
+    if i.op == Param {
+        return true
+    }
+    if i.op != Add || depth > 8 {
+        return false
+    }
+    a := i.args[0]
+    b := i.args[1]
+    return param_rooted(f, a, depth + 1) && scaled_index(f, b) || param_rooted(f, b, depth + 1) && scaled_index(f, a)
+}
+
+priv fn scaled_index(f: *Func, v: i64) -> bool {
+    i := &f.insts[v]
+    if i.op == Const {
+        return true
+    }
+    if (i.op == Shl || i.op == Mul) && is_some(f.is_const(i.args[1])) {
+        return true
+    }
+    return false
 }
 
 priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
@@ -91,6 +159,9 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     }
     if i.op == GAddr {
         return Some(Global(i.k))
+    }
+    if i.op == Fresh && fresh_enabled() {
+        return Some(Base.Fresh(v))
     }
     if i.op == Add {
         r := decompose_obj(f, i.args[0], depth + 1)
@@ -234,6 +305,11 @@ fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
         (Alloca(x), Alloca(y)), (Global(x), Global(y)) if x != y => return false
         (Alloca(_), Global(_)), (Global(_), Alloca(_)) => return false
         (Alloca(x), Unknown(_)), (Unknown(_), Alloca(x)) if !esc[x] => return false
+        // (see the top of the file)
+        (Fresh(x), Fresh(y)) if x != y => return false
+        (Fresh(_), Alloca(_)), (Alloca(_), Fresh(_)), (Fresh(_), Global(_)), (Global(_), Fresh(_)) => return false
+        (Fresh(_), Arg(_)), (Arg(_), Fresh(_)) => return false
+        (Alloca(x), Arg(_)), (Arg(_), Alloca(x)) if !esc[x] => return false
         _ => {}
     }
     if a.ptr == b.ptr && a.ptr != NOV {

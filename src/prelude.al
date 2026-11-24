@@ -749,14 +749,17 @@ __region_depth: i64
 
 // uninitialized memory, 16-byte aligned; never freed individually (see mark/release). A size
 // that is negative (also one that overflowed) is refused by __heap_grow.
+// The result is marked fresh (`__fresh`): memory that no object live at this moment occupies,
+// which the optimizer's alias analysis takes as an object of its own (src/opt/alias.al).
 inline fn __alloc_raw(n: i64) -> i64 {
     n = (n + 15) & ~15
     p := __heap_cur
     if u64(n) > u64(__heap_end - p) {
-        return __heap_grow(n)
+        p = __heap_grow(n)
+    } else {
+        __heap_cur = p + n
     }
-    __heap_cur = p + n
-    return p
+    return __fresh(p)
 }
 
 // the bytes of n elements of `size` bytes; stops the program if n is negative or the result
