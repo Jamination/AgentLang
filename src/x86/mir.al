@@ -178,7 +178,17 @@ enum MOp {
     // jmp a (a register; tgt = the jump table in MFunc.jtabs whose blocks it goes to)
     Bt,
     JmpInd,
+    // SSE2 operations of the loop vectorizer's VBin, encoded `[pfx] 0F op /r [ib]`: tgt = op |
+    // pfx << 8 | imm << 16 | SSE_IMM (an immediate byte follows). a is an xmm register, b an xmm
+    // register or a 16-byte aligned memory operand (the float constant pool; never a folded
+    // load, which may be unaligned). Sse reads and writes a (paddd a, b), Ssew only writes it (pshufd a, b, imm). SseSh: the shift of register a by an
+    // immediate, `66 0F op /n ib` with tgt = op | n << 8 | imm << 16.
+    Sse,
+    Ssew,
+    SseSh,
 }
+
+const SSE_IMM = 1 << 24
 
 const CC_B: u8 = 2
 const CC_AE: u8 = 3
@@ -335,7 +345,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
     q := p + 1
     flags := 0
     match i.op {
-        Mov, Movzx, Movsx, Lea, MovSd, Cvtsi2sd, Cvttsd2si, MovqToX, MovqToR, Setcc, Sqrtsd, Cvtf, Popcnt, Tzcnt, Lzcnt, Imul3 => {
+        Mov, Movzx, Movsx, Lea, MovSd, Cvtsi2sd, Cvttsd2si, MovqToX, MovqToR, Setcc, Sqrtsd, Cvtf, Popcnt, Tzcnt, Lzcnt, Imul3, Ssew => {
             match &i.a {
                 R(r) => {
                     du[q] = r
@@ -370,7 +380,7 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
                 _ => {}
             }
         }
-        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Andnpd, Orpd, Cmpsd, Cmov, Shl, Shr, Sar, Rol, Ror => {
+        Add, Sub, And, Or, Xor, Imul, Addsd, Subsd, Mulsd, Divsd, Minsd, Maxsd, Shufps, Unpcklps, Movlo, Xorpd, Andpd, Andnpd, Orpd, Cmpsd, Cmov, Shl, Shr, Sar, Rol, Ror, Sse, SseSh => {
             match &i.a {
                 R(r) => {
                     du[q] = r

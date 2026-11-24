@@ -14,6 +14,13 @@ enum T {
     V2,
     V3,
     V4,
+    // 128-bit vectors made by the loop vectorizer (src/opt/vec.al): 16 x i8, 8 x i16, 4 x i32,
+    // 2 x i64, 2 x f64 (4 x f32 is V4)
+    VI8,
+    VI16,
+    VI32,
+    VI64,
+    VF64,
 }
 
 fn size(self: T) -> i64 {
@@ -24,7 +31,7 @@ fn size(self: T) -> i64 {
         I32, F32 => 4
         I64, F64, V2 => 8
         V3 => 12
-        V4 => 16
+        V4, VI8, VI16, VI32, VI64, VF64 => 16
     }
 }
 
@@ -38,11 +45,38 @@ fn is_int(self: T) -> bool {
 
 // lives in an xmm register
 fn is_fp(self: T) -> bool {
-    return self == F32 || self == F64 || self == V2 || self == V3 || self == V4
+    return self == F32 || self == F64 || self.is_vec()
 }
 
 fn is_vec(self: T) -> bool {
-    return self == V2 || self == V3 || self == V4
+    match self {
+        V2, V3, V4, VI8, VI16, VI32, VI64, VF64 => return true
+        _ => return false
+    }
+}
+
+// the type of the lanes of a 128-bit vector type (F32 for V2 .. V4)
+fn vec_elem(self: T) -> T {
+    match self {
+        VI8 => I8
+        VI16 => I16
+        VI32 => I32
+        VI64 => I64
+        VF64 => F64
+        _ => F32
+    }
+}
+
+// the 128-bit vector type with lanes of scalar type e
+fn vec_for(e: T) -> T {
+    match e {
+        I8 => VI8
+        I16 => VI16
+        I32 => VI32
+        I64 => VI64
+        F64 => VF64
+        _ => V4
+    }
 }
 
 priv fn name(self: T) -> str {
@@ -57,6 +91,11 @@ priv fn name(self: T) -> str {
         V2 => "v2"
         V3 => "v3"
         V4 => "v4"
+        VI8 => "v16i8"
+        VI16 => "v8i16"
+        VI32 => "v4i32"
+        VI64 => "v2i64"
+        VF64 => "v2f64"
     }
 }
 
@@ -100,6 +139,11 @@ enum Op {
     VExt,   // vector -> f32, k = lane
     VIns,   // args = [vector, f32], k = lane
     VShuf,  // args = [a, b], k = shufps immediate: lanes 0,1 from a and 2,3 from b
+    // an operation on the lanes of the 128-bit vectors of the loop vectorizer (src/opt/vec.al):
+    // ty is the vector type of the result, k = VK_* (low 8 bits) | an immediate << 8; see
+    // there for the operands of each kind. (VSplat and VExt also take these types: a scalar of
+    // the lane type in every lane, lane k as a scalar.)
+    VBin,
     Eq,
     Ne,
     Slt,
@@ -151,6 +195,42 @@ enum Op {
     // Removed before instruction selection (opt_backend_cleanup)
     Fresh,
 }
+
+// kinds of VBin (Inst.k & 255). Operands are vectors of the result type unless said otherwise;
+// integer lanes wrap.
+const VK_ADD = 1   // [a, b] a + b (integer or float lanes)
+const VK_SUB = 2   // [a, b] a - b
+const VK_MUL = 3   // [a, b] a * b (i16, i32, f32, f64 lanes)
+const VK_AND = 4   // [a, b] bitwise
+const VK_OR = 5
+const VK_XOR = 6
+const VK_ANDN = 7  // [a, b] ~a & b
+const VK_SHL = 8   // [a, n] lanes shifted by the scalar i64 n (0 <= n < lane bits), or [a] by
+                   // the immediate (k >> 8)
+const VK_LSHR = 9
+const VK_ASHR = 10 // (i16, i32 lanes)
+const VK_FDIV = 11 // [a, b] float lanes
+const VK_FMIN = 12 // [a, b] a < b ? a : b per lane (FMin)
+const VK_FMAX = 13 // [a, b] a > b ? a : b per lane (FMax)
+const VK_FSQRT = 14 // [a]
+const VK_FNEG = 15 // [a]
+const VK_FABS = 16 // [a]
+const VK_CEQ = 17  // [a, b] all ones where a == b, else 0 (i8, i16, i32 lanes)
+const VK_CGT = 18  // [a, b] signed a > b
+const VK_CGTU = 19 // [a, b] unsigned a > b
+const VK_FCMP = 20 // [a, b] float compare, immediate: the cmpps predicate (0 ==, 1 <, 2 <=, 4 !=)
+const VK_SEL = 21  // [m, a, b] (m & a) | (~m & b), m a mask of any vector type
+const VK_BSRL = 22 // [a] the whole register shifted right by the immediate number of bytes
+// [a] the lower / upper half of the lanes of a (a vector of half the lane size of the result)
+// zero- or sign-extended
+const VK_ZLO = 23
+const VK_ZHI = 24
+const VK_SLO = 25
+const VK_SHI = 26
+const VK_TRUNC = 27 // [a, b] the lanes of a, then of b (twice the result's lane size), truncated
+const VK_SAD = 28   // [a] a of i8 lanes: the sums of its bytes 0-7 and 8-15 in two i64 lanes
+const VK_MULHU = 29 // [a, b] the high half of the unsigned product (i16, i32 lanes)
+const VK_MULHS = 30 // [a, b] the high half of the signed product (i16 lanes)
 
 const ATOMIC_LOAD = 0
 const ATOMIC_STORE = 1
@@ -1642,7 +1722,7 @@ fn ir_print_func(f: *Func, m: Opt[*Module]) -> str {
                         s.push(concat(" ", float_debug(fmt(cast[f64](u64(i.k))))))
                     }
                 }
-                Param, Proj, VExt, VIns, VShuf => {
+                Param, Proj, VExt, VIns, VShuf, VBin => {
                     s.push(fmt(" #", i.k))
                 }
                 GAddr => {
