@@ -83,7 +83,10 @@ fn main() {
     write_file(src, SRC)
     out, status := run_capture([]str{ALC, "build", "--target", "windows", "--emit-ir", src, "-o", exe})
     // the loads in the loop of scatter (the blocks after the loop's phi): only the one of idx[k]
+    // for each store into an element of `a` (the loop may be unrolled: one load per copy of
+    // the body; the stores of the failing check's message have other alias classes)
     loads := 0
+    stores := 0
     inside := false
     in_loop := false
     for l in split(out, "\n") {
@@ -97,9 +100,12 @@ fn main() {
             if in_loop && find(l, " = Load ") >= 0 {
                 loads += 1
             }
+            if in_loop && find(l, "  Store i64 !3.0 ") >= 0 {
+                stores += 1
+            }
         }
     }
-    print(status, loads)
+    print(status, loads / max(stores, 1))
     remove_file(src)
     remove_file(fmt(exe, ".exe"))
 }

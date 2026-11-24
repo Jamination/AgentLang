@@ -1,0 +1,1 @@
+panic: index out of bounds at tests/run/loop_unroll_trap.al:8

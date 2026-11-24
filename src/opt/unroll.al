@@ -406,6 +406,209 @@ priv fn apply(f: *Func, p: *Plan, def_block_v: *Vec[i32]) {
     f.apply_repl(&repl)
 }
 
+// ---------- runtime unrolling ----------
+// An innermost counted loop (loop_counted, counting by 1 to a bound known on entry) with a
+// small body and no calls is unrolled u times when its trip count is not known at compile
+// time:
+//
+//     pre:  tc = end - start; ok = (start < end) & (tc >=u u)
+//           br ok header rpre
+//     header..latch: u copies of the body, one after the other (the counter of copy k is
+//           iv + k), then `br iv + u != start + (tc & -u) header mid`
+//     mid:  the partial results of the reductions combine; br (tc & (u-1)) != 0 rpre x
+//     rpre: phis: the values the remainder starts from (from pre: the loop's start values)
+//     the remainder: a copy of the original loop, with its own preheader rpre; it leaves to x
+//     x:    phis of the values used after the loop (from the remainder or from mid); jmp exit
+//
+// Reductions (loop_reduction: wrapping integer +, *, &, |, ^, min, max) keep one partial result
+// per copy, so that the copies do not wait for each other; mid combines them. Side exits to
+// check failure blocks stay in every copy in their order (loop_exits_simple). Both loops are
+// marked (LOOP_NO_UNROLL) so that later runs of the pipeline leave them alone. Runs after
+// bounds-check hoisting, which needs the original loop shape and leaves the checks out of the
+// loop.
+priv const RT_MAX_SIZE = 40 // instructions and terminators of the loop
+priv const RT_TARGET = 64   // roughly the size of the unrolled body
+
+// the number of copies for a loop body of `size` (1: do not unroll). (8 copies of a tiny body
+// measured slower than 4 where the loop shares the registers with much else: bytesum, whose
+// 8 partial sums spilled.)
+priv fn rt_factor(size: i64) -> i64 {
+    if size > RT_MAX_SIZE {
+        return 1
+    }
+    if size * 4 <= RT_TARGET {
+        return 4
+    }
+    return 2
+}
+
+// the position of phi ph among the reductions (-1: none)
+priv fn red_index(reds: *Vec[Reduction], ph: i64) -> i64 {
+    for k in 0..reds.len {
+        if reds[k].phi == ph {
+            return k
+        }
+    }
+    return -1
+}
+
+// unrolls loop li if it qualifies; true if it did
+priv fn rt_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block: []i32) -> bool {
+    cl := match loop_counted(f, cfg, loops, li, in_loop, def_block) {
+        Some(c) => c
+        None => return false
+    }
+    if f.insts[cl.cond].aux & LOOP_NO_UNROLL != 0 || !loop_trip_known(&cl) {
+        return false
+    }
+    if loop_has_call(f, &cl) || !loop_exits_simple(f, &cl, in_loop, def_block) {
+        return false
+    }
+    size := loop_size(f, &cl)
+    if size > RT_MAX_SIZE {
+        return false
+    }
+    outside := loop_used_outside(f, in_loop, def_block)
+    reds := vec[Reduction]()
+    for ph in header_phis(f, cl.header) {
+        match loop_reduction(f, &cl, ph, in_loop, def_block, outside.items()) {
+            Some(r) => reds.push(r)
+            None => {}
+        }
+    }
+    u := rt_factor(size)
+    // at most 8 partial results in all (a loop unrolled by hand into 4 sums already has
+    // its own: 16 would spill)
+    while u > 1 && u * reds.len > 8 {
+        u /= 2
+    }
+    if u < 2 {
+        return false
+    }
+    match loop_const_trip(f, &cl) {
+        Some(t) => {
+            while u > 2 && t < 2 * u {
+                u /= 2
+            }
+            if t < 2 * u {
+                return false
+            }
+        }
+        None => {}
+    }
+    rt_apply(f, &cl, u, &reds, &outside, in_loop, def_block)
+    return true
+}
+
+// the main loop of the frame (loop_remainder_begin) as u copies of the body
+priv fn rt_apply(f: *Func, cl: *CLoop, u: i64, reds: *Vec[Reduction], outside: *Vec[i64], in_loop: []bool, def_block: []i32) {
+    h := cl.header
+    lt := cl.latch
+    rem := loop_remainder_begin(f, cl, u)
+    hphis := &rem.hphis
+    // the partial results of the reductions: accs[r * u + k] for copy k (k = 0: the phi),
+    // starting from inits[r * u + k]
+    accs := vec[i64]()
+    inits := vec[i64]()
+    for r in 0..reds.len {
+        rp := reds[r].phi
+        st := rem.starts[index_of(hphis.items(), rp)]
+        accs.push(rp)
+        inits.push(st)
+        for k in 1..u {
+            accs.push(f.mk_phi(f.insts[rp].ty, 2))
+            inits.push(loop_red_init(f, cl.pre, &reds[r], st))
+        }
+    }
+    // copies 1..u-1, each after the previous one
+    maps := vec[IMap]()
+    maps.push(imap_new(1))
+    prev_latch := lt
+    for k in 1..u {
+        vm := imap_new(2 * loop_size(f, cl))
+        for pi in 0..hphis.len {
+            ph := hphis[pi]
+            ri := red_index(reds, ph)
+            if ri >= 0 {
+                vm.iset(ph, accs[ri * u + k])
+            } else {
+                vm.iset(ph, loop_map_val(&maps[k - 1], rem.backs[pi]))
+            }
+        }
+        bm := loop_clone_blocks(f, cl.blocks.items(), &vm)
+        f.blocks[prev_latch].term = Jmp(bm.iget(h))
+        prev_latch = bm.iget(lt)
+        maps.push(vm)
+    }
+    ll := prev_latch
+    lastm := &maps[u - 1]
+    // the last copy goes back to the header until the counter reaches ue
+    c2 := f.push(ll, Ne, I8, vec_of([]i64{loop_map_val(lastm, cl.next), rem.ue}), 0)
+    f.im(c2).aux = LOOP_NO_UNROLL
+    f.blocks[ll].term = Br(c2, h, rem.mid)
+    // the header phis: the back edge comes from the last copy
+    for pi in 0..hphis.len {
+        ph := hphis[pi]
+        ri := red_index(reds, ph)
+        nb := if ri >= 0 { rem.backs[pi] } else { loop_map_val(lastm, rem.backs[pi]) }
+        i := f.im(ph)
+        ifrom := i.from()
+        for k in 0..ifrom.len {
+            if ifrom[k] == lt {
+                ifrom[k] = ll
+                i.args[k] = nb
+            }
+        }
+    }
+    newphis := vec[i32]()
+    for r in 0..reds.len {
+        for k in 1..u {
+            a := accs[r * u + k]
+            f.im(a).phi_set([]i64{inits[r * u + k], loop_map_val(&maps[k], reds[r].back)}, []i64{rem.chk, ll})
+            newphis.push(i32(a))
+        }
+    }
+    if newphis.len > 0 {
+        newphis.extend(f.blocks[h].insts.items())
+        f.blocks[h].insts = newphis
+    }
+    // the values after the main loop: the last copy's, or for a reduction the partial results
+    // combined (pairwise) in mid
+    fin := imap_new(outside.len + hphis.len)
+    for pi in 0..hphis.len {
+        fin.iset(rem.backs[pi], loop_map_val(lastm, rem.backs[pi]))
+    }
+    for v in outside {
+        fin.iset(v, loop_map_val(lastm, v))
+    }
+    for r in 0..reds.len {
+        vals := vec[i64]()
+        for k in 0..u {
+            vals.push(loop_map_val(&maps[k], reds[r].back))
+        }
+        while vals.len > 1 {
+            nv := vec[i64]()
+            for k in 0..vals.len / 2 {
+                nv.push(loop_red_combine(f, rem.mid, &reds[r], vals[2 * k], vals[2 * k + 1]))
+            }
+            if vals.len % 2 == 1 {
+                nv.push(vals[vals.len - 1])
+            }
+            vals = nv
+        }
+        fin.iset(reds[r].back, vals[0])
+    }
+    loop_remainder_end(f, cl, &rem, &fin, outside.items(), in_loop, def_block)
+}
+
+// Runtime unrolling of every qualifying loop (see above); true if a loop was unrolled.
+fn unroll_runtime(f: *Func) -> bool {
+    if f.size() > 20000 {
+        return false
+    }
+    return loop_each_innermost(f, rt_try)
+}
+
 fn unroll_run(f: *Func) -> bool {
     changed := false
     rounds: for it in 0..64 {

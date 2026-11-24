@@ -236,5 +236,237 @@ fn licm_run(f: *Func) -> bool {
         }
         loops.mark_blocks(li, in_loop.items(), false)
     }
+    if opt_enabled("promote") && licm_promote(f) {
+        changed = true
+    }
+    return changed
+}
+
+// ---------- scalar promotion ----------
+// A location that a loop loads and stores through one loop-invariant address (a global
+// counter, `self.count += x`, `counts[k] += 1` with k fixed) is kept in a register instead:
+// it is loaded once before the loop and stored back on every way out of it. Only for loops
+// without calls (nothing else could read the location while the loop runs), without exits
+// but normal ones (a failing check would stop the program with the location not yet
+// written back: its failure path, or code inlined from the run-time library that a check
+// reports through, might read it), where no other load or store of the loop may alias the
+// location. The load before the loop must be safe: one of the accesses runs on every
+// iteration (and the loop runs at least once), or the location is a global. When no store
+// runs on every iteration a flag tells whether the loop stored at all, so that nothing is
+// written where the loop wrote nothing (another thread may own the location then).
+// The promotion goes through a new stack slot that the loop's accesses use instead, which
+// mem2reg then turns into SSA values.
+
+// promotes one location of loop li if one qualifies (in_loop marks its blocks, def_block:
+// the block of every instruction); true if it did
+priv fn promote_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, def_block: []i32, esc: []bool) -> bool {
+    l := &loops.loops[li]
+    h := l.header
+    outside := licm_outside_preds(cfg, loops, li, h)
+    if outside.len != 1 {
+        return false
+    }
+    pre := outside[0]
+    nsucc, _, _ := f.succ_pair(pre)
+    if nsucc != 1 {
+        return false
+    }
+    mems := vec[i64]()
+    exits := vec[(i64, i64)]()
+    exiting := vec[i64]()
+    for b in l.blocks {
+        match f.blocks[b].term {
+            Jmp(_), Br(_, _, _) => {}
+            _ => return false
+        }
+        for v in f.blocks[b].insts {
+            o := f.insts[v].op
+            if o == Load || o == Store {
+                mems.push(i64(v))
+            } else if o.clobbers() {
+                return false
+            }
+        }
+        ns, s0, s1 := f.succ_pair(b)
+        for k in 0..ns {
+            s := if k == 0 { s0 } else { s1 }
+            if !in_loop[s] {
+                if is_trap_block(f, s) {
+                    return false
+                }
+                exits.push((b, s))
+                if !contains(&exiting, b) {
+                    exiting.push(b)
+                }
+            }
+        }
+    }
+    if exits.is_empty() {
+        return false
+    }
+    done := vec[i64]()
+    for st in mems {
+        if f.insts[st].op != Store {
+            continue
+        }
+        a := f.insts[st].args[0]
+        db := def_block[a]
+        if db != NOV && in_loop[db] || contains(&done, a) {
+            continue
+        }
+        done.push(a)
+        ty := f.insts[st].ty
+        if ty.is_vec() {
+            continue
+        }
+        ref := alias_memref(f, st)
+        match ref.addr.base {
+            // (a slot of the function's own that does not escape: mem2reg's)
+            Alloca(x) => {
+                if !esc[x] {
+                    continue
+                }
+            }
+            _ => {}
+        }
+        group := vec[i64]()
+        ok := true
+        safe := false
+        store_always := false
+        for m in mems {
+            mi := &f.insts[m]
+            if mi.args[0] == a {
+                if mi.ty != ty {
+                    ok = false
+                    break
+                }
+                group.push(m)
+                if guaranteed(cfg, exiting.items(), l.latches.items(), i64(def_block[m])) {
+                    safe = true
+                    if mi.op == Store {
+                        store_always = true
+                    }
+                }
+            } else {
+                other := alias_memref(f, m)
+                if alias_may_alias(&ref, &other, esc) {
+                    ok = false
+                    break
+                }
+            }
+        }
+        if !ok {
+            continue
+        }
+        if !safe {
+            match ref.addr.base {
+                Global(_) => safe = is_some(ref.addr.off)
+                _ => {}
+            }
+        }
+        if !safe {
+            continue
+        }
+        promote_apply(f, pre, a, ty, group.items(), exits.items(), store_always)
+        return true
+    }
+    return false
+}
+
+// a new stack slot of `size` bytes, at the top of the entry block
+priv fn promote_slot(f: *Func, size: i64) -> i64 {
+    s := f.mk(Alloca, I64, vec[i64](), size)
+    f.im(s).aux = i32(size)
+    f.blocks[0].insts.insert(0, i32(s))
+    return s
+}
+
+priv fn promote_apply(f: *Func, pre: i64, a: i64, ty: T, group: []i64, exits: [](i64, i64), store_always: bool) {
+    class := f.insts[group[0]].aux
+    tmp := promote_slot(f, ty.size())
+    v0 := f.push(pre, Load, ty, vec_of([]i64{a}), 0)
+    f.im(v0).aux = class
+    f.push(pre, Store, ty, vec_of([]i64{tmp, v0}), 0)
+    flag := NOV
+    one := NOV
+    if !store_always {
+        flag = promote_slot(f, 1)
+        zero := f.push(pre, Const, I8, vec[i64](), 0)
+        one = f.push(pre, Const, I8, vec[i64](), 1)
+        f.push(pre, Store, I8, vec_of([]i64{flag, zero}), 0)
+    }
+    for m in group {
+        f.insts[m].args[0] = tmp
+    }
+    if flag != NOV {
+        // every store also sets the flag
+        for b in 0..f.blocks.len {
+            insts := &f.blocks[b].insts
+            k := 0
+            while k < insts.len {
+                v := i64(insts[k])
+                if f.insts[v].op == Store && contains(group, v) {
+                    s := f.mk(Store, I8, vec_of([]i64{flag, one}), 0)
+                    insts.insert(k + 1, i32(s))
+                    k += 1
+                }
+                k += 1
+            }
+        }
+    }
+    // the way out: store the value back (if the loop stored)
+    for e in exits {
+        b, s := e
+        j := loop_split_edge(f, b, s)
+        at := j
+        if flag != NOV {
+            nb := loop_split_edge(f, b, j)
+            d := f.push(nb, Load, I8, vec_of([]i64{flag}), 0)
+            c := f.push(nb, Ne, I8, vec_of([]i64{d, f.push(nb, Const, I8, vec[i64](), 0)}), 0)
+            at = f.new_block()
+            f.blocks[at].term = Jmp(j)
+            f.blocks[nb].term = Br(c, at, j)
+        }
+        x := f.push(at, Load, ty, vec_of([]i64{tmp}), 0)
+        st := f.push(at, Store, ty, vec_of([]i64{a, x}), 0)
+        f.im(st).aux = class
+    }
+}
+
+// Scalar promotion in every loop (see above), deepest loops first; true if a location was
+// promoted (the new stack slots are then promoted by mem2reg).
+fn licm_promote(f: *Func) -> bool {
+    changed := false
+    skip := vec[bool]()
+    rounds: for it in 0..16 {
+        cfg, loops := cfg_loops(f)
+        if loops.loops.is_empty() {
+            break
+        }
+        esc := alias_escaped_allocas(f)
+        def_block := f.block_of()
+        in_loop := vec_fill(f.blocks.len, false)
+        skip.resize(f.blocks.len, false)
+        for li in licm_loop_order(&loops) {
+            h := loops.loops[li].header
+            if skip[h] {
+                continue
+            }
+            loops.mark_blocks(li, in_loop.items(), true)
+            done := promote_loop(f, &cfg, &loops, li, in_loop.items(), def_block.items(), esc.items())
+            loops.mark_blocks(li, in_loop.items(), false)
+            if done {
+                changed = true
+                continue rounds
+            }
+            skip[h] = true
+        }
+        break
+    }
+    if changed {
+        // (the IR changed under the pass: analyses remembered for the change count are stale)
+        f.w.gen += 1
+        mem2reg_run(f)
+    }
     return changed
 }

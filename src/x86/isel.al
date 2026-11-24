@@ -1078,9 +1078,6 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
     if i.op != Add || i.ty != I64 {
         return false
     }
-    if self.uses[v] <= 1 || self.addr_only[v] {
-        return true
-    }
     // x + const never lengthens live ranges
     fn leafy(op: Op) -> bool {
         match op {
@@ -1088,7 +1085,20 @@ priv fn foldable_add(self: *Sel, v: i64) -> bool {
             _ => false
         }
     }
-    return leafy(self.f.insts[i.args[0]].op) || leafy(self.f.insts[i.args[1]].op)
+    is_leafy := leafy(self.f.insts[i.args[0]].op) || leafy(self.f.insts[i.args[1]].op)
+    // a sum computed before the loop of the access stays in its register: folded, it would be
+    // redone on every iteration (with a `lea` when the address has no room for its registers)
+    // (blocks made after the loops were found, by splitting edges, are not known to them)
+    db := i64(self.blk_of[v])
+    cb := i64(self.cur_block)
+    nl := self.loops.loop_of.len
+    if !is_leafy && db >= 0 && db < nl && cb >= 0 && cb < nl && self.loops.depth(db) < self.loops.depth(cb) {
+        return false
+    }
+    if self.uses[v] <= 1 || self.addr_only[v] {
+        return true
+    }
+    return is_leafy
 }
 
 // `mem`: the address is the operand of one memory access (every value on the way to v has one
@@ -1929,6 +1939,47 @@ priv fn binop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     self.e(mop, sz, R(d), bo)
 }
 
+// Read-modify-write: the integer store v of `load(a) op x` back to the same address a, where
+// the load and the operation are used by this store alone, in its block, with no store or
+// call between the load and it, becomes `op [a], x` (`hist[b] += 1`: `add dword [m], 1`).
+// False if v is not such a store (nothing emitted).
+priv fn rmw_store(self: *Sel, v: i64) -> bool {
+    i := &self.f.insts[v]
+    a := i.args[0]
+    val := i.args[1]
+    vi := &self.f.insts[val]
+    mop := match vi.op {
+        Add => MOp.Add
+        Sub => MOp.Sub
+        And => MOp.And
+        Or => MOp.Or
+        Xor => MOp.Xor
+        _ => return false
+    }
+    if vi.ty != i.ty || self.uses[val] != 1 || self.blk_of[val] != self.cur_block || self.vreg[val] != NOREG || self.needed[val] {
+        return false
+    }
+    ld := vi.args[0]
+    x := vi.args[1]
+    fn same_load(s: *Sel, l: i64, a: i64, ty: T) -> bool {
+        li := &s.f.insts[l]
+        return li.op == Load && li.args[0] == a && li.ty == ty && s.can_fold_load(l)
+    }
+    if !same_load(self, ld, a, i.ty) {
+        if vi.op == Sub || !same_load(self, x, a, i.ty) {
+            return false
+        }
+        swap(&ld, &x)
+    }
+    if x == ld {
+        return false
+    }
+    src := self.rmi(x)
+    m := self.addr(a)
+    self.e(mop, sz_of(i.ty), M(m), src)
+    return true
+}
+
 priv fn fbinop(self: *Sel, v: i64, mop: MOp, commutative: bool) {
     i := &self.f.insts[v]
     a := i.args[0]
@@ -2455,7 +2506,7 @@ priv fn inst(self: *Sel, v: i64) {
                     m := self.addr(i.args[0])
                     self.e(MovSd, fsz_mem(ty), M(m), R(r))
                 }
-            } else {
+            } else if !self.rmw_store(v) {
                 src: Opnd = if vi.op == Const && fits_i32(vi.k) { I(vi.k) } else { R(self.reg(val)) }
                 m := self.addr(i.args[0])
                 self.e(Mov, sz_of(ty), M(m), src)
