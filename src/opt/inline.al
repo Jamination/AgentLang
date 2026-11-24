@@ -438,6 +438,32 @@ priv fn cold_blocks(f: *Func, rpo: *Vec[i64]) -> Vec[bool] {
     return cold
 }
 
+// does g call function k directly?
+priv fn calls_fn(g: *Func, k: i64) -> bool {
+    for b in 0..g.blocks.len {
+        for v in g.blocks[b].insts {
+            if g.insts[v].op == Call && g.insts[v].k == k {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+// the functions g calls directly
+priv fn callees_of(g: *Func) -> Vec[i64] {
+    r := vec[i64]()
+    for b in 0..g.blocks.len {
+        for v in g.blocks[b].insts {
+            i := &g.insts[v]
+            if i.op == Call && !contains(&r, i.k) {
+                r.push(i.k)
+            }
+        }
+    }
+    return r
+}
+
 // inline eligible calls in function `fid`; `done[g]` marks callees that are final;
 // `costs[g]` is inline_cost(g) once known (-1 before: a final function does not change).
 // Returns whether a call was inlined, and whether an indirect call was made direct.
@@ -474,6 +500,15 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
         cold = cold_blocks(f, &rpo)
     }
     info := map[i64, i64]()
+    // A call that inlining made (an instruction from n0 on) of a recursive function already
+    // inlined here is not inlined again: the recursion (call/mutrec's hf / hm) would otherwise
+    // unroll until the budget ran out (hf grew from 18 to 4418 instructions, main to 4509).
+    // rec_of: by callee, 1 if it is recursive or calls f; inl_count: the callees inlined.
+    // ALC_DISABLE=reclimit unrolls as before.
+    n0 := m.funcs[fid].insts.len
+    rec_of := map[i64, i64]()
+    inl_count := map[i64, i64]()
+    rec_limit := opt_enabled("reclimit")
     while budget > 0 && caller_size <= pol.max_caller {
         // find the next inlinable call
         found: Opt[(i64, i64, i64)] = None
@@ -508,6 +543,24 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                     if gf.inl < 0 || gf.noreturn || !gf.lowered {
                         continue
                     }
+                    if i64(v) >= n0 && rec_limit && inl_count.has(g) {
+                        // (a function in a cycle reaches itself through itself or one callee)
+                        r, known := rec_of.get(g)
+                        if !known {
+                            r = if calls_fn(gf, g) || calls_fn(gf, fid) { 1 } else { 0 }
+                            if r == 0 {
+                                for h in callees_of(gf) {
+                                    if h != g && h < m.funcs.len && calls_fn(&m.funcs[h], g) {
+                                        r = 1
+                                    }
+                                }
+                            }
+                            rec_of.set(g, r)
+                        }
+                        if r != 0 {
+                            continue
+                        }
+                    }
                     if costs[g] < 0 {
                         costs[g] = inline_cost(gf)
                     }
@@ -536,6 +589,7 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
                 returns := false
                 nb0 := m.funcs[fid].blocks.len
                 caller_size += inline_call(&m.funcs[fid], b, call, &m.funcs[g], &repl, &returns, &m.locs)
+                inl_count.set(g, 1)
                 hot.resize(m.funcs[fid].blocks.len, hot[b])
                 cold.resize(m.funcs[fid].blocks.len, cold[b])
                 if !returns {
