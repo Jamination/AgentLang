@@ -179,6 +179,7 @@ fn patch_text(text: *Vec[u8], out: *Output, func_off: *Vec[i64], func_addr: *Vec
                 Rel32Func(f) => func_addr[f] - (fa + r.off + 4)
                 Rel32Global(g) => gaddr[g] + i64(r.addend) - (fa + r.off + 4)
                 Rel32FConst(i) => fpool_addr + 16 * i + i64(r.addend) - (fa + r.off + 4)
+                JTab(_) => panic("a jump table relocation left in the code")
             }
             assert fits_i32(val), "relocation out of range"
             assert at >= 0 && at + 4 <= text.len

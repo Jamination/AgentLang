@@ -43,6 +43,7 @@ fn a_split_critical_edges(f: *Func) {
                 }
                 f.blocks[b].term = Br(c, nt, ne)
             }
+            Switch(_, &tab) => isel_split_switch_edges(f, b, tab, &preds)
             _ => {}
         }
     }
@@ -694,7 +695,73 @@ priv fn term(self: *Sel, b: i64) {
             self.out.push(self.mf.a_with_uses(Ret, used.items()))
         }
         Trap, Term.None => self.e(Brk, 0, NOREG, NOREG, NOREG)
+        Switch(x, tab) => self.switch_term(x, &tab)
     }
+}
+
+// A Switch, as switch_term in src/x86/isel.al: a jump table, bit tests (lsr and tst of a mask
+// per target) or a chain of compares; after the first conditional branch only temporaries
+// are read.
+priv fn switch_term(self: *Sel, x: i64, tab: *Vec[i64]) {
+    ks, ts := sw_cases(tab)
+    d := sw_default(tab)
+    ty := self.f.insts[x].ty
+    kind := switch_leaf_kind(ks.items(), ts.items(), d)
+    lo := if kind == SW_CHAIN { 0 } else { ks[0] }
+    // t = x - lo, zero-extended to 64 bits (narrow values: in 32 bits, sign-extended first)
+    sz: u8 = if ty == I64 { 8 } else { 4 }
+    t := self.gp()
+    if ty == I64 {
+        self.mov(t, self.reg(x))
+    } else {
+        self.e(Mov, 4, t, self.ext32(x, true), NOREG)
+    }
+    if lo != 0 {
+        self.ei(SubI, sz, t, t, lo)
+    }
+    if kind == SW_CHAIN {
+        for i in 0..ks.len {
+            // (a key is canonical: sign-extended, as t)
+            self.ei(CmpI, sz, NOREG, t, ks[i])
+            self.branch(Bcc, A64_EQ, ts[i])
+        }
+        self.branch(B, 0, d)
+        return
+    }
+    span := ks[ks.len - 1] - lo
+    self.ei(CmpI, sz, NOREG, t, span)
+    self.branch(Bcc, A64_HI, d)
+    if kind == SW_BITS {
+        done := vec[i64]()
+        for i in 0..ks.len {
+            if contains(&done, ts[i]) {
+                continue
+            }
+            done.push(ts[i])
+            mask: u64 = 0
+            for j in i..ks.len {
+                if ts[j] == ts[i] {
+                    mask |= u64(1) << u64(ks[j] - lo)
+                }
+            }
+            mr := self.gp()
+            self.movi(mr, i64(mask))
+            sh := self.gp()
+            self.e(Lsrv, 8, sh, mr, t)
+            self.ei(TstI, 8, NOREG, sh, 1)
+            self.branch(Bcc, A64_NE, ts[i])
+        }
+        self.branch(B, 0, d)
+        return
+    }
+    entries := vec_fill(span + 1, d)
+    for i in 0..ks.len {
+        entries[ks[i] - lo] = ts[i]
+    }
+    self.mf.jtabs.push(entries)
+    ji := ainst(JmpTab, 8, NOREG, t, NOREG)
+    ji.id = i32(self.mf.jtabs.len - 1)
+    self.out.push(ji)
 }
 
 // ---------- instructions ----------

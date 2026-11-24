@@ -198,6 +198,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
         }
         match f.blocks[b].term {
             Br(c, _, _) => term_used[c] = true
+            Switch(c, _) => term_used[c] = true
             Ret(vs) => {
                 for u in vs {
                     term_used[u] = true

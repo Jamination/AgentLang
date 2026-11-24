@@ -195,6 +195,7 @@ fn alias_escaped_allocas(f: *Func) -> Vec[bool] {
             }
             match f.blocks[b].term {
                 Br(c, _, _) => esc_use(&esc, &derived, c, &changed)
+                Switch(c, _) => esc_use(&esc, &derived, c, &changed)
                 Ret(vs) => {
                     for u in vs {
                         esc_use(&esc, &derived, u, &changed)

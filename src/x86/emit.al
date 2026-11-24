@@ -11,6 +11,8 @@ priv enum RelocKind {
     Abs32FConst(i64), // module float pool index
     Rel32Global(i64),
     Rel32FConst(i64),
+    // the function's own jump table (rip-relative; resolved by emit_emit, never in Code.relocs)
+    JTab(i64),
 }
 
 priv struct Reloc {
@@ -125,6 +127,7 @@ priv fn rm_mem(self: *Enc, m: *Mem) -> RM {
             }
             r.reloc = Some(Abs32FConst(self.fpool[i64(m.id)]))
         }
+        MK_JTAB => return rm_rip(JTab(i64(m.id)), r.disp)
         MK_SLOT => {
             r.base = i8(RSP)
             r.disp += self.frame.slot_off[i64(m.id)]
@@ -706,6 +709,16 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             e.b1(0xAE)
             e.b1(0xF0)
         }
+        Bt => {
+            // bt r/m64, r64
+            rm := e.rm(&i.a)
+            e.op(false, 0, true, 0x0FA3, u8(reg_of(&i.b) & 15), &rm, false)
+        }
+        JmpInd => {
+            // jmp r/m64
+            rm := e.rm(&i.a)
+            e.op(false, 0, false, 0xFF, 4, &rm, false)
+        }
         Jmp, Jcc => panic("unreachable")
     }
 }
@@ -713,7 +726,7 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
 fn sets_flags(op: MOp) -> bool {
     match op {
         Add, Sub, And, Or, Xor, Cmp, Test, Imul, Imul3, Neg, Shl, Shr, Sar, Rol, Ror, Idiv, Div,
-            Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap, Xadd, Cmpxchg => true
+            Mul1, Imul1, Ucomisd, Popcnt, Tzcnt, Lzcnt, Zero, Call, CallInd, Syscall, Bswap, Xadd, Cmpxchg, Bt => true
         _ => false
     }
 }
@@ -770,14 +783,19 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
             fwd[b] = i64(blk.insts[0].tgt)
         }
     }
-    // (jumps are only at the end of a block: isel puts them last and nothing is ever inserted
-    // after an instruction without definitions)
+    // (jumps are at the end of a block, except those of a switch: isel puts them last and
+    // nothing is ever inserted after an instruction without definitions)
     for b in 0..nb {
         insts := &mf.blocks[b].insts
-        x := insts.len - 1
-        while x >= 0 && (insts[x].op == Jmp || insts[x].op == Jcc) {
-            insts[x].tgt = i32(resolve(i64(insts[x].tgt), &fwd))
-            x -= 1
+        for x in 0..insts.len {
+            if insts[x].op == Jmp || insts[x].op == Jcc {
+                insts[x].tgt = i32(resolve(i64(insts[x].tgt), &fwd))
+            }
+        }
+    }
+    for t in 0..mf.jtabs.len {
+        for x in 0..mf.jtabs[t].len {
+            mf.jtabs[t][x] = resolve(mf.jtabs[t][x], &fwd)
         }
     }
     // drop blocks that are no longer reachable
@@ -788,14 +806,23 @@ priv fn peephole(mf: *MFunc, layout: *Vec[i64], pro: bool) {
         while !work.is_empty() {
             b := work.pop()
             insts := &mf.blocks[b].insts
-            x := insts.len - 1
-            while x >= 0 && (insts[x].op == Jmp || insts[x].op == Jcc) {
+            for x in 0..insts.len {
+                if insts[x].op == JmpInd {
+                    for t in mf.jtabs[i64(insts[x].tgt)] {
+                        if !reach[t] {
+                            reach[t] = true
+                            work.push(t)
+                        }
+                    }
+                }
+                if insts[x].op != Jmp && insts[x].op != Jcc {
+                    continue
+                }
                 t := i64(insts[x].tgt)
                 if !reach[t] {
                     reach[t] = true
                     work.push(t)
                 }
-                x -= 1
             }
         }
         layout.retain(reach, fn(reach: Vec[bool], b: i64) -> bool { reach[b] })
@@ -1172,12 +1199,16 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
     src := enc.out.items()
     p := 0  // copied from src up to here
     ri := 0 // relocations up to here are placed
+    jfix := vec[Reloc]() // the references to the jump tables (final offsets)
     for k in 0..=ni {
         q := if k < ni { items[k].pos } else { src.len }
         // (a relocation is inside an instruction: never at the position of an item)
         while ri < enc.relocs.len && enc.relocs[ri].off < q {
             rr := enc.relocs[ri]
-            relocs.push(Reloc{off: rr.off + pre[k], kind: rr.kind, addend: rr.addend})
+            match rr.kind {
+                JTab(_) => jfix.push(Reloc{off: rr.off + pre[k], kind: rr.kind, addend: rr.addend})
+                _ => relocs.push(Reloc{off: rr.off + pre[k], kind: rr.kind, addend: rr.addend})
+            }
             ri += 1
         }
         bytes.extend(src[p..q])
@@ -1218,6 +1249,30 @@ fn emit_emit(mf: *MFunc, alloc: *Alloc, layout0: []i64, fpool: []i64) -> Code {
             d := t - (o + 2)
             bytes.push(if it.cc >= 0 { 0x70 | u8(it.cc) } else { 0xEB })
             bytes.push(u8(i8(d)))
+        }
+    }
+    // the jump tables after the code, 4-aligned: an entry is the offset of its block from the
+    // table (position-independent, no relocation)
+    if mf.jtabs.len > 0 {
+        while bytes.len % 4 != 0 {
+            bytes.push(0xCC)
+        }
+        tpos := vec_fill(mf.jtabs.len, 0)
+        for t in 0..mf.jtabs.len {
+            tpos[t] = bytes.len
+            for blk in mf.jtabs[t] {
+                put32(&bytes, bpos[blk] + pre[bitem[blk]] - tpos[t])
+            }
+        }
+        for r in jfix {
+            t := match r.kind {
+                JTab(x) => x
+                _ => 0
+            }
+            v := tpos[t] + i64(r.addend) - (r.off + 4)
+            for j in 0..4 {
+                bytes[r.off + j] = u8(v >> (8 * j))
+            }
         }
     }
     // the line offsets: shifted by the items at or before them

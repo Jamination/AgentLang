@@ -60,6 +60,9 @@ const MK_FCONST: u8 = 5 // float constant pool entry `id`
 // pointer, see layout_tls), or (id -1) an offset from the segment base; encoded with the fs
 // prefix (Windows: gs, the TEB, only with id -1)
 const MK_TLS: u8 = 6
+// the jump table `id` of the function (MFunc.jtabs; placed after its code by emit_emit),
+// rip-relative
+const MK_JTAB: u8 = 7
 
 // 20 bytes: an operand is 32, an instruction 80
 struct Mem {
@@ -171,6 +174,10 @@ enum MOp {
     // a sibling call: the epilogue, then a jump to function tgt (tgt -1: to the address in
     // rax); reads its fixed registers like `ret`
     TailJmp,
+    // switches (isel switch_term): bt a, b (a register, b the bit number: CF = bit b of a);
+    // jmp a (a register; tgt = the jump table in MFunc.jtabs whose blocks it goes to)
+    Bt,
+    JmpInd,
 }
 
 const CC_B: u8 = 2
@@ -241,6 +248,9 @@ struct MFunc {
     xuses: Vec[i64] // the fixed registers read by calls, `ret` and `syscall` (see MInst)
     dvars: Vec[i64] // -g: pairs (variable, frame slot) (src/debug.al)
     dbg: DbgMF      // -g: what the locations of the variables are found from (dbg_ranges)
+    // the jump tables: the block of each entry (an entry holds the 32-bit offset of the block
+    // from the table, see emit_emit)
+    jtabs: Vec[Vec[i64]]
 }
 
 fn new_vreg(self: *MFunc, class: u8) -> i64 {
@@ -385,10 +395,11 @@ fn mir_decode(mf: *MFunc, i: *MInst, du: []i64, p: i64) -> i64 {
                 _ => {}
             }
         }
-        Cmp, Test, Ucomisd => {
+        Cmp, Test, Ucomisd, Bt => {
             q = du_opnd(&i.a, du, q)
             q = du_opnd(&i.b, du, q)
         }
+        JmpInd => q = du_opnd(&i.a, du, q)
         Cqo => {
             du[q] = RDX
             du[q + 1] = RAX

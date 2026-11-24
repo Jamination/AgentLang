@@ -158,6 +158,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     f.w = w
     work_begin(w)
     opt_backend_cleanup(f, fid)
+    switch_lower(f, true)
     aliases := isel_split_critical_edges(f)
     // the loops (a function without a cycle has none: no need for dominators)
     rpo := f.rpo()
@@ -379,6 +380,11 @@ priv fn has_cycle(f: *Func, rpo: []i64) -> bool {
         if (k > 0 && idx[s0] <= i) || (k > 1 && idx[s1] <= i) {
             return true
         }
+        for j in 0..if k == 0 { f.nsucc(b) } else { 0 } {
+            if idx[f.succ_at(b, j)] <= i {
+                return true
+            }
+        }
     }
     return false
 }
@@ -399,6 +405,10 @@ priv fn block_layout(f: *Func, depths: []i64) -> Vec[i64] {
         b, i := stack[top]
         // the successors in reverse order: else, then
         k, s0, s1 := f.succ_pair(b)
+        sw := k == 0 && f.is_switch(b)
+        if sw {
+            k = f.nsucc(b)
+        }
         if i < k {
             // (the successor visited last follows the block)
             first, last := (s1, s0)
@@ -406,6 +416,10 @@ priv fn block_layout(f: *Func, depths: []i64) -> Vec[i64] {
                 first, last = (s0, s1)
             }
             s := if k == 2 && i == 0 { first } else { last }
+            if sw {
+                // a switch: the targets from the last to the default
+                s = f.succ_at(b, k - 1 - i)
+            }
             stack[top].1 = i + 1
             if !seen[s] {
                 seen[s] = true
@@ -432,6 +446,15 @@ priv fn block_layout(f: *Func, depths: []i64) -> Vec[i64] {
                 Jmp(t) => cold[t]
                 Br(_, t, e) => cold[t] && cold[e]
                 Ret(_) => false
+                Switch(_, tab) => {
+                    all := true
+                    for j in 1..1 + tab[0] {
+                        if !cold[tab[j]] {
+                            all = false
+                        }
+                    }
+                    all
+                }
             }
             if c {
                 cold[b] = true

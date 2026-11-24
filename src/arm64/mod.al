@@ -167,6 +167,7 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     f.w = w
     work_begin(w)
     opt_backend_cleanup(f, fid)
+    switch_lower(f, true)
     a_split_critical_edges(f)
     rpo := f.rpo()
     cfg := cfg_new(f)
@@ -205,8 +206,15 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
         top := stack.len - 1
         b, i := stack[top]
         k, s0, s1 := f.succ_pair(b)
+        sw := k == 0 && f.is_switch(b)
+        if sw {
+            k = f.nsucc(b)
+        }
         if i < k {
             s := if k == 2 && i == 0 { s1 } else { s0 }
+            if sw {
+                s = f.succ_at(b, k - 1 - i)
+            }
             stack[top].1 = i + 1
             if !seen[s] {
                 seen[s] = true
@@ -232,6 +240,15 @@ priv fn block_layout(f: *Func) -> Vec[i64] {
                 Jmp(t) => cold[t]
                 Br(_, t, e) => cold[t] && cold[e]
                 Ret(_) => false
+                Switch(_, tab) => {
+                    all := true
+                    for j in 1..1 + tab[0] {
+                        if !cold[tab[j]] {
+                            all = false
+                        }
+                    }
+                    all
+                }
             }
             if c {
                 cold[b] = true

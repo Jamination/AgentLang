@@ -334,10 +334,27 @@ fn isel_split_critical_edges(f: *Func) -> Vec[ExitAlias] {
                 }
                 f.blocks[b].term = Br(c, nt, ne)
             }
+            Switch(_, &tab) => isel_split_switch_edges(f, b, tab, &preds)
             _ => {}
         }
     }
     return aliases
+}
+
+// the edges of the Switch of block b into blocks with other predecessors or phis go through
+// a block of their own (the phi copies are made there); also used by the arm64 back end
+fn isel_split_switch_edges(f: *Func, b: i64, tab: *Vec[i64], preds: *Vec[Vec[i64]]) {
+    for j in 1..1 + tab[0] {
+        s := tab[j]
+        ins := &f.blocks[s].insts
+        if preds[s].len <= 1 && !(ins.len > 0 && f.insts[ins[0]].op == Phi) {
+            continue
+        }
+        nbk := f.new_block()
+        f.blocks[nbk].term = Jmp(s)
+        f.phi_pred_replace(s, b, nbk)
+        tab[j] = nbk
+    }
 }
 
 priv fn sz_of(t: T) -> u8 {
@@ -1769,7 +1786,100 @@ priv fn term(self: *Sel, b: i64) {
         Trap, Term.None => {
             self.e(Ud2, 0, Opnd.None, Opnd.None)
         }
+        Switch(x, tab) => self.switch_term(x, &tab)
     }
+}
+
+// A Switch (its targets have no phis: isel_split_critical_edges). switch_lower
+// (src/opt/switch.al) has left a jump table or bit tests; anything else is a chain of
+// compares. After the first conditional jump only temporaries are read (a reload there of a
+// value that lives on would not be seen by the jump's target).
+priv fn switch_term(self: *Sel, x: i64, tab: *Vec[i64]) {
+    ks, ts := sw_cases(tab)
+    d := sw_default(tab)
+    ty := self.f.insts[x].ty
+    kind := switch_leaf_kind(ks.items(), ts.items(), d)
+    // t = x - lo, zero-extended to 64 bits (narrow values: in 32 bits, sign-extended first)
+    lo := if kind == SW_CHAIN { 0 } else { ks[0] }
+    t := new_vreg(&self.mf, 0)
+    w: u8 = if ty == I64 { 8 } else { 4 }
+    if ty == I64 {
+        self.e(Mov, 8, R(t), R(self.reg(x)))
+    } else {
+        self.e(Mov, 4, R(t), R(self.ext32(x, true)))
+    }
+    if lo != 0 {
+        if fits_i32(lo) {
+            self.e(Sub, w, R(t), I(lo))
+        } else {
+            kr := new_vreg(&self.mf, 0)
+            self.e(Mov, 8, R(kr), I(lo))
+            self.e(Sub, w, R(t), R(kr))
+        }
+    }
+    if kind == SW_CHAIN {
+        for i in 0..ks.len {
+            k := ks[i]
+            if fits_i32(k) {
+                self.e(Cmp, w, R(t), I(k))
+            } else {
+                kr := new_vreg(&self.mf, 0)
+                self.e(Mov, 8, R(kr), I(k))
+                self.e(Cmp, w, R(t), R(kr))
+            }
+            self.jcc(CC_E, ts[i])
+        }
+        self.jmp(d)
+        return
+    }
+    span := ks[ks.len - 1] - lo
+    self.e(Cmp, w, R(t), I(span))
+    self.jcc(CC_A, d)
+    if kind == SW_BITS {
+        done := vec[i64]()
+        for i in 0..ks.len {
+            if contains(&done, ts[i]) {
+                continue
+            }
+            done.push(ts[i])
+            mask: u64 = 0
+            for j in i..ks.len {
+                if ts[j] == ts[i] {
+                    mask |= u64(1) << u64(ks[j] - lo)
+                }
+            }
+            mr := new_vreg(&self.mf, 0)
+            self.e(Mov, 8, R(mr), I(i64(mask)))
+            self.e(Bt, 8, R(mr), R(t))
+            self.jcc(CC_B, ts[i])
+        }
+        self.jmp(d)
+        return
+    }
+    // a jump table of 32-bit offsets from the table
+    entries := vec_fill(span + 1, d)
+    for i in 0..ks.len {
+        entries[ks[i] - lo] = ts[i]
+    }
+    self.mf.jtabs.push(entries)
+    id := self.mf.jtabs.len - 1
+    m := mem_new()
+    m.kind = MK_JTAB
+    m.id = i32(id)
+    tb := new_vreg(&self.mf, 0)
+    self.e(Lea, 8, R(tb), M(m))
+    mm := mem_new()
+    mm.base = i32(tb)
+    mm.idx = i32(t)
+    mm.scale = 4
+    off := new_vreg(&self.mf, 0)
+    mi := minst_new(Movsx, 4, R(off), M(mm))
+    mi.sz2 = 8
+    self.out.push(mi)
+    self.e(Add, 8, R(tb), R(off))
+    ji := minst_new(JmpInd, 8, R(tb), Opnd.None)
+    ji.tgt = i32(id)
+    self.out.push(ji)
 }
 
 // a source operand for a full-width integer move: immediate, symbol address or register

@@ -32,8 +32,7 @@ fn cleanup_prune_unreachable(f: *Func) -> bool {
                 p := fr[k]
                 is_pred := false
                 if p >= 0 && p < n {
-                    cnt, s0, s1 := f.succ_pair(p)
-                    is_pred = cnt > 0 && s0 == b || cnt > 1 && s1 == b
+                    is_pred = f.has_succ(p, b)
                 }
                 if is_pred {
                     fr[m] = p
@@ -71,6 +70,11 @@ fn cleanup_dce(f: *Func) -> bool {
         }
         match b.term {
             Br(c, _, _) if !live[c] => {
+                live[c] = true
+                work[sp] = i32(c)
+                sp += 1
+            }
+            Switch(c, _) if !live[c] => {
                 live[c] = true
                 work[sp] = i32(c)
                 sp += 1

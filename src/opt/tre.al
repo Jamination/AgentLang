@@ -119,6 +119,11 @@ priv fn allocas_private(f: *Func, sites: *Vec[Site]) -> bool {
                     return false
                 }
             }
+            Switch(c, _) => {
+                if f.insts[c].op == Alloca {
+                    return false
+                }
+            }
             _ => {}
         }
     }

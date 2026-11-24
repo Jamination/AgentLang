@@ -121,6 +121,13 @@ priv fn inline_call(f: *Func, cb: i64, call: i64, g: *Func, repl: *Vec[i32], ret
         match g.blocks[gb].term {
             Jmp(t) => f.blocks[nb].term = Jmp(bmap_at(&bmap, t))
             Br(c, t, e) => f.blocks[nb].term = Br(vmap[c], bmap_at(&bmap, t), bmap_at(&bmap, e))
+            Switch(c, tab) => {
+                nt := vec_of(tab.items())
+                for j in 1..1 + nt[0] {
+                    nt[j] = bmap_at(&bmap, nt[j])
+                }
+                f.blocks[nb].term = Switch(vmap[c], nt)
+            }
             Ret(vs) => {
                 rv := vec[i64]()
                 for v in vs {
@@ -224,11 +231,18 @@ priv fn rpo_after_inline(f: *Func, rpo: *Vec[i64], at: i64, nb0: i64) -> (Vec[i6
         b := sb.last()
         i := si.last()
         cnt, s0, s1 := f.succ_pair(b)
+        sw := cnt == 0 && f.is_switch(b)
+        if sw {
+            cnt = f.nsucc(b)
+        }
         if b == nb0 {
             cnt = 0
         }
         if i < cnt {
             s := if i == 1 { s1 } else { s0 }
+            if sw {
+                s = f.succ_at(b, i)
+            }
             si[si.len - 1] = i + 1
             if s < nb0 || s >= f.blocks.len {
                 // (cannot happen: the copy only goes to itself and the continuation)
