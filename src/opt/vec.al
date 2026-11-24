@@ -329,8 +329,19 @@ priv fn vec_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
             return false
         }
     }
-    // interleave two vectors when the registers allow it
-    u := if (ndata + reds.len) * 2 <= 12 { 2 } else { 1 }
+    // interleave two vectors when the registers allow it: the partial results and the splats
+    // stay in registers, the rest are short-lived temporaries (four per copy, roughly)
+    ninv := map[i64, bool]()
+    for v in f.blocks[h].insts {
+        if data.has(i64(v)) || f.insts[v].op == Store {
+            for a in f.insts[v].args {
+                if !data.has(a) && loop_invariant(a, in_loop, def_block) && f.insts[v].op != Store {
+                    ninv.set(a, true)
+                }
+            }
+        }
+    }
+    u := if 2 * (reds.len + 4) + ninv.len <= 16 && ndata <= 24 { 2 } else { 1 }
     w := vf * u
     match loop_const_trip(f, &cl) {
         Some(t) => {

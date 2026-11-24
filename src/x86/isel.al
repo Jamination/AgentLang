@@ -2857,15 +2857,14 @@ priv fn vbin(self: *Sel, v: i64) {
     d := self.vr(v)
     match kind {
         VK_SEL => {
+            // b ^ ((a ^ b) & m)
             m := self.reg(args[0])
             a := self.reg(args[1])
             b := self.reg(args[2])
-            t := new_vreg(&self.mf, 1)
-            self.e(MovSd, 8, R(t), R(m))
-            self.sse(Sse, 0xDB, 0x66, t, R(a)) // pand
-            self.e(MovSd, 8, R(d), R(m))
-            self.sse(Sse, 0xDF, 0x66, d, R(b)) // pandn
-            self.sse(Sse, 0xEB, 0x66, d, R(t)) // por
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, 0xEF, 0x66, d, R(b)) // pxor
+            self.sse(Sse, 0xDB, 0x66, d, R(m)) // pand
+            self.sse(Sse, 0xEF, 0x66, d, R(b))
         }
         VK_FSQRT => {
             a := self.reg(args[0])
