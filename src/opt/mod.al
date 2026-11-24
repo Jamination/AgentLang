@@ -479,6 +479,12 @@ priv fn local_opt(f: *Func, level: i64) {
             }
         }
     }
+    // runs of checks against one power-of-two length (checkmerge.al)
+    if opt_enabled("checkmerge") && opt_enabled("checkor") && checkmerge_or(f) {
+        sk_forget(f)
+        cleanup_prune_unreachable(f)
+        simplify_run(f)
+    }
     opt_pass(PASS_DCE, f, cleanup_dce)
     opt_trace("end-local-opt", f)
 }

@@ -76,9 +76,6 @@ fn checkmerge_run(f: *Func) -> bool {
             f.blocks[b].term = Br(nc, ok, trap)
         }
     }
-    if opt_enabled("checkor") && checkmerge_or(f) {
-        changed = true
-    }
     if opt_enabled("checkarms") && checkmerge_arms(f) {
         changed = true
     }
@@ -107,8 +104,9 @@ priv fn pow2_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
 //   i1 <u K; ...; i2 <u K   (no calls in between, i2 computed before the first check)
 // become one check `(i1 | i2) <u K` at the position of the first: the bits of the OR are below
 // K exactly when those of every index are. As for the merges above, only which failing access
-// is reported can differ.
-priv fn checkmerge_or(f: *Func) -> bool {
+// is reported can differ. Run once at the end of local_opt (opt/mod.al), after bce: a merged
+// check would hide an induction variable's check from it (bench/fannkuch's flip loop).
+fn checkmerge_or(f: *Func) -> bool {
     cfg := cfg_new(f)
     preds := &cfg.preds
     bo := f.block_of()
