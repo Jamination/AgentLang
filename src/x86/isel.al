@@ -2833,6 +2833,8 @@ priv fn vint_opc(kind: i64, e: T) -> i64 {
         VK_ADD => [4]i64{0xFC, 0xFD, 0xFE, 0xD4}
         VK_SUB => [4]i64{0xF8, 0xF9, 0xFA, 0xFB}
         VK_MUL => [4]i64{-1, 0xD5, -1, -1}
+        VK_MULHU => [4]i64{-1, 0xE4, -1, -1}
+        VK_MULHS => [4]i64{-1, 0xE5, -1, -1}
         VK_CEQ => [4]i64{0x74, 0x75, 0x76, -1}
         VK_CGT => [4]i64{0x64, 0x65, 0x66, -1}
         VK_AND => [4]i64{0xDB, 0xDB, 0xDB, 0xDB}
@@ -2932,6 +2934,83 @@ priv fn vbin(self: *Sel, v: i64) {
             self.e(MovSd, 8, R(d), R(a))
             self.sse(Sse, 0xEF, 0x66, d, bias)
             self.sse(Sse, vint_opc(VK_CGT, e), 0x66, d, R(t))
+        }
+        VK_ZLO, VK_ZHI, VK_SLO, VK_SHI => {
+            // the source lanes are half the size of the result's
+            a := self.reg(args[0])
+            hi := kind == VK_ZHI || kind == VK_SHI
+            x := match e {
+                I16 => 0
+                I32 => 1
+                _ => 2
+            }
+            lo_opc := [3]i64{0x60, 0x61, 0x62}
+            hi_opc := [3]i64{0x68, 0x69, 0x6A}
+            unpack := if hi { hi_opc[x] } else { lo_opc[x] }
+            if kind == VK_ZLO || kind == VK_ZHI {
+                z := new_vreg(&self.mf, 1)
+                self.e(Zero, 8, R(z), Opnd.None)
+                self.e(MovSd, 8, R(d), R(a))
+                self.sse(Sse, unpack, 0x66, d, R(z))
+            } else if e == I64 {
+                // the sign of each lane as a lane of its own: 0 > a
+                m := new_vreg(&self.mf, 1)
+                self.e(Zero, 8, R(m), Opnd.None)
+                self.sse(Sse, 0x66, 0x66, m, R(a))
+                self.e(MovSd, 8, R(d), R(a))
+                self.sse(Sse, unpack, 0x66, d, R(m))
+            } else {
+                // each lane twice, the upper copy shifted down arithmetically
+                self.e(MovSd, 8, R(d), R(a))
+                self.sse(Sse, unpack, 0x66, d, R(a))
+                self.sse_sh(if e == I16 { 0x71 } else { 0x72 }, 4, d, if e == I16 { 8 } else { 16 })
+            }
+        }
+        VK_TRUNC => {
+            a := self.reg(args[0])
+            b := self.reg(args[1])
+            if e == I32 {
+                self.e(MovSd, 8, R(d), R(a))
+                self.shufps(d, b, 0x88)
+            } else {
+                // the low bits of each lane are made the whole value (in range for the packs)
+                t := new_vreg(&self.mf, 1)
+                self.e(MovSd, 8, R(d), R(a))
+                self.e(MovSd, 8, R(t), R(b))
+                if e == I8 {
+                    m := M(self.fconst(splat_bits(I16, 0xFF)))
+                    self.sse(Sse, 0xDB, 0x66, d, m)
+                    self.sse(Sse, 0xDB, 0x66, t, m)
+                    self.sse(Sse, 0x67, 0x66, d, R(t)) // packuswb
+                } else {
+                    for r in [2]i64{d, t} {
+                        self.sse_sh(0x72, 6, r, 16)
+                        self.sse_sh(0x72, 4, r, 16)
+                    }
+                    self.sse(Sse, 0x6B, 0x66, d, R(t)) // packssdw
+                }
+            }
+        }
+        VK_SAD => {
+            a := self.reg(args[0])
+            z := new_vreg(&self.mf, 1)
+            self.e(Zero, 8, R(z), Opnd.None)
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, 0xF6, 0x66, d, R(z))
+        }
+        VK_MULHU if e == I32 => {
+            // the 64-bit products of lanes 0, 2 and of lanes 1, 3; their high halves in order
+            a := self.reg(args[0])
+            b := self.reg(args[1])
+            t := new_vreg(&self.mf, 1)
+            u := new_vreg(&self.mf, 1)
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, 0xF4, 0x66, d, R(b))
+            self.sse_imm(Ssew, 0x70, 0x66, t, R(a), 0xF5)
+            self.sse_imm(Ssew, 0x70, 0x66, u, R(b), 0xF5)
+            self.sse(Sse, 0xF4, 0x66, t, R(u))
+            self.shufps(d, t, 0xDD)
+            self.sse_imm(Ssew, 0x70, 0x66, d, R(d), 0xD8)
         }
         VK_MUL if e == I32 => {
             // pmuludq on lanes 0, 2 and on lanes 1, 3 (moved down), the low halves of the

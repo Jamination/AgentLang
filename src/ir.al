@@ -217,6 +217,16 @@ const VK_CGTU = 19 // [a, b] unsigned a > b
 const VK_FCMP = 20 // [a, b] float compare, immediate: the cmpps predicate (0 ==, 1 <, 2 <=, 4 !=)
 const VK_SEL = 21  // [m, a, b] (m & a) | (~m & b), m a mask of any vector type
 const VK_BSRL = 22 // [a] the whole register shifted right by the immediate number of bytes
+// [a] the lower / upper half of the lanes of a (a vector of half the lane size of the result)
+// zero- or sign-extended
+const VK_ZLO = 23
+const VK_ZHI = 24
+const VK_SLO = 25
+const VK_SHI = 26
+const VK_TRUNC = 27 // [a, b] the lanes of a, then of b (twice the result's lane size), truncated
+const VK_SAD = 28   // [a] a of i8 lanes: the sums of its bytes 0-7 and 8-15 in two i64 lanes
+const VK_MULHU = 29 // [a, b] the high half of the unsigned product (i16, i32 lanes)
+const VK_MULHS = 30 // [a, b] the high half of the signed product (i16 lanes)
 
 const ATOMIC_LOAD = 0
 const ATOMIC_STORE = 1
