@@ -172,6 +172,13 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   windows are unchanged. The checklist is in docs/std/gfx.md (Wayland).
 
 ### Changed
+- Optimiser: memory from different allocations (`alloc`, `new`, Vec growth, `clone`, ...) is
+  known not to overlap, nor memory of a fresh allocation and of a parameter; addresses that
+  differ by a constant (`d[i*w + j]`, `d[i*w + j - 1]`) are told apart; a value stored or
+  loaded in one loop iteration is reused by the next instead of loaded again; constants and
+  global addresses are recomputed instead of spilled; `find` on strings tests 16 positions per
+  step. As before, using memory after `release` / `reset` or a pointer made from an integer
+  that is no live object's address is undefined.
 - The graphics examples are redrawn. New on std.gfx: `examples/gfx_fireworks`, `gfx_lights`,
   `gfx_parallax`, `gfx_lowpoly` and `gfx_flow`. `examples/starter`, `dx12_starter`,
   `gfx_starter` and `dx12_breakout` have procedural art, particles and effects kept outside

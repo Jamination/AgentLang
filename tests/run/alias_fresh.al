@@ -96,19 +96,22 @@ fn region_reuse() -> i64 {
     return x * 100 + y * 10 + if same { 1 } else { 0 }
 }
 
-// a Vec that grows inside the loop: its old buffer keeps the old values (it is not handed out
-// again), the new one gets the writes
+// a Vec that grows inside the loop next to a fresh array: its buffer moves to new fresh
+// memory, the writes follow it
 fn vec_grow() -> i64 {
     v := vec[i64]()
     v.push(1)
-    old := v.items()
+    a := alloc[i64](2)
     total := 0
     for i in 0..40 {
+        s := v.items()
+        a[0] = s[0]
         v.push(i)
         v[0] += 1
-        total += old[0]
+        a[1] += 1
+        total += v[0] + a[0]
     }
-    return total * 1000 + v[0]
+    return total * 1000 + v[0] + a[1]
 }
 
 // a store through a by-reference parameter (inlined into a function with fresh memory)
