@@ -771,6 +771,38 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
             if self.c(a) == Some(1) && self.c(b) == Some(0) && self.set_carry(v, c, ty) {
                 return None
             }
+            if opt_enabled("selfold") {
+                // a select on the negation of a boolean selects the other way round (as
+                // if-conversion inside an inlined `(T, bool)` function leaves them)
+                ci := &self.f.insts[c]
+                if ci.ty == I8 && ci.args.len == 2 {
+                    x := ci.args[0]
+                    y := ci.args[1]
+                    neg := NOV
+                    if ci.op == Sub && self.c(x) == Some(1) && is_bool(self.f, y, 2) {
+                        neg = y
+                    } else if ci.op == Xor && self.c(y) == Some(1) && is_bool(self.f, x, 2) {
+                        neg = x
+                    } else if ci.op == Eq && self.c(y) == Some(0) && is_bool(self.f, x, 2) {
+                        neg = x
+                    }
+                    if neg != NOV {
+                        self.set(v, Select, vec_of([]i64{neg, b, a}), 0)
+                        return None
+                    }
+                }
+                // an arm that is a select on the same condition takes its side of it
+                ai := &self.f.insts[a]
+                bi := &self.f.insts[b]
+                if ai.op == Select && ai.args[0] == c {
+                    self.set(v, Select, vec_of([]i64{c, ai.args[1], b}), 0)
+                    return None
+                }
+                if bi.op == Select && bi.args[0] == c {
+                    self.set(v, Select, vec_of([]i64{c, a, bi.args[2]}), 0)
+                    return None
+                }
+            }
             return None
         }
         Carry => {
@@ -3109,6 +3141,107 @@ priv fn simplify_cfg(f: *Func) -> bool {
     return changed
 }
 
+const PASS_SELBR = 10
+
+// A select on the condition of a branch, used where only one side of the branch leads: there
+// it is that side's value (a digit test's `(c - '0', true)` / `(0, false)`, if-converted inside
+// the inlined function and then branched on by the caller, selects the digit only where the
+// caller already knows it is one)
+priv fn select_under_branch(f: *Func) -> bool {
+    // (cheap exits: no two-way branch, no select)
+    nb := f.blocks.len
+    any := false
+    for b in 0..nb {
+        match f.blocks[b].term {
+            Br(c, t, e) if t != e && f.insts[c].ty == I8 => {
+                any = true
+                break
+            }
+            _ => {}
+        }
+    }
+    if !any {
+        return false
+    }
+    sel := false
+    for b in 0..nb {
+        for v in f.blocks[b].insts {
+            i := &f.insts[v]
+            if i.op == Select {
+                sel = true
+                break
+            }
+        }
+        if sel {
+            break
+        }
+    }
+    if !sel {
+        return false
+    }
+    cfg := cfg_new(f)
+    // per condition, the first block that branches on it to a successor of its own (a
+    // successor whose only predecessor it is)
+    br_of := imap_new(16)
+    for b in cfg.rpo.items() {
+        match f.blocks[b].term {
+            Br(c, t, e) if t != e && (cfg.preds[t].len == 1 || cfg.preds[e].len == 1) => {
+                if br_of.iget(c) < 0 {
+                    br_of.iset(c, b)
+                }
+            }
+            _ => {}
+        }
+    }
+    // the value of select s where it is used in block x (NOV: unknown)
+    fn known(f: *Func, cfg: *Cfg, br_of: *IMap, s: i64, x: i64) -> i64 {
+        si := &f.insts[s]
+        if si.op != Select {
+            return NOV
+        }
+        b := br_of.iget(si.args[0])
+        if b < 0 {
+            return NOV
+        }
+        t, e := match f.blocks[b].term {
+            Br(_, t0, e0) => (t0, e0)
+            _ => return NOV
+        }
+        if cfg.preds[t].len == 1 && cfg.dom(t, x) {
+            return si.args[1]
+        }
+        if cfg.preds[e].len == 1 && cfg.dom(e, x) {
+            return si.args[2]
+        }
+        return NOV
+    }
+    changed := false
+    for x in cfg.rpo.items() {
+        for v in f.blocks[x].insts {
+            i := &f.insts[v]
+            isphi := i.op == Phi
+            for k in 0..i.args.len {
+                a := i.args[k]
+                at := if isphi { i.from()[k] } else { x }
+                r := known(f, &cfg, &br_of, a, at)
+                if r != NOV {
+                    i.args[k] = r
+                    changed = true
+                }
+            }
+        }
+        ta := term_args(&f.blocks[x].term)
+        for k in 0..len(ta) {
+            r := known(f, &cfg, &br_of, ta[k], x)
+            if r != NOV {
+                ta[k] = r
+                changed = true
+            }
+        }
+    }
+    return changed
+}
+
 fn simplify_run(f: *Func) -> bool {
     any := false
     for it in 0..50 {
@@ -3119,6 +3252,9 @@ fn simplify_run(f: *Func) -> bool {
         }
         opt_trace("  cfg", f)
         if opt_pass(PASS_CFG, f, simplify_cfg) {
+            ch = true
+        }
+        if opt_enabled("selbr") && opt_pass(PASS_SELBR, f, select_under_branch) {
             ch = true
         }
         opt_trace("  phis", f)
