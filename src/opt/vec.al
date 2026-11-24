@@ -145,6 +145,63 @@ priv fn vec_const_dist(f: *Func, a: i64, b: i64) -> Opt[i64] {
     return Some(ca - cb)
 }
 
+// Is the vector loop worth it? A rough count of SSE2 instructions for W iterations against
+// one instruction per data operation and store of the scalar loop W times: the vector loop must
+// be at most 4/5 of it. (Widening is what makes it lose: an i32 sum into an i64, sign-extended
+// on SSE2 in four instructions per two lanes, is no faster than the scalar loop.)
+priv fn vec_profitable(f: *Func, h: i64, data: *Map[i64, bool], lsz: *Map[i64, i64], sad: *Map[i64, bool], w: i64) -> bool {
+    scalar := 0
+    vector := 0
+    for v0 in f.blocks[h].insts {
+        v := i64(v0)
+        i := &f.insts[v]
+        if i.op == Store {
+            scalar += w
+            vector += w * i.ty.size() / 16
+            continue
+        }
+        if !data.has(v) || i.op == Phi {
+            continue
+        }
+        scalar += w
+        np := w * lsz.get_or(v, 0) / 16
+        if sad.has(v) {
+            // psadbw and the add, once per 16 bytes (the extension costs nothing more)
+            vector += if i.op == Add { 2 * np } else { 0 }
+            continue
+        }
+        e := vec_lane_ty(f, v)
+        // the instructions per part, times 2 (halves)
+        c2 := match i.op {
+            Mul => if e == I32 { 12 } else { 2 }
+            MulHiU => if e == I32 { 14 } else { 2 }
+            Select => 6
+            ZExt, SExt => {
+                x := i.args[0]
+                si := lsz.get_or(x, 0)
+                r := i.ty.size() / si
+                // the extensions of one part of the source make 2r - 2 vectors (a tree of
+                // unpacks), each three instructions (four for i32 -> i64 signed); a compare
+                // first becomes 0 / 1 (one instruction per source part)
+                unit := if i.op == SExt && i.ty.size() == 8 && si == 4 { 4 } else { 3 }
+                k := 2 * unit * (2 * r - 2) / r
+                if f.insts[x].op.is_cmp() {
+                    k += 2 / r
+                }
+                k
+            }
+            Trunc => {
+                rr := lsz.get_or(i.args[0], 0) / i.ty.size()
+                6 * (rr - 1)
+            }
+            Ugt, Uge, Ult, Ule => 6
+            _ => 2
+        }
+        vector += np * c2 / 2
+    }
+    return vector * 5 <= scalar * 4
+}
+
 // the users of v in its block
 priv fn vec_users(f: *Func, b: i64, v: i64) -> Vec[i64] {
     out := vec[i64]()
@@ -418,6 +475,9 @@ priv fn vec_try(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []bool, de
     u := if smin == smax && 2 * (reds.len + 4) + ninv.len <= 16 && ndata <= 24 { 2 } else { 1 }
     w := u * 16 / smin
     if w * smax / 16 > VEC_MAX_PARTS {
+        return false
+    }
+    if !vec_profitable(f, h, &data, &lsz, &sad, w) {
         return false
     }
     match loop_const_trip(f, &cl) {
