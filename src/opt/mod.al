@@ -699,6 +699,12 @@ fn opt_func(m: *Module, fid: i64, st: *OptState) {
                 local_opt(f, st.level)
             }
         }
+        // one level of a small function that still calls itself (inline.al)
+        if opt_enabled("recinline") && inline_recursive(m, fid) {
+            sk_forget(f)
+            opt_trace("after-recinline", f)
+            local_opt(f, st.level)
+        }
         // the indirect calls of known targets the passes after inlining exposed (or the
         // inliner did not reach) become direct; the addresses of the functions such calls
         // took may be dead

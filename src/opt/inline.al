@@ -562,3 +562,85 @@ fn inline_run(m: *Module, fid: i64, done: []bool, call_counts: []i64, addr_taken
     }
     return (any, devirt)
 }
+
+// ---------- one level of a small self-recursive function ----------
+// A small function that still calls itself after tail recursion elimination (call/fib's
+// `fib(n - 1)`, call/takack's `ack(m, n - 1)`) gets a copy of its own body at each such call
+// (of the body as it was before: one level, never more): half the calls, and the copy's
+// parameters are the caller's values in registers. ALC_DISABLE=recinline.
+const REC_COST = 40 // the largest inline_cost of such a function
+const REC_TOTAL = 100 // and of its body with the copies
+
+// a copy of f whose lists are its own (inline_call reads it while it changes f)
+priv fn self_copy(f: *Func) -> Func {
+    c := *f
+    c.w = nil
+    c.insts = vec_of(f.insts.items())
+    for v in 0..c.insts.len {
+        i := &c.insts[v]
+        n := len(i.args)
+        if i.op == Phi {
+            i.phi_set(i.args, i.from())
+        } else if n > 0 {
+            a := mkslice[i64](__alloc_raw(n * 8), n)
+            memcopy(ptr(a), ptr(i.args), n * 8)
+            i.args = a
+        }
+    }
+    c.rets = vec_of(f.rets.items())
+    c.blocks = vec_of(f.blocks.items())
+    for b in 0..c.blocks.len {
+        blk := &c.blocks[b]
+        blk.insts = vec_of(blk.insts.items())
+        match blk.term {
+            Ret(vs) => blk.term = Ret(vec_of(vs.items()))
+            Switch(x, tab) => blk.term = Switch(x, vec_of(tab.items()))
+            _ => {}
+        }
+    }
+    return c
+}
+
+fn inline_recursive(m: *Module, fid: i64) -> bool {
+    f := &m.funcs[fid]
+    if f.inl < 0 || f.noreturn || !f.lowered {
+        return false
+    }
+    cost := inline_cost(f)
+    if cost > REC_COST {
+        return false
+    }
+    calls := vec[i64]()
+    rpo := f.rpo_compute()
+    cold := cold_blocks(f, &rpo)
+    for b in rpo {
+        for v in f.blocks[b].insts {
+            i := &f.insts[v]
+            if i.op == Call && i.k == fid && !cold[b] {
+                calls.push(i64(v))
+            }
+        }
+    }
+    if calls.is_empty() || cost * (calls.len + 1) > REC_TOTAL {
+        return false
+    }
+    g := self_copy(f)
+    repl := vec[i32]()
+    for call in calls {
+        // (the block of a call moves when an earlier one in its block was inlined)
+        cb := -1
+        for b in 0..f.blocks.len {
+            if contains(&f.blocks[b].insts, i32(call)) {
+                cb = b
+                break
+            }
+        }
+        if cb < 0 {
+            continue
+        }
+        returns := false
+        inline_call(f, cb, call, &g, &repl, &returns, &m.locs)
+    }
+    f.apply_repl(&repl)
+    return true
+}
