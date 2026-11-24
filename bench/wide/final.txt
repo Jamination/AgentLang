@@ -1,0 +1,94 @@
+== vec
+name                clang_s     al_s   al/cl unchk/cl al/novec  status
+blur                  0.400    0.914    2.29    2.26    0.51  ok
+bytehist              0.433    0.501    1.16    1.17    1.17  ok
+bytesum               0.884    0.159    0.18    0.18    0.18  ok
+bytesum_v             0.878    1.025    1.17    1.16    1.16  ok
+colsum                0.412    0.518    1.26    1.24    0.50  ok
+countif               0.391    0.427    1.09    1.10    0.60  ok
+countif_v             0.387    0.432    1.12    1.12    0.61  ok
+daxpy                 0.312    0.379    1.21    1.23    0.71  ok
+dot_f64               0.685    0.683    1.00    1.00    1.00  ok
+dot_u32               0.428    0.429    1.00    1.00    0.61  ok
+fillcopy              0.326    0.315    0.97    0.98    0.96  ok
+fillcopy_v            0.329    0.316    0.96    0.96    0.98  ok
+minmax                0.360    0.413    1.15    1.14    0.54  ok
+prefixsum             0.572    0.566    0.99    1.00    1.00  ok
+saxpy                 0.299    0.384    1.29    1.30    0.41  ok
+saxpy_big             0.282    0.291    1.04    1.05    0.92  ok
+saxpy_big_v           0.283    0.298    1.05    1.09    0.94  ok
+saxpy_v               0.305    0.317    1.04    1.06    0.33  ok
+== int
+name                clang_s     al_s   al/cl unchk/cl al/novec  status
+bignum                0.567    0.584    1.03    1.07    1.03  ok
+bitidioms             0.476    0.465    0.98    0.97    0.99  ok
+crc32                 0.463    0.512    1.11    1.12    1.11  ok
+divmod                0.630    0.653    1.04    1.00    1.04  ok
+gcdcollatz            0.552    0.566    1.03    1.03    1.01  ok
+interp                0.296    0.341    1.15    1.18    1.17  ok
+mrprime               0.841    0.884    1.05    1.08    1.04  ok
+nqueens               1.324    1.182    0.89    0.89    0.90  ok
+rnghash               0.432    0.427    0.99    0.99    0.99  ok
+smallint              0.482    0.592    1.23    1.12    1.23  ok
+== str
+name                clang_s     al_s   al/cl unchk/cl al/novec  status
+base64                0.258    0.311    1.20    1.13    1.20  ok
+bytescan              0.369    0.287    0.78    0.78    0.80  ok
+fmtparse              0.910    0.700    0.77    0.73    0.79  ok
+itoa                  0.565    0.591    1.05    1.05    1.06  ok
+json                  0.542    0.803    1.48    1.47    1.60  ok
+lexer                 0.522    0.551    1.06    1.62    1.02  ok
+strbuild              0.602    0.710    1.18    1.19    1.15  ok
+strsort               0.479    0.372    0.78    0.71    0.80  ok
+strsort_cg            0.339    0.364    1.07    0.99    1.07  ok
+substr                0.500    0.614    1.23    1.10    1.28  ok
+substr_lib            0.177    0.288    1.63    1.64    1.65  ok
+utf8                  0.463    0.459    0.99    1.00    1.01  ok
+wordfreq              0.556    0.608    1.09    1.09    1.09  ok
+== call
+name                clang_s     al_s   al/cl unchk/cl al/novec  status
+errprop               0.313    0.399    1.27    1.28    1.28  ok
+exprtree              0.441    0.454    1.03    1.01    1.04  ok
+fib                   0.369    0.378    1.02    0.91    1.04  ok
+generics              0.436    0.410    0.94    0.91    0.93  ok
+hof                   0.474    0.471    0.99    0.98    1.01  ok
+iter                  0.324    0.305    0.94    0.96    0.93  ok
+lexer                 0.403    0.501    1.24    1.15    1.25  ok
+mutrec                0.280    0.358    1.28    1.28    1.28  ok
+structs               0.335    0.398    1.19    1.18    1.00  ok
+takack                0.262    0.237    0.90    0.89    0.90  ok
+vm                    0.416    0.395    0.95    0.99    0.89  ok
+== mem
+name                clang_s     al_s   al/cl unchk/cl al/novec  status
+dp                    0.410    0.435    1.06    1.04    1.06  ok
+graph                 0.439    0.385    0.88    0.87    0.85  ok
+heap                  0.566    0.506    0.89    0.80    0.88  ok
+life                  0.279    0.282    1.01    1.02    1.02  ok
+linkedlist            0.710    0.684    0.96    0.98    0.98  ok
+mergesort             0.574    0.604    1.05    1.03    1.04  ok
+particles_aos         0.649    0.793    1.22    1.22    1.01  ok
+particles_soa         0.802    0.805    1.00    1.00    1.00  ok
+radix                 0.244    0.246    1.01    1.01    1.01  ok
+rows                  0.308    0.372    1.21    1.38    0.98  ok
+treap                 0.704    0.640    0.91    0.95    0.81  ok
+vecring               0.376    0.375    1.00    1.00    1.06  ok
+== fp
+name                clang_s     al_s   al/cl unchk/cl al/novec  status
+branchy               0.442    0.699    1.58    1.58    1.08  ok
+f32conv               0.353    0.419    1.19    1.18    1.01  ok
+fft                   0.343    0.329    0.96    0.93    1.23  ok
+lu                    0.323    0.363    1.12    1.13    0.47  ok
+mat4quat              0.263    0.306    1.16    1.15    1.00  ok
+mathlib               0.366    0.465    1.27    1.26    1.28  ok
+montecarlo            0.596    0.429    0.72    0.73    0.72  ok
+poly                  0.344    0.342    0.99    1.00    1.00  ok
+raytrace              0.456    0.451    0.99    0.99    1.02  ok
+reduce                0.357    0.355    1.00    1.00    0.99  ok
+rk4                   0.323    0.307    0.95    0.96    1.01  ok
+mem   n=12 al/cl=1.01 al/novec=0.97
+fp    n=11 al/cl=1.06 al/novec=0.95
+call  n=11 al/cl=1.06 al/novec=1.04
+int   n=10 al/cl=1.05 al/novec=1.05
+vec   n=13 al/cl=1.01 al/novec=0.63
+str   n=13 al/cl=1.07 al/novec=1.09
+ALL   n=70 al/cl=1.04 al/novec=0.93
