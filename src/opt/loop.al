@@ -22,6 +22,8 @@
 // again on the next run of the pipeline (local_opt runs again after inlining).
 const LOOP_NO_UNROLL = 1
 const LOOP_NO_IDIOM = 2
+// a loop the vectorizer made (vector loop or remainder): not vectorized again
+const LOOP_NO_VEC = 4
 
 // A counted loop (loop_counted).
 struct CLoop {
@@ -1159,6 +1161,9 @@ fn loop_opts(f: *Func) -> bool {
         ch = true
     }
     if opt_enabled("idiom") && idiom_run(f) {
+        ch = true
+    }
+    if opt_enabled("vectorize") && vec_run(f) {
         ch = true
     }
     if opt_enabled("lsr") && lsr_run(f) {

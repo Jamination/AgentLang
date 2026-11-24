@@ -2459,7 +2459,8 @@ priv fn inst(self: *Sel, v: i64) {
             d := self.vr(v)
             m := self.addr(i.args[0])
             match ty {
-                F64, F32, V2, V4 => self.e(MovSd, fsz_mem(ty), R(d), M(m))
+                // (movups: vector accesses need not be aligned)
+                F64, F32, V2, V4, VI8, VI16, VI32, VI64, VF64 => self.e(MovSd, fsz_mem(ty), R(d), M(m))
                 V3 => {
                     // x, y as one 8-byte load; z joins as the upper half
                     t := new_vreg(&self.mf, 1)
@@ -2549,12 +2550,14 @@ priv fn inst(self: *Sel, v: i64) {
             self.e(Zero, 8, R(d), Opnd.None)
             self.e(Cvtf, fsz(ty), R(d), s)
         }
+        VSplat if ty.vec_elem() != F32 => self.vsplat(v)
         VSplat => {
             d := self.vr(v)
             s := self.reg(i.args[0])
             self.e(MovSd, 8, R(d), R(s))
             self.shufps(d, d, 0)
         }
+        VBin => self.vbin(v)
         VBuild => {
             d := self.vr(v)
             all_const := true
@@ -2595,6 +2598,20 @@ priv fn inst(self: *Sel, v: i64) {
                 self.e(MovSd, 8, R(t), R(rs[2]))
                 self.e(Unpcklps, 16, R(t), R(rs[3]))
                 self.shufps(d, t, 0x44)
+            }
+        }
+        VExt if ty != F32 => {
+            // a lane of the vectorizer's types: lane 0 of an integer vector, lane 0 or 1 of f64
+            d := self.vr(v)
+            s := self.reg(i.args[0])
+            if ty.is_int() {
+                assert i.k == 0, "isel: VExt of an integer lane other than 0"
+                self.e(MovqToR, if ty == I64 { 8 } else { 4 }, R(d), R(s))
+            } else {
+                self.e(MovSd, 8, R(d), R(s))
+                if i.k != 0 {
+                    self.sse(Sse, 0x15, 0x66, d, R(d))
+                }
             }
         }
         VExt => {
@@ -2719,6 +2736,239 @@ priv fn inst(self: *Sel, v: i64) {
             } else {
                 panic(fmt("isel: unhandled op ", i.op))
             }
+        }
+    }
+}
+
+// ---------- the loop vectorizer's operations (VBin; VSplat and VExt of its types) ----------
+// SSE2 only (the x86-64 baseline): everything here is `[66] 0F op`.
+
+// op d, b with the opcode byte opc and the mandatory prefix pfx (0 or 0x66)
+priv fn sse(self: *Sel, op: MOp, opc: i64, pfx: i64, d: i64, b: Opnd) {
+    mi := minst_new(op, 16, R(d), b)
+    mi.tgt = i32(opc | pfx << 8)
+    self.out.push(mi)
+}
+
+// the same with an immediate byte
+priv fn sse_imm(self: *Sel, op: MOp, opc: i64, pfx: i64, d: i64, b: Opnd, imm: i64) {
+    mi := minst_new(op, 16, R(d), b)
+    mi.tgt = i32(opc | pfx << 8 | (imm & 255) << 16 | SSE_IMM)
+    self.out.push(mi)
+}
+
+// shift of register d by an immediate: `66 0F opc /n ib`
+priv fn sse_sh(self: *Sel, opc: i64, n: i64, d: i64, imm: i64) {
+    mi := minst_new(SseSh, 16, R(d), Opnd.None)
+    mi.tgt = i32(opc | n << 8 | (imm & 255) << 16)
+    self.out.push(mi)
+}
+
+// 128 bits with every lane of type e equal to the low bits of k
+priv fn splat_bits(e: T, k: u64) -> Bits128 {
+    sz := e.size()
+    lane := if sz >= 8 { k } else { k & ((u64(1) << u64(8 * sz)) - 1) }
+    w := lane
+    s := sz
+    while s < 8 {
+        w = w | (w << u64(8 * s))
+        s *= 2
+    }
+    return Bits128{lo: w, hi: w}
+}
+
+// a vector register holding the constant 128 bits (from the pool, which is 16-byte aligned)
+priv fn vconst(self: *Sel, bits: Bits128) -> i64 {
+    r := new_vreg(&self.mf, 1)
+    if bits.lo == 0 && bits.hi == 0 {
+        self.e(Zero, 8, R(r), Opnd.None)
+    } else {
+        self.e(MovSd, 16, R(r), M(self.fconst(bits)))
+    }
+    return r
+}
+
+// VSplat of an integer or f64 lane type
+priv fn vsplat(self: *Sel, v: i64) {
+    i := &self.f.insts[v]
+    e := i.ty.vec_elem()
+    a := i.args[0]
+    ai := &self.f.insts[a]
+    d := self.vr(v)
+    if ai.op == Const || ai.op == FConst {
+        self.e(MovSd, 8, R(d), R(self.vconst(splat_bits(e, u64(ai.k)))))
+        return
+    }
+    s := self.reg(a)
+    if e == F64 {
+        self.e(MovSd, 8, R(d), R(s))
+        self.sse(Sse, 0x14, 0x66, d, R(d)) // unpcklpd
+        return
+    }
+    self.e(MovqToX, if e == I64 { 8 } else { 4 }, R(d), R(s))
+    match e {
+        I64 => self.sse(Sse, 0x6C, 0x66, d, R(d)) // punpcklqdq
+        I32 => self.sse_imm(Ssew, 0x70, 0x66, d, R(d), 0) // pshufd
+        I16 => {
+            self.sse(Sse, 0x61, 0x66, d, R(d)) // punpcklwd
+            self.sse_imm(Ssew, 0x70, 0x66, d, R(d), 0)
+        }
+        _ => {
+            self.sse(Sse, 0x60, 0x66, d, R(d)) // punpcklbw
+            self.sse(Sse, 0x61, 0x66, d, R(d))
+            self.sse_imm(Ssew, 0x70, 0x66, d, R(d), 0)
+        }
+    }
+}
+
+// the opcode byte of an integer lane operation (by lane size: 1, 2, 4, 8 bytes), -1 if SSE2 has none
+priv fn vint_opc(kind: i64, e: T) -> i64 {
+    x := match e {
+        I8 => 0
+        I16 => 1
+        I32 => 2
+        _ => 3
+    }
+    t: [4]i64 = match kind {
+        VK_ADD => [4]i64{0xFC, 0xFD, 0xFE, 0xD4}
+        VK_SUB => [4]i64{0xF8, 0xF9, 0xFA, 0xFB}
+        VK_MUL => [4]i64{-1, 0xD5, -1, -1}
+        VK_CEQ => [4]i64{0x74, 0x75, 0x76, -1}
+        VK_CGT => [4]i64{0x64, 0x65, 0x66, -1}
+        VK_AND => [4]i64{0xDB, 0xDB, 0xDB, 0xDB}
+        VK_OR => [4]i64{0xEB, 0xEB, 0xEB, 0xEB}
+        VK_XOR => [4]i64{0xEF, 0xEF, 0xEF, 0xEF}
+        VK_ANDN => [4]i64{0xDF, 0xDF, 0xDF, 0xDF}
+        _ => [4]i64{-1, -1, -1, -1}
+    }
+    return t[x]
+}
+
+priv fn vbin(self: *Sel, v: i64) {
+    i := &self.f.insts[v]
+    ty := i.ty
+    kind := i.k & 255
+    imm := i.k >> 8
+    args := i.args
+    e := ty.vec_elem()
+    fl := e == F32 || e == F64
+    // the prefix of a float operation: none for f32 lanes (ps), 66 for f64 (pd)
+    fp := if e == F64 { 0x66 } else { 0 }
+    d := self.vr(v)
+    match kind {
+        VK_SEL => {
+            m := self.reg(args[0])
+            a := self.reg(args[1])
+            b := self.reg(args[2])
+            t := new_vreg(&self.mf, 1)
+            self.e(MovSd, 8, R(t), R(m))
+            self.sse(Sse, 0xDB, 0x66, t, R(a)) // pand
+            self.e(MovSd, 8, R(d), R(m))
+            self.sse(Sse, 0xDF, 0x66, d, R(b)) // pandn
+            self.sse(Sse, 0xEB, 0x66, d, R(t)) // por
+        }
+        VK_FSQRT => {
+            a := self.reg(args[0])
+            self.sse(Ssew, 0x51, fp, d, R(a))
+        }
+        VK_FNEG, VK_FABS => {
+            a := self.reg(args[0])
+            neg := kind == VK_FNEG
+            bits := if e == F64 {
+                splat_bits(I64, if neg { 0x8000_0000_0000_0000 } else { 0x7FFF_FFFF_FFFF_FFFF })
+            } else {
+                splat_bits(I32, if neg { 0x8000_0000 } else { 0x7FFF_FFFF })
+            }
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, if neg { 0xEF } else { 0xDB }, 0x66, d, M(self.fconst(bits)))
+        }
+        VK_SHL, VK_LSHR, VK_ASHR => {
+            x := match e {
+                I16 => 0
+                I32 => 1
+                _ => 2
+            }
+            assert e != I8 && !(kind == VK_ASHR && e == I64), "isel: no SSE2 shift for these lanes"
+            a := self.reg(args[0])
+            if args.len == 1 {
+                n := match kind {
+                    VK_SHL => 6
+                    VK_LSHR => 2
+                    _ => 4
+                }
+                self.e(MovSd, 8, R(d), R(a))
+                self.sse_sh(0x71 + x, n, d, imm)
+            } else {
+                base := match kind {
+                    VK_SHL => 0xF1
+                    VK_LSHR => 0xD1
+                    _ => 0xE1
+                }
+                c := self.reg(args[1])
+                t := new_vreg(&self.mf, 1)
+                self.e(MovqToX, 8, R(t), R(c))
+                self.e(MovSd, 8, R(d), R(a))
+                self.sse(Sse, base + x, 0x66, d, R(t))
+            }
+        }
+        VK_BSRL => {
+            a := self.reg(args[0])
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse_sh(0x73, 3, d, imm) // psrldq
+        }
+        VK_FCMP => {
+            a := self.reg(args[0])
+            b := self.reg(args[1])
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse_imm(Sse, 0xC2, fp, d, R(b), imm)
+        }
+        VK_CGTU => {
+            // signed compare of both sides with their sign bits flipped
+            bias := M(self.fconst(splat_bits(e, u64(1) << u64(e.bits() - 1))))
+            a := self.reg(args[0])
+            b := self.reg(args[1])
+            t := new_vreg(&self.mf, 1)
+            self.e(MovSd, 8, R(t), R(b))
+            self.sse(Sse, 0xEF, 0x66, t, bias)
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, 0xEF, 0x66, d, bias)
+            self.sse(Sse, vint_opc(VK_CGT, e), 0x66, d, R(t))
+        }
+        VK_MUL if e == I32 => {
+            // pmuludq on lanes 0, 2 and on lanes 1, 3 (moved down), the low halves of the
+            // products put back together
+            a := self.reg(args[0])
+            b := self.reg(args[1])
+            t := new_vreg(&self.mf, 1)
+            u := new_vreg(&self.mf, 1)
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, 0xF4, 0x66, d, R(b))
+            self.sse_imm(Ssew, 0x70, 0x66, t, R(a), 0xF5)
+            self.sse_imm(Ssew, 0x70, 0x66, u, R(b), 0xF5)
+            self.sse(Sse, 0xF4, 0x66, t, R(u))
+            self.sse_imm(Ssew, 0x70, 0x66, d, R(d), 0x08)
+            self.sse_imm(Ssew, 0x70, 0x66, t, R(t), 0x08)
+            self.sse(Sse, 0x62, 0x66, d, R(t)) // punpckldq
+        }
+        _ => {
+            opc := if fl && kind != VK_AND && kind != VK_OR && kind != VK_XOR && kind != VK_ANDN {
+                match kind {
+                    VK_ADD => 0x58
+                    VK_MUL => 0x59
+                    VK_SUB => 0x5C
+                    VK_FDIV => 0x5E
+                    VK_FMIN => 0x5D
+                    VK_FMAX => 0x5F
+                    _ => -1
+                }
+            } else {
+                vint_opc(kind, e)
+            }
+            assert opc >= 0, fmt("isel: no SSE2 instruction for VBin ", kind, " on ", ty)
+            a := self.reg(args[0])
+            b := self.reg(args[1])
+            self.e(MovSd, 8, R(d), R(a))
+            self.sse(Sse, opc, if fl && opc < 0xC0 { fp } else { 0x66 }, d, R(b))
         }
     }
 }

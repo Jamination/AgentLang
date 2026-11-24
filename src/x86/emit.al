@@ -639,6 +639,22 @@ priv fn enc_inst(e: *Enc, i: *MInst) {
             rm := e.rm(&i.b)
             e.op(false, if u8(i.sz2) == 4 { 0xF3 } else { 0xF2 }, w, 0x0F2C, u8(d & 15), &rm, false)
         }
+        Sse, Ssew => {
+            t := i64(i.tgt)
+            pfx := u8((t >> 8) & 0xFF)
+            d := reg_of(&i.a)
+            rm := e.rm(&i.b)
+            e.op(pfx == 0x66, if pfx == 0x66 { 0 } else { pfx }, false, 0x0F00 | (t & 0xFF), u8(d & 15), &rm, false)
+            if t & SSE_IMM != 0 {
+                e.imm((t >> 16) & 0xFF, 1)
+            }
+        }
+        SseSh => {
+            t := i64(i.tgt)
+            rm := rm_reg(reg_of(&i.a))
+            e.op(true, 0, false, 0x0F00 | (t & 0xFF), u8((t >> 8) & 7), &rm, false)
+            e.imm((t >> 16) & 0xFF, 1)
+        }
         MovqToX => {
             d := reg_of(&i.a)
             rm := e.rm(&i.b)
