@@ -749,14 +749,17 @@ __region_depth: i64
 
 // uninitialized memory, 16-byte aligned; never freed individually (see mark/release). A size
 // that is negative (also one that overflowed) is refused by __heap_grow.
+// The result is marked fresh (`__fresh`): memory that no object live at this moment occupies,
+// which the optimizer's alias analysis takes as an object of its own (src/opt/alias.al).
 inline fn __alloc_raw(n: i64) -> i64 {
     n = (n + 15) & ~15
     p := __heap_cur
     if u64(n) > u64(__heap_end - p) {
-        return __heap_grow(n)
+        p = __heap_grow(n)
+    } else {
+        __heap_cur = p + n
     }
-    __heap_cur = p + n
-    return p
+    return __fresh(p)
 }
 
 // the bytes of n elements of `size` bytes; stops the program if n is negative or the result
@@ -1827,16 +1830,16 @@ fn __str_eq(a: str, b: str) -> bool {
 // ---------- bytes, a word at a time ----------
 // These read 8 bytes per step with u64 loads (unaligned: fine on x86-64 and arm64; both are
 // little-endian, so the byte at the lowest address is the low byte of a word), and never
-// outside the bytes they are given. The loads are u64 reads of memory that may have been
-// written as another type (a byte view of typed data): the functions that do them are not
-// inlined, so that no such load can be moved across a store in the caller.
+// outside the bytes they are given. The loads read memory that may have been written as
+// another type (a byte view of typed data): they have the alias class of a byte's, which may
+// alias anything (`__ld64_any`, `__ld32_any`), so the functions may be inlined anywhere.
 
 inline fn __ld64(p: i64) -> u64 {
-    return *cast[*u64](p)
+    return __ld64_any(p)
 }
 
 inline fn __ld32(p: i64) -> u64 {
-    return u64(*cast[*u32](p))
+    return u64(__ld32_any(p))
 }
 
 inline fn __ld8(p: i64) -> u64 {
@@ -3107,8 +3110,15 @@ noinline fn __find_words(s: str, sub: str) -> i64 {
     last := u64(c1) * 0x0101010101010101
     work := 0
     i := 0
+    // (a byte of x | y is zero where both are: one __zero_bytes for both tests; 16 positions
+    // per step while nothing matches)
+    pl := p + m - 1
     while i + m + 7 <= n {
-        z := __zero_bytes(__ld64(p + i) ^ first) & __zero_bytes(__ld64(p + i + m - 1) ^ last)
+        if i + m + 15 <= n && __zero_bytes((__ld64(p + i) ^ first) | (__ld64(pl + i) ^ last)) | __zero_bytes((__ld64(p + i + 8) ^ first) | (__ld64(pl + i + 8) ^ last)) == 0 {
+            i += 16
+            continue
+        }
+        z := __zero_bytes((__ld64(p + i) ^ first) | (__ld64(pl + i) ^ last))
         while z != 0 {
             k := i + __low_byte(z)
             if __mem_eq_k(p + k + 1, q + 1, m - 2) {

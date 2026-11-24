@@ -1,9 +1,45 @@
-// Simple alias analysis: identified objects (allocas, globals), constant offsets, type-based classes.
+// Simple alias analysis: identified objects (allocas, globals, fresh allocations), constant
+// offsets, type-based classes.
+//
+// Fresh allocations. `Fresh(p)` (Op.Fresh, made by __alloc_raw, see the prelude) is the address
+// of memory the allocator has just handed out: memory no object that is live at that moment
+// occupies. Memory is never handed out again while its object is live (release, reset and a
+// Vec's growth give memory back only together with its objects; using an object after that is
+// an error of the program, which ALC_CHECK_MEMORY reports), so two objects that are live at
+// the same time are disjoint, even when the same address belonged to another object earlier.
+// An answer "no alias" between an access q and the accesses p, p' through one pointer value
+// (p before q, p' after it, or p moved across q) is used to keep a fact about p's location
+// across q. The object of p and p' is live at both of them (else the program is wrong), so it
+// is live at q too (an object's life is one interval); the object of q is live at q: they are
+// different objects live at the same time, hence disjoint, when
+//  - q and p go through two different Fresh values: two distinct allocations (each a single
+//    instance wherever the IR compares them: no pass carries a fact across a redefinition of
+//    a value it names), or
+//  - one goes through a Fresh value and the other through a parameter of the function: the
+//    parameter's object was made before the function began, so before the allocation.
+// Addresses derived from a base stay inside its object (the rule the Alloca and Global cases
+// rely on too); a pointer made from an integer that is no address of a live object (say a
+// mark) is not a pointer to any object. A fresh object is neither a stack slot nor a global.
 
 priv enum Base {
     Alloca(i64),
     Global(i64),
     Unknown(i64),
+    Fresh(i64),
+    // an Unknown address that is a parameter, perhaps plus scaled indices (param_rooted)
+    Arg(i64),
+}
+
+// (ALC_DISABLE=fresh: Fresh values are not identified objects)
+priv fresh_read: bool
+priv fresh_on: bool
+
+priv inline fn fresh_enabled() -> bool {
+    if !fresh_read {
+        fresh_on = opt_enabled("fresh")
+        fresh_read = true
+    }
+    return fresh_on
 }
 
 struct Addr {
@@ -47,6 +83,9 @@ priv fn decompose(f: *Func, addr: i64) -> Addr {
         if i.op == GAddr {
             return Addr{base: Global(i.k), off: off}
         }
+        if i.op == Fresh && fresh_enabled() {
+            return Addr{base: Base.Fresh(v), off: off}
+        }
         if i.op == Add && depth < 32 {
             depth += 1
             a := i.args[0]
@@ -77,8 +116,37 @@ priv fn decompose(f: *Func, addr: i64) -> Addr {
                 None => {}
             }
         }
+        if param_rooted(f, v, 0) {
+            return Addr{base: Arg(v), off: off}
+        }
         return Addr{base: Unknown(v), off: off}
     }
+}
+
+// v is a parameter of the function, or one plus scaled indices (`p + (i << 3)`, `p + i * 24`):
+// an address in the object a parameter points to (the scaled terms cannot be the pointer)
+priv fn param_rooted(f: *Func, v: i64, depth: i64) -> bool {
+    i := &f.insts[v]
+    if i.op == Param {
+        return true
+    }
+    if i.op != Add || depth > 8 {
+        return false
+    }
+    a := i.args[0]
+    b := i.args[1]
+    return param_rooted(f, a, depth + 1) && scaled_index(f, b) || param_rooted(f, b, depth + 1) && scaled_index(f, a)
+}
+
+priv fn scaled_index(f: *Func, v: i64) -> bool {
+    i := &f.insts[v]
+    if i.op == Const {
+        return true
+    }
+    if (i.op == Shl || i.op == Mul) && is_some(f.is_const(i.args[1])) {
+        return true
+    }
+    return false
 }
 
 priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
@@ -91,6 +159,9 @@ priv fn decompose_obj(f: *Func, v: i64, depth: i64) -> Opt[Base] {
     }
     if i.op == GAddr {
         return Some(Global(i.k))
+    }
+    if i.op == Fresh && fresh_enabled() {
+        return Some(Base.Fresh(v))
     }
     if i.op == Add {
         r := decompose_obj(f, i.args[0], depth + 1)
@@ -222,11 +293,129 @@ struct MemRef {
     size: i32,
     class: i32, // Inst.aux
     ptr: i32, // the address value itself
+    lin: Lin, // the address as a linear form (see alias_lin)
 }
 
 fn alias_memref(f: *Func, v: i64) -> MemRef {
     i := &f.insts[v]
-    return MemRef{addr: decompose(f, i.args[0]), size: i32(i.ty.size()), class: i.aux, ptr: i32(i.args[0])}
+    return MemRef{addr: decompose(f, i.args[0]), size: i32(i.ty.size()), class: i.aux, ptr: i32(i.args[0]), lin: alias_lin(f, i.args[0])}
+}
+
+// ---------- addresses as linear forms ----------
+// An address computed by adds, subtracts and multiplications or shifts by constants is
+// sum(k[t] * v[t]) + c over at most LIN_MAX values v (in increasing order, no k zero), modulo
+// 2^64 like the arithmetic that computes it. Two addresses with the same terms differ by
+// exactly the difference of their constants: equal constants mean the same address, constants
+// at least an access size apart mean disjoint bytes (`d[i * w + j]` and `d[i * w + j - 1]`
+// even when the two are computed separately). (ALC_DISABLE=linaddr)
+const LIN_MAX = 4
+
+struct Lin {
+    n: i32, // the number of terms; -1: not a linear form
+    v: [4]i32,
+    k: [4]i64,
+    c: i64,
+}
+
+priv lin_read: bool
+priv lin_on: bool
+
+fn alias_lin(f: *Func, addr: i64) -> Lin {
+    if !lin_read {
+        lin_on = opt_enabled("linaddr")
+        lin_read = true
+    }
+    l := Lin{n: 0}
+    if !lin_on || !lin_add(f, &l, addr, 1, 0) {
+        l.n = -1
+    }
+    return l
+}
+
+// l += k * (value v); false if the form gets too large
+priv fn lin_add(f: *Func, l: *Lin, v: i64, k: i64, depth: i64) -> bool {
+    if k == 0 {
+        return true
+    }
+    i := &f.insts[v]
+    if depth < 12 {
+        match i.op {
+            Const => {
+                l.c += k * i.k
+                return true
+            }
+            Add => return lin_add(f, l, i.args[0], k, depth + 1) && lin_add(f, l, i.args[1], k, depth + 1)
+            Sub => return lin_add(f, l, i.args[0], k, depth + 1) && lin_add(f, l, i.args[1], 0 - k, depth + 1)
+            Shl => {
+                match f.is_const(i.args[1]) {
+                    Some(s) if s >= 0 && s < 63 => return lin_add(f, l, i.args[0], k * (1 << s), depth + 1)
+                    _ => {}
+                }
+            }
+            Mul => {
+                match f.is_const(i.args[1]) {
+                    Some(m) => return lin_add(f, l, i.args[0], k * m, depth + 1)
+                    None => {}
+                }
+                match f.is_const(i.args[0]) {
+                    Some(m) => return lin_add(f, l, i.args[1], k * m, depth + 1)
+                    None => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    if i.ty != I64 {
+        // (a narrower value wraps at another width)
+        return false
+    }
+    // a term: merged, the values kept in order
+    n := i64(l.n)
+    vv := i32(v)
+    for t in 0..n {
+        if l.v[t] == vv {
+            l.k[t] += k
+            if l.k[t] == 0 {
+                for u in t..n - 1 {
+                    l.v[u] = l.v[u + 1]
+                    l.k[u] = l.k[u + 1]
+                }
+                l.n -= 1
+            }
+            return true
+        }
+    }
+    if n == LIN_MAX {
+        return false
+    }
+    at := n
+    while at > 0 && l.v[at - 1] > vv {
+        l.v[at] = l.v[at - 1]
+        l.k[at] = l.k[at - 1]
+        at -= 1
+    }
+    l.v[at] = vv
+    l.k[at] = k
+    l.n += 1
+    return true
+}
+
+// l += k * v as a linear form; false if it does not fit
+fn alias_lin_add(f: *Func, l: *Lin, v: i64, k: i64) -> bool {
+    return l.n >= 0 && lin_add(f, l, v, k, 0)
+}
+
+// the same terms (then the addresses differ by b.c - a.c)
+fn lin_same_terms(a: *Lin, b: *Lin) -> bool {
+    if a.n < 0 || a.n != b.n {
+        return false
+    }
+    for t in 0..i64(a.n) {
+        if a.v[t] != b.v[t] || a.k[t] != b.k[t] {
+            return false
+        }
+    }
+    return true
 }
 
 fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
@@ -234,6 +423,11 @@ fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
         (Alloca(x), Alloca(y)), (Global(x), Global(y)) if x != y => return false
         (Alloca(_), Global(_)), (Global(_), Alloca(_)) => return false
         (Alloca(x), Unknown(_)), (Unknown(_), Alloca(x)) if !esc[x] => return false
+        // (see the top of the file)
+        (Fresh(x), Fresh(y)) if x != y => return false
+        (Fresh(_), Alloca(_)), (Alloca(_), Fresh(_)), (Fresh(_), Global(_)), (Global(_), Fresh(_)) => return false
+        (Fresh(_), Arg(_)), (Arg(_), Fresh(_)) => return false
+        (Alloca(x), Arg(_)), (Arg(_), Alloca(x)) if !esc[x] => return false
         _ => {}
     }
     if a.ptr == b.ptr && a.ptr != NOV {
@@ -245,6 +439,13 @@ fn alias_may_alias(a: *MemRef, b: *MemRef, esc: []bool) -> bool {
             _ => {}
         }
     }
+    if lin_same_terms(&a.lin, &b.lin) {
+        // b's address is a's plus d (modulo 2^64): the bytes overlap if -b.size < d < a.size
+        d := b.lin.c - a.lin.c
+        if d <= 0 - i64(b.size) || d >= i64(a.size) {
+            return false
+        }
+    }
     return types_may_alias_class(i64(a.class), i64(b.class))
 }
 
@@ -252,5 +453,8 @@ fn alias_must_alias(a: *MemRef, b: *MemRef) -> bool {
     if a.size != b.size {
         return false
     }
-    return (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && off_some_eq(a.addr.off, b.addr.off))
+    if (a.ptr == b.ptr && a.ptr != NOV) || (a.addr.base == b.addr.base && off_some_eq(a.addr.off, b.addr.off)) {
+        return true
+    }
+    return lin_same_terms(&a.lin, &b.lin) && a.lin.c == b.lin.c
 }

@@ -107,6 +107,19 @@ inline fn ra_spill_store(mf: *MFunc, cls: u8, r: i64, slot: i64) -> MInst {
     return minst_new(if cls == 1 { MovSd } else { Mov }, spill_size(mf, cls), M(mem_slot(slot, 0)), R(r))
 }
 
+// i, the one definition of v, may be repeated before each use instead of a spill (src/
+// regalloc.al, "rematerialization"): `mov v, imm` or the address of a global or function
+// (no operand register, flags untouched)
+inline fn ra_remat(mf: *MFunc, i: *MInst, v: i64) -> bool {
+    if i.op != Mov || i.a != R(v) {
+        return false
+    }
+    return match i.b {
+        I(_), GAddr(_, _), FAddr(_) => true
+        _ => false
+    }
+}
+
 // can operand `b` of this instruction be a memory operand?
 priv fn b_can_be_mem(i: *MInst) -> bool {
     match i.a {

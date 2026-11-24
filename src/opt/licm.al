@@ -202,7 +202,7 @@ fn licm_run(f: *Func) -> bool {
                             private, safe_addr := match m.addr.base {
                                 Alloca(x) => (!esc[x], is_some(m.addr.off))
                                 Global(_) => (false, is_some(m.addr.off))
-                                Unknown(_) => (false, false)
+                                Unknown(_), Fresh(_), Arg(_) => (false, false)
                             }
                             if !has_call || private {
                                 aliased := false

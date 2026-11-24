@@ -493,11 +493,49 @@ priv first_done: Vec[bool]
 priv clean_at: Vec[i64]
 priv clean_end: Vec[i64]
 
+// replaces every Fresh(p) by p (the mark is for the optimiser only); true if there was one
+priv fn strip_fresh(f: *Func) -> bool {
+    any := false
+    for b in 0..f.blocks.len {
+        for v in f.blocks[b].insts {
+            if f.insts[v].op == Fresh {
+                any = true
+                break
+            }
+        }
+        if any {
+            break
+        }
+    }
+    if !any {
+        return false
+    }
+    repl := vec_fill(f.insts.len, i32(NOV))
+    dead := alloc[bool](f.insts.len)
+    for b in 0..f.blocks.len {
+        for v in f.blocks[b].insts {
+            if f.insts[v].op == Fresh {
+                repl[v] = i32(f.insts[v].args[0])
+                dead[v] = true
+            }
+        }
+    }
+    for bi in 0..f.blocks.len {
+        f.blocks[bi].insts.retain(dead, fn(dead: []bool, v: i32) -> bool { !dead[v] })
+    }
+    f.apply_repl(&repl)
+    return true
+}
+
 // The cleanups the back end runs first (prune, trivial phis, DCE), each skipped where the
 // optimiser left the function clean for it (f.w is set).
 fn opt_backend_cleanup(f: *Func, fid: i64) {
     bits := if fid < clean_end.len { clean_end[fid] } else { 0 }
     sk_restore(f, bits)
+    if strip_fresh(f) {
+        // (an identity removed: no pass has more to do than before)
+        sk_restore(f, bits)
+    }
     opt_pass(PASS_PRUNE, f, cleanup_prune_unreachable)
     opt_pass(PASS_PHIS, f, cleanup_trivial_phis)
     opt_pass(PASS_DCE, f, cleanup_dce)

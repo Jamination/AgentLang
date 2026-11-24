@@ -146,6 +146,10 @@ enum Op {
     // value's type), fence []. Not pure, clobbers memory: a barrier for every memory
     // optimisation (BOOTSTRAP.md, "Threads")
     Atomic,
+    // args = [p]: p itself, the address of memory the allocator has just handed out
+    // (`__fresh(p)` in __alloc_raw): an object of its own for alias analysis (src/opt/alias.al).
+    // Removed before instruction selection (opt_backend_cleanup)
+    Fresh,
 }
 
 const ATOMIC_LOAD = 0
