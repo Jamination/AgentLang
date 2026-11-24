@@ -1366,7 +1366,9 @@ priv fn loop_pads(mf: *MFunc, layout: []i64, items: *Vec[Item], bpos: []i64, bit
                 njumps += 1
             }
         }
-        if items[lend].pos - bpos[b] + 2 * njumps > 64 {
+        // (a larger loop is only kept from starting near the end of a 16-byte block: see
+        // loop_pad)
+        if items[lend].pos - bpos[b] + 2 * njumps > 64 && !align_big {
             continue
         }
         spot := padi[b]
@@ -1394,7 +1396,21 @@ priv fn loop_pad(at: i64, size: i64) -> i64 {
     if size <= 64 && at % 64 + size > 64 {
         return 64 - at % 64
     }
+    // a larger loop whose header starts in the last bytes of a 16-byte block: every back edge
+    // (in an interpreter's dispatch loop, every handler) jumps to an instruction that the first
+    // fetch from there barely reaches or that straddles the block; it moves to the next block
+    // (int/interp ran 1.5 times as long with its header at offset 63 of a line)
+    if size > 64 && at % 16 >= 9 {
+        return 16 - at % 16
+    }
     return 0
+}
+
+// ALC_DISABLE=alignbig: loops larger than 64 bytes are not padded
+priv align_big := true
+
+fn emit_align_big(on: bool) {
+    align_big = on
 }
 
 // rewrites the float constant relocations of code from indices into the function's own list
