@@ -76,8 +76,106 @@ fn checkmerge_run(f: *Func) -> bool {
             f.blocks[b].term = Br(nc, ok, trap)
         }
     }
+    if opt_enabled("checkor") && checkmerge_or(f) {
+        changed = true
+    }
     if changed {
         cleanup_prune_unreachable(f)
+    }
+    return changed
+}
+
+// (index, bound) of a check condition `i <u K` / `K >u i` with K a constant power of two
+priv fn pow2_check(f: *Func, c: i64) -> Opt[(i64, i64)] {
+    i := &f.insts[c]
+    x, kv := match i.op {
+        Ult => (i.args[0], i.args[1])
+        Ugt => (i.args[1], i.args[0])
+        _ => return None
+    }
+    return match f.is_const(kv) {
+        Some(k) if k > 0 && k & (k - 1) == 0 && f.insts[x].ty == f.insts[kv].ty => Some((x, k))
+        _ => None
+    }
+}
+
+// Runs of checks of variable indices against the same power-of-two constant (an array of fixed
+// size indexed by fields of a word, as in an interpreter's `r[a] = r[b] + r[c]`):
+//   i1 <u K; ...; i2 <u K   (no calls in between, i2 computed before the first check)
+// become one check `(i1 | i2) <u K` at the position of the first: the bits of the OR are below
+// K exactly when those of every index are. As for the merges above, only which failing access
+// is reported can differ.
+priv fn checkmerge_or(f: *Func) -> bool {
+    cfg := cfg_new(f)
+    preds := &cfg.preds
+    bo := f.block_of()
+    changed := false
+    for b in cfg.rpo.items() {
+        c, ok, trap := match f.blocks[b].term {
+            Br(c0, t0, e0) => (c0, t0, e0)
+            _ => continue
+        }
+        if !opt_is_check_trap(f, trap) {
+            continue
+        }
+        x0, k0 := match pow2_check(f, c) {
+            Some(x) => x
+            None => continue
+        }
+        acc := x0
+        cur := ok
+        steps := 0
+        walk: loop {
+            steps += 1
+            if steps > 64 || preds[cur].len != 1 || cur == b {
+                break
+            }
+            for v in f.blocks[cur].insts {
+                o := f.insts[v].op
+                if o == Call || o == CallInd || o == Syscall || o == Atomic || o == Phi {
+                    break walk
+                }
+            }
+            match f.blocks[cur].term {
+                Jmp(t) => cur = t
+                Br(c2, t2, e2) => {
+                    if !opt_is_check_trap(f, e2) {
+                        break
+                    }
+                    match pow2_check(f, c2) {
+                        Some((y, k2)) if k2 == k0 && f.insts[y].ty == f.insts[x0].ty => {
+                            yv := y
+                            yb := i64(bo[y])
+                            avail := yb != NOV && cfg.dom(yb, b)
+                            // (the widening of a field, made next to the check: made again)
+                            if !avail && f.insts[y].op == ZExt {
+                                z := f.insts[y].args[0]
+                                zb := i64(bo[z])
+                                if zb != NOV && cfg.dom(zb, b) {
+                                    yv = f.push(b, ZExt, f.insts[y].ty, vec_of([]i64{z}), 0)
+                                    avail = true
+                                }
+                            }
+                            if avail {
+                                if yv != x0 && yv != acc {
+                                    acc = f.push(b, Or, f.insts[x0].ty, vec_of([]i64{acc, yv}), 0)
+                                }
+                                f.blocks[cur].term = Jmp(t2)
+                                changed = true
+                            }
+                        }
+                        _ => {}
+                    }
+                    cur = t2
+                }
+                _ => break
+            }
+        }
+        if acc != x0 {
+            kc := f.push(b, Const, f.insts[x0].ty, vec[i64](), k0)
+            nc := f.push(b, Ult, I8, vec_of([]i64{acc, kc}), 0)
+            f.blocks[b].term = Br(nc, ok, trap)
+        }
     }
     return changed
 }
