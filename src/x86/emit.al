@@ -1378,6 +1378,24 @@ priv fn loop_pads(mf: *MFunc, layout: []i64, items: *Vec[Item], bpos: []i64, bit
                 break
             }
         }
+        // padding that would be executed on every entry is not worth it for a loop that makes
+        // calls (call/fib's loop of the recursion: a few rounds per entry, and a jump over the
+        // padding on each; ALC_DISABLE=alignbig pads it as before)
+        if !items[spot].free && align_big {
+            calls := false
+            for blk in layout {
+                if bpos[blk] >= bpos[b] && bpos[blk] <= items[lend].pos {
+                    for mi in mf.blocks[blk].insts {
+                        if mi.op == Call || mi.op == CallInd {
+                            calls = true
+                        }
+                    }
+                }
+            }
+            if calls {
+                continue
+            }
+        }
         items[spot].hdr = b
         items[spot].lend = lend
         items[spot].pad = 63
