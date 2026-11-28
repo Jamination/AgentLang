@@ -8,6 +8,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-28
+
 ### Breaking
 - **std.gfx and std.gfx_text are removed** (with `std.gfx_core`, `std.gfx_dx12`, `std.gfx_vk`,
   `std.gfx_shaders`, docs/std/gfx.md, the `examples/gfx_*` programs and their tests): a shared
@@ -639,7 +641,8 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   C boundary; the compiler compiles sequentially there (no parallel back end).
 - No package manager: code outside `std` is included by path.
 
-[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Jamination/AgentLang/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jamination/AgentLang/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Jamination/AgentLang/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Jamination/AgentLang/compare/v0.2.1...v0.2.2

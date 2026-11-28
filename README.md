@@ -92,14 +92,14 @@ each one changes. A project pins the compiler it is written for:
 
 ```
 git clone https://github.com/Jamination/AgentLang && cd AgentLang
-git checkout v0.4.0 && ./build.sh
+git checkout v0.5.0 && ./build.sh
 cp build/alc build/alc.exe ~/game/tools/       # or install on the PATH, below
 ```
 
 On a machine shared by several projects, install each release beside the others and let
-`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.4.0 && ln -sfn alc-0.4.0
+`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.5.0 && ln -sfn alc-0.5.0
 ~/.local/bin/alc`. A project that must not change with a new release can call the versioned
-name (`alc-0.4.0`); the [AGENTS.md template](docs/AGENTS_TEMPLATE.md) calls plain `alc`.
+name (`alc-0.5.0`); the [AGENTS.md template](docs/AGENTS_TEMPLATE.md) calls plain `alc`.
 
 The standard library ships inside the compiler, so one executable is the whole toolchain;
 `alc --version` names it. While the version is 0.x, a new minor version (0.2) may break
