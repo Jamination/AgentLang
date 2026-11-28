@@ -295,10 +295,19 @@ fn __net_poll(fds: []i64, want: []i64, ready: []i64, ns: i64) -> i64 {
     rs := sr[..]
     ws := sw[..]
     es := se[..]
+    marked := false
+    mk := 0
     if n > 64 {
+        mk = mark()
+        marked = true
         rs = alloc[i64](n + 1)
         ws = alloc[i64](n + 1)
         es = alloc[i64](n + 1)
+    }
+    defer {
+        if marked {
+            release(mk)
+        }
     }
     nr := 0
     nw := 0
@@ -350,7 +359,7 @@ fn __net_poll(fds: []i64, want: []i64, ready: []i64, ns: i64) -> i64 {
                 es[kw] = fds[i]
             }
         }
-        r = i64(select(0,if nr > 0 { &rs[0] } else { nil }, if nw > 0 { &ws[0] } else { nil }, if nw > 0 { &es[0] } else { nil }, tp))
+        r = i64(select(0, if nr > 0 { &rs[0] } else { nil }, if nw > 0 { &ws[0] } else { nil }, if nw > 0 { &es[0] } else { nil }, tp))
         if r < 0 {
             e := WSAGetLastError()
             if e == 10004 {

@@ -4,8 +4,13 @@
 // ---------- checksums ----------
 // slicing-by-8 tables for crc32, filled on first use
 priv crc_tab: [2048]u32
+priv crc_ready: i64 // 0: uninit, 1: initializing, 2: ready
 
 priv fn crc_init() {
+    if !atomic_cas(&crc_ready, 0, 1).1 {
+        while atomic_load(&crc_ready) != 2 {}
+        return
+    }
     for i in 0..256 {
         c := u32(i)
         for k in 0..8 {
@@ -20,6 +25,7 @@ priv fn crc_init() {
             crc_tab[t * 256 + i] = c
         }
     }
+    atomic_store(&crc_ready, 2)
 }
 
 priv inline fn load64(addr: i64) -> u64 {
@@ -28,7 +34,7 @@ priv inline fn load64(addr: i64) -> u64 {
 
 // CRC-32 (the PNG / zip / gzip polynomial) of data, continuing from the CRC `prev` of the bytes before it
 fn crc32(prev: u32, data: []u8) -> u32 {
-    if crc_tab[1] == 0 {
+    if atomic_load(&crc_ready) != 2 {
         crc_init()
     }
     c := ~prev
@@ -295,15 +301,21 @@ priv fn take_bits(s: *Inflate, n: i64) -> i64 {
     v
 }
 
-// makes room for n more output bytes; false if the output buffer is fixed and full
+priv const MAX_INFLATE = 1 << 29 // 512 MiB cap for growing inflate / zlib_decompress
+
+// makes room for n more output bytes; false if the output buffer is fixed and full (or exceeds MAX_INFLATE)
 priv fn out_room(s: *Inflate, n: i64) -> bool {
+    if n < 0 || s.n > MAX_INFLATE - n {
+        return false
+    }
     if s.n + n <= len(s.out) {
         return true
     }
     if !s.grow {
         return false
     }
-    nb := alloc[u8](max(len(s.out) * 2, s.n + n + 4096))
+    want := min(max(len(s.out) * 2, s.n + n + 4096), MAX_INFLATE)
+    nb := alloc[u8](want)
     memcopy(ptr(nb), ptr(s.out), s.n)
     s.out = nb
     true
@@ -560,7 +572,8 @@ priv fn zlib_run(s: *Inflate) -> bool {
 fn inflate(data: []u8) -> ([]u8, bool) {
     s: Inflate
     s.src = data
-    s.out = alloc[u8](len(data) * 4 + 4096)
+    init := if len(data) > (MAX_INFLATE - 4096) / 4 { MAX_INFLATE } else { len(data) * 4 + 4096 }
+    s.out = alloc[u8](init)
     s.grow = true
     ok := inflate_run(&s)
     (s.out[..s.n], ok)
@@ -580,7 +593,8 @@ fn inflate_into(data: []u8, out: []u8) -> (i64, bool) {
 fn zlib_decompress(data: []u8) -> ([]u8, bool) {
     s: Inflate
     s.src = data
-    s.out = alloc[u8](len(data) * 4 + 4096)
+    init := if len(data) > (MAX_INFLATE - 4096) / 4 { MAX_INFLATE } else { len(data) * 4 + 4096 }
+    s.out = alloc[u8](init)
     s.grow = true
     ok := zlib_run(&s)
     (s.out[..s.n], ok)

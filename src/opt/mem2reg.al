@@ -10,7 +10,7 @@ priv struct Ctx {
     def_in: IMap,
     new_phis: Vec[(i64, i64)],
     entry_consts: Vec[i32],
-    zero: [10]i64, // by T; NOV: none yet
+    zero: [15]i64, // by T (all 15 variants of enum T); NOV: none yet
     walk: Vec[(i64, i64, i64)], // read_in's blocks on the way back (block, phi or NOV, next pred)
 }
 
@@ -343,7 +343,7 @@ priv fn run_once(f: *Func, first: bool) -> bool {
     }
     repl := vec_fill(n, i32(NOV))
     nvar := var_ty.len
-    cx := Ctx{f: f, preds: preds, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i32](), zero: [10]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}, walk: vec[(i64, i64, i64)]()}
+    cx := Ctx{f: f, preds: preds, var_ty: var_ty, nb: nb, last_store: last_store, has_store: has_store, def_in: imap_new(4 * naccess), new_phis: vec[(i64, i64)](), entry_consts: vec[i32](), zero: [15]i64{NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV, NOV}, walk: vec[(i64, i64, i64)]()}
     // the value of each var in the current block: cur_val[var] when cur_blk[var] == b
     cur_val := alloc[i64](nvar)
     cur_blk := vec_fill(nvar, NOV)

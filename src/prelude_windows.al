@@ -277,6 +277,11 @@ fn __os_check_memory() -> bool {
     return n > 0 && !(n == 1 && v[0] == u16('0'))
 }
 
+// system page size in bytes (x86-64 Windows is always 4 KiB)
+fn __os_page_size() -> i64 {
+    return 4096
+}
+
 // takes the pages [p, p + n) of an arena away (ALC_CHECK_MEMORY): decommitted, an access faults
 fn __os_page_off(p: i64, n: i64) {
     VirtualFree(p, n, 0x4000)                   // MEM_DECOMMIT

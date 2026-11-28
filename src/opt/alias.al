@@ -34,6 +34,18 @@ priv enum Base {
 priv fresh_read: bool
 priv fresh_on: bool
 
+// Initialize alias environment flags before parallel worker threads start.
+fn alias_init() {
+    if !fresh_read {
+        fresh_on = opt_enabled("fresh")
+        fresh_read = true
+    }
+    if !lin_read {
+        lin_on = opt_enabled("linaddr")
+        lin_read = true
+    }
+}
+
 priv inline fn fresh_enabled() -> bool {
     if !fresh_read {
         fresh_on = opt_enabled("fresh")

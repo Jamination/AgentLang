@@ -1,0 +1,5 @@
+temp_dir_nonempty: true
+status: 0
+got_out: OUT: hello-pipe
+got_err: ERR:hello-pipe
+split: 0 OUT: ERR:

@@ -54,7 +54,7 @@ and keep every system a simple loop:
 enum Kind { Player, Rock, Shot }
 struct Entity { kind: Kind, pos: vec2, vel: vec2, radius: f32, life: f32, hp: i32, color: u32 }
 
-for i in 0..g.ents.len {
+for i in 0..g.ents.used {
     if !g.ents.is_live(i) { continue }
     e := &g.ents.items[i]
     e.pos = e.pos + e.vel * dt                 // shared behaviour: no dispatch at all
@@ -84,7 +84,7 @@ Mix them freely: a fat `Entity` whose `brain` field is a tagged union of AI stat
 
 A colour such as `color: u32` is RGBA8 with red in the lowest byte: as a literal it reads
 `0xAABBGGRR` (`0xFF0000FF` is opaque red, `0xFFFFFFFF` white), what std.math's
-`color_u32` use.
+`color_u32` uses.
 
 Store entities in a `Pool[Entity]` and keep `Handle`s, never pointers or indices, across
 frames: a handle to a removed entity simply stops resolving (`get` returns nil), even when its

@@ -147,9 +147,9 @@ fn prim(name: str) -> str {
         "int", "INT", "long", "LONG", "INT32", "HRESULT", "BOOL", "WINBOOL" => "i32"
         "unsigned", "UINT", "ULONG", "DWORD", "UINT32", "unsigned int", "unsigned long" => "u32"
         "INT64", "LONGLONG", "__int64", "LONG_PTR", "INT_PTR", "SSIZE_T", "LPARAM", "LRESULT", "LARGE_INTEGER",
-        "long long" => "i64"
+            "long long" => "i64"
         "UINT64", "ULONGLONG", "SIZE_T", "ULONG_PTR", "UINT_PTR", "DWORD_PTR", "WPARAM", "ULARGE_INTEGER",
-        "unsigned __int64", "unsigned long long" => "u64"
+            "unsigned __int64", "unsigned long long" => "u64"
         "float", "FLOAT" => "f32"
         "double", "DOUBLE" => "f64"
         _ => ""
@@ -177,7 +177,7 @@ fn boxed(ty: Ty) -> *Ty {
 fn pointer_name(name: str) -> (Ty, bool) {
     match name {
         "HANDLE", "HWND", "HDC", "HMONITOR", "HMODULE", "HINSTANCE", "HICON", "HCURSOR", "HBRUSH", "HMENU", "LPVOID",
-        "PVOID", "LPCVOID" => (Ptr(boxed(Void)), true)
+            "PVOID", "LPCVOID" => (Ptr(boxed(Void)), true)
         "WNDPROC" => (Fn("fn(*u8, u32, u64, i64) -> i64"), true)
         "LPCSTR", "LPSTR" => (Ptr(boxed(Prim("u8"))), true)
         "LPCWSTR", "LPWSTR" => (Ptr(boxed(Prim("u16"))), true)
@@ -195,8 +195,8 @@ fn header_name(name: str) -> str { if name == "ID3DBlob" { "ID3D10Blob" } else {
 fn ident(name: str) -> str {
     reserved := match name {
         "fn", "struct", "enum", "const", "test", "use", "if", "else", "while", "loop", "for", "in", "by", "return",
-        "break", "continue", "assert", "match", "defer", "inline", "noinline", "true", "false", "nil", "extern",
-        "priv", "self" => true
+            "break", "continue", "assert", "match", "defer", "inline", "noinline", "true", "false", "nil", "extern",
+            "priv", "when", "self" => true
         _ => prim_size(name) > 0
     }
     if reserved { concat(name, "_") } else { name }
@@ -226,7 +226,7 @@ fn define_name(name: str) -> bool {
 fn hresult_name(name: str) -> bool {
     match name {
         "S_OK", "S_FALSE", "E_FAIL", "E_INVALIDARG", "E_OUTOFMEMORY", "E_NOINTERFACE", "E_NOTIMPL", "E_POINTER",
-        "E_ABORT", "E_ACCESSDENIED", "E_UNEXPECTED" => true
+            "E_ABORT", "E_ACCESSDENIED", "E_UNEXPECTED" => true
         _ => extends(name, "DXGI_ERROR_") || extends(name, "DXGI_STATUS_") || extends(name, "D3D12_ERROR_")
     }
 }

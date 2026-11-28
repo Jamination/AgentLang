@@ -17,17 +17,19 @@ priv struct Parser {
     cost_peak: i64
     budget: i64
     too_deep: bool
+    // `alc fmt` (src/fmt.al): when non-nil, records `{` positions of literals (`Name{...}`,
+    // `[]T{...}`) and contextual keywords (`in`, `by`, `test`)
+    lits: *Vec[Pos]
+    kws: *Vec[Pos]
 }
-
-// `alc fmt` (src/fmt.al): while parser_lits_on, the position of the `{` of every literal
-// (`Name{...}`, `[]T{...}`) is recorded in parser_lits; a block's `{` is not
-parser_lits_on: bool
-parser_lits: Vec[Pos]
-// and the position of every `in`, `by` and `test` that is a keyword there (ctx_kw)
-parser_kws: Vec[Pos]
 
 fn parser_new(toks: Vec[Token], errs: *Vec[Diag]) -> Parser {
     return Parser{toks: toks, errs: errs, hdr_name: -1, budget: stack_budget()}
+}
+
+fn parser_record_fmt(p: *Parser, lits: *Vec[Pos], kws: *Vec[Pos]) {
+    p.lits = lits
+    p.kws = kws
 }
 
 // Deeper nesting is an error instead of a stack overflow of the parser and the later phases.
@@ -272,8 +274,8 @@ priv fn test_block(p: *Parser) -> bool {
 // `in`, `by` or `test` taken as the keyword: consumed with the end of line after it (as a
 // keyword it never ended a statement); its position is recorded for `alc fmt`
 priv fn ctx_kw(p: *Parser) {
-    if parser_lits_on {
-        parser_kws.push(p.pos())
+    if p.kws != nil {
+        p.kws.push(p.pos())
     }
     p.bump()
     if p.peek() == Nl {
@@ -1397,13 +1399,19 @@ priv fn block(p: *Parser) -> *Block {
 priv fn lit_like(p: *Parser, open: i64) -> bool {
     saved := *p
     nerr := p.errs.len
-    nlits := parser_lits.len
+    nlits := if p.lits != nil { p.lits.len } else { 0 }
+    nkws := if p.kws != nil { p.kws.len } else { 0 }
     p.i = open + 1
     p.no_lit = false
     _, ok := p.lit_body()
     *p = saved
     p.errs.truncate(nerr)
-    parser_lits.truncate(nlits)
+    if p.lits != nil {
+        p.lits.truncate(nlits)
+    }
+    if p.kws != nil {
+        p.kws.truncate(nkws)
+    }
     return ok
 }
 
@@ -2030,8 +2038,8 @@ priv fn postfix_links(p: *Parser) -> *Expr {
             }
             p.bump()
         } else if p.is_p('{') && typeish(e) && (!p.no_lit || lit_in_header(e)) {
-            if parser_lits_on {
-                parser_lits.push(pos)
+            if p.lits != nil {
+                p.lits.push(pos)
             }
             p.bump()
             save := p.no_lit

@@ -15,7 +15,7 @@ not extend narrow arguments (`BOOL`) to 32 bits as Apple's convention asks.
 
 ## How it maps
 
-- **Objects** are typed pointers to empty structs (`*MTLDevice`, `*MTLTexture`, `*NSWindow`),
+- **Objects** are typed pointers to distinct opaque structs (`*MTLDevice`, `*MTLTexture`, `*NSWindow`),
   so passing a texture where a buffer is expected is a compile error. nil is a valid receiver:
   a message to nil does nothing, as in Objective-C.
 - **Methods** are functions named after the selector in snake_case with a prefix, taking the

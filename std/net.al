@@ -711,8 +711,17 @@ fn recv(s: Socket, buf: []u8, timeout_ns: i64) -> i64 {
     if fd < 0 {
         return -1
     }
+    end := if timeout_ns <= 0 { 0 } else { sat_add(clock_ns(), timeout_ns) }
     loop {
-        w := wait_fd(fd, POLL_READ, timeout_ns)
+        wait_ns := timeout_ns
+        if timeout_ns > 0 {
+            wait_ns = end - clock_ns()
+            if wait_ns <= 0 {
+                __io_result(-110)
+                return -1
+            }
+        }
+        w := wait_fd(fd, POLL_READ, wait_ns)
         if w < 0 {
             __io_result(w)
             return -1
@@ -837,8 +846,17 @@ fn recv_from(s: Socket, buf: []u8, timeout_ns: i64) -> (i64, Addr) {
     if fd < 0 {
         return (-1, none)
     }
+    end := if timeout_ns <= 0 { 0 } else { sat_add(clock_ns(), timeout_ns) }
     loop {
-        w := wait_fd(fd, POLL_READ, timeout_ns)
+        wait_ns := timeout_ns
+        if timeout_ns > 0 {
+            wait_ns = end - clock_ns()
+            if wait_ns <= 0 {
+                __io_result(-110)
+                return (-1, none)
+            }
+        }
+        w := wait_fd(fd, POLL_READ, wait_ns)
         if w < 0 {
             __io_result(w)
             return (-1, none)
@@ -868,10 +886,19 @@ fn poll(items: []PollItem, timeout_ns: i64) -> i64 {
     fds := sf[..]
     want := sw[..]
     ready := sr[..]
+    marked := false
+    mk := 0
     if n > 64 {
+        mk = mark()
+        marked = true
         fds = alloc[i64](n)
         want = alloc[i64](n)
         ready = alloc[i64](n)
+    }
+    defer {
+        if marked {
+            release(mk)
+        }
     }
     bad := 0
     k := 0
@@ -1395,6 +1422,20 @@ fn http_request(method: str, url: str, headers: [](str, str), body: str, timeout
         __io_result(-22)
         return (none, err)
     }
+    if !http_valid_token(method) {
+        __io_result(-22)
+        return (none, fmt("invalid HTTP method: ", method))
+    }
+    if !http_valid_target(path) || !http_valid_target(host) {
+        __io_result(-22)
+        return (none, fmt("invalid characters in URL: ", url))
+    }
+    for h in headers {
+        if !http_valid_header_name(h.0) || !http_valid_header_value(h.1) {
+            __io_result(-22)
+            return (none, fmt("invalid HTTP header: ", h.0))
+        }
+    }
     end := if timeout_ns < 0 { 0x7FFF_FFFF_FFFF_FFFF } else { sat_add(clock_ns(), timeout_ns) }
     s, ok := tcp_connect(host, port, timeout_ns)
     if !ok {
@@ -1425,11 +1466,13 @@ fn http_request(method: str, url: str, headers: [](str, str), body: str, timeout
     got := vec[u8]()
     buf := alloc[u8](65536)
     loop {
+        pm := mark()
         r, state := http_parse(got.items(), method == "HEAD")
         if state == 1 {
             __io_result(0)
             return (r, "")
         }
+        release(pm)
         if state < 0 {
             __io_result(-22)
             return (none, "malformed response")
@@ -1455,6 +1498,42 @@ fn http_request(method: str, url: str, headers: [](str, str), body: str, timeout
         }
         got.extend(buf[..n])
     }
+}
+
+// validates HTTP method tokens (non-empty visible ASCII without whitespace/separators)
+priv fn http_valid_token(s: str) -> bool {
+    if len(s) == 0 {
+        return false
+    }
+    for c in s {
+        if c <= 32 || c >= 127 || c == ':' {
+            return false
+        }
+    }
+    return true
+}
+
+// validates URL host/path components against CR/LF/whitespace/control injection
+priv fn http_valid_target(s: str) -> bool {
+    for c in s {
+        if c <= 32 || c == 127 {
+            return false
+        }
+    }
+    return true
+}
+
+priv fn http_valid_header_name(s: str) -> bool {
+    return http_valid_token(s)
+}
+
+priv fn http_valid_header_value(s: str) -> bool {
+    for c in s {
+        if c == '\r' || c == '\n' || c == 0 {
+            return false
+        }
+    }
+    return true
 }
 
 // closes s and keeps io_error() as it was (the reason of a failure)
@@ -1585,8 +1664,11 @@ priv fn http_parse(data: []u8, head: bool) -> (HttpResponse, i64) {
                 r.body = b.items()
                 return (r, 1)
             }
-            if at + size + 2 > len(rest) {
+            if size > len(rest) - at || len(rest) - at - size < 2 {
                 return (r, 0)
+            }
+            if rest[at + size] != '\r' || rest[at + size + 1] != '\n' {
+                return (r, -1)
             }
             b.extend(rest[at..at + size])
             at += size + 2

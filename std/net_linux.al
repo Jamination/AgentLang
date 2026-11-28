@@ -136,8 +136,17 @@ fn __net_poll(fds: []i64, want: []i64, ready: []i64, ns: i64) -> i64 {
     // struct pollfd { int fd; short events; short revents }: one i64 each
     small: [64]i64
     pf := small[..]
+    marked := false
+    mk := 0
     if n > 64 {
+        mk = mark()
+        marked = true
         pf = alloc[i64](n)
+    }
+    defer {
+        if marked {
+            release(mk)
+        }
     }
     for i in 0..n {
         ev := 0

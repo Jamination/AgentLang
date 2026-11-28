@@ -39,9 +39,10 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     regs := cast[*i64](uc + 176 + 8)
     pc := regs[32]
     sp := regs[31]
+    addr := cast[*i64](info + 16)[0]
     // a fault on the first instruction of a function (`stp x29, x30, [sp, #-16]!`: a stack
     // that overflows) has no frame of the function yet: the walk starts at its call
-    if cast[*u32](pc)[0] == 0xA9BF7BFD {
+    if sig != 8 && sig != 5 && pc != addr && (pc & 3) == 0 && u64(pc) >= 0x10000 && cast[*u32](pc)[0] == 0xA9BF7BFD {
         pc = regs[30] - 4
     }
     __bt_fault_pc = pc
@@ -50,10 +51,12 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     if sig == 8 || sig == 5 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
-    __die_fault(cast[*i64](info + 16)[0])            // si_addr
+    __die_fault(addr)            // si_addr
 }
+priv page_size: i64
+
 // the program headers (AT_PHDR, AT_PHNUM of the auxiliary vector, which follows the
-// environment on the initial stack): (address, count)
+// environment on the initial stack): (address, count); also records AT_PAGESZ
 priv fn phdrs() -> (i64, i64) {
     p := __argv + 8 * (__argc + 1)
     while cast[*i64](p)[0] != 0 {
@@ -68,6 +71,8 @@ priv fn phdrs() -> (i64, i64) {
             phdr = a[1]
         } else if a[0] == 5 {
             phnum = a[1]
+        } else if a[0] == 6 {
+            page_size = a[1]
         }
         p += 16
     }
@@ -132,6 +137,14 @@ fn __os_backtrace_off() -> bool {
 fn __os_check_memory() -> bool {
     v, set := env_get("ALC_CHECK_MEMORY")
     return set && v != "" && v != "0"
+}
+
+// system page size in bytes (from AT_PAGESZ, falling back to 4 KiB)
+fn __os_page_size() -> i64 {
+    if page_size >= 4096 && (page_size & (page_size - 1)) == 0 {
+        return page_size
+    }
+    return 4096
 }
 
 // takes the pages [p, p + n) of an arena away (ALC_CHECK_MEMORY): a new mapping without access
@@ -661,7 +674,6 @@ priv fn thread_entry_raw(c: i64) {
 
 // c.os: [0] the mapping, [1] its size, [3] 2 (clone)
 fn __os_thread_create(c: *__ThreadCtl) -> i64 {
-
     total := 4096 + c.stack + tls_size + 64
     // PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_STACK
     p := syscall(222, 0, total, 3, 0x22 | 0x4000 | 0x20000, -1, 0)
@@ -691,7 +703,6 @@ fn __os_thread_create(c: *__ThreadCtl) -> i64 {
 }
 
 fn __os_thread_join(c: *__ThreadCtl) {
-
     loop {
         t := atomic_load(&c.tid)
         if t == 0 {

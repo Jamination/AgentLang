@@ -748,7 +748,17 @@ priv fn opt_expr(s: *Walk, o: Opt[*Expr]) {
 
 priv fn stmt(s: *Walk, st: *Stmt) {
     match st.k {
-        Expr(e), Let(_, e), Assign(_, _, e), MultiAssign(_, e) => s.expr(e)
+        Expr(e), Let(_, e) => s.expr(e)
+        Assign(lhs, _, e) => {
+            s.expr(lhs)
+            s.expr(e)
+        }
+        MultiAssign(lhss, e) => {
+            for i in 0..lhss.len {
+                s.expr(&lhss[i])
+            }
+            s.expr(e)
+        }
         Var(_, _, init) => s.opt_expr(init)
         If(c, t, eo) => {
             s.expr(c)

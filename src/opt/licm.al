@@ -200,8 +200,14 @@ fn licm_run(f: *Func) -> bool {
                         } else if i.op == Load {
                             m := alias_memref(f, i64(v))
                             private, safe_addr := match m.addr.base {
-                                Alloca(x) => (!esc[x], is_some(m.addr.off))
-                                Global(_) => (false, is_some(m.addr.off))
+                                Alloca(x) => (!esc[x], match m.addr.off {
+                                    Some(o) => f.insts[x].op == Alloca && o >= 0 && o + i64(m.size) <= f.insts[x].k
+                                    None => false
+                                })
+                                Global(_) => (false, match m.addr.off {
+                                    Some(o) => o >= 0
+                                    None => false
+                                })
                                 Unknown(_), Fresh(_), Arg(_) => (false, false)
                             }
                             if !has_call || private {
@@ -360,7 +366,10 @@ priv fn promote_loop(f: *Func, cfg: *Cfg, loops: *Loops, li: i64, in_loop: []boo
         }
         if !safe {
             match ref.addr.base {
-                Global(_) => safe = is_some(ref.addr.off)
+                Global(_) => safe = match ref.addr.off {
+                    Some(o) => o >= 0
+                    None => false
+                }
                 _ => {}
             }
         }

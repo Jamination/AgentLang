@@ -55,6 +55,7 @@ Typed data round-trips through the byte views of [mem](mem.md):
 |---|---|---|
 | Linux | `$XDG_DATA_HOME/app`, else `$HOME/.local/share/app` | `$XDG_CONFIG_HOME/app`, else `$HOME/.config/app` |
 | Windows | `%APPDATA%/app`, else `%USERPROFILE%/AppData/Roaming/app` | the same as `data_dir` |
+| macOS | `$HOME/Library/Application Support/app` | the same as `data_dir` |
 
 - **Result.** `(path, true)` when the directory exists afterwards (also when it existed before);
   `(path, false)` when it could not be created (`io_error()` says why: a file in the way,

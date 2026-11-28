@@ -2,6 +2,7 @@
 
 struct Opts {
     checks: bool
+    warn: bool
 }
 
 enum CV {
@@ -856,6 +857,12 @@ fn err(self: *Cx, pos: Pos, msg: str) {
     self.errs.push(Diag{pos: pos, msg: msg})
 }
 
+fn warn(self: *Cx, pos: Pos, msg: str) {
+    if self.opts.warn {
+        self.errs.push(Diag{pos: pos, msg: msg, warn: true})
+    }
+}
+
 // the address of a value with alias class `alias` escapes: a scalar field loses its private
 // class (`exposed`, applied when the function is finished)
 fn expose(self: *Cx, alias: i64) {
@@ -936,7 +943,25 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
                 "void" => " (omit the result type instead)"
                 _ => ""
             }
-            self.err(pos, fmt("unknown type `", n, "`", hint, self.priv_hint(n)))
+            ph := self.priv_hint(n)
+            dym := if len(hint) == 0 && len(ph) == 0 {
+                cands := vec_of([]str{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "str", "vec2", "vec3", "vec4", "quat", "mat4"})
+                for tp in env.keys() {
+                    cands.push(tp)
+                }
+                for sd in self.struct_decls {
+                    if !ast_is_private(sd.name) || sd.pos.file == pos.file {
+                        cands.push(ast_plain(sd.name))
+                    }
+                }
+                for ed in self.enum_decls {
+                    if !ast_is_private(ed.name) || ed.pos.file == pos.file {
+                        cands.push(ast_plain(ed.name))
+                    }
+                }
+                did_you_mean_hint(ast_plain(n), cands.items())
+            } else { "" }
+            self.err(pos, fmt("unknown type `", n, "`", hint, ph, dym))
             return T_ERR
         }
         Ptr(e) => {

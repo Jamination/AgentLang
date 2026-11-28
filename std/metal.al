@@ -2,9 +2,9 @@
 // CAMetalLayer (`ca_`), the AppKit pieces needed to open a window and pump events (`ns_`) and
 // the runtime itself (`objc_`, `sel`, the `msg_*` family).
 //
-// AL has no macOS backend yet: programs using this module type-check (`alc check`) but cannot
-// be built. See docs/std/metal.md for the mapping rules, ownership, the calling-convention
-// notes and a walk-through of tests/check/metal_triangle.al.
+// Builds with `alc build --target macos` (experimental, arm64, never run on a Mac) and
+// type-checks on all hosts (`alc check`). See docs/std/metal.md for the mapping rules,
+// ownership, the calling-convention notes and a walk-through of tests/check/metal_triangle.al.
 //
 //   device := mtl_create_system_default_device()
 //   queue := device.mtl_new_command_queue()

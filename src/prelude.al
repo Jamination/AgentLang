@@ -19,6 +19,7 @@
 //   __os_stack_range() -> (lo, hi) the stack of the running thread, for stack traces
 //   __os_backtrace_off() -> bool   ALC_BACKTRACE=0 is set (without allocating)
 //   __os_check_memory() -> bool    ALC_CHECK_MEMORY is set and not 0 (without allocating)
+//   __os_page_size() -> i64        system page size in bytes (a power of two, >= 4096)
 //   __os_page_off(p, n)            takes the pages [p, p + n) of an arena away: an access faults
 //   __os_bt_foreign, __os_bt_unwind, __os_bt_where, __BT_SAVED
 //                                  stack traces through C libraries (see __bt_c_init)
@@ -752,6 +753,9 @@ __region_depth: i64
 // The result is marked fresh (`__fresh`): memory that no object live at this moment occupies,
 // which the optimizer's alias analysis takes as an object of its own (src/opt/alias.al).
 inline fn __alloc_raw(n: i64) -> i64 {
+    if n < 0 {
+        __size_fail(n)
+    }
     n = (n + 15) & ~15
     p := __heap_cur
     if u64(n) > u64(__heap_end - p) {
@@ -817,7 +821,8 @@ fn mark() -> i64 {
 // (ALC_CHECK_MEMORY) a mark starts a page, so that everything allocated after it can be taken
 // away by its release
 noinline fn __mark_page() {
-    p := (__heap_cur + 4095) & ~4095
+    pm := __os_page_size() - 1
+    p := (__heap_cur + pm) & ~pm
     if p > __heap_cur && p <= __heap_end {
         __heap_cur = p
     }
@@ -861,12 +866,15 @@ __released_lo: [1024]i64
 __released_hi: [1024]i64
 __released_kind: [1024]i64
 __released_n: i64
+__released_lock: i64
 
 fn __mem_checked() -> bool {
-    if __check_mem == 0 {
-        __check_mem = if __os_check_memory() { 2 } else { 1 }
+    cm := atomic_load(&__check_mem)
+    if cm == 0 {
+        cm = if __os_check_memory() { 2 } else { 1 }
+        atomic_store(&__check_mem, cm)
     }
-    return __check_mem == 2
+    return cm == 2
 }
 
 // (ALC_CHECK_MEMORY) gives back [m, cur) of an arena that ends at `end` without handing it out
@@ -874,20 +882,23 @@ fn __mem_checked() -> bool {
 noinline fn __released(m: i64, cur: i64, end: i64) -> i64 {
     kind := __tls_release_kind
     __tls_release_kind = 0
-    lo := (m + 4095) & ~4095
+    pm := __os_page_size() - 1
+    lo := (m + pm) & ~pm
     top := cur
     if lo < cur {
-        top = min((cur + 4095) & ~4095, end)
+        top = min((cur + pm) & ~pm, end)
         __os_page_off(lo, top - lo)
     } else {
         lo = cur
     }
     memfill(m, 0xDE, lo - m)
+    while !atomic_cas(&__released_lock, 0, 1).1 {}
     i := __released_n % 1024
     __released_lo[i] = m
     __released_hi[i] = top
     __released_kind[i] = kind
-    __released_n += 1
+    atomic_store(&__released_n, __released_n + 1)
+    atomic_store(&__released_lock, 0)
     return top
 }
 
@@ -910,8 +921,10 @@ noinline fn __grow_check(at: i64) {
 
 // the report of a memory fault at `addr` (0: not known)
 noinline fn __die_fault(addr: i64) -> never {
-    if __check_mem == 2 {
-        for i in 0..min(__released_n, 1024) {
+    cm := atomic_load(&__check_mem)
+    if cm == 2 {
+        rn := min(atomic_load(&__released_n), 1024)
+        for i in 0..rn {
             if addr >= __released_lo[i] && addr < __released_hi[i] {
                 what := match __released_kind[i] {
                     1 => "the memory was released by frame_end(): it was allocated inside a frame_begin()/frame_end() scope (also the new storage of a Vec or Map that grew there) and used after the scope ended (ALC_CHECK_MEMORY)"
@@ -1017,9 +1030,10 @@ fn reset(r: *Region) {
         __heap_cur = __heap_base
         return
     }
-    o := atomic_load(&r.owner)
-    if o != 0 && o != __thread_key() {
-        __region_other("reset", o)
+    me := __thread_key()
+    prev, owned := atomic_cas(&r.owner, 0, me)
+    if !owned && prev != me {
+        __region_other("reset", prev)
     }
     if r.cur > r.hwm {
         r.hwm = r.cur
@@ -1027,9 +1041,15 @@ fn reset(r: *Region) {
     if r.cur > r.base && __check_mem != 1 && __mem_checked() {
         __tls_release_kind = 2
         r.cur = __released(r.base, r.cur, r.end)
+        if owned {
+            atomic_store(&r.owner, 0)
+        }
         return
     }
     r.cur = r.base
+    if owned {
+        atomic_store(&r.owner, 0)
+    }
 }
 
 // bytes of r in use
@@ -1043,12 +1063,15 @@ fn used(r: *Region) -> i64 {
 // gives the memory of r back to the operating system; r is empty afterwards and can be used
 // again. The region must not be entered.
 fn region_free(r: *Region) {
-    o := atomic_load(&r.owner)
-    if o != 0 {
-        if o == __thread_key() {
+    prev, ok := atomic_cas(&r.owner, 0, -1)
+    if !ok {
+        if prev == __thread_key() {
             __die("panic: region_free: this region is entered (leave() first)", "", "")
         }
-        __region_other("region_free", o)
+        if prev == -1 {
+            __die("panic: region_free: this region is being freed by another thread", "", "")
+        }
+        __region_other("region_free", prev)
     }
     if r.base != 0 {
         __os_unmap(r.base, r.end - r.base)
@@ -1758,7 +1781,8 @@ fn __at_fmtf(x: f64, prec: i64, at: str) -> str {
     __check_digits(prec, at)
     b: [1420]u8
     n := __fmt_fixed(x, prec, b[..])
-    s := alloc[u8](n + __fmt_extra(x, prec))
+    sz := n + __fmt_extra(x, prec)
+    s := mkslice[u8](__alloc_raw(sz), sz)
     copy(s, b[..n])
     fill(s[n..], '0')
     return s
@@ -1962,23 +1986,77 @@ noinline fn __mem_count(p: i64, n: i64, c: u8) -> i64 {
 }
 
 // ---------- tests ----------
+__tests_passed: i64
+__tests_skipped: i64
+__tests_env_init: bool
+__tests_json: bool
+__tests_filter: str
+__tests_items: Vec[str]
+
+fn __test_json_str(s: str) -> str {
+    o := vec[u8]()
+    o.push('"')
+    for c in s {
+        match c {
+            '"' => o.extend("\\\"")
+            '\\' => o.extend("\\\\")
+            '\n' => o.extend("\\n")
+            '\r' => o.extend("\\r")
+            '\t' => o.extend("\\t")
+            _ if c < 0x20 => o.extend(concat("\\u", hex(u64(c), 4)))
+            _ => o.push(c)
+        }
+    }
+    o.push('"')
+    return o.items()
+}
+
 fn __run_test(name: str, f: fn()) {
+    if !__tests_env_init {
+        __tests_env_init = true
+        jv, jok := env_get("ALC_TEST_JSON")
+        __tests_json = jok && jv != "" && jv != "0"
+        fv, fok := env_get("ALC_TEST_FILTER")
+        if fok {
+            __tests_filter = fv
+        }
+    }
+    if len(__tests_filter) != 0 && find(name, __tests_filter) < 0 {
+        __tests_skipped += 1
+        return
+    }
     flush()
+    t0 := clock_ns()
     r := __os_test(f)
     if r < 0 {
         // (a process that runs one test of the program, on Windows: not this one)
         return
     }
+    dt_ms := f64(clock_ns() - t0) / 1000000.0
     if r == 1 {
-        put("ok   ", name, "\n")
+        __tests_passed += 1
+        if __tests_json {
+            __tests_items.push(fmt("{\"name\":", __test_json_str(name), ",\"ok\":true,\"ms\":", fmtf(dt_ms, 2), "}"))
+        } else {
+            put("ok   ", name, "\n")
+        }
     } else {
-        put("FAIL ", name, "\n")
         __tests_failed += 1
+        if __tests_json {
+            __tests_items.push(fmt("{\"name\":", __test_json_str(name), ",\"ok\":false,\"ms\":", fmtf(dt_ms, 2), "}"))
+        } else {
+            put("FAIL ", name, "\n")
+        }
     }
     flush()
 }
 
 fn __tests_done() -> i64 {
+    if __tests_json {
+        put("{\"passed\":", __tests_passed, ",\"failed\":", __tests_failed, ",\"skipped\":", __tests_skipped, ",\"tests\":[", join(__tests_items.items(), ","), "]}\n")
+        flush()
+        return if __tests_failed > 0 { 1 } else { 0 }
+    }
     if __tests_failed > 0 {
         put(__tests_failed, " test(s) failed\n")
         return 1
@@ -2029,7 +2107,7 @@ fn __cap_put(s: str) {
 
 fn __cap_end(start: i64) -> str {
     n := __tls_cap_len - start
-    out := alloc[u8](n)
+    out := mkslice[u8](__alloc_raw(n), n)
     memcopy(ptr(out), cast[i64](ptr(__tls_cap_buf)) + start, n)
     __tls_cap_len = start
     __tls_cap_on -= 1
@@ -2758,9 +2836,13 @@ fn del[K, V](m: *Map[K, V], k: K) -> bool {
     }
 }
 
-// removes every entry
+// removes every entry (keeps the allocated buffers, as Vec.clear does)
 fn clear[K, V](m: *Map[K, V]) {
-    *m = Map[K, V]{}
+    if len(m.index) != 0 {
+        memfill(ptr(m.index), 0, len(m.index) * 4)
+    }
+    m.len = 0
+    m.used = 0
 }
 
 // a pointer to the value stored for k (nil if k is missing), to change it in place; valid
@@ -2966,7 +3048,9 @@ fn sort[T](a: []T) {
 
 // ascending byte order (as `cmp` orders strings)
 fn sort(a: []str) {
+    mk := mark()
     sort_by(a, fn(x: str, y: str) -> bool { cmp(x, y) < 0 })
+    release(mk)
 }
 
 // stable merge sort with a user-supplied "less than"
@@ -2975,7 +3059,7 @@ fn sort_by[T](a: []T, less: fn(T, T) -> bool) {
     if n < 2 {
         return
     }
-    tmp := alloc[T](n)
+    tmp := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
     src := a
     dst := tmp
     width := 1
@@ -3026,7 +3110,7 @@ fn sort_by[T, C](a: []T, ctx: C, less: fn(C, T, T) -> bool) {
     if n < 2 {
         return
     }
-    tmp := alloc[T](n)
+    tmp := mkslice[T](__alloc_raw(__alloc_size(n, sizeof[T]())), n)
     src := a
     dst := tmp
     width := 1
@@ -3073,7 +3157,8 @@ fn sort_by[T, C](a: []T, ctx: C, less: fn(C, T, T) -> bool) {
 // ---------- strings ----------
 // a new string: a followed by b (fmt(...) joins any number of values)
 fn concat(a: str, b: str) -> str {
-    out := alloc[u8](__add_size(len(a), len(b)))
+    n := __add_size(len(a), len(b))
+    out := mkslice[u8](__alloc_raw(n), n)
     memcopy(ptr(out), ptr(a), len(a))
     memcopy(cast[i64](ptr(out)) + len(a), ptr(b), len(b))
     return out
@@ -3274,7 +3359,8 @@ fn __at_replace(s: str, old: str, new: str, at: str) -> str {
         __panic(at, "replace: empty substring")
     }
     cnt := __at_count(s, old, at)
-    out := alloc[u8](if len(new) >= len(old) { __add_size(len(s), __alloc_size(cnt, len(new) - len(old))) } else { len(s) - cnt * (len(old) - len(new)) })
+    sz := if len(new) >= len(old) { __add_size(len(s), __alloc_size(cnt, len(new) - len(old))) } else { len(s) - cnt * (len(old) - len(new)) }
+    out := mkslice[u8](__alloc_raw(sz), sz)
     k := 0
     start := 0
     loop {
@@ -3297,7 +3383,7 @@ fn repeat(s: str, n: i64) -> str {
         return ""
     }
     total := __alloc_size(n, len(s))
-    out := alloc[u8](total)
+    out := mkslice[u8](__alloc_raw(total), total)
     // one copy of s, then copies of what is written, doubling in length
     p := cast[i64](ptr(out))
     memcopy(p, ptr(s), len(s))
@@ -3373,7 +3459,7 @@ fn trim_right(s: str, chars: str) -> str {
 fn split(s: str, sep: u8) -> []str {
     p := cast[i64](ptr(s))
     n := __mem_count(p, len(s), sep) + 1
-    out := alloc[str](n)
+    out := mkslice[str](__alloc_raw(__alloc_size(n, sizeof[str]())), n)
     start := 0
     for k in 0..n - 1 {
         i := start + __mem_chr(p + start, len(s) - start, sep)
@@ -3393,7 +3479,8 @@ fn __at_split(s: str, sep: str, at: str) -> []str {
     if len(sep) == 0 {
         __panic(at, "split: empty separator")
     }
-    out := alloc[str](__at_count(s, sep, at) + 1)
+    n := __at_count(s, sep, at) + 1
+    out := mkslice[str](__alloc_raw(__alloc_size(n, sizeof[str]())), n)
     k := 0
     start := 0
     loop {
@@ -3416,7 +3503,7 @@ fn fields(s: str) -> []str {
             n += 1
         }
     }
-    out := alloc[str](n)
+    out := mkslice[str](__alloc_raw(__alloc_size(n, sizeof[str]())), n)
     k := 0
     i := 0
     while k < n {
@@ -3857,8 +3944,9 @@ fn __parse_dec(s: str, num: []u32) -> (f64, bool, i64, i64) {
 
 // ---------- files and arguments ----------
 fn __cstr(s: str) -> i64 {
-    p := __alloc(len(s) + 1)
+    p := __alloc_raw(len(s) + 1)
     memcopy(p, ptr(s), len(s))
+    *cast[*u8](p + len(s)) = 0
     return p
 }
 
@@ -3995,11 +4083,9 @@ fn pad_left(s: str, width: i64, fill: u8) -> str {
     if len(s) >= width {
         return s
     }
-    out := alloc[u8](width)
+    out := mkslice[u8](__alloc_raw(width), width)
     k := width - len(s)
-    for i in 0..k {
-        out[i] = fill
-    }
+    memfill(ptr(out), fill, k)
     memcopy(cast[i64](ptr(out)) + k, ptr(s), len(s))
     return out
 }
@@ -4009,11 +4095,9 @@ fn pad_right(s: str, width: i64, fill: u8) -> str {
     if len(s) >= width {
         return s
     }
-    out := alloc[u8](width)
+    out := mkslice[u8](__alloc_raw(width), width)
     memcopy(ptr(out), ptr(s), len(s))
-    for i in len(s)..width {
-        out[i] = fill
-    }
+    memfill(cast[i64](ptr(out)) + len(s), fill, width - len(s))
     return out
 }
 
@@ -4051,8 +4135,9 @@ fn __to_base(x: u64, base: u64) -> str {
             break
         }
     }
-    out := alloc[u8](64 - i)
-    memcopy(ptr(out), cast[i64](ptr(b)) + i, 64 - i)
+    n := 64 - i
+    out := mkslice[u8](__alloc_raw(n), n)
+    memcopy(ptr(out), cast[i64](ptr(b)) + i, n)
     return out
 }
 
@@ -4070,7 +4155,7 @@ fn fmti[T](x: T, width: i64, fill: u8) -> str {
 
 // a copy of s with the ASCII letters a-z in upper case (other bytes as they are)
 fn to_upper(s: str) -> str {
-    out := alloc[u8](len(s))
+    out := mkslice[u8](__alloc_raw(len(s)), len(s))
     for i, c in s {
         out[i] = if c >= 'a' && c <= 'z' { c - 32 } else { c }
     }
@@ -4079,7 +4164,7 @@ fn to_upper(s: str) -> str {
 
 // a copy of s with the ASCII letters A-Z in lower case (other bytes as they are)
 fn to_lower(s: str) -> str {
-    out := alloc[u8](len(s))
+    out := mkslice[u8](__alloc_raw(len(s)), len(s))
     for i, c in s {
         out[i] = if c >= 'A' && c <= 'Z' { c + 32 } else { c }
     }
@@ -4095,7 +4180,7 @@ fn join(parts: []str, sep: str) -> str {
     if len(parts) > 1 {
         n = __add_size(n, __alloc_size(len(parts) - 1, len(sep)))
     }
-    out := alloc[u8](n)
+    out := mkslice[u8](__alloc_raw(n), n)
     k := 0
     for i, p in parts {
         if i > 0 {

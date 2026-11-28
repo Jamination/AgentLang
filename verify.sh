@@ -14,6 +14,7 @@ BENCHES="nbody spectralnorm fannkuch mandelbrot binarytrees sha256 matmul quicks
 ALC=./build/alc
 BIN=bench/bin
 fail=0
+trap 'rm -f tmp_verify_conf.txt' EXIT
 
 echo "== build: the compiler compiles itself =="
 # seed -> stage 1 -> stage 2 -> stage 3, stages 2 and 3 must be identical
@@ -73,7 +74,7 @@ done
 
 echo "== standard library: tests, documentation, static linking =="
 # every module has at least one test and a documentation page
-for m in math rand time mem input window audio image asset os wayland; do
+for m in math rand time mem input window audio image asset os wayland font net shaderc libc crypto cli; do
   n=$(ls tests/std/${m}*.al tests/sys/${m}*.al 2>/dev/null | wc -l)
   [[ $n -gt 0 ]] || { echo "FAIL: no test for module $m"; fail=1; }
   [[ -s docs/std/$m.md ]] || { echo "FAIL: docs/std/$m.md is missing"; fail=1; }

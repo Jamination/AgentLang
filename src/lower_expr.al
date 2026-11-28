@@ -464,7 +464,10 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
         "self", "this" => " (methods are plain functions: name the receiver parameter explicitly)"
         _ => ""
     }
-    self.err(pos, fmt("unknown identifier `", n, "`", hint, self.nested_hint(n, pos), self.cx.priv_hint(n)))
+    nh := self.nested_hint(n, pos)
+    ph := self.cx.priv_hint(n)
+    dym := if len(hint) == 0 && len(nh) == 0 && len(ph) == 0 { self.suggest_value(n, pos) } else { "" }
+    self.err(pos, fmt("unknown identifier `", n, "`", hint, nh, ph, dym))
     return val_err()
 }
 
@@ -541,7 +544,9 @@ priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                 if hint != "" {
                     self.err(e.pos, fmt("unknown variable `", n, "`", hint))
                 } else {
-                    self.err(e.pos, fmt("unknown variable `", n, "` (declare it with `:=`)", self.cx.priv_hint(n)))
+                    ph := self.cx.priv_hint(n)
+                    dym := if len(ph) == 0 { self.suggest_var(n, e.pos) } else { "" }
+                    self.err(e.pos, fmt("unknown variable `", n, "` (declare it with `:=`)", ph, dym))
                 }
             }
             return None
@@ -643,7 +648,7 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
             }
             tn := self.tyname(bv.ty)
             names := self.cx.member_names(bv.ty)
-            self.err(pos, fmt(tn, " has no field `", name, "` (fields: ", join(names.items(), ", "), ")"))
+            self.err(pos, fmt(tn, " has no field `", name, "` (fields: ", join(names.items(), ", "), ")", did_you_mean_hint(name, names.items())))
             return None
         }
         Tuple(tys) => {
@@ -1635,7 +1640,11 @@ priv fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
                         }
                         if fi < 0 {
                             tn := self.tyname(dst.ty)
-                            self.err(item.pos, fmt(tn, " has no field `", n, "`"))
+                            fnames := vec[str]()
+                            for f in fields {
+                                fnames.push(f.0)
+                            }
+                            self.err(item.pos, fmt(tn, " has no field `", n, "` (fields: ", join(fnames.items(), ", "), ")", did_you_mean_hint(n, fnames.items())))
                             continue
                         }
                     }

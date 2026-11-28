@@ -144,6 +144,11 @@ fn __os_check_memory() -> bool {
     return set && v != "" && v != "0"
 }
 
+// system page size in bytes (x86-64 Linux is always 4 KiB)
+fn __os_page_size() -> i64 {
+    return 4096
+}
+
 // takes the pages [p, p + n) of an arena away (ALC_CHECK_MEMORY): a new mapping without access
 // in their place gives their memory back and makes every access fault
 fn __os_page_off(p: i64, n: i64) {

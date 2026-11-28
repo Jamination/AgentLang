@@ -33,6 +33,7 @@ priv const LOADER = "/usr/lib/libvulkan.so.1"
 // the commands name (`extern VULKAN fn ...`); those of a window-system extension name the
 // loader of their system directly
 priv const LIB = "libvulkan.so.1"
+priv const LIB_MACOS = "libvulkan.1.dylib"
 priv const LIB_WINDOWS = "vulkan-1.dll"
 priv const HELPERS = embed("vk_helpers.al")
 
@@ -76,8 +77,8 @@ priv fn platform_define(platform: str) -> str {
 priv fn al_name(name: str) -> str {
     match name {
         "fn", "struct", "enum", "const", "test", "use", "if", "else", "while", "loop", "for", "in",
-        "by", "return", "break", "continue", "assert", "match", "defer", "inline", "noinline",
-        "true", "false", "nil", "extern", "priv" => concat(name, "_")
+            "by", "return", "break", "continue", "assert", "match", "defer", "inline", "noinline",
+            "true", "false", "nil", "extern", "priv", "when" => concat(name, "_")
         _ => name
     }
 }
@@ -784,7 +785,8 @@ const VK_NULL_HANDLE: u64 = 0`)
 
     out.push("\n// ---- commands ----")
     out.push(fmt("// the Vulkan loader of the target system\nwhen TARGET_OS == Windows {\n    priv const VULKAN = \"",
-        LIB_WINDOWS, "\"\n} else {\n    priv const VULKAN = \"", LIB, "\"\n}"))
+        LIB_WINDOWS, "\"\n} else when TARGET_OS == MacOS {\n    priv const VULKAN = \"",
+        LIB_MACOS, "\"\n} else {\n    priv const VULKAN = \"", LIB, "\"\n}"))
     loader, loader_known := exported(LOADER)
     missing := vec[str]()
     for name in r.req_commands {

@@ -43,8 +43,8 @@ priv const SCRATCH = "tmp/WaylandBindings"
 priv fn al_name(name: str) -> str {
     match name {
         "fn", "struct", "enum", "const", "test", "use", "if", "else", "while", "loop", "for", "in",
-        "by", "return", "break", "continue", "assert", "match", "defer", "inline", "noinline",
-        "true", "false", "nil", "extern", "priv" => concat(name, "_")
+            "by", "return", "break", "continue", "assert", "match", "defer", "inline", "noinline",
+            "true", "false", "nil", "extern", "priv", "when" => concat(name, "_")
         _ => name
     }
 }

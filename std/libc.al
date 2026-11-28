@@ -13,6 +13,9 @@
 when TARGET_OS == Windows {
     priv const LIBC = "msvcrt.dll"
     priv const LIBM = "msvcrt.dll"
+} else when TARGET_OS == MacOS {
+    priv const LIBC = "/usr/lib/libSystem.B.dylib"
+    priv const LIBM = "/usr/lib/libSystem.B.dylib"
 } else {
     priv const LIBC = "libc.so.6"
     priv const LIBM = "libm.so.6"
@@ -55,6 +58,23 @@ when TARGET_OS == Windows {
 
     fn c_stderr() -> *u8 {
         return ptr(mkslice[u8](__iob_func(), 144)[96..])
+    }
+} else when TARGET_OS == MacOS {
+    extern "/usr/lib/libSystem.B.dylib" fn getpid() -> i32
+    extern "/usr/lib/libSystem.B.dylib" fn dprintf(fd: i32, format: *u8, ...) -> i32
+    extern "/usr/lib/libSystem.B.dylib" fn snprintf(buf: *u8, n: i64, format: *u8, ...) -> i32
+    extern "/usr/lib/libSystem.B.dylib" __stdoutp: *u8
+    extern "/usr/lib/libSystem.B.dylib" __stderrp: *u8
+    extern "/usr/lib/libSystem.B.dylib" fn dlopen(path: *u8, flags: i32) -> *u8
+    extern "/usr/lib/libSystem.B.dylib" fn dlsym(handle: *u8, name: *u8) -> *u8
+    extern "/usr/lib/libSystem.B.dylib" fn dlerror() -> *u8
+
+    fn c_stdout() -> *u8 {
+        return __stdoutp
+    }
+
+    fn c_stderr() -> *u8 {
+        return __stderrp
     }
 } else {
     extern "libc.so.6" fn getpid() -> i32

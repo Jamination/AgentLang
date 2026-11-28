@@ -117,8 +117,8 @@ priv fn same_lines(a: str, b: str) -> bool {
         j += 1
     }
 }
-// The text of t from the line of its comment `// alc fmt: off` on, which formatting must leave
-// as it is ("" if it has none; the marker stands at the start of a line or after a space)
+// The text of t from the line of its comment `// alc fmt: off` up to `// alc fmt: on` (or EOF),
+// which formatting must leave as it is ("" if it has none)
 priv fn off_part(t: str) -> str {
     m := concat("// alc fmt", ": off")      // (not the marker itself in this file)
     k := find(t, m)
@@ -128,7 +128,16 @@ priv fn off_part(t: str) -> str {
     if k < 0 {
         return ""
     }
-    return t[rfind(t[..k], "\n") + 1..]
+    start := rfind(t[..k], "\n") + 1
+    on := concat("// alc fmt", ": on")
+    e := find(t, on, k + len(m))
+    if e >= 0 {
+        nl := find(t, "\n", e)
+        if nl >= 0 {
+            return t[start..nl + 1]
+        }
+    }
+    return t[start..]
 }
 
 // `alc fmt` on the trees under base; its standard error
@@ -298,7 +307,7 @@ fn main() -> i64 {
         off := off_part(o)
         if len(off) > 0 {
             marked += 1
-            if !ends_with(t, off) {
+            if find(t, off) < 0 {
                 fail(fmt(f, ": formatting changed the lines after its `alc fmt: off`"))
             }
         }

@@ -108,6 +108,10 @@ if "%SAME%"=="checked" (
   echo build: build\alc.exe, self-compiled ^(stages 2 and 3 not compared^); build\alc ^(Linux^)
 )
 if "%MODE%"=="reseed" (
+  if not "%SAME%"=="checked" (
+    echo build: FAIL: refusing to --reseed when stage 2 and stage 3 were not compared
+    exit /b 1
+  )
   if not exist bootstrap mkdir bootstrap
   copy /y build\alc.exe bootstrap\alc.exe >nul
   copy /y build\alc bootstrap\alc >nul

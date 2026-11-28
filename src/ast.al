@@ -11,6 +11,7 @@ struct Pos {
 struct Diag {
     pos: Pos
     msg: str
+    warn: bool
 }
 
 enum TypeAst {
@@ -465,9 +466,11 @@ priv sym_hashes: Vec[u64]
 priv sym_slots: []u64
 priv sym_shift: u64
 priv const SYM_MIX: u64 = 0x9E3779B97F4A7C15
-// the canonical texts are appended to the current chunk, each behind its number
+// the canonical texts are appended to the current chunk, each behind its number;
+// filled chunks are kept in `sym_chunks` as (base, used) so `canonical` stays O(1) across chunks
 priv sym_chunk: []u8
 priv sym_chunk_used: i64
+priv sym_chunks: Vec[(i64, i64)]
 
 priv const SYM_CHUNK = 1 << 20
 
@@ -489,17 +492,30 @@ fn ast_sym_name(id: i64) -> str {
     return sym_texts[id]
 }
 
-// the symbol of a canonical text, or -1 for any other text
-priv fn canonical(s: str) -> i64 {
-    p := cast[i64](ptr(s))
-    base := cast[i64](ptr(sym_chunk))
-    if p >= base + 8 && p < base + sym_chunk_used {
+priv inline fn canonical_in(s: str, p: i64, base: i64, used: i64) -> i64 {
+    if p >= base + 8 && p < base + used {
         id := *cast[*i64](p - 8)
         if id >= 0 && id < sym_texts.len {
             t := sym_texts[id]
             if cast[i64](ptr(t)) == p && len(t) == len(s) {
                 return id
             }
+        }
+    }
+    return -1
+}
+
+// the symbol of a canonical text, or -1 for any other text
+priv fn canonical(s: str) -> i64 {
+    p := cast[i64](ptr(s))
+    id := canonical_in(s, p, cast[i64](ptr(sym_chunk)), sym_chunk_used)
+    if id >= 0 {
+        return id
+    }
+    for ch in sym_chunks {
+        id = canonical_in(s, p, ch.0, ch.1)
+        if id >= 0 {
+            return id
         }
     }
     return -1
@@ -570,6 +586,9 @@ fn ast_sym_hashed(s: str, h: u64) -> i64 {
     assert id < 0x7FFFFFFF, "ast: too many symbols"
     n := len(s)
     if sym_chunk_used + n + 8 > len(sym_chunk) {
+        if sym_chunk_used > 0 {
+            sym_chunks.push((cast[i64](ptr(sym_chunk)), sym_chunk_used))
+        }
         sym_chunk = alloc[u8](max(SYM_CHUNK, n + 8))
         sym_chunk_used = 0
     }

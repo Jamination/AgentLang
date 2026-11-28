@@ -1,0 +1,4 @@
+compact: {"name":"a\"b\\c\n\t\u0001","count":42,"ok":true,"none":null,"nan":null,"arr":[1,false,"x"],"empty_arr":[],"empty_obj":{}}
+roundtrip: true true 42 true true x
+pretty_lines: 14 true
+escape: "hi\r\n\"x\""

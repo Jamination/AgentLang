@@ -24,6 +24,45 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   branch for macOS, so check that it suits macOS (or add `else when TARGET_OS == MacOS`).
 
 ### Added
+- Linux ELF hardening and linker cleanup: dynamic executables on Linux x86-64 and arm64 now
+  emit Full RELRO (`PT_GNU_RELRO` with `BIND_NOW`, `.dynamic` and `.got` placed in a
+  page-aligned read-only-after-relocation prefix), and `src/elf.al` / `src/elf_arm64.al` share
+  common dynamic-table and header helpers in `src/objwrite.al`.
+- Runtime arena hygiene and compiler cleanup: `Map.clear()` now reuses its allocated buffers
+  instead of leaking them into the arena; `sort([]str)` reclaims its scratch buffer via
+  `mark()`/`release()`; `sort_by` and string builders (`concat`, `repeat`, `replace`,
+  `pad_left`, `pad_right`, `to_upper`, `to_lower`, `join`, `split`, `fields`, `fmtf`,
+  `__cap_end`, `__cstr`) avoid redundant zeroing; `ast.al` symbol `canonical()` lookup stays
+  O(1) across multiple symbol chunks; `priv.al` and `parser.al` eliminate module-level mutable
+  globals; `lower_call.al`'s `builtin` dispatcher is split into cohesive helpers; macOS target
+  branches added to `std.libc`, `std.asset`, `std.vk`, and `std.shaderc`.
+- `std.crypto`: SHA-256 (one-shot and streaming `Sha256`), HMAC-SHA256, `const_time_eq`, Hex
+  and Base64 / Base64URL encode/decode, and OS CSPRNG (`random_bytes`, `random_u64`; static
+  `getrandom` on Linux x86-64/arm64, `RtlGenRandom` on Windows, `arc4random_buf` on macOS).
+- `std.cli`: zero-dependency command-line flag, option, and positional argument parser with
+  auto-generated `--help` text.
+- `std.asset`: JSON constructors (`json_null`, `json_bool`, `json_num`, `json_int`,
+  `json_string`, `json_array`, `json_object`), `json_escape`, `json_stringify`, and
+  `json_stringify_pretty`.
+- `std.os`: `temp_dir()`, `run_capture_split(argv)` (separate stdout/stderr capture), and
+  `run_with_stdin(argv, stdin_data)`.
+- Parallel `-O2` optimization (`opt_first` and pre-inline `local_opt` via `spread_run`,
+  byte-identical to `ALC_JOBS=1`, ~25% faster self-compile), cached `ALC_DISABLE` lookup, and
+  bounded `loadelim` straight-line tables; GitHub Actions CI (`.github/workflows/ci.yml`) and
+  negative crash fuzzer (`tests/gen/fuzz_crash.py`).
+- Agent-focused CLI and diagnostics: `--help` / `-h` / `help` (exits 0); `--json` now includes
+  `"severity"` (`"error"` / `"warning"`), emits `[]` on clean `alc check --json`, formats
+  `alc --version --json`, `alc sigs --json`, `alc test --json`, and `alc fmt --json` usage
+  errors as JSON; `alc sigs` adds `--std`, `--pub`, `--filter <pat>`, and hides internal `__*`
+  structs, enums, and constants; `alc test` adds `--filter <pat>` and per-test JSON timing;
+  `alc fmt` supports `// alc fmt: on` to resume formatting after `// alc fmt: off`.
+- Fuzzy "did you mean?" suggestions (Damerau-Levenshtein) on unknown identifiers, variables,
+  functions, struct fields (including struct literals), types, and `std.*` modules.
+- Opt-in compiler warnings (`-W` / `--warn`, `--deny-warnings`): unused local variables
+  (ignoring `_`-prefixed names), unreachable statements, self-assignments (`x = x`), and
+  non-exhaustive statement-form `match` on enums; `lint_copy_writes` now also detects writes
+  to copied nested structs, inline arrays, and tuples while respecting inner-block shadowing
+  and ignoring shared pointer/slice mutations.
 - `--target macos` (experimental, never run): arm64 Mach-O executables for macOS 11 and later
   (Apple silicon), with chained fixups, an ad-hoc code signature, thread-local data through
   dyld's descriptors, a run-time library over libSystem (`src/prelude_macos.al`), C functions
@@ -47,33 +86,11 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   the first C frame.
 - The compiler builds for arm64 Linux (experimental, as above):
   `alc build --target linux-arm64 -D HOST_ARM64=true src/main.al`.
-- `std.gfx`: a 2D renderer on a std.window window. It draws textures from std.image images (a
-  one-channel image is a coverage texture, drawn in the tint's colour, for font atlases),
-  sprites with source rectangle, rotation, origin and tint, rectangles, lines, triangles with
-  per-corner colours, alpha and additive blending, a 2D transform (`camera`, `set_view` for a
-  letterboxed virtual resolution), scissor and render textures. Draws are batched by texture
-  and state, and nothing is allocated per frame. The backend is chosen by the target:
-  Direct3D 12 on Windows, Vulkan 1.3 on Linux (`use std.gfx_vk` gives Vulkan on Windows too);
-  the shaders are precompiled (`tools/gen_gfx_shaders.al`). `gfx_offscreen` and `read_pixels`
-  serve pixel tests. `examples/gfx_starter` is the starter game on it. See docs/std/gfx.md.
 - `std.font`: TrueType / OpenType fonts with TrueType outlines in AL (cmap 4 / 12, composite
   glyphs, `kern` and GPOS pair kerning, `.ttc`), antialiased glyph rasterisation at any size,
   glyph atlases into std.image images, and UTF-8 text layout, measuring, line wrapping and
   drawing into images. CFF outlines are rejected with an error; a malformed font is rejected,
   never read out of bounds. `examples/font_demo.al`. See docs/std/font.md.
-- `std.gfx_text`: text for std.gfx with std.font's fonts. `gfx_font(g, font, px, chars)` makes
-  a `GfxFont` (the glyphs at one pixel size as a coverage texture; `gfx_font(g, atlas,
-  filter)` from an atlas of one's own, `gfx_font_add`, `gfx_font_free`); `draw_text(g, font, x,
-  y, text, color)` draws UTF-8 text with kerning and `'\n'`, also aligned (`AlignLeft`,
-  `AlignCenter`, `AlignRight`); `draw_text_box` wraps into a rectangle as `wrap_text` does;
-  `text_size` and `line_height` measure. Pens are rounded to whole target pixels, so the GPU
-  draws what std.font's `draw_text` with the atlas draws into an image (within 1 of 255 per
-  channel on Direct3D 12 and Vulkan); `font.size` draws a font rasterised at the size it has on
-  the screen at its virtual size under `set_view`; characters outside the font's set draw as
-  its missing glyph; drawing allocates nothing. A separate module: a std.gfx program without
-  text does not grow. std.font's 4-channel atlases are now white in every pixel (alpha 0
-  between the glyphs), so a linear filter no longer darkens the glyphs' edges.
-  `examples/gfx_starter` draws its text with it in a system font. See docs/std/gfx.md#text.
 - `std.net`: TCP (connect with a time limit, non-blocking connect, listen / accept, send / recv
   with time limits, shutdown), UDP (`udp_bind`, `send_to`, `recv_from`), IPv4 and IPv6 address
   parsing and formatting, and `poll` over several sockets for game loops. Errors are Linux
@@ -165,11 +182,6 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   `VK_KHR_wayland_surface`; integer buffer scales; xdg-shell, server-side decorations where
   offered, xkbcommon keys and text, relative pointer and pointer lock. The checklist for a real
   session is in docs/std/window.md (Wayland).
-- `std.gfx` on a Wayland window of std.window (experimental; passed on headless weston with
-  NVIDIA, not yet tried on a desktop compositor):
-  the Vulkan backend creates a `VK_KHR_wayland_surface` surface, makes the swapchain the
-  window's pixel size (surface size times buffer scale) and follows its configure events; X11
-  windows are unchanged. The checklist is in docs/std/gfx.md (Wayland).
 
 ### Changed
 - Optimiser: memory from different allocations (`alloc`, `new`, Vec growth, `clone`, ...) is
@@ -179,9 +191,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   global addresses are recomputed instead of spilled; `find` on strings tests 16 positions per
   step. As before, using memory after `release` / `reset` or a pointer made from an integer
   that is no live object's address is undefined.
-- The graphics examples are redrawn. New on std.gfx: `examples/gfx_fireworks`, `gfx_lights`,
-  `gfx_parallax`, `gfx_lowpoly` and `gfx_flow`. `examples/starter`, `dx12_starter`,
-  `gfx_starter` and `dx12_breakout` have procedural art, particles and effects kept outside
+- The graphics examples are redrawn. `examples/starter`, `dx12_starter`,
+  and `dx12_breakout` have procedural art, particles and effects kept outside
   the game state (the rules and their checksums are unchanged; the frame hash of
   `starter/game.al --headless` is new); the two Direct3D 12 games have their own HDR renderer
   with bloom instead of gamekit's batcher. Each takes `--shot file.png` to draw a frame
@@ -189,11 +200,10 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   lights with maze shadows and ambient occlusion, 4x MSAA and an HDR chain with bloom and tone
   mapping (`--still file.png`); its rules, saves and checksums are unchanged. `examples/starter` and the three Direct3D 12 games draw their text
   in a TrueType font of the system (std.font, baked into their atlas at start-up) instead of
-  the 5 x 7 bitmap font; `examples/gfx_lowpoly` supersamples its 3D (`--aa 1|2|3`), and
-  `dx12_crypt` has an HDR-aware MSAA resolve and an FXAA pass. Every example has `--record`,
+  the 5 x 7 bitmap font, and `dx12_crypt` has an HDR-aware MSAA resolve and an FXAA pass. Every example has `--record`,
   which writes raw frames (and the games' sound as a WAV) for a video encoder.
 - docs/AGENTS_TEMPLATE.md is platform-neutral: no absolute paths, a section per renderer
-  (std.gfx; Direct3D 12 with gamekit's `dx_compile`; Vulkan with glslc or std.shaderc).
+  (Direct3D 12 with gamekit's `dx_compile`; Vulkan with glslc or std.shaderc).
   docs/GAMES.md: where mouse-look goes (once per frame, not in `update`; stick look is a rate in
   `update`), how a one-system game passes `alc check --all-targets` and keeps compiling when a
   target is added, the colour byte order, pointers to Ogg streaming, std.font, std.net and `-g`.
@@ -245,6 +255,20 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   must use LF`) instead of "stdout differs" and a diff of lines that look the same.
 
 ### Fixed
+- Compiler & runtime soundness: fixed `mem2reg` out-of-bounds panic when promoting vector allocas,
+  LICM speculative hoisting of out-of-bounds `Alloca` loads, ARM64 `cbz`/`cbnz`/`adr` ±1 MiB
+  overflow checks, `when` traversal of assignment LHS expressions, `alc check --all-targets`
+  resetting `target_arch`, `__alloc_raw` rejecting negative sizes `-15..-1`, `ALC_CHECK_MEMORY`
+  thread safety and OS page size detection (16 KiB macOS / `AT_PAGESZ` arm64), TOCTOU races in
+  `reset()` and `region_free()`, and ARM64/macOS fault handlers dereferencing invalid PCs.
+- Standard library safety & races: `std.net` now rejects HTTP CRLF/header injection, prevents
+  signed integer overflow and checks `\r\n` in chunked responses, frees per-chunk `http_parse`
+  probes, tracks remaining deadlines in `recv`/`recv_from`, and releases `poll` scratch buffers;
+  `std.image` fixes a `crc32` multithreaded init race and caps growing `inflate`/`zlib_decompress`
+  output at 512 MiB; `std.asset` rejects NUL bytes in paths and `..`/absolute traversal in
+  `data_dir`/`config_dir`/`Assets`; `std.os` reports `__os_wait` failures instead of status 0;
+  `std.mem`'s `from_bytes` handles zero-sized types; `std.audio`'s `ogg_error`/`audio_error`
+  and `ogg_crc` init are now thread-safe.
 - `alc build` / `alc run` accepted a type error in a function a program does not reach of a
   bundled module read from `ALC_STD_DIR` (a module being written) that `alc check` reported:
   such a module is now checked in full by every command. The modules inside the compiler are

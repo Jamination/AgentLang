@@ -1641,6 +1641,12 @@ fn match_expr(self: *Fx, sc: *Expr, arms: []MatchArm, want: bool, expect: Opt[i6
                 }
                 self.err(pos, fmt("match used as a value must be exhaustive; missing: ", join(missing.items(), ", "), hint))
             }
+        } else if !want && !any_pat_err && missing.len > 0 {
+            if missing.len > 8 {
+                missing.truncate(8)
+                missing.push("...")
+            }
+            self.warn(pos, fmt("non-exhaustive `match` statement; missing: ", join(missing.items(), ", "), " (add `_ => {}` if intentional)"))
         }
         m.all_dead = false
         self.jmp(bj)

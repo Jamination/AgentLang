@@ -1,7 +1,7 @@
 // Renders one colour-interpolated triangle with Vulkan into an offscreen image (no window) and
 // saves it as triangle.bmp.
 //
-//     ALC_STD_DIR=std alc run examples/vk_triangle.al
+//     alc run examples/vk_triangle.al
 //
 // The steps: instance -> physical device -> device + queue -> colour image + view -> render pass
 // -> framebuffer -> pipeline -> vertex buffer -> command buffer (draw, copy image to a buffer)

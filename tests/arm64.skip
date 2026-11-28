@@ -7,6 +7,7 @@ std/input reads gamepads with x86-64 system call numbers (std.input_linux): refu
 std/input_gamepad_watch reads gamepads with x86-64 system call numbers (std.input_linux): refused for linux-arm64
 std/net_dns std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_http std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
+std/net_http_safety std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_ipv6 std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_tcp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64
 std/net_udp std.net uses x86-64 system call numbers (std.net_linux): refused for linux-arm64

@@ -10,6 +10,16 @@
 // writes a, a '/' if both parts are non-empty and a does not end in a separator, b and a NUL
 // into buf
 fn __asset_cpath(buf: []u8, a: str, b: str) -> bool {
+    for c in a {
+        if c == 0 {
+            return false
+        }
+    }
+    for c in b {
+        if c == 0 {
+            return false
+        }
+    }
     sep := if len(a) > 0 && len(b) > 0 && !__os_is_sep(a[len(a) - 1]) { 1 } else { 0 }
     if len(a) + sep + len(b) >= len(buf) {
         return false
@@ -18,6 +28,29 @@ fn __asset_cpath(buf: []u8, a: str, b: str) -> bool {
     buf[len(a)] = '/'
     memcopy(cast[i64](ptr(buf)) + len(a) + sep, ptr(b), len(b))
     buf[len(a) + sep + len(b)] = 0
+    return true
+}
+
+// true if p is a relative path with no NUL, no leading separator / drive prefix, and no ".." component
+priv fn safe_rel_path(p: str) -> bool {
+    if len(p) == 0 {
+        return true
+    }
+    if p[0] == '/' || p[0] == '\\' || (len(p) >= 2 && p[1] == ':') {
+        return false
+    }
+    start := 0
+    for i in 0..len(p) + 1 {
+        if i < len(p) && p[i] == 0 {
+            return false
+        }
+        if i == len(p) || p[i] == '/' || p[i] == '\\' {
+            if i - start == 2 && p[start] == '.' && p[start + 1] == '.' {
+                return false
+            }
+            start = i + 1
+        }
+    }
     return true
 }
 
@@ -260,6 +293,7 @@ fn path_stem(p: str) -> str {
 //            (an XDG variable that is empty or not an absolute path is ignored, as the XDG
 //            base directory specification asks; ~ is $HOME)
 //   Windows: %APPDATA%/app for both, or %USERPROFILE%/AppData/Roaming/app without APPDATA
+//   macOS:   $HOME/Library/Application Support/app for both
 when TARGET_OS == Windows {
     // the per-user directory for the data of `app` (saves), created if missing: (path, ok)
     fn data_dir(app: str) -> (str, bool) {
@@ -281,6 +315,24 @@ when TARGET_OS == Windows {
             return path_join(u, "AppData/Roaming")
         }
         return ""
+    }
+} else when TARGET_OS == MacOS {
+    // the per-user directory for the data of `app` (saves), created if missing: (path, ok)
+    fn data_dir(app: str) -> (str, bool) {
+        return __asset_user_dir(__asset_macos_dir(), app)
+    }
+
+    // the per-user directory for the settings of `app`, created if missing: (path, ok)
+    fn config_dir(app: str) -> (str, bool) {
+        return __asset_user_dir(__asset_macos_dir(), app)
+    }
+
+    fn __asset_macos_dir() -> str {
+        h, _ := env_get("HOME")
+        if len(h) == 0 {
+            return ""
+        }
+        return path_join(h, "Library/Application Support")
     }
 } else {
     // the per-user directory for the data of `app` (saves), created if missing: (path, ok)
@@ -312,6 +364,10 @@ fn __asset_user_dir(base: str, app: str) -> (str, bool) {
         __io_result(-2)
         return ("", false)
     }
+    if !safe_rel_path(app) {
+        __io_result(-22)
+        return ("", false)
+    }
     dir := path_join(base, app)
     return (dir, make_dir(dir))
 }
@@ -332,6 +388,10 @@ fn assets_new(root: str) -> Assets {
 // reads `name` from disk (again), replacing the cached copy; (empty, false) if it cannot be
 // read, in which case a cached copy stays. The previous data stays in the arena.
 fn reload(a: *Assets, name: str) -> ([]u8, bool) {
+    if !safe_rel_path(name) {
+        __io_result(-22)
+        return ("", false)
+    }
     mtime := __asset_mtime(a.root, name)
     data, ok := __asset_read(a.root, name)
     if !ok {
@@ -858,4 +918,153 @@ fn as_bool(v: *Json, default: bool) -> bool {
 // true if v is a JSON null (false for nil, i.e. a missing value)
 fn is_null(v: *Json) -> bool {
     return v != nil && v.kind == JsonNull
+}
+
+// ---------- JSON construction and serialization ----------
+
+// Constructors for building a `Json` tree programmatically.
+fn json_null() -> Json {
+    return Json{kind: JsonNull}
+}
+
+fn json_bool(b: bool) -> Json {
+    return Json{kind: JsonBool, num: if b { 1.0 } else { 0.0 }}
+}
+
+fn json_num(x: f64) -> Json {
+    return Json{kind: JsonNumber, num: x}
+}
+
+fn json_int(x: i64) -> Json {
+    return Json{kind: JsonNumber, num: f64(x), text: fmt(x)}
+}
+
+fn json_string(s: str) -> Json {
+    return Json{kind: JsonString, text: s}
+}
+
+fn json_array(items: []Json) -> Json {
+    return Json{kind: JsonArray, items: items}
+}
+
+fn json_object(members: [](str, Json)) -> Json {
+    out := alloc[Json](len(members))
+    for i, m in members {
+        v := m.1
+        v.key = m.0
+        out[i] = v
+    }
+    return Json{kind: JsonObject, items: out}
+}
+
+// Escapes `s` as a quoted RFC 8259 JSON string literal (`"..."`).
+fn json_escape(s: str) -> str {
+    o := vec[u8]()
+    json_write_str(&o, s)
+    return o.items()
+}
+
+priv fn json_write_str(o: *Vec[u8], s: str) {
+    o.push('"')
+    for c in s {
+        match c {
+            '"' => o.extend("\\\"")
+            '\\' => o.extend("\\\\")
+            '\n' => o.extend("\\n")
+            '\r' => o.extend("\\r")
+            '\t' => o.extend("\\t")
+            8 => o.extend("\\b")
+            12 => o.extend("\\f")
+            _ if c < 0x20 => o.extend(concat("\\u", hex(u64(c), 4)))
+            _ => o.push(c)
+        }
+    }
+    o.push('"')
+}
+
+priv fn json_write_indent(o: *Vec[u8], n: i64) {
+    for _ in 0..n {
+        o.push(' ')
+    }
+}
+
+priv fn json_write(o: *Vec[u8], v: *Json, indent: i64, depth: i64) {
+    if v == nil {
+        o.extend("null")
+        return
+    }
+    match v.kind {
+        JsonNull => o.extend("null")
+        JsonBool => o.extend(if v.num != 0.0 { "true" } else { "false" })
+        JsonNumber => {
+            if len(v.text) > 0 {
+                o.extend(v.text)
+            } else if v.num != v.num || v.num == 1e999 || v.num == -1e999 {
+                o.extend("null")
+            } else {
+                o.extend(fmt(v.num))
+            }
+        }
+        JsonString => json_write_str(o, v.text)
+        JsonArray => {
+            if len(v.items) == 0 {
+                o.extend("[]")
+                return
+            }
+            o.push('[')
+            for i in 0..len(v.items) {
+                if i > 0 {
+                    o.push(',')
+                }
+                if indent > 0 {
+                    o.push('\n')
+                    json_write_indent(o, (depth + 1) * indent)
+                }
+                json_write(o, &v.items[i], indent, depth + 1)
+            }
+            if indent > 0 {
+                o.push('\n')
+                json_write_indent(o, depth * indent)
+            }
+            o.push(']')
+        }
+        JsonObject => {
+            if len(v.items) == 0 {
+                o.extend("{}")
+                return
+            }
+            o.push('{')
+            for i in 0..len(v.items) {
+                if i > 0 {
+                    o.push(',')
+                }
+                if indent > 0 {
+                    o.push('\n')
+                    json_write_indent(o, (depth + 1) * indent)
+                }
+                json_write_str(o, v.items[i].key)
+                o.extend(if indent > 0 { ": " } else { ":" })
+                json_write(o, &v.items[i], indent, depth + 1)
+            }
+            if indent > 0 {
+                o.push('\n')
+                json_write_indent(o, depth * indent)
+            }
+            o.push('}')
+        }
+    }
+}
+
+// Serializes `v` to compact JSON text.
+fn json_stringify(v: *Json) -> str {
+    o := vec[u8]()
+    json_write(&o, v, 0, 0)
+    return o.items()
+}
+
+// Serializes `v` to pretty-printed JSON with `indent` spaces per level (<= 0: compact).
+fn json_stringify_pretty(v: *Json, indent: i64) -> str {
+    o := vec[u8]()
+    json_write(&o, v, max(indent, 0), 0)
+    return o.items()
 }

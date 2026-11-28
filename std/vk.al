@@ -3907,6 +3907,8 @@ struct VkCommandBufferInheritanceRenderingInfo {
 // the Vulkan loader of the target system
 when TARGET_OS == Windows {
     priv const VULKAN = "vulkan-1.dll"
+} else when TARGET_OS == MacOS {
+    priv const VULKAN = "libvulkan.1.dylib"
 } else {
     priv const VULKAN = "libvulkan.so.1"
 }

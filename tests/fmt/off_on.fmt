@@ -1,0 +1,10 @@
+// Preserves only the lines between off and on markers, formatting code before and after
+fn main() {
+    a := 1 + 2
+    // alc fmt: off
+    table := [3]i64{
+        1,   2,   3,
+    }
+    // alc fmt: on
+    print(a, table[0])
+}

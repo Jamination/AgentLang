@@ -6,9 +6,9 @@ that talk to C code: the printf family (variadic), `qsort` with an AL function a
 library needs none of them; a program that calls one is linked against the C library
 (Linux: a dynamically linked executable; Windows: one more DLL in its import table).
 
-| | Linux | Windows |
-|---|---|---|
-| library | glibc: `libc.so.6` (`cosf`: `libm.so.6`) | `msvcrt.dll` |
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| library | glibc: `libc.so.6` (`cosf`: `libm.so.6`) | `msvcrt.dll` | `/usr/lib/libSystem.B.dylib` |
 
 Anything else of the C library is declared the same way in the program itself
 (`extern "msvcrt.dll" fn strtol(s: *u8, end: **u8, base: i32) -> i32`), inside

@@ -228,8 +228,8 @@ follow the same rules.
 condition holds; the others are parsed but not type-checked and leave nothing in the
 executable. At top level the branches hold declarations (also `use`), in a function
 statements; neither form opens a scope. A condition is made of literals, `==`, `!=`, `&&`,
-`||`, `!` and constants declared outside `when`: `TARGET_OS` (`Linux`, `Windows`),
-`TARGET_ARCH` (`X86_64`) and the program's; anything else is an error. `alc build -D N=V`
+`||`, `!` and constants declared outside `when`: `TARGET_OS` (`Linux`, `Windows`, `MacOS`),
+`TARGET_ARCH` (`X86_64`, `Arm64`) and the program's; anything else is an error. `alc build -D N=V`
 (also run, test, check; `-D N` alone: `true`) sets the program's constant `N`. An `if` on constants
 compiles only its taken branch (both type-checked), as uncalled functions are left out. [DETAILS.md](DETAILS.md#when-and--d)
 
@@ -844,16 +844,16 @@ fn main() {
 ```
 alc build file.al [-o out]     compile; the executable is the source path without `.al`
 alc run file.al [-- args...]   compile (writing the executable as build does) and run; exit status of the program
-alc test file.al               run each `test` block in its own process (`main` need not exist): its output, `ok   name` / `FAIL name`; status 1 if any failed
-alc check file.al              type-check only; `main` need not exist (check one file of a program alone); `--all-targets`: once per target
-alc sigs file.al [-- std]      one line per declaration: `file:line: signature  // first line of its comment`; `-- std` adds the library's
-alc fmt [--check] file.al dir/ rewrite in the one canonical layout (white space only); `--check`: list files that would change
-options: -o path (build, run, test: e.g. `-o build/game` keeps executables out of the source folder)  -D NAME=VALUE (a constant: see `when`)  --unchecked  -O0  --json  --emit-ir  --emit-asm  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  for a Windows target (the default on Windows): --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows
+alc test file.al               run each `test` block in its own process (`main` need not exist): its output, `ok   name` / `FAIL name`; status 1 if any failed (`--filter <pat>`, `--json`)
+alc check file.al              type-check only; `main` need not exist (check one file of a program alone); `--all-targets`: once per target; `-W` / `--deny-warnings`
+alc sigs file.al [--std]       one line per declaration: `file:line: signature  // first line of its comment`; `--std` (or `-- std`) adds the library's; `--pub`, `--filter <pat>`, `--json`
+alc fmt [--check] file.al dir/ rewrite in the one canonical layout (white space only; `// alc fmt: off` .. `// alc fmt: on`); `--check`: list files that would change
+options: -o path (build, run, test: e.g. `-o build/game` keeps executables out of the source folder)  -D NAME=VALUE (a constant: see `when`)  -W / --warn  --deny-warnings  --unchecked  -O0  --json  --emit-ir  --emit-asm  --help  --target windows (a Windows executable `file.exe`; run/test use Wine if ALC_WINE=1)  for a Windows target (the default on Windows): --gui (no console window)  --icon app.ico  --version-info NAME=VALUE: DETAILS.md#windows
 ```
 
-Diagnostics list every error found, sorted by position: `file:line:col: error: message` (`col`
+Diagnostics list every error (and with `-W`, warning) found, sorted by position: `file:line:col: error: message` (`col`
 counts bytes from 1). With `--json` they are printed to standard output as `[{"file":"f.al",
-"line":3,"col":7,"message":"..."}]`; errors without a position (unreadable file) have line 0.
+"line":3,"col":7,"message":"...","severity":"error"}]` (`[]` on a clean `alc check --json`); errors without a position (unreadable file) have line 0.
 
 ## Unsafe corners
 

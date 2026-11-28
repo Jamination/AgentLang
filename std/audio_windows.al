@@ -207,12 +207,12 @@ struct AudioOs {
 }
 
 // why the last audio_open failed
-priv audio_err: str
+priv __tls_audio_err: str
 
 // Why the last audio_open failed: which call failed with which HRESULT, or that there is no
 // playback device ("WASAPI: no playback device ..."); "" after a successful open.
 fn audio_error() -> str {
-    audio_err
+    __tls_audio_err
 }
 
 priv fn wa_hr(what: str, hr: i32) -> str {
@@ -323,7 +323,7 @@ priv fn wa_com_init() -> (bool, bool) {
     if hr == RPC_E_CHANGED_MODE {
         return (true, false)
     }
-    audio_err = wa_hr("CoInitializeEx", hr)
+    __tls_audio_err = wa_hr("CoInitializeEx", hr)
     (false, false)
 }
 
@@ -331,7 +331,7 @@ priv fn wa_enumerator() -> *IMMDeviceEnumerator {
     e: *IMMDeviceEnumerator = nil
     hr := CoCreateInstance(&CLSID_MMDeviceEnumerator, nil, CLSCTX_ALL, &IID_IMMDeviceEnumerator, cast[**u8](&e))
     if hr < 0 || e == nil {
-        audio_err = wa_hr("CoCreateInstance(MMDeviceEnumerator)", hr)
+        __tls_audio_err = wa_hr("CoCreateInstance(MMDeviceEnumerator)", hr)
         return nil
     }
     e
@@ -345,7 +345,7 @@ priv fn wa_find(e: *IMMDeviceEnumerator, name: str) -> *IMMDevice {
     if name == "default" {
         hr := e.vt.GetDefaultAudioEndpoint(e, eRender, eConsole, &dev)
         if hr < 0 || dev == nil {
-            audio_err = if hr == E_NOTFOUND {
+            __tls_audio_err = if hr == E_NOTFOUND {
                 "WASAPI: no playback device (GetDefaultAudioEndpoint: HRESULT 0x80070490, E_NOTFOUND)"
             } else {
                 wa_hr("GetDefaultAudioEndpoint", hr)
@@ -357,7 +357,7 @@ priv fn wa_find(e: *IMMDeviceEnumerator, name: str) -> *IMMDevice {
     all: *IMMDeviceCollection = nil
     hr := e.vt.EnumAudioEndpoints(e, eRender, DEVICE_STATE_ACTIVE, &all)
     if hr < 0 || all == nil {
-        audio_err = wa_hr("EnumAudioEndpoints", hr)
+        __tls_audio_err = wa_hr("EnumAudioEndpoints", hr)
         return nil
     }
     count: u32 = 0
@@ -377,7 +377,7 @@ priv fn wa_find(e: *IMMDeviceEnumerator, name: str) -> *IMMDevice {
     release(mk)
     all.vt.Release(all)
     if dev == nil {
-        audio_err = fmt("WASAPI: no playback device named \"", name, "\" (audio_devices() lists them)")
+        __tls_audio_err = fmt("WASAPI: no playback device named \"", name, "\" (audio_devices() lists them)")
     }
     dev
 }
@@ -421,14 +421,14 @@ priv fn wa_connect(d: *AudioDevice) -> bool {
     hr := o.device.vt.Activate(o.device, &IID_IAudioClient, CLSCTX_ALL, nil, cast[**u8](&o.client))
     if hr < 0 || o.client == nil {
         o.client = nil
-        audio_err = wa_hr("IMMDevice::Activate(IAudioClient)", hr)
+        __tls_audio_err = wa_hr("IMMDevice::Activate(IAudioClient)", hr)
         wa_disconnect(d)
         return false
     }
     mf: *WAVEFORMATEXTENSIBLE = nil
     hr = o.client.vt.GetMixFormat(o.client, &mf)
     if hr < 0 || mf == nil {
-        audio_err = wa_hr("IAudioClient::GetMixFormat", hr)
+        __tls_audio_err = wa_hr("IAudioClient::GetMixFormat", hr)
         wa_disconnect(d)
         return false
     }
@@ -454,7 +454,7 @@ priv fn wa_connect(d: *AudioDevice) -> bool {
         kind = WA_I32
     }
     if kind < 0 || rate <= 0 {
-        audio_err = fmt("WASAPI: unsupported mix format (tag 0x", hex(u64(mf.wFormatTag)), ", ", mf.wBitsPerSample, " bits, ", channels, " channels, ", rate, " Hz)")
+        __tls_audio_err = fmt("WASAPI: unsupported mix format (tag 0x", hex(u64(mf.wFormatTag)), ", ", mf.wBitsPerSample, " bits, ", channels, " channels, ", rate, " Hz)")
         CoTaskMemFree(cast[*u8](mf))
         wa_disconnect(d)
         return false
@@ -462,7 +462,7 @@ priv fn wa_connect(d: *AudioDevice) -> bool {
     hr = o.client.vt.Initialize(o.client, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, max(o.latency_ms, 0) * 10000, 0, mf, nil)
     CoTaskMemFree(cast[*u8](mf))
     if hr < 0 {
-        audio_err = wa_hr("IAudioClient::Initialize", hr)
+        __tls_audio_err = wa_hr("IAudioClient::Initialize", hr)
         wa_disconnect(d)
         return false
     }
@@ -484,7 +484,7 @@ priv fn wa_connect(d: *AudioDevice) -> bool {
     }
     if hr < 0 || o.render == nil || frames == 0 {
         o.render = nil
-        audio_err = wa_hr("setting up the IAudioClient stream", hr)
+        __tls_audio_err = wa_hr("setting up the IAudioClient stream", hr)
         wa_disconnect(d)
         return false
     }
@@ -514,7 +514,7 @@ priv fn wa_connect(d: *AudioDevice) -> bool {
 // differ: the samples are converted (see the top of this file). Allocates the device once.
 fn audio_open(name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDevice, bool) {
     if rate <= 0 || channels <= 0 {
-        audio_err = fmt("audio_open: bad format (", rate, " Hz, ", channels, " channels)")
+        __tls_audio_err = fmt("audio_open: bad format (", rate, " Hz, ", channels, " channels)")
         return (nil, false)
     }
     d := new[AudioDevice]()
@@ -530,7 +530,7 @@ fn audio_open(name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDe
         d.period_frames = max(d.buffer_frames / 4, 1)
         o.qcap = AUDIO_CHUNK_FRAMES
         o.q = alloc[f32](o.qcap * channels)
-        audio_err = ""
+        __tls_audio_err = ""
         return (d, true)
     }
     usable, com := wa_com_init()
@@ -553,7 +553,7 @@ fn audio_open(name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDe
     }
     o.open = true
     o.last_check = GetTickCount64()
-    audio_err = ""
+    __tls_audio_err = ""
     (d, true)
 }
 
@@ -578,11 +578,11 @@ priv fn wa_ready(d: *AudioDevice) -> bool {
         o.last_try = now
         // a failed attempt gives back what it allocated (also its error text: audio_error
         // stays about audio_open), so a device that stays away costs no memory
-        saved := audio_err
+        saved := __tls_audio_err
         mk := mark()
         if !wa_connect(d) {
             release(mk)
-            audio_err = saved
+            __tls_audio_err = saved
             return false
         }
         d.lost = false

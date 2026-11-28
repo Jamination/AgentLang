@@ -17,7 +17,8 @@
 //     before a line that starts with a closing one, at the start or end of the file
 //   - no trailing white space, one line end after the last line; the line ends of the file
 //     (LF, or CRLF if its first line ends so) except inside raw strings, which stay as they are
-// From a comment `// alc fmt: off` on, the lines stay as written (tests of layout itself).
+// From a comment `// alc fmt: off` until `// alc fmt: on` (or the end of the file), the lines
+// stay as written (hand-aligned tables, tests of layout itself).
 // A file with a syntax error is not changed. Before a result is used it is checked: lexed
 // again it must give the same tokens (newlines that end statements included) and the same
 // comments, and formatting it again must not change it.
@@ -42,13 +43,19 @@ priv struct Src {
     errs: Vec[Diag]
     text: str
     starts: Vec[i64]        // the offset of each line's start (index: the line, from 1)
-    off_line: i64           // the line of the first `// alc fmt: off` (0: none)
+    off_ranges: Vec[(i64, i64)] // `(start_line, end_line)` for `// alc fmt: off` .. `on` (end 0 = EOF)
 }
 
 // a comment `// alc fmt: off` (more text may follow, not a letter or digit right after it): the
-// formatter leaves its line and the rest of the file as written
+// formatter leaves its line and the lines up to `// alc fmt: on` (or EOF) as written
 priv fn fmt_off(c: str) -> bool {
     m := "// alc fmt: off"
+    return starts_with(c, m) && (len(c) == len(m) || !(is_alnum(c[len(m)]) || c[len(m)] == '_'))
+}
+
+// a comment `// alc fmt: on` re-enables formatting after `// alc fmt: off`
+priv fn fmt_on(c: str) -> bool {
+    m := "// alc fmt: on"
     return starts_with(c, m) && (len(c) == len(m) || !(is_alnum(c[len(m)]) || c[len(m)] == '_'))
 }
 
@@ -159,29 +166,28 @@ priv fn scan(s: str) -> Src {
     if !r.errs.is_empty() {
         return r
     }
-    parser_lits.clear()
-    parser_kws.clear()
-    parser_lits_on = true
+    plits := vec[Pos]()
+    pkws := vec[Pos]()
     p := parser_new(toks, &r.errs)
+    parser_record_fmt(&p, &plits, &pkws)
     p.file()
-    parser_lits_on = false
     if !r.errs.is_empty() {
         return r
     }
     lits := map[i64, bool]()
-    for q in parser_lits {
+    for q in plits {
         lits.set(i64(q.line) << 32 | i64(q.col), true)
     }
-    take_apart(s, &r, &lits)
+    take_apart(s, &r, &lits, &pkws)
     return r
 }
 
 // the items of `s`, lexed into r.toks without errors (lits: the `{` of literals by line << 32 | col)
-priv fn take_apart(s: str, r: *Src, lits: *Map[i64, bool]) {
+priv fn take_apart(s: str, r: *Src, lits: *Map[i64, bool], pkws: *Vec[Pos]) {
     // `in`, `by`, `test` where the parser took them as keywords are laid out as keywords
     // (`by -1`, `in (a, b)`: no binary operator, no call); elsewhere they are names
     kws := map[i64, bool]()
-    for q in parser_kws {
+    for q in *pkws {
         kws.set(i64(q.line) << 32 | i64(q.col), true)
     }
     // the offset of each line's start (index: the line, from 1)
@@ -233,11 +239,19 @@ priv fn take_apart(s: str, r: *Src, lits: *Map[i64, bool]) {
     }
     r.text = s
     r.starts = starts
+    off_start := 0
     for it in r.items {
-        if !it.tok && fmt_off(it.text) {
-            r.off_line = it.line
-            break
+        if !it.tok {
+            if off_start == 0 && fmt_off(it.text) {
+                off_start = it.line
+            } else if off_start > 0 && fmt_on(it.text) {
+                r.off_ranges.push((off_start, it.line))
+                off_start = 0
+            }
         }
+    }
+    if off_start > 0 {
+        r.off_ranges.push((off_start, 0))
     }
 }
 
@@ -252,7 +266,8 @@ fn comment_lines(s: str) -> Map[i64, str] {
         return m
     }
     lits := map[i64, bool]()
-    take_apart(s, &r, &lits)
+    pkws := vec[Pos]()
+    take_apart(s, &r, &lits, &pkws)
     for i, it in r.items {
         if !it.tok {
             alone := i == 0 || r.items[i - 1].end_line < it.line
@@ -339,6 +354,7 @@ priv fn layout(sc: *Src, crlf: bool, bom: bool) -> str {
     // line below it in the same column continues it)
     tc_col := -1
     tc_at := 0
+    off_idx := 0
     k := 0
     while k < items.len {
         g0 := k
@@ -356,10 +372,102 @@ priv fn layout(sc: *Src, crlf: bool, bom: bool) -> str {
                 o.line_start = o.b.len
             }
         }
-        if sc.off_line > 0 && end >= sc.off_line {
-            // `// alc fmt: off`: from the start of this line on, the text as written
-            o.add(sc.text[sc.starts[first.line]..])
-            return o.b.items()
+        while off_idx < sc.off_ranges.len && sc.off_ranges[off_idx].1 > 0 && sc.off_ranges[off_idx].1 < first.line {
+            off_idx += 1
+        }
+        if off_idx < sc.off_ranges.len && end >= sc.off_ranges[off_idx].0 {
+            hi := sc.off_ranges[off_idx].1
+            if hi == 0 {
+                // `// alc fmt: off` without a matching `on`: from this line on, the text as written
+                o.add(sc.text[sc.starts[first.line]..])
+                return o.b.items()
+            }
+            // `// alc fmt: off` .. `// alc fmt: on`: copy lines first.line..=hi verbatim and keep
+            // bracket stack / continuation state synchronized across them
+            while k < items.len && items[k].line <= hi {
+                hi = max(hi, items[k].end_line)
+                k += 1
+            }
+            end_off := if hi + 1 < sc.starts.len { sc.starts[hi + 1] } else { len(sc.text) }
+            o.add(sc.text[sc.starts[first.line]..end_off])
+            if end_off == len(sc.text) && (o.b.len == 0 || o.b[o.b.len - 1] != '\n') {
+                o.add(eol)
+            }
+            o.line_start = o.b.len
+            tc_col = -1
+            last_end = hi
+            off_idx += 1
+            // Replay bracket/header state across the skipped lines so indentation after `on` is exact
+            r_cur := g0
+            while r_cur < k {
+                rl0 := r_cur
+                rl_end := items[r_cur].end_line
+                r_cur += 1
+                while r_cur < k && items[r_cur].line <= rl_end {
+                    rl_end = max(rl_end, items[r_cur].end_line)
+                    r_cur += 1
+                }
+                rf := items[rl0]
+                r_closed := rf.tok && closer(rf.t)
+                r_extra := if cont && !r_closed { cont_extra } else { 0 }
+                r_indent := if r_closed && stack.len > 0 { stack.last().base } else if stack.len > 0 { stack.last().base + 4 + r_extra } else { r_extra }
+                r_base := r_indent - r_extra
+                r_depth0 := stack.len
+                r_close_base := r_base
+                r_has_tok := false
+                for i in rl0..r_cur {
+                    it := items[i]
+                    if !it.tok {
+                        continue
+                    }
+                    t := it.t
+                    r_first_tok := !r_has_tok
+                    r_lit := it.lit
+                    r_pclose := false
+                    if closer(t) && stack.len > 0 {
+                        top := stack.pop()
+                        r_lit = top.lit
+                        r_pclose = top.prefix
+                        if stack.len < r_depth0 {
+                            r_close_base = top.base
+                        }
+                    }
+                    match t {
+                        Kw(kw) if kw == KW_STRUCT || kw == KW_ENUM || kw == KW_MATCH => {
+                            hdr = kw
+                            hdr_depth = stack.len
+                        }
+                        _ => {}
+                    }
+                    if opener(t) {
+                        r_prefix := punct(t, '[') && (r_first_tok || !ends_operand(pt, p_pclose))
+                        r_ch := if punct(t, '(') { '(' } else if punct(t, '[') { '[' } else { '{' }
+                        r_comma_cont := false
+                        if r_ch == '{' && !r_lit {
+                            r_comma_cont = !(hdr_depth == stack.len && (hdr == KW_STRUCT || hdr == KW_ENUM))
+                            if hdr_depth == stack.len {
+                                hdr_depth = -1
+                            }
+                        }
+                        stack.push(Open{ch: r_ch, base: if stack.len < r_depth0 { r_close_base } else { r_base }, lit: r_lit, prefix: r_prefix, comma_cont: r_comma_cont})
+                    }
+                    pt = t
+                    p_pclose = r_pclose
+                    p_lit = r_lit
+                    r_has_tok = true
+                }
+                if r_has_tok {
+                    r_was_cont := cont
+                    cont = continues(pt) || (punct(pt, ',') && (stack.len == 0 || stack.last().comma_cont))
+                    if cont {
+                        cont_extra = if r_was_cont { r_extra } else if stack.len > r_depth0 { 0 } else { 4 }
+                    }
+                    opened = opener(pt)
+                } else {
+                    opened = false
+                }
+            }
+            continue
         }
         prev_end := last_end
         last_end = end
@@ -546,7 +654,7 @@ priv fn walk(dir: str, out: *Vec[str]) {
     }
 }
 
-priv const FMT_USAGE = "usage: alc fmt [--check | --stdout] [--json] <file.al | directory | -> ...\n  rewrites the files in place in the canonical layout (directories: every .al file in them)\n  --check   change nothing; list the files that would change (exit status 1 if any)\n  --stdout  write the result to standard output instead of the file\n  --json    diagnostics as one JSON array on standard output, as `alc check --json`; with\n            --check also one entry per file that would change, at its first changed line\n  -         read standard input, write standard output\nA comment `// alc fmt: off` leaves its line and the rest of the file as written.\n"
+priv const FMT_USAGE = "usage: alc fmt [--check | --stdout] [--json] <file.al | directory | -> ...\n  rewrites the files in place in the canonical layout (directories: every .al file in them)\n  --check   change nothing; list the files that would change (exit status 1 if any)\n  --stdout  write the result to standard output instead of the file\n  --json    diagnostics as one JSON array on standard output, as `alc check --json`; with\n            --check also one entry per file that would change, at its first changed line\n  -         read standard input, write standard output\n  -h, --help print this help message\nA comment `// alc fmt: off` leaves lines as written until `// alc fmt: on` (or the end of the file).\n"
 
 // the first line where a and b differ (from 1)
 priv fn first_diff_line(a: str, b: str) -> i64 {
@@ -570,7 +678,10 @@ fn fmt_main(argv: []str, report: fn(*Vec[str], *Vec[Diag]) -> bool) -> i64 {
     as_json := false
     paths := vec[str]()
     for a in argv {
-        if a == "--check" {
+        if a == "--help" || a == "-h" {
+            put(FMT_USAGE)
+            return 0
+        } else if a == "--check" {
             check = true
         } else if a == "--stdout" {
             to_stdout = true
@@ -579,12 +690,25 @@ fn fmt_main(argv: []str, report: fn(*Vec[str], *Vec[Diag]) -> bool) -> i64 {
         } else if a == "-" || !starts_with(a, "-") {
             paths.push(a)
         } else {
-            eput(fmt("unknown option ", a, "\n", FMT_USAGE))
+            if as_json {
+                un := vec_one("")
+                ue := vec_one(Diag{pos: Pos{file: 0, line: 0, col: 0}, msg: fmt("unknown option ", a)})
+                report(&un, &ue)
+            } else {
+                eput(fmt("unknown option ", a, "\n", FMT_USAGE))
+            }
             return 2
         }
     }
     if paths.len == 0 || (check && to_stdout) || (as_json && (to_stdout || contains(&paths, "-"))) {
-        eput(FMT_USAGE)
+        if as_json {
+            msg := if paths.len == 0 { "usage: alc fmt [--check | --stdout] [--json] <file.al | directory | -> ..." } else if check && to_stdout { "--check and --stdout cannot be used together" } else { "--json cannot be used with --stdout or `-`" }
+            un := vec_one("")
+            ue := vec_one(Diag{pos: Pos{file: 0, line: 0, col: 0}, msg: msg})
+            report(&un, &ue)
+        } else {
+            eput(FMT_USAGE)
+        }
         return 2
     }
     // --json: the diagnostics of all files (file: an index into all_names), printed at the end

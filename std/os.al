@@ -38,6 +38,62 @@ fn run_capture_all(argv: []str) -> (str, i64) {
     return start(argv, 2)
 }
 
+priv tmp_seq: i64
+
+// Returns the system temporary directory (TMPDIR / TEMP / TMP, falling back to /tmp or .).
+fn temp_dir() -> str {
+    when TARGET_OS == Windows {
+        for k in []str{"TEMP", "TMP", "TMPDIR"} {
+            v, ok := env_get(k)
+            if ok && len(v) > 0 {
+                return v
+            }
+        }
+        return "."
+    } else {
+        for k in []str{"TMPDIR", "TMP", "TEMP"} {
+            v, ok := env_get(k)
+            if ok && len(v) > 0 {
+                return v
+            }
+        }
+        return "/tmp"
+    }
+}
+
+// Runs `argv` and captures standard output and standard error separately: (stdout, stderr, status).
+fn run_capture_split(argv: []str) -> (str, str, i64) {
+    return run_with_stdin(argv, "")
+}
+
+// Runs `argv` feeding `stdin_data` as standard input and capturing stdout and stderr separately:
+// (stdout, stderr, status). Status is -1 on launch failure (see io_error()).
+fn run_with_stdin(argv: []str, stdin_data: str) -> (str, str, i64) {
+    seq := atomic_add(&tmp_seq, 1)
+    tag := fmt("al_proc_", process_id(), "_", seq)
+    dir := temp_dir()
+    p_in := path_join(dir, concat(tag, ".in"))
+    p_out := path_join(dir, concat(tag, ".out"))
+    p_err := path_join(dir, concat(tag, ".err"))
+    has_in := len(stdin_data) > 0
+    if has_in && !write_file(p_in, stdin_data) {
+        return ("", "", -1)
+    }
+    defer {
+        if has_in {
+            remove_file(p_in)
+        }
+        remove_file(p_out)
+        remove_file(p_err)
+    }
+    st := run(argv, Launch{stdin: if has_in { p_in } else { "" }, stdout: p_out, stderr: p_err})
+    e := io_error()
+    out, _ := read_file(p_out)
+    err, _ := read_file(p_err)
+    __io_result(-e)
+    return (out, err, st)
+}
+
 // ---------- background processes ----------
 // A program started by `spawn` that runs alongside this process. Copies of a Process are the
 // same process.
@@ -145,8 +201,12 @@ priv fn start(argv: []str, capture: i64) -> (str, i64) {
         __os_close(pipe_r)
     }
     st := __os_wait(pid, handle, true)
+    if st < 0 {
+        __io_result(st)
+        return (out, -1)
+    }
     __io_result(0)
-    return (out, max(st, 0))
+    return (out, st)
 }
 
 // ---------- shared memory and file descriptors ----------

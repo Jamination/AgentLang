@@ -416,8 +416,8 @@ not read, and they leave no code or data in the executable.
   result, `const BIG = LEVEL > 2`), an operand of the wrong type, a name that is not declared.
   A misspelt name is never false. Every condition of a chain is checked, also those after the
   taken branch.
-- **Which constants.** The built-in `TARGET_OS` (`enum Os { Linux, Windows }`, declared by the
-  OS layer of the run-time library for `--target`) and `TARGET_ARCH` (`enum Arch { X86_64 }`),
+- **Which constants.** The built-in `TARGET_OS` (`enum Os { Linux, Windows, MacOS }`, declared by the
+  OS layer of the run-time library for `--target`) and `TARGET_ARCH` (`enum Arch { X86_64, Arm64 }`),
   and the constants of the program declared at top level outside every `when`, in any file. A
   name of the condition's file means its private constant first, then a public one of the
   program, then one of the library (the library's own `when`s see only the library's). Such a
@@ -526,7 +526,7 @@ panic: index out of bounds at main.al:12
   (start-up, test runner). Library frames between frames of the program (`sort_by` calling a
   comparison) are shown; a run of more than 7 as its first 4 and last 3 around
   `  ... N more frames in the library`. Modules loaded with `use std.name` count as the
-  program: `  at <std/image.al>:1095 in image_new` shows where a call failed inside one.
+  program: `  at <std/image.al>:1109 in image_new` shows where a call failed inside one.
 - **C code.** The trace goes on through frames of C libraries (a callback called by `qsort`
   that panics, a fault inside `strlen`), one line each: `  at LIBRARY SYMBOL`, the library's
   file name and the function (Linux: its dynamic symbol; Windows: its export), or

@@ -1,0 +1,4 @@
+ok: true true false build.bin 8 [in1.al, --not-a-flag]
+bad_int: false option `--jobs` expects an integer, got `notanint`
+unknown: false unknown option `--unknown`
+help: true true true true

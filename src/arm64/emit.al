@@ -706,8 +706,24 @@ fn a_emit(mf: *AFunc, alloc: *AAlloc, layout: []i64) -> A64Code {
                 }
                 a64_bcond(f.cc, d)
             }
-            Cbnz => a64_cbz(f.sf, true, f.reg, d)
-            _ => a64_cbz(f.sf, false, f.reg, d)
+            Cbnz, Cbz => {
+                if d < -(1 << 18) || d >= (1 << 18) {
+                    if len(err) == 0 {
+                        err = fmt("function `", mf.name, "` is too large for the conditional branches of arm64 (1 MiB)")
+                    }
+                    d = 0
+                }
+                a64_cbz(f.sf, f.op == Cbnz, f.reg, d)
+            }
+            _ => {
+                if d < -(1 << 18) || d >= (1 << 18) {
+                    if len(err) == 0 {
+                        err = fmt("function `", mf.name, "` is too large for the conditional branches of arm64 (1 MiB)")
+                    }
+                    d = 0
+                }
+                a64_cbz(f.sf, false, f.reg, d)
+            }
         }
         e.words[f.at] = word
     }
@@ -722,7 +738,14 @@ fn a_emit(mf: *AFunc, alloc: *AAlloc, layout: []i64) -> A64Code {
         }
     }
     for jf in e.jfix {
-        e.words[jf.0] = a64_adr(16, 4 * (tpos[jf.1] - jf.0))
+        off := 4 * (tpos[jf.1] - jf.0)
+        if off < -(1 << 20) || off >= (1 << 20) {
+            if len(err) == 0 {
+                err = fmt("function `", mf.name, "` is too large for the jump table address of arm64 (1 MiB)")
+            }
+            off = 0
+        }
+        e.words[jf.0] = a64_adr(16, off)
     }
     bytes := vec[u8]()
     bytes.reserve(4 * e.words.len)

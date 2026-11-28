@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux x86-64 (bootstrap, tests, structural checks, crash fuzz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang for f32 and C-interop tests
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: 3-stage self-hosted build and verification
+        run: |
+          ./build.sh
+          tests/run.sh ./build/alc
+      - name: Verify ALC_JOBS=1 determinism
+        run: |
+          ALC_JOBS=1 ./build/alc build src/main.al -o /tmp/alc_j1
+          cmp -s build/alc /tmp/alc_j1
+      - name: Run structural checks (arm64 ELF & macOS Mach-O)
+        run: |
+          ./build/alc run tests/arm64/check.al -o /tmp/a64chk -- ./build/alc
+          ./build/alc run tests/macho/check.al -o /tmp/machochk -- ./build/alc
+      - name: Run parser/typechecker/formatter crash fuzzer
+        run: python3 tests/gen/fuzz_crash.py --cases 200 --seed 42
+      - name: Run Vim plugin tests (if vim installed)
+        run: |
+          if command -v vim >/dev/null 2>&1; then
+            bash editors/vim/test/indent/run.sh
+            bash editors/vim/test/syntax/run.sh
+          fi
+
+  windows:
+    name: Windows x86-64 (bootstrap & conformance)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run verify.bat
+        shell: cmd
+        run: verify.bat

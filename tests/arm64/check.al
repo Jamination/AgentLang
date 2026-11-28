@@ -717,6 +717,7 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals, sigs: Map[str, Si
     nload := 0
     has_tls := false
     has_stack := false
+    has_relro := false
     dyn_va := 0
     dyn_size := 0
     interp := ""
@@ -754,6 +755,11 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals, sigs: Map[str, Si
             if u32_at(b, h + 4) & 1 != 0 {
                 bad(p, name, "PT_GNU_STACK asks for an executable stack")
             }
+        } else if ty == 0x6474e552 {
+            has_relro = true
+            if fsz == 0 || fsz != msz || va % 0x10000 != 0 || msz % 0x10000 != 0 {
+                bad(p, name, fmt("PT_GNU_RELRO: address ", va, ", sizes ", fsz, "/", msz))
+            }
         }
     }
     if nload != 2 || !has_tls || !has_stack {
@@ -762,12 +768,12 @@ priv fn check_elf(name: str, b: str, p: *Vec[str], t: *Totals, sigs: Map[str, Si
     cs := CSide{sigs: sigs}
     dynamic := dyn_va != 0
     if dynamic {
-        if !has_phdr || interp != "/lib/ld-linux-aarch64.so.1" || phnum != 7 {
-            bad(p, name, fmt("a dynamic executable needs PT_PHDR first, PT_INTERP /lib/ld-linux-aarch64.so.1 (", interp, ") and 7 program headers"))
+        if !has_phdr || !has_relro || interp != "/lib/ld-linux-aarch64.so.1" || phnum != 8 {
+            bad(p, name, fmt("a dynamic executable needs PT_PHDR first, PT_INTERP /lib/ld-linux-aarch64.so.1 (", interp, "), PT_GNU_RELRO and 8 program headers"))
         }
         check_dynamic(name, b, &segs, dyn_va, dyn_size, &cs, p)
-    } else if interp != "" || has_phdr {
-        bad(p, name, "PT_INTERP or PT_PHDR without PT_DYNAMIC")
+    } else if interp != "" || has_phdr || has_relro {
+        bad(p, name, "PT_INTERP, PT_PHDR or PT_GNU_RELRO without PT_DYNAMIC")
     }
     // sections: .text and .symtab / .strtab
     text_off := -1
@@ -969,7 +975,7 @@ priv fn check_dynamic(name: str, b: str, segs: *Vec[Seg], dyn_va: i64, dyn_size:
 }
 
 priv fn check_func(name: str, b: str, text_off: i64, text_addr: i64, fn_: Func, starts: *Map[i64, bool], segs: *Vec[Seg],
-        in_image: fn(*Vec[Seg], i64) -> bool, p: *Vec[str], t: *Totals, stub: bool, cs: *CSide) {
+    in_image: fn(*Vec[Seg], i64) -> bool, p: *Vec[str], t: *Totals, stub: bool, cs: *CSide) {
     n := fn_.size / 4
     if n == 0 {
         return

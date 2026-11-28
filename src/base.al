@@ -1,6 +1,98 @@
 // Helpers shared by the compiler sources: Vec conveniences, processes, worker threads, working
 // memory.
 
+// ---------- fuzzy matching (did-you-mean suggestions) ----------
+// ASCII lower-case byte (for case-insensitive typo matching)
+priv inline fn ascii_lower(c: u8) -> u8 {
+    return if c >= 'A' && c <= 'Z' { c + 32 } else { c }
+}
+
+// Damerau-Levenshtein edit distance (transposition = 1), capped at `lim + 1` for fast early exit.
+// Compares case-insensitively first; an exact case-insensitive match with different casing gets
+// distance 1 so `myvar` suggests `myVar`.
+priv fn edit_dist(a: str, b: str, lim: i64) -> i64 {
+    na := len(a)
+    nb := len(b)
+    if na == 0 || nb == 0 || abs(na - nb) > lim {
+        return lim + 1
+    }
+    if na > 64 || nb > 64 {
+        return lim + 1
+    }
+    prev2: [65]i64
+    prev: [65]i64
+    cur: [65]i64
+    for j in 0..=nb {
+        prev[j] = j
+    }
+    for i in 1..=na {
+        cur[0] = i
+        row_min := i
+        ca := ascii_lower(a[i - 1])
+        for j in 1..=nb {
+            cb := ascii_lower(b[j - 1])
+            cost := if ca == cb { 0 } else { 1 }
+            d := min(prev[j] + 1, min(cur[j - 1] + 1, prev[j - 1] + cost))
+            if i > 1 && j > 1 && ca == ascii_lower(b[j - 2]) && ascii_lower(a[i - 2]) == cb {
+                d = min(d, prev2[j - 2] + 1)
+            }
+            cur[j] = d
+            if d < row_min {
+                row_min = d
+            }
+        }
+        if row_min > lim {
+            return lim + 1
+        }
+        for j in 0..=nb {
+            prev2[j] = prev[j]
+            prev[j] = cur[j]
+        }
+    }
+    d := prev[nb]
+    if d == 0 && a != b {
+        return 1
+    }
+    return d
+}
+
+// closest candidate name to `name` within a small typo distance, or "" if none fits
+fn did_you_mean(name: str, cands: []str) -> str {
+    n := len(name)
+    if n < 2 {
+        return ""
+    }
+    lim := if n <= 3 { 1 } else if n <= 8 { 2 } else { 3 }
+    best := ""
+    best_d := lim + 1
+    for c in cands {
+        if len(c) == 0 || c == name || starts_with(c, "__") {
+            continue
+        }
+        d := edit_dist(name, c, best_d - 1)
+        if d < best_d {
+            best_d = d
+            best = c
+            if best_d == 1 && len(c) == n {
+                // exact length 1-edit match is hard to beat, keep scanning only for case-only match
+                if to_lower(c) == to_lower(name) {
+                    return best
+                }
+            }
+        }
+    }
+    return best
+}
+
+// "; did you mean `best`?" if a close candidate exists, else ""
+fn did_you_mean_hint(name: str, cands: []str) -> str {
+    b := did_you_mean(name, cands)
+    if len(b) == 0 {
+        return ""
+    }
+    return fmt(" (did you mean `", b, "`?)")
+}
+
 // ---------- Vec ----------
 // Vecs of one and two elements without an intermediate slice (`succs` in ir.al is hot:
 // vec_of([]i64{t}) there costs 15 % of the whole compile time)
@@ -165,7 +257,7 @@ fn os_error(errno: i64) -> str {
 // the stack of a worker thread (reserved; committed as it is used). Nothing that runs there
 // (opt_finish, compile_fn) recurses deeper with the size or nesting of a function: every
 // program measured needs about 12 KiB, see "Parallel back end" in docs/BOOTSTRAP.md
-priv const WORKER_STACK = 1 << 20
+priv const WORKER_STACK = 2 << 20
 
 // starts a thread that runs f(ctx); nil if it cannot be started
 fn worker_start[C](f: fn(C), ctx: C) -> *__ThreadCtl {

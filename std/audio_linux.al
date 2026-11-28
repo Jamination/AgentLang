@@ -16,12 +16,12 @@ struct AudioOs {
 }
 
 // why the last audio_open failed
-priv audio_err: str
+priv __tls_audio_err: str
 
 // Why the last audio_open failed: the ALSA error text with the call that failed; "" after a
 // successful open.
 fn audio_error() -> str {
-    audio_err
+    __tls_audio_err
 }
 
 // Opens the ALSA device `name` ("default", "null", "hw:0", ...) with `latency_ms` of buffering.
@@ -31,7 +31,7 @@ fn audio_open(name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDe
     err := snd_pcm_open(&pcm, cstr(name), SND_PCM_STREAM_PLAYBACK, 0)
     release(mk)
     if err < 0 {
-        audio_err = fmt("snd_pcm_open(", name, "): ", from_cstr(snd_strerror(err)))
+        __tls_audio_err = fmt("snd_pcm_open(", name, "): ", from_cstr(snd_strerror(err)))
         return (nil, false)
     }
     buffer: u64
@@ -41,11 +41,11 @@ fn audio_open(name: str, rate: i64, channels: i64, latency_ms: i64) -> (*AudioDe
         err = snd_pcm_get_params(pcm, &buffer, &period)
     }
     if err < 0 {
-        audio_err = fmt("snd_pcm_set_params(", name, "): ", from_cstr(snd_strerror(err)))
+        __tls_audio_err = fmt("snd_pcm_set_params(", name, "): ", from_cstr(snd_strerror(err)))
         snd_pcm_close(pcm)
         return (nil, false)
     }
-    audio_err = ""
+    __tls_audio_err = ""
     d := new[AudioDevice]()
     d.os.pcm = pcm
     d.rate = rate

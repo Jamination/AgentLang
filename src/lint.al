@@ -5,8 +5,10 @@
 // itself was meant. `lint_copy_writes` finds that pattern for one `:=` statement.
 
 priv struct Use {
+    cx: *Cx
+    root_ty: i64
     name: str
-    // direct field assignments `name.f = e` / `name.f op= e`
+    // assignments into value-copied parts of `name` (`name.f = e`, `name.a.b = e`, `name[i] = e`)
     writes: i64
     first: Pos
     field: str
@@ -70,9 +72,108 @@ priv fn opt(u: *Use, e: Opt[*Expr]) -> bool {
     }
 }
 
+// Step from a value type `ty` into field `f`; returns (true, field_ty) only for inline value
+// fields (Struct/Tuple), NOT through a Ptr (auto-deref mutates shared storage).
+priv fn value_field_ty(cx: *Cx, ty: i64, f: str) -> (bool, i64) {
+    match cx.types.k(ty) {
+        Struct(sid) => {
+            for fd in cx.types.structs[sid].fields {
+                if fd.0 == f {
+                    return (true, fd.1)
+                }
+            }
+            return (false, T_ERR)
+        }
+        Tuple(tys) => {
+            i, ok := parse_i64(f)
+            if ok && i >= 0 && i < tys.len {
+                return (true, tys[i])
+            }
+            return (false, T_ERR)
+        }
+        _ => return (false, T_ERR)
+    }
+}
+
+// Step from a value type `ty` into an element via `[i]`; returns (true, elem_ty) ONLY for inline
+// fixed-size arrays (`[N]T`), NOT slices or Vecs (which share backing storage).
+priv fn value_elem_ty(cx: *Cx, ty: i64) -> (bool, i64) {
+    match cx.types.k(ty) {
+        Array(et, _) => (true, et)
+        _ => (false, T_ERR)
+    }
+}
+
+// is `e` a place rooted at `u.name` through ONLY inline value fields/arrays (never Ptr/Slice/Vec)?
+// Returns (true, suffix_str, leaf_ty) and visits any index subexpressions into `u`.
+priv fn write_root(u: *Use, e: *Expr) -> (bool, str, i64) {
+    match e.k {
+        Field(b, f) => {
+            if is_name(b, u.name) {
+                ok, ft := value_field_ty(u.cx, u.root_ty, f)
+                return if ok { (true, fmt(".", f), ft) } else { (false, "", T_ERR) }
+            }
+            ok, sub, bty := write_root(u, b)
+            if ok {
+                fok, ft := value_field_ty(u.cx, bty, f)
+                if fok {
+                    return (true, fmt(sub, ".", f), ft)
+                }
+            }
+            return (false, "", T_ERR)
+        }
+        Index(b, idx) => {
+            if is_name(b, u.name) {
+                ok, et := value_elem_ty(u.cx, u.root_ty)
+                if ok {
+                    exprs(u, &idx)
+                    return (true, "[..]", et)
+                }
+                return (false, "", T_ERR)
+            }
+            ok, sub, bty := write_root(u, b)
+            if ok {
+                eok, et := value_elem_ty(u.cx, bty)
+                if eok {
+                    exprs(u, &idx)
+                    return (true, fmt(sub, "[..]"), et)
+                }
+            }
+            return (false, "", T_ERR)
+        }
+        _ => return (false, "", T_ERR)
+    }
+}
+
+// true if statement `s` declares `name` in its block (shadowing the outer variable)
+priv fn declares_name(s: *Stmt, name: str) -> bool {
+    match s.k {
+        Let(names, _) => {
+            for n in names {
+                if n == name {
+                    return true
+                }
+            }
+            false
+        }
+        Var(n, _, _) => n == name
+        _ => false
+    }
+}
+
 priv fn block(u: *Use, b: *Block) -> bool {
     for i in 0..b.stmts.len {
-        stmt(u, &b.stmts[i])
+        s := &b.stmts[i]
+        // Evaluate initializer before shadowing takes effect, then stop scanning this block
+        if declares_name(s, u.name) {
+            match s.k {
+                Let(_, e) => { expr(u, e) }
+                Var(_, _, init) => { opt(u, init) }
+                _ => {}
+            }
+            return true
+        }
+        stmt(u, s)
     }
     return true
 }
@@ -135,17 +236,16 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
         Var(_, _, init) => opt(u, init)
         Assign(lhs, _, rhs) => {
             expr(u, rhs)
-            match lhs.k {
-                // a direct field assignment `name.f = e`
-                Field(b, f) if is_name(b, u.name) => {
-                    if u.writes == 0 {
-                        u.first = lhs.pos
-                        u.field = f
-                    }
-                    u.writes += 1
-                    true
+            ok, suffix, _ := write_root(u, lhs)
+            if ok {
+                if u.writes == 0 {
+                    u.first = lhs.pos
+                    u.field = suffix
                 }
-                _ => expr(u, lhs)
+                u.writes += 1
+                true
+            } else {
+                expr(u, lhs)
             }
         }
         If(c, t, eo) => {
@@ -165,7 +265,14 @@ priv fn stmt(u: *Use, s: *Stmt) -> bool {
             expr(u, f.lo)
             opt(u, f.hi)
             opt(u, f.step)
-            block(u, f.body)
+            shadowed := f.var1 == u.name || match f.var2 {
+                Some(v2) => v2 == u.name
+                None => false
+            }
+            if !shadowed {
+                block(u, f.body)
+            }
+            true
         }
         Return(e) => opt(u, e)
         Break, Continue, BreakTo(_), ContinueTo(_) => true
@@ -193,15 +300,17 @@ fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
         return
     }
     name := names[0]
-    v := match self.lookup(name) {
+    v := match self.lookup_peek(name) {
         Some(v) => v
         None => return
     }
-    match self.cx.types.k(v.0) {
-        Struct(_) => {}
+    kind_name := match self.cx.types.k(v.0) {
+        Struct(_) => "struct"
+        Array(_, _) => "array"
+        Tuple(_) => "tuple"
         _ => return
     }
-    u := Use{name: name, first: s.pos}
+    u := Use{cx: self.cx, root_ty: v.0, name: name, first: s.pos}
     for j in i + 1..b.stmts.len {
         stmt(&u, &b.stmts[j])
         if u.others > 0 {
@@ -211,6 +320,6 @@ fn lint_copy_writes(self: *Fx, b: *Block, i: i64) {
     if u.writes > 0 {
         src := place_str(e)
         plain := ast_plain(name)
-        self.err(u.first, fmt("`", plain, "` is a copy of `", src, "` (`:=` copies a struct), so this assignment changes only the copy, and the copy is never read afterwards. To change the original write `", src, ".", u.field, " = ...`, or take a pointer: `", plain, " := &", src, "`"))
+        self.err(u.first, fmt("`", plain, "` is a copy of `", src, "` (`:=` copies a ", kind_name, "), so this assignment changes only the copy, and the copy is never read afterwards. To change the original write `", src, u.field, " = ...`, or take a pointer: `", plain, " := &", src, "`"))
     }
 }

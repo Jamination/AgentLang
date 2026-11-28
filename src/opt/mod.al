@@ -4,21 +4,27 @@
 // the environment switches, read once
 priv env_read: bool
 priv env_debug: str
-priv env_disable: str
 priv env_has_disable: bool
+priv env_disabled: Map[str, bool]
 
 priv fn read_env() {
     if !env_read {
         env_read = true
         d, _ := env_get("ALC_DEBUG")
         env_debug = d
-        env_disable, env_has_disable = env_get("ALC_DISABLE")
+        dis, has := env_get("ALC_DISABLE")
+        env_has_disable = has && len(dis) > 0
+        if env_has_disable {
+            for p in split(dis, ',') {
+                env_disabled.set(p, true)
+            }
+        }
     }
 }
 
 fn opt_enabled(name: str) -> bool {
     read_env()
-    return !env_has_disable || !split(env_disable, ',').contains(name)
+    return !env_has_disable || !env_disabled.has(name)
 }
 
 // check_fail[k]: function k ends the program for a failed run-time check (__bounds_fail,
@@ -609,11 +615,31 @@ fn opt_deferred() -> bool {
     return deferred
 }
 
-// Optimises the module on the compiler's main thread (work_main()); at -O0 only prepares what
-// opt_finish needs. Everything the back end's threads read of the optimiser's state (the
-// tables by function, the environment switches) is filled here, before they start.
+// Pre-inline local optimisation of one function, run in parallel across worker threads
+// before the bottom-up inlining loop. Reads nothing of the module outside `m.funcs[fid]`.
+priv fn opt_pre(m: *Module, fid: i64, level: i64, w: *Work) {
+    f := &m.funcs[fid]
+    if !f.lowered {
+        return
+    }
+    f.w = w
+    work_begin(w)
+    ir_memo_begin(f)
+    sk_restore(f, clean_at[fid])
+    local_opt(f, level)
+    ir_memo_end(w)
+    work_end(w)
+    clean_at[fid] = sk_save(f)
+    keep_func(f)
+    f.w = nil
+}
+
+// Optimises the module; at -O0 only prepares what opt_finish needs. At -O1/-O2 runs opt_first
+// and pre-inline local_opt across worker threads (when enough functions exist and tracing is
+// off), then runs the bottom-up inlining and specialization loop on the main thread.
 fn opt_optimize(m: *Module, level: i64) {
     read_env()
+    alias_init()
     n := m.funcs.len
     check_fail = vec_fill(n, false)
     for fid in 0..n {
@@ -628,8 +654,24 @@ fn opt_optimize(m: *Module, level: i64) {
         return
     }
     w := work_main()
+    cands := vec[i64]()
     for fid in 0..n {
-        opt_first(m, fid, level, w)
+        if m.funcs[fid].lowered {
+            cands.push(fid)
+        }
+    }
+    nw, exact := spread_jobs()
+    tracing := env_debug != "" && env_debug != "mem"
+    nt := if tracing || cands.len < SPREAD_MIN { 1 } else { spread_threads(nw, exact, cands.len, SPREAD_PER) }
+    if nt > 1 {
+        ord1 := spread_order(m, cands.items())
+        spread_run(ord1.items(), nt, (m, level), fn(ctx: (*Module, i64), fid: i64, wk: *Work) {
+            opt_first(ctx.0, fid, ctx.1, wk)
+        })
+    } else {
+        for fid in 0..n {
+            opt_first(m, fid, level, w)
+        }
     }
     // call graph facts
     call_counts := vec_fill(n, 0)
@@ -692,10 +734,25 @@ fn opt_optimize(m: *Module, level: i64) {
             }
         }
     }
+    pre_done := vec_fill(n, false)
+    if nt > 1 {
+        ord2 := spread_order(m, cands.items())
+        spread_run(ord2.items(), nt, (m, level), fn(ctx: (*Module, i64), fid: i64, wk: *Work) {
+            opt_pre(ctx.0, fid, ctx.1, wk)
+        })
+    } else {
+        for fid in cands {
+            opt_pre(m, fid, level, w)
+        }
+    }
+    for fid in cands {
+        pre_done[fid] = true
+    }
     st := OptState{
         level: level,
         pol: Policy{small: 40, hinted: 400, single_site: 150, max_caller: 4000, devirt: devirt},
         done: vec_fill(n, false),
+        pre_done: pre_done,
         costs: vec_fill(n, -1),
         call_counts: call_counts,
         addr_taken: addr_taken,
@@ -713,8 +770,9 @@ fn opt_optimize(m: *Module, level: i64) {
 struct OptState {
     level: i64
     pol: Policy
-    done: Vec[bool] // the function is final
-    costs: Vec[i64] // see inline_run
+    done: Vec[bool]     // the function is final
+    pre_done: Vec[bool] // pre-inline local_opt already ran in parallel
+    costs: Vec[i64]     // see inline_run
     call_counts: Vec[i64]
     addr_taken: Vec[bool]
     spec: Spec
@@ -730,7 +788,9 @@ fn opt_func(m: *Module, fid: i64, st: *OptState) {
         work_begin(w)
         ir_memo_begin(f)
         sk_restore(f, clean_at[fid])
-        local_opt(f, st.level)
+        if !st.pre_done[fid] {
+            local_opt(f, st.level)
+        }
         inlined, direct := inline_run(m, fid, st.done.items(), st.call_counts.items(), st.addr_taken.items(), &st.pol, st.costs.items())
         if inlined {
             sk_forget(f)
@@ -777,6 +837,7 @@ fn opt_add_func(m: *Module, st: *OptState, f: Func) -> i64 {
     clean_end.resize(n, 0)
     check_fail.resize(n, false)
     st.done.push(false)
+    st.pre_done.push(false)
     st.costs.push(-1)
     st.call_counts.push(0)
     st.addr_taken.push(false)

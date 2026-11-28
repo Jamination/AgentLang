@@ -37,7 +37,11 @@ fn as_bytes[T](s: []T) -> []u8 {
 
 // bytes reinterpreted as a slice of T (a view; trailing bytes that do not fill a T are dropped)
 fn from_bytes[T](b: []u8) -> []T {
-    return mkslice[T](ptr(b), len(b) / sizeof[T]())
+    sz := sizeof[T]()
+    if sz == 0 {
+        return nil
+    }
+    return mkslice[T](ptr(b), len(b) / sz)
 }
 
 // sets the value p points to to all zero bytes

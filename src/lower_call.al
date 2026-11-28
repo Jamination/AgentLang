@@ -538,7 +538,10 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                 "int", "float" => " (convert with a type name: `i64(x)`, `f64(x)`)"
                 _ => ""
             }
-            self.err(pos, fmt("unknown function `", n, "`", hint, self.nested_hint(n, pos), self.cx.priv_hint(n)))
+            nh := self.nested_hint(n, pos)
+            ph := self.cx.priv_hint(n)
+            dym := if len(hint) == 0 && len(nh) == 0 && len(ph) == 0 { self.suggest_fn(n, pos) } else { "" }
+            self.err(pos, fmt("unknown function `", n, "`", hint, nh, ph, dym))
             lower_call_eval_all(self, args)
             return val_err()
         }
@@ -1610,171 +1613,255 @@ priv fn one_targ(self: *Fx, name: str, targs: Opt[[]i64], pos: Pos) -> i64 {
 
 // ---------- builtins ----------
 fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i64], pos: Pos) -> Opt[Val] {
+    match name {
+        "len", "sizeof", "variant_count", "offsetof", "std140_size", "std430_size", "hlsl_cbuffer_size" => {
+            return Some(self.builtin_layout(name, targs, args, pos))
+        }
+        "cast" => {
+            return Some(self.builtin_cast(targs, args, pos))
+        }
+        "mkslice", "ptr", "memcopy", "memfill", "syscall" => {
+            return Some(self.builtin_mem(name, targs, args, pos))
+        }
+        "__ra_addr" if self.cx.scope_prelude && len(args) == 0 => {
+            // (library only: the start of a stack trace, see __bt_print in the prelude; the
+            // function that uses it must not be inlined)
+            return Some(self.sval(T_I64, self.ins(RaAddr, I64, vec[i64](), 0)))
+        }
+        "__ld64_any", "__ld32_any" if self.cx.scope_prelude && len(args) == 1 => {
+            return Some(self.builtin_rt_low(name, args))
+        }
+        "__fresh" if self.cx.scope_prelude && len(args) == 1 => {
+            return Some(self.builtin_rt_low(name, args))
+        }
+        "__clone" if self.cx.scope_prelude && len(args) == 5 => {
+            return Some(self.builtin_rt_low(name, args))
+        }
+        "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence" => {
+            return Some(self.atomic(name, args, pos))
+        }
+        "sqrt", "fabs", "fmin", "fmax", "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "mulhi" => {
+            return Some(self.builtin_math(name, args, expect, pos))
+        }
+        "embed", "panic", "fmt", "hash", "clone", "put", "print" => {
+            return Some(self.builtin_io(name, args, expect, pos))
+        }
+        _ => return None
+    }
+}
+
+priv fn builtin_layout(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, pos: Pos) -> Val {
     nargs := len(args)
     match name {
         "len" => {
             if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+                return val_err()
             }
             v := self.expr(&args[0], None)
             if v.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             match self.len_of(v) {
-                Some(l) => return Some(l)
+                Some(l) => return l
                 None => {
                     tn := self.tyname(v.ty)
                     self.err(pos, fmt("`len` needs a slice, array, str, Vec or Map, found ", tn))
-                    return Some(val_err())
+                    return val_err()
                 }
             }
         }
         "sizeof" => {
             if self.bad_arity(name, nargs, 0, pos) {
-                return Some(val_err())
+                return val_err()
             }
             t := self.one_targ(name, targs, pos)
             if t < 0 {
-                return Some(val_err())
+                return val_err()
             }
             s := self.cx.types.size_of(t)
-            v := self.iconst(I64, i64(s))
-            return Some(self.sval(T_I64, v))
+            return self.sval(T_I64, self.iconst(I64, i64(s)))
         }
         "variant_count" => {
             if self.bad_arity(name, nargs, 0, pos) {
-                return Some(val_err())
+                return val_err()
             }
             t := self.one_targ(name, targs, pos)
             if t < 0 {
-                return Some(val_err())
+                return val_err()
             }
             n, err := self.cx.variant_count(t)
             if len(err) != 0 {
                 self.err(pos, err)
-                return Some(val_err())
+                return val_err()
             }
-            return Some(self.sval(T_I64, self.iconst(I64, n)))
+            return self.sval(T_I64, self.iconst(I64, n))
         }
         "offsetof" => {
             // the offset of a field: the argument names it and is not evaluated
             if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+                return val_err()
             }
             t := self.one_targ(name, targs, pos)
             if t < 0 {
-                return Some(val_err())
+                return val_err()
             }
             off, _, err := self.cx.offset_of(t, &args[0])
             if len(err) != 0 {
                 self.err(pos, fmt(name, "[", self.tyname(t), "]: ", err))
-                return Some(val_err())
+                return val_err()
             }
-            return Some(self.sval(T_I64, self.iconst(I64, off)))
+            return self.sval(T_I64, self.iconst(I64, off))
         }
-        "std140_size", "std430_size", "hlsl_cbuffer_size" => {
-            // the size in a GLSL buffer block / an HLSL constant buffer; a compile error if the
-            // AL layout differs
+        _ => {
+            // std140_size, std430_size, hlsl_cbuffer_size: the size in a GLSL buffer block /
+            // an HLSL constant buffer; a compile error if the AL layout differs
             if self.bad_arity(name, nargs, 0, pos) {
-                return Some(val_err())
+                return val_err()
             }
             t := self.one_targ(name, targs, pos)
             if t < 0 {
-                return Some(val_err())
+                return val_err()
             }
             s, _, err := if name == "hlsl_cbuffer_size" { self.cx.types.hlsl_cbuffer(t) } else { self.cx.types.gpu_layout(t, name == "std140_size", "") }
             if len(err) != 0 {
                 self.err(pos, fmt(name, "[", self.tyname(t), "]: ", err))
-                return Some(val_err())
+                return val_err()
             }
-            return Some(self.sval(T_I64, self.iconst(I64, s)))
+            return self.sval(T_I64, self.iconst(I64, s))
         }
-        "cast" => {
-            if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+    }
+}
+
+priv fn builtin_cast(self: *Fx, targs: Opt[[]i64], args: []Expr, pos: Pos) -> Val {
+    if self.bad_arity("cast", len(args), 1, pos) {
+        return val_err()
+    }
+    to := self.one_targ("cast", targs, pos)
+    if to < 0 {
+        return val_err()
+    }
+    v := self.expr(&args[0], None)
+    if v.ty == T_ERR {
+        return val_err()
+    }
+    fk := self.cx.types.k(v.ty)
+    tk := self.cx.types.k(to)
+    if builtin_word(fk) && builtin_word(tk) {
+        s := self.scalar(v)
+        return self.sval(to, s)
+    }
+    match (fk, tk) {
+        (F64, Int(64, _)) => {
+            s := self.scalar(v)
+            r := self.ins(FToBits, I64, vec_one(s), 0)
+            return self.sval(to, r)
+        }
+        (Int(64, _), F64) => {
+            s := self.scalar(v)
+            r := self.ins(BitsToF, F64, vec_one(s), 0)
+            return self.sval(to, r)
+        }
+        (F32, Int(32, _)) => {
+            s := self.scalar(v)
+            r := self.ins(FToBits, I32, vec_one(s), 0)
+            return self.sval(to, r)
+        }
+        (Int(32, _), F32) => {
+            s := self.scalar(v)
+            r := self.ins(BitsToF, F32, vec_one(s), 0)
+            return self.sval(to, r)
+        }
+        (Int(64, _), Enum(_)) if self.cx.types.is_scalar(to) => {
+            s := self.scalar(v)
+            r := self.ins(Trunc, I32, vec_one(s), 0)
+            return self.sval(to, r)
+        }
+        (Slice(fe), Slice(te)) => {
+            // reinterpret a slice: the byte length is preserved
+            p, l := self.slice_parts(v)
+            fs := i64(self.cx.types.size_of(fe))
+            ts := i64(self.cx.types.size_of(te))
+            n := l
+            if fs != ts {
+                a := self.iconst(I64, fs)
+                bytes := self.ins(Mul, I64, vec_two(l, a), 0)
+                b := self.iconst(I64, max(ts, 1))
+                n = self.ins(UDiv, I64, vec_two(bytes, b), 0)
             }
-            to := self.one_targ(name, targs, pos)
-            if to < 0 {
-                return Some(val_err())
-            }
-            v := self.expr(&args[0], None)
+            t := self.temp(to)
+            sv := self.mval(to, t)
+            self.store_slice(sv, p, n)
+            return sv
+        }
+        _ => {
+            a := self.tyname(v.ty)
+            b := self.tyname(to)
+            self.err(pos, fmt("cannot cast ", a, " to ", b))
+            return val_err()
+        }
+    }
+}
+
+priv fn builtin_rt_low(self: *Fx, name: str, args: []Expr) -> Val {
+    match name {
+        "__ld64_any", "__ld32_any" => {
+            // (library only: a u64 / u32 load of memory that may have been written as any
+            // type, alias class "any" like a byte's: see "bytes, a word at a time")
+            v := self.expr(&args[0], Some(T_I64))
+            v = self.coerce(v, T_I64, args[0].pos)
             if v.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
-            fk := self.cx.types.k(v.ty)
-            tk := self.cx.types.k(to)
-            if builtin_word(fk) && builtin_word(tk) {
-                s := self.scalar(v)
-                return Some(self.sval(to, s))
-            }
-            match (fk, tk) {
-                (F64, Int(64, _)) => {
-                    s := self.scalar(v)
-                    r := self.ins(FToBits, I64, vec_one(s), 0)
-                    return Some(self.sval(to, r))
-                }
-                (Int(64, _), F64) => {
-                    s := self.scalar(v)
-                    r := self.ins(BitsToF, F64, vec_one(s), 0)
-                    return Some(self.sval(to, r))
-                }
-                (F32, Int(32, _)) => {
-                    s := self.scalar(v)
-                    r := self.ins(FToBits, I32, vec_one(s), 0)
-                    return Some(self.sval(to, r))
-                }
-                (Int(32, _), F32) => {
-                    s := self.scalar(v)
-                    r := self.ins(BitsToF, F32, vec_one(s), 0)
-                    return Some(self.sval(to, r))
-                }
-                (Int(64, _), Enum(_)) if self.cx.types.is_scalar(to) => {
-                    s := self.scalar(v)
-                    r := self.ins(Trunc, I32, vec_one(s), 0)
-                    return Some(self.sval(to, r))
-                }
-                (Slice(fe), Slice(te)) => {
-                    // reinterpret a slice: the byte length is preserved
-                    p, l := self.slice_parts(v)
-                    fs := i64(self.cx.types.size_of(fe))
-                    ts := i64(self.cx.types.size_of(te))
-                    n := l
-                    if fs != ts {
-                        a := self.iconst(I64, fs)
-                        bytes := self.ins(Mul, I64, vec_two(l, a), 0)
-                        b := self.iconst(I64, max(ts, 1))
-                        n = self.ins(UDiv, I64, vec_two(bytes, b), 0)
-                    }
-                    t := self.temp(to)
-                    sv := self.mval(to, t)
-                    self.store_slice(sv, p, n)
-                    return Some(sv)
-                }
-                _ => {
-                    a := self.tyname(v.ty)
-                    b := self.tyname(to)
-                    self.err(pos, fmt("cannot cast ", a, " to ", b))
-                    return Some(val_err())
-                }
-            }
+            wide := name == "__ld64_any"
+            l := self.load_raw(self.scalar(v), if wide { I64 } else { I32 }, 0)
+            return self.sval(if wide { T_U64 } else { T_U32 }, l)
         }
+        "__fresh" => {
+            // (library only: the allocator's result, an object of its own, see Op.Fresh)
+            v := self.expr(&args[0], Some(T_I64))
+            v = self.coerce(v, T_I64, args[0].pos)
+            if v.ty == T_ERR {
+                return val_err()
+            }
+            return self.sval(T_I64, self.ins(Fresh, I64, vec_one(self.scalar(v)), 0))
+        }
+        _ => {
+            // __clone (library only: clone(flags, stack, ptid, ctid, tls) of a thread whose
+            // new stack holds its argument and its function, which the child calls: see emit.al)
+            vs := vec_one(self.iconst(I64, 56))
+            for i in 0..len(args) {
+                v := self.expr(&args[i], Some(T_I64))
+                v = self.coerce(v, T_I64, args[i].pos)
+                if v.ty == T_ERR {
+                    return val_err()
+                }
+                vs.push(self.scalar(v))
+            }
+            return self.sval(T_I64, self.ins(Syscall, I64, vs, 1))
+        }
+    }
+}
+
+priv fn builtin_mem(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, pos: Pos) -> Val {
+    nargs := len(args)
+    match name {
         "mkslice" => {
             if self.bad_arity(name, nargs, 2, pos) {
-                return Some(val_err())
+                return val_err()
             }
             et := self.one_targ(name, targs, pos)
             if et < 0 {
-                return Some(val_err())
+                return val_err()
             }
             p := self.expr(&args[0], None)
             n := self.expr(&args[1], Some(T_I64))
             n = self.coerce(n, T_I64, args[1].pos)
             if p.ty == T_ERR || n.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             if !builtin_okp(self.cx.types.k(p.ty)) {
                 self.err(args[0].pos, "`mkslice` needs a pointer or i64 address")
-                return Some(val_err())
+                return val_err()
             }
             pv := self.scalar(p)
             nv := self.scalar(n)
@@ -1782,11 +1869,11 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             t := self.temp(sty)
             sv := self.mval(sty, t)
             self.store_slice(sv, pv, nv)
-            return Some(sv)
+            return sv
         }
         "ptr" => {
             if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+                return val_err()
             }
             v := self.expr(&args[0], None)
             v = self.auto_deref(v)
@@ -1794,90 +1881,76 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 Slice(et) => {
                     p, _ := self.slice_parts(v)
                     pt := self.cx.types.ptr_to(et)
-                    return Some(self.sval(pt, p))
+                    return self.sval(pt, p)
                 }
                 Array(et, _) => {
                     pt := self.cx.types.ptr_to(et)
-                    return Some(self.sval(pt, v.v))
+                    return self.sval(pt, v.v)
                 }
-                Err => {
-                    return Some(val_err())
-                }
+                Err => return val_err()
                 _ => {
                     self.err(pos, "`ptr` needs a slice or array")
-                    return Some(val_err())
+                    return val_err()
                 }
             }
-        }
-        "__ra_addr" if self.cx.scope_prelude && nargs == 0 => {
-            // (library only: the start of a stack trace, see __bt_print in the prelude; the
-            // function that uses it must not be inlined)
-            return Some(self.sval(T_I64, self.ins(RaAddr, I64, vec[i64](), 0)))
-        }
-        "__ld64_any", "__ld32_any" if self.cx.scope_prelude && nargs == 1 => {
-            // (library only: a u64 / u32 load of memory that may have been written as any
-            // type, alias class "any" like a byte's: see "bytes, a word at a time")
-            v := self.expr(&args[0], Some(T_I64))
-            v = self.coerce(v, T_I64, args[0].pos)
-            if v.ty == T_ERR {
-                return Some(val_err())
-            }
-            wide := name == "__ld64_any"
-            l := self.load_raw(self.scalar(v), if wide { I64 } else { I32 }, 0)
-            return Some(self.sval(if wide { T_U64 } else { T_U32 }, l))
-        }
-        "__fresh" if self.cx.scope_prelude && nargs == 1 => {
-            // (library only: the allocator's result, an object of its own, see Op.Fresh)
-            v := self.expr(&args[0], Some(T_I64))
-            v = self.coerce(v, T_I64, args[0].pos)
-            if v.ty == T_ERR {
-                return Some(val_err())
-            }
-            return Some(self.sval(T_I64, self.ins(Fresh, I64, vec_one(self.scalar(v)), 0)))
-        }
-        "__clone" if self.cx.scope_prelude && nargs == 5 => {
-            // (library only: clone(flags, stack, ptid, ctid, tls) of a thread whose new stack
-            // holds its argument and its function, which the child calls: see emit.al)
-            vs := vec_one(self.iconst(I64, 56))
-            for i in 0..nargs {
-                v := self.expr(&args[i], Some(T_I64))
-                v = self.coerce(v, T_I64, args[i].pos)
-                if v.ty == T_ERR {
-                    return Some(val_err())
-                }
-                vs.push(self.scalar(v))
-            }
-            return Some(self.sval(T_I64, self.ins(Syscall, I64, vs, 1)))
-        }
-        "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence" => {
-            return Some(self.atomic(name, args, pos))
         }
         "syscall" => {
             if nargs == 0 || nargs > 7 {
                 self.err(pos, "`syscall` takes a number and up to 6 arguments")
-                return Some(val_err())
+                return val_err()
             }
             vs := vec[i64]()
             for i in 0..nargs {
                 a := &args[i]
                 v := self.expr(a, Some(T_I64))
                 if v.ty == T_ERR {
-                    return Some(val_err())
+                    return val_err()
                 }
                 if !self.cx.types.is_scalar(v.ty) || self.cx.types.is_float(v.ty) || self.is_vecish(v.ty) {
                     self.err(a.pos, "syscall arguments must be integers or pointers")
-                    return Some(val_err())
+                    return val_err()
                 }
                 s := if self.cx.types.is_int(v.ty) || v.ty == T_BOOL { self.to_i64(v) } else { self.scalar(v) }
                 vs.push(s)
             }
             r := self.ins(Syscall, I64, vs, 0)
-            return Some(self.sval(T_I64, r))
+            return self.sval(T_I64, r)
         }
+        _ => {
+            // memcopy, memfill
+            if self.bad_arity(name, nargs, 3, pos) {
+                return val_err()
+            }
+            d := self.expr(&args[0], None)
+            sexp: Opt[i64] = if name == "memfill" { Some(T_U8) } else { None }
+            s := self.expr(&args[1], sexp)
+            n := self.expr(&args[2], Some(T_I64))
+            n = self.coerce(n, T_I64, args[2].pos)
+            if d.ty == T_ERR || s.ty == T_ERR || n.ty == T_ERR {
+                return val_err()
+            }
+            dk := self.cx.types.k(d.ty)
+            sk := self.cx.types.k(s.ty)
+            if !builtin_okp(dk) || (name == "memcopy" && !builtin_okp(sk)) || (name == "memfill" && s.ty != T_U8) {
+                self.err(pos, fmt("`", name, "` arguments have the wrong types"))
+                return val_err()
+            }
+            dv := self.scalar(d)
+            sv := self.scalar(s)
+            nv := self.scalar(n)
+            self.ins(if name == "memcopy" { MemCpy } else { MemSet }, Void, vec_of([]i64{dv, sv, nv}), 0)
+            return val_unit()
+        }
+    }
+}
+
+priv fn builtin_math(self: *Fx, name: str, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
+    nargs := len(args)
+    match name {
         "sqrt", "fabs", "fmin", "fmax" => {
             two := name == "fmin" || name == "fmax"
             if self.bad_arity(name, nargs, if two { 2 } else { 1 }, pos) {
-                return Some(val_err())
+                return val_err()
             }
             // an untyped literal (or sqrt(literal), ...) takes the type of the other operand,
             // else of the context
@@ -1888,12 +1961,12 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             }
             v := self.expr(&args[first], exp0)
             if v.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             if !self.cx.types.is_float(v.ty) && !is_some(self.cx.types.vec_lanes(v.ty)) {
                 tn := self.tyname(v.ty)
                 self.err(args[first].pos, fmt("`", name, "` needs f32, f64 or a vector, found ", tn))
-                return Some(val_err())
+                return val_err()
             }
             it := self.irt(v.ty)
             s := self.scalar(v)
@@ -1902,7 +1975,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 w := self.expr(&args[1 - first], Some(v.ty))
                 w = self.coerce(w, v.ty, args[1 - first].pos)
                 if w.ty == T_ERR {
-                    return Some(val_err())
+                    return val_err()
                 }
                 t := self.scalar(w)
                 a, b := if first != 0 { (t, s) } else { (s, t) }
@@ -1910,19 +1983,19 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             } else {
                 r = self.ins(if name == "sqrt" { FSqrt } else { FAbs }, it, vec_one(s), 0)
             }
-            return Some(self.sval(v.ty, r))
+            return self.sval(v.ty, r)
         }
         "popcnt", "ctz", "clz", "bswap" => {
             if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+                return val_err()
             }
             v := self.expr(&args[0], None)
             if v.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             if !self.cx.types.is_int(v.ty) {
                 self.err(pos, fmt("`", name, "` needs an integer"))
-                return Some(val_err())
+                return val_err()
             }
             it := self.irt(v.ty)
             s := self.scalar(v)
@@ -1933,20 +2006,20 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 _ => Op.Bswap
             }
             r := self.ins(op, it, vec_one(s), 0)
-            return Some(self.sval(v.ty, r))
+            return self.sval(v.ty, r)
         }
         "rotl", "rotr" => {
             if self.bad_arity(name, nargs, 2, pos) {
-                return Some(val_err())
+                return val_err()
             }
             v := self.expr(&args[0], None)
             n := self.expr(&args[1], None)
             if v.ty == T_ERR || n.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             if !self.cx.types.is_int(v.ty) || !self.cx.types.is_int(n.ty) {
                 self.err(pos, fmt("`", name, "` needs integers"))
-                return Some(val_err())
+                return val_err()
             }
             it := self.irt(v.ty)
             nt := self.irt(n.ty)
@@ -1958,12 +2031,12 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 c = self.ins(ZExt, it, vec_one(c), 0)
             }
             r := self.ins(if name == "rotl" { Rotl } else { Rotr }, it, vec_two(s, c), 0)
-            return Some(self.sval(v.ty, r))
+            return self.sval(v.ty, r)
         }
-        "mulhi" => {
-            // the high half of the full (double-width) product of two integers of one type
+        _ => {
+            // mulhi: the high half of the full (double-width) product of two integers of one type
             if self.bad_arity(name, nargs, 2, pos) {
-                return Some(val_err())
+                return val_err()
             }
             // an untyped literal takes the type of the other operand, else of the context
             first := if self.is_untyped(&args[0]) && !self.is_untyped(&args[1]) { 1 } else { 0 }
@@ -1978,21 +2051,21 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             }
             v := self.expr(&args[first], exp0)
             if v.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             if !self.cx.types.is_int(v.ty) {
                 tn := self.tyname(v.ty)
                 self.err(args[first].pos, fmt("`mulhi` needs two integers of the same type, found ", tn))
-                return Some(val_err())
+                return val_err()
             }
             w := self.expr(&args[1 - first], Some(v.ty))
             if w.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             if w.ty != v.ty {
                 a, b := if first != 0 { (self.tyname(w.ty), self.tyname(v.ty)) } else { (self.tyname(v.ty), self.tyname(w.ty)) }
                 self.err(pos, fmt("`mulhi` needs two integers of the same type, found ", a, " and ", b, " (convert one explicitly, e.g. `", a, "(y)`)"))
-                return Some(val_err())
+                return val_err()
             }
             signed := self.cx.types.is_signed(v.ty)
             it := self.irt(v.ty)
@@ -2000,7 +2073,7 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             b := self.scalar(w)
             if it == I64 {
                 r := self.ins(if signed { MulHiS } else { MulHiU }, I64, vec_two(a, b), 0)
-                return Some(self.sval(v.ty, r))
+                return self.sval(v.ty, r)
             }
             // narrower types: the full product fits in 64 bits
             ext, shr := if signed { (SExt, AShr) } else { (ZExt, LShr) }
@@ -2010,47 +2083,29 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             bits := self.iconst(I64, it.size() * 8)
             hi := self.ins(shr, I64, vec_two(prod, bits), 0)
             r := self.ins(Trunc, it, vec_one(hi), 0)
-            return Some(self.sval(v.ty, r))
+            return self.sval(v.ty, r)
         }
-        "memcopy", "memfill" => {
-            if self.bad_arity(name, nargs, 3, pos) {
-                return Some(val_err())
-            }
-            d := self.expr(&args[0], None)
-            sexp: Opt[i64] = if name == "memfill" { Some(T_U8) } else { None }
-            s := self.expr(&args[1], sexp)
-            n := self.expr(&args[2], Some(T_I64))
-            n = self.coerce(n, T_I64, args[2].pos)
-            if d.ty == T_ERR || s.ty == T_ERR || n.ty == T_ERR {
-                return Some(val_err())
-            }
-            dk := self.cx.types.k(d.ty)
-            sk := self.cx.types.k(s.ty)
-            if !builtin_okp(dk) || (name == "memcopy" && !builtin_okp(sk)) || (name == "memfill" && s.ty != T_U8) {
-                self.err(pos, fmt("`", name, "` arguments have the wrong types"))
-                return Some(val_err())
-            }
-            dv := self.scalar(d)
-            sv := self.scalar(s)
-            nv := self.scalar(n)
-            self.ins(if name == "memcopy" { MemCpy } else { MemSet }, Void, vec_of([]i64{dv, sv, nv}), 0)
-            return Some(val_unit())
-        }
+    }
+}
+
+priv fn builtin_io(self: *Fx, name: str, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
+    nargs := len(args)
+    match name {
         "embed" => {
             // the bytes of a file, read at compile time (path relative to the source file)
-            return Some(match self.cx.embed_bytes(args, pos) {
+            return match self.cx.embed_bytes(args, pos) {
                 Some(bytes) => self.str_val(bytes)
                 None => val_err()
-            })
+            }
         }
         "panic" => {
             if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+                return val_err()
             }
             m := self.expr(&args[0], Some(T_STR))
             m = self.coerce(m, T_STR, args[0].pos)
             loc := self.loc_str(pos)
-            return Some(self.call_rt("__panic", vec[i64](), vec_two[Val](loc, m), pos))
+            return self.call_rt("__panic", vec[i64](), vec_two[Val](loc, m), pos)
         }
         "fmt" => {
             // evaluate everything first: output produced by the arguments themselves is not captured
@@ -2067,25 +2122,24 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
             for i in 0..vals.len {
                 self.put_val(vals[i].0, vals[i].1, 0)
             }
-            return Some(self.call_rt("__cap_end", vec[i64](), vec_one[Val](start), pos))
+            return self.call_rt("__cap_end", vec[i64](), vec_one[Val](start), pos)
         }
         "hash" => {
             if self.bad_arity(name, nargs, 1, pos) {
-                return Some(val_err())
+                return val_err()
             }
             v := self.expr(&args[0], None)
             if v.ty == T_ERR {
-                return Some(val_err())
+                return val_err()
             }
             match self.hash_val(v, pos) {
-                Some(h) => return Some(self.sval(T_U64, h))
-                None => return Some(val_err())
+                Some(h) => return self.sval(T_U64, h)
+                None => return val_err()
             }
         }
-        "clone" => {
-            return Some(self.clone_builtin(args, expect, pos))
-        }
-        "put", "print" => {
+        "clone" => return self.clone_builtin(args, expect, pos)
+        _ => {
+            // put, print
             for i in 0..nargs {
                 a := &args[i]
                 if i > 0 && name == "print" {
@@ -2099,13 +2153,9 @@ fn builtin(self: *Fx, name: str, targs: Opt[[]i64], args: []Expr, expect: Opt[i6
                 nl := self.str_val("\n")
                 self.call_rt("__put_str", vec[i64](), vec_one[Val](nl), pos)
             }
-            return Some(val_unit())
-        }
-        _ => {
-            return None
+            return val_unit()
         }
     }
-    return None
 }
 
 // the common tail of the scalar cases of `hash_val`: hash the 64-bit pattern `x`

@@ -235,6 +235,8 @@ struct shaderc_include_result {
 // the shaderc library of the target system (Windows: the DLL of the Vulkan SDK's Bin directory)
 when TARGET_OS == Windows {
     priv const SHADERC = "shaderc_shared.dll"
+} else when TARGET_OS == MacOS {
+    priv const SHADERC = "libshaderc_shared.1.dylib"
 } else {
     priv const SHADERC = "libshaderc_shared.so.1"
 }

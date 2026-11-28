@@ -24,20 +24,16 @@
 // exhaustive: a new AST variant does not compile until it is handled here.
 
 priv struct PrivCx {
-    // the symbols whose entries in `ren` / `ren_fn` are set for this file
-    set: Vec[i64]
+    // by symbol of the written name: the internal name of a private declaration of the file
+    // being renamed, and whether it is a function (method-call syntax `x.f(..)`)
+    ren: Map[i64, str]
+    ren_fn: Map[i64, bool]
 }
 
-// by symbol of the written name: the internal name of a private declaration of the file
-// being renamed ("" for none), and whether it is a function (method-call syntax `x.f(..)`).
-// Only the entries of the private names of that file are set; they are cleared afterwards.
-priv ren: Vec[str]
-priv ren_fn: Vec[bool]
-
-priv fn renamed(n: str) -> str {
-    id := ast_sym(n)
-    if id < ren.len {
-        return ren[id]
+priv fn renamed(r: *PrivCx, n: str) -> str {
+    v, ok := r.ren.get(ast_sym(n))
+    if ok {
+        return v
     }
     return ""
 }
@@ -70,11 +66,7 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
     if !any {
         return
     }
-    r := PrivCx{set: vec[i64]()}
-    if ren.len < ast_sym_count() {
-        ren.resize(ast_sym_count(), "")
-        ren_fn.resize(ast_sym_count(), false)
-    }
+    r := PrivCx{ren: map[i64, str](), ren_fn: map[i64, bool]()}
     // written name -> (private, kind, line) of its first declaration in this file
     seen := map[str, (bool, i64, i64)]()
     for i in 0..decls.len {
@@ -94,16 +86,15 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
         }
         // a builtin type name is rejected as a declaration name anyway (cx_new): renaming it
         // would only hide the type from the rest of the file
-        if is_private && renamed(name) == "" && !is_some(lower_builtin_type(name)) {
+        if is_private && renamed(&r, name) == "" && !is_some(lower_builtin_type(name)) {
             id := ast_sym(name)
-            ren[id] = ast_intern(fmt(name, "\x01", file))
-            r.set.push(id)
+            r.ren.set(id, ast_intern(fmt(name, "\x01", file)))
         }
     }
     for i in 0..decls.len {
         name, kind, is_private, pos := priv_decl_info(&decls[i])
-        if kind == 1 && renamed(name) != "" {
-            ren_fn[ast_sym(name)] = true
+        if kind == 1 && renamed(&r, name) != "" {
+            r.ren_fn.set(ast_sym(name), true)
         }
     }
     // enum variants are not private: inside this file a private declaration of the same name
@@ -113,7 +104,7 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
             Enum(e) => {
                 for vi in 0..e.variants.len {
                     vn := e.variants[vi].0
-                    if renamed(vn) != "" {
+                    if renamed(&r, vn) != "" {
                         errs.push(Diag{pos: e.pos, msg: fmt("enum variant `", vn, "` conflicts with the `priv` declaration `", vn, "` of this file (variants are never private); rename one of them")})
                     }
                 }
@@ -124,14 +115,10 @@ fn priv_apply(decls: *Vec[Decl], file: i64, errs: *Vec[Diag]) {
     for i in 0..decls.len {
         decls[i] = rewrite(&r, decls[i])
     }
-    for id in r.set {
-        ren[id] = ""
-        ren_fn[id] = false
-    }
 }
 
 priv fn priv_name(r: *PrivCx, n: str) -> str {
-    nn := renamed(n)
+    nn := renamed(r, n)
     if nn != "" {
         return nn
     }
@@ -147,7 +134,7 @@ priv fn priv_names(r: *PrivCx, v: *Vec[str]) {
 // a function, top-level or nested: its name, parameters, types and body
 priv fn priv_fn(r: *PrivCx, f: *FnDecl) -> bool {
     f.name = priv_name(r, f.name)
-    f.ext = priv_ext(f.ext, f.ext_const)
+    f.ext = priv_ext(r, f.ext, f.ext_const)
     priv_names(r, &f.tparams)
     for i in 0..f.params.len {
         f.params[i].0 = priv_name(r, f.params[i].0)
@@ -187,7 +174,7 @@ priv fn rewrite(r: *PrivCx, d: Decl) -> Decl {
         }
         Global(g) => {
             g.name = priv_name(r, g.name)
-            g.ext = priv_ext(g.ext, g.ext_const)
+            g.ext = priv_ext(r, g.ext, g.ext_const)
             g.ty = opt_type(r, g.ty)
             g.init = opt_expr(r, g.init)
             Global(g)
@@ -230,7 +217,7 @@ priv fn priv_type(r: *PrivCx, t: *TypeAst) -> bool {
     return match *t {
         Name(n, args, pos) => {
             types(r, &args)
-            nn := renamed(n)
+            nn := renamed(r, n)
             if nn != "" {
                 *t = Name(nn, args, pos)
             }
@@ -297,8 +284,8 @@ priv fn callee(r: *PrivCx, c: *Expr) -> bool {
         Field(recv, name) => {
             expr(r, recv)
             id := ast_sym(name)
-            if id < ren_fn.len && ren_fn[id] {
-                mn := ren[id]
+            if r.ren_fn.has(id) {
+                mn, _ := r.ren.get(id)
                 c.k = Field(recv, mn)
             }
             return true
@@ -321,7 +308,7 @@ priv fn expr(r: *PrivCx, e: *Expr) -> bool {
     return match e.k {
         Int(_, _), Float(_, _), Str(_), Bool(_), Nil => true
         Ident(n) => {
-            nn := renamed(n)
+            nn := renamed(r, n)
             if nn != "" {
                 e.k = Ident(nn)
             }
@@ -483,13 +470,13 @@ priv fn stmt(r: *PrivCx, s: *Stmt) -> bool {
 }
 
 // `extern LIB`: the constant LIB as this file names it (a private one is renamed)
-priv fn priv_ext(ext: Opt[str], named: bool) -> Opt[str] {
+priv fn priv_ext(r: *PrivCx, ext: Opt[str], named: bool) -> Opt[str] {
     if !named {
         return ext
     }
     return match ext {
         Some(n) => {
-            nn := renamed(n)
+            nn := renamed(r, n)
             if nn != "" { Some(nn) } else { ext }
         }
         None => None

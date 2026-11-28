@@ -201,3 +201,126 @@ fn patch_data(buf: *Vec[u8], base_addr: i64, g: *Global, ga: i64, gaddr: *Vec[i6
         set64(buf, at, val)
     }
 }
+
+// ---------- ELF64 shared helpers (elf.al, elf_arm64.al) ----------
+
+// where the read-only tables of dynamic linking lie (addresses)
+struct ElfDynTabs {
+    interp_at: i64
+    interp_len: i64
+    dynstr_at: i64
+    dynstr_len: i64
+    dynsym_at: i64
+    hash_at: i64
+    rela_at: i64
+    needed: Vec[i64] // offsets of the library names in .dynstr
+}
+
+// Appends the interpreter's path, .dynstr (the libraries, then the symbols), .dynsym (symbol 0,
+// then one undefined global symbol per import: STT_FUNC or STT_OBJECT), a SysV hash table with
+// one empty bucket (the program exports nothing) and room for the relocations (filled in once
+// the import slots have addresses) to rodata, whose first byte is at address `at`.
+fn elf_dyn_tables(m: *Module, externs: []i64, interp: str, rodata: *Vec[u8], at: i64, dy: *ElfDynTabs) {
+    rodata.resize(align_up(rodata.len, 8), 0)
+    dy.interp_at = at + rodata.len
+    dy.interp_len = len(interp) + 1
+    rodata.extend(interp)
+    rodata.push(0)
+    dynstr := vec_of([]u8{0})
+    libs := vec[str]()
+    for x in externs {
+        if !libs.contains(m.externs[x].lib) {
+            libs.push(m.externs[x].lib)
+        }
+    }
+    for l in libs {
+        dy.needed.push(dynstr.len)
+        dynstr.extend(l)
+        dynstr.push(0)
+    }
+    dynsym := vec_fill(24, u8(0))
+    for x in externs {
+        put32(&dynsym, dynstr.len)
+        dynstr.extend(m.externs[x].name)
+        dynstr.push(0)
+        // STB_GLOBAL, STT_OBJECT for a variable, STT_FUNC for a function
+        dynsym.push(if m.externs[x].data { u8(0x11) } else { u8(0x12) })
+        dynsym.push(0)
+        put16(&dynsym, 0) // undefined
+        put64(&dynsym, 0)
+        put64(&dynsym, 0)
+    }
+    dy.dynstr_at = at + rodata.len
+    dy.dynstr_len = dynstr.len
+    rodata.extend(dynstr.items())
+    rodata.resize(align_up(rodata.len, 8), 0)
+    dy.dynsym_at = at + rodata.len
+    rodata.extend(dynsym.items())
+    // SysV hash table with one empty bucket: nothing is exported
+    dy.hash_at = at + rodata.len
+    nsym := len(externs) + 1
+    put32(rodata, 1)
+    put32(rodata, nsym)
+    put32(rodata, 0)
+    rodata.resize(align_up(rodata.len + 4 * nsym, 8), 0)
+    dy.rela_at = at + rodata.len
+    rodata.resize(rodata.len + 24 * len(externs), 0)
+}
+
+// the entries of the ELF .dynamic section
+fn elf_dyn_entries(dy: *ElfDynTabs, nimports: i64) -> Vec[(i64, i64)] {
+    d := vec[(i64, i64)]()
+    for n in dy.needed {
+        d.push((1, n)) // DT_NEEDED
+    }
+    d.push((4, dy.hash_at)) // DT_HASH
+    d.push((5, dy.dynstr_at)) // DT_STRTAB
+    d.push((6, dy.dynsym_at)) // DT_SYMTAB
+    d.push((10, dy.dynstr_len)) // DT_STRSZ
+    d.push((11, 24)) // DT_SYMENT
+    d.push((7, dy.rela_at)) // DT_RELA
+    d.push((8, 24 * nimports)) // DT_RELASZ
+    d.push((9, 24)) // DT_RELAENT
+    d.push((30, 8)) // DT_FLAGS: BIND_NOW
+    d.push((0x6ffffffb, 1)) // DT_FLAGS_1: NOW
+    d.push((21, 0)) // DT_DEBUG
+    d.push((0, 0))
+    return d
+}
+
+// writes one GLOB_DAT relocation entry per imported symbol into .rela.dyn in rodata
+fn elf_patch_got_relas(m: *Module, externs: []i64, rodata: *Vec[u8], ro_addr: i64, rela_at: i64, gaddr: *Vec[i64], reloc_type: i64) {
+    base := rela_at - ro_addr
+    for k, x in externs {
+        at := base + 24 * k
+        assert at + 24 <= rodata.len
+        set64(rodata, at, gaddr[m.externs[x].got])
+        set64(rodata, at + 8, ((k + 1) << 32) | reloc_type)
+    }
+}
+
+// emits one ELF64 program header
+fn elf_segment(h: *Vec[u8], ty: i64, flags: i64, off: i64, vaddr: i64, filesz: i64, memsz: i64, align: i64) {
+    put32(h, ty)
+    put32(h, flags)
+    put64(h, off)
+    put64(h, vaddr)
+    put64(h, vaddr)
+    put64(h, filesz)
+    put64(h, memsz)
+    put64(h, align)
+}
+
+// emits one ELF64 section header
+fn elf_section(sh: *Vec[u8], name: i64, ty: i64, flags: i64, addr: i64, off: i64, size: i64, link: i64, info: i64, align: i64, entsize: i64) {
+    put32(sh, name)
+    put32(sh, ty)
+    put64(sh, flags)
+    put64(sh, addr)
+    put64(sh, off)
+    put64(sh, size)
+    put32(sh, link)
+    put32(sh, info)
+    put64(sh, align)
+    put64(sh, entsize)
+}

@@ -163,7 +163,7 @@ they are in the repository).
 
 ## 6. The games (`--gui`)
 Build each with `--target windows --gui` (on Windows `--target windows` is the default):
-`examples\dx12_starter\game.al`, `examples\dx12_breakout\game.al`, `examples\dx12_triangle.al`.
+`examples\dx12_starter\game.al`, `examples\dx12_breakout\game.al`, `examples\dx12_crypt\game.al`, `examples\dx12_triangle.al`.
 1. Double-click each from Explorer: no console window appears.
 2. Starter: move, shoot, M toggles music, die, fire to restart.
 3. Breakout: start, launch, steer with keys, D-pad and stick.
@@ -172,8 +172,8 @@ Build each with `--target windows --gui` (on Windows `--target windows` is the d
 6. F11 and Alt+Enter toggle fullscreen; dragging the edge keeps the picture letterboxed.
 7. Unplug headphones: "SOUND DEVICE LOST, RECONNECTING" shows and sound comes back.
 8. Plug in a gamepad mid-game: picked up within about 2 seconds.
-9. From cmd: `breakout.exe --headless` prints the 1800-frame checksums
-   (`0f8df097329c76c3`, audio `955e5eef407531e7`); `breakout.exe > log.txt` writes the final line
+9. From cmd: `breakout.exe --headless` prints the 3600-frame checksums
+   (`3dca7641271b73b1`, audio `eceae5463faf0641`); `breakout.exe > log.txt` writes the final line
    to the file.
 10. A `--gui` program that panics, started from Explorer, shows a message box naming the panic.
 11. Closing with the window's X exits cleanly.

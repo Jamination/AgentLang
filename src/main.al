@@ -132,6 +132,8 @@ priv const STD_MODULES = [_](str, str){
     ("net", embed("../std/net.al")),
     ("net_linux", embed("../std/net_linux.al")),
     ("net_windows", embed("../std/net_windows.al")),
+    ("crypto", embed("../std/crypto.al")),
+    ("cli", embed("../std/cli.al")),
 }
 
 // modules that are loaded into every program
@@ -264,13 +266,26 @@ priv struct Args {
     // `alc check --all-targets`: once per target
     all_targets: bool
     target_set: bool
+    warn: bool
+    deny_warnings: bool
+    sigs_std: bool
+    sigs_pub: bool
+    filter: str
+}
+
+priv deny_warnings: bool
+
+priv fn usage_text() -> str {
+    return concat("usage: alc <command> <file.al> [options]\n       alc --version [--json]\n       alc --help\n",
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
+            "options:\n  -o <path>       output path (default: input without .al; with .exe for windows)\n  --target <os>   linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                  AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                  arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets   check: type-check once for every target\n  -D NAME=VALUE   set the program's constant NAME (-D NAME: a bool constant set to true)\n  -W, --warn      enable compiler warnings (unused locals, unreachable code, self-assignment)\n  --deny-warnings treat warnings as errors (implies -W)\n  --std           sigs: include the standard library (same as `-- std`)\n  --pub           sigs: omit `priv` declarations\n  --filter <pat>  sigs / test: only declarations or tests whose name contains <pat>\n  --gui           windows: a GUI program (no console window of its own)\n  --icon <ico>    windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                  windows: version information (FileDescription, ProductName, CompanyName,\n                  FileVersion, LegalCopyright, ...), once per name\n  --unchecked     disable bounds/division checks\n  -O0, -O1, -O2   optimization level (default: -O2; -O0 disables optimizations)\n  -g              debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json          print diagnostics, sigs, test results or version as JSON on stdout\n  --emit-ir       print optimized IR to stdout\n  --emit-asm      print the selected machine code to stdout\n  --version       print the compiler's version and default target\n  -h, --help      print this help message\n"))
 }
 
 // an error of the driver itself (no position): with --json the same array as diagnostics,
 // with line and col 0
 priv fn driver_error(file: str, msg: str) {
     if json {
-        print(fmt("[{\"file\":", json_str(file), ",\"line\":0,\"col\":0,\"message\":", json_str(msg), "}]"))
+        print(fmt("[{\"file\":", json_str(file), ",\"line\":0,\"col\":0,\"message\":", json_str(msg), ",\"severity\":\"error\"}]"))
     } else {
         eput(fmt("error: ", msg, "\n"))
     }
@@ -285,9 +300,7 @@ priv fn usage(why: str) -> never {
     if len(why) != 0 {
         eput(fmt(why, "\n"))
     }
-    eput(concat("usage: alc <command> <file.al> [options]\n       alc --version\n",
-        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`alc sigs f.al -- std` adds the standard library)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n",
-        "options:\n  -o <path>     output path (default: input without .al; with .exe for windows)\n  --target <os> linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets check: type-check once for every target\n  -D NAME=VALUE set the program's constant NAME (-D NAME: a bool constant set to true)\n  --gui         windows: a GUI program (no console window of its own)\n  --icon <ico>  windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                windows: version information (FileDescription, ProductName, CompanyName,\n                FileVersion, LegalCopyright, ...), once per name\n  --unchecked   disable bounds/division checks\n  -O0           disable optimizations\n  -g            debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json        print diagnostics as a JSON array on stdout\n  --emit-ir     print optimized IR to stdout\n  --emit-asm    print the selected machine code to stdout\n  --version     print the compiler's version and default target\n")))
+    eput(usage_text())
     exit(2)
 }
 
@@ -319,13 +332,20 @@ priv fn parse_args() -> Args {
         av.push(all[i])
     }
     // --json first: it also decides how errors in the command line are written
-    for k, s in av {
+    k := 0
+    while k < av.len {
+        s := av[k]
         if s == "--" {
             break
         }
-        if s == "--json" && !(k > 0 && av[k - 1] == "-o") {
+        if s == "-o" || s == "--target" || s == "--icon" || s == "--version-info" || s == "-D" || s == "--filter" {
+            k += 2
+            continue
+        }
+        if s == "--json" {
             json = true
         }
+        k += 1
     }
     // the default target is the system the compiler runs on
     if TARGET_OS == Windows {
@@ -334,8 +354,18 @@ priv fn parse_args() -> Args {
     if HOST_ARM64 {
         target_arch = ArchArm64
     }
+    if av.len >= 1 && (av[0] == "--help" || av[0] == "-h" || av[0] == "help") {
+        put(usage_text())
+        exit(0)
+    }
     if av.len >= 1 && (av[0] == "--version" || av[0] == "version") {
-        print(fmt("alc ", VERSION, "\ndefault target: ", if target_os == TargetWindows { "windows" } else { "linux" }, if target_arch == ArchArm64 { " arm64" } else { " x86-64" }))
+        os_name := if target_os == TargetWindows { "windows" } else if target_os == TargetMacOS { "macos" } else { "linux" }
+        arch_name := if target_arch == ArchArm64 { "arm64" } else { "x86-64" }
+        if json {
+            print(fmt("{\"version\":", json_str(VERSION), ",\"target_os\":", json_str(os_name), ",\"target_arch\":", json_str(arch_name), "}"))
+        } else {
+            print(fmt("alc ", VERSION, "\ndefault target: ", os_name, " ", arch_name))
+        }
         exit(0)
     }
     if av.len < 2 {
@@ -347,6 +377,10 @@ priv fn parse_args() -> Args {
     while i < av.len {
         s := av[i]
         match s {
+            "-h", "--help" => {
+                put(usage_text())
+                exit(0)
+            }
             "-o" => {
                 i += 1
                 if i >= av.len {
@@ -409,6 +443,21 @@ priv fn parse_args() -> Args {
             }
             _ if starts_with(s, "-D") => a.parse_define(s[2..])
             "--all-targets" => a.all_targets = true
+            "-W", "--warn" => a.warn = true
+            "--deny-warnings" => {
+                a.warn = true
+                a.deny_warnings = true
+                deny_warnings = true
+            }
+            "--std" => a.sigs_std = true
+            "--pub" => a.sigs_pub = true
+            "--filter" => {
+                i += 1
+                if i >= av.len {
+                    usage("--filter needs a pattern: --filter <substring>")
+                }
+                a.filter = av[i]
+            }
             "-O1" => a.opt = 1
             "-O2" => a.opt = 2
             "--" => {
@@ -440,6 +489,12 @@ priv fn parse_args() -> Args {
     }
     if a.all_targets && (a.cmd != "check" || a.target_set) {
         usage("--all-targets is an option of `alc check`, which then checks every target (without --target)")
+    }
+    if (a.sigs_std || a.sigs_pub) && a.cmd != "sigs" {
+        usage(fmt(if a.sigs_std { "--std" } else { "--pub" }, " is an option of `alc sigs`"))
+    }
+    if len(a.filter) != 0 && a.cmd != "sigs" && a.cmd != "test" {
+        usage("--filter is an option of `alc sigs` and `alc test`")
     }
     return a
 }
@@ -574,7 +629,7 @@ priv fn use_file(self: *Sources, file: i64, path: str, pos: Pos, out: *Vec[Item]
                 for m in STD_MODULES {
                     all.push(m.0)
                 }
-                self.errs.push(Diag{pos: pos, msg: fmt("unknown module `std.", mname, "` (available: ", join(all.items(), ", "), ")")})
+                self.errs.push(Diag{pos: pos, msg: fmt("unknown module `std.", mname, "` (available: ", join(all.items(), ", "), ")", did_you_mean_hint(mname, all.items()))})
             }
         }
         return
@@ -775,34 +830,52 @@ priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
     while errs.len > 1 && file_name(names, errs.last().pos.file) == "<entry>" && file_name(names, errs[0].pos.file) != "<entry>" {
         errs.pop()
     }
+    n_err := 0
+    n_warn := 0
     if json {
         // machine-readable diagnostics: one JSON array on stdout
         items := vec[str]()
         last := ""
         for d in errs {
             file := if d.pos.file < 0 { "" } else { file_name(names, d.pos.file) }
-            item := fmt("{\"file\":", json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", json_str(ast_plain_text(d.msg)), "}")
+            sev := if d.warn { "warning" } else { "error" }
+            item := fmt("{\"file\":", json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", json_str(ast_plain_text(d.msg)), ",\"severity\":", json_str(sev), "}")
             if item != last {
                 items.push(item)
                 last = item
+                if d.warn {
+                    n_warn += 1
+                } else {
+                    n_err += 1
+                }
             }
         }
         print(fmt("[", join(items.items(), ","), "]"))
-        return true
+        return n_err > 0 || (deny_warnings && n_warn > 0)
     }
     last := ""
-    n := 0
     for d in errs {
         // (file -1: the command line)
-        line := if d.pos.file < 0 { fmt("error: ", ast_plain_text(d.msg)) } else { fmt(file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": error: ", ast_plain_text(d.msg)) }
+        sev := if d.warn { "warning" } else { "error" }
+        line := if d.pos.file < 0 { fmt(sev, ": ", ast_plain_text(d.msg)) } else { fmt(file_name(names, d.pos.file), ":", d.pos.line, ":", d.pos.col, ": ", sev, ": ", ast_plain_text(d.msg)) }
         if line != last {
             eput(fmt(line, "\n"))
-            n += 1
+            if d.warn {
+                n_warn += 1
+            } else {
+                n_err += 1
+            }
             last = line
         }
     }
-    eput(fmt(n, " error(s)\n"))
-    return true
+    if n_err > 0 && n_warn > 0 {
+        eput(fmt(n_err, " error(s), ", n_warn, " warning(s)\n"))
+    } else if n_err > 0 {
+        eput(fmt(n_err, " error(s)\n"))
+    } else if n_warn > 0 {
+        eput(fmt(n_warn, " warning(s)\n"))
+    }
+    return n_err > 0 || (deny_warnings && n_warn > 0)
 }
 
 // "priv " in front of the signature of a private declaration
@@ -869,34 +942,43 @@ priv fn sigs_doc(cl: *Map[i64, str], line: i64) -> str {
 }
 
 // `alc sigs`: one line per declaration, for a quick overview of a file; the first line of its
-// leading comment follows after `  // `
-priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
+// leading comment follows after `  // ` (or a JSON array with `--json`)
+priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64, pub_only: bool, filter: str) {
     // the comments of the files seen so far
     comments := map[i64, Map[i64, str]]()
+    jitems := vec[str]()
     for d in decls {
-        pos, text := match d {
-            Fn(f) => (f.pos, fmt(sigs_priv(f.name), sigs_extern(f.ext, f.ext_const), ast_sig_str(&f)))
-            Struct(s) => (s.pos, fmt(sigs_priv(s.name), ast_struct_str(&s)))
-            Enum(e) => (e.pos, fmt(sigs_priv(e.name), ast_enum_str(&e)))
+        pos, kind, raw_name, text := match d {
+            Fn(f) => (f.pos, "fn", f.name, fmt(sigs_priv(f.name), sigs_extern(f.ext, f.ext_const), ast_sig_str(&f)))
+            Struct(s) => (s.pos, "struct", s.name, fmt(sigs_priv(s.name), ast_struct_str(&s)))
+            Enum(e) => (e.pos, "enum", e.name, fmt(sigs_priv(e.name), ast_enum_str(&e)))
             // (the value of a constant or a global is not shown: `...`)
             Const(c) => {
                 sig := match c.ty {
                     Some(ty) => fmt(sigs_priv(c.name), "const ", c.name, ": ", ast_type_str(&ty), " = ...")
                     None => fmt(sigs_priv(c.name), "const ", c.name, " = ...")
                 }
-                (c.pos, sig)
+                (c.pos, "const", c.name, sig)
             }
             Global(g) => {
                 sig := match g.ty {
                     Some(ty) => fmt(sigs_priv(g.name), sigs_extern(g.ext, g.ext_const), g.name, ": ", ast_type_str(&ty))
                     None => fmt(sigs_priv(g.name), g.name, " := ...")
                 }
-                (g.pos, sig)
+                (g.pos, "global", g.name, sig)
             }
-            Test(t) => (t.pos, fmt("test \"", t.name, "\""))
+            Test(t) => (t.pos, "test", t.name, fmt("test \"", t.name, "\""))
             Use(_, _), When(_) => continue
         }
         if pos.file < from_file {
+            continue
+        }
+        is_p := ast_is_private(raw_name)
+        if pub_only && is_p {
+            continue
+        }
+        plain_name := ast_plain(raw_name)
+        if len(filter) != 0 && find(plain_name, filter) < 0 {
             continue
         }
         if !comments.has(pos.file) {
@@ -904,15 +986,27 @@ priv fn print_sigs(names: *Vec[str], decls: []Decl, from_file: i64) {
         }
         cl := comments.get_or(pos.file, map[i64, str]())
         doc := sigs_doc(&cl, i64(pos.line))
-        print(fmt(file_name(names, pos.file), ":", pos.line, ": ", ast_plain_text(text), if len(doc) == 0 { "" } else { concat("  // ", doc) }))
+        fname := file_name(names, pos.file)
+        sig_plain := ast_plain_text(text)
+        if json {
+            jitems.push(fmt("{\"file\":", json_str(fname), ",\"line\":", pos.line, ",\"kind\":", json_str(kind), ",\"name\":", json_str(plain_name), ",\"priv\":", if is_p { "true" } else { "false" }, ",\"sig\":", json_str(sig_plain), ",\"doc\":", json_str(doc), "}"))
+        } else {
+            print(fmt(fname, ":", pos.line, ": ", sig_plain, if len(doc) == 0 { "" } else { concat("  // ", doc) }))
+        }
+    }
+    if json {
+        print(fmt("[", join(jitems.items(), ","), "]"))
     }
 }
 
-// is a declaration shown by `alc sigs <file> -- std`?
+// is a declaration shown by `alc sigs <file> --std` / `-- std`?
 priv fn sigs_visible(d: *Decl) -> bool {
     match *d {
         Fn(f) => !starts_with(f.name, "__")
         Global(g) => !starts_with(g.name, "__")
+        Struct(s) => !starts_with(s.name, "__")
+        Enum(e) => !starts_with(e.name, "__")
+        Const(c) => !starts_with(c.name, "__")
         _ => true
     }
 }
@@ -1087,7 +1181,7 @@ priv fn typecheck(ar: *Args, src: *Sources, decls: *Vec[Decl], n_prelude: i64) -
     for i in 0..src.files.len {
         lib_files.push(if i < n_prelude { LIB_CORE } else if src.files[i].lib { LIB_MODULE } else { u8(0) })
     }
-    cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked}, lib_files)
+    cx := cx_new(decls.items(), clone(src.names), Opts{checks: !ar.unchecked, warn: ar.warn}, lib_files)
     // `alc check` type-checks every function of the program and of the bundled modules it
     // includes, the core modules (n_core..n_prelude) too. `alc build` / `run` / `test` compile
     // the bundled modules only as far as the program reaches into them: checking the rest
@@ -1112,9 +1206,12 @@ priv fn check_all(ar: *Args) -> i64 {
     names := vec[str]()
     // a diagnostic (its file an index into `names`) and the targets that report it (bits)
     found := map[Diag, i64]()
+    saved_os := target_os
+    saved_arch := target_arch
     targets := []TargetOs{TargetLinux, TargetWindows}
     for t, target in targets {
         target_os = target
+        target_arch = ArchX86_64
         src, n_prelude := load(ar)
         decls := program(&src, n_prelude, false, false)
         errs := src.errs
@@ -1133,7 +1230,7 @@ priv fn check_all(ar: *Args) -> i64 {
                     names.push(fname)
                 }
             }
-            nd := Diag{pos: Pos{file: f, line: d.pos.line, col: d.pos.col}, msg: ast_plain_text(d.msg)}
+            nd := Diag{pos: Pos{file: f, line: d.pos.line, col: d.pos.col}, msg: ast_plain_text(d.msg), warn: d.warn}
             found.set(nd, found.get_or(nd, 0) | 1 << t)
         }
     }
@@ -1151,8 +1248,13 @@ priv fn check_all(ar: *Args) -> i64 {
         }
         errs.push(d)
     }
+    target_os = saved_os
+    target_arch = saved_arch
     if report(&names, &errs) {
         return 1
+    }
+    if json && errs.is_empty() {
+        print("[]")
     }
     return 0
 }
@@ -1173,11 +1275,11 @@ priv fn real_main() -> i64 {
     }
     src, n_prelude := load(&ar)
     if ar.cmd == "sigs" {
-        // `alc sigs <file> --` with "std" as input lists the standard library
+        // `alc sigs <file> --std` (or `-- std`) lists the standard library
         if report(&src.names, &src.errs) {
             return 1
         }
-        from := if contains(&ar.rest, "std") { 0 } else { n_prelude }
+        from := if ar.sigs_std || contains(&ar.rest, "std") { 0 } else { n_prelude }
         sdecls := vec[Decl]()
         if from == 0 {
             for x in 0..src.decls.len {
@@ -1191,7 +1293,7 @@ priv fn real_main() -> i64 {
         } else {
             sdecls = src.decls
         }
-        print_sigs(&src.names, sdecls.items(), from)
+        print_sigs(&src.names, sdecls.items(), from, ar.sigs_pub, ar.filter)
         return 0
     }
     decls := program(&src, n_prelude, test_mode, ar.cmd == "build" || ar.cmd == "run")
@@ -1204,6 +1306,9 @@ priv fn real_main() -> i64 {
         return 1
     }
     if ar.cmd == "check" {
+        if json && cx.errs.is_empty() {
+            print("[]")
+        }
         return 0
     }
     module := cx.module
@@ -1227,13 +1332,16 @@ priv fn real_main() -> i64 {
         aout = a64_compile(&module, ar.emit_asm)
         for fi in aout.code_files {
             fname := file_name(&src.names, fi)
-            if starts_with(fname, "<std/") && find(std_text(fname[5..len(fname) - 4]).or(""), "syscall(") >= 0 {
-                mname := fname[5..len(fname) - 4]
-                if ends_with(mname, "_linux") {
-                    mname = mname[..len(mname) - 6]
+            if starts_with(fname, "<std/") {
+                stxt := std_text(fname[5..len(fname) - 4]).or("")
+                if find(stxt, "syscall(") >= 0 && find(stxt, "TARGET_ARCH") < 0 {
+                    mname := fname[5..len(fname) - 4]
+                    if ends_with(mname, "_linux") {
+                        mname = mname[..len(mname) - 6]
+                    }
+                    driver_error(ar.input, fmt("module `std.", mname, "` makes Linux system calls by their x86-64 numbers: it is not available for --target ", if target_os == TargetMacOS { "macos" } else { "linux-arm64" }, " yet"))
+                    return 1
                 }
-                driver_error(ar.input, fmt("module `std.", mname, "` makes Linux system calls by their x86-64 numbers: it is not available for --target ", if target_os == TargetMacOS { "macos" } else { "linux-arm64" }, " yet"))
-                return 1
             }
         }
         if opt_enabled("backtrace") {
@@ -1318,8 +1426,17 @@ priv fn real_main() -> i64 {
     }
     make_executable(out_path)
     if ar.cmd == "run" || ar.cmd == "test" {
+        extra_env := vec[str]()
+        if test_mode {
+            if len(ar.filter) != 0 {
+                extra_env.push(concat("ALC_TEST_FILTER=", ar.filter))
+            }
+            if json {
+                extra_env.push("ALC_TEST_JSON=1")
+            }
+        }
         if target_os == TargetWindows && TARGET_OS != Windows {
-            return run_windows(out_path, ar.rest.items())
+            return run_windows(out_path, ar.rest.items(), extra_env.items())
         }
         if target_os == TargetMacOS {
             driver_error(out_path, fmt("built `", out_path, "`, a macOS executable, which cannot run here"))
@@ -1334,7 +1451,7 @@ priv fn real_main() -> i64 {
             driver_error(out_path, fmt("built `", out_path, "`, an ", if target_arch == ArchArm64 { "arm64" } else { "x86-64" }, " executable, which cannot run on this processor"))
             return 1
         }
-        code := run_program(out_path, ar.rest.items())
+        code := if extra_env.is_empty() { run_program(out_path, ar.rest.items()) } else { run_program_env(out_path, ar.rest.items(), nil, extra_env.items()) }
         if code < 0 {
             driver_error(out_path, fmt("cannot run `", out_path, "`: ", os_error(11)))
             return 1
@@ -1347,7 +1464,7 @@ priv fn real_main() -> i64 {
 // `alc run` / `alc test` of a Windows executable on Linux: under Wine if ALC_WINE=1 (with
 // WINEPREFIX set; no window can open: DISPLAY and WAYLAND_DISPLAY are removed), else it is
 // only built
-priv fn run_windows(exe: str, argv: []str) -> i64 {
+priv fn run_windows(exe: str, argv: []str, extra_env: []str) -> i64 {
     w, wset := env_get("ALC_WINE")
     if !wset || w != "1" {
         driver_error(exe, fmt("built `", exe, "`, a Windows executable, which cannot run here (ALC_WINE=1 runs it under Wine)"))
@@ -1377,8 +1494,9 @@ priv fn run_windows(exe: str, argv: []str) -> i64 {
     wargs := vec_one(exe)
     wargs.extend(argv)
     drop := []str{"DISPLAY", "WAYLAND_DISPLAY", "WINEDEBUG", "WINEDLLOVERRIDES"}
-    add := []str{"WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree=;mshtml="}
-    code := run_program_env(wine, wargs.items(), drop, add)
+    add := vec_of([]str{"WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree=;mshtml="})
+    add.extend(extra_env)
+    code := run_program_env(wine, wargs.items(), drop, add.items())
     if code < 0 {
         driver_error(exe, fmt("cannot run `", wine, "`: ", os_error(11)))
         return 1

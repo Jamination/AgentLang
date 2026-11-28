@@ -32,8 +32,9 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
                 "`, which is not a Linux library; this compiler emits x86-64 Linux executables (bindings for other platforms can be type-checked with `alc check`)"))
         }
     }
-    // (PT_TLS: the thread block, see layout_tls; a static program's start sets it up itself)
-    nph := if dynamic { 7 } else { 4 }
+    // (PT_TLS: the thread block, see layout_tls; a static program's start sets it up itself;
+    // dynamic adds PT_PHDR, PT_INTERP, PT_DYNAMIC and PT_GNU_RELRO for Full RELRO)
+    nph := if dynamic { 8 } else { 4 }
     hdr_size := 64 + 56 * nph
     text_off := align_up(hdr_size, 16)
     // ---- text ----
@@ -50,108 +51,54 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     live := x86_live_data(m, out)
     rodata := layout_rodata(m, out, live.items(), BASE + ro_off, &gaddr)
     // ---- dynamic linking tables (read-only part) ----
-    interp_at := 0
-    interp_len := 0
-    dynstr_at := 0
-    dynstr_len := 0
-    dynsym_at := 0
-    hash_at := 0
-    rela_at := 0
-    needed := vec[i64]() // offsets of library names in dynstr
+    dy := ElfDynTabs{}
     if dynamic {
-        rodata.resize(align_up(rodata.len, 8), 0)
-        interp := "/lib64/ld-linux-x86-64.so.2\0"
-        interp_at = BASE + ro_off + rodata.len
-        interp_len = len(interp)
-        rodata.extend(interp)
-        dynstr := vec_of([]u8{0})
-        libs := vec[str]()
-        for x in externs {
-            if !libs.contains(m.externs[x].lib) {
-                libs.push(m.externs[x].lib)
-            }
-        }
-        for l in libs {
-            needed.push(dynstr.len)
-            dynstr.extend(l)
-            dynstr.push(0)
-        }
-        dynsym := vec_fill(24, u8(0))
-        for x in externs {
-            put32(&dynsym, dynstr.len)
-            dynstr.extend(m.externs[x].name)
-            dynstr.push(0)
-            // STB_GLOBAL, STT_OBJECT for a variable, STT_FUNC for a function
-            dynsym.push(if m.externs[x].data { u8(0x11) } else { u8(0x12) })
-            dynsym.push(0)
-            put16(&dynsym, 0) // undefined
-            put64(&dynsym, 0)
-            put64(&dynsym, 0)
-        }
-        dynstr_at = BASE + ro_off + rodata.len
-        dynstr_len = dynstr.len
-        rodata.extend(dynstr.items())
-        rodata.resize(align_up(rodata.len, 8), 0)
-        dynsym_at = BASE + ro_off + rodata.len
-        rodata.extend(dynsym.items())
-        // SysV hash table with one empty bucket: nothing is exported
-        hash_at = BASE + ro_off + rodata.len
-        nsym := externs.len + 1
-        put32(&rodata, 1)
-        put32(&rodata, nsym)
-        put32(&rodata, 0)
-        rodata.resize(align_up(rodata.len + 4 * nsym, 8), 0)
-        rela_at = BASE + ro_off + rodata.len
-        rodata.resize(rodata.len + 24 * externs.len, 0)
+        elf_dyn_tables(m, externs.items(), "/lib64/ld-linux-x86-64.so.2", &rodata, BASE + ro_off, &dy)
     }
     ro_end := ro_off + rodata.len
     // ---- data / bss ----
+    // For dynamic binaries, .dynamic and the GOT import slots live in a page-aligned RELRO
+    // prefix at the start of .data (protected read-only after BIND_NOW relocations via
+    // PT_GNU_RELRO), followed by mutable globals on the next page.
     data_off := align_up(ro_end, 0x1000)
     data := vec[u8]()
+    is_got := vec_fill(m.globals.len, false)
+    dyn_at := 0
+    dyn_len := 0
+    got_at := 0
+    got_len := 0
+    relro_size := 0
+    if dynamic {
+        for x in externs {
+            is_got[m.externs[x].got] = true
+        }
+        dyn_at = BASE + data_off
+        for e in elf_dyn_entries(&dy, externs.len) {
+            put64(&data, e.0)
+            put64(&data, e.1)
+        }
+        dyn_len = data.len
+        data.resize(align_up(data.len, 8), 0)
+        got_at = BASE + data_off + data.len
+        for x in externs {
+            gaddr[m.externs[x].got] = BASE + data_off + data.len
+            put64(&data, 0)
+        }
+        got_len = BASE + data_off + data.len - got_at
+        data.resize(align_up(data.len, 0x1000), 0)
+        relro_size = data.len
+        // one R_X86_64_GLOB_DAT (6) relocation per import slot
+        elf_patch_got_relas(m, externs.items(), &rodata, BASE + ro_off, dy.rela_at, &gaddr, 6)
+    }
     for gi in 0..m.globals.len {
         g := &m.globals[gi]
         match g.data {
-            Some(d) if !g.readonly => {
+            Some(d) if !g.readonly && !is_got[gi] => {
                 data.resize(align_up(data.len, max(g.align, 1)), 0)
                 gaddr[gi] = BASE + data_off + data.len
                 data.extend(d.items())
             }
             _ => {}
-        }
-    }
-    dyn_at := 0
-    dyn_len := 0
-    if dynamic {
-        data.resize(align_up(data.len, 8), 0)
-        dyn_at = BASE + data_off + data.len
-        d := vec[(i64, i64)]()
-        for n in needed {
-            d.push((1, n)) // DT_NEEDED
-        }
-        d.push((4, hash_at)) // DT_HASH
-        d.push((5, dynstr_at)) // DT_STRTAB
-        d.push((6, dynsym_at)) // DT_SYMTAB
-        d.push((10, dynstr_len)) // DT_STRSZ
-        d.push((11, 24)) // DT_SYMENT
-        d.push((7, rela_at)) // DT_RELA
-        d.push((8, 24 * externs.len)) // DT_RELASZ
-        d.push((9, 24)) // DT_RELAENT
-        d.push((30, 8)) // DT_FLAGS: BIND_NOW
-        d.push((0x6ffffffb, 1)) // DT_FLAGS_1: NOW
-        d.push((21, 0)) // DT_DEBUG
-        d.push((0, 0))
-        for e in d {
-            put64(&data, e.0)
-            put64(&data, e.1)
-        }
-        dyn_len = BASE + data_off + data.len - dyn_at
-        // one R_X86_64_GLOB_DAT relocation per import slot
-        base := rela_at - (BASE + ro_off)
-        for k, x in externs {
-            at := base + 24 * k
-            assert at + 24 <= rodata.len
-            set64(&rodata, at, gaddr[m.externs[x].got])
-            set64(&rodata, at + 8, ((k + 1) << 32) | 6)
         }
     }
     data.resize(align_up(data.len, 16), 0)
@@ -196,7 +143,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
         put64(&symtab, c.code.bytes.len)
         nsyms += 1
     }
-    shstr := "\0.text\0.rodata\0.data\0.bss\0.symtab\0.strtab\0.shstrtab\0.dynstr\0.dynsym\0.dynamic\0"
+    shstr := "\0.text\0.rodata\0.data\0.bss\0.symtab\0.strtab\0.shstrtab\0.dynstr\0.dynsym\0.dynamic\0.got\0"
     // -g: the DWARF sections (src/dwarf.al), after the others
     dsecs := vec[(str, Vec[u8])]()
     if dbg_on {
@@ -230,16 +177,7 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     sh := vec[u8]()
     // one section header (the name is looked up in the section name table `names`)
     fn section(sh: *Vec[u8], names: str, name: str, ty: i64, flags: i64, addr: i64, off: i64, size: i64, link: i64, info: i64, align: i64, entsize: i64) {
-        put32(sh, if name == "" { 0 } else { name_of(names, name) })
-        put32(sh, ty)
-        put64(sh, flags)
-        put64(sh, addr)
-        put64(sh, off)
-        put64(sh, size)
-        put32(sh, link)
-        put32(sh, info)
-        put64(sh, align)
-        put64(sh, entsize)
+        elf_section(sh, if name == "" { 0 } else { name_of(names, name) }, ty, flags, addr, off, size, link, info, align, entsize)
     }
     section(&sh, shstr, "", 0, 0, 0, 0, 0, 0, 0, 0, 0)
     section(&sh, shstr, ".text", 1, 6, BASE + text_off, text_off, text.len, 0, 0, 16, 0)
@@ -250,9 +188,10 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     section(&sh, shstr, ".strtab", 3, 0, 0, strtab_off, strtab.len, 0, 0, 1, 0)
     section(&sh, shstr, ".shstrtab", 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)
     if dynamic {
-        section(&sh, shstr, ".dynstr", 3, 2, dynstr_at, dynstr_at - BASE, dynstr_len, 0, 0, 1, 0)
-        section(&sh, shstr, ".dynsym", 11, 2, dynsym_at, dynsym_at - BASE, 24 * (externs.len + 1), 8, 1, 8, 24)
+        section(&sh, shstr, ".dynstr", 3, 2, dy.dynstr_at, dy.dynstr_at - BASE, dy.dynstr_len, 0, 0, 1, 0)
+        section(&sh, shstr, ".dynsym", 11, 2, dy.dynsym_at, dy.dynsym_at - BASE, 24 * (externs.len + 1), 8, 1, 8, 24)
         section(&sh, shstr, ".dynamic", 6, 3, dyn_at, dyn_at - BASE, dyn_len, 8, 0, 8, 16)
+        section(&sh, shstr, ".got", 1, 3, got_at, got_at - BASE, got_len, 0, 0, 8, 8)
     }
     for k, s in dsecs {
         section(&sh, shstr, s.0, 1, 0, 0, dsec_off[k], s.1.len, 0, 0, 1, 0)
@@ -272,30 +211,23 @@ fn elf_link(m: *Module, out: *Output) -> (str, str) {
     put16(&h, 56)
     put16(&h, nph)
     put16(&h, 64)
-    put16(&h, (if dynamic { 11 } else { 8 }) + dsecs.len)
+    put16(&h, (if dynamic { 12 } else { 8 }) + dsecs.len)
     put16(&h, 7)
     // program headers
-    fn segment(h: *Vec[u8], ty: i64, flags: i64, off: i64, vaddr: i64, filesz: i64, memsz: i64, align: i64) {
-        put32(h, ty)
-        put32(h, flags)
-        put64(h, off)
-        put64(h, vaddr)
-        put64(h, vaddr)
-        put64(h, filesz)
-        put64(h, memsz)
-        put64(h, align)
-    }
     if dynamic {
-        segment(&h, 6, 4, 64, BASE + 64, 56 * nph, 56 * nph, 8) // PT_PHDR
-        segment(&h, 3, 4, interp_at - BASE, interp_at, interp_len, interp_len, 1) // PT_INTERP
+        elf_segment(&h, 6, 4, 64, BASE + 64, 56 * nph, 56 * nph, 8) // PT_PHDR
+        elf_segment(&h, 3, 4, dy.interp_at - BASE, dy.interp_at, dy.interp_len, dy.interp_len, 1) // PT_INTERP
     }
-    segment(&h, 1, 5, 0, BASE, ro_end, ro_end, 0x1000)
-    segment(&h, 1, 6, data_off, BASE + data_off, data.len, data.len + bss_size, 0x1000)
+    elf_segment(&h, 1, 5, 0, BASE, ro_end, ro_end, 0x1000)
+    elf_segment(&h, 1, 6, data_off, BASE + data_off, data.len, data.len + bss_size, 0x1000)
     if dynamic {
-        segment(&h, 2, 6, dyn_at - BASE, dyn_at, dyn_len, dyn_len, 8) // PT_DYNAMIC
+        elf_segment(&h, 2, 6, dyn_at - BASE, dyn_at, dyn_len, dyn_len, 8) // PT_DYNAMIC
     }
-    segment(&h, 7, 4, data_off + data.len, bss_addr, 0, tls_size, 16) // PT_TLS
-    segment(&h, 0x6474e551, 6, 0, 0, 0, 0, 16)
+    elf_segment(&h, 7, 4, data_off + data.len, bss_addr, 0, tls_size, 16) // PT_TLS
+    elf_segment(&h, 0x6474e551, 6, 0, 0, 0, 0, 16) // PT_GNU_STACK (RW, NX)
+    if dynamic {
+        elf_segment(&h, 0x6474e552, 4, data_off, BASE + data_off, relro_size, relro_size, 1) // PT_GNU_RELRO
+    }
     assert h.len <= file.len
     copy(file[..], h.items())
     return (file.items(), "")

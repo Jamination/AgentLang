@@ -107,7 +107,8 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     mc := cast[*i64](uc + 48)[0]
     regs := cast[*i64](mc + 16)
     pc := regs[32]
-    if cast[*u32](pc)[0] == 0xA9BF7BFD {
+    addr := cast[*i64](info + 24)[0]
+    if sig != 8 && sig != 5 && pc != addr && (pc & 3) == 0 && u64(pc) >= 0x10000 && cast[*u32](pc)[0] == 0xA9BF7BFD {
         pc = regs[30] - 4
     }
     __bt_fault_pc = pc
@@ -115,7 +116,7 @@ noinline fn __on_fault(sig: i64, info: i64, uc: i64) -> never {
     if sig == 8 || sig == 5 {
         __die("panic: arithmetic fault (division by zero or overflow)", "", "")
     }
-    __die_fault(cast[*i64](info + 24)[0])            // si_addr
+    __die_fault(addr)            // si_addr
 }
 
 // argv: from the entry stub (dyld's argv: the arguments, a null, the environment, a null)
@@ -161,6 +162,11 @@ fn __os_backtrace_off() -> bool {
 fn __os_check_memory() -> bool {
     v, set := env_get("ALC_CHECK_MEMORY")
     return set && v != "" && v != "0"
+}
+
+// system page size in bytes (Apple Silicon macOS is 16 KiB)
+fn __os_page_size() -> i64 {
+    return 16384
 }
 
 fn __os_page_off(p: i64, n: i64) {

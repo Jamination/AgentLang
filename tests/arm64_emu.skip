@@ -22,6 +22,7 @@ std/os_files the long-path case fails on Windows (being fixed elsewhere) and the
 std/os_run starts processes
 std/os_shm memfd_create and file maps
 std/os_spawn starts processes
+std/os_split starts processes
 std/os_spawn_threads starts processes
 std/portable_launch starts processes
 std/portable_process starts processes

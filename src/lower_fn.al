@@ -43,6 +43,10 @@ priv struct Binding {
     lvl: i64
     // the binding of the same symbol that this one hides, or -1
     prev: i64
+    // for unused-variable warnings (-W)
+    used: bool
+    is_local: bool
+    decl_pos: Pos
 }
 
 priv binds: Vec[Binding]
@@ -435,6 +439,75 @@ fn err(self: *Fx, pos: Pos, msg: str) {
     self.cx.err(pos, msg)
 }
 
+fn warn(self: *Fx, pos: Pos, msg: str) {
+    if self.cx.opts.warn && !self.cx.scope_prelude {
+        self.cx.warn(pos, msg)
+    }
+}
+
+// Fuzzy "did you mean?" helpers for unknown identifiers, variables and functions.
+priv fn collect_locals(self: *Fx, out: *Vec[str], want_fns: bool) {
+    for bi in 0..binds.len {
+        b := &binds[bi]
+        if b.lvl == self.lvl {
+            if b.val.0 > 0 || (want_fns && b.val.0 < 0 && b.val.0 != LOWER_NESTED_OUTER) {
+                out.push(ast_plain(ast_sym_name(b.sym)))
+            }
+        }
+    }
+}
+
+fn suggest_var(self: *Fx, n: str, pos: Pos) -> str {
+    cands := vec[str]()
+    self.collect_locals(&cands, false)
+    for k in self.cx.global_decls.keys() {
+        g := self.cx.global_decls.get_or(k, nil)
+        if g != nil && (!ast_is_private(k) || g.pos.file == pos.file) {
+            cands.push(ast_plain(k))
+        }
+    }
+    return did_you_mean_hint(ast_plain(n), cands.items())
+}
+
+fn suggest_value(self: *Fx, n: str, pos: Pos) -> str {
+    cands := vec[str]()
+    self.collect_locals(&cands, true)
+    for k in self.cx.global_decls.keys() {
+        g := self.cx.global_decls.get_or(k, nil)
+        if g != nil && (!ast_is_private(k) || g.pos.file == pos.file) {
+            cands.push(ast_plain(k))
+        }
+    }
+    for k in self.cx.const_decls.keys() {
+        c := self.cx.const_decls.get_or(k, nil)
+        if c != nil && (!ast_is_private(k) || c.pos.file == pos.file) {
+            cands.push(ast_plain(k))
+        }
+    }
+    for k in self.cx.p_const_decls.keys() {
+        if !ast_is_private(k) {
+            cands.push(ast_plain(k))
+        }
+    }
+    for fd in self.cx.fn_decls {
+        if !ast_is_private(fd.name) || fd.pos.file == pos.file {
+            cands.push(ast_plain(fd.name))
+        }
+    }
+    return did_you_mean_hint(ast_plain(n), cands.items())
+}
+
+fn suggest_fn(self: *Fx, n: str, pos: Pos) -> str {
+    cands := vec_of([]str{"print", "put", "fmt", "len", "hash", "clone", "sizeof", "offsetof", "sqrt", "fabs", "fmin", "fmax", "popcnt", "ctz", "clz", "bswap", "rotl", "rotr", "mulhi", "panic", "embed", "cast", "ptr", "mkslice", "memcopy", "memfill", "atomic_load", "atomic_store", "atomic_swap", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_cas", "atomic_fence"})
+    self.collect_locals(&cands, true)
+    for fd in self.cx.fn_decls {
+        if !ast_is_private(fd.name) || fd.pos.file == pos.file {
+            cands.push(ast_plain(fd.name))
+        }
+    }
+    return did_you_mean_hint(ast_plain(n), cands.items())
+}
+
 fn tyname(self: *Fx, t: i64) -> str {
     return self.cx.types.name(t)
 }
@@ -636,6 +709,17 @@ fn pop_scope(self: *Fx) {
             self.block(defers[i])
         }
     }
+    if self.cx.opts.warn && !self.cx.scope_prelude {
+        for bi in s.start..binds.len {
+            b := &binds[bi]
+            if b.is_local && !b.used && b.val.0 > 0 {
+                plain := ast_plain(ast_sym_name(b.sym))
+                if len(plain) > 0 && !starts_with(plain, "_") {
+                    self.warn(b.decl_pos, fmt("unused variable `", plain, "` (prefix with `_` if intentional)"))
+                }
+            }
+        }
+    }
     unbind(s.start)
     self.scopes.pop()
 }
@@ -733,13 +817,31 @@ priv fn run_defers_down_to(self: *Fx, depth: i64) {
     }
 }
 
-// A local name: (type, address) of a variable. A negative type slot is not a variable: a
-// nested function (-(index into cx.nested) - 1), or LOWER_NESTED_OUTER for a variable of an
-// enclosing function, which a nested function cannot use.
+// A local name: (type, address) of a variable, marking it used for `-W`.
 fn lookup(self: *Fx, name: str) -> Opt[(i64, i64)] {
     id := ast_sym_find(name)
     b := top_binding(id)
     // the newest binding is this function's if it has one
+    if b >= 0 && binds[b].lvl == self.lvl {
+        binds[b].used = true
+        return Some(binds[b].val)
+    }
+    if self.late.len != 0 {
+        x := self.local(id)
+        if is_some(x) {
+            return x
+        }
+    }
+    if self.parent != nil {
+        return lower_nested_outer(self.parent, name)
+    }
+    return None
+}
+
+// Same as `lookup`, without marking the binding as used (for lint inspection).
+fn lookup_peek(self: *Fx, name: str) -> Opt[(i64, i64)] {
+    id := ast_sym_find(name)
+    b := top_binding(id)
     if b >= 0 && binds[b].lvl == self.lvl {
         return Some(binds[b].val)
     }
@@ -770,6 +872,12 @@ priv fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
         }
     }
     self.scope_set(name, (ty, addr))
+    bi := bind_top[id]
+    if bi >= 0 {
+        binds[bi].is_local = true
+        binds[bi].decl_pos = pos
+        binds[bi].used = false
+    }
     return addr
 }
 
@@ -777,7 +885,17 @@ priv fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
 priv fn block(self: *Fx, b: *Block) {
     self.push_scope()
     self.blocks.push(b)
+    warned_dead := false
     for i in 0..b.stmts.len {
+        if self.dead && !warned_dead {
+            match b.stmts[i].k {
+                Fn(_), When(_) => {}
+                _ => {
+                    self.warn(b.stmts[i].pos, "unreachable statement")
+                    warned_dead = true
+                }
+            }
+        }
         self.stmt(&b.stmts[i])
         lint_copy_writes(self, b, i)
     }
@@ -794,8 +912,18 @@ fn block_value(self: *Fx, b: *Block, want: bool, expect: Opt[i64]) -> Val {
     self.blocks.push(b)
     n := b.stmts.len
     v := val_unit()
+    warned_dead := false
     for i in 0..n {
         s := &b.stmts[i]
+        if self.dead && !warned_dead {
+            match s.k {
+                Fn(_), When(_) => {}
+                _ => {
+                    self.warn(s.pos, "unreachable statement")
+                    warned_dead = true
+                }
+            }
+        }
         if i + 1 < n {
             self.stmt(s)
             lint_copy_writes(self, b, i)
@@ -1012,6 +1140,12 @@ priv fn stmt_k(self: *Fx, s: *Stmt) {
             }
             match op {
                 None => {
+                    match (lhs.k, rhs.k) {
+                        (Ident(a), Ident(b)) if a == b => {
+                            self.warn(s.pos, fmt("self-assignment `", ast_plain(a), " = ", ast_plain(b), "` has no effect"))
+                        }
+                        _ => {}
+                    }
                     v := self.expr(rhs, Some(dst.ty))
                     v2 := self.coerce(v, dst.ty, rhs.pos)
                     self.store(dst, v2)

@@ -75,11 +75,11 @@ verify.bat                          :: Windows: build.bat, the tests, VERIFY: PA
 |---|---|
 | `alc build file.al` | compile to an executable (`-o path`, `-O0`, `--unchecked`, `-g` for debuggers and profilers: DWARF; on Windows also a `.pdb`) |
 | `alc run file.al` | build and run |
-| `alc test file.al` | run the file's `test` blocks |
-| `alc check file.al` | type-check only (`--json` for machine-readable diagnostics) |
-| `alc sigs file.al` | list declarations with the first line of their comments (`-- std` adds the standard library) |
-| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`, `--json`; `// alc fmt: off`) |
-| `alc --version` | the compiler's version and default target |
+| `alc test file.al` | run the file's `test` blocks (`--filter <pat>`, `--json`) |
+| `alc check file.al` | type-check only (`--json` for machine-readable diagnostics; `-W` / `--deny-warnings` for lints) |
+| `alc sigs file.al` | list declarations with the first line of their comments (`--std`, `--pub`, `--filter <pat>`, `--json`) |
+| `alc fmt file.al dir/` | rewrite in the canonical layout (`--check`: list files that would change; `--stdout`, `-`, `--json`; `// alc fmt: off` .. `on`) |
+| `alc --version` / `--help` | the compiler's version and default target (`--json`) / command-line usage |
 
 ## Versions
 
@@ -109,10 +109,11 @@ between the two versions, then rebuild and run the project's tests with the new 
 - [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
 - [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
 - [Standard library](docs/STDLIB.md): strings, collections, files, sockets, math, images, fonts, windows,
-  input, audio, a 2D renderer with text, and bindings for Vulkan, Wayland, D3D12 and Metal
+  input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
 - [Structuring a game](docs/GAMES.md)
 - [Testing on Windows](docs/WINDOWS_TEST.md): checks to run on a real Windows machine
 - [Testing on arm64](docs/ARM64_TEST.md): checks to run on real arm64 Linux (or QEMU) for the experimental arm64 target
+- [Testing on macOS](docs/MACOS_TEST.md): checks to run on Apple silicon for the experimental macOS target
 - [AGENTS.md template](docs/AGENTS_TEMPLATE.md): for a new game repository written by agents
 - [How the compiler is built and organised](docs/BOOTSTRAP.md)
 
@@ -125,7 +126,7 @@ between the two versions, then rebuild and run the project's tests with the new 
 - `examples/gamekit/`: parts the Direct3D 12 examples share (GPU set-up and a sprite batcher in `dx12_gpu.al`, screen, font, synthesizer, options); example code to copy, not a library
 - `examples/dx12_crypt/`: a first-person 3D dungeon crawler on Direct3D 12: procedural stone, flagstone and wood materials with normal maps, per-pixel torch and lantern lighting with maze shadows and ambient occlusion, HDR bloom and tone mapping, mouse-look, gamepad, a scripted test mode and `--still` screenshots (Windows)
 - `examples/font_demo.al`: a TrueType font: wrapped text drawn into an image and a glyph atlas
-- `examples/dx12_triangle.al`, `vk_triangle.al`: a triangle with Direct3D 12 (Windows) / Vulkan (Linux)
+- `examples/dx12_triangle.al`, `vk_triangle.al`, `vk_renderer/`: a triangle with Direct3D 12 (Windows) / Vulkan (Linux), and a fuller Vulkan 1.3 renderer with compute, textures, depth and swapchain recreation
 - `examples/wayland_window.al`, `win32_input.al`, `audio_tone.al`: a Wayland window, input events, a melody on the sound device
 
 ## Performance

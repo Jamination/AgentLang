@@ -7,6 +7,21 @@ priv struct Avail {
     pending_store: i32, // a store not yet observed by any possible reader (NOV: none)
 }
 
+priv const MAX_AVAIL = 256
+
+priv fn push_avail(st: *Vec[Avail], a: Avail) {
+    if st.len >= MAX_AVAIL {
+        // Drop the oldest half to bound straight-line alias scans to O(MAX_AVAIL)
+        drop := MAX_AVAIL / 2
+        keep := st.len - drop
+        for k in 0..keep {
+            st[k] = st[k + drop]
+        }
+        st.len = keep
+    }
+    st.push(a)
+}
+
 // The state at the start of a join: the entries of its first predecessor that every other
 // predecessor has too, for exactly that location, type and value (that value then is in the
 // location on every way in, and its definition dominates every predecessor, so the join too).
@@ -232,7 +247,7 @@ fn loadelim_run(f: *Func) -> bool {
                                 a.pending_store = NOV
                             }
                         }
-                        st.push(Avail{m: m, ty: ty, val: v, pending_store: NOV})
+                        push_avail(&st, Avail{m: m, ty: ty, val: v, pending_store: NOV})
                     }
                 }
                 Store => {
@@ -256,7 +271,7 @@ fn loadelim_run(f: *Func) -> bool {
                         }
                     }
                     st.len = n
-                    st.push(Avail{m: m, ty: ty, val: i32(val), pending_store: v})
+                    push_avail(&st, Avail{m: m, ty: ty, val: i32(val), pending_store: v})
                 }
                 // these take raw pointers that may point into any alloca passed to them
                 MemCpy, MemSet => st.clear()

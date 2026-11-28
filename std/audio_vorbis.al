@@ -465,26 +465,30 @@ struct OggStream {
     dec: *Dec
 }
 
-priv ogg_err: str
+priv __tls_ogg_err: str
 
 // Why the last ogg_open / ogg_decode / ogg_load failed ("" after a success).
 fn ogg_error() -> str {
-    ogg_err
+    __tls_ogg_err
 }
 
 priv crc_table: [256]u32
-priv crc_ready: bool
+priv crc_ready: i64 // 0: uninit, 1: initializing, 2: ready
 
 priv fn ogg_crc(d: str) -> u32 {
-    if !crc_ready {
-        for i in 0..256 {
-            r := u32(i) << 24
-            for k in 0..8 {
-                r = if r & 0x80000000 != 0 { (r << 1) ^ 0x04C11DB7 } else { r << 1 }
+    if atomic_load(&crc_ready) != 2 {
+        if atomic_cas(&crc_ready, 0, 1).1 {
+            for i in 0..256 {
+                r := u32(i) << 24
+                for k in 0..8 {
+                    r = if r & 0x80000000 != 0 { (r << 1) ^ 0x04C11DB7 } else { r << 1 }
+                }
+                crc_table[i] = r
             }
-            crc_table[i] = r
+            atomic_store(&crc_ready, 2)
+        } else {
+            while atomic_load(&crc_ready) != 2 {}
         }
-        crc_ready = true
     }
     crc: u32 = 0
     for i in 0..len(d) {
@@ -1576,7 +1580,7 @@ fn ogg_open(data: str) -> (*OggStream, bool) {
     st.dec = d
     biggest, err := scan(d)
     if err != "" {
-        ogg_err = err
+        __tls_ogg_err = err
         return (nil, false)
     }
     d.pk = alloc[u8](biggest + 1)
@@ -1600,7 +1604,7 @@ fn ogg_open(data: str) -> (*OggStream, bool) {
         err = "bad packet"
     }
     if err != "" {
-        ogg_err = err
+        __tls_ogg_err = err
         return (nil, false)
     }
     st.channels = d.channels
@@ -1609,13 +1613,13 @@ fn ogg_open(data: str) -> (*OggStream, bool) {
     d.a_bpos = d.bpos
     st.frames, err = walk(d)
     if err != "" {
-        ogg_err = err
+        __tls_ogg_err = err
         return (nil, false)
     }
     prepare(d)
     restart(d, -1)
     d.lo_abs = d.skip
-    ogg_err = ""
+    __tls_ogg_err = ""
     (st, true)
 }
 
@@ -1623,7 +1627,7 @@ fn ogg_open(data: str) -> (*OggStream, bool) {
 fn ogg_open_file(path: str) -> (*OggStream, bool) {
     data, ok := read_file(path)
     if !ok {
-        ogg_err = fmt("cannot read ", path, ": ", error_text(io_error()))
+        __tls_ogg_err = fmt("cannot read ", path, ": ", error_text(io_error()))
         return (nil, false)
     }
     ogg_open(data)
@@ -1755,7 +1759,7 @@ fn ogg_decode(data: str) -> (Sound, bool) {
     st, ok := ogg_open(data)
     leave()
     if !ok {
-        ogg_err = clone(ogg_err)
+        __tls_ogg_err = clone(__tls_ogg_err)
         region_free(&r)
         return (none, false)
     }
@@ -1766,7 +1770,7 @@ fn ogg_decode(data: str) -> (Sound, bool) {
     leave()
     ok = got == st.frames && err == ""
     if !ok {
-        ogg_err = if err != "" { clone(err) } else { "stream shorter than its granule positions" }
+        __tls_ogg_err = if err != "" { clone(err) } else { "stream shorter than its granule positions" }
     }
     region_free(&r)
     if !ok {
@@ -1780,7 +1784,7 @@ fn ogg_load(path: str) -> (Sound, bool) {
     data, ok := read_file(path)
     if !ok {
         none: Sound
-        ogg_err = fmt("cannot read ", path, ": ", error_text(io_error()))
+        __tls_ogg_err = fmt("cannot read ", path, ": ", error_text(io_error()))
         return (none, false)
     }
     ogg_decode(data)
