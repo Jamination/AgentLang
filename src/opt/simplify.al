@@ -251,7 +251,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
     // ops without a rule below (most instructions): nothing to copy or match
     match self.f.insts[v].op {
         Const, FConst, Param, GAddr, FAddr, Alloca, Load, Store, Call, CallInd, Syscall, Proj, Phi,
-        MemCpy, MemSet, Atomic => return None
+            MemCpy, MemSet, Atomic => return None
         _ => {}
     }
     inst := self.f.insts[v]
@@ -259,7 +259,7 @@ priv fn simplify(self: *Ctx, v: i64) -> Opt[i64] {
     op := inst.op
     match op {
         Add, Sub, Mul, SDiv, UDiv, SRem, URem, And, Or, Xor, Shl, LShr, AShr,
-        Rotl, Rotr, MulHiS, MulHiU => {
+            Rotl, Rotr, MulHiS, MulHiU => {
             a := inst.args[0]
             b := inst.args[1]
             match (self.c(a), self.c(b)) {
@@ -2049,7 +2049,7 @@ priv fn thread_dup(f: *Func, b: i64, p: i64, target: i64) {
 
 // if-conversion budgets: the cost of one arm, of both arms with the selects they need, and the
 // number of selects (see arm_cost)
-const IFC_ARM_MAX = 4
+const IFC_ARM_MAX = 5
 const IFC_TOTAL_MAX = 8
 const IFC_SELECTS_MAX = 3
 
@@ -2411,6 +2411,96 @@ priv fn ifc_not(f: *Func, b: i64, c: i64) -> i64 {
     return f.push(b, Xor, I8, vec_two(c, f.push(b, Const, I8, vec[i64](), 1)), 0)
 }
 
+// see simplify_cfg, step 3b
+priv fn phi_fold_headers(f: *Func) -> bool {
+    // (most functions have no candidate: a block of phis only that jumps to a block with phis)
+    any := false
+    for e in 1..f.blocks.len {
+        match f.blocks[e].term {
+            Jmp(t) if t != e && !f.blocks[e].insts.is_empty() && all_phis(f, &f.blocks[e].insts) && !f.blocks[t].insts.is_empty() && f.insts[f.blocks[t].insts[0]].op == Phi => any = true
+            _ => {}
+        }
+    }
+    if !any {
+        return false
+    }
+    rpo, preds := f.rpo_preds()
+    pos := vec_fill(f.blocks.len, -1)
+    for k in 0..rpo.len {
+        pos[rpo[k]] = k
+    }
+    blocks: for e in rpo {
+        if e == 0 || f.blocks[e].insts.is_empty() || !all_phis(f, &f.blocks[e].insts) {
+            continue
+        }
+        t := match f.blocks[e].term {
+            Jmp(t1) if t1 != e => t1
+            _ => continue
+        }
+        if f.blocks[t].insts.is_empty() || f.insts[f.blocks[t].insts[0]].op != Phi {
+            continue
+        }
+        // e is a loop header (an edge comes back to it), and no way into it reaches t already
+        back := false
+        for p in preds[e] {
+            if p == e || pos[p] < 0 || contains(&preds[t], p) || f.has_succ(p, t) {
+                continue blocks
+            }
+            if pos[p] >= pos[e] {
+                back = true
+            }
+        }
+        if !back {
+            continue
+        }
+        // the phis of e are read by the phis of t on the edge from e, and nowhere else
+        for b in 0..f.blocks.len {
+            for v in f.blocks[b].insts {
+                i := &f.insts[v]
+                for k in 0..i.args.len {
+                    if contains(&f.blocks[e].insts, i32(i.args[k])) && !(b == t && i.op == Phi && i.from()[k] == e) {
+                        continue blocks
+                    }
+                }
+            }
+            for a in term_args(&f.blocks[b].term) {
+                if contains(&f.blocks[e].insts, i32(a)) {
+                    continue blocks
+                }
+            }
+        }
+        for v in f.blocks[t].insts {
+            if f.insts[v].op != Phi {
+                break
+            }
+            inst := f.im(i64(v))
+            k := index_of(inst.from(), e)
+            if k < 0 {
+                continue
+            }
+            val := inst.args[k]
+            inst.phi_remove(k)
+            if contains(&f.blocks[e].insts, i32(val)) {
+                src := f.insts[val]
+                sf := src.from()
+                for j in 0..src.args.len {
+                    f.im(i64(v)).phi_add(src.args[j], sf[j])
+                }
+            } else {
+                for p in preds[e] {
+                    f.im(i64(v)).phi_add(val, p)
+                }
+            }
+        }
+        for p in preds[e] {
+            f.retarget(p, e, t)
+        }
+        // (one at a time: the lists of predecessors are those of before)
+        return true
+    }
+    return false
+}
+
 priv fn simplify_cfg(f: *Func) -> bool {
     changed := false
     // 1. fold constant / degenerate branches
@@ -2583,6 +2673,15 @@ priv fn simplify_cfg(f: *Func) -> bool {
         if !did {
             break
         }
+        cleanup_prune_unreachable(f)
+        changed = true
+        scanned = false
+    }
+    // 3b. a loop header that holds only phis and jumps on to an inner header (two functions
+    // that tail-call each other become such a pair of loops): its phis are folded into the
+    // inner header's, and both back edges go to one header, where the arms of a branch that
+    // end in them can become selects (step 6)
+    if opt_enabled("phifold") && phi_fold_headers(f) {
         cleanup_prune_unreachable(f)
         changed = true
         scanned = false

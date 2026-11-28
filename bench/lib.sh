@@ -132,13 +132,12 @@ bench_finish() {
   local status=0 quiet=yes
   [[ $BENCH_DISTURBED == 1 ]] && quiet=no
   if [[ -s $BENCH_HISTORY ]]; then
-    # the previous run of this suite on this CPU, row by row (the first baseline only: the
-    # others are for comparison, not for the compiler's own progress)
+    # the previous run of this suite on this CPU, row by row and baseline by baseline
     awk -F'\t' -v suite="$BENCH_SUITE" -v cpu="$BENCH_CPU" -v noise="$BENCH_NOISE" '
-      FNR == NR { if ($3 == suite && $4 == cpu && $10 == "yes") { if ($1 != last) { last = $1; delete old; delete base }; old[$11] = $12; base[$11] = $8; commit = $2 } next }
-      ($11 in old) && base[$11] == $8 { n++; d = ($12 / old[$11] - 1) * 100
-        if (d > noise) { bad++; printf "regression  %-16s %s -> %s (%+.1f %%)\n", $11, old[$11], $12, d }
-        else if (d < -noise) printf "improved    %-16s %s -> %s (%+.1f %%)\n", $11, old[$11], $12, d }
+      FNR == NR { if ($3 == suite && $4 == cpu && $10 == "yes") { if ($1 != last) { last = $1; delete old }; old[$8, $11] = $12; commit = $2 } next }
+      (($8, $11) in old) { n++; o = old[$8, $11]; d = ($12 / o - 1) * 100
+        if (d > noise) { bad++; printf "regression  %-8s %-16s %s -> %s (%+.1f %%)\n", $8, $11, o, $12, d }
+        else if (d < -noise) printf "improved    %-8s %-16s %s -> %s (%+.1f %%)\n", $8, $11, o, $12, d }
       END { if (n) printf "history   compared %d rows with the run of %s (%s): %d regression(s)\n", n, last, commit, bad; exit bad > 0 }
     ' "$BENCH_HISTORY" "$BENCH_ROWS" || status=3
   fi

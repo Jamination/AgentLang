@@ -196,6 +196,9 @@ priv fn compile_fn(m: *Module, fid: i64, o: *Opts, w: *Work) -> Done {
     }
     opt_trace("regalloc", f)
     ra := regalloc_allocate(&mf, layout.items(), w)
+    if opt_enabled("jthread") && !dbg_on {
+        x86_thread_switches(&mf, &layout)
+    }
     opt_trace("emit", f)
     local := vec[i64]()
     for x in 0..mf.fconsts.len {

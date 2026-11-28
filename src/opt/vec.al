@@ -998,9 +998,182 @@ priv fn vec_inst(f: *Func, b: *VB, plan: *VPlan, v: i64, p: i64) {
 }
 
 // Vectorizes every qualifying loop (see above); true if one changed.
+// ---------- narrowing ----------
+// A loop that sums bytes in 32 bits and stores a byte (a box blur: `out[x] = u8(s / 9)` with
+// `s` a sum of `u32(p[x])`) would run in 32-bit lanes: four vectors per vector of bytes, and a
+// 32-bit high multiply that SSE2 does not have. Where every value on the way from the bytes to
+// the stored byte is known to fit in 16 bits, the same computation in i16 gives the same byte,
+// in half the vectors and with pmulhuw. Done before the vectorizer, in one-block loops, for a
+// tree of single-use values under a `Trunc` to i8:
+//     ZExt to i32 of an i8 or i16      Add (no carry out of 16 bits)      LShr by a constant
+//     MulHiU by a constant M, as MulHiU i16 by M16 (the division by a constant): only if
+//     trying every value the operand can have shows that the two give the same result
+// ALC_DISABLE=vnarrow turns it off.
+
+// The largest value of x (an i32 of block b) if it can be computed in 16 bits, else -1.
+// `uses`: the number of uses of every instruction; `pos`: its index in block b or -1.
+priv fn vn_max(f: *Func, x: i64, uses: []i32, pos: []i32, depth: i64) -> i64 {
+    i := &f.insts[x]
+    if i.ty != I32 || depth == 0 {
+        return -1
+    }
+    if i.op == Const {
+        k := i.k & 0xFFFF_FFFF
+        return if k <= 0xFFFF { k } else { -1 }
+    }
+    if pos[x] < 0 || uses[x] != 1 {
+        return -1
+    }
+    match i.op {
+        ZExt => {
+            st := f.insts[i.args[0]].ty
+            return if st == I8 { 255 } else if st == I16 { 0xFFFF } else { -1 }
+        }
+        Add => {
+            a := vn_max(f, i.args[0], uses, pos, depth - 1)
+            b := vn_max(f, i.args[1], uses, pos, depth - 1)
+            return if a < 0 || b < 0 || a + b > 0xFFFF { -1 } else { a + b }
+        }
+        LShr => {
+            a := vn_max(f, i.args[0], uses, pos, depth - 1)
+            c := match f.is_const(i.args[1]) {
+                Some(c1) => c1
+                None => -1
+            }
+            return if a < 0 || c < 0 || c > 15 { -1 } else { a >> c }
+        }
+        MulHiU => {
+            a := vn_max(f, i.args[0], uses, pos, depth - 1)
+            m := match f.is_const(i.args[1]) {
+                Some(m1) => m1 & 0xFFFF_FFFF
+                None => -1
+            }
+            if a < 0 || m < 0 || vn_mul16(m, a) < 0 {
+                return -1
+            }
+            return (a * m) >> 32
+        }
+        _ => return -1
+    }
+}
+
+// the 16-bit multiplier whose high product equals that of the 32-bit multiplier m for every
+// operand from 0 to hi, or -1
+priv fn vn_mul16(m: i64, hi: i64) -> i64 {
+    for cand in [2]i64{(m >> 16) + 1, m >> 16} {
+        if cand <= 0 || cand > 0xFFFF {
+            continue
+        }
+        ok := true
+        for x in 0..=hi {
+            if (x * m) >> 32 != (x * cand) >> 16 {
+                ok = false
+                break
+            }
+        }
+        if ok {
+            return cand
+        }
+    }
+    return -1
+}
+
+// builds x (accepted by vn_max) in i16: the new instructions, in order, go to `out`, the ones
+// they replace to `dead`; constants are added to the entry block
+priv fn vn_build(f: *Func, x: i64, uses: []i32, pos: []i32, out: *Vec[i64], dead: *Vec[i64]) -> i64 {
+    i := f.insts[x]
+    if i.op == Const {
+        return f.push(0, Const, I16, vec[i64](), i.k & 0xFFFF)
+    }
+    dead.push(x)
+    v := NOV
+    match i.op {
+        ZExt => {
+            if f.insts[i.args[0]].ty == I16 {
+                return i.args[0]
+            }
+            v = f.mk(ZExt, I16, vec_one(i.args[0]), 0)
+        }
+        MulHiU => {
+            a := vn_build(f, i.args[0], uses, pos, out, dead)
+            hi := vn_max(f, i.args[0], uses, pos, 16)
+            m := f.insts[i.args[1]].k & 0xFFFF_FFFF
+            c := f.push(0, Const, I16, vec[i64](), vn_mul16(m, hi))
+            v = f.mk(MulHiU, I16, vec_two(a, c), 0)
+        }
+        _ => {
+            a := vn_build(f, i.args[0], uses, pos, out, dead)
+            b := vn_build(f, i.args[1], uses, pos, out, dead)
+            v = f.mk(i.op, I16, vec_two(a, b), 0)
+        }
+    }
+    out.push(v)
+    return v
+}
+
+priv fn vec_narrow(f: *Func) -> bool {
+    changed := false
+    uses := vec[i32]()
+    for b in 1..f.blocks.len {
+        match f.blocks[b].term {
+            Br(_, t, e) if t == b || e == b => {}
+            _ => continue
+        }
+        idx := 0
+        while idx < f.blocks[b].insts.len {
+            v := i64(f.blocks[b].insts[idx])
+            idx += 1
+            i := f.insts[v]
+            if i.op != Trunc || i.ty != I8 || f.insts[i.args[0]].ty != I32 || f.insts[i.args[0]].op == ZExt {
+                continue
+            }
+            // (the tables are those of the function as it is now)
+            uses = vec_fill(f.insts.len, i32(0))
+            pos := vec_fill(f.insts.len, i32(-1))
+            for bb in 0..f.blocks.len {
+                for u in f.blocks[bb].insts {
+                    for a in f.insts[u].args {
+                        uses[a] += 1
+                    }
+                }
+                for a in term_args(&f.blocks[bb].term) {
+                    uses[a] += 1
+                }
+            }
+            for k in 0..f.blocks[b].insts.len {
+                pos[f.blocks[b].insts[k]] = i32(k)
+            }
+            if vn_max(f, i.args[0], uses.items(), pos.items(), 16) < 0 {
+                continue
+            }
+            out := vec[i64]()
+            dead := vec[i64]()
+            nv := vn_build(f, i.args[0], uses.items(), pos.items(), &out, &dead)
+            f.im(v).args[0] = nv
+            // the block without the replaced instructions, the new ones before the Trunc
+            insts := vec[i32]()
+            for u in f.blocks[b].insts {
+                if i64(u) == v {
+                    for n in out {
+                        insts.push(i32(n))
+                    }
+                }
+                if !contains(&dead, i64(u)) {
+                    insts.push(u)
+                }
+            }
+            f.blocks[b].insts = insts
+            idx = 0
+            changed = true
+        }
+    }
+    return changed
+}
+
 fn vec_run(f: *Func) -> bool {
     if !vec_enabled() || f.size() > 20000 {
         return false
     }
-    return loop_each_innermost(f, vec_try)
+    narrowed := opt_enabled("vnarrow") && vec_narrow(f)
+    return loop_each_innermost(f, vec_try) || narrowed
 }

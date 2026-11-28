@@ -8,6 +8,28 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Changed
+- **Faster code for state machines.** A loop around `match state { ... }` whose arms set the
+  state to a constant jumps from each arm straight to the next one instead of through the
+  jump table (src/x86/thread.al, after register allocation; `ALC_DISABLE=jthread`).
+  bench/wide/call/lexer: 1.65 to 1.24 times clang -O2.
+- **Byte sums divided by a constant run in 16-bit lanes** where every intermediate value is
+  known to fit (`out[x] = u8(s / 9)` with `s` a sum of `u32(p[x])`): half the vectors and no
+  32-bit high multiply (`ALC_DISABLE=vnarrow`). bench/wide/vec/blur: 2.55 to 0.98.
+- **Two functions that tail-call each other become one loop** with one header, so a branch
+  between their bodies can become a conditional move (`ALC_DISABLE=phifold`).
+  bench/wide/call/mutrec: 1.42 to 0.99.
+- If-conversion accepts an arm that costs one operation more (a float select after a compare
+  and an add), which lets such a loop vectorize. bench/wide/fp/branchy: 1.44 to 0.91.
+- Benchmarks: the history compares every baseline of a row, and names the wide benchmarks by
+  group (`call/lexer`, `str/lexer`); the quiet check before a run waits up to 20 seconds for a
+  busy moment to pass.
+
+### Fixed
+- A 16-bit or 8-bit high multiply outside a vector loop (the remainder iterations of a loop
+  that divides u16 values by a constant in vectors) computed with 32-bit operands and gave a
+  wrong result.
+
 ## [0.6.0] - 2026-11-28
 
 ### Added

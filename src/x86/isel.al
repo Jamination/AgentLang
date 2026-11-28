@@ -2303,6 +2303,16 @@ priv fn inst(self: *Sel, v: i64) {
             res := if i.op == SDiv || i.op == UDiv { RAX } else { RDX }
             self.e(Mov, 8, R(d), R(res))
         }
+        MulHiS, MulHiU if ty == I16 || ty == I8 => {
+            // the whole product fits in 32 bits: its upper half is a shift away
+            signed := i.op == MulHiS
+            d := self.vr(v)
+            a := self.ext32(i.args[0], signed)
+            b := self.ext32(i.args[1], signed)
+            self.e(Mov, 4, R(d), R(a))
+            self.e(Imul, 4, R(d), R(b))
+            self.e(if signed { Sar } else { Shr }, 4, R(d), I(ty.bits()))
+        }
         MulHiS, MulHiU => {
             d := self.vr(v)
             a := self.reg(i.args[0])

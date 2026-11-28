@@ -3,7 +3,7 @@
 # usage: bench/wide/run.sh [-r runs] [--force] [--no-save] [groups...]
 #        (default groups: vec int str call mem fp)
 # How a run is judged (machine, quiet check, noise band, history, exit status 3 and 4): see
-# bench/lib.sh. The history gets one row per benchmark (AL / clang -O2).
+# bench/lib.sh. The history gets one row per benchmark (group/name, AL / clang -O2).
 cd "$(dirname "$0")/../.." || exit 2
 RUNS=5
 args=()
@@ -28,6 +28,6 @@ awk '/^== /{g=$2; next} $1=="name"||$1~/_v$/{next} NF>=7 && $4+0>0 {n[g]++; s[g]
   END{for(g in n) printf "%-5s n=%d al/cl=%.2f al/novec=%.2f\n", g, n[g], exp(s[g]/n[g]), exp(v[g]/n[g]); printf "ALL   n=%d al/cl=%.2f al/novec=%.2f\n", N, exp(S/N), exp(V/N)}' bench/wide/last.txt
 awk -v noise="$BENCH_NOISE" '/^== /||$1=="name"||$1~/_v$/{next} NF>=7 && $4+0>0 { if ($4 > 1 + noise/100) s++; else if ($4 < 1 - noise/100) f++; else t++ }
   END { printf "against clang -O2: %d faster, %d tie (within %s %%), %d slower\n", f, t, noise, s }' bench/wide/last.txt
-while read -r name cl al ratio _; do bench_row clang "$name" "$ratio" "$al" "$cl"; done < <(awk '/^== /||$1=="name"||$1~/_v$/{next} NF>=7 && $4+0>0 { print $1, $2, $3, $4 }' bench/wide/last.txt)
+while read -r name cl al ratio _; do bench_row clang "$name" "$ratio" "$al" "$cl"; done < <(awk '/^== /{g=$2; next} $1=="name"||$1~/_v$/{next} NF>=7 && $4+0>0 { print g "/" $1, $2, $3, $4 }' bench/wide/last.txt)
 echo
 bench_finish

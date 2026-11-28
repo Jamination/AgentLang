@@ -3,10 +3,10 @@
 AL is a small, statically typed language that compiles to native code in milliseconds.
 `alc` is its compiler: one 6 MB executable with no LLVM, assembler, linker or libc behind it.
 
-- **Fast to compile.** The compiler builds its own 68,000 lines in about 0.2 s unoptimised
+- **Fast to compile.** The compiler builds its own 69,000 lines in about 0.2 s unoptimised
   and 3 s optimised. Hello world builds in under 30 ms.
 - **Fast to run.** On a par with `clang -O2` with bounds and division checks on: a geometric
-  mean of 1.03 on ten classic benchmarks and 1.04 on 70 more, and 1.06 against Rust on the
+  mean of 1.02 on ten classic benchmarks and 1.01 on 70 more, and 1.05 against Rust on the
   ten ([Performance](#performance)).
 - **Simple memory.** Arenas and regions, reclaimed in bulk, with deep `clone` to move data
   out. No `free`, no garbage collector, no borrow checker ([the trade-offs](docs/MEMORY.md)).
@@ -172,27 +172,33 @@ between the two versions, then rebuild and run the project's tests with the new 
 
 The same algorithms and sizes in AL, C, C++ and Rust; all must print identical output. AL runs
 with bounds and division checks enabled, Rust with its bounds checks. Each column is AL's time
-divided by the other compiler's, so above 1 means AL is slower. Measured with AL 0.5.0 on Linux
+divided by the other compiler's, so above 1 means AL is slower. Measured with AL 0.6.0 and the optimisations listed under Unreleased in the changelog, on Linux
 x86-64 (Ryzen 5 3600: 6 cores, 12 threads, nothing pinned), best of 7 runs
 (`bash bench/run.sh -r 7`).
 
 | Benchmark | AL / clang -O2 | AL / gcc -O2 | AL / g++ -O2 | AL / rustc -O |
 |---|---|---|---|---|
-| nbody | 1.13 | 1.09 | 1.10 | 1.45 |
-| spectralnorm | 1.01 | 1.51 | 1.48 | 1.01 |
-| fannkuch | 1.12 | 1.18 | 1.19 | 1.40 |
-| mandelbrot | 1.02 | 1.04 | 1.04 | 1.02 |
-| binarytrees | 1.00 | 1.28 | 1.73 | 0.90 |
-| sha256 | 0.98 | 0.95 | 0.96 | 0.95 |
-| matmul | 0.97 | 0.98 | 0.98 | 0.93 |
-| quicksort | 1.07 | 1.05 | 1.04 | 0.99 |
-| sieve | 1.02 | 1.02 | 1.02 | 1.03 |
-| hashmap | 1.05 | 1.01 | 1.02 | 1.04 |
-| **geometric mean** | **1.03** | **1.10** | **1.14** | **1.06** |
+| nbody | 1.11 | 1.08 | 1.09 | 1.46 |
+| spectralnorm | 1.01 | 1.51 | 1.50 | 1.00 |
+| fannkuch | 1.12 | 1.18 | 1.18 | 1.38 |
+| mandelbrot | 1.02 | 1.04 | 1.05 | 1.01 |
+| binarytrees | 0.94 | 1.22 | 1.62 | 0.85 |
+| sha256 | 0.99 | 0.97 | 0.97 | 0.97 |
+| matmul | 0.96 | 0.97 | 0.96 | 0.93 |
+| quicksort | 1.03 | 1.04 | 1.03 | 0.99 |
+| sieve | 1.02 | 1.04 | 1.02 | 1.03 |
+| hashmap | 1.05 | 1.02 | 1.04 | 1.05 |
+| **geometric mean** | **1.02** | **1.10** | **1.13** | **1.05** |
 
 clang 23.1.5, gcc 16.2.1 and rustc 1.99.0. A difference within 5 % is noise on this machine:
-against clang, six of the ten are ties and four are slower. The ports are plain ones (safe Rust,
+against clang, six of the ten are ties, three are slower and one is faster. The ports are plain ones (safe Rust,
 `std::vector` in C++); in binarytrees the Rust port indexes a `Vec` where C and AL use pointers.
+`rustc -O` is optimisation level 3, the level Rust programs are normally built at, against
+level 2 for the C and C++ compilers. It matters most in nbody, where rustc at level 3 unrolls
+the ten body pairs and computes their square roots and divisions two at a time (about 240 ms); at
+level 2 it takes 403 ms, against 350 ms for AL and 312 ms for clang. `clang -O3` does not
+gain on these two programs (320 ms on nbody, 185 ms on fannkuch, where rustc takes 168 ms at
+level 2 and 148 ms at level 3).
 
 Building these ten programs takes `alc` 0.38 s in total, clang 0.73 s, gcc 0.70 s, rustc 0.96 s
 and g++ 2.6 s. They are small files, so this is mostly start-up cost; the compiler's own
@@ -209,22 +215,23 @@ compiler before the work these benchmarks drove, and after it):
 
 | Area | Pairs | AL / clang | AL / clang without its vectorizers |
 |---|---|---|---|
-| loops clang vectorizes | 13 | 1.02 | 0.62 |
-| integer and bit manipulation | 10 | 1.04 | 1.05 |
-| strings and text | 13 | 1.10 | 1.10 |
-| calls and control flow | 11 | 1.15 | 1.12 |
-| memory and data structures | 12 | 0.93 | 1.01 |
-| floating point | 11 | 0.99 | 0.97 |
-| **geometric mean** | **70** | **1.04** | **0.95** |
+| loops clang vectorizes | 13 | 0.95 | 0.58 |
+| integer and bit manipulation | 10 | 1.04 | 1.04 |
+| strings and text | 13 | 1.11 | 1.11 |
+| calls and control flow | 11 | 1.08 | 1.06 |
+| memory and data structures | 12 | 0.93 | 1.00 |
+| floating point | 11 | 0.95 | 0.92 |
+| **geometric mean** | **70** | **1.01** | **0.92** |
 
-Of the 70, 10 are faster than clang by more than 5 %, 22 are within 5 % (a tie on this
-machine) and 38 are slower; 20 are more than 15 % slower.
-The slowest are a u8 box blur (2.6, clang narrows its arithmetic to 16-bit lanes), a lexer
-state machine with many branches (1.7), a clamp/abs/select loop that is not vectorized (1.4)
-and mutual recursion (1.4); a byte sum that only AL vectorizes is at 0.17 and lifts the first
-row (the mean of the other 69 is 1.06). The loop vectorizer is x86-64 only (SSE2).
+Of the 70, 9 are faster than clang by more than 5 %, 28 are within 5 % (a tie on this
+machine) and 33 are slower; 18 are more than 15 % slower.
+The slowest are a ring buffer of vectors (1.33), particles as an array of structs (1.31,
+clang divides two adjacent fields at once), a word-frequency count (1.30), string building
+(1.30) and a division and remainder loop (1.29); a byte sum that only AL vectorizes is at
+0.16 and lifts the first
+row (the mean of the other 69 is 1.04). The loop vectorizer is x86-64 only (SSE2).
 
-The compiler compiles its own 68,000 lines in about 0.2 s without optimisation (about 350,000 lines/s) and 2.9 s with optimisation (same machine, 6 cores and 12 threads, best of 7: `bash bench/compile.sh`), compiling functions in parallel worker threads on Linux and Windows (`ALC_JOBS=n` sets the number).
+The compiler compiles its own 69,000 lines in about 0.2 s without optimisation (about 340,000 lines/s) and 3.0 s with optimisation (same machine, 6 cores and 12 threads, best of 7: `bash bench/compile.sh`), compiling functions in parallel worker threads on Linux and Windows (`ALC_JOBS=n` sets the number).
 
 ## Repository
 
