@@ -58,13 +58,13 @@ Download the compiler from the [latest release](https://github.com/Jamination/Ag
 It is one executable with the standard library inside it; there is nothing else to install.
 
 ```
-curl -L -o alc https://github.com/Jamination/AgentLang/releases/download/v0.5.0/alc-0.5.0-linux-x86_64
+curl -L -o alc https://github.com/Jamination/AgentLang/releases/download/v0.6.0/alc-0.6.0-linux-x86_64
 chmod +x alc
 echo 'fn main() { print("hello") }' > hello.al
 ./alc run hello.al
 ```
 
-On Windows, download `alc-0.5.0-windows-x86_64.exe`, rename it to `alc.exe` and run
+On Windows, download `alc-0.6.0-windows-x86_64.exe`, rename it to `alc.exe` and run
 `alc.exe run hello.al`. `SHA256SUMS` in the release lists the checksums of both.
 
 ### Building from source
@@ -123,14 +123,14 @@ each one changes. A project pins the compiler it is written for:
 
 ```
 git clone https://github.com/Jamination/AgentLang && cd AgentLang
-git checkout v0.5.0 && ./build.sh
+git checkout v0.6.0 && ./build.sh
 cp build/alc build/alc.exe ~/game/tools/       # or install on the PATH, below
 ```
 
 On a machine shared by several projects, install each release beside the others and let
-`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.5.0 && ln -sfn alc-0.5.0
+`alc` point at the default: `cp build/alc ~/.local/bin/alc-0.6.0 && ln -sfn alc-0.6.0
 ~/.local/bin/alc`. A project that must not change with a new release can call the versioned
-name (`alc-0.5.0`); the [AGENTS.md template](docs/AGENTS_TEMPLATE.md) calls plain `alc`.
+name (`alc-0.6.0`); the [AGENTS.md template](docs/AGENTS_TEMPLATE.md) calls plain `alc`.
 
 The standard library ships inside the compiler, so one executable is the whole toolchain;
 `alc --version` names it. While the version is 0.x, a new minor version (0.2) may break

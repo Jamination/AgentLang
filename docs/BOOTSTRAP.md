@@ -175,7 +175,7 @@ notice it. A release:
    0.1.1).
 2. In `CHANGELOG.md` rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a new empty
    `## [Unreleased]` above it and update the two link lines at the end.
-3. Set `VERSION` in `src/main.al` to `"X.Y.Z"`; `./verify.sh` must pass.
+3. Set `VERSION` in `src/main.al` to `"X.Y.Z"`; `./verify.sh` must pass. Update the version in the download commands and pin examples of `README.md` (Getting started, Versions).
 4. Commit, then tag that commit: `git tag -a vX.Y.Z -m "AL X.Y.Z"` and push the tag.
 
 ## History

@@ -8,6 +8,8 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-28
+
 ### Added
 - **Diagnostic codes.** Every error and warning has a code that names the kind of mistake
   (`E0301` unknown-identifier, `E0401` type-mismatch, `W0001` unused-variable, ...). With
@@ -660,7 +662,8 @@ The first release. An overview of what a project starting on 0.1.0 gets:
   C boundary; the compiler compiles sequentially there (no parallel back end).
 - No package manager: code outside `std` is included by path.
 
-[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Jamination/AgentLang/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Jamination/AgentLang/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Jamination/AgentLang/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jamination/AgentLang/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Jamination/AgentLang/compare/v0.2.2...v0.3.0
