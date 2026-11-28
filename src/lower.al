@@ -3,6 +3,27 @@
 struct Opts {
     checks: bool
     warn: bool
+    lsp: bool
+}
+
+// semantic reference/definition record collected when Opts.lsp is true (alc lsp)
+struct LspHit {
+    pos: Pos
+    len: i32
+    def_pos: Pos
+    name: str
+    kind: str
+    detail: str
+}
+
+// local variable or parameter visible inside a function (for alc lsp completion)
+struct LspLocal {
+    file: i64
+    fn_line: i32
+    fn_end: i32
+    name: str
+    ty: str
+    def_pos: Pos
 }
 
 enum CV {
@@ -125,6 +146,21 @@ struct Cx {
     names: Vec[SymNames]
     lists: Vec[Vec[i64]]
     vlists: Vec[Vec[(i64, i64)]]
+    // opt-in semantic index for `alc lsp` (populated only when opts.lsp is true)
+    lsp_hits: Vec[LspHit]
+    lsp_locals: Vec[LspLocal]
+}
+
+// records a resolved symbol occurrence for `alc lsp` (no-op unless opts.lsp is true)
+fn lsp_hit(self: *Cx, pos: Pos, name: str, def_pos: Pos, kind: str, detail: str) {
+    if !self.opts.lsp || pos.file < 0 || pos.line <= 0 || self.lib_file(pos.file) {
+        return
+    }
+    plain := ast_plain(name)
+    if len(plain) == 0 {
+        return
+    }
+    self.lsp_hits.push(LspHit{pos: pos, len: i32(len(plain)), def_pos: def_pos, name: plain, kind: kind, detail: detail})
 }
 
 // for "unknown name" diagnostics: says that `n` exists as a private declaration of another file
@@ -928,11 +964,25 @@ fn resolve(self: *Cx, t: *TypeAst, env: *Map[str, i64]) -> i64 {
                 return T_ERR
             }
             match self.find_struct(n) {
-                Some(si) => return self.inst_struct(si, targs, pos)
+                Some(si) => {
+                    t := self.inst_struct(si, targs, pos)
+                    if self.opts.lsp {
+                        sd := self.struct_decls[si]
+                        self.lsp_hit(pos, n, sd.pos, "struct", ast_plain_text(ast_struct_str(sd)))
+                    }
+                    return t
+                }
                 None => {}
             }
             match self.find_enum(n) {
-                Some(ei) => return self.inst_enum(ei, targs, pos)
+                Some(ei) => {
+                    t := self.inst_enum(ei, targs, pos)
+                    if self.opts.lsp {
+                        ed := self.enum_decls[ei]
+                        self.lsp_hit(pos, n, ed.pos, "enum", ast_plain_text(ast_enum_str(ed)))
+                    }
+                    return t
+                }
                 None => {}
             }
             hint := match n {

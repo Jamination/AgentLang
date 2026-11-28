@@ -470,6 +470,17 @@ priv fn recv_val(self: *Fx, recv: *Expr) -> Val {
 }
 
 fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
+    if self.cx.opts.lsp {
+        self.lsp_callee_pos = match c.k {
+            Ident(_) => c.pos
+            Field(_, _) => Pos{file: c.pos.file, line: c.pos.line, col: c.pos.col + 1}
+            Index(b, _) => match b.k {
+                Field(_, _) => Pos{file: b.pos.file, line: b.pos.line, col: b.pos.col + 1}
+                _ => b.pos
+            }
+            _ => pos
+        }
+    }
     match c.k {
         Ident(n) => {
             match self.lookup(n) {
@@ -617,6 +628,9 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
                                 if rv.ty == T_ERR {
                                     return val_err()
                                 }
+                                if self.cx.opts.lsp {
+                                    self.lsp_callee_pos = Pos{file: b.pos.file, line: b.pos.line, col: b.pos.col + 1}
+                                }
                                 if lower_mem_is_builtin(name) {
                                     return self.call_shared(name, cands, Some(tys), Some(rv), recv, args, expect, pos)
                                 }
@@ -643,6 +657,9 @@ fn call(self: *Fx, c: *Expr, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
             rv := self.recv_val(recv)
             if rv.ty == T_ERR {
                 return val_err()
+            }
+            if self.cx.opts.lsp {
+                self.lsp_callee_pos = Pos{file: c.pos.file, line: c.pos.line, col: c.pos.col + 1}
             }
             // a struct field or a tuple element (`t.1(x)`) holding a function value?
             dv := self.auto_deref(rv)
@@ -1171,6 +1188,10 @@ fn call_decl(self: *Fx, di: i64, explicit: Opt[Vec[i64]], recv: Opt[Val], args: 
 // the nested function `self.cx.nested[nest]`, whose types are resolved already and which gets
 // the addresses of the variables it uses as extra arguments.
 fn call_fn(self: *Fx, d: *FnDecl, di: i64, nest: i64, explicit: Opt[Vec[i64]], recv: Opt[Val], args: []Expr, expect: Opt[i64], pos: Pos, pre: [](i64, Val)) -> Val {
+    if self.cx.opts.lsp {
+        cpos := if self.lsp_callee_pos.line > 0 { self.lsp_callee_pos } else { pos }
+        self.cx.lsp_hit(cpos, d.name, d.pos, "fn", ast_plain_text(ast_sig_str(d)))
+    }
     nrecv := if is_some(recv) { 1 } else { 0 }
     // a library function `f` with a twin `__at_f` that takes the place of the call as a last
     // `str` parameter: the twin is called, so that its failure names the caller's line

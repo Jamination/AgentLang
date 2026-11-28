@@ -207,6 +207,13 @@ priv fn ident_tab_init() {
     ident_tab_ready = true
 }
 
+// clears cached lexer tables (used by `alc lsp` before freeing a per-request Region)
+fn lexer_reset() {
+    ident_tab_ready = false
+    kw_of_sym = vec[i64]()
+    tok_buf = vec[Token]()
+}
+
 // a token after which a newline ends the statement
 priv fn ends_stmt(t: Tk) -> bool {
     return match t {

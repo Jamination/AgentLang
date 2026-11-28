@@ -386,6 +386,9 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
             if x.0 < 0 {
                 return self.nested_ident(n, x.0, pos)
             }
+            if self.cx.opts.lsp {
+                self.cx.lsp_hit(pos, n, self.lookup_def_pos(n), "var", fmt(ast_plain(n), ": ", self.tyname(x.0)))
+            }
             m := self.mval(x.0, x.1)
             return self.rvalue(m)
         }
@@ -430,13 +433,25 @@ priv fn ident(self: *Fx, n: str, expect: Opt[i64], pos: Pos) -> Val {
                     _ => {}
                 }
                 d, _ := self.cx.const_decl(n)
-                return self.const_val(c.0, cv, self.cx.const_expr_dec(&d.val, 0), expect, pos)
+                v := self.const_val(c.0, cv, self.cx.const_expr_dec(&d.val, 0), expect, pos)
+                if self.cx.opts.lsp {
+                    self.cx.lsp_hit(pos, n, d.pos, "const", fmt("const ", ast_plain(n), ": ", self.tyname(v.ty)))
+                }
+                return v
             }
             None => { return val_err() }
         }
     }
     match self.global_place(n) {
         Some(m) => {
+            if self.cx.opts.lsp {
+                gd, gok := self.cx.global_decls.get(n)
+                if !gok {
+                    gd, gok = self.cx.p_global_decls.get(n)
+                }
+                gp := if gok && gd != nil { gd.pos } else { Pos{file: -1} }
+                self.cx.lsp_hit(pos, n, gp, "global", fmt(ast_plain(n), ": ", self.tyname(m.ty)))
+            }
             return self.rvalue(m)
         }
         None => {}
@@ -525,6 +540,9 @@ priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
                         self.err(e.pos, fmt("`", n, "` is a nested function: it is not assignable"))
                         return None
                     }
+                    if self.cx.opts.lsp {
+                        self.cx.lsp_hit(e.pos, n, self.lookup_def_pos(n), "var", fmt(ast_plain(n), ": ", self.tyname(x.0)))
+                    }
                     return Some(self.mval(x.0, x.1))
                 }
                 None => {}
@@ -532,6 +550,14 @@ priv fn place_raw(self: *Fx, e: *Expr) -> Opt[Val] {
             if !self.cx.has_const(n) {
                 match self.global_place(n) {
                     Some(m) => {
+                        if self.cx.opts.lsp {
+                            gd, gok := self.cx.global_decls.get(n)
+                            if !gok {
+                                gd, gok = self.cx.p_global_decls.get(n)
+                            }
+                            gp := if gok && gd != nil { gd.pos } else { Pos{file: -1} }
+                            self.cx.lsp_hit(e.pos, n, gp, "global", fmt(ast_plain(n), ": ", self.tyname(m.ty)))
+                        }
                         return Some(m)
                     }
                     None => {}
@@ -644,6 +670,19 @@ fn field_of(self: *Fx, base: Val, written: str, pos: Pos) -> Opt[Val] {
                     v.alias = self.cx.types.field_alias(bv.ty, fi, fty)
                 }
                 v.ro = bv.ro
+                if self.cx.opts.lsp {
+                    bn := si.name
+                    br := find(bn, "[")
+                    if br >= 0 {
+                        bn = bn[..br]
+                    }
+                    sp := match self.cx.find_struct(bn) {
+                        Some(sdi) => self.cx.struct_decls[sdi].pos
+                        None => Pos{file: -1}
+                    }
+                    fpos := Pos{file: pos.file, line: pos.line, col: pos.col + 1}
+                    self.cx.lsp_hit(fpos, name, sp, "field", fmt(ast_plain(si.name), ".", name, ": ", self.tyname(fty)))
+                }
                 return Some(v)
             }
             tn := self.tyname(bv.ty)
@@ -1719,6 +1758,9 @@ priv fn init_lit(self: *Fx, dst: Val, items: [](Opt[str], Expr), pos: Pos) {
 fn construct_variant(self: *Fx, ei: i64, vi: i64, args: []Expr, expect: Opt[i64], pos: Pos) -> Val {
     d := self.cx.enum_decls[ei]
     vname := d.variants[vi].0
+    if self.cx.opts.lsp {
+        self.cx.lsp_hit(pos, vname, d.pos, "variant", fmt(ast_plain(d.name), ".", vname))
+    }
     if len(args) != d.variants[vi].1.len {
         self.err(pos, fmt("variant `", vname, "` takes ", d.variants[vi].1.len, " value(s), got ", len(args)))
         lower_call_eval_all(self, args)

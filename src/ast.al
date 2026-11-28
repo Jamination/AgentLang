@@ -492,6 +492,17 @@ fn ast_sym_name(id: i64) -> str {
     return sym_texts[id]
 }
 
+// clears the symbol interner (used by `alc lsp` before freeing a per-request Region)
+fn ast_reset() {
+    sym_texts = vec[str]()
+    sym_hashes = vec[u64]()
+    sym_slots = nil
+    sym_shift = 0
+    sym_chunk = nil
+    sym_chunk_used = 0
+    sym_chunks = vec[(i64, i64)]()
+}
+
 priv inline fn canonical_in(s: str, p: i64, base: i64, used: i64) -> i64 {
     if p >= base + 8 && p < base + used {
         id := *cast[*i64](p - 8)

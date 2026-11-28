@@ -59,6 +59,7 @@ use "priv.al"
 use "lower_mem.al"
 use "when.al"
 use "fmt.al"
+use "lsp.al"
 
 // the compiler's version, "MAJOR.MINOR.PATCH": `alc --version`. Changed only on a release,
 // to the version of the topmost released section of CHANGELOG.md (verify.sh checks it).
@@ -277,7 +278,7 @@ priv deny_warnings: bool
 
 priv fn usage_text() -> str {
     return concat("usage: alc <command> <file.al> [options]\n       alc --version [--json]\n       alc --help\n",
-        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  lsp     run the Language Server Protocol (LSP) server over stdio\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
             "options:\n  -o <path>       output path (default: input without .al; with .exe for windows)\n  --target <os>   linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                  AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                  arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets   check: type-check once for every target\n  -D NAME=VALUE   set the program's constant NAME (-D NAME: a bool constant set to true)\n  -W, --warn      enable compiler warnings (unused locals, unreachable code, self-assignment)\n  --deny-warnings treat warnings as errors (implies -W)\n  --std           sigs: include the standard library (same as `-- std`)\n  --pub           sigs: omit `priv` declarations\n  --filter <pat>  sigs / test: only declarations or tests whose name contains <pat>\n  --gui           windows: a GUI program (no console window of its own)\n  --icon <ico>    windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                  windows: version information (FileDescription, ProductName, CompanyName,\n                  FileVersion, LegalCopyright, ...), once per name\n  --unchecked     disable bounds/division checks\n  -O0, -O1, -O2   optimization level (default: -O2; -O0 disables optimizations)\n  -g              debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json          print diagnostics, sigs, test results or version as JSON on stdout\n  --emit-ir       print optimized IR to stdout\n  --emit-asm      print the selected machine code to stdout\n  --version       print the compiler's version and default target\n  -h, --help      print this help message\n"))
 }
 
@@ -520,7 +521,7 @@ priv struct SrcFile {
     waiting: bool
 }
 
-priv struct Sources {
+struct Sources {
     names: Vec[str]
     files: Vec[SrcFile]
     decls: Vec[Decl]
@@ -538,6 +539,8 @@ priv struct Sources {
     decided: Vec[(WhenDecl, i64, i64)]
     // the names of the `test` blocks: the function `__test_k` is test k (see program)
     tests: Vec[str]
+    // optional in-memory file overlays for `alc lsp` (normalized path -> source text)
+    overlays: *Map[str, str]
 }
 
 // file `file` gets the declarations in `decls` (a file, or the taken branch of one of its
@@ -646,6 +649,22 @@ priv fn use_file(self: *Sources, file: i64, path: str, pos: Pos, out: *Vec[Item]
 
 // a file of the program; its index, or -1 if it was included before or cannot be read
 priv fn add_file(self: *Sources, path: str, from: Opt[Pos]) -> i64 {
+    // in-memory overlay (alc lsp) takes precedence over disk
+    if self.overlays != nil {
+        norm := lsp_norm_path(path)
+        otext, has_ov := self.overlays.get(norm)
+        if !has_ov {
+            otext, has_ov = self.overlays.get(path)
+        }
+        if has_ov {
+            okey := concat("ov:", norm)
+            if self.seen.has(okey) {
+                return -1
+            }
+            self.seen.set(okey, true)
+            return self.add_text(path, otext, path_parent(path), false)
+        }
+    }
     // a file is recognised by its identity, also through symbolic and hard links; one that
     // does not exist by its path (reading it fails below)
     key, exists := file_id(path)
@@ -668,8 +687,12 @@ priv fn add_file(self: *Sources, path: str, from: Opt[Pos]) -> i64 {
     match from {
         Some(pos) => self.errs.push(Diag{pos: pos, msg: msg})
         None => {
-            driver_error(path, msg)
-            exit(1)
+            if self.overlays != nil {
+                self.errs.push(Diag{pos: Pos{file: -1, line: 1, col: 1}, msg: msg})
+            } else {
+                driver_error(path, msg)
+                exit(1)
+            }
         }
     }
     return -1
@@ -894,9 +917,9 @@ priv fn sigs_extern(ext: Opt[str], named: bool) -> str {
     }
 }
 
-// the text of the file named `name` in `alc sigs` (its comments are not kept): a bundled
+// the text of the file named `name` in `alc sigs` / `alc lsp` (its comments are not kept): a bundled
 // module, the run-time library (as `load` reads it), a file of the program; "" if unknown
-priv fn sigs_text(name: str) -> str {
+fn sigs_text(name: str) -> str {
     if starts_with(name, "<std/") {
         return std_text(name[5..len(name) - 4]).or("")
     }
@@ -927,7 +950,7 @@ priv fn sigs_text(name: str) -> str {
 // the first line of the comment that leads the declaration on `line` (the comment lines right
 // above it, after a heading such as `// ---- paths ----`), else the comment after it on its
 // line; "" if neither
-priv fn sigs_doc(cl: *Map[i64, str], line: i64) -> str {
+fn sigs_doc(cl: *Map[i64, str], line: i64) -> str {
     top := line
     while cl.has(top - 1) {
         top -= 1
@@ -1259,10 +1282,73 @@ priv fn check_all(ar: *Args) -> i64 {
     return 0
 }
 
+// Helpers used by `alc lsp` (src/lsp.al)
+fn lsp_version() -> str {
+    return VERSION
+}
+
+fn lsp_std_modules() -> Vec[str] {
+    out := vec[str]()
+    for m in STD_MODULES {
+        n := m.0
+        if ends_with(n, "_linux") || ends_with(n, "_windows") || ends_with(n, "_wayland") || ends_with(n, "_jpeg") || ends_with(n, "_vorbis") {
+            continue
+        }
+        out.push(n)
+    }
+    return out
+}
+
+// Loads and type-checks `path` using in-memory `overlays` for `alc lsp` (with Opts.lsp = true
+// and Opts.warn = true). Returns (sources, n_prelude, cx, typechecked).
+fn lsp_analyze(path: str, overlays: *Map[str, str]) -> (Sources, i64, Cx, bool) {
+    src := Sources{overlays: overlays}
+    prelude := PRELUDE
+    layer_name, layer := if target_os == TargetWindows { ("prelude_windows.al", PRELUDE_WINDOWS) } else { ("prelude_linux.al", PRELUDE_LINUX) }
+    if target_arch == ArchArm64 {
+        layer_name, layer = if target_os == TargetMacOS { ("prelude_macos.al", PRELUDE_MACOS) } else { ("prelude_linux_arm64.al", PRELUDE_LINUX_ARM64) }
+    }
+    src.add_text("<prelude>", prelude, None, true)
+    src.add_text(fmt("<", layer_name[..len(layer_name) - 3], ">"), layer, None, true)
+    src.n_core = src.names.len
+    for name in CORE_MODULES {
+        text := std_text(name).or("")
+        src.seen.set(fmt("<std/", name, ".al>"), true)
+        src.add_text(fmt("<std/", name, ".al>"), text, None, true)
+    }
+    n_prelude := src.names.len
+    src.add_file(path, None)
+    src.finish()
+    decls := program(&src, n_prelude, false, false)
+    if !src.errs.is_empty() {
+        empty_cx := Cx{}
+        return (src, n_prelude, empty_cx, false)
+    }
+    lib_files := vec[u8]()
+    for i in 0..src.files.len {
+        lib_files.push(if i < n_prelude { LIB_CORE } else if src.files[i].lib { LIB_MODULE } else { u8(0) })
+    }
+    cx := cx_new(decls.items(), clone(src.names), Opts{checks: false, warn: true, lsp: true}, lib_files)
+    for f in src.std_files {
+        cx.lazy_files.set(f, true)
+    }
+    lower_fn_lower_all(&cx, "__entry", n_prelude)
+    return (src, n_prelude, cx, true)
+}
+
 priv fn real_main() -> i64 {
     if len(args()) >= 2 && args()[1] == "fmt" {
         json = contains(args()[2..], "--json")
         return fmt_main(args()[2..], report)
+    }
+    if len(args()) >= 2 && args()[1] == "lsp" {
+        if TARGET_OS == Windows {
+            target_os = TargetWindows
+        }
+        if HOST_ARM64 {
+            target_arch = ArchArm64
+        }
+        return lsp_main(args()[2..])
     }
     ar := parse_args()
     dbg_keep_vars = dbg_on && ar.opt == 0

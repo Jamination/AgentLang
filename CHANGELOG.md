@@ -24,6 +24,11 @@ can break a program is listed under **Breaking**. A patch version never breaks o
   branch for macOS, so check that it suits macOS (or add `else when TARGET_OS == MacOS`).
 
 ### Added
+- `alc lsp`: built-in Language Server Protocol (LSP 3.17) server over stdio (`src/lsp.al`)
+  with live diagnostics (including `-W` warnings and multi-file in-memory overlays), hover
+  types and doc comments, overload-resolved go-to-definition, find references, completions
+  (dot fields, UFCS methods, enum variants, `use std.`, locals, declarations, keywords),
+  signature help, document symbols, and in-process `alc fmt` formatting.
 - Linux ELF hardening and linker cleanup: dynamic executables on Linux x86-64 and arm64 now
   emit Full RELRO (`PT_GNU_RELRO` with `BIND_NOW`, `.dynamic` and `.got` placed in a
   page-aligned read-only-after-relocation prefix), and `src/elf.al` / `src/elf_arm64.al` share

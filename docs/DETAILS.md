@@ -10,7 +10,7 @@ Contents: [Overloading and builtin names](#overloading-and-builtin-names) ·
 [Enum variants](#enum-variants) · [Constants](#constants) · [Float literals](#float-literals) · [priv](#priv) ·
 [Labelled loops](#labelled-loops) · [Nested functions](#nested-functions) · [match](#match) ·
 [Method calls](#method-calls) · [when and -D](#when-and--d) · [Bounds checks](#bounds-checks) · [Stack traces](#stack-traces) · [Debug information](#debug-information) · [Regions](#regions) ·
-[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Files of a program](#files-of-a-program) · [alc fmt](#alc-fmt) · [Grammar](#grammar)
+[clone](#clone) · [mulhi](#mulhi) · [C interop](#c-interop) · [Windows](#windows) · [Files of a program](#files-of-a-program) · [alc fmt](#alc-fmt) · [alc lsp](#alc-lsp) · [Grammar](#grammar)
 
 ## Overloading and builtin names
 
@@ -1030,6 +1030,23 @@ full by `alc check`; `alc build` / `run` / `test` compile only what the program 
 them (checking the rest would make building a program on std.window 40-70% slower). The
 repository's tests check every module for every target, so this never hides an error, except
 in a module being written: one read from `ALC_STD_DIR` is checked in full by every command.
+
+## alc lsp
+
+`alc lsp` runs a Language Server Protocol (LSP 3.17) server over standard input and output
+(`Content-Length` JSON-RPC framing). It invokes the compiler's own lexer, parser, `when`
+evaluator, type checker, and formatter directly with in-memory document overlays so editor
+feedback stays identical to `alc`.
+
+Supported requests and notifications:
+- **Diagnostics** (`textDocument/publishDiagnostics` on `didOpen`, `didChange`, `didSave`, cleared on `didClose`), including `-W` warnings and multi-file unsaved buffer overlays
+- **Hover** (`textDocument/hover`): resolved types, overload signatures, and leading doc comments
+- **Go to Definition** (`textDocument/definition`): locals, parameters, overloaded functions, UFCS methods, structs, fields, enums, variants, constants, globals, and `use` file/module targets
+- **Find References** (`textDocument/references`)
+- **Completions** (`textDocument/completion`, trigger characters `.` and `:`): struct fields, UFCS methods, `.len`, enum variants, `use std.` modules, enclosing locals, visible declarations, builtins, and keywords
+- **Signature Help** (`textDocument/signatureHelp`, trigger characters `(` and `,`): overload signatures, parameter labels, and active parameter tracking
+- **Document Symbols** (`textDocument/documentSymbol`): functions, structs (with field children), enums (with variant children), constants, globals, and `test` blocks
+- **Formatting** (`textDocument/formatting`): in-process `alc fmt`
 
 ## alc fmt
 

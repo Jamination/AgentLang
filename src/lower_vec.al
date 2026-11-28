@@ -47,14 +47,29 @@ fn lvalue_base(self: *Fx, b: *Expr) -> Val {
     match b.k {
         Ident(n) => {
             match self.lookup(n) {
-                Some(x) if x.0 >= 0 => return self.mval(x.0, x.1)
+                Some(x) if x.0 >= 0 => {
+                    if self.cx.opts.lsp {
+                        self.cx.lsp_hit(b.pos, n, self.lookup_def_pos(n), "var", fmt(ast_plain(n), ": ", self.tyname(x.0)))
+                    }
+                    return self.mval(x.0, x.1)
+                }
                 // a nested function
                 Some(_) => return self.expr(b, None)
                 None => {}
             }
             if !self.cx.has_const(n) {
                 match self.global_place(n) {
-                    Some(m) => return m
+                    Some(m) => {
+                        if self.cx.opts.lsp {
+                            gd, gok := self.cx.global_decls.get(n)
+                            if !gok {
+                                gd, gok = self.cx.p_global_decls.get(n)
+                            }
+                            gp := if gok && gd != nil { gd.pos } else { Pos{file: -1} }
+                            self.cx.lsp_hit(b.pos, n, gp, "global", fmt(ast_plain(n), ": ", self.tyname(m.ty)))
+                        }
+                        return m
+                    }
                     None => {}
                 }
             }

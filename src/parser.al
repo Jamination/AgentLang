@@ -1324,6 +1324,15 @@ priv lit_stack: Vec[(Opt[str], Expr)]
 priv arm_stack: Vec[MatchArm]
 priv pat_stack: Vec[Pat]
 
+// clears reusable parser stacks (used by `alc lsp` before freeing a per-request Region)
+fn parser_reset() {
+    stmt_stack = vec[Stmt]()
+    expr_stack = vec[Expr]()
+    lit_stack = vec[(Opt[str], Expr)]()
+    arm_stack = vec[MatchArm]()
+    pat_stack = vec[Pat]()
+}
+
 // at the end of a statement: a newline, `;` or `}`
 priv fn at_end(p: *Parser) -> bool {
     return match p.toks[p.i].t {

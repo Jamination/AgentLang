@@ -96,6 +96,20 @@ struct Fx {
     // gives to the instructions (set per statement and expression: `at`)
     fid: i64
     loc: i32
+    // for `alc lsp`: enclosing function span and current call's callee position
+    lsp_fn_pos: Pos
+    lsp_fn_end: i32
+    lsp_callee_pos: Pos
+}
+
+// clears lowering slab/binding caches (used by `alc lsp` before freeing a per-request Region)
+fn lower_fn_reset() {
+    binds = vec[Binding]()
+    bind_top = vec[i64]()
+    inst_bufs = vec[Vec[Inst]]()
+    block_bufs = vec[Vec[BlockData]]()
+    pend_bufs = vec[Vec[i32]]()
+    buf_depth = 0
 }
 
 fn lower_fn_lower_all(cx: *Cx, entry: str, check_from_file: i64) {
@@ -265,6 +279,8 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
         parent: parent,
         lvl: buf_depth,
         fid: fid,
+        lsp_fn_pos: pos,
+        lsp_fn_end: body.end.line,
     }
     fx.at(pos)
     fx.scopes.push(Scope{defers: vec[*Block](), start: binds.len})
@@ -307,6 +323,13 @@ fn lower_fn_lower_body(cx: *Cx, fid: i64, params: *Vec[(str, TypeAst)], body: *B
                 fx.scope_set(pname, (pt, p))
                 if had {
                     fx.cx.err(pos, fmt("duplicate parameter `", pname, "`"))
+                }
+                if fx.cx.opts.lsp && pos.file >= 0 && !fx.cx.lib_file(pos.file) {
+                    bi := bind_top[ast_sym(pname)]
+                    if bi >= 0 {
+                        binds[bi].decl_pos = pos
+                    }
+                    fx.cx.lsp_locals.push(LspLocal{file: pos.file, fn_line: pos.line, fn_end: body.end.line, name: ast_plain(pname), ty: fx.cx.types.name(pt), def_pos: pos})
                 }
             }
         }
@@ -857,6 +880,16 @@ fn lookup_peek(self: *Fx, name: str) -> Opt[(i64, i64)] {
     return None
 }
 
+// declaration position of a local binding (for `alc lsp`), or Pos{file: -1}
+fn lookup_def_pos(self: *Fx, name: str) -> Pos {
+    id := ast_sym_find(name)
+    b := top_binding(id)
+    if b >= 0 && binds[b].lvl == self.lvl {
+        return binds[b].decl_pos
+    }
+    return Pos{file: -1}
+}
+
 priv fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
     addr := self.temp(ty)
     if name == "_" {
@@ -877,6 +910,12 @@ priv fn declare(self: *Fx, name: str, ty: i64, pos: Pos) -> i64 {
         binds[bi].is_local = true
         binds[bi].decl_pos = pos
         binds[bi].used = false
+    }
+    if self.cx.opts.lsp && pos.file >= 0 && !self.cx.lib_file(pos.file) && ty != T_ERR {
+        plain := ast_plain(name)
+        tstr := self.tyname(ty)
+        self.cx.lsp_hit(pos, plain, pos, "var", fmt(plain, ": ", tstr))
+        self.cx.lsp_locals.push(LspLocal{file: pos.file, fn_line: self.lsp_fn_pos.line, fn_end: self.lsp_fn_end, name: plain, ty: tstr, def_pos: pos})
     }
     return addr
 }
