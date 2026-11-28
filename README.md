@@ -8,7 +8,7 @@ AL is a small, statically typed language that compiles to native code in millise
 - **Fast to run.** On a par with `clang -O2` with bounds and division checks on: a geometric
   mean of 0.94 on ten classic benchmarks and 1.04 on 70 more ([Performance](#performance)).
 - **Simple memory.** Arenas and regions, reclaimed in bulk, with deep `clone` to move data
-  out. No `free`, no garbage collector, no borrow checker ([the trade-offs](docs/LANGUAGE.md#regions)).
+  out. No `free`, no garbage collector, no borrow checker ([the trade-offs](docs/MEMORY.md)).
 - **Self-contained.** The compiler is written in AL and reproduces itself byte for byte.
   It builds static Linux and Windows x86-64 binaries, and cross-compiles between the two.
 - **Mistakes fail loudly.** `match` must be exhaustive, there are no implicit conversions or
@@ -111,6 +111,7 @@ between the two versions, then rebuild and run the project's tests with the new 
 ## Documentation
 
 - [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
+- [The memory model and its trade-offs](docs/MEMORY.md): what arenas buy and cost, what is checked
 - [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
 - [Standard library](docs/STDLIB.md): strings, collections, files, sockets, math, images, fonts, windows,
   input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
