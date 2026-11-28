@@ -1,0 +1,1 @@
+See [AGENTS.md](AGENTS.md) for the AgentLang (`alc`) workflow, machine-readable CLI commands (`alc check --json -W`, `alc sigs --json`, `alc test --json`, `alc query`, `alc lsp`, `alc fmt`), and repository verification rules.

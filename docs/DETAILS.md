@@ -1048,6 +1048,9 @@ Supported requests and notifications:
 - **Document Symbols** (`textDocument/documentSymbol`): functions, structs (with field children), enums (with variant children), constants, globals, and `test` blocks
 - **Formatting** (`textDocument/formatting`): in-process `alc fmt`
 
+For shell-only agents without an LSP client, `alc query <hover|def|refs|complete|symbols> <file.al[:line:col]>`
+exposes the same semantic engine as one-shot JSON commands on stdout (1-based `line:col`).
+
 ## alc fmt
 
 `alc fmt` gives source files the one layout of the repository's own sources, so that two

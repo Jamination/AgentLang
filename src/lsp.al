@@ -153,7 +153,14 @@ priv fn lsp_send(body: str) {
     flush()
 }
 
+// when true (`alc query`), lsp_ok prints the raw JSON result to stdout instead of LSP framing
+priv lsp_raw_stdout: bool
+
 priv fn lsp_ok(id_json: str, result_json: str) {
+    if lsp_raw_stdout {
+        print(result_json)
+        return
+    }
     if len(id_json) == 0 {
         return
     }
@@ -940,13 +947,14 @@ priv fn lsp_handle_completion(srv: *LspServer, id_json: str, path: str, line0: i
         }
     }
 
-    // If dot completion has a trailing `.` or `.prefix`, build a patched scratch overlay with
-    // `.<prefix>` replaced by spaces so the line still parses and typechecks!
-    ov := map[str, str]()
-    for k in srv.docs.keys() {
-        ov.set(k, srv.docs.get_or(k, ""))
-    }
-    if is_dot {
+    // Analyze the current buffers first; if dot completion is on an incomplete line like `p.`
+    // that failed to parse, retry with `.<prefix>` replaced by spaces so `p` type-checks.
+    src, _, cx, ok := lsp_analyze(path, &srv.docs)
+    if is_dot && !ok {
+        ov := map[str, str]()
+        for k in srv.docs.keys() {
+            ov.set(k, srv.docs.get_or(k, ""))
+        }
         ls, _ := lsp_line_bounds(cur_text, line0)
         dot_off := ls + pstart - 1
         end_off := ls + c
@@ -954,10 +962,9 @@ priv fn lsp_handle_completion(srv: *LspServer, id_json: str, path: str, line0: i
             spaces := repeat(" ", end_off - dot_off)
             patched := fmt(cur_text[..dot_off], spaces, cur_text[end_off..])
             ov.set(path, patched)
+            src, _, cx, ok = lsp_analyze(path, &ov)
         }
     }
-
-    src, _, cx, ok := lsp_analyze(path, &ov)
     cur_file := lsp_find_file_idx(&src.names, path)
     items := vec[str]()
     seen := map[str, bool]()
@@ -1379,4 +1386,78 @@ fn lsp_main(argv: []str) -> i64 {
         }
     }
     return if srv.shutdown { 0 } else { 1 }
+}
+
+// ---------- One-shot CLI semantic queries (`alc query`) ----------
+priv const QUERY_USAGE = "usage: alc query <kind> <file.al[:line:col]>\n  kinds:\n    hover    <file.al:line:col>   resolved type/signature and doc comment at 1-based line:col (JSON)\n    def      <file.al:line:col>   definition location at 1-based line:col (JSON)\n    refs     <file.al:line:col>   all references to the symbol at 1-based line:col (JSON)\n    complete <file.al:line:col>   completion items at 1-based line:col (JSON)\n    symbols  <file.al>            document symbols (JSON)\n"
+
+// parses `file.al:line:col` (1-based line and col; handles Windows drive letters like C:\foo.al:10:5)
+priv fn lsp_parse_loc(spec: str) -> (str, i64, i64, bool) {
+    c2 := rfind(spec, ":")
+    if c2 <= 0 {
+        return (spec, 0, 0, false)
+    }
+    col, ok2 := parse_i64(spec[c2 + 1..])
+    if !ok2 || col < 1 {
+        return (spec, 0, 0, false)
+    }
+    c1 := rfind(spec[..c2], ":")
+    if c1 <= 0 {
+        return (spec, 0, 0, false)
+    }
+    line, ok1 := parse_i64(spec[c1 + 1..c2])
+    if !ok1 || line < 1 {
+        return (spec, 0, 0, false)
+    }
+    return (spec[..c1], line, col, true)
+}
+
+fn lsp_query_main(argv: []str) -> i64 {
+    if len(argv) == 0 || argv[0] == "--help" || argv[0] == "-h" {
+        put(QUERY_USAGE)
+        return 0
+    }
+    if len(argv) < 2 {
+        eput(QUERY_USAGE)
+        return 2
+    }
+    kind := argv[0]
+    spec := argv[1]
+    need_pos := kind == "hover" || kind == "def" || kind == "refs" || kind == "complete"
+    if !need_pos && kind != "symbols" {
+        eput(fmt("alc query: unknown query kind `", kind, "`\n", QUERY_USAGE))
+        return 2
+    }
+    path := spec
+    line1 := 1
+    col1 := 1
+    if need_pos {
+        p, l, c, ok := lsp_parse_loc(spec)
+        if !ok {
+            eput(fmt("alc query ", kind, ": expected `<file.al:line:col>` (1-based), got `", spec, "`\n"))
+            return 2
+        }
+        path = p
+        line1 = l
+        col1 = c
+    }
+    abs := lsp_abs_path(path)
+    text, rok := read_file(abs)
+    if !rok {
+        eput(fmt("alc query: cannot read `", path, "`: ", error_text(io_error()), "\n"))
+        return 1
+    }
+    srv := LspServer{docs: map[str, str](), uris: map[str, str](), root_path: __os_current_dir(), shutdown: false}
+    srv.docs.set(abs, text)
+    srv.uris.set(abs, lsp_path_to_uri(abs))
+    lsp_raw_stdout = true
+    match kind {
+        "hover" => lsp_handle_hover(&srv, "1", abs, line1 - 1, col1 - 1)
+        "def" => lsp_handle_definition(&srv, "1", abs, line1 - 1, col1 - 1)
+        "refs" => lsp_handle_references(&srv, "1", abs, line1 - 1, col1 - 1, true)
+        "complete" => lsp_handle_completion(&srv, "1", abs, line1 - 1, col1 - 1)
+        _ => lsp_handle_symbols(&srv, "1", abs)
+    }
+    lsp_raw_stdout = false
+    return 0
 }

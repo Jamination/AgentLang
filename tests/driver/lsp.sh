@@ -276,3 +276,13 @@ stderr_out = proc.stderr.read().decode("utf-8", errors="replace")
 assert rc == 0, f"expected exit 0, got {rc}, stderr={stderr_out}"
 print("lsp_e2e_ok")
 PY
+
+# One-shot CLI semantic queries (`alc query`)
+"$ALC" query --help | grep -q "usage: alc query"
+"$ALC" query hover "$WORK/main.al:10:13" | grep -q "fn add_points(a: Point, b: Point) -> Point"
+"$ALC" query def "$WORK/main.al:10:13" | grep -q "helper.al"
+"$ALC" query refs "$WORK/main.al:10:22" | grep -q "main.al"
+"$ALC" query symbols "$WORK/helper.al" | grep -q '"name":"Point"'
+"$ALC" query complete "$WORK/main.al:7:12" | grep -q '"label":"scale"'
+echo "query_e2e_ok"
+

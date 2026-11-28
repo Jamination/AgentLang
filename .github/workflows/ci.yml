@@ -27,11 +27,13 @@ jobs:
           ./build/alc run tests/macho/check.al -o /tmp/machochk -- ./build/alc
       - name: Run parser/typechecker/formatter crash fuzzer
         run: python3 tests/gen/fuzz_crash.py --cases 200 --seed 42
-      - name: Run Vim plugin tests (if vim installed)
+      - name: Run editor integration tests (Emacs 29+ / Neovim 0.11+, if installed)
         run: |
-          if command -v vim >/dev/null 2>&1; then
-            bash editors/vim/test/indent/run.sh
-            bash editors/vim/test/syntax/run.sh
+          if command -v emacs >/dev/null 2>&1 && [ "$(emacs -Q --batch --eval '(princ (if (version< emacs-version "29.1") 0 1))')" = 1 ]; then
+            bash editors/emacs/test/run.sh
+          fi
+          if command -v nvim >/dev/null 2>&1 && [ "$(nvim --headless -u NONE --cmd 'lua io.write(vim.fn.has("nvim-0.11"))' +q 2>&1)" = 1 ]; then
+            bash editors/nvim/test/run.sh
           fi
 
   windows:

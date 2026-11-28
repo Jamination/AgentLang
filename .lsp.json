@@ -1,0 +1,9 @@
+{
+  "al": {
+    "command": "alc",
+    "args": ["lsp"],
+    "extensionToLanguage": {
+      ".al": "al"
+    }
+  }
+}

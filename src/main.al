@@ -278,7 +278,7 @@ priv deny_warnings: bool
 
 priv fn usage_text() -> str {
     return concat("usage: alc <command> <file.al> [options]\n       alc --version [--json]\n       alc --help\n",
-        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  lsp     run the Language Server Protocol (LSP) server over stdio\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  lsp     run the Language Server Protocol (LSP) server over stdio\n  query   one-shot JSON semantic queries (`hover`, `def`, `refs`, `complete`, `symbols`)\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
             "options:\n  -o <path>       output path (default: input without .al; with .exe for windows)\n  --target <os>   linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                  AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                  arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets   check: type-check once for every target\n  -D NAME=VALUE   set the program's constant NAME (-D NAME: a bool constant set to true)\n  -W, --warn      enable compiler warnings (unused locals, unreachable code, self-assignment)\n  --deny-warnings treat warnings as errors (implies -W)\n  --std           sigs: include the standard library (same as `-- std`)\n  --pub           sigs: omit `priv` declarations\n  --filter <pat>  sigs / test: only declarations or tests whose name contains <pat>\n  --gui           windows: a GUI program (no console window of its own)\n  --icon <ico>    windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                  windows: version information (FileDescription, ProductName, CompanyName,\n                  FileVersion, LegalCopyright, ...), once per name\n  --unchecked     disable bounds/division checks\n  -O0, -O1, -O2   optimization level (default: -O2; -O0 disables optimizations)\n  -g              debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json          print diagnostics, sigs, test results or version as JSON on stdout\n  --emit-ir       print optimized IR to stdout\n  --emit-asm      print the selected machine code to stdout\n  --version       print the compiler's version and default target\n  -h, --help      print this help message\n"))
 }
 
@@ -1349,6 +1349,15 @@ priv fn real_main() -> i64 {
             target_arch = ArchArm64
         }
         return lsp_main(args()[2..])
+    }
+    if len(args()) >= 2 && args()[1] == "query" {
+        if TARGET_OS == Windows {
+            target_os = TargetWindows
+        }
+        if HOST_ARM64 {
+            target_arch = ArchArm64
+        }
+        return lsp_query_main(args()[2..])
     }
     ar := parse_args()
     dbg_keep_vars = dbg_on && ar.opt == 0
