@@ -3,10 +3,10 @@
 AL is a small, statically typed language that compiles to native code in milliseconds.
 `alc` is its compiler: one 6 MB executable with no LLVM, assembler, linker or libc behind it.
 
-- **Fast to compile.** The compiler builds its own 65,000 lines in about 0.3 s unoptimised
+- **Fast to compile.** The compiler builds its own 68,000 lines in about 0.2 s unoptimised
   and 3 s optimised. Hello world builds in under 30 ms.
 - **Fast to run.** On a par with `clang -O2` with bounds and division checks on: a geometric
-  mean of 0.94 on ten classic benchmarks and 1.04 on 70 more ([Performance](#performance)).
+  mean of 1.03 on ten classic benchmarks and 1.04 on 70 more ([Performance](#performance)).
 - **Simple memory.** Arenas and regions, reclaimed in bulk, with deep `clone` to move data
   out. No `free`, no garbage collector, no borrow checker ([the trade-offs](docs/MEMORY.md)).
 - **Self-contained.** The compiler is written in AL and reproduces itself byte for byte.
@@ -151,45 +151,46 @@ between the two versions, then rebuild and run the project's tests with the new 
 
 ## Performance
 
-Against `clang -O2` (clang 19.1.5), same algorithms and sizes, identical output required, AL
-with bounds and division checks enabled. Measured on Windows 11 x86-64 (Ryzen 7 8840U), best
-of 7 runs; the Linux numbers come from `bench/run.sh`, which this table does not use.
+Against `clang -O2` (clang 23.1.5), same algorithms and sizes, identical output required, AL
+with bounds and division checks enabled. Measured with AL 0.5.0 on Linux x86-64 (Ryzen 5 3600),
+best of 7 runs (`bash bench/run.sh -r 7`).
 
 | Benchmark | AL / clang |
 |---|---|
-| nbody | 1.01 |
-| spectralnorm | 0.99 |
-| fannkuch | 1.05 |
-| mandelbrot | 0.66 |
-| binarytrees | 0.84 |
-| sha256 | 0.95 |
-| matmul | 0.96 |
-| quicksort | 1.00 |
-| sieve | 1.00 |
-| hashmap | 1.02 |
-| **geometric mean** | **0.94** |
+| nbody | 1.11 |
+| spectralnorm | 1.00 |
+| fannkuch | 1.13 |
+| mandelbrot | 1.02 |
+| binarytrees | 1.00 |
+| sha256 | 0.99 |
+| matmul | 0.97 |
+| quicksort | 1.05 |
+| sieve | 1.02 |
+| hashmap | 1.06 |
+| **geometric mean** | **1.03** |
 
 `bench/wide` holds 70 more pairs in six areas that the ten above do not cover
-(`bash bench/wide/run.sh`; best of 5; `baseline.txt` is the compiler before the work these
-benchmarks drove, `final.txt` the one after):
+(`bash bench/wide/run.sh`; best of 5; same machine; the full results are in
+`bench/wide/linux.txt`. `baseline.txt` and `final.txt` are earlier runs on Windows: the
+compiler before the work these benchmarks drove, and after it):
 
 | Area | Pairs | AL / clang | AL / clang without its vectorizers |
 |---|---|---|---|
-| loops clang vectorizes | 13 | 1.01 | 0.63 |
-| integer and bit manipulation | 10 | 1.05 | 1.05 |
-| strings and text | 13 | 1.07 | 1.09 |
-| calls and control flow | 11 | 1.06 | 1.04 |
-| memory and data structures | 12 | 1.01 | 0.97 |
-| floating point | 11 | 1.06 | 0.95 |
-| **geometric mean** | **70** | **1.04** | **0.93** |
+| loops clang vectorizes | 13 | 1.02 | 0.62 |
+| integer and bit manipulation | 10 | 1.04 | 1.04 |
+| strings and text | 13 | 1.10 | 1.10 |
+| calls and control flow | 11 | 1.15 | 1.12 |
+| memory and data structures | 12 | 0.93 | 1.01 |
+| floating point | 11 | 0.99 | 0.97 |
+| **geometric mean** | **70** | **1.04** | **0.95** |
 
-40 of the 70 are within 5 % of clang or faster, 21 are more than 15 % slower. The slowest are
-a u8 box blur (2.3, clang narrows its arithmetic to 16-bit lanes), `find` against the C
-library's SIMD `strstr` (1.6), a clamp/abs/select loop that is not vectorized (1.6) and a JSON
-tokenizer (1.5); a byte sum that only AL vectorizes is at 0.18 and lifts the first row (the
-mean of the other 69 is 1.07). The loop vectorizer is x86-64 only (SSE2).
+34 of the 70 are within 5 % of clang or faster (21 are faster), 23 are more than 15 % slower.
+The slowest are a u8 box blur (2.5, clang narrows its arithmetic to 16-bit lanes), a lexer
+state machine with many branches (1.6), a clamp/abs/select loop that is not vectorized (1.5)
+and mutual recursion (1.4); a byte sum that only AL vectorizes is at 0.16 and lifts the first
+row (the mean of the other 69 is 1.06). The loop vectorizer is x86-64 only (SSE2).
 
-The compiler compiles its own 65,000 lines in about 0.35 s without optimisation (about 190,000 lines/s) and 3.3 s with optimisation (Windows, same machine; `bench/compile.sh` measures it on Linux), compiling functions in parallel worker threads on Linux and Windows (`ALC_JOBS=n` sets the number).
+The compiler compiles its own 68,000 lines in about 0.2 s without optimisation (about 350,000 lines/s) and 2.8 s with optimisation (same machine, 12 threads, best of 7: `bash bench/compile.sh`), compiling functions in parallel worker threads on Linux and Windows (`ALC_JOBS=n` sets the number).
 
 ## Repository
 
@@ -198,7 +199,7 @@ The compiler compiles its own 65,000 lines in about 0.35 s without optimisation 
 | `src/` | the compiler: front end, SSA optimizer (`opt/`), x86-64 back end (`x86/`), experimental arm64 back end (`arm64/`), ELF linker, and the run-time library (`prelude.al`) |
 | `std/` | standard library modules (`use std.<name>`) |
 | `bootstrap/alc`, `bootstrap/alc.exe` | seed compilers that `build.sh` (Linux) and `build.bat` (Windows) start from |
-| `examples/`, `bench/` | sample programs; the benchmarks in AL and C (`bench/wide`: 70 more pairs, with their harness for Windows) |
+| `examples/`, `bench/` | sample programs; the benchmarks in AL and C (`bench/wide`: 70 more pairs, with their harness) |
 | `tests/` | conformance suite (`tests/run.sh`, `tests\run.bat`; the runner is `tests/run.al`) and fuzzers (`tests/gen/`) |
 | `verify.sh`, `verify.bat` | everything: self-compilation to a fixed point, tests, benchmarks (Linux); build and tests (Windows) |
 | `CHANGELOG.md` | changes per release; [Versions](#versions) |
