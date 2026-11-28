@@ -1,19 +1,21 @@
 # AL
 
-AL is a small, statically typed, compiled language designed to be written by AI agents.
-`alc` is its compiler.
+AL is a small, statically typed language that compiles to native code in milliseconds.
+`alc` is its compiler: one 6 MB executable with no LLVM, assembler, linker or libc behind it.
 
-- **One small language.** The whole reference fits in an agent's context. There is usually one
-  way to write something, and diagnostics say what to write instead.
-- **Mistakes fail at compile time or loudly at run time.** Bounds and division checks are on by
-  default, `match` must be exhaustive, and there are no hidden captures or implicit conversions.
-- **Fast.** Native code on a par with `clang -O2`, with checks on: a geometric mean of 0.94 on
-  ten classic benchmarks and 1.04 on 70 more ([Performance](#performance)).
-- **Self-contained.** The compiler is written in AL and compiles itself. It has no dependency on
-  LLVM, an assembler, a linker or libc: one 6 MB executable turns source into a static Linux
-  x86-64 binary in milliseconds.
-- **Simple memory.** Arena allocation with regions and deep `clone`; no `free`, no garbage
-  collector, no borrow checker.
+- **Fast to compile.** The compiler builds its own 65,000 lines in about 0.3 s unoptimised
+  and 3 s optimised. Hello world builds in under 30 ms.
+- **Fast to run.** On a par with `clang -O2` with bounds and division checks on: a geometric
+  mean of 0.94 on ten classic benchmarks and 1.04 on 70 more ([Performance](#performance)).
+- **Simple memory.** Arenas and regions, reclaimed in bulk, with deep `clone` to move data
+  out. No `free`, no garbage collector, no borrow checker ([the trade-offs](docs/LANGUAGE.md#regions)).
+- **Self-contained.** The compiler is written in AL and reproduces itself byte for byte.
+  It builds static Linux and Windows x86-64 binaries, and cross-compiles between the two.
+- **Mistakes fail loudly.** `match` must be exhaustive, there are no implicit conversions or
+  hidden captures, and run-time errors stop with a stack trace.
+- **Small enough to hold in your head.** The whole reference is under 900 lines, which also
+  makes AL easy for AI agents to write correctly: diagnostics say what to write instead, and
+  the CLI has machine-readable output throughout.
 
 ```
 enum Shape { Circle(f64), Rect(f64, f64) }
