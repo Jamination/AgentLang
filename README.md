@@ -38,6 +38,21 @@ fn main() {
 
 ## Getting started
 
+Download the compiler from the [latest release](https://github.com/Jamination/AgentLang/releases/latest).
+It is one executable with the standard library inside it; there is nothing else to install.
+
+```
+curl -L -o alc https://github.com/Jamination/AgentLang/releases/download/v0.5.0/alc-0.5.0-linux-x86_64
+chmod +x alc
+echo 'fn main() { print("hello") }' > hello.al
+./alc run hello.al
+```
+
+On Windows, download `alc-0.5.0-windows-x86_64.exe`, rename it to `alc.exe` and run
+`alc.exe run hello.al`. `SHA256SUMS` in the release lists the checksums of both.
+
+### Building from source
+
 Linux or Windows on x86-64 is the only requirement; the repository carries a seed compiler for
 each. The compiler runs on both and builds for both (`--target linux|windows`), and, experimentally,
 for arm64 Linux (`--target linux-arm64`, with C libraries through the Arm calling convention;
