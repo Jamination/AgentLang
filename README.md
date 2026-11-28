@@ -6,16 +6,32 @@ AL is a small, statically typed language that compiles to native code in millise
 - **Fast to compile.** The compiler builds its own 68,000 lines in about 0.2 s unoptimised
   and 3 s optimised. Hello world builds in under 30 ms.
 - **Fast to run.** On a par with `clang -O2` with bounds and division checks on: a geometric
-  mean of 1.03 on ten classic benchmarks and 1.04 on 70 more ([Performance](#performance)).
+  mean of 1.03 on ten classic benchmarks and 1.04 on 70 more, and 1.06 against Rust on the
+  ten ([Performance](#performance)).
 - **Simple memory.** Arenas and regions, reclaimed in bulk, with deep `clone` to move data
   out. No `free`, no garbage collector, no borrow checker ([the trade-offs](docs/MEMORY.md)).
-- **Self-contained.** The compiler is written in AL and reproduces itself byte for byte.
-  It builds static Linux and Windows x86-64 binaries, and cross-compiles between the two.
+- **Self-contained and reproducible.** The compiler is written in AL and reproduces itself
+  byte for byte: the same source gives the same executable, on Linux and on Windows. It
+  builds static Linux and Windows x86-64 binaries, and cross-compiles between the two.
 - **Mistakes fail loudly.** `match` must be exhaustive, there are no implicit conversions or
-  hidden captures, and run-time errors stop with a stack trace.
+  hidden captures, and run-time errors stop with a stack trace. What C leaves undefined is
+  [defined](docs/SEMANTICS.md).
 - **Small enough to hold in your head.** The whole reference is under 900 lines, which also
-  makes AL easy for AI agents to write correctly: diagnostics say what to write instead, and
-  the CLI has machine-readable output throughout.
+  makes AL easy for AI agents to write correctly: every diagnostic has a
+  [stable code](docs/DIAGNOSTICS.md) and says what to write instead, and the CLI has
+  machine-readable output throughout.
+
+Each claim has a command that checks it:
+
+| Claim | Check it with |
+|---|---|
+| Compiles its own source in a fraction of a second | `bash bench/compile.sh` |
+| On a par with `clang -O2`; how it compares with gcc, C++ and Rust | `bash bench/run.sh -r 7`, `bash bench/wide/run.sh` |
+| Reproduces itself byte for byte | `./build.sh` (fails unless stages 2 and 3 are identical) |
+| No libc, no linker: a static executable | `alc build hello.al && file hello` |
+| Everything it accepts, as one JSON object | `alc capabilities` |
+| Every diagnostic has a code and a fix | `alc check --json -W file.al`, `alc explain E0301` |
+| Use of released memory is found when a test runs it | `ALC_CHECK_MEMORY=1 ./program` |
 
 ```
 enum Shape { Circle(f64), Rect(f64, f64) }
@@ -127,6 +143,9 @@ between the two versions, then rebuild and run the project's tests with the new 
 
 - [Language reference](docs/LANGUAGE.md): everything needed to write programs, under 900 lines
 - [The memory model and its trade-offs](docs/MEMORY.md): what arenas buy and cost, what is checked
+- [Defined behaviour](docs/SEMANTICS.md): overflow, division, shifts, evaluation order, conversions
+- [Diagnostics](docs/DIAGNOSTICS.md): the JSON form and every code
+- [AL in one screen](docs/AGENT_CARD.md): the card a model loads before writing AL
 - [Details](docs/DETAILS.md): fine print, read on demand (name resolution, grammar, C interop)
 - [Standard library](docs/STDLIB.md): strings, collections, files, sockets, math, images, fonts, windows,
   input, audio, and bindings for Vulkan, Wayland, D3D12 and Metal
@@ -151,23 +170,37 @@ between the two versions, then rebuild and run the project's tests with the new 
 
 ## Performance
 
-Against `clang -O2` (clang 23.1.5), same algorithms and sizes, identical output required, AL
-with bounds and division checks enabled. Measured with AL 0.5.0 on Linux x86-64 (Ryzen 5 3600),
-best of 7 runs (`bash bench/run.sh -r 7`).
+The same algorithms and sizes in AL, C, C++ and Rust; all must print identical output. AL runs
+with bounds and division checks enabled, Rust with its bounds checks. Each column is AL's time
+divided by the other compiler's, so above 1 means AL is slower. Measured with AL 0.5.0 on Linux
+x86-64 (Ryzen 5 3600: 6 cores, 12 threads, nothing pinned), best of 7 runs
+(`bash bench/run.sh -r 7`).
 
-| Benchmark | AL / clang |
-|---|---|
-| nbody | 1.11 |
-| spectralnorm | 1.00 |
-| fannkuch | 1.13 |
-| mandelbrot | 1.02 |
-| binarytrees | 1.00 |
-| sha256 | 0.99 |
-| matmul | 0.97 |
-| quicksort | 1.05 |
-| sieve | 1.02 |
-| hashmap | 1.06 |
-| **geometric mean** | **1.03** |
+| Benchmark | AL / clang -O2 | AL / gcc -O2 | AL / g++ -O2 | AL / rustc -O |
+|---|---|---|---|---|
+| nbody | 1.13 | 1.09 | 1.10 | 1.45 |
+| spectralnorm | 1.01 | 1.51 | 1.48 | 1.01 |
+| fannkuch | 1.12 | 1.18 | 1.19 | 1.40 |
+| mandelbrot | 1.02 | 1.04 | 1.04 | 1.02 |
+| binarytrees | 1.00 | 1.28 | 1.73 | 0.90 |
+| sha256 | 0.98 | 0.95 | 0.96 | 0.95 |
+| matmul | 0.97 | 0.98 | 0.98 | 0.93 |
+| quicksort | 1.07 | 1.05 | 1.04 | 0.99 |
+| sieve | 1.02 | 1.02 | 1.02 | 1.03 |
+| hashmap | 1.05 | 1.01 | 1.02 | 1.04 |
+| **geometric mean** | **1.03** | **1.10** | **1.14** | **1.06** |
+
+clang 23.1.5, gcc 16.2.1 and rustc 1.99.0. A difference within 5 % is noise on this machine:
+against clang, six of the ten are ties and four are slower. The ports are plain ones (safe Rust,
+`std::vector` in C++); in binarytrees the Rust port indexes a `Vec` where C and AL use pointers.
+
+Building these ten programs takes `alc` 0.38 s in total, clang 0.73 s, gcc 0.70 s, rustc 0.96 s
+and g++ 2.6 s. They are small files, so this is mostly start-up cost; the compiler's own
+source is the larger measure, below.
+
+The scripts print the machine, refuse to record a run if other programs were using more than
+half a core, and append each quiet run to `bench/history.tsv`, where the next run is compared
+with it (`bench/lib.sh`).
 
 `bench/wide` holds 70 more pairs in six areas that the ten above do not cover
 (`bash bench/wide/run.sh`; best of 5; same machine; the full results are in
@@ -177,20 +210,21 @@ compiler before the work these benchmarks drove, and after it):
 | Area | Pairs | AL / clang | AL / clang without its vectorizers |
 |---|---|---|---|
 | loops clang vectorizes | 13 | 1.02 | 0.62 |
-| integer and bit manipulation | 10 | 1.04 | 1.04 |
+| integer and bit manipulation | 10 | 1.04 | 1.05 |
 | strings and text | 13 | 1.10 | 1.10 |
 | calls and control flow | 11 | 1.15 | 1.12 |
 | memory and data structures | 12 | 0.93 | 1.01 |
 | floating point | 11 | 0.99 | 0.97 |
 | **geometric mean** | **70** | **1.04** | **0.95** |
 
-34 of the 70 are within 5 % of clang or faster (21 are faster), 23 are more than 15 % slower.
-The slowest are a u8 box blur (2.5, clang narrows its arithmetic to 16-bit lanes), a lexer
-state machine with many branches (1.6), a clamp/abs/select loop that is not vectorized (1.5)
-and mutual recursion (1.4); a byte sum that only AL vectorizes is at 0.16 and lifts the first
+Of the 70, 10 are faster than clang by more than 5 %, 22 are within 5 % (a tie on this
+machine) and 38 are slower; 20 are more than 15 % slower.
+The slowest are a u8 box blur (2.6, clang narrows its arithmetic to 16-bit lanes), a lexer
+state machine with many branches (1.7), a clamp/abs/select loop that is not vectorized (1.4)
+and mutual recursion (1.4); a byte sum that only AL vectorizes is at 0.17 and lifts the first
 row (the mean of the other 69 is 1.06). The loop vectorizer is x86-64 only (SSE2).
 
-The compiler compiles its own 68,000 lines in about 0.2 s without optimisation (about 350,000 lines/s) and 2.8 s with optimisation (same machine, 12 threads, best of 7: `bash bench/compile.sh`), compiling functions in parallel worker threads on Linux and Windows (`ALC_JOBS=n` sets the number).
+The compiler compiles its own 68,000 lines in about 0.2 s without optimisation (about 350,000 lines/s) and 2.9 s with optimisation (same machine, 6 cores and 12 threads, best of 7: `bash bench/compile.sh`), compiling functions in parallel worker threads on Linux and Windows (`ALC_JOBS=n` sets the number).
 
 ## Repository
 

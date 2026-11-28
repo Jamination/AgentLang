@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wide benchmark harness: AL vs clang -O2 on Windows x86-64.
+# Wide benchmark harness: AL vs clang -O2 (Linux, or Windows under Git Bash).
 # usage: bench/wide/harness.sh [-r runs] <dir> [names...]
 #   <dir> holds pairs NAME.al / NAME.c that print identical output.
 # Columns: clang -O2 time, AL (checks on) time and ratio, AL --unchecked ratio, clang -O2 -fno-vectorize -fno-slp-vectorize ratio-of-AL.
@@ -27,7 +27,7 @@ DIR="$1"; shift
 cd "$DIR" || exit 2
 mkdir -p bin
 NAMES=${*:-$(ls *.al | sed 's/\.al$//')}
-t_min() { local best=""; for _ in $(seq "$RUNS"); do local s e t; s=$(date +%s%N); "$@" >/dev/null 2>&1; e=$(date +%s%N); t=$((e-s)); if [[ -z "$best" || $t -lt $best ]]; then best=$t; fi; done; echo "$best"; }
+t_one() { local s e; s=$(date +%s%N); "$@" >/dev/null 2>&1; e=$(date +%s%N); echo $((e-s)); }
 printf "%-18s %8s %8s %7s %7s %7s  %s\n" name clang_s al_s al/cl unchk/cl al/novec status
 failed=0
 for b in $NAMES; do
@@ -45,7 +45,14 @@ for b in $NAMES; do
     failed=1
     continue
   fi
-  tc=$(t_min bin/$b.c$EXT); ta=$(t_min bin/$b.al$EXT); tu=$(t_min bin/$b.un$EXT); tn=$(t_min bin/$b.nv$EXT)
+  # the four programs in turn, RUNS times: a disturbance hits all of them alike
+  tc=""; ta=""; tu=""; tn=""
+  for _ in $(seq "$RUNS"); do
+    t=$(t_one bin/$b.c$EXT); [[ -z $tc || $t -lt $tc ]] && tc=$t
+    t=$(t_one bin/$b.al$EXT); [[ -z $ta || $t -lt $ta ]] && ta=$t
+    t=$(t_one bin/$b.un$EXT); [[ -z $tu || $t -lt $tu ]] && tu=$t
+    t=$(t_one bin/$b.nv$EXT); [[ -z $tn || $t -lt $tn ]] && tn=$t
+  done
   awk -v n="$b" -v c="$tc" -v a="$ta" -v u="$tu" -v v="$tn" -v s="$status" 'BEGIN { printf "%-18s %8.3f %8.3f %7.2f %7.2f %7.2f  %s\n", n, c/1e9, a/1e9, a/c, u/c, a/v, s }'
 done
 exit $failed

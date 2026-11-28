@@ -85,6 +85,11 @@ fn lexer_contextual(k: i64) -> bool {
     return k == KW_IN || k == KW_BY || k == KW_TEST
 }
 
+// all keywords
+fn lexer_keywords() -> []str {
+    return KEYWORDS[..]
+}
+
 // the text of a keyword
 fn lexer_kw_text(k: i64) -> str {
     return KEYWORDS[k]

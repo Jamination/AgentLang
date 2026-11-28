@@ -853,7 +853,7 @@ options: -o path (build, run, test: e.g. `-o build/game` keeps executables out o
 
 Diagnostics list every error (and with `-W`, warning) found, sorted by position: `file:line:col: error: message` (`col`
 counts bytes from 1). With `--json` they are printed to standard output as `[{"file":"f.al",
-"line":3,"col":7,"message":"...","severity":"error"}]` (`[]` on a clean `alc check --json`); errors without a position (unreadable file) have line 0.
+"line":3,"col":7,"message":"...","severity":"error","code":"E0301","end_line":3,"end_col":12,"fix":"..."}]` (`[]` on a clean `alc check --json`); errors without a position (unreadable file) have line 0. `code` names the kind of mistake (`alc explain E0301`), `fix` is the advice of the message alone and is absent if there is none: [DIAGNOSTICS.md](DIAGNOSTICS.md). `alc capabilities` prints the whole language surface (keywords, types, modules, limits, codes) as one JSON object.
 
 ## Unsafe corners
 

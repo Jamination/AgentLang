@@ -10,6 +10,8 @@ Prefer `alc`'s machine-readable CLI commands and built-in LSP/semantic queries o
 |---|---|
 | Type-check & lint (JSON) | `alc check --json -W <file.al>` (add `--deny-warnings` to fail on warnings; `--all-targets` to check Linux + Windows) |
 | List declarations & docs (JSON) | `alc sigs --json --pub <file.al>` (add `--std` for stdlib, `--filter <pat>` to narrow) |
+| What a diagnostic `code` means | `alc explain E0401` (all codes: `docs/DIAGNOSTICS.md`; each diagnostic also has `end_line`, `end_col` and, where the message gives advice, `fix`) |
+| The whole language surface (JSON) | `alc capabilities` (keywords, builtin types, modules, limits, defined behaviour, diagnostic codes); the language on one screen: `docs/AGENT_CARD.md` |
 | Run unit tests (JSON) | `alc test --json <file.al>` (add `--filter <pat>` to run a subset) |
 | Build / run | `alc build <file.al> -o <out>` / `alc run <file.al> -- [args]` |
 | Format code | `alc fmt <file.al | dir/>` (`--check` to verify without modifying; `// alc fmt: off` .. `// alc fmt: on` for opt-out ranges) |
@@ -31,4 +33,5 @@ Use `./build/alc` when working inside this repository (or `alc` if the current b
 1. Format touched files: `./build/alc fmt <files...>`
 2. Run the 3-stage deterministic bootstrap: `./build.sh` (verifies stage 2 and stage 3 are byte-identical and builds `build/alc.exe`)
 3. Note: Stage 1 of `./build.sh` compiles `src/` with `bootstrap/alc`, so `src/` must stay compatible with the seed compiler.
-4. Run relevant tests (`./tests/run.sh`, `tests/driver/*.sh`, `./tests/run.sh tree`).
+4. A new or reworded diagnostic: give it a kind in `src/diagcode.al` (and `docs/DIAGNOSTICS.md` for a new code), then `UPDATE=1 bash tests/driver/diag_codes.sh build/alc /tmp/dc` records the codes of `tests/fail`.
+5. Run relevant tests (`./tests/run.sh`, `tests/driver/*.sh`, `./tests/run.sh tree`).

@@ -37,6 +37,11 @@ fn parser_record_fmt(p: *Parser, lits: *Vec[Pos], kws: *Vec[Pos]) {
 // anything; where that is not possible, the stack each level costs (the largest frames of the
 // parser and lowering on that path, measured) is counted against 3/4 of the stack there is.
 priv const NEST_MAX = 2000
+
+// the deepest nesting the parser accepts
+fn parser_nest_max() -> i64 {
+    return NEST_MAX
+}
 priv const COST_STMT = 112 * 1024
 priv const COST_EXPR = 32 * 1024
 priv const COST_LINK = 16 * 1024

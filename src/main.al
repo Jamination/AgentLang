@@ -1,5 +1,6 @@
 // alc: the AL compiler driver.
 use "base.al"
+use "diagcode.al"
 use "ast.al"
 use "lexer.al"
 use "parser.al"
@@ -278,15 +279,120 @@ priv deny_warnings: bool
 
 priv fn usage_text() -> str {
     return concat("usage: alc <command> <file.al> [options]\n       alc --version [--json]\n       alc --help\n",
-        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  lsp     run the Language Server Protocol (LSP) server over stdio\n  query   one-shot JSON semantic queries (`hover`, `def`, `refs`, `complete`, `symbols`)\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
+        concat("commands:\n  build   compile to a static x86-64 executable (Linux ELF, or Windows PE with --target windows)\n  run     build and run (arguments after `--` are passed on)\n  test    build and run all `test` blocks (`--filter <pat>`, `--json`)\n  check   type-check only (`main` need not exist: one file of a program can be checked alone)\n  sigs    list the declarations of a file (`--std`, `--pub`, `--filter <pat>`, `--json`)\n  fmt     rewrite files in the canonical layout (`alc fmt --check` lists those that would change)\n  lsp     run the Language Server Protocol (LSP) server over stdio\n  query   one-shot JSON semantic queries (`hover`, `def`, `refs`, `complete`, `symbols`)\n  capabilities  describe the language and compiler as one JSON object (keywords, types,\n          modules, limits, defined behaviour, diagnostic codes)\n  explain print what a diagnostic code means: `alc explain E0401`\n  version print the compiler's version and default target (also --version)\n  help    print this help message (also --help, -h)\n",
             "options:\n  -o <path>       output path (default: input without .al; with .exe for windows)\n  --target <os>   linux or windows (default: the system alc runs on); linux-arm64 (experimental:\n                  AArch64, see docs/ARM64_TEST.md); macos (experimental:\n                  arm64, never run: see docs/MACOS_TEST.md)\n  --all-targets   check: type-check once for every target\n  -D NAME=VALUE   set the program's constant NAME (-D NAME: a bool constant set to true)\n  -W, --warn      enable compiler warnings (unused locals, unreachable code, self-assignment)\n  --deny-warnings treat warnings as errors (implies -W)\n  --std           sigs: include the standard library (same as `-- std`)\n  --pub           sigs: omit `priv` declarations\n  --filter <pat>  sigs / test: only declarations or tests whose name contains <pat>\n  --gui           windows: a GUI program (no console window of its own)\n  --icon <ico>    windows: the icon of the executable (an .ico file)\n  --version-info NAME=VALUE\n                  windows: version information (FileDescription, ProductName, CompanyName,\n                  FileVersion, LegalCopyright, ...), once per name\n  --unchecked     disable bounds/division checks\n  -O0, -O1, -O2   optimization level (default: -O2; -O0 disables optimizations)\n  -g              debug information for debuggers and profilers (DWARF; Windows: also a .pdb)\n  --json          print diagnostics, sigs, test results or version as JSON on stdout\n  --emit-ir       print optimized IR to stdout\n  --emit-asm      print the selected machine code to stdout\n  --version       print the compiler's version and default target\n  -h, --help      print this help message\n"))
+}
+
+// `"a","b"`: the elements of a JSON array of strings
+priv fn json_strs(xs: []str) -> str {
+    o := vec[str]()
+    for x in xs {
+        o.push(json_str(x))
+    }
+    return join(o.items(), ",")
+}
+
+priv fn json_kinds(kinds: []DiagKind, sev: str, o: *Vec[str]) {
+    for k in kinds {
+        o.push(fmt("{\"code\":", json_str(k.code), ",\"name\":", json_str(k.name), ",\"severity\":", json_str(sev), ",\"summary\":", json_str(k.what), "}"))
+    }
+}
+
+// What a C programmer would have to look up, and AL's answer: (question, answer). Printed by
+// `alc capabilities`; docs/SEMANTICS.md is the same table with examples.
+priv fn defined_behaviour() -> [](str, str) {
+    return [](str, str){
+        ("signed integer overflow", "wraps around (two's complement); `sat_add` / `sat_sub` saturate"),
+        ("unsigned integer overflow", "wraps around"),
+        ("integer division", "truncates toward zero; `%` has the sign of the left operand"),
+        ("integer division or remainder by zero", "panic with file:line, exit status 1 (undefined with --unchecked)"),
+        ("MIN / -1", "yields MIN"),
+        ("shift count not less than the bit width", "the count is taken modulo the bit width"),
+        ("right shift of a negative number", "arithmetic for signed types, logical for unsigned"),
+        ("index or slice bound out of range", "panic with file:line, exit status 1 (undefined with --unchecked)"),
+        ("nil dereference, stack overflow", "panic: memory fault, exit status 1"),
+        ("uninitialized variable or memory", "cannot be read: every variable and every allocation starts zeroed"),
+        ("order of evaluation", "operands and arguments left to right, each once; `&&` and `||` short-circuit"),
+        ("implicit conversions", "none between types; an integer literal is accepted where a float is expected"),
+        ("integer to narrower integer", "keeps the low bits"),
+        ("integer to wider integer", "the source type decides: signed sign-extends, unsigned zero-extends"),
+        ("float to integer", "truncates toward zero; NaN and values beyond i64 give 0x8000000000000000"),
+        ("char signedness", "there is no char type: a character literal and a byte of a str are u8"),
+        ("size of int", "there is no int: i8 to i64 and u8 to u64 have the same size on every target; an untyped integer literal is i64, a float literal f32"),
+        ("use of released memory", "not detected in a normal run; `ALC_CHECK_MEMORY=1` makes it a panic"),
+        ("data race", "undefined"),
+        ("missing return", "compile error"),
+        ("non-exhaustive match", "compile error when the match is used as a value, warning (-W) as a statement"),
+    }
+}
+
+// `alc capabilities`: the compiler described as one JSON object, from the tables it works with
+priv fn capabilities_json() -> str {
+    os_name := if target_os == TargetWindows { "windows" } else if target_os == TargetMacOS { "macos" } else { "linux" }
+    arch_name := if target_arch == ArchArm64 { "arm64" } else { "x86-64" }
+    types := vec[str]()
+    for t in []str{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "str", "vec2", "vec3", "vec4", "quat", "mat4", "never"} {
+        if is_some(lower_builtin_type(t)) {
+            types.push(t)
+        }
+    }
+    mods := vec[str]()
+    for m in STD_MODULES {
+        note := ""
+        linux_only := false
+        for lo in LINUX_ONLY {
+            if lo.0 == m.0 {
+                linux_only = true
+                note = lo.1
+            }
+        }
+        mods.push(fmt("{\"name\":", json_str(m.0), ",\"linux_only\":", linux_only, if len(note) == 0 { "" } else { fmt(",\"note\":", json_str(note)) }, "}"))
+    }
+    sem := vec[str]()
+    for q in defined_behaviour() {
+        sem.push(fmt("{\"question\":", json_str(q.0), ",\"answer\":", json_str(q.1), "}"))
+    }
+    kinds := vec[str]()
+    json_kinds(diag_errors(), "error", &kinds)
+    json_kinds(diag_warnings(), "warning", &kinds)
+    o := vec[str]()
+    o.push(fmt("\"language\":\"AL\",\"version\":", json_str(VERSION)))
+    o.push(fmt("\"host\":{\"os\":", json_str(os_name), ",\"arch\":", json_str(arch_name), "}"))
+    o.push("\"source\":{\"extension\":\".al\",\"encoding\":\"UTF-8\",\"entry\":\"fn main() or fn main() -> i64\",\"comment\":\"//\",\"statement_end\":\"end of line\"}")
+    o.push("\"targets\":[{\"name\":\"linux\",\"arch\":\"x86-64\",\"status\":\"supported\"},{\"name\":\"windows\",\"arch\":\"x86-64\",\"status\":\"supported\"},{\"name\":\"linux-arm64\",\"arch\":\"arm64\",\"status\":\"experimental\"},{\"name\":\"macos\",\"arch\":\"arm64\",\"status\":\"experimental, never run\"}]")
+    o.push(fmt("\"commands\":[", json_strs([]str{"build", "run", "test", "check", "sigs", "fmt", "lsp", "query", "capabilities", "explain", "version", "help"}), "]"))
+    o.push(fmt("\"keywords\":[", json_strs(lexer_keywords()), "]"))
+    o.push(fmt("\"builtin_types\":[", json_strs(types.items()), "]"))
+    o.push("\"library\":\"alc sigs --std --json --pub <file.al> lists every function of the run-time library and of the modules the file uses\"")
+    o.push(fmt("\"std_modules\":[", join(mods.items(), ","), "]"))
+    o.push(fmt("\"limits\":{\"nesting\":", parser_nest_max(), "}"))
+    o.push("\"exit_status\":{\"0\":\"success\",\"1\":\"diagnostics were reported; for a built program: a panic or failed assert\",\"2\":\"mistake in the command line\"}")
+    o.push("\"diagnostic_format\":{\"command\":\"alc check --json -W <file.al>\",\"output\":\"one JSON array on standard output\",\"fields\":{\"file\":\"path as given\",\"line\":\"from 1; 0: no position\",\"col\":\"from 1, in bytes\",\"message\":\"the whole message\",\"severity\":\"error or warning\",\"code\":\"the kind of mistake, one of diagnostics[].code\",\"end_line\":\"line of the end of the token at the position\",\"end_col\":\"column after its last character\",\"fix\":\"what the message says to do; absent if it gives no advice\"}}")
+    o.push(fmt("\"semantics\":[", join(sem.items(), ","), "]"))
+    o.push(fmt("\"diagnostics\":[", join(kinds.items(), ","), "]"))
+    return fmt("{", join(o.items(), ","), "}")
+}
+
+// `alc explain <code>`: what a diagnostic code means
+priv fn explain(code: str) -> never {
+    match diag_kind(code) {
+        Some(k) => {
+            if json {
+                print(fmt("{\"code\":", json_str(k.code), ",\"name\":", json_str(k.name), ",\"summary\":", json_str(k.what), "}"))
+            } else {
+                print(fmt(k.code, " ", k.name, "\n", k.what))
+            }
+            exit(0)
+        }
+        None => usage(if len(code) == 0 { "explain needs a diagnostic code: alc explain E0401" } else { fmt("unknown diagnostic code ", code, " (`alc capabilities` lists them)") })
+    }
 }
 
 // an error of the driver itself (no position): with --json the same array as diagnostics,
 // with line and col 0
 priv fn driver_error(file: str, msg: str) {
     if json {
-        print(fmt("[{\"file\":", json_str(file), ",\"line\":0,\"col\":0,\"message\":", json_str(msg), ",\"severity\":\"error\"}]"))
+        print(fmt("[{\"file\":", json_str(file), ",\"line\":0,\"col\":0,\"message\":", json_str(msg), ",\"severity\":\"error\",\"code\":", json_str(DIAG_DRIVER), ",\"end_line\":0,\"end_col\":0}]"))
     } else {
         eput(fmt("error: ", msg, "\n"))
     }
@@ -368,6 +474,13 @@ priv fn parse_args() -> Args {
             print(fmt("alc ", VERSION, "\ndefault target: ", os_name, " ", arch_name))
         }
         exit(0)
+    }
+    if av.len >= 1 && av[0] == "capabilities" {
+        print(capabilities_json())
+        exit(0)
+    }
+    if av.len >= 1 && av[0] == "explain" {
+        explain(if av.len >= 2 && av[1] != "--json" { av[1] } else if av.len >= 3 { av[2] } else { "" })
     }
     if av.len < 2 {
         usage("")
@@ -859,10 +972,25 @@ priv fn report(names: *Vec[str], errs: *Vec[Diag]) -> bool {
         // machine-readable diagnostics: one JSON array on stdout
         items := vec[str]()
         last := ""
+        texts := map[i64, str]()
         for d in errs {
             file := if d.pos.file < 0 { "" } else { file_name(names, d.pos.file) }
             sev := if d.warn { "warning" } else { "error" }
-            item := fmt("{\"file\":", json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", json_str(ast_plain_text(d.msg)), ",\"severity\":", json_str(sev), "}")
+            msg := ast_plain_text(d.msg)
+            // the end of the token at the position (in the file as it is on disk; a file that
+            // is not one, like the generated entry, gives an empty range)
+            end_col := i64(d.pos.col)
+            if d.pos.file >= 0 && d.pos.line > 0 {
+                if !texts.has(d.pos.file) {
+                    text, _ := read_file(file)
+                    texts.set(d.pos.file, text)
+                }
+                text, _ := texts.get(d.pos.file)
+                end_col = diag_token_end(diag_line_text(text, i64(d.pos.line)), i64(d.pos.col))
+            }
+            fix := diag_fix(msg)
+            fix_json := if len(fix) == 0 { "" } else { fmt(",\"fix\":", json_str(fix)) }
+            item := fmt("{\"file\":", json_str(file), ",\"line\":", d.pos.line, ",\"col\":", d.pos.col, ",\"message\":", json_str(msg), ",\"severity\":", json_str(sev), ",\"code\":", json_str(diag_code(msg, d.warn)), ",\"end_line\":", d.pos.line, ",\"end_col\":", end_col, fix_json, "}")
             if item != last {
                 items.push(item)
                 last = item

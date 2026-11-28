@@ -8,6 +8,25 @@ can break a program is listed under **Breaking**. A patch version never breaks o
 
 ## [Unreleased]
 
+### Added
+- **Diagnostic codes.** Every error and warning has a code that names the kind of mistake
+  (`E0301` unknown-identifier, `E0401` type-mismatch, `W0001` unused-variable, ...). With
+  `--json` each diagnostic has four new fields after the existing ones: `code`, `end_line`,
+  `end_col` (the end of the token at the position) and, where the message gives advice, `fix`
+  (the advice alone: ``"write `count`"``). docs/DIAGNOSTICS.md lists the codes.
+- `alc explain <code>` prints what a code means (`--json`: as an object).
+- `alc capabilities` prints one JSON object that describes the language and the compiler from
+  the compiler's own tables: keywords, builtin types, library modules, targets, commands,
+  limits, exit statuses, defined behaviour and all diagnostic codes.
+- docs/SEMANTICS.md (what C leaves undefined and AL defines) and docs/AGENT_CARD.md (the
+  language on one screen, for a model that writes AL).
+- Benchmarks: `bench/run.sh` also times C with gcc, C++ (`bench/*.cpp`, g++) and Rust
+  (`bench/*.rs`, rustc), and the time each compiler takes to build the programs. All bench
+  scripts print the machine (CPU, cores, threads; nothing is pinned), check that it is quiet
+  before, during and after the run, call a ratio within 5 % a tie, append quiet runs to
+  `bench/history.tsv` and exit with status 3 if a row got slower than in the previous run
+  (bench/lib.sh).
+
 ## [0.5.0] - 2026-11-28
 
 ### Breaking
